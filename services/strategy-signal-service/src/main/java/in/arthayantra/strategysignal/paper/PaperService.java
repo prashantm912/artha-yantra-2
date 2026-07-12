@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.paper;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
@@ -137,6 +138,79 @@ public class PaperService {
       BigDecimal realizedPnl,
       OffsetDateTime openedAt,
       OffsetDateTime closedAt) {}
+
+  /** The itemized statutory cost legs of one fill (recomputed for display; {@link PaperFillService#costs}). */
+  public record FeeBreakdown(
+      BigDecimal brokerage,
+      BigDecimal stt,
+      BigDecimal exchangeTxn,
+      BigDecimal gst,
+      BigDecimal stamp,
+      BigDecimal sebi,
+      BigDecimal total) {}
+
+  /** One order leg of a position (entry / averaged add / exit) with its fill-audit + recomputed fees. */
+  public record OrderLeg(
+      long orderId,
+      Long signalId,
+      String side,
+      long qty,
+      String status,
+      OffsetDateTime placedAt,
+      OffsetDateTime filledAt,
+      BigDecimal fillPrice,
+      String fillSimulator,
+      BigDecimal slippageApplied,
+      FeeBreakdown fees) {}
+
+  /** The signal that opened a position (audit H5), with its family enrichment side-channels. */
+  public record OpeningSignal(
+      long signalId,
+      String status,
+      String side,
+      BigDecimal entryPrice,
+      BigDecimal stopLoss,
+      BigDecimal target,
+      BigDecimal compositeScore,
+      OffsetDateTime generatedAt,
+      JsonNode scalperDetail,
+      JsonNode minerviniDetail,
+      JsonNode manasAroraDetail) {}
+
+  /**
+   * The full provenance of one paper position (Phase-2 §6.4/§6.5): the position + live MTM, its F9
+   * advisory (advised-vs-actual lots, margin snapshot/%), the E10 sub-account, the opening signal +
+   * its family detail, and the ordered entry/exit legs with a recomputed fee breakdown. Assembled for
+   * the detail pane; the ordered legs + opening signal ARE the trade-chain timeline.
+   */
+  public record PositionDetail(
+      long id,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal avgEntryPrice,
+      BigDecimal markPrice,
+      BigDecimal unrealizedPnl,
+      BigDecimal realizedPnl,
+      String status,
+      OffsetDateTime openedAt,
+      OffsetDateTime closedAt,
+      String closeReason,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit,
+      Long advisedLots,
+      BigDecimal marginSnapshot,
+      BigDecimal marginPct,
+      Integer subaccountIdx,
+      Long openingSignalId,
+      OpeningSignal openingSignal,
+      List<OrderLeg> orders) {}
+
+  /** The result of a bracket edit: the previous levels (for the audit trail) + the refreshed detail. */
+  public record BracketEdit(
+      BigDecimal previousStopLoss, BigDecimal previousTakeProfit, PositionDetail detail) {}
 
   private final PaperOrderRepository orders;
   private final PaperPositionRepository positions;
@@ -504,6 +578,128 @@ public class PaperService {
   /** Open positions with mark-to-market P&amp;L ({@code book} null → all books; unrealized never stored). */
   public List<PositionDto> openPositions(String book) {
     return positions.listOpen(book).stream().map(this::toPositionDto).toList();
+  }
+
+  /**
+   * The full detail + provenance of one position (Phase-2 §6.4/§6.5): live MTM (OPEN only), the F9
+   * advisory + E10 sub-account, the opening signal with its family side-channel, and the ordered
+   * entry/exit legs each carrying a recomputed statutory fee breakdown (the trade-chain timeline).
+   */
+  public PositionDetail positionDetail(long id) {
+    PaperPositionRepository.DetailRow row =
+        positions
+            .findDetail(id)
+            .orElseThrow(
+                () -> new NotFoundException(ErrorCodes.NOT_FOUND_RESOURCE, "no such position"));
+    InstrumentMeta meta = instruments.meta(row.exchange(), row.tradingsymbol());
+    // Live MTM only while OPEN — a closed position's realized P&L is final + stored on the row.
+    BigDecimal mark = null;
+    BigDecimal unrealized = null;
+    if ("OPEN".equals(row.status())) {
+      mark = lastTick.lastPrice(row.exchange(), row.tradingsymbol()).orElse(null);
+      if (mark != null) {
+        BigDecimal move =
+            "BUY".equals(row.side())
+                ? mark.subtract(row.avgEntryPrice())
+                : row.avgEntryPrice().subtract(mark);
+        unrealized = move.multiply(BigDecimal.valueOf(row.qty())).setScale(2, RoundingMode.HALF_UP);
+      }
+    }
+    List<OrderLeg> legs =
+        orders
+            .legsForPosition(
+                row.book(), row.exchange(), row.tradingsymbol(), row.openedAt(), row.closedAt())
+            .stream()
+            .map(o -> toOrderLeg(o, meta))
+            .toList();
+    return new PositionDetail(
+        row.id(), row.book(), row.exchange(), row.tradingsymbol(), row.side(), row.qty(),
+        row.avgEntryPrice(), mark, unrealized, row.realizedPnl(), row.status(), row.openedAt(),
+        row.closedAt(), row.closeReason(), row.stopLoss(), row.takeProfit(), row.advisedLots(),
+        row.marginSnapshot(), row.marginPct(), row.subaccountIdx(), row.openingSignalId(),
+        openingSignal(row.openingSignalId()), legs);
+  }
+
+  private OpeningSignal openingSignal(Long signalId) {
+    if (signalId == null) {
+      return null;
+    }
+    return signals
+        .find(signalId)
+        .map(
+            s ->
+                new OpeningSignal(
+                    s.id(), s.status(), s.side(), s.entryPrice(), s.stopLoss(), s.target(),
+                    s.compositeScore(), s.generatedAt(), s.scalperDetail(), s.minerviniDetail(),
+                    s.manasAroraDetail()))
+        .orElse(null);
+  }
+
+  private OrderLeg toOrderLeg(PaperOrderRepository.OrderRow o, InstrumentMeta meta) {
+    FeeBreakdown fees = null;
+    if (o.fillPrice() != null) {
+      var c = fills.costs(Side.valueOf(o.side()), o.qty(), o.fillPrice(), meta);
+      fees =
+          new FeeBreakdown(
+              c.brokerage(), c.stt(), c.exchangeTxn(), c.gst(), c.stamp(), c.sebi(), c.total());
+    }
+    return new OrderLeg(
+        o.id(), o.signalId(), o.side(), o.qty(), o.status(), o.placedAt(), o.filledAt(),
+        o.fillPrice(), o.fillSimulator(), o.slippageApplied(), fees);
+  }
+
+  /**
+   * Manually edits an OPEN position's bracket levels (Phase-2, HOLD-tier — it changes what the live
+   * 15s evaluator will act on). At least one of {@code stopLoss}/{@code takeProfit} is set; a {@code
+   * null} field leaves that level unchanged (partial edit). Sanity is validated against the last REAL
+   * tick at ANY age (audit #694: a LEVEL EDIT is not a fill — it never settles, so tick staleness must
+   * NOT refuse it; only NO tick at all skips the check): a level that would immediately fire at the
+   * current LTP is rejected 422, reusing the evaluator's own {@link PaperBracketEvaluator#breach}
+   * inequalities so acceptance exactly matches live behaviour. Persisted via a CAS on OPEN; the
+   * previous levels are returned for the {@code paper_admin_audit} trail. NEVER touches settle/fill
+   * freshness semantics.
+   */
+  @Transactional
+  public BracketEdit editBrackets(long id, BigDecimal stopLoss, BigDecimal takeProfit) {
+    PaperPositionRepository.DetailRow row =
+        positions
+            .findDetail(id)
+            .orElseThrow(
+                () -> new NotFoundException(ErrorCodes.NOT_FOUND_RESOURCE, "no such position"));
+    if (!"OPEN".equals(row.status())) {
+      throw new ApiException(409, ErrorCodes.CONFLICT_POSITION_CLOSED, "position already closed");
+    }
+    BigDecimal ltp = lastTick.lastPrice(row.exchange(), row.tradingsymbol()).orElse(null);
+    if (ltp != null) {
+      // Validate ONLY the field(s) being set, each against the current LTP — checking a merged pair
+      // could false-reject an edit to one level because the OTHER (unchanged) level sits near the LTP.
+      if (stopLoss != null) {
+        rejectIfAlreadyHit(row.side(), stopLoss, null, ltp, "stopLoss", stopLoss);
+      }
+      if (takeProfit != null) {
+        rejectIfAlreadyHit(row.side(), null, takeProfit, ltp, "takeProfit", takeProfit);
+      }
+    }
+    if (positions.updateBrackets(id, stopLoss, takeProfit) == 0) {
+      // Lost a CAS race to a concurrent close between the OPEN check and the UPDATE.
+      throw new ApiException(409, ErrorCodes.CONFLICT_POSITION_CLOSED, "position already closed");
+    }
+    return new BracketEdit(row.stopLoss(), row.takeProfit(), positionDetail(id));
+  }
+
+  private void rejectIfAlreadyHit(
+      String side, BigDecimal stopLoss, BigDecimal takeProfit, BigDecimal ltp, String field,
+      BigDecimal level) {
+    if (PaperBracketEvaluator.breach(side, stopLoss, takeProfit, ltp) != null) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          field + " " + level.toPlainString() + " would trigger immediately against the current LTP "
+              + ltp.toPlainString() + " for a " + side + " position",
+          Map.of(
+              "field", field, "level", level.toPlainString(), "ltp", ltp.toPlainString(), "side",
+              side));
+    }
   }
 
   /** The closed-trade ledger for a book ({@code book} null → all; optionally one tradingsymbol). */

@@ -132,54 +132,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/strategies/{id}/enable": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["enable"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/strategies/{id}/disable": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["disable"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/strategies/{id}/clone": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["clone"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/strategies/{id}/archive": {
         parameters: {
             query?: never;
@@ -238,22 +190,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["dismiss"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/signals/sell-decisions/{id}/ack": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["acknowledge"];
         delete?: never;
         options?: never;
         head?: never;
@@ -436,6 +372,22 @@ export interface paths {
         patch: operations["notifications"];
         trace?: never;
     };
+    "/api/v1/paper/positions/{id}/brackets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["editBrackets"];
+        trace?: never;
+    };
     "/api/v1/strategies/{id}/versions": {
         parameters: {
             query?: never;
@@ -492,22 +444,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["diff"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/strategies/{id}/audit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["audit"];
         put?: never;
         post?: never;
         delete?: never;
@@ -588,22 +524,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["detail"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/signals/sell-decisions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_4"];
         put?: never;
         post?: never;
         delete?: never;
@@ -699,7 +619,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_5"];
+        get: operations["list_4"];
         put?: never;
         post?: never;
         delete?: never;
@@ -788,6 +708,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/positions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["positionDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/paper/pnl": {
         parameters: {
             query?: never;
@@ -812,22 +748,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["marginHeat"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/paper/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["events"];
         put?: never;
         post?: never;
         delete?: never;
@@ -907,7 +827,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_6"];
+        get: operations["list_5"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1118,22 +1038,6 @@ export interface components {
             targetVersion?: string;
             notes?: string;
         };
-        ToggleResult: {
-            /** Format: uuid */
-            id?: string;
-            enabled?: boolean;
-        };
-        CloneRequest: {
-            name?: string;
-            slug?: string;
-        };
-        CloneResult: {
-            /** Format: uuid */
-            id?: string;
-            slug?: string;
-            version?: string;
-            status?: string;
-        };
         ValidateRequest: {
             config?: string;
         };
@@ -1142,35 +1046,6 @@ export interface components {
             /** Format: int32 */
             qty?: number;
             note?: string;
-        };
-        SellDecisionRow: {
-            /** Format: int64 */
-            id?: number;
-            book?: string;
-            /** Format: date */
-            runDate?: string;
-            /** Format: date-time */
-            evaluatedAt?: string;
-            /** Format: int64 */
-            signalId?: number;
-            exchange?: string;
-            symbol?: string;
-            setup?: string;
-            /** Format: int32 */
-            stage?: number;
-            setupType?: string;
-            footprint?: string;
-            entryPrice?: number;
-            currentPrice?: number;
-            unrealizedPct?: number;
-            stopLevel?: number;
-            trailLevel?: number;
-            stillBuyable?: boolean;
-            sellingNow?: boolean;
-            sellReason?: string;
-            verdict?: string;
-            /** Format: date-time */
-            acknowledgedAt?: string;
         };
         AdmissionProbe: {
             /** Format: int32 */
@@ -1301,19 +1176,83 @@ export interface components {
             enabled?: boolean;
             channel?: string;
         };
-        AuditLogResponse: {
-            items?: components["schemas"]["AuditRow"][];
+        BracketBody: {
+            stopLoss?: number;
+            takeProfit?: number;
         };
-        AuditRow: {
+        FeeBreakdown: {
+            brokerage?: number;
+            stt?: number;
+            exchangeTxn?: number;
+            gst?: number;
+            stamp?: number;
+            sebi?: number;
+            total?: number;
+        };
+        OpeningSignal: {
+            /** Format: int64 */
+            signalId?: number;
+            status?: string;
+            side?: string;
+            entryPrice?: number;
+            stopLoss?: number;
+            target?: number;
+            compositeScore?: number;
+            /** Format: date-time */
+            generatedAt?: string;
+            scalperDetail?: components["schemas"]["JsonNode"];
+            minerviniDetail?: components["schemas"]["JsonNode"];
+            manasAroraDetail?: components["schemas"]["JsonNode"];
+        };
+        OrderLeg: {
+            /** Format: int64 */
+            orderId?: number;
+            /** Format: int64 */
+            signalId?: number;
+            side?: string;
+            /** Format: int64 */
+            qty?: number;
+            status?: string;
+            /** Format: date-time */
+            placedAt?: string;
+            /** Format: date-time */
+            filledAt?: string;
+            fillPrice?: number;
+            fillSimulator?: string;
+            slippageApplied?: number;
+            fees?: components["schemas"]["FeeBreakdown"];
+        };
+        PositionDetail: {
             /** Format: int64 */
             id?: number;
-            action?: string;
-            fromVersion?: string;
-            toVersion?: string;
-            diffSummary?: string;
-            actor?: string;
+            book?: string;
+            exchange?: string;
+            tradingsymbol?: string;
+            side?: string;
+            /** Format: int64 */
+            qty?: number;
+            avgEntryPrice?: number;
+            markPrice?: number;
+            unrealizedPnl?: number;
+            realizedPnl?: number;
+            status?: string;
             /** Format: date-time */
-            createdAt?: string;
+            openedAt?: string;
+            /** Format: date-time */
+            closedAt?: string;
+            closeReason?: string;
+            stopLoss?: number;
+            takeProfit?: number;
+            /** Format: int64 */
+            advisedLots?: number;
+            marginSnapshot?: number;
+            marginPct?: number;
+            /** Format: int32 */
+            subaccountIdx?: number;
+            /** Format: int64 */
+            openingSignalId?: number;
+            openingSignal?: components["schemas"]["OpeningSignal"];
+            orders?: components["schemas"]["OrderLeg"][];
         };
         Criterion: {
             name?: string;
@@ -1360,12 +1299,7 @@ export interface components {
             sharpe?: number;
             maxDrawdownPct?: number;
         };
-        SellDecisions: {
-            items?: components["schemas"]["SellDecisionRow"][];
-        };
         SwingSellDecision: {
-            /** Format: int64 */
-            signalId?: number;
             symbol?: string;
             setup?: string;
             /** Format: int32 */
@@ -1459,26 +1393,6 @@ export interface components {
             pricedLegs?: number;
             /** Format: date-time */
             asOf?: string;
-        };
-        PaperEventDto: {
-            /** Format: int64 */
-            id?: number;
-            /** Format: int64 */
-            positionId?: number;
-            kind?: string;
-            book?: string;
-            exchange?: string;
-            tradingsymbol?: string;
-            side?: string;
-            /** Format: int64 */
-            qty?: number;
-            reason?: string;
-            realizedPnl?: string;
-            /** Format: date-time */
-            createdAt?: string;
-        };
-        PaperEventsResponse: {
-            items?: components["schemas"]["PaperEventDto"][];
         };
         Funds: {
             status?: string;
@@ -2136,103 +2050,6 @@ export interface operations {
             };
         };
     };
-    enable: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ToggleResult"];
-                };
-            };
-            /** @description Error envelope (COMMON 8.3) */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    disable: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ToggleResult"];
-                };
-            };
-            /** @description Error envelope (COMMON 8.3) */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    clone: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CloneRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["CloneResult"];
-                };
-            };
-            /** @description Error envelope (COMMON 8.3) */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     archive: {
         parameters: {
             query?: never;
@@ -2358,37 +2175,6 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
-                };
-            };
-            /** @description Error envelope (COMMON 8.3) */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    acknowledge: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["SellDecisionRow"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2827,6 +2613,41 @@ export interface operations {
             };
         };
     };
+    editBrackets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BracketBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PositionDetail"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     versions: {
         parameters: {
             query?: {
@@ -2955,40 +2776,6 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
-                };
-            };
-            /** @description Error envelope (COMMON 8.3) */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    audit: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["AuditLogResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3163,40 +2950,6 @@ export interface operations {
             };
         };
     };
-    list_4: {
-        parameters: {
-            query?: {
-                book?: string;
-                unacknowledged?: boolean;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["SellDecisions"];
-                };
-            };
-            /** @description Error envelope (COMMON 8.3) */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     sellDecisions: {
         parameters: {
             query?: never;
@@ -3348,7 +3101,7 @@ export interface operations {
             };
         };
     };
-    list_5: {
+    list_4: {
         parameters: {
             query?: {
                 strategyVersionId?: string;
@@ -3556,6 +3309,37 @@ export interface operations {
             };
         };
     };
+    positionDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PositionDetail"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     pnl: {
         parameters: {
             query?: {
@@ -3607,41 +3391,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["MarginHeat"];
-                };
-            };
-            /** @description Error envelope (COMMON 8.3) */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    events: {
-        parameters: {
-            query?: {
-                positionId?: number;
-                book?: string;
-                day?: string;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["PaperEventsResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3777,7 +3526,7 @@ export interface operations {
             };
         };
     };
-    list_6: {
+    list_5: {
         parameters: {
             query?: {
                 type?: string;

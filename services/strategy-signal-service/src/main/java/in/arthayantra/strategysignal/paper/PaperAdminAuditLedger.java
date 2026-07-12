@@ -29,6 +29,8 @@ public class PaperAdminAuditLedger {
   /** The audited actions. Constants keep call sites typo-proof + discoverable. */
   public static final String ACTION_RESET = "RESET";
   public static final String ACTION_CAPITAL_CHANGE = "CAPITAL_CHANGE";
+  /** A manual owner override of an OPEN position's stop-loss / take-profit (PATCH .../brackets). */
+  public static final String ACTION_BRACKET_EDIT = "BRACKET_EDIT";
 
   private static final Logger log = LoggerFactory.getLogger(PaperAdminAuditLedger.class);
 
@@ -54,6 +56,31 @@ public class PaperAdminAuditLedger {
     detail.put("previous", previous == null ? null : previous.toPlainString());
     detail.put("new", updated == null ? null : updated.toPlainString());
     record(ACTION_CAPITAL_CHANGE, book, detail);
+  }
+
+  /**
+   * Record a manual bracket edit on an OPEN position (Phase-2 detail pane) — the previous and new
+   * stop-loss / take-profit (all money-as-string; {@code null} = the level was/stays unset). The
+   * position id lives in the detail JSON so the append-only trail stays a single flat table.
+   */
+  public void recordBracketEdit(
+      String book,
+      long positionId,
+      BigDecimal previousStopLoss,
+      BigDecimal previousTakeProfit,
+      BigDecimal newStopLoss,
+      BigDecimal newTakeProfit) {
+    Map<String, Object> detail = new LinkedHashMap<>();
+    detail.put("positionId", positionId);
+    detail.put("previousStopLoss", plain(previousStopLoss));
+    detail.put("previousTakeProfit", plain(previousTakeProfit));
+    detail.put("newStopLoss", plain(newStopLoss));
+    detail.put("newTakeProfit", plain(newTakeProfit));
+    record(ACTION_BRACKET_EDIT, book, detail);
+  }
+
+  private static String plain(BigDecimal v) {
+    return v == null ? null : v.toPlainString();
   }
 
   private void record(String action, String book, Map<String, Object> detail) {

@@ -85,6 +85,84 @@ public class PaperPositionRepository {
   }
 
   /**
+   * The FULL position row for the detail pane (Phase-2 §6.4): the base {@link PositionRow} fields plus
+   * the provenance columns the compact row omits — {@code subaccount_idx} (E10 ledger), the F9
+   * {@code advised_lots}/{@code margin_snapshot}/{@code margin_pct} advisory, and {@code
+   * opening_signal_id} (the ONE signal that opened it, audit H5). A dedicated read so the hot
+   * {@link PositionRow} used across the ledger stays unchanged.
+   */
+  public record DetailRow(
+      long id,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal avgEntryPrice,
+      BigDecimal realizedPnl,
+      String status,
+      OffsetDateTime openedAt,
+      OffsetDateTime closedAt,
+      String closeReason,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit,
+      String book,
+      Integer subaccountIdx,
+      Long advisedLots,
+      BigDecimal marginSnapshot,
+      BigDecimal marginPct,
+      Long openingSignalId) {}
+
+  /** The full detail row for one position id (all provenance columns), if any. */
+  public Optional<DetailRow> findDetail(long id) {
+    return jdbc
+        .query(
+            "SELECT id, exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status,"
+                + " opened_at, closed_at, close_reason, stop_loss, take_profit, book,"
+                + " subaccount_idx, advised_lots, margin_snapshot, margin_pct, opening_signal_id"
+                + " FROM paper_positions WHERE id=?",
+            (rs, n) ->
+                new DetailRow(
+                    rs.getLong("id"),
+                    rs.getString("exchange"),
+                    rs.getString("tradingsymbol"),
+                    rs.getString("side"),
+                    rs.getLong("qty"),
+                    rs.getBigDecimal("avg_entry_price"),
+                    rs.getBigDecimal("realized_pnl"),
+                    rs.getString("status"),
+                    rs.getObject("opened_at", OffsetDateTime.class),
+                    rs.getObject("closed_at", OffsetDateTime.class),
+                    rs.getString("close_reason"),
+                    rs.getBigDecimal("stop_loss"),
+                    rs.getBigDecimal("take_profit"),
+                    rs.getString("book"),
+                    rs.getObject("subaccount_idx", Integer.class),
+                    rs.getObject("advised_lots", Long.class),
+                    rs.getBigDecimal("margin_snapshot"),
+                    rs.getBigDecimal("margin_pct"),
+                    rs.getObject("opening_signal_id", Long.class)),
+            id)
+        .stream()
+        .findFirst();
+  }
+
+  /**
+   * Edits an OPEN position's bracket levels (Phase-2 manual override). {@code COALESCE} keeps a level
+   * the caller left {@code null} (a partial edit touches only the field supplied); the {@code AND
+   * status='OPEN'} guard is a compare-and-set — returns 1 iff the row was still open, 0 if a concurrent
+   * close beat the edit. The 15s {@link PaperBracketEvaluator} poll reads {@code stop_loss}/{@code
+   * take_profit} fresh every pass, so the new level is live-effective on the very next evaluation.
+   */
+  public int updateBrackets(long id, BigDecimal stopLoss, BigDecimal takeProfit) {
+    return jdbc.update(
+        "UPDATE paper_positions SET stop_loss=COALESCE(?, stop_loss),"
+            + " take_profit=COALESCE(?, take_profit) WHERE id=? AND status='OPEN'",
+        stopLoss,
+        takeProfit,
+        id);
+  }
+
+  /**
    * The most recent position for a book+key regardless of status (newest opened first) — the V2
    * idempotency read-back: a duplicate submission within the retry window resolves to the still-OPEN
    * position it created; a late replay resolves to that position's row even after it closed. (A key

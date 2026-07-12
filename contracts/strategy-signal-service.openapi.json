@@ -620,127 +620,6 @@
         }
       }
     },
-    "/api/v1/strategies/{id}/enable" : {
-      "post" : {
-        "tags" : [ "registry-controller" ],
-        "operationId" : "enable",
-        "parameters" : [ {
-          "name" : "id",
-          "in" : "path",
-          "required" : true,
-          "schema" : {
-            "type" : "string",
-            "format" : "uuid"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ToggleResult"
-                }
-              }
-            }
-          },
-          "default" : {
-            "description" : "Error envelope (COMMON 8.3)",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/strategies/{id}/disable" : {
-      "post" : {
-        "tags" : [ "registry-controller" ],
-        "operationId" : "disable",
-        "parameters" : [ {
-          "name" : "id",
-          "in" : "path",
-          "required" : true,
-          "schema" : {
-            "type" : "string",
-            "format" : "uuid"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ToggleResult"
-                }
-              }
-            }
-          },
-          "default" : {
-            "description" : "Error envelope (COMMON 8.3)",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/strategies/{id}/clone" : {
-      "post" : {
-        "tags" : [ "registry-controller" ],
-        "operationId" : "clone",
-        "parameters" : [ {
-          "name" : "id",
-          "in" : "path",
-          "required" : true,
-          "schema" : {
-            "type" : "string",
-            "format" : "uuid"
-          }
-        } ],
-        "requestBody" : {
-          "content" : {
-            "application/json" : {
-              "schema" : {
-                "$ref" : "#/components/schemas/CloneRequest"
-              }
-            }
-          },
-          "required" : true
-        },
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/CloneResult"
-                }
-              }
-            }
-          },
-          "default" : {
-            "description" : "Error envelope (COMMON 8.3)",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/strategies/{id}/archive" : {
       "post" : {
         "tags" : [ "registry-controller" ],
@@ -886,43 +765,6 @@
                 "schema" : {
                   "type" : "object",
                   "additionalProperties" : { }
-                }
-              }
-            }
-          },
-          "default" : {
-            "description" : "Error envelope (COMMON 8.3)",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/signals/sell-decisions/{id}/ack" : {
-      "post" : {
-        "tags" : [ "sell-decisions-controller" ],
-        "operationId" : "acknowledge",
-        "parameters" : [ {
-          "name" : "id",
-          "in" : "path",
-          "required" : true,
-          "schema" : {
-            "type" : "integer",
-            "format" : "int64"
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/SellDecisionRow"
                 }
               }
             }
@@ -1465,6 +1307,53 @@
         }
       }
     },
+    "/api/v1/paper/positions/{id}/brackets" : {
+      "patch" : {
+        "tags" : [ "paper-controller" ],
+        "operationId" : "editBrackets",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BracketBody"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PositionDetail"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/strategies/{id}/versions" : {
       "get" : {
         "tags" : [ "registry-controller" ],
@@ -1646,61 +1535,6 @@
                 "schema" : {
                   "type" : "object",
                   "additionalProperties" : { }
-                }
-              }
-            }
-          },
-          "default" : {
-            "description" : "Error envelope (COMMON 8.3)",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/strategies/{id}/audit" : {
-      "get" : {
-        "tags" : [ "registry-controller" ],
-        "operationId" : "audit",
-        "parameters" : [ {
-          "name" : "id",
-          "in" : "path",
-          "required" : true,
-          "schema" : {
-            "type" : "string",
-            "format" : "uuid"
-          }
-        }, {
-          "name" : "limit",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "integer",
-            "format" : "int32",
-            "default" : 100
-          }
-        }, {
-          "name" : "offset",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "integer",
-            "format" : "int32",
-            "default" : 0
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/AuditLogResponse"
                 }
               }
             }
@@ -1943,68 +1777,6 @@
         }
       }
     },
-    "/api/v1/signals/sell-decisions" : {
-      "get" : {
-        "tags" : [ "sell-decisions-controller" ],
-        "operationId" : "list_4",
-        "parameters" : [ {
-          "name" : "book",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "string"
-          }
-        }, {
-          "name" : "unacknowledged",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "boolean",
-            "default" : false
-          }
-        }, {
-          "name" : "limit",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "integer",
-            "format" : "int32",
-            "default" : 100
-          }
-        }, {
-          "name" : "offset",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "integer",
-            "format" : "int32",
-            "default" : 0
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/SellDecisions"
-                }
-              }
-            }
-          },
-          "default" : {
-            "description" : "Error envelope (COMMON 8.3)",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/signals/minervini-swing/sell-decisions" : {
       "get" : {
         "tags" : [ "minervini-swing-controller" ],
@@ -2169,7 +1941,7 @@
     "/api/v1/signal-rejections" : {
       "get" : {
         "tags" : [ "signal-rejections-controller" ],
-        "operationId" : "list_5",
+        "operationId" : "list_4",
         "parameters" : [ {
           "name" : "strategyVersionId",
           "in" : "query",
@@ -2508,6 +2280,43 @@
         }
       }
     },
+    "/api/v1/paper/positions/{id}" : {
+      "get" : {
+        "tags" : [ "paper-controller" ],
+        "operationId" : "positionDetail",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PositionDetail"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/paper/pnl" : {
       "get" : {
         "tags" : [ "paper-controller" ],
@@ -2564,76 +2373,6 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/MarginHeat"
-                }
-              }
-            }
-          },
-          "default" : {
-            "description" : "Error envelope (COMMON 8.3)",
-            "content" : {
-              "application/json" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/paper/events" : {
-      "get" : {
-        "tags" : [ "paper-controller" ],
-        "operationId" : "events",
-        "parameters" : [ {
-          "name" : "positionId",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "integer",
-            "format" : "int64"
-          }
-        }, {
-          "name" : "book",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "string"
-          }
-        }, {
-          "name" : "day",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "string",
-            "format" : "date"
-          }
-        }, {
-          "name" : "limit",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "integer",
-            "format" : "int32",
-            "default" : 100
-          }
-        }, {
-          "name" : "offset",
-          "in" : "query",
-          "required" : false,
-          "schema" : {
-            "type" : "integer",
-            "format" : "int32",
-            "default" : 0
-          }
-        } ],
-        "responses" : {
-          "200" : {
-            "description" : "OK",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/PaperEventsResponse"
                 }
               }
             }
@@ -2769,7 +2508,7 @@
     "/api/v1/insights" : {
       "get" : {
         "tags" : [ "insight-controller" ],
-        "operationId" : "list_6",
+        "operationId" : "list_5",
         "parameters" : [ {
           "name" : "type",
           "in" : "query",
@@ -3321,47 +3060,6 @@
           }
         }
       },
-      "ToggleResult" : {
-        "type" : "object",
-        "properties" : {
-          "id" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "enabled" : {
-            "type" : "boolean"
-          }
-        }
-      },
-      "CloneRequest" : {
-        "type" : "object",
-        "properties" : {
-          "name" : {
-            "type" : "string"
-          },
-          "slug" : {
-            "type" : "string"
-          }
-        }
-      },
-      "CloneResult" : {
-        "type" : "object",
-        "properties" : {
-          "id" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "slug" : {
-            "type" : "string"
-          },
-          "version" : {
-            "type" : "string"
-          },
-          "status" : {
-            "type" : "string"
-          }
-        }
-      },
       "ValidateRequest" : {
         "type" : "object",
         "properties" : {
@@ -3382,80 +3080,6 @@
           },
           "note" : {
             "type" : "string"
-          }
-        }
-      },
-      "SellDecisionRow" : {
-        "type" : "object",
-        "properties" : {
-          "id" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "book" : {
-            "type" : "string"
-          },
-          "runDate" : {
-            "type" : "string",
-            "format" : "date"
-          },
-          "evaluatedAt" : {
-            "type" : "string",
-            "format" : "date-time"
-          },
-          "signalId" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "exchange" : {
-            "type" : "string"
-          },
-          "symbol" : {
-            "type" : "string"
-          },
-          "setup" : {
-            "type" : "string"
-          },
-          "stage" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "setupType" : {
-            "type" : "string"
-          },
-          "footprint" : {
-            "type" : "string"
-          },
-          "entryPrice" : {
-            "type" : "number"
-          },
-          "currentPrice" : {
-            "type" : "number"
-          },
-          "unrealizedPct" : {
-            "type" : "number"
-          },
-          "stopLevel" : {
-            "type" : "number"
-          },
-          "trailLevel" : {
-            "type" : "number"
-          },
-          "stillBuyable" : {
-            "type" : "boolean"
-          },
-          "sellingNow" : {
-            "type" : "boolean"
-          },
-          "sellReason" : {
-            "type" : "string"
-          },
-          "verdict" : {
-            "type" : "string"
-          },
-          "acknowledgedAt" : {
-            "type" : "string",
-            "format" : "date-time"
           }
         }
       },
@@ -3787,42 +3411,207 @@
           }
         }
       },
-      "AuditLogResponse" : {
+      "BracketBody" : {
         "type" : "object",
         "properties" : {
-          "items" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/AuditRow"
-            }
+          "stopLoss" : {
+            "type" : "number"
+          },
+          "takeProfit" : {
+            "type" : "number"
           }
         }
       },
-      "AuditRow" : {
+      "FeeBreakdown" : {
+        "type" : "object",
+        "properties" : {
+          "brokerage" : {
+            "type" : "number"
+          },
+          "stt" : {
+            "type" : "number"
+          },
+          "exchangeTxn" : {
+            "type" : "number"
+          },
+          "gst" : {
+            "type" : "number"
+          },
+          "stamp" : {
+            "type" : "number"
+          },
+          "sebi" : {
+            "type" : "number"
+          },
+          "total" : {
+            "type" : "number"
+          }
+        }
+      },
+      "OpeningSignal" : {
+        "type" : "object",
+        "properties" : {
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "entryPrice" : {
+            "type" : "number"
+          },
+          "stopLoss" : {
+            "type" : "number"
+          },
+          "target" : {
+            "type" : "number"
+          },
+          "compositeScore" : {
+            "type" : "number"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "scalperDetail" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "minerviniDetail" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "manasAroraDetail" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          }
+        }
+      },
+      "OrderLeg" : {
+        "type" : "object",
+        "properties" : {
+          "orderId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "placedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "filledAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "fillPrice" : {
+            "type" : "number"
+          },
+          "fillSimulator" : {
+            "type" : "string"
+          },
+          "slippageApplied" : {
+            "type" : "number"
+          },
+          "fees" : {
+            "$ref" : "#/components/schemas/FeeBreakdown"
+          }
+        }
+      },
+      "PositionDetail" : {
         "type" : "object",
         "properties" : {
           "id" : {
             "type" : "integer",
             "format" : "int64"
           },
-          "action" : {
+          "book" : {
             "type" : "string"
           },
-          "fromVersion" : {
+          "exchange" : {
             "type" : "string"
           },
-          "toVersion" : {
+          "tradingsymbol" : {
             "type" : "string"
           },
-          "diffSummary" : {
+          "side" : {
             "type" : "string"
           },
-          "actor" : {
+          "qty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "avgEntryPrice" : {
+            "type" : "number"
+          },
+          "markPrice" : {
+            "type" : "number"
+          },
+          "unrealizedPnl" : {
+            "type" : "number"
+          },
+          "realizedPnl" : {
+            "type" : "number"
+          },
+          "status" : {
             "type" : "string"
           },
-          "createdAt" : {
+          "openedAt" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "closedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "closeReason" : {
+            "type" : "string"
+          },
+          "stopLoss" : {
+            "type" : "number"
+          },
+          "takeProfit" : {
+            "type" : "number"
+          },
+          "advisedLots" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "marginSnapshot" : {
+            "type" : "number"
+          },
+          "marginPct" : {
+            "type" : "number"
+          },
+          "subaccountIdx" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openingSignalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "openingSignal" : {
+            "$ref" : "#/components/schemas/OpeningSignal"
+          },
+          "orders" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OrderLeg"
+            }
           }
         }
       },
@@ -3948,24 +3737,9 @@
           }
         }
       },
-      "SellDecisions" : {
-        "type" : "object",
-        "properties" : {
-          "items" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/SellDecisionRow"
-            }
-          }
-        }
-      },
       "SwingSellDecision" : {
         "type" : "object",
         "properties" : {
-          "signalId" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
           "symbol" : {
             "type" : "string"
           },
@@ -4215,59 +3989,6 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
-          }
-        }
-      },
-      "PaperEventDto" : {
-        "type" : "object",
-        "properties" : {
-          "id" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "positionId" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "kind" : {
-            "type" : "string"
-          },
-          "book" : {
-            "type" : "string"
-          },
-          "exchange" : {
-            "type" : "string"
-          },
-          "tradingsymbol" : {
-            "type" : "string"
-          },
-          "side" : {
-            "type" : "string"
-          },
-          "qty" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "reason" : {
-            "type" : "string"
-          },
-          "realizedPnl" : {
-            "type" : "string"
-          },
-          "createdAt" : {
-            "type" : "string",
-            "format" : "date-time"
-          }
-        }
-      },
-      "PaperEventsResponse" : {
-        "type" : "object",
-        "properties" : {
-          "items" : {
-            "type" : "array",
-            "items" : {
-              "$ref" : "#/components/schemas/PaperEventDto"
-            }
           }
         }
       },

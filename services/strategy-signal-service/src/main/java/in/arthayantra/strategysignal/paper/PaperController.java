@@ -12,6 +12,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -44,6 +45,9 @@ public class PaperController {
 
   /** Close body: an explicit price overrides the last tick. */
   public record CloseBody(BigDecimal price) {}
+
+  /** Bracket-edit body: either level may be set (a {@code null} field leaves it unchanged); both null → 400. */
+  public record BracketBody(BigDecimal stopLoss, BigDecimal takeProfit) {}
 
   /** Reset is guarded by an explicit confirm flag; scoped to a book (null → all books). */
   public record ResetBody(boolean confirm, String book) {}
@@ -221,6 +225,43 @@ public class PaperController {
   @PostMapping("/positions/{id}/close")
   public PaperService.TradeDto close(@PathVariable long id, @RequestBody(required = false) CloseBody body) {
     return paper.closePosition(id, body == null ? null : body.price());
+  }
+
+  /**
+   * The full detail + provenance of one position (Phase-2 §6.4/§6.5): opening signal + its family
+   * side-channel, the ordered entry/exit legs with a recomputed fee breakdown, brackets, the F9
+   * advised-lots / margin snapshot, sub-account and book — the detail-pane + trade-chain payload.
+   */
+  @GetMapping("/positions/{id}")
+  public PaperService.PositionDetail positionDetail(@PathVariable long id) {
+    return paper.positionDetail(id);
+  }
+
+  /**
+   * Manually edit an OPEN position's stop-loss / take-profit (Phase-2, HOLD-tier — the edit changes
+   * what the live 15s bracket evaluator will act on). At least one level is required and each supplied
+   * level must be positive; a {@code null} field leaves that level unchanged. The service validates the
+   * new level against the last REAL tick (a level that would fire immediately 422s) and NEVER settles.
+   * The override is written to the {@code paper_admin_audit} trail (previous → new); the evaluator
+   * reads the fresh levels on its next pass.
+   */
+  @PatchMapping("/positions/{id}/brackets")
+  public PaperService.PositionDetail editBrackets(@PathVariable long id, @RequestBody BracketBody body) {
+    if (body == null || (body.stopLoss() == null && body.takeProfit() == null)) {
+      throw new ApiException(
+          400, ErrorCodes.VALIDATION_FAILED, "at least one of stopLoss / takeProfit is required");
+    }
+    if (body.stopLoss() != null && body.stopLoss().signum() <= 0) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "stopLoss must be positive");
+    }
+    if (body.takeProfit() != null && body.takeProfit().signum() <= 0) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "takeProfit must be positive");
+    }
+    PaperService.BracketEdit edit = paper.editBrackets(id, body.stopLoss(), body.takeProfit());
+    adminAudit.recordBracketEdit(
+        edit.detail().book(), id, edit.previousStopLoss(), edit.previousTakeProfit(),
+        edit.detail().stopLoss(), edit.detail().takeProfit());
+    return edit.detail();
   }
 
   /**

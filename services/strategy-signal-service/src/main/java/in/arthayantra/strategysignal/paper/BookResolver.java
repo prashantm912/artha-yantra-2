@@ -35,28 +35,19 @@ public class BookResolver {
   }
 
   /**
-   * The book that owns a signal, via its strategy's tags (same-schema join). A missing signal or an
-   * unrecognised family resolves to {@code OTHER}; callers with no signal use {@code MANUAL} directly.
+   * The book that owns a signal — read from the {@code signals.book} column stamped at emission (T1),
+   * frozen against later tag drift. A missing signal or a null book resolves to {@code OTHER}; callers
+   * with no signal use {@code MANUAL} directly.
    */
   public String bookForSignal(long signalId) {
-    String book =
-        jdbc.query(
-                """
-                SELECT CASE
-                  WHEN 'scalper'     = ANY(st.tags) THEN 'scalper'
-                  WHEN 'minervini'   = ANY(st.tags) THEN 'minervini'
-                  WHEN 'manas-arora' = ANY(st.tags) THEN 'manas-arora'
-                  ELSE 'other' END AS book
-                FROM signals s
-                JOIN strategy_versions sv ON sv.id = s.strategy_version_id
-                JOIN strategies st ON st.id = sv.strategy_id
-                WHERE s.id = ?
-                """,
-                (rs, n) -> rs.getString("book"),
-                signalId)
-            .stream()
-            .findFirst()
-            .orElse(OTHER);
-    return book;
+    return jdbc
+        .query(
+            "SELECT book FROM signals WHERE id = ?",
+            (rs, n) -> rs.getString("book"),
+            signalId)
+        .stream()
+        .filter(java.util.Objects::nonNull)
+        .findFirst()
+        .orElse(OTHER);
   }
 }

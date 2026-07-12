@@ -11,7 +11,9 @@ import in.arthayantra.strategysignal.swing.PyramidPolicy;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -46,6 +48,16 @@ public class ManasPyramidPolicy implements PyramidPolicy {
   @Override
   public boolean hasRoom(List<SignalRepository.SignalRow> lots) {
     return enabled && lots.size() < maxLots;
+  }
+
+  @Override
+  public Map<String, Object> describe() {
+    Map<String, Object> regime = new LinkedHashMap<>();
+    regime.put("enabled", enabled);
+    regime.put("minGainPct", minGainPct.toPlainString());
+    regime.put("maxLots", maxLots);
+    regime.put("maxPortfolioRiskPct", maxPortfolioRiskPct.toPlainString());
+    return regime;
   }
 
   @Override

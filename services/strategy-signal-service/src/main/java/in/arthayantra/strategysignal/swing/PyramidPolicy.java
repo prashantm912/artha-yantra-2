@@ -7,6 +7,7 @@ import in.arthayantra.strategysignal.signals.EmissionGuard;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 /**
  * A swing family's rule for ADDING lots to a winning holding (Manas Arora §3.4). The {@link
@@ -48,12 +49,23 @@ public interface PyramidPolicy {
       BigDecimal entryPrice,
       EmissionGuard guard);
 
+  /**
+   * The pyramid regime as a flat map (P1-7 flag snapshot) — the out-of-YAML pyramiding env flags this run
+   * used. {@link #NONE} reports only {@code enabled=false}; a real add-capable policy reports its knob set.
+   */
+  Map<String, Object> describe();
+
   /** No pyramiding: single-lot, never adds — the Minervini (and default) policy. */
   PyramidPolicy NONE =
       new PyramidPolicy() {
         @Override
         public boolean hasRoom(List<SignalRepository.SignalRow> lots) {
           return false;
+        }
+
+        @Override
+        public Map<String, Object> describe() {
+          return Map.of("enabled", false);
         }
 
         @Override

@@ -15,7 +15,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class PaperOrderRepository {
 
-  /** One order row (fill-audit included). */
+  /** One order row (fill-audit included, plus the P1-5 fill-reference provenance). */
   public record OrderRow(
       long id,
       Long signalId,
@@ -30,7 +30,9 @@ public class PaperOrderRepository {
       String fillSimulator,
       BigDecimal slippageApplied,
       BigDecimal quoteBid,
-      BigDecimal quoteAsk) {}
+      BigDecimal quoteAsk,
+      String refSource,
+      Long refTickAgeMs) {}
 
   /** The open-position key of the order carrying a clientOrderId — the V2 idempotency read-back anchor. */
   public record OrderKey(String exchange, String tradingsymbol, String side) {}
@@ -60,12 +62,7 @@ public class PaperOrderRepository {
         quoteBid, quoteAsk, null);
   }
 
-  /**
-   * Inserts a FILLED order in a book with its fill-audit trail; returns the generated id. A non-null
-   * {@code clientOrderId} (the MANUAL order path only, audit V2) is stamped on the row and constrained
-   * by the {@code uq_paper_orders_client_order_id} partial-unique index — so a concurrent duplicate
-   * submission's INSERT collides here (23505) and its whole fill transaction rolls back.
-   */
+  /** The pre-P1-5 12-arg form (no fill-reference provenance): delegates with null ref_source/age. */
   public long insertFilled(
       String book,
       Long signalId,
@@ -79,14 +76,42 @@ public class PaperOrderRepository {
       BigDecimal quoteBid,
       BigDecimal quoteAsk,
       String clientOrderId) {
+    return insertFilled(
+        book, signalId, exchange, tradingsymbol, side, qty, fillPrice, fillSimulator, slippageApplied,
+        quoteBid, quoteAsk, clientOrderId, null, null);
+  }
+
+  /**
+   * Inserts a FILLED order in a book with its fill-audit trail + P1-5 fill-reference provenance
+   * ({@code refSource} = CALLER | LIVE_TICK | SIGNAL_ENTRY; {@code refTickAgeMs} = the LIVE_TICK's
+   * wall-clock age at fill, else null); returns the generated id. A non-null {@code clientOrderId} (the
+   * MANUAL order path only, audit V2) is stamped on the row and constrained by the
+   * {@code uq_paper_orders_client_order_id} partial-unique index — so a concurrent duplicate submission's
+   * INSERT collides here (23505) and its whole fill transaction rolls back.
+   */
+  public long insertFilled(
+      String book,
+      Long signalId,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal fillPrice,
+      String fillSimulator,
+      BigDecimal slippageApplied,
+      BigDecimal quoteBid,
+      BigDecimal quoteAsk,
+      String clientOrderId,
+      String refSource,
+      Long refTickAgeMs) {
     Long id =
         jdbc.queryForObject(
             """
             INSERT INTO paper_orders
               (book, signal_id, exchange, tradingsymbol, side, qty, order_type, status, placed_at,
                filled_at, fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask,
-               client_order_id)
-            VALUES (?,?,?,?,?,?, 'MARKET', 'FILLED', now(), now(), ?,?,?,?,?,?)
+               client_order_id, ref_source, ref_tick_age_ms)
+            VALUES (?,?,?,?,?,?, 'MARKET', 'FILLED', now(), now(), ?,?,?,?,?,?,?,?)
             RETURNING id
             """,
             Long.class,
@@ -101,7 +126,9 @@ public class PaperOrderRepository {
             slippageApplied,
             quoteBid,
             quoteAsk,
-            clientOrderId);
+            clientOrderId,
+            refSource,
+            refTickAgeMs);
     return id == null ? 0 : id;
   }
 
@@ -128,7 +155,8 @@ public class PaperOrderRepository {
     return jdbc.query(
         """
         SELECT id, signal_id, exchange, tradingsymbol, side, qty, status, placed_at, filled_at,
-               fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask
+               fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask,
+               ref_source, ref_tick_age_ms
         FROM paper_orders ORDER BY placed_at DESC LIMIT ? OFFSET ?
         """,
         PaperOrderRepository::mapOrder,
@@ -152,7 +180,8 @@ public class PaperOrderRepository {
     return jdbc.query(
         """
         SELECT id, signal_id, exchange, tradingsymbol, side, qty, status, placed_at, filled_at,
-               fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask
+               fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask,
+               ref_source, ref_tick_age_ms
         FROM paper_orders
         WHERE book=? AND exchange=? AND tradingsymbol=?
           AND COALESCE(filled_at, placed_at) >= ?
@@ -182,7 +211,9 @@ public class PaperOrderRepository {
         rs.getString("fill_simulator"),
         rs.getBigDecimal("slippage_applied"),
         rs.getBigDecimal("quote_bid"),
-        rs.getBigDecimal("quote_ask"));
+        rs.getBigDecimal("quote_ask"),
+        rs.getString("ref_source"),
+        rs.getObject("ref_tick_age_ms", Long.class));
   }
 
   /** Wipes a book's order log ({@code book} null → all books; paper reset). */

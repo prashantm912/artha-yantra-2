@@ -223,6 +223,7 @@ public class PaperService {
   private final RiskService risk;
   private final ApplicationEventPublisher events;
   private final PaperStaleTickAlerter staleTicks;
+  private final PaperOrderRejectionRecorder rejections;
   private final BigDecimal perTradeRiskPct;
   /** Audit V3: a fill priced off a last tick older than this is fiction — rejected DATA_STALE. */
   private final Duration tickMaxAge;
@@ -241,6 +242,7 @@ public class PaperService {
       RiskService risk,
       ApplicationEventPublisher events,
       PaperStaleTickAlerter staleTicks,
+      PaperOrderRejectionRecorder rejections,
       PlatformTransactionManager transactionManager,
       @org.springframework.beans.factory.annotation.Value("${artha.paper.risk.per-trade-risk-pct:1.0}")
           BigDecimal perTradeRiskPct,
@@ -257,6 +259,7 @@ public class PaperService {
     this.risk = risk;
     this.events = events;
     this.staleTicks = staleTicks;
+    this.rejections = rejections;
     this.perTradeRiskPct = perTradeRiskPct;
     this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
     this.txTemplate = new TransactionTemplate(transactionManager);
@@ -371,12 +374,20 @@ public class PaperService {
     // fall to the live last tick — but ONLY when it is fresh: a fill priced off a stale LTP is fiction, so
     // a tick older than tickMaxAge is rejected DATA_STALE, never silently substituted. With no tick at all
     // a signal take still fills at its own entry price; nothing available stays the existing DATA_STALE.
+    // P1-5 fill-reference provenance: record WHICH price the fill was struck against (CALLER = an
+    // explicit request price / gate-captured premium / swing close; LIVE_TICK = the Redis last tick;
+    // SIGNAL_ENTRY = the signal's own entry as last resort) and, for a LIVE_TICK, how fresh it was.
     BigDecimal reference = request.price();
+    String refSource = reference != null ? "CALLER" : null;
+    Long refTickAgeMs = null;
     if (reference == null) {
       Optional<LastTickReader.TickView> tick = lastTick.lastTick(exchange, tradingsymbol);
       if (tick.isPresent()) {
         Duration age = tick.get().age();
         if (age != null && age.compareTo(tickMaxAge) > 0) {
+          // P1-4: durably record the refused attempt (auto-takes swallow this throw as a log line) —
+          // fail-soft + REQUIRES_NEW so it survives the fill rollback and never masks the DATA_STALE.
+          recordStaleRejectQuietly(request, exchange, tradingsymbol, side, age.toMillis());
           throw new ApiException(
               422,
               ErrorCodes.DATA_STALE,
@@ -386,11 +397,15 @@ public class PaperService {
                   "exchange", exchange, "tradingsymbol", tradingsymbol, "tickAgeSeconds", age.toSeconds()));
         }
         reference = tick.get().price();
+        refSource = "LIVE_TICK";
+        refTickAgeMs = age == null ? null : age.toMillis();
       } else {
         reference = signalEntry;
+        refSource = reference != null ? "SIGNAL_ENTRY" : null;
       }
     }
     if (reference == null) {
+      recordNoPriceRejectQuietly(request, exchange, tradingsymbol, side);
       throw new ApiException(422, ErrorCodes.DATA_STALE, "no price available to fill " + exchange + ":" + tradingsymbol);
     }
     // The book to charge: explicit on the request, else the signal's strategy family, else MANUAL.
@@ -399,7 +414,8 @@ public class PaperService {
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
     orders.insertFilled(
         book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
-        fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId());
+        fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId(), refSource,
+        refTickAgeMs);
     Long advisedLots = advisedLots(book, fill.fillPrice(), request.stopLoss());
     upsertPosition(
         book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
@@ -486,6 +502,32 @@ public class PaperService {
     return riskBudget.divide(stopDistance, 0, RoundingMode.DOWN).longValue();
   }
 
+  /**
+   * P1-4 reject capture (fail-soft): a stale-tick refusal on the entry fill. Wraps the REQUIRES_NEW
+   * recorder so a ledger hiccup never masks the {@code DATA_STALE} the order path is about to throw.
+   */
+  private void recordStaleRejectQuietly(
+      OrderRequest request, String exchange, String tradingsymbol, String side, long tickAgeMs) {
+    try {
+      rejections.recordStaleTick(
+          request.signalId(), bookFor(request), exchange, tradingsymbol, side, request.qty(),
+          tickAgeMs, tickMaxAge.toMillis());
+    } catch (RuntimeException e) {
+      log.warn("paper_order_rejections (stale) not written for {}:{}: {}", exchange, tradingsymbol, e.getMessage());
+    }
+  }
+
+  /** P1-4 reject capture (fail-soft): no reference price was available to strike the entry fill. */
+  private void recordNoPriceRejectQuietly(
+      OrderRequest request, String exchange, String tradingsymbol, String side) {
+    try {
+      rejections.recordNoPrice(
+          request.signalId(), bookFor(request), exchange, tradingsymbol, side, request.qty());
+    } catch (RuntimeException e) {
+      log.warn("paper_order_rejections (no-price) not written for {}:{}: {}", exchange, tradingsymbol, e.getMessage());
+    }
+  }
+
   /** Closes a position at the stated price (or the last tick); realized = exit + entry-basis cash. */
   @Transactional
   public TradeDto closePosition(long id, BigDecimal price) {
@@ -536,7 +578,12 @@ public class PaperService {
   private BigDecimal doSettle(PositionRow pos, BigDecimal price, String closeReason, boolean exercise) {
     InstrumentMeta meta = instruments.meta(pos.exchange(), pos.tradingsymbol());
     Side exitSide = "BUY".equals(pos.side()) ? Side.SELL : Side.BUY;
+    // P1-5 fill-reference provenance on the EXIT leg too: CALLER = an explicit settle price (manual
+    // close / swing daily close / expiry intrinsic); LIVE_TICK = the last real tick fallback (used at
+    // ANY age on a close — #694), with its wall-clock age recorded.
     BigDecimal reference = price;
+    String refSource = reference != null ? "CALLER" : null;
+    Long refTickAgeMs = null;
     if (reference == null) {
       Optional<LastTickReader.TickView> tick = lastTick.lastTick(pos.exchange(), pos.tradingsymbol());
       if (tick.isEmpty()) {
@@ -549,7 +596,9 @@ public class PaperService {
             Map.of("positionId", pos.id(), "closeReason", closeReason));
       }
       reference = tick.get().price();
+      refSource = "LIVE_TICK";
       Duration age = tick.get().age();
+      refTickAgeMs = age == null ? null : age.toMillis();
       if (age != null && age.compareTo(tickMaxAge) > 0) {
         staleTicks.staleSettleUsed(pos, closeReason, age);
       }
@@ -568,7 +617,7 @@ public class PaperService {
     }
     orders.insertFilled(
         pos.book(), null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
-        fills.simulatorId(), exit.slippageApplied(), null, null);
+        fills.simulatorId(), exit.slippageApplied(), null, null, null, refSource, refTickAgeMs);
     // Auto-journal hook: the journal module listens AFTER_COMMIT (so a journal failure can never
     // roll back the close). Publishing inside the close tx is fine — delivery is deferred to commit.
     events.publishEvent(new PaperPositionClosed(pos.id(), realized, closeReason));

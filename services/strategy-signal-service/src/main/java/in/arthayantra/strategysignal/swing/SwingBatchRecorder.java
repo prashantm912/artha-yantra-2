@@ -1,10 +1,13 @@
 package in.arthayantra.strategysignal.swing;
 
+import in.arthayantra.strategysignal.signals.FlagSnapshotService;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.Map;
+import java.util.TreeMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -31,19 +34,22 @@ public class SwingBatchRecorder {
   private final SwingBatchEngine engine;
   private final SwingBatchRunRepository runs;
   private final SwingSellDecisionService sellDecisions;
+  private final FlagSnapshotService flagSnapshots;
   private final ApplicationEventPublisher events;
   private final Clock clock;
 
-  /** Wires the shared engine, the marker repo, the sell-decision store, and the event bus. */
+  /** Wires the shared engine, the marker repo, the sell-decision store, the flag ledger, and the bus. */
   public SwingBatchRecorder(
       SwingBatchEngine engine,
       SwingBatchRunRepository runs,
       SwingSellDecisionService sellDecisions,
+      FlagSnapshotService flagSnapshots,
       ApplicationEventPublisher events,
       Clock clock) {
     this.engine = engine;
     this.runs = runs;
     this.sellDecisions = sellDecisions;
+    this.flagSnapshots = flagSnapshots;
     this.events = events;
     this.clock = clock;
   }
@@ -55,6 +61,14 @@ public class SwingBatchRecorder {
     if (!doctrine.enabled()) {
       return result; // disarmed no-op — nothing ran, nothing to record or announce
     }
+    // P1-7: snapshot the out-of-YAML flag regime that governed THIS run (the pyramiding env flags) keyed to
+    // the swing_batch_runs natural key (batch:runDate). capture() is fail-soft — an observability write must
+    // never break the run this batch is the only exit evaluator for.
+    Map<String, Object> flags = new TreeMap<>();
+    flags.put("batch", doctrine.batchName());
+    doctrine.pyramid().describe().forEach((k, v) -> flags.put("pyramid." + k, v));
+    flagSnapshots.capture(
+        FlagSnapshotService.SWING_BATCH, doctrine.batchName() + ":" + runDate, doctrine.book(), flags);
     try {
       SwingBatchEngine.AdmissionProbe probe = result.admission();
       runs.record(

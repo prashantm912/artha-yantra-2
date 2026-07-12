@@ -93,9 +93,9 @@ public class SignalRepository {
   }
 
   /**
-   * Paged history with optional filters, including a paper BOOK (strategy family) filter — a family
-   * tag ({@code scalper}/{@code minervini}/{@code manas-arora}) matched against the originating
-   * strategy's {@code strategies.tags} so each book's signals page shows only its own signals.
+   * Paged history with optional filters, including a paper BOOK (strategy family) filter — matched
+   * against the {@code signals.book} column stamped at emission (T1), so history stays keyed to the book
+   * the signal fired under even if the strategy's tags are later edited.
    */
   public List<SignalRow> list(
       String status, String book, UUID strategyVersionId, String exchange, String tradingsymbol,
@@ -107,9 +107,7 @@ public class SignalRepository {
       args.add(status);
     }
     if (book != null && !book.isBlank()) {
-      sql.append(
-          " AND EXISTS (SELECT 1 FROM strategy_versions sv JOIN strategies st ON st.id = sv.strategy_id"
-              + " WHERE sv.id = s.strategy_version_id AND ? = ANY(st.tags))");
+      sql.append(" AND s.book = ?");
       args.add(book);
     }
     if (strategyVersionId != null) {
@@ -180,27 +178,19 @@ public class SignalRepository {
   }
 
   /**
-   * The paper BOOK for a signal id — the originating strategy's first recognised family tag ({@link
-   * Books#fromTags}), else {@link Books#OTHER}. Resolved by {@link SignalStatusListener} to stamp the
-   * §7.2.1 status frame so a book-filtered live view can drop a frame for another book (the M17 rule).
-   * A missing signal / null tags fall back to {@code OTHER} (the frame stays valid; the FE just can't
-   * early-drop it).
+   * The paper BOOK for a signal id — read from the {@code signals.book} column stamped at emission (T1),
+   * frozen against later tag drift. Resolved by {@link SignalStatusListener} to stamp the §7.2.1 status
+   * frame so a book-filtered live view can drop a frame for another book (the M17 rule). A missing signal
+   * / null book fall back to {@code OTHER} (the frame stays valid; the FE just can't early-drop it).
    */
   public String bookForSignal(long id) {
     return jdbc
         .query(
-            "SELECT st.tags FROM signals s"
-                + " JOIN strategy_versions sv ON sv.id = s.strategy_version_id"
-                + " JOIN strategies st ON st.id = sv.strategy_id"
-                + " WHERE s.id = ?",
-            (rs, n) -> {
-              java.sql.Array arr = rs.getArray("tags");
-              return arr == null
-                  ? Books.OTHER
-                  : Books.fromTags(java.util.Arrays.asList((String[]) arr.getArray()));
-            },
+            "SELECT book FROM signals WHERE id = ?",
+            (rs, n) -> rs.getString("book"),
             id)
         .stream()
+        .filter(java.util.Objects::nonNull)
         .findFirst()
         .orElse(Books.OTHER);
   }

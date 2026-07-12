@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategysignal.signals.DroppedCandidate;
+import in.arthayantra.strategysignal.signals.FlagSnapshotService;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
 import java.time.Clock;
@@ -36,7 +37,9 @@ class SwingBatchRecorderTest {
     SwingDoctrine d = mock(SwingDoctrine.class);
     when(d.enabled()).thenReturn(true);
     when(d.batchName()).thenReturn("manas-arora");
+    when(d.book()).thenReturn("manas-arora");
     when(d.alertLabel()).thenReturn("Manas swing");
+    when(d.pyramid()).thenReturn(PyramidPolicy.NONE);
     return d;
   }
 
@@ -49,8 +52,8 @@ class SwingBatchRecorderTest {
 
     SwingBatchRecorder recorder =
         new SwingBatchRecorder(
-            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class), events,
-            Clock.systemUTC());
+            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class),
+            mock(FlagSnapshotService.class), events, Clock.systemUTC());
     recorder.runScheduled(doctrine);
 
     ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
@@ -72,8 +75,8 @@ class SwingBatchRecorderTest {
 
     SwingBatchRecorder recorder =
         new SwingBatchRecorder(
-            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class), events,
-            Clock.systemUTC());
+            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class),
+            mock(FlagSnapshotService.class), events, Clock.systemUTC());
 
     assertThatCode(() -> recorder.runScheduled(doctrine)).doesNotThrowAnyException();
   }
@@ -89,8 +92,8 @@ class SwingBatchRecorderTest {
 
     SwingBatchRecorder recorder =
         new SwingBatchRecorder(
-            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class), events,
-            Clock.systemUTC());
+            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class),
+            mock(FlagSnapshotService.class), events, Clock.systemUTC());
     recorder.runScheduled(doctrine);
 
     // the "done" summary alert may fire, but never a FAILED one
@@ -115,7 +118,9 @@ class SwingBatchRecorderTest {
     when(engine.runDaily(doctrine))
         .thenReturn(new SwingBatchEngine.SwingRun(3, 12, 6, 1, 0, probe));
 
-    new SwingBatchRecorder(engine, runs, sellDecisions, events, clock).runAndRecord(doctrine);
+    new SwingBatchRecorder(
+            engine, runs, sellDecisions, mock(FlagSnapshotService.class), events, clock)
+        .runAndRecord(doctrine);
 
     verify(runs)
         .record(
@@ -138,7 +143,9 @@ class SwingBatchRecorderTest {
             new SwingBatchEngine.SwingRun(3, 12, 2, 1, 0, SwingBatchEngine.AdmissionProbe.empty()));
     when(sellDecisions.persist(doctrine)).thenThrow(new RuntimeException("sell-decision store down"));
 
-    SwingBatchRecorder recorder = new SwingBatchRecorder(engine, runs, sellDecisions, events, clock);
+    SwingBatchRecorder recorder =
+        new SwingBatchRecorder(
+            engine, runs, sellDecisions, mock(FlagSnapshotService.class), events, clock);
 
     assertThatCode(() -> recorder.runAndRecord(doctrine)).doesNotThrowAnyException();
     // The run marker still records despite the persist failure (fail-soft is per-collaborator).

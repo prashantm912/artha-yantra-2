@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Bell } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Bell, GitCompareArrows } from 'lucide-react';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { DateInput } from '../../components/atoms/DateInput.tsx';
@@ -14,6 +15,7 @@ import { TrustChip } from '../../components/insights/TrustChip.tsx';
 import { InsightExplainDrawer } from '../../components/insights/InsightExplainDrawer.tsx';
 import {
   insightBand,
+  signalScopeId,
   useAckInsight,
   useDismissInsight,
   useInsights,
@@ -22,6 +24,7 @@ import {
   INSIGHT_TYPES,
   type Insight,
 } from '../../api/insights.ts';
+import { useSavedViews, type SavedView } from './savedViews.ts';
 
 // /insights — the in-app notification center the platform lacked (INT design §8.2), the feed half of
 // increment I1 (shadow mode: read + triage only). Filters by type/severity/status/scope/day + a
@@ -65,6 +68,8 @@ export function InsightsPage() {
 
   const ack = useAckInsight();
   const dismiss = useDismissInsight();
+  const navigate = useNavigate();
+  const { views, save, remove } = useSavedViews();
 
   const q = useInsights({
     type: type || null,
@@ -126,6 +131,38 @@ export function InsightsPage() {
     setSelectedRows(new Set());
   };
 
+  // Compare-selection (§4.1 / §8.5): the distinct signal ids behind the ticked signal-scoped rows.
+  const selectedSignalIds = useMemo(() => {
+    const ids: number[] = [];
+    for (const r of rows) {
+      if (!selectedRows.has(r.id)) continue;
+      const sid = signalScopeId(r);
+      if (sid != null && !ids.includes(sid)) ids.push(sid);
+    }
+    return ids;
+  }, [rows, selectedRows]);
+  const canCompare = selectedSignalIds.length >= 2 && selectedSignalIds.length <= 6;
+  const openCompare = () => {
+    if (!canCompare) return;
+    navigate(`/insights/compare?signalIds=${selectedSignalIds.join(',')}`);
+  };
+
+  // Saved views (§8.2, localStorage interim) — apply / save the current filter set.
+  const applyView = (v: SavedView) => {
+    setType(v.type);
+    setSeverity(v.severity);
+    setStatus(v.status);
+    setScope(v.scope);
+    setDay(v.day);
+    setIncludeSuppressed(v.includeSuppressed);
+    resetPage();
+  };
+  const saveCurrentView = () => {
+    const name = window.prompt('Save this filter set as:')?.trim();
+    if (!name) return;
+    save({ name, type, severity, status, scope, day, includeSuppressed });
+  };
+
   const typeOptions = [{ value: '', label: 'All types' }, ...INSIGHT_TYPES.map((t) => ({ value: t, label: t }))];
   const severityOptions = [
     { value: '', label: 'All severities' },
@@ -177,11 +214,51 @@ export function InsightsPage() {
         </label>
       </div>
 
-      {/* Bulk-action bar — appears once at least one row is selected (§8.2 bulk ack/dismiss). */}
+      {/* Saved views (§8.2, localStorage interim) — click a chip to apply a saved filter set, × to
+          delete it, "Save view" to store the current one. Swaps to user_prefs when P1-Phase-4 lands. */}
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        {views.map((v) => (
+          <span
+            key={v.name}
+            className="inline-flex items-center gap-1 rounded-md border border-ay-border bg-surface-1 px-2 py-1 text-xs"
+          >
+            <button type="button" onClick={() => applyView(v)} className="text-ay-text hover:text-accent">
+              {v.name}
+            </button>
+            <button
+              type="button"
+              aria-label={`Delete saved view ${v.name}`}
+              onClick={() => remove(v.name)}
+              className="text-ay-muted hover:text-bear"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <Button variant="outline" size="sm" onClick={saveCurrentView}>
+          Save view
+        </Button>
+      </div>
+
+      {/* Bulk-action bar — appears once at least one row is selected (§8.2 bulk ack/dismiss + compare). */}
       {selectedRows.size > 0 && (
         <div className="mb-3 flex items-center gap-2 rounded-md border border-ay-border bg-surface-2/40 px-3 py-2 text-body-sm">
           <span className="text-ay-muted">{selectedRows.size} selected</span>
           <span className="ml-auto flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              icon={GitCompareArrows}
+              disabled={!canCompare}
+              title={
+                canCompare
+                  ? undefined
+                  : 'Select 2–6 signal-scoped insights to compare their setups side by side.'
+              }
+              onClick={openCompare}
+            >
+              Compare{selectedSignalIds.length > 0 ? ` (${selectedSignalIds.length})` : ''}
+            </Button>
             <Button variant="outline" size="sm" disabled={ack.isPending} onClick={bulkAck}>
               Ack selected
             </Button>

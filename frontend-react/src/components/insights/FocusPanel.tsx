@@ -15,13 +15,15 @@ import {
 import { BandChip, EvidenceChip, SeverityBadge } from './InsightBits.tsx';
 import { TrustChip } from './TrustChip.tsx';
 import { InsightExplainDrawer } from './InsightExplainDrawer.tsx';
+import { InsightActions } from './InsightActions.tsx';
 
 // The Focus panel (INT design §8.1) — the priority-ordered decision surface. Shadow mode (I1): this is
 // an ADDITIVE dashboard panel that PREVIEWS what will replace the passive "Active Signals top-7"; the
 // old card stays until the layer is trusted (§10.3 Stage 0). Top = the ranked signal queue
 // (SIGNAL_PRIORITY, priority desc); below = the attention queue (everything else OPEN, severity-ordered).
-// Each row: band chip · title · top-2 evidence · trust chip · age · Review/Ack/Dismiss. Take (PROPOSE →
-// ticket) is I3 and intentionally absent. Reads only on mount/refetch — no WS (that is I3).
+// Each row: band chip · title · top-2 evidence · trust chip · age · Take/Review/Ack/Dismiss. Take
+// (PROPOSE → ticket, I3) rides <InsightActions> and shows only for signal-scoped rows. Reads only on
+// mount/refetch — no WS (that is a later I3/I4 push wave).
 
 interface FocusItemProps {
   insight: Insight;
@@ -58,8 +60,10 @@ function FocusItem({ insight, onReview, onAck, onDismiss, busy }: FocusItemProps
           <TrustChip state={insight.dataTrust} reasons={insight.trustReasons} />
         </div>
       </div>
-      <div className="mt-2 flex items-center gap-1.5">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <SeverityBadge severity={insight.severity} />
+        {/* Take → ticket (I3) — renders only for a signal-scoped row, trust-gated inside. */}
+        <InsightActions insight={insight} only={['OPEN_TICKET']} />
         <span className="ml-auto flex gap-1.5">
           <Button variant="ghost" size="sm" onClick={() => onReview(insight)}>
             Review

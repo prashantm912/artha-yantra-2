@@ -18,13 +18,15 @@ import {
 } from '../../api/insights.ts';
 import { BandChip, EvidenceChip, SeverityBadge } from './InsightBits.tsx';
 import { TrustChip } from './TrustChip.tsx';
+import { InsightActions } from './InsightActions.tsx';
 
 // The ONE explain drawer (INT design §8.3), reused by the Focus panel and the insight feed. Renders the
 // §3.4 explain contract straight from the row (list/focus/get are self-contained, §9.4 — no extra
 // fetch): the trust banner + reasons, the plain-language explanation, the priority component table
 // (weight × c = points with the named evidence), the evidence list, the triage actions and the
-// Useful/Not-useful feedback. Shadow mode (I1): triage = ack/dismiss/feedback only — the PROPOSE
-// take/ticket one-clicks are I3 (they touch the live paper flow) and are intentionally absent here.
+// Useful/Not-useful feedback. I3 adds the tier-2 PROPOSE action row (<InsightActions>) — Take → ticket,
+// Draft journal, Acknowledge sell, Mute type — trust-gated + routed through the EXISTING governed
+// endpoints; ack/dismiss/feedback stay the drawer's own triage.
 
 const num = (v: number | undefined | null, dp = 2): string =>
   v == null || Number.isNaN(v) ? '—' : v.toLocaleString('en-IN', { maximumFractionDigits: dp });
@@ -209,6 +211,9 @@ export function InsightExplainDrawer({ insight, open, onOpenChange }: InsightExp
                     Dismiss
                   </Button>
                 </div>
+                {/* Tier-2 PROPOSE actions (I3) — one-click to an EXISTING governed endpoint (ticket
+                    prefill / journal draft / sell-ack / mute); trust-gated + 422-aware (§1.2 / §8.3). */}
+                <InsightActions insight={insight} onActed={() => onOpenChange(false)} />
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-caption text-ay-muted">Was this useful?</span>
                   {feedbackGiven ? (

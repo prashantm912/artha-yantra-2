@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
@@ -23,6 +24,11 @@ import { useJobs, fetchResultRef } from '../../api/backtests.ts';
 // an optional link picked from recent signals / paper trades / backtest runs) and per-row
 // edit / delete. Free entries (no link) are first-class. Links are set at CREATE and are immutable
 // (the BE PUT only edits note/tags/ratings), so the pickers live on the new-entry form only.
+//
+// INT-I3 draft-accept entry point (§8.6): an insight's JOURNAL_DRAFT_ACCEPT PROPOSE routes here with
+// ?draftSignalId&draftNote&draftTags — the new-entry form pre-seeds from them (note + tags + a signal
+// link), the owner reviews and clicks "+ New entry". The params clear after seeding so a refresh doesn't
+// re-open a stale draft. The actual write stays the existing governed POST /journal (XSRF via apiFetch).
 
 const inputCls = 'h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
 
@@ -150,6 +156,23 @@ export function JournalPage() {
   const [editEmo, setEditEmo] = useState('');
 
   const rows = useMemo(() => list.data?.items ?? [], [list.data]);
+
+  // INT-I3 draft-accept: seed the new-entry form from an insight JOURNAL_DRAFT_ACCEPT deep link, then
+  // clear the params so a refresh/back doesn't re-seed a stale draft (the OrderPrefillTicket pattern).
+  const [draftParams, setDraftParams] = useSearchParams();
+  useEffect(() => {
+    const draftSignalId = draftParams.get('draftSignalId');
+    const draftNote = draftParams.get('draftNote');
+    const draftTags = draftParams.get('draftTags');
+    if (!draftSignalId && !draftNote && !draftTags) return;
+    if (draftNote) setNote(draftNote);
+    if (draftTags) setTagsInput(draftTags);
+    if (draftSignalId && /^\d+$/.test(draftSignalId)) {
+      setLinkType('signal');
+      setLinkId(draftSignalId);
+    }
+    setDraftParams(new URLSearchParams(), { replace: true });
+  }, [draftParams, setDraftParams]);
 
   const resetForm = () => {
     setNote('');

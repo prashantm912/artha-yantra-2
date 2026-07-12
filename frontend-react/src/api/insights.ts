@@ -253,3 +253,231 @@ export function useInsightFeedback() {
     },
   });
 }
+
+// ─── I3: compare · dossier · act ──────────────────────────────────────────────────────────────────
+// The I3 wave adds the decide-BETWEEN (compare), the strategy-evidence dossier, and the one-click
+// PROPOSE executor (#778 backend). Every mutation still flows through an EXISTING governed endpoint —
+// /act returns a PREFILL the browser posts to /paper/orders or /journal (never a new mutation path),
+// or a PROPOSED instruction the browser completes; ack/dismiss/mute are in-module idempotent writes.
+
+/** One priority component's contribution in a compare column (§4.1 / §3.4 render). */
+export interface ComponentPoint {
+  key: string;
+  points?: number | null;
+  c?: number | null;
+}
+
+/** One signal's compare column (§4.1). `scored`: SCORED | BLOCKED | NO_INSIGHT. */
+export interface CompareColumn {
+  signalId: number;
+  tradingsymbol?: string;
+  side?: string;
+  family?: string;
+  book?: string;
+  priority?: number | null;
+  band?: string | null;
+  components?: ComponentPoint[];
+  optionLegCost?: number | null;
+  /** Honest "unpriced" ride-through — the backend never fabricates a margin number (§4.1). */
+  marginEstimate?: string;
+  riskReward?: number | null;
+  entryPrice?: number | null;
+  stopLoss?: number | null;
+  target?: number | null;
+  dataTrust?: string;
+  trustReasons?: string[] | null;
+  scored?: string;
+}
+
+/** The compare matrix (§4.1 / §8.5) — signals as columns, priority components as rows. */
+export interface CompareResult {
+  session?: string;
+  booksDiffer?: boolean;
+  /** The component whose points spread most across the set — "they differ mainly on X". */
+  differsMost?: string | null;
+  columns?: CompareColumn[];
+  notes?: string[];
+}
+
+/** One scored graduation criterion (name / human bound / actual / pass) — mirrors the board's. */
+export interface Criterion {
+  name?: string;
+  required?: string;
+  actual?: string;
+  pass?: boolean;
+}
+
+/** One threshold-crossing timeline entry (the STRATEGY_EVIDENCE history the board lacks, §5.2). */
+export interface CrossingEntry {
+  at?: string;
+  severity?: string;
+  title?: string;
+}
+
+/** One blocking-rail count in the dossier rejection profile. */
+export interface RailCount {
+  rail?: string;
+  count?: number;
+}
+
+/** One open sell-decision row in the dossier (§5.3). */
+export interface OpenSell {
+  sellDecisionId: number;
+  runDate?: string;
+  symbol?: string;
+  verdict?: string;
+  unrealizedPct?: number | null;
+  acknowledged?: boolean;
+}
+
+/** The server-assembled qualification dossier (§5.1). */
+export interface Dossier {
+  strategyId: string;
+  slug?: string | null;
+  name?: string | null;
+  enabled?: boolean;
+  stage?: string;
+  criteria?: Criterion[];
+  graduatedAt?: string | null;
+  crossingTimeline?: CrossingEntry[];
+  rejectionProfile?: RailCount[];
+  openSellDecisions?: OpenSell[];
+  asOf?: string;
+  notes?: string[];
+}
+
+/** A ticket prefill (§11.4) — the leg/side/qty/SL/TP the owner reviews before the existing endpoint post. */
+export interface TicketPrefill {
+  signalId: number;
+  exchange?: string;
+  tradingsymbol?: string;
+  side?: string;
+  qty?: number | null;
+  stopLoss?: number | null;
+  target?: number | null;
+}
+
+/** A journal-draft prefill (§8.6 draft-accept flow) — the owner's browser posts it to /journal. */
+export interface JournalDraft {
+  signalId?: number | null;
+  paperPositionId?: number | null;
+  tags?: string[] | null;
+  note?: string;
+}
+
+/** The one-click PROPOSE result (§9.1). `status`: DONE (in-module) | PREFILL (browser posts to target) | PROPOSED. */
+export interface ActResponse {
+  insightId: string;
+  action: string;
+  status: 'DONE' | 'PREFILL' | 'PROPOSED';
+  targetMethod?: string;
+  targetEndpoint?: string;
+  ticket?: TicketPrefill;
+  journal?: JournalDraft;
+  instrument?: string;
+  sellDecisionId?: number;
+  note?: string;
+}
+
+/** The PROPOSE action enum the /act executor accepts (§2.4). */
+export type ProposeAction =
+  | 'OPEN_TICKET'
+  | 'TAKE_SIGNAL'
+  | 'JOURNAL_DRAFT_ACCEPT'
+  | 'MUTE_TYPE'
+  | 'ACK_SELL_DECISION'
+  | 'ADD_WATCHLIST';
+
+/** One rendered PROPOSE button spec: the action, its label, and whether it is an order-placing action. */
+export interface ActionSpec {
+  action: ProposeAction;
+  label: string;
+  /** Order-placing actions are trust-gated OFF on DEGRADED (§1.2 / §7.4). */
+  order: boolean;
+}
+
+/** The signal id behind a `signal:<id>` scope, else null. */
+export function signalScopeId(insight: Insight): number | null {
+  const scope = insight.scope;
+  if (!scope || !scope.startsWith('signal:')) return null;
+  const n = Number(scope.slice('signal:'.length));
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * The PROPOSE actions that apply to an insight, by scope + type (mirrors the backend /act switch). A
+ * signal-scoped insight can be taken to a ticket or drafted to the journal; a SELL_DECISION insight can
+ * be acknowledged; every insight's type can be muted. ack/dismiss live on the drawer's triage row, so
+ * they are intentionally NOT repeated here.
+ */
+export function insightActions(insight: Insight): ActionSpec[] {
+  const specs: ActionSpec[] = [];
+  if (signalScopeId(insight) != null) {
+    specs.push({ action: 'OPEN_TICKET', label: 'Take → ticket', order: true });
+    specs.push({ action: 'JOURNAL_DRAFT_ACCEPT', label: 'Draft journal', order: false });
+  }
+  if (insight.type === 'SELL_DECISION') {
+    specs.push({ action: 'ACK_SELL_DECISION', label: 'Acknowledge sell', order: false });
+  }
+  specs.push({ action: 'MUTE_TYPE', label: 'Mute type', order: false });
+  return specs;
+}
+
+/**
+ * The trust-gate disabled reason for an action, or null when enabled — the client mirror of the §7.4
+ * hard line the backend enforces (BLOCKED refuses ALL actions; DEGRADED refuses the order prefills), so
+ * the button renders disabled + explained BEFORE the click rather than only surfacing the 422.
+ */
+export function actionGate(insight: Insight, spec: ActionSpec): string | null {
+  if (insight.dataTrust === 'BLOCKED') {
+    return 'Data trust is BLOCKED — advice cannot outrun its data (§7.4).';
+  }
+  if (spec.order && insight.dataTrust === 'DEGRADED') {
+    return 'Data trust is DEGRADED — the order prefill is gated off (§1.2).';
+  }
+  return null;
+}
+
+/**
+ * Candidate-trade compare (§4.1): 2–6 same-session signal ids → the priority matrix + cost / R:R /
+ * trust. Disabled until 2–6 ids are present (the backend 422s otherwise). Ids are sent comma-joined
+ * (Spring binds a single `signalIds=a,b,c` param to the List).
+ */
+export function useCompare(signalIds: number[]) {
+  const ids = signalIds.filter((n) => Number.isFinite(n));
+  return useQuery({
+    queryKey: [INSIGHTS_KEY, 'compare', ids],
+    enabled: ids.length >= 2 && ids.length <= 6,
+    queryFn: () => apiFetch<CompareResult>(`/insights/compare?signalIds=${ids.join(',')}`),
+  });
+}
+
+/** The qualification dossier for one strategy (§5.1). Disabled when the id is absent. */
+export function useDossier(strategyId: string | null) {
+  return useQuery({
+    queryKey: [INSIGHTS_KEY, 'dossier', strategyId],
+    enabled: strategyId != null && strategyId !== '',
+    queryFn: () => apiFetch<Dossier>(`/insights/strategy-dossier/${strategyId}`),
+  });
+}
+
+/**
+ * The one-click PROPOSE executor (§1.2 / §9.1). Writes an `insight_actions` row FIRST, then returns a
+ * DONE / PREFILL / PROPOSED result the caller routes: DONE is complete; PREFILL is posted through the
+ * existing /paper/orders or /journal UI; PROPOSED is completed against the existing target endpoint. A
+ * BLOCKED insight 422s all actions, a DEGRADED insight 422s the order prefills — surfaced via ApiError.
+ */
+export function useAct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, qty }: { id: string; action: ProposeAction; qty?: number }) =>
+      apiFetch<ActResponse>(`/insights/${id}/act`, {
+        method: 'POST',
+        json: qty != null ? { action, qty } : { action },
+        silenceToast: true, // the 422 trust-gate reason renders inline on the action row, not a toast
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: [INSIGHTS_KEY] });
+    },
+  });
+}

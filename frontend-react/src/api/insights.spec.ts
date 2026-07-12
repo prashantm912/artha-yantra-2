@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { formatAge, insightBand, type Insight } from './insights.ts';
+import {
+  actionGate,
+  formatAge,
+  insightActions,
+  insightBand,
+  signalScopeId,
+  type ActionSpec,
+  type Insight,
+} from './insights.ts';
 
 function insight(partial: Partial<Insight>): Insight {
   return {
@@ -47,5 +55,49 @@ describe('formatAge', () => {
 
   it('reads a future timestamp as "now" rather than a negative age', () => {
     expect(formatAge('2026-07-11T10:00:05+05:30', now)).toBe('now');
+  });
+});
+
+describe('signalScopeId', () => {
+  it('extracts the id from a signal: scope', () => {
+    expect(signalScopeId(insight({ scope: 'signal:42' }))).toBe(42);
+  });
+  it('is null for a non-signal scope', () => {
+    expect(signalScopeId(insight({ scope: 'dataops' }))).toBeNull();
+    expect(signalScopeId(insight({ scope: 'strategy:abc' }))).toBeNull();
+    expect(signalScopeId(insight({ scope: 'signal:nope' }))).toBeNull();
+  });
+});
+
+describe('insightActions', () => {
+  it('offers ticket + journal + mute for a signal-scoped insight', () => {
+    const actions = insightActions(insight({ scope: 'signal:42', type: 'SIGNAL_PRIORITY' })).map((a) => a.action);
+    expect(actions).toEqual(['OPEN_TICKET', 'JOURNAL_DRAFT_ACCEPT', 'MUTE_TYPE']);
+  });
+  it('offers sell-ack + mute for a SELL_DECISION insight', () => {
+    const actions = insightActions(insight({ scope: 'strategy:x', type: 'SELL_DECISION' })).map((a) => a.action);
+    expect(actions).toEqual(['ACK_SELL_DECISION', 'MUTE_TYPE']);
+  });
+  it('offers only mute for a non-signal, non-sell insight', () => {
+    const actions = insightActions(insight({ scope: 'dataops', type: 'DATA_TRUST' })).map((a) => a.action);
+    expect(actions).toEqual(['MUTE_TYPE']);
+  });
+});
+
+describe('actionGate (§7.4 client mirror)', () => {
+  const order: ActionSpec = { action: 'OPEN_TICKET', label: 'Take → ticket', order: true };
+  const nonOrder: ActionSpec = { action: 'MUTE_TYPE', label: 'Mute type', order: false };
+
+  it('BLOCKED refuses every action', () => {
+    expect(actionGate(insight({ dataTrust: 'BLOCKED' }), order)).toMatch(/BLOCKED/);
+    expect(actionGate(insight({ dataTrust: 'BLOCKED' }), nonOrder)).toMatch(/BLOCKED/);
+  });
+  it('DEGRADED refuses only the order prefills', () => {
+    expect(actionGate(insight({ dataTrust: 'DEGRADED' }), order)).toMatch(/DEGRADED/);
+    expect(actionGate(insight({ dataTrust: 'DEGRADED' }), nonOrder)).toBeNull();
+  });
+  it('OK enables every action', () => {
+    expect(actionGate(insight({ dataTrust: 'OK' }), order)).toBeNull();
+    expect(actionGate(insight({ dataTrust: 'OK' }), nonOrder)).toBeNull();
   });
 });

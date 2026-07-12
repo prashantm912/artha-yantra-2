@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { SwingSellReport } from '../../api/swing.ts';
+import type { RecordedSellDecision, SwingSellReport } from '../../api/swing.ts';
 
 const report: SwingSellReport = {
   asOf: '2026-07-09T20:15:00+05:30',
   items: [
     {
+      signalId: 101,
       symbol: 'TCS',
       setup: 'minervini-vcp',
       stage: 2,
@@ -23,6 +24,7 @@ const report: SwingSellReport = {
       verdict: 'HOLD',
     },
     {
+      signalId: 102,
       symbol: 'INFY',
       setup: 'minervini-cheat',
       stage: 2,
@@ -40,6 +42,35 @@ const report: SwingSellReport = {
   ],
 };
 
+const recorded: { items: RecordedSellDecision[] } = {
+  items: [
+    {
+      id: 7,
+      book: 'minervini',
+      runDate: '2026-07-09',
+      evaluatedAt: '2026-07-09T20:15:00+05:30',
+      signalId: 102,
+      exchange: 'NSE',
+      symbol: 'INFY',
+      setup: 'minervini-cheat',
+      stage: 2,
+      footprint: null,
+      entryPrice: '1600',
+      currentPrice: '1472',
+      unrealizedPct: '-8.00',
+      stopLevel: '1472',
+      trailLevel: null,
+      stillBuyable: false,
+      sellingNow: true,
+      sellReason: 'STOP_LOSS',
+      verdict: 'SELL (STOP_LOSS)',
+      acknowledgedAt: null,
+    },
+  ],
+};
+
+const ackMutate = vi.fn();
+
 vi.mock('../../api/swing.ts', async (importActual) => {
   const actual = await importActual<typeof import('../../api/swing.ts')>();
   return {
@@ -51,6 +82,14 @@ vi.mock('../../api/swing.ts', async (importActual) => {
       isSuccess: true,
       refetch: () => {},
     }),
+    useRecordedSellDecisions: () => ({
+      data: recorded,
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      refetch: () => {},
+    }),
+    useAckSellDecision: () => ({ mutate: ackMutate, isPending: false }),
   };
 });
 
@@ -89,5 +128,16 @@ describe('SwingSellDecisionsPage', () => {
     expect(screen.getByText(/2 holding · 1 selling/)).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Minervini' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Manas Arora' })).toBeInTheDocument();
+  });
+
+  it('switches to the Recorded view and acknowledges a persisted decision', () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Recorded' }));
+    // the recorded snapshot carries the run date + an unacknowledged verdict
+    expect(screen.getByText('2026-07-09')).toBeInTheDocument();
+    expect(screen.getByText(/1 recorded · 1 unacknowledged/)).toBeInTheDocument();
+    const ackBtn = screen.getByRole('button', { name: 'Acknowledge' });
+    fireEvent.click(ackBtn);
+    expect(ackMutate).toHaveBeenCalledWith(7);
   });
 });

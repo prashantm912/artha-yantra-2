@@ -8,9 +8,13 @@ import { MemoryRouter } from 'react-router-dom';
 // flips to the placed confirmation.
 
 const place = vi.fn();
-vi.mock('../../api/paper.ts', () => ({
-  usePlacePaperOrder: () => ({ mutate: place, isPending: false, isError: false }),
-}));
+vi.mock('../../api/paper.ts', async (importActual) => {
+  const actual = await importActual<typeof import('../../api/paper.ts')>();
+  return {
+    ...actual,
+    usePlacePaperOrder: () => ({ mutate: place, isPending: false, isError: false }),
+  };
+});
 
 import { OrderPrefillTicket } from './OrderPrefillTicket.tsx';
 
@@ -48,6 +52,19 @@ describe('OrderPrefillTicket', () => {
         book: 'scalper',
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it('lets the owner override the deep-linked book before placing', () => {
+    place.mockReset();
+    renderAt('/orders?sig=77&symbol=NFO%3ANIFTY24JUN24000CE&side=BUY&qty=75&book=scalper');
+    const bookSel = screen.getByLabelText('Paper book') as HTMLSelectElement;
+    expect(bookSel.value).toBe('scalper'); // seeded from the deep link
+    fireEvent.change(bookSel, { target: { value: 'manas-arora' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Place paper BUY' }));
+    expect(place).toHaveBeenCalledWith(
+      expect.objectContaining({ book: 'manas-arora' }),
+      expect.anything(),
     );
   });
 

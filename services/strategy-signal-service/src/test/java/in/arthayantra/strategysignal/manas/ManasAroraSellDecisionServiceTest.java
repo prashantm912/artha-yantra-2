@@ -13,6 +13,7 @@ import in.arthayantra.strategyschema.StrategyDocuments;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
 import in.arthayantra.strategysignal.signals.SignalRepository;
+import in.arthayantra.strategysignal.swing.SellDecisionRepository;
 import in.arthayantra.strategysignal.swing.SwingSellDecisionService;
 import java.io.IOException;
 import java.io.InputStream;
@@ -94,7 +95,9 @@ class ManasAroraSellDecisionServiceTest {
             new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
             om, true, 520, 60, 1440);
 
-    return new SwingSellDecisionService(registry, candles, signals, Clock.systemUTC()).report(doctrine);
+    return new SwingSellDecisionService(
+            registry, candles, signals, mock(SellDecisionRepository.class), Clock.systemUTC())
+        .report(doctrine);
   }
 
   private static JsonNode breakoutConfig() throws IOException {

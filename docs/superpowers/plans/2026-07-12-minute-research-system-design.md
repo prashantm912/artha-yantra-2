@@ -99,8 +99,37 @@ immune to the publish-first bottleneck. Delivery shape: a new backtest-service j
 (`HYPOTHESIS_SCAN`) + results tables in the backtest schema (D10: backtest-service is that schema's
 single writer).
 
+**R2b — Autonomous condition generation + search (owner requirement added 2026-07-12).** The owner
+does NOT hand-write conditions: the system generates entry/exit candidates itself and searches the
+condition space for regions where profitable trade generation rises or falls. Design:
+
+1. **Bounded vocabulary, pre-registered.** Search space = research-matrix features (~20–40 columns:
+   price/returns, fut OI/ΔOI, chain aggregates, IV percentile, VIX, regime, time-of-day) ×
+   operator set (>, <, crossover, percentile band) × threshold grid × optional session window.
+   The vocabulary is REGISTERED per campaign before the search runs (E5 pre-registration reused) —
+   an unbounded generator is an overfit machine by construction.
+2. **Staged search, not brute force.** Stage 0: univariate sweep — every single-clause condition
+   scanned + labeled (R1b), keep by effect size × support. Stage 1: combine top-K into 2–3-clause
+   conjunctions via beam search / mutation (EVO's structure-experimentation machinery V016-bt, E5
+   gate-candidate suggesters #792 — both already built — are the natural drivers; Optuna in
+   optimizer-service handles continuous thresholds). Stage 2: exit grid (R2c) per surviving entry.
+   Objective = deflated expectancy × support, never raw win-rate.
+3. **Multiple-testing discipline is the load-bearing wall.** Auto-generation evaluates thousands of
+   hypotheses; without correction it WILL find fake edges. Every generated candidate increments the
+   campaign-cumulative trial count feeding the deflated-Sharpe gate (#726); dead conditions enter
+   the graveyard and are never silently re-tested; survivors must pass paired IS/OOS (E5) and
+   non-overlap sampling (§13). This machinery exists — R2b's rule is that the generator CANNOT
+   bypass it.
+4. **Autonomy rides E6.** The search runs as scheduled campaigns under the EXISTING autonomy
+   scheduler (V017-bt: budgets, expiry, off-hours policy, campaign reports, default-OFF) — nightly/
+   weekend compute within an owner-set budget, results into the proposals inbox + monthly digest.
+5. **Generation is autonomous; PROMOTION stays owner-gated.** The system proposes ranked survivors;
+   nothing self-publishes to paper or live — the platform's "nothing self-arms" doctrine holds.
+
 **R2c — Exit-rule grid.** Batch counterfactual replay of one entry set × N exit configs (reuses
-the frozen evaluator; adds only orchestration + a comparison view).
+the frozen evaluator; adds only orchestration + a comparison view). Under R2b this becomes stage 2
+of the automated search: exit candidates are drawn from a registered grid (target/trail/time-stop
+families), not hand-entered.
 
 **R3 — Monthly rollup + refinement ritual.** Calendar-month aggregation over runs, paper books,
 shadow book, and reconciliations (a view over existing tables + one insights digest generator),
@@ -122,6 +151,8 @@ performance → hypothesis-lane review → EVO campaign proposals → owner deci
 | Derived-history OI muting | MED | Pre-2026-06-15 chain state is VIRTUAL (Dow/IV → NEUTRAL); hypothesis results on derived history carry a mandatory provenance caveat — judge chain-led hypotheses on captured-OI windows only (evidence-policy already encodes this) |
 | Snapshot retention vs research horizon | MED | A10 prune = 365d (owner-decided). Chain-state research beyond 365d falls back to derived (muted). Flag in monthly ritual; revisit horizon if it starts binding (§12 Q5) |
 | Duplicate-sample inflation (overlapping forward windows on a 1m grid) | MED | §13 below — non-overlapping sampling / block bootstrap documented in the analysis method; E5 paired evaluation reused for any promotion decision |
+| R2b data-mining bias: autonomous generator evaluates thousands of conditions → guaranteed fake edges if uncorrected | **HIGH** | Pre-registered bounded vocabulary; campaign-cumulative trial N into deflated Sharpe; graveyard (no silent re-tests); paired IS/OOS mandatory; generation autonomous but promotion owner-gated |
+| R2b compute pressure on the shared worker pool / live DB | MED | Runs only under the E6 scheduler's budgets + off-hours policy (default-OFF); same pool cap #717; owner sets the monthly compute budget |
 | Queue contention with current program | LOW | This doc is DORMANT; nothing starts until the owner activates it |
 
 ## 5. Recommended architecture
@@ -179,6 +210,7 @@ repeatable migrations — decide at build).
 | P0 | R1 views + label functions + no-lookahead property tests + a documented notebook/SQL recipe | 1–2 PRs | clean |
 | P1 | R2 `HYPOTHESIS_SCAN` job kind + results tables + typed endpoints + FE list/detail page | 3–4 PRs | clean (engine read-only) |
 | P2 | R2c exit-rule grid orchestration + comparison view | 1–2 PRs | clean |
+| P2b | R2b autonomous generator: Stage-0 univariate sweep + Stage-1 beam/mutation search (drivers: EVO structure-experimentation + E5 suggesters + Optuna) + E6 campaign wiring, default-OFF | 3–4 PRs | clean to build; **arming = owner** (budget + vocabulary sign-off) |
 | P3 | R3 monthly rollup view + insights digest generator + monthly-ritual runbook skill | 1–2 PRs | clean |
 | P4 | Asset-class seams: calendar registry, per-segment session/cost/lot config, instrument-sync segment list | 2–3 PRs | clean, but data/feed entitlements = owner |
 | P5 | New asset classes themselves (MCX/CDS/equity-options capture) | — | owner-gated (feed cost, disk, cadence) |
@@ -237,6 +269,10 @@ None of these need building until a second asset class has a funded data source.
 6. **Assumption:** research consumers are SQL/notebook-first initially; FE pages ride in P1, not P0.
 7. **Assumption:** the strategy-schema grammar is expressive enough for hypothesis conditions
    (it powers 45 live strategies; anything it can't express becomes a grammar item, not a new DSL).
+8. **R2b vocabulary + budget (owner, at activation):** which feature families enter the registered
+   search vocabulary, max clauses per condition (recommend 3), monthly compute budget for
+   autonomous campaigns, and whether searches may run on derived-history windows (recommend
+   captured-OI-only for chain-led features).
 
 ## 13. Method guardrails baked into the design (look-ahead / inflation / overfitting)
 

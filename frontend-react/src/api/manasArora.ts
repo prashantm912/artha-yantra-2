@@ -45,13 +45,17 @@ export interface ManasScreen {
 export interface ManasScreenParams {
   passesAllOnly: boolean;
   limit: number;
+  /** Time-travel to a persisted screen date (audit §6.7); omit for the latest. */
+  asOf?: string | null;
 }
 
 function qs(p: ManasScreenParams): string {
-  return new URLSearchParams({
+  const params = new URLSearchParams({
     passesAllOnly: String(p.passesAllOnly),
     limit: String(p.limit),
-  }).toString();
+  });
+  if (p.asOf) params.set('asOf', p.asOf);
+  return params.toString();
 }
 
 /** The persisted daily selection screen (fast path). */

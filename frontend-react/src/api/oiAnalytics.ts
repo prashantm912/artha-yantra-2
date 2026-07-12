@@ -6,6 +6,7 @@ import type {
   BanksAnalysis,
   BigOiLog,
   Breadth,
+  BreadthHistory,
   ChainHistory,
   ChainTable,
   ConnectingDots,
@@ -807,6 +808,14 @@ export function useBreadth(date: string | null) {
         null,
       ),
     enabled: !!date,
+  });
+}
+
+/** The materialized daily-breadth history (audit §3.3 / §6.10 Phase-3) — the A/D + above-MA series. */
+export function useBreadthHistory(days = 180) {
+  return useQuery({
+    queryKey: ['breadth-history', days],
+    queryFn: () => apiFetch<BreadthHistory>(`/market/breadth/history?days=${days}`),
   });
 }
 

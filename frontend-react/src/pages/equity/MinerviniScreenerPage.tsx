@@ -15,6 +15,9 @@ import {
   type FunnelRow,
   type ScreenParams,
 } from '../../api/minervini.ts';
+import { useScreenerDates, screenerExportPath } from '../../api/screenerHistory.ts';
+import { downloadFile } from '../../api/client.ts';
+import { ScreenerHistoryPanel } from '../../components/ScreenerHistoryPanel.tsx';
 
 // /equity/minervini (Track-1 + Track-B): the daily Minervini SEPA screener. Two views: the flat
 // 8-gate Trend-Template SCREEN, and the SEPA FUNNEL that ranks the passers into the actionable triad
@@ -32,15 +35,17 @@ const GATE_TITLES = [
 ];
 const STAGE_LABEL: Record<number, string> = { 1: 'Stage 1', 2: 'Stage 2', 3: 'Stage 3', 4: 'Stage 4' };
 
-type View = 'screen' | 'funnel';
+type View = 'screen' | 'funnel' | 'history';
 
 export function MinerviniScreenerPage() {
   const [view, setView] = useState<View>('screen');
   const [passesAllOnly, setPassesAllOnly] = useState(true);
   const [minRsRank, setMinRsRank] = useState(70);
-  const params: ScreenParams = { passesAllOnly, minRsRank, limit: 200 };
+  const [asOf, setAsOf] = useState<string | null>(null);
+  const params: ScreenParams = { passesAllOnly, minRsRank, limit: 200, asOf };
   const screen = useMinerviniScreen(params, view === 'screen');
-  const funnel = useMinerviniFunnel(undefined, view === 'funnel');
+  const funnel = useMinerviniFunnel(asOf ?? undefined, view === 'funnel');
+  const dates = useScreenerDates('minervini');
   const run = useRunMinervini();
   const qc = useQueryClient();
 
@@ -68,7 +73,7 @@ export function MinerviniScreenerPage() {
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <div role="tablist" aria-label="View" className="flex rounded-md border border-ay-border p-0.5">
-          {(['screen', 'funnel'] as View[]).map((v) => (
+          {(['screen', 'funnel', 'history'] as View[]).map((v) => (
             <button
               key={v}
               type="button"
@@ -84,6 +89,30 @@ export function MinerviniScreenerPage() {
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-1.5 text-sm text-ay-text" title="Time-travel to a past screen date.">
+          Date
+          <select
+            value={asOf ?? ''}
+            onChange={(e) => setAsOf(e.target.value || null)}
+            className={`${inputCls} w-40`}
+            aria-label="Screen date"
+          >
+            <option value="">Latest</option>
+            {(dates.data ?? []).map((d) => (
+              <option key={d.date} value={d.date}>
+                {d.date} ({d.passers})
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => void downloadFile(screenerExportPath('minervini', asOf, passesAllOnly))}
+          title="Download the current screen as CSV."
+          className="h-9 rounded-md border border-ay-border bg-surface-1 px-3 text-sm text-ay-text hover:bg-surface-2"
+        >
+          Export CSV
+        </button>
         {view === 'screen' && (
           <>
             <label className="flex items-center gap-1.5 text-sm text-ay-text" title="Show only candidates that pass all 8 gates.">
@@ -189,7 +218,7 @@ export function MinerviniScreenerPage() {
               </BeatBlock>
             )}
           </QueryState>
-        ) : (
+        ) : view === 'funnel' ? (
           <QueryState
             query={funnel}
             empty={{ title: 'No funnel yet — the screen has no passers for this date.' }}
@@ -207,6 +236,8 @@ export function MinerviniScreenerPage() {
               </>
             )}
           </QueryState>
+        ) : (
+          <ScreenerHistoryPanel family="minervini" asOf={asOf} />
         )}
       </m.div>
     </LoadBeat>

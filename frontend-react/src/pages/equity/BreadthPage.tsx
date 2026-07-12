@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { EChartsOption } from 'echarts';
-import { useBreadth } from '../../api/oiAnalytics.ts';
-import type { BreadthDeliveryRow } from '../../api/types.ts';
+import { useBreadth, useBreadthHistory } from '../../api/oiAnalytics.ts';
+import type { BreadthDeliveryRow, BreadthDay } from '../../api/types.ts';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { DateInput } from '../../components/atoms/DateInput.tsx';
@@ -195,6 +195,89 @@ export function BreadthPage() {
           ) : null
         }
       </QueryState>
+
+      <BeatBlock className="mt-6">
+        <h2 className="mb-1 text-h3 text-ay-text">Breadth history</h2>
+        <p className="mb-2 text-caption text-ay-muted">
+          Advance/decline + % of stocks above their 50-day MA, materialized nightly from the EQ
+          bhavcopy. The series accrues forward from deploy.
+        </p>
+        <BreadthHistoryChart />
+      </BeatBlock>
     </LoadBeat>
+  );
+}
+
+/** The materialized A/D + above-50-DMA% history series (audit §3.3 / §6.10). */
+function BreadthHistoryChart() {
+  const q = useBreadthHistory(180);
+  const items = useMemo(() => q.data?.items ?? [], [q.data]);
+
+  const makeOption = useCallback(
+    (t: ChartTheme): EChartsOption => {
+      const dates = items.map((d) => d.tradeDate);
+      const above50 = items.map((d: BreadthDay) =>
+        d.sma50Universe && d.sma50Universe > 0 && d.aboveSma50 != null
+          ? Math.round((d.aboveSma50 / d.sma50Universe) * 1000) / 10
+          : null,
+      );
+      return {
+        aria: { enabled: true },
+        textStyle: { color: t.text },
+        grid: { left: 48, right: 48, top: 12, bottom: 48 },
+        legend: { bottom: 0, textStyle: { color: t.muted } },
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: t.surface1,
+          borderColor: t.border,
+          textStyle: { color: t.text },
+        },
+        xAxis: {
+          type: 'category',
+          data: dates,
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: t.border } },
+          axisLabel: { color: t.muted },
+        },
+        yAxis: [
+          {
+            type: 'value',
+            name: 'Count',
+            splitLine: { lineStyle: { color: t.grid } },
+            axisLabel: { color: t.muted },
+          },
+          {
+            type: 'value',
+            name: '% > 50-DMA',
+            min: 0,
+            max: 100,
+            splitLine: { show: false },
+            axisLabel: { color: t.muted, formatter: '{value}%' },
+          },
+        ],
+        series: [
+          { name: 'Advances', type: 'line', showSymbol: false, data: items.map((d) => d.advances), lineStyle: { color: t.bull }, itemStyle: { color: t.bull } },
+          { name: 'Declines', type: 'line', showSymbol: false, data: items.map((d) => d.declines), lineStyle: { color: t.bear }, itemStyle: { color: t.bear } },
+          { name: '% > 50-DMA', type: 'line', yAxisIndex: 1, showSymbol: false, data: above50, lineStyle: { color: t.accent }, itemStyle: { color: t.accent } },
+        ],
+      };
+    },
+    [items],
+  );
+
+  return (
+    <QueryState
+      query={q}
+      isEmpty={() => items.length === 0}
+      empty={{ title: 'No breadth history yet — the nightly materialization accrues forward from deploy.' }}
+      errorTitle="Couldn't load breadth history"
+      skeleton={<Skeleton variant="chart-block" height={260} />}
+    >
+      {() => (
+        <div className="card shadow-e1">
+          <EChart makeOption={makeOption} height={260} ariaLabel="Breadth history: advances, declines and percent above 50-day MA" />
+        </div>
+      )}
+    </QueryState>
   );
 }

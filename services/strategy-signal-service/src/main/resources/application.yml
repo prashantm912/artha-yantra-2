@@ -101,6 +101,12 @@ artha:
     # counted + alerted, never refused). Env-tunable via the matching compose passthroughs (.env override).
     tick-max-age-seconds: ${ARTHA_PAPER_TICK_MAX_AGE_SECONDS:15}
     bracket-starvation-alert-minutes: ${ARTHA_PAPER_BRACKET_STARVATION_ALERT_MINUTES:2}
+    # HOLD (task_94f40cf6) signal-freshness gate on the MANUAL take path (POST /api/v1/paper/orders):
+    # a signal-linked hand ticket whose SIGNAL is older than this on a NON-swing book is rejected
+    # SIGNAL_STALE (the setup's thesis is gone even though the fill prices fresh). Swing books
+    # (minervini / manas-arora) are always exempt (EOD signals taken next session); 0/negative disables.
+    # Separate from the tick-freshness guard above. Env-tunable (.env override) via the compose passthrough.
+    signal-take-max-age-minutes: ${ARTHA_PAPER_SIGNAL_TAKE_MAX_AGE_MINUTES:60}
     # A12 per-class capital-usage margin approximations (no Kite margin API).
     # Equities use full notional; long options the premium; futures & short
     # options a margin-pct-of-notional approximation (real SPAN+exposure varies).

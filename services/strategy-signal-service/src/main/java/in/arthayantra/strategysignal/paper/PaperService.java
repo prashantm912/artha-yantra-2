@@ -227,6 +227,12 @@ public class PaperService {
   private final BigDecimal perTradeRiskPct;
   /** Audit V3: a fill priced off a last tick older than this is fiction — rejected DATA_STALE. */
   private final Duration tickMaxAge;
+  /**
+   * HOLD (task_94f40cf6): a manual signal-take on a NON-swing book whose signal is older than this
+   * is rejected SIGNAL_STALE — the setup's thesis is gone even though the fill would price fresh.
+   * Zero/negative disables the gate; swing books are always exempt. Separate from {@link #tickMaxAge}.
+   */
+  private final Duration signalTakeMaxAge;
   private final TransactionTemplate txTemplate;
 
   /** Wires the ledger collaborators. */
@@ -247,7 +253,10 @@ public class PaperService {
       @org.springframework.beans.factory.annotation.Value("${artha.paper.risk.per-trade-risk-pct:1.0}")
           BigDecimal perTradeRiskPct,
       @org.springframework.beans.factory.annotation.Value("${artha.paper.tick-max-age-seconds:15}")
-          long tickMaxAgeSeconds) {
+          long tickMaxAgeSeconds,
+      @org.springframework.beans.factory.annotation.Value(
+              "${artha.paper.signal-take-max-age-minutes:60}")
+          long signalTakeMaxAgeMinutes) {
     this.orders = orders;
     this.positions = positions;
     this.fills = fills;
@@ -262,6 +271,7 @@ public class PaperService {
     this.rejections = rejections;
     this.perTradeRiskPct = perTradeRiskPct;
     this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
+    this.signalTakeMaxAge = Duration.ofMinutes(signalTakeMaxAgeMinutes);
     this.txTemplate = new TransactionTemplate(transactionManager);
   }
 
@@ -294,6 +304,39 @@ public class PaperService {
           .ifPresent(
               original -> {
                 throw new DuplicateOrderException(original);
+              });
+    }
+    // HOLD (task_94f40cf6) signal-freshness gate: a signal TAKEN by hand hours after emission fills at
+    // today's tick, but the SIGNAL's thesis is stale (a scalper's option premium has moved, the setup
+    // is gone). Reject a too-old signal-linked take with 422 SIGNAL_STALE (age + limit in the body).
+    // This is SEPARATE from the #694 TICK-freshness doctrine (that guards the FILL price; this guards
+    // the SIGNAL) — an entry needs fresh truth on BOTH axes. SWING books (minervini / manas-arora) are
+    // EXEMPT: their EOD signals are meant to be taken the NEXT session, so a ~1-day age is normal. A
+    // hand ticket with no signalId (a MANUAL order) has no signal to age-check. Runs AFTER the
+    // idempotency replay (a replay of an already-filled order must return the original even if the
+    // signal has since aged out) and, like the governor, OUTSIDE the fill txn.
+    if (request.signalId() != null
+        && signalTakeMaxAge.compareTo(Duration.ZERO) > 0
+        && !isSwingBook(book)) {
+      long signalId = request.signalId();
+      signals
+          .find(signalId)
+          .ifPresent(
+              signal -> {
+                Duration age = Duration.between(signal.generatedAt().toInstant(), java.time.Instant.now());
+                if (age.compareTo(signalTakeMaxAge) > 0) {
+                  throw new ApiException(
+                      422,
+                      ErrorCodes.SIGNAL_STALE,
+                      "signal #" + signalId + " is " + age.toMinutes() + "m old (max "
+                          + signalTakeMaxAge.toMinutes() + "m for book " + book
+                          + ") — refusing a stale-signal take",
+                      Map.of(
+                          "signalId", signalId,
+                          "book", book,
+                          "signalAgeMinutes", age.toMinutes(),
+                          "maxAgeMinutes", signalTakeMaxAge.toMinutes()));
+                }
               });
     }
     risk.entryVeto(book)
@@ -342,6 +385,15 @@ public class PaperService {
     return request.book() != null
         ? request.book()
         : request.signalId() != null ? books.bookForSignal(request.signalId()) : BookResolver.MANUAL;
+  }
+
+  /**
+   * Swing books (minervini / manas-arora) are exempt from the signal-freshness gate — their EOD
+   * signals fire post-close and are meant to be taken the NEXT session, so a ~1-day-old take is
+   * normal, not stale. Every other book (scalper / other) is age-gated.
+   */
+  private static boolean isSwingBook(String book) {
+    return BookResolver.MINERVINI.equals(book) || BookResolver.MANAS_ARORA.equals(book);
   }
 
   /** Simulates an entry; fills via {@code ltp_slippage/v1} against the next-tick LTP + cost model. */

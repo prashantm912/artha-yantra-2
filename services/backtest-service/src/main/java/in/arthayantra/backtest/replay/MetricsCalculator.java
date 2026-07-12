@@ -252,17 +252,13 @@ public final class MetricsCalculator {
   /**
    * Primary bars per trading session (375 IST minutes). Derived from {@link #periodsPerYear} for
    * every interval it enumerates (1m→375, 5m→75, 15m→25, 1h→6.25, 1d→1, 1w→52/252) — byte-identical
-   * to the prior inline {@code periodsPerYear(interval) / 252.0} — EXCEPT {@code 3m}, which {@code
-   * periodsPerYear} omits: it silently fell to the {@code default 252} there, making barsPerSession
-   * collapse to 1 and {@code tradeFrequency} report trades-per-BAR (~125× the true per-session rate,
-   * #721 / chip task_547656bf). The carve-out fixes only tradeFrequency; {@code periodsPerYear} (and
-   * the Sharpe/Sortino annualization it drives) is deliberately left untouched.
+   * to the prior inline {@code periodsPerYear(interval) / 252.0}. {@code 3m} was absent from {@code
+   * periodsPerYear} until chip task_c7132464: it silently fell to the {@code default 252}, collapsing
+   * barsPerSession to 1 ({@code tradeFrequency} read trades-per-BAR, ~125× the true per-session rate,
+   * #721 / chip task_547656bf) and annualizing 3m Sharpe/Sortino as if 3m bars were daily bars.
    */
   private static double barsPerSession(String interval) {
-    return switch (interval) {
-      case "3m" -> 125.0; // 375 trading minutes / 3
-      default -> periodsPerYear(interval) / 252.0;
-    };
+    return periodsPerYear(interval) / 252.0;
   }
 
   /**
@@ -289,6 +285,7 @@ public final class MetricsCalculator {
   private static double periodsPerYear(String interval) {
     return switch (interval) {
       case "1m" -> 252.0 * 375;
+      case "3m" -> 252.0 * 125; // 375 trading minutes / 3 (chip task_c7132464)
       case "5m" -> 252.0 * 75;
       case "15m" -> 252.0 * 25;
       case "1h" -> 252.0 * 375 / 60;

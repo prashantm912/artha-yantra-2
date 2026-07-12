@@ -131,7 +131,7 @@ class MetricsCalculatorTest {
 
   @Test
   void tradeFrequencyPreservesTheEnumeratedIntervalDivisors() {
-    // The 3m carve-out must not perturb the intervals periodsPerYear already enumerates: 5m == 75
+    // The 3m addition must not perturb the intervals periodsPerYear already enumerates: 5m == 75
     // bars/session and 1h == 6.25 bars/session (375/60), byte-identical to the prior derivation.
     List<EquityPoint> equity =
         List.of(

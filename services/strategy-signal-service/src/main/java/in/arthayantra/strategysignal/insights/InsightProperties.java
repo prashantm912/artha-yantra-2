@@ -26,7 +26,9 @@ public record InsightProperties(
     Rejection rejection,
     Hygiene hygiene,
     Expiry expiry,
-    Quality quality) {
+    Quality quality,
+    SellDecision sellDecision,
+    Delivery delivery) {
 
   /** Fills the whole tree with defaults when a section (or the root) is absent. */
   public InsightProperties {
@@ -38,6 +40,8 @@ public record InsightProperties(
     hygiene = hygiene == null ? Hygiene.defaults() : hygiene;
     expiry = expiry == null ? Expiry.defaults() : expiry;
     quality = quality == null ? Quality.defaults() : quality;
+    sellDecision = sellDecision == null ? SellDecision.defaults() : sellDecision;
+    delivery = delivery == null ? Delivery.defaults() : delivery;
   }
 
   /** Signal-priority weights, bands, trust cap, and per-family band/half-life/TTL (§3.2). */
@@ -209,6 +213,24 @@ public record InsightProperties(
 
     static Quality defaults() {
       return new Quality(7, new BigDecimal("0.60"), new BigDecimal("0.40"), 5);
+    }
+  }
+
+  /** SELL_DECISION escalation window (§5.3) — sessions un-acknowledged before NOTICE escalates to WARN. */
+  public record SellDecision(@DefaultValue("1") int escalateSessions) {
+    static SellDecision defaults() {
+      return new SellDecision(1);
+    }
+  }
+
+  /**
+   * Staged-rollout delivery flags (§10.3). {@code ws} arms the {@code insights} WS channel (Stage 1);
+   * DEFAULT FALSE — I3 ships in SHADOW mode (rows + read APIs only), so nothing pushes until the owner
+   * flips it. ntfy/Telegram floors are I4 (owner-gated) and land under this same subtree then.
+   */
+  public record Delivery(@DefaultValue("false") boolean ws) {
+    static Delivery defaults() {
+      return new Delivery(false);
     }
   }
 }

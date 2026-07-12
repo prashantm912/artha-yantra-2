@@ -491,4 +491,264 @@
   "cooldownMinutes" : null,
   "expiresAt" : null,
   "suppressed" : false
+}, {
+  "type" : "STRATEGY_EVIDENCE",
+  "severity" : "INFO",
+  "scope" : "strategy:00000000-0000-0000-0000-0000000000a1",
+  "title" : "manas-arora-breakout graduation snapshot 2026-07-12",
+  "explanation" : "manas-arora-breakout graduation snapshot: stage TAKE_ELIGIBLE, 22 closed trades, PF 1.35, expectancy 0.5, max drawdown 12%.",
+  "evidence" : [ {
+    "label" : "stage",
+    "value" : "TAKE_ELIGIBLE"
+  }, {
+    "label" : "trades",
+    "value" : "22"
+  }, {
+    "label" : "profit factor",
+    "value" : "1.35"
+  }, {
+    "label" : "expectancy",
+    "value" : "0.5"
+  }, {
+    "label" : "max drawdown %",
+    "value" : "12"
+  }, {
+    "label" : "criterion:trades",
+    "value" : "pass"
+  }, {
+    "label" : "criterion:profitFactor",
+    "value" : "pass"
+  }, {
+    "label" : "criterion:expectancy",
+    "value" : "pass"
+  }, {
+    "label" : "criterion:maxDrawdownPct",
+    "value" : "pass"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "STRATEGY_EVIDENCE_SNAP:strategy:00000000-0000-0000-0000-0000000000a1:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : true
+}, {
+  "type" : "STRATEGY_EVIDENCE",
+  "severity" : "NOTICE",
+  "scope" : "strategy:00000000-0000-0000-0000-0000000000a1",
+  "title" : "manas-arora-breakout crossed PF 1.3 (22 trades) — TAKE_ELIGIBLE",
+  "explanation" : "manas-arora-breakout now passes PF 1.3 (1.35 vs >= 1.3) over 22 closed trades — stage TAKE_ELIGIBLE (GRADUATED).",
+  "evidence" : [ {
+    "label" : "stage",
+    "value" : "TAKE_ELIGIBLE",
+    "source" : {
+      "endpoint" : "/api/v1/strategies/graduation",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "PF 1.3",
+    "value" : "1.35 (bound >= 1.3)",
+    "source" : {
+      "endpoint" : "/api/v1/strategies/graduation",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "closed trades",
+    "value" : "22"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "STRATEGY_EVIDENCE:strategy:00000000-0000-0000-0000-0000000000a1:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "STRATEGY_EVIDENCE",
+  "severity" : "INFO",
+  "scope" : "strategy:00000000-0000-0000-0000-0000000000b2",
+  "title" : "manas-arora-vcp graduation snapshot 2026-07-12",
+  "explanation" : "manas-arora-vcp graduation snapshot: stage PAPER, 18 closed trades, PF 1.1, expectancy 0.1, max drawdown 20%.",
+  "evidence" : [ {
+    "label" : "stage",
+    "value" : "PAPER"
+  }, {
+    "label" : "trades",
+    "value" : "18"
+  }, {
+    "label" : "profit factor",
+    "value" : "1.1"
+  }, {
+    "label" : "expectancy",
+    "value" : "0.1"
+  }, {
+    "label" : "max drawdown %",
+    "value" : "20"
+  }, {
+    "label" : "criterion:trades",
+    "value" : "fail"
+  }, {
+    "label" : "criterion:profitFactor",
+    "value" : "fail"
+  }, {
+    "label" : "criterion:expectancy",
+    "value" : "pass"
+  }, {
+    "label" : "criterion:maxDrawdownPct",
+    "value" : "pass"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "STRATEGY_EVIDENCE_SNAP:strategy:00000000-0000-0000-0000-0000000000b2:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : true
+}, {
+  "type" : "STRATEGY_EVIDENCE",
+  "severity" : "WARN",
+  "scope" : "strategy:00000000-0000-0000-0000-0000000000b2",
+  "title" : "manas-arora-vcp dropped below trade count 20",
+  "explanation" : "manas-arora-vcp fell below trade count 20 (18 vs >= 20) after previously holding it — now stage PAPER over 18 closed trades.",
+  "evidence" : [ {
+    "label" : "stage",
+    "value" : "PAPER",
+    "source" : {
+      "endpoint" : "/api/v1/strategies/graduation",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "trade count 20",
+    "value" : "18 (bound >= 20)",
+    "source" : {
+      "endpoint" : "/api/v1/strategies/graduation",
+      "asOf" : "2026-07-12T09:47:12+05:30"
+    }
+  }, {
+    "label" : "closed trades",
+    "value" : "18"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "STRATEGY_EVIDENCE:strategy:00000000-0000-0000-0000-0000000000b2:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "STRATEGY_EVIDENCE",
+  "severity" : "INFO",
+  "scope" : "strategy:00000000-0000-0000-0000-0000000000c3",
+  "title" : "siva-vwap-breakout graduation snapshot 2026-07-12",
+  "explanation" : "siva-vwap-breakout graduation snapshot: stage PAPER, 30 closed trades, PF 1.2, expectancy 0.05, max drawdown 22%.",
+  "evidence" : [ {
+    "label" : "stage",
+    "value" : "PAPER"
+  }, {
+    "label" : "trades",
+    "value" : "30"
+  }, {
+    "label" : "profit factor",
+    "value" : "1.2"
+  }, {
+    "label" : "expectancy",
+    "value" : "0.05"
+  }, {
+    "label" : "max drawdown %",
+    "value" : "22"
+  }, {
+    "label" : "criterion:trades",
+    "value" : "pass"
+  }, {
+    "label" : "criterion:profitFactor",
+    "value" : "fail"
+  }, {
+    "label" : "criterion:expectancy",
+    "value" : "pass"
+  }, {
+    "label" : "criterion:maxDrawdownPct",
+    "value" : "pass"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "STRATEGY_EVIDENCE_SNAP:strategy:00000000-0000-0000-0000-0000000000c3:2026-07-12",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : true
+}, {
+  "type" : "SELL_DECISION",
+  "severity" : "NOTICE",
+  "scope" : "book:manas-arora",
+  "title" : "SBCL — SELL (stop 2xATR breached) (+4.2%)",
+  "explanation" : "The manas-arora swing book flagged SBCL as SELL (stop 2xATR breached) on 2026-07-12 (entry 100, now 104.2, +4.2%). Acknowledge to clear.",
+  "evidence" : [ {
+    "label" : "verdict",
+    "value" : "SELL (stop 2xATR breached)",
+    "source" : {
+      "endpoint" : "/api/v1/signals/sell-decisions",
+      "params" : {
+        "book" : "manas-arora"
+      },
+      "asOf" : "2026-07-12"
+    },
+    "ref" : {
+      "sellDecisionId" : 5001,
+      "signalId" : 7001
+    }
+  }, {
+    "label" : "unrealized",
+    "value" : "+4.2%"
+  }, {
+    "label" : "reason",
+    "value" : "stop 2xATR breached"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "SELL_DECISION:5001",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : false
+}, {
+  "type" : "SELL_DECISION",
+  "severity" : "WARN",
+  "scope" : "book:minervini",
+  "title" : "TCS — SELL (50-DMA break) (-5%)",
+  "explanation" : "The minervini swing book flagged TCS as SELL (50-DMA break) on 2026-07-10 (entry 3000, now 2850, -5%) — un-acknowledged for 2 session(s). Acknowledge to clear.",
+  "evidence" : [ {
+    "label" : "verdict",
+    "value" : "SELL (50-DMA break)",
+    "source" : {
+      "endpoint" : "/api/v1/signals/sell-decisions",
+      "params" : {
+        "book" : "minervini"
+      },
+      "asOf" : "2026-07-10"
+    },
+    "ref" : {
+      "sellDecisionId" : 5002,
+      "signalId" : 7002
+    }
+  }, {
+    "label" : "unrealized",
+    "value" : "-5%"
+  }, {
+    "label" : "reason",
+    "value" : "50-DMA break"
+  } ],
+  "priority" : null,
+  "priorityDetail" : null,
+  "dataTrust" : "OK",
+  "trustReasons" : [ ],
+  "dedupeKey" : "SELL_DECISION:5002",
+  "cooldownMinutes" : null,
+  "expiresAt" : null,
+  "suppressed" : false
 } ]

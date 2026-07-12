@@ -41,6 +41,8 @@ public class InsightEngine {
   private final ContextClient contextClient;
   private final RejectionReader rejectionReader;
   private final PortfolioReader portfolioReader;
+  private final StrategyEvidenceReader strategyEvidenceReader;
+  private final InsightPublisher publisher;
   private final InsightProperties props;
   private final EngineStamp stamp;
   private final ObjectMapper objectMapper;
@@ -56,6 +58,8 @@ public class InsightEngine {
       ContextClient contextClient,
       RejectionReader rejectionReader,
       PortfolioReader portfolioReader,
+      StrategyEvidenceReader strategyEvidenceReader,
+      InsightPublisher publisher,
       InsightProperties props,
       EngineStamp stamp,
       ObjectMapper objectMapper,
@@ -68,6 +72,8 @@ public class InsightEngine {
     this.contextClient = contextClient;
     this.rejectionReader = rejectionReader;
     this.portfolioReader = portfolioReader;
+    this.strategyEvidenceReader = strategyEvidenceReader;
+    this.publisher = publisher;
     this.props = props;
     this.stamp = stamp;
     this.objectMapper = objectMapper;
@@ -146,6 +152,25 @@ public class InsightEngine {
     run(GenerationContext.forQuality(repository.qualityStats(props), now), now);
   }
 
+  /**
+   * The 21:10 strategy-evidence sweep (called by {@link InsightSweeper}, after the 21:00 graduation
+   * evaluator): STRATEGY_EVIDENCE. Reads today's graduation board vs yesterday's persisted snapshot
+   * (§5.2), writes today's snapshot + any crossing insight. Fail-soft.
+   */
+  public void runStrategyEvidenceSweep() {
+    OffsetDateTime now = OffsetDateTime.now(clock);
+    run(GenerationContext.forStrategyEvidence(strategyEvidenceReader.strategyEvidenceScan(), now), now);
+  }
+
+  /**
+   * The sell-decision sweep (called by {@link InsightSweeper}, after the swing batches persist V037):
+   * SELL_DECISION over the unacknowledged SELL rows (§5.3). Fail-soft.
+   */
+  public void runSellDecisionSweep() {
+    OffsetDateTime now = OffsetDateTime.now(clock);
+    run(GenerationContext.forSellDecision(strategyEvidenceReader.sellDecisionScan(), now), now);
+  }
+
   /** The index exchange for an underlying's insight scope (SENSEX → BSE, else NSE). */
   private static String exchangeFor(String underlying) {
     return underlying != null && underlying.toUpperCase(java.util.Locale.ROOT).contains("SENSEX")
@@ -198,6 +223,9 @@ public class InsightEngine {
       if (c.suppressed()) {
         meters.counter("ay_insights_suppressed_total").increment();
       }
+      // Stage-1 WS delivery (§9.3): the publisher no-ops in shadow mode (flag default OFF), so nothing
+      // pushes until the owner arms it — the durable row above is always the record of truth.
+      publisher.publish(row);
     } catch (RuntimeException e) {
       log.warn("insight persist failed ({}): {}", c.dedupeKey(), e.toString());
     }

@@ -2643,6 +2643,17 @@ export interface components {
             thrust?: boolean;
             rejectReason?: string;
         };
+        DataFreshness: {
+            /** Format: date-time */
+            asOf?: string;
+            source?: string;
+            /** Format: date */
+            historyStart?: string;
+            /** Format: int64 */
+            staleSeconds?: number;
+            complete?: boolean;
+            provenance?: string;
+        };
         TrendPoint: {
             /** Format: date-time */
             bucket?: string;
@@ -2662,6 +2673,7 @@ export interface components {
             items?: components["schemas"]["TrendPoint"][];
             /** Format: date-time */
             asOf?: string;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         StrikeSessionStat: {
             strike?: number;
@@ -2793,6 +2805,7 @@ export interface components {
             peOi?: number;
             /** Format: date-time */
             asOf?: string;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         Cell: {
             /** Format: int32 */
@@ -2811,6 +2824,7 @@ export interface components {
             maxAbs?: number;
             /** Format: date-time */
             asOf?: string;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         HistoryPoint: {
             /** Format: date */
@@ -2909,6 +2923,7 @@ export interface components {
             asOf?: string;
             interval?: string;
             rows?: components["schemas"]["ChainTableRow"][];
+            freshness?: components["schemas"]["DataFreshness"];
         };
         ChainTableLeg: {
             leg?: components["schemas"]["Leg"];
@@ -3013,6 +3028,7 @@ export interface components {
             activeStrikeSideIvSeries?: components["schemas"]["ActiveStrikeIvPoint"][];
             /** Format: date-time */
             asOf?: string;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         SentimentPoint: {
             /** Format: date-time */
@@ -3109,6 +3125,7 @@ export interface components {
             /** Format: date-time */
             asOf?: string;
             contracts?: components["schemas"]["ContractLeg"][];
+            freshness?: components["schemas"]["DataFreshness"];
         };
         FutSpurt: {
             tradingsymbol?: string;
@@ -3127,6 +3144,7 @@ export interface components {
             items?: components["schemas"]["FutSpurt"][];
             /** Format: date-time */
             asOf?: string;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         MoverRow: {
             tradingsymbol?: string;
@@ -3144,6 +3162,7 @@ export interface components {
             losers?: components["schemas"]["MoverRow"][];
             /** Format: date-time */
             asOf?: string;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         BuzzMatrix: {
             contracts?: string[];
@@ -3169,6 +3188,7 @@ export interface components {
             items?: components["schemas"]["BankRow"][];
             /** Format: date-time */
             asOf?: string;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         BankGrid: {
             items?: components["schemas"]["BankGridRow"][];
@@ -3218,6 +3238,7 @@ export interface components {
             legBias?: string;
             /** Format: int32 */
             biasSign?: number;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         SectorAgg: {
             sector?: string;
@@ -3245,6 +3266,7 @@ export interface components {
             sectorIndices?: components["schemas"]["SectorIndexCard"][];
             sectors?: components["schemas"]["SectorAgg"][];
             stocks?: components["schemas"]["StockChange"][];
+            freshness?: components["schemas"]["DataFreshness"];
         };
         StockChange: {
             symbol?: string;
@@ -3258,11 +3280,13 @@ export interface components {
             tiles?: components["schemas"]["StockChange"][];
             /** Format: date */
             asOf?: string;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         Returns: {
             /** Format: date */
             asOf?: string;
             items?: components["schemas"]["ReturnsRow"][];
+            freshness?: components["schemas"]["DataFreshness"];
         };
         ReturnsRow: {
             symbol?: string;
@@ -3776,6 +3800,7 @@ export interface components {
             topDelivery?: components["schemas"]["DeliveryRow"][];
             /** Format: date-time */
             asOf?: string;
+            freshness?: components["schemas"]["DataFreshness"];
         };
         BreadthSummary: {
             /** Format: date */

@@ -7868,6 +7868,32 @@
           }
         }
       },
+      "DataFreshness" : {
+        "type" : "object",
+        "properties" : {
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "source" : {
+            "type" : "string"
+          },
+          "historyStart" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "staleSeconds" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "complete" : {
+            "type" : "boolean"
+          },
+          "provenance" : {
+            "type" : "string"
+          }
+        }
+      },
       "TrendPoint" : {
         "type" : "object",
         "properties" : {
@@ -7914,6 +7940,9 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -8265,6 +8294,9 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -8319,6 +8351,9 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -8604,6 +8639,9 @@
             "items" : {
               "$ref" : "#/components/schemas/ChainTableRow"
             }
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -8890,6 +8928,9 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -9141,6 +9182,9 @@
             "items" : {
               "$ref" : "#/components/schemas/ContractLeg"
             }
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -9188,6 +9232,9 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -9239,6 +9286,9 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -9316,6 +9366,9 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -9442,6 +9495,9 @@
           "biasSign" : {
             "type" : "integer",
             "format" : "int32"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -9521,6 +9577,9 @@
             "items" : {
               "$ref" : "#/components/schemas/StockChange"
             }
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -9559,6 +9618,9 @@
           "asOf" : {
             "type" : "string",
             "format" : "date"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -9574,6 +9636,9 @@
             "items" : {
               "$ref" : "#/components/schemas/ReturnsRow"
             }
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },
@@ -10976,6 +11041,9 @@
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "freshness" : {
+            "$ref" : "#/components/schemas/DataFreshness"
           }
         }
       },

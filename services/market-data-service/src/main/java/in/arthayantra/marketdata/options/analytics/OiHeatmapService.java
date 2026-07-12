@@ -1,6 +1,8 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -35,7 +37,23 @@ public class OiHeatmapService {
       List<Cell> ce,
       List<Cell> pe,
       Long maxAbs,
-      OffsetDateTime asOf) {}
+      OffsetDateTime asOf,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public Heatmap(
+        List<String> buckets,
+        List<String> strikes,
+        List<Cell> ce,
+        List<Cell> pe,
+        Long maxAbs,
+        OffsetDateTime asOf) {
+      this(buckets, strikes, ce, pe, maxAbs, asOf, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public Heatmap withFreshness(DataFreshness f) {
+      return new Heatmap(buckets, strikes, ce, pe, maxAbs, asOf, f);
+    }
+  }
 
   /**
    * Fold {@code series} (one row per bucket/strike/leg, oldest-first per {@link OptionsSnapshotReader})

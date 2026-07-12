@@ -7,6 +7,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { OiBadge4 } from '../../components/atoms/OiBadge4.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -69,6 +70,7 @@ export function FuturesMoversPage() {
         title="Futures Market Movers"
         subtitle="Top gainers and losers by day price %, with OI interpretation"
         help="Ranks captured futures contracts into top gainers and losers by the day's price change, alongside their OI action and open-positioning flag."
+        right={<FreshnessBadge freshness={q.data?.freshness} />}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

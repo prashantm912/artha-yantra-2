@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,7 @@ class BreadthControllerTest {
                 "NIFTY 50", new BigDecimal("0.04"), null, null, null, null, null,
                 List.of(up, up, up), List.of(down), LocalDate.of(2026, 7, 3), true));
     BreadthController controller =
-        new BreadthController(mock(BreadthService.class), contributions);
+        new BreadthController(mock(BreadthService.class), contributions, Clock.systemUTC());
 
     BreadthController.LiveBreadth out = controller.live("NIFTY 50");
 

@@ -1,10 +1,12 @@
 package in.arthayantra.marketdata.futures;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.instruments.Instrument;
 import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
@@ -50,7 +52,24 @@ public class FuturesTermStructureService {
       BigDecimal calendarSpread,
       boolean stale,
       OffsetDateTime asOf,
-      List<ContractLeg> contracts) {}
+      List<ContractLeg> contracts,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public TermStructure(
+        String underlying,
+        BigDecimal spot,
+        String state,
+        BigDecimal calendarSpread,
+        boolean stale,
+        OffsetDateTime asOf,
+        List<ContractLeg> contracts) {
+      this(underlying, spot, state, calendarSpread, stale, asOf, contracts, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public TermStructure withFreshness(DataFreshness f) {
+      return new TermStructure(underlying, spot, state, calendarSpread, stale, asOf, contracts, f);
+    }
+  }
 
   private final InstrumentRepository instruments;
   private final QuoteGateway quoteGateway;

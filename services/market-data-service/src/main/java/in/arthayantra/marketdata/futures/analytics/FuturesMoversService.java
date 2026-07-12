@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.futures.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.options.OiInterpretation;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -35,7 +37,20 @@ public class FuturesMoversService {
       BigDecimal dayLow,
       OiInterpretation interpretation) {}
 
-  public record Movers(List<MoverRow> gainers, List<MoverRow> losers, OffsetDateTime asOf) {}
+  public record Movers(
+      List<MoverRow> gainers,
+      List<MoverRow> losers,
+      OffsetDateTime asOf,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public Movers(List<MoverRow> gainers, List<MoverRow> losers, OffsetDateTime asOf) {
+      this(gainers, losers, asOf, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public Movers withFreshness(DataFreshness f) {
+      return new Movers(gainers, losers, asOf, f);
+    }
+  }
 
   public record BankRow(
       String tradingsymbol,
@@ -46,7 +61,19 @@ public class FuturesMoversService {
       BigDecimal basis,
       OiInterpretation interpretation) {}
 
-  public record Banks(List<BankRow> items, OffsetDateTime asOf) {}
+  public record Banks(
+      List<BankRow> items,
+      OffsetDateTime asOf,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public Banks(List<BankRow> items, OffsetDateTime asOf) {
+      this(items, asOf, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public Banks withFreshness(DataFreshness f) {
+      return new Banks(items, asOf, f);
+    }
+  }
 
   private record Pair(FuturesSnapshotReader.FutPoint cur, FuturesSnapshotReader.FutPoint old) {}
 

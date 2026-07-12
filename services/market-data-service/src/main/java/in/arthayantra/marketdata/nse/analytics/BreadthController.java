@@ -2,6 +2,8 @@ package in.arthayantra.marketdata.nse.analytics;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.marketdata.freshness.DataFreshness;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,16 +18,19 @@ public class BreadthController {
 
   private final BreadthService service;
   private final EquityIndexContributionService contributions;
+  private final Clock clock;
 
   public BreadthController(
-      BreadthService service, EquityIndexContributionService contributions) {
+      BreadthService service, EquityIndexContributionService contributions, Clock clock) {
     this.service = service;
     this.contributions = contributions;
+    this.clock = clock;
   }
 
   @GetMapping
   public BreadthService.Breadth breadth(@RequestParam String date) {
-    return service.breadth(parseDate(date));
+    BreadthService.Breadth b = service.breadth(parseDate(date));
+    return b.withFreshness(DataFreshness.eod(b.asOf(), "bhavcopy", clock));
   }
 
   /**

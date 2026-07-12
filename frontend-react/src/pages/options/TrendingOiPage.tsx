@@ -7,6 +7,7 @@ import { FilterBar } from '../../components/FilterBar.tsx';
 import { StockOiWarmBar } from '../../components/StockOiWarmBar.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
@@ -128,7 +129,7 @@ export function TrendingOiPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="OI Trending" help="Tracks total call versus put OI through the session, interval by interval, and reads a directional bias from which side is being built faster — newest reading on top." subtitle="Call vs Put OI over the session with a derived directional sentiment" />
+      <PageHeader title="OI Trending" help="Tracks total call versus put OI through the session, interval by interval, and reads a directional bias from which side is being built faster — newest reading on top." subtitle="Call vs Put OI over the session with a derived directional sentiment" right={<FreshnessBadge freshness={q.data?.freshness} />} />
 
       <StockOiWarmBar />
 

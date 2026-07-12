@@ -8,6 +8,7 @@ import { DateInput } from '../../components/atoms/DateInput.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -133,6 +134,7 @@ export function BreadthPage() {
             {data ? ` · ${summary?.tradeDate}` : ''}
           </>
         }
+        right={<FreshnessBadge freshness={data?.freshness} />}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

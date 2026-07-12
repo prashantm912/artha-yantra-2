@@ -6,7 +6,7 @@ import { Select } from '../../components/atoms/Select.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
-import { EodBadge } from '../../components/atoms/EodBadge.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -116,12 +116,12 @@ export function SectorHeatmapPage() {
         title="Sector Heatmap"
         help="A treemap of an index's stocks grouped into sector boxes — each tile's size and green-to-red colour scale with its % change, so you can see which sectors are leading or lagging at a glance."
         subtitle="Constituents grouped by sector · tile size + colour ∝ % change vs prev close"
+        right={<FreshnessBadge freshness={q.data?.freshness} />}
       />
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <Select value={index} options={indices} onChange={setIndex} ariaLabel="Index" placeholder="Index…" title="Pick the index whose constituents the heatmap groups by sector" />
         <GoButton onClick={() => void q.refetch()} loading={q.isFetching} />
-        {q.data?.asOf && <EodBadge asOf={q.data.asOf} />}
       </div>
 
       <QueryState

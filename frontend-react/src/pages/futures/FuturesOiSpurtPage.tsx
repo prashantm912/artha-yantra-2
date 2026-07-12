@@ -8,6 +8,7 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { SignedCount } from '../../components/atoms/SignedCount.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -72,6 +73,7 @@ export function FuturesOiSpurtPage() {
         title="Futures OI Spurt"
         subtitle="Every captured futures contract bucketed by its 4-state OI interpretation"
         help="Sorts every captured futures contract into four OI-action quadrants (long buildup, short buildup, short covering, long unwinding) so you can spot where fresh positions are being added or unwound."
+        right={<FreshnessBadge freshness={q.data?.freshness} />}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

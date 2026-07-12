@@ -11,6 +11,14 @@ const hm: SectorHeatmap = {
   tiles: [
     { symbol: 'RELIANCE', sector: 'Oil Gas & Consumable Fuels', changePct: '1.30', close: '1326.5', prevClose: '1309.5' },
   ],
+  freshness: {
+    asOf: '2026-06-22T15:30:00+05:30',
+    source: 'bhavcopy',
+    historyStart: null,
+    staleSeconds: null,
+    complete: true,
+    provenance: 'eod',
+  },
 };
 
 vi.mock('../../api/oiAnalytics.ts', () => ({
@@ -33,7 +41,9 @@ describe('SectorHeatmapPage', () => {
   it('renders the index selector and the EOD provenance badge', () => {
     renderPage();
     expect(screen.getByRole('option', { name: 'NIFTY 50' })).toBeInTheDocument();
-    expect(screen.getByText(/EOD · as of 2026-06-22/)).toBeInTheDocument();
+    // The shared FreshnessBadge renders the KIND word + the as-of date as sibling spans.
+    expect(screen.getByText('EOD')).toBeInTheDocument();
+    expect(screen.getByText('as of 2026-06-22')).toBeInTheDocument();
     expect(screen.getByText(/grouped by sector/)).toBeInTheDocument();
   });
 });

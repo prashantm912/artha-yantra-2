@@ -4,6 +4,7 @@ import { useOiAnalysis, useOiStats, usePcrSeries } from '../../api/oiAnalytics.t
 import { foldIndividualOi, type PcrPricePoint } from '../../api/oiStatsFold.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
@@ -58,7 +59,7 @@ export function OiStatisticsPage() {
 
   return (
     <LoadBeat>
-      <PageHeader title="Options OI Statistics" help="Shows where open interest is concentrated — total call vs put OI, the per-strike OI ladder (call OI marks resistance, put OI marks support), and how the put-call ratio tracks price through the day." subtitle="OI distribution + PCR — cumulative & per-strike OI and the intraday PCR-vs-price line" />
+      <PageHeader title="Options OI Statistics" help="Shows where open interest is concentrated — total call vs put OI, the per-strike OI ladder (call OI marks resistance, put OI marks support), and how the put-call ratio tracks price through the day." subtitle="OI distribution + PCR — cumulative & per-strike OI and the intraday PCR-vs-price line" right={<FreshnessBadge freshness={stats?.freshness} />} />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <FilterBar showName showExpiry />

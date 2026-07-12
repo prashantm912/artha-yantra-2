@@ -4,6 +4,27 @@ import type { OiInterpretation } from '../core/oiInterpretation.ts';
 // at runtime (Jackson) even though the generated .d.ts types them as `number` — keep them `string`
 // and never parseFloat. `long` OI/count fields are numbers. Anchor-scoped subset; more added per wave.
 
+/**
+ * The standard data-freshness / source-quality envelope (app-platform audit §11.17) nested on the
+ * high-value analytics reads, read by the shared {@code FreshnessBadge}. Absent (`undefined`) on
+ * endpoints not yet covered by Phase-3 slice A. `historyStart` is deliberately null server-side for
+ * now (a MIN(ts) probe is not run on the hot read path).
+ */
+export interface DataFreshness {
+  /** ISO-8601 timestamp of the newest datapoint (null when the read is empty). */
+  asOf: string | null;
+  /** Concrete producer label: `capture` | `candle-derived` | `bhavcopy` | `nse-eod`. */
+  source: string | null;
+  /** Earliest available session (null in this slice — depth not yet surfaced). */
+  historyStart: string | null;
+  /** `max(0, now − asOf)` in seconds (null when asOf is null). */
+  staleSeconds: number | null;
+  /** The response carries a fully-captured latest datapoint. */
+  complete: boolean;
+  /** Data KIND (independent of freshness): `live` | `derived` | `eod` | `static`. */
+  provenance: string | null;
+}
+
 /** GET /api/v1/market/options/oi-stats — bare object; 422 DATA_GAP when no snapshot. */
 export interface OiStats {
   pcr: string | null;
@@ -11,6 +32,7 @@ export interface OiStats {
   ceOi: number;
   peOi: number;
   asOf: string;
+  freshness?: DataFreshness;
 }
 
 /** One active strike from GET /api/v1/market/options/active-strikes. */
@@ -58,6 +80,7 @@ export interface ActiveStrikes {
   /** Per-side SPOT-solved IVs (display path) — shows the call-vs-put IV split the PCP-forward solve hides. */
   activeStrikeSideIvSeries?: ActiveStrikeIvPoint[] | null;
   asOf: string;
+  freshness?: DataFreshness;
 }
 
 /** One row of GET /api/v1/market/options/oi-analysis `{items}` (per bucket·strike·optionType). */
@@ -251,6 +274,7 @@ export interface OiHeatmap {
   pe: OiHeatmapCell[];
   maxAbs: number;
   asOf: string | null;
+  freshness?: DataFreshness;
 }
 
 /**
@@ -390,6 +414,7 @@ export interface ChainTable {
   asOf: string;
   interval: string;
   rows: ChainTableRow[];
+  freshness?: DataFreshness;
 }
 
 /**
@@ -446,6 +471,7 @@ export interface TrendPoint {
 export interface TrendSeries {
   items: TrendPoint[];
   asOf: string | null;
+  freshness?: DataFreshness;
 }
 
 /**
@@ -505,6 +531,7 @@ export interface FutSpurt {
 export interface FutSpurtChain {
   items: FutSpurt[];
   asOf: string | null;
+  freshness?: DataFreshness;
 }
 
 /** One row of GET /api/v1/market/futures/movers gainers/losers (day OHLC drives the O=H/L flag). */
@@ -524,6 +551,7 @@ export interface Movers {
   gainers: MoverRow[];
   losers: MoverRow[];
   asOf: string | null;
+  freshness?: DataFreshness;
 }
 
 /** One row of GET /api/v1/market/futures/eod `{items}` — per-contract per-IST-day OHLC + OI rollup. */
@@ -762,6 +790,7 @@ export interface Breadth {
   summary: BreadthSummary;
   topDelivery: BreadthDeliveryRow[];
   asOf: string;
+  freshness?: DataFreshness;
 }
 
 /** One Futures OI Buzz constituent tile — BigDecimal fields are decimal STRINGS; oi/oiChange numbers.
@@ -825,6 +854,7 @@ export interface EquityReturnRow {
 export interface EquityReturns {
   asOf: string | null;
   items: EquityReturnRow[];
+  freshness?: DataFreshness;
 }
 
 /** One stock's latest-session change + sector — BigDecimal fields are decimal STRINGS. */
@@ -841,6 +871,7 @@ export interface SectorHeatmap {
   index: string;
   tiles: SectorStockChange[];
   asOf: string | null;
+  freshness?: DataFreshness;
 }
 
 /** Per-sector roll-up: avg change + advancer/decliner split. */
@@ -870,6 +901,7 @@ export interface SectorStats {
   sectorIndices: SectorIndexCard[];
   sectors: SectorAgg[];
   stocks: SectorStockChange[];
+  freshness?: DataFreshness;
 }
 
 /** One constituent's index contribution (weight × %change) — decimal STRINGS. {@code points} =

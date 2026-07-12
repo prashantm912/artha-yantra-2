@@ -32,7 +32,9 @@ gets `isolation: "worktree"` + rebase-before-push) and itself only orchestrates,
 merges, deploys, and talks to the owner. Rules proven over the first runs (#675–#680):
 - The brief must be self-contained: goal, constraints, **relevant memory-trap content pasted in**
   (subagents get this file but never the memory files), and a required receipt shape — diff, test
-  output, claims WITH evidence (file:line / SQL+result / log line), and a mandatory **open-doubts**
+  output, claims WITH evidence (file:line / SQL+result / log line) **each labeled
+  computed / sourced / recalled / assumed** (recalled + load-bearing belongs in open-doubts,
+  not the claims list), and a mandatory **open-doubts**
   section (builders' self-flagged doubts have caught real regressions).
 - Audit the RECEIPT against the real artifact (read the actual diff, spot-rerun tests, verify
   citations); depth tiered by risk — docs/mechanical = diff read, engine/money/parity =

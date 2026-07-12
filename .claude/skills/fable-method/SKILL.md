@@ -32,11 +32,18 @@ ledger over your own sense of "what's next"**.
   from code/DB first (read the index, the join, the caller — e.g. the F2 pyramiding fork
   was settled by reading `uq_paper_positions_open` + the order→position close-join), then
   ask ONE sharp question with a recommendation. Never ask what the code can answer.
-- Sequence **cheap-and-certain before expensive-and-uncertain**. Independent units may run
-  as parallel worktree agents — but their branches base on spawn-time main: **rebase before
-  push or the squash-merge reverts other work** (cost a real revert once).
+- Sequence **cheap-and-certain before expensive-and-uncertain** — EXCEPT when one unknown
+  can invalidate downstream units (a design fork, an unverified "does the data even
+  exist?"): spike the **load-bearing unknown first**, even when it is the expensive one.
+  Three cheap units built on a wrong assumption are three reverts. Independent units may
+  run as parallel worktree agents — but their branches base on spawn-time main: **rebase
+  before push or the squash-merge reverts other work** (cost a real revert once).
 - Hard bug? **Reproduce first** (failing test or a live query showing the wrong row), then
   fix, then watch the same probe go green.
+- **Two-strikes rule:** an approach that fails twice the SAME way is exhausted — change
+  strategy (different tool, different decomposition, different data source), never re-run
+  with cosmetic variation. Three near-identical failing commands in a transcript is the
+  tell you are already past the limit.
 
 ## 2. Classify — the merge-policy tier decides everything downstream
 
@@ -90,4 +97,24 @@ variant moved, the sim changed, not the market.
 - Costs are recorded ("cost 2 CI cycles") — future sessions learn from them.
 - Every number cites its source (backtest run date, DB query, PR). Backtest claims carry
   their caveats (survivorship, derived OI, capacity-bound slots) in the same sentence.
+- Label every material claim by how you know it: **computed** (derived this session),
+  **sourced** (file:line / SQL+result / doc read now), **recalled** (memory/training,
+  unverified here), **assumed** (filled in to proceed). Recalled + load-bearing → verify
+  now or downgrade to a labeled guess. Contamination: a conclusion computed from an
+  ASSUMED input stays ASSUMED — one arithmetic step never launders a guess into a fact.
 - Never print secrets: owner password, PHC hashes, Kite/Upstox tokens, `.env` contents.
+
+## 6. Report verdict-first
+
+Owner-facing output (session analyses, backtest verdicts, run reports, PR bodies) opens
+with the answer, not the journey:
+
+1. **First sentence = the verdict** — the number, ship/no-ship, the recommendation — with
+   its claim label attached ("holds — computed from paper_trades" beats "should hold").
+   Cannot write that sentence? The work is not done — back to §1.
+2. Then the 2–3 reasons that carried the weight. Considerations that did not move the
+   verdict go last or nowhere; process narration is an appendix, not an opening.
+3. **Weld the caveat to the verdict**: "safe to arm — AFTER the V031 probe lands" in ONE
+   sentence, never a note three paragraphs down. Skimmed reports act on sentence one.
+4. "It depends" must fork: "X if A, Y if B" names the deciding variable; "there are
+   tradeoffs on both sides" is not a verdict.

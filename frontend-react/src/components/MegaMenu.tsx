@@ -29,6 +29,7 @@ const SECTIONS: MenuSection[] = [
       { label: 'Manas Arora Signals', to: '/signals/manas-arora' }, // per-book — Manas-Arora-family calls only
       { label: 'Signal Rejections', to: '/signal-rejections' }, // why the confluence gate blocked each scalper entry (rail + margin + dots)
       { label: 'Insights', to: '/insights' }, // INT-I1 — decision-support feed: priority-ranked signals + context/risk/trust attention items (shadow mode)
+      { label: 'Compare Signals', to: '/insights/compare' }, // INT-I3 — decide between 2–6 same-session setups (priority/cost/R:R matrix)
       { label: 'Charts', to: '/charts' }, // cockpit — candlestick + trade/signal overlays (A13)
       { label: 'Advance Chart', to: '/advance-chart' }, // §1b — LWC pro chart + default study set (VWAP/VWMA/SuperTrend/RSI)
       { label: 'Multiframe Chart', to: '/multiframe-chart' }, // §1b — 2×2 multi-timeframe grid of Advance Charts

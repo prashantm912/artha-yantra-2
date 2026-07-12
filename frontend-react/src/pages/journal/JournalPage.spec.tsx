@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const create = vi.fn();
@@ -28,7 +29,9 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <JournalPage />
+      <MemoryRouter>
+        <JournalPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -77,5 +80,23 @@ describe('JournalPage', () => {
     expect(screen.queryByLabelText('Pick a signal to link')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Link to (optional)'), { target: { value: 'signal' } });
     expect(screen.getByLabelText('Pick a signal to link')).toBeInTheDocument();
+  });
+
+  it('seeds the new-entry form from an insight JOURNAL_DRAFT_ACCEPT deep link (INT-I3)', () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/journal?draftSignalId=42&draftNote=Draft%20from%20insight&draftTags=insight']}>
+          <JournalPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    // Note + tags pre-seed from the draft; the signal picker appears (link type switched to signal).
+    expect((screen.getByLabelText('Note') as HTMLInputElement).value).toBe('Draft from insight');
+    expect((screen.getByLabelText('Tags') as HTMLInputElement).value).toBe('insight');
+    expect(screen.getByLabelText('Pick a signal to link')).toBeInTheDocument();
+    // Focus lands on the seeded Note input (user-initiated nav) — the prefill is not a silent
+    // below-the-fold change for keyboard/SR users.
+    expect(screen.getByLabelText('Note')).toHaveFocus();
   });
 });

@@ -206,6 +206,13 @@ const CampaignWorkspacePage = lazy(() =>
 const ProposalsInboxPage = lazy(() =>
   import('./pages/evolution/ProposalsInboxPage.tsx').then((m) => ({ default: m.ProposalsInboxPage })),
 );
+// The INT-I3 decision surfaces — the compare matrix + the strategy dossier (both route-lazy).
+const InsightsComparePage = lazy(() =>
+  import('./pages/insights/InsightsComparePage.tsx').then((m) => ({ default: m.InsightsComparePage })),
+);
+const StrategyDossierPage = lazy(() =>
+  import('./pages/insights/StrategyDossierPage.tsx').then((m) => ({ default: m.StrategyDossierPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -231,6 +238,8 @@ export function App() {
           <Route path="/signals/:book" element={<SignalsPage />} />
           <Route path="/signal-rejections" element={<RejectionsPage />} />
           <Route path="/insights" element={<Lazy><InsightsPage /></Lazy>} />
+          <Route path="/insights/compare" element={<Lazy><InsightsComparePage /></Lazy>} />
+          <Route path="/insights/strategy-dossier/:strategyId" element={<Lazy><StrategyDossierPage /></Lazy>} />
           <Route path="/paper" element={<Lazy><PaperPage /></Lazy>} />
           <Route path="/paper/:book" element={<Lazy><PaperPage /></Lazy>} />
           <Route path="/orders" element={<OrdersPage />} />

@@ -5,6 +5,7 @@ import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { CallOiHeatmap, PutOiHeatmap } from '../../components/OiHeatmapChart.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -29,6 +30,7 @@ export function OiHeatmapPage() {
       <PageHeader
         title="OI Change Heatmap"
         help="A strike-by-time grid showing where open interest is building or unwinding through the session — green cells mark fresh OI being added, red cells mark OI being closed."
+        right={<FreshnessBadge freshness={data?.freshness} />}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

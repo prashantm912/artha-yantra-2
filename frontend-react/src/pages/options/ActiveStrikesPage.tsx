@@ -8,6 +8,7 @@ import { Skeleton } from '../../components/Skeletons.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import {
   ActiveStrikeOiChart,
   ActiveStrikeSentimentChart,
@@ -49,6 +50,7 @@ export function ActiveStrikesPage() {
       <PageHeader
         title="Active Strikes OI"
         help="Tracks the most active strike's Call and Put open interest plus the sentiment % through the session — rising Call OI leans bearish, rising Put OI leans bullish."
+        right={<FreshnessBadge freshness={data?.freshness} />}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

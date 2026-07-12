@@ -11,7 +11,8 @@ import { ColumnSettings } from '../../components/ColumnSettings.tsx';
 import { DensityToggle } from '../../components/DensityToggle.tsx';
 import { OptionsChainTable } from '../../components/OptionsChainTable.tsx';
 import { OPTIONAL_COLUMN_META } from '../../components/optionsChainColumns.ts';
-import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
+import { PageHeader } from '../../components/PageHeader.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -96,7 +97,7 @@ export function OptionsChainPage() {
             ? `${chain.underlying} · ${chain.expiry ?? '—'} expiry · black-76 live greeks`
             : 'black-76 live greeks'
         }
-        right={<LiveDot stale={!!chain?.stale} detail={chain?.asOf ? chain.asOf.slice(11, 19) : undefined} />}
+        right={<FreshnessBadge freshness={chain?.freshness} />}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

@@ -5,7 +5,7 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
-import { EodBadge } from '../../components/atoms/EodBadge.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -69,12 +69,8 @@ export function EquityReturnsPage() {
       <PageHeader
         title="Equity Returns"
         help="A screener ranking stocks by their price return across several timeframes (today through 1 year) so you can spot momentum leaders and laggards at a glance."
-        subtitle={
-          <>
-            Multi-timeframe % returns over the EQ universe · 6M / 1Y fill in as history accrues{' '}
-            {q.data?.asOf ? <EodBadge asOf={q.data.asOf} /> : null}
-          </>
-        }
+        subtitle="Multi-timeframe % returns over the EQ universe · 6M / 1Y fill in as history accrues"
+        right={<FreshnessBadge freshness={q.data?.freshness} />}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

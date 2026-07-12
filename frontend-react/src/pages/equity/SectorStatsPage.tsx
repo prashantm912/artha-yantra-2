@@ -5,7 +5,7 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { ValueDeltaCell } from '../../components/atoms/ValueDeltaCell.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
-import { EodBadge } from '../../components/atoms/EodBadge.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -92,12 +92,8 @@ export function SectorStatsPage() {
       <PageHeader
         title="Sector Stats"
         help="Rolls every stock up into per-sector cards (average change plus the advancer/decliner split) and a sortable stock table, so you can see which sectors are driving the market today."
-        subtitle={
-          <>
-            Per-sector average change (from constituents) + the stock factor table{' '}
-            {data?.asOf ? <EodBadge asOf={data.asOf} /> : null}
-          </>
-        }
+        subtitle="Per-sector average change (from constituents) + the stock factor table"
+        right={<FreshnessBadge freshness={data?.freshness} />}
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">

@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.futures.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.options.OiInterpretation;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -30,7 +32,19 @@ public class FuturesSpurtService {
       BigDecimal spurtPct,
       OiInterpretation interpretation) {}
 
-  public record FutSpurtChain(List<FutSpurt> items, OffsetDateTime asOf) {}
+  public record FutSpurtChain(
+      List<FutSpurt> items,
+      OffsetDateTime asOf,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public FutSpurtChain(List<FutSpurt> items, OffsetDateTime asOf) {
+      this(items, asOf, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public FutSpurtChain withFreshness(DataFreshness f) {
+      return new FutSpurtChain(items, asOf, f);
+    }
+  }
 
   public FutSpurtChain spurts(List<FuturesSnapshotReader.FutPoint> pair) {
     OffsetDateTime newest =

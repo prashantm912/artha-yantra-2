@@ -1,10 +1,12 @@
 package in.arthayantra.marketdata.nse.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
 import in.arthayantra.marketdata.constituents.StockSectorMap;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -54,7 +56,20 @@ public class EquitySectorService {
       String symbol, String sector, BigDecimal changePct, BigDecimal close, BigDecimal prevClose) {}
 
   /** An index's constituent tiles grouped (client-side) by sector. */
-  public record SectorHeatmap(String index, List<StockChange> tiles, LocalDate asOf) {}
+  public record SectorHeatmap(
+      String index,
+      List<StockChange> tiles,
+      LocalDate asOf,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public SectorHeatmap(String index, List<StockChange> tiles, LocalDate asOf) {
+      this(index, tiles, asOf, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public SectorHeatmap withFreshness(DataFreshness f) {
+      return new SectorHeatmap(index, tiles, asOf, f);
+    }
+  }
 
   /** Per-sector roll-up of the constituents (avg change + advancer/decliner split). */
   public record SectorAgg(
@@ -65,7 +80,21 @@ public class EquitySectorService {
       LocalDate asOf,
       List<SectorIndexWatch.SectorIndexCard> sectorIndices,
       List<SectorAgg> sectors,
-      List<StockChange> stocks) {}
+      List<StockChange> stocks,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public SectorStats(
+        LocalDate asOf,
+        List<SectorIndexWatch.SectorIndexCard> sectorIndices,
+        List<SectorAgg> sectors,
+        List<StockChange> stocks) {
+      this(asOf, sectorIndices, sectors, stocks, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public SectorStats withFreshness(DataFreshness f) {
+      return new SectorStats(asOf, sectorIndices, sectors, stocks, f);
+    }
+  }
 
   public SectorHeatmap sectorHeatmap(String index) {
     List<String> members = constituents.symbols(index);

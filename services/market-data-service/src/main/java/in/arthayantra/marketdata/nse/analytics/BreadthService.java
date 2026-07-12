@@ -1,7 +1,9 @@
 package in.arthayantra.marketdata.nse.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -36,7 +38,20 @@ public class BreadthService {
   public record DeliveryRow(
       String symbol, BigDecimal deliveryPct, BigDecimal close, BigDecimal pctChange) {}
 
-  public record Breadth(BreadthSummary summary, List<DeliveryRow> topDelivery, OffsetDateTime asOf) {}
+  public record Breadth(
+      BreadthSummary summary,
+      List<DeliveryRow> topDelivery,
+      OffsetDateTime asOf,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public Breadth(BreadthSummary summary, List<DeliveryRow> topDelivery, OffsetDateTime asOf) {
+      this(summary, topDelivery, asOf, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public Breadth withFreshness(DataFreshness f) {
+      return new Breadth(summary, topDelivery, asOf, f);
+    }
+  }
 
   public Breadth breadth(LocalDate date) {
     BreadthSummary summary =

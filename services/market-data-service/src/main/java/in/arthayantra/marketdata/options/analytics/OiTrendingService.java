@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -35,7 +37,19 @@ public class OiTrendingService {
       BigDecimal ceLtp,
       BigDecimal peLtp) {}
 
-  public record TrendSeries(List<TrendPoint> items, OffsetDateTime asOf) {}
+  public record TrendSeries(
+      List<TrendPoint> items,
+      OffsetDateTime asOf,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public TrendSeries(List<TrendPoint> items, OffsetDateTime asOf) {
+      this(items, asOf, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public TrendSeries withFreshness(DataFreshness f) {
+      return new TrendSeries(items, asOf, f);
+    }
+  }
 
   /** {@code series} must be bucket-ordered oldest-first (the OptionsSnapshotReader.series contract). */
   public TrendSeries trending(List<OptionsSnapshotReader.StrikePoint> series) {

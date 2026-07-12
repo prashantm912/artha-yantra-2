@@ -1,8 +1,10 @@
 package in.arthayantra.marketdata.nse.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.constituents.StockSectorMap;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -43,7 +45,19 @@ public class EquityReturnsService {
       BigDecimal r1y) {}
 
   /** The whole screener for the latest accrued session. */
-  public record Returns(LocalDate asOf, List<ReturnsRow> items) {}
+  public record Returns(
+      LocalDate asOf,
+      List<ReturnsRow> items,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+    public Returns(LocalDate asOf, List<ReturnsRow> items) {
+      this(asOf, items, null);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public Returns withFreshness(DataFreshness f) {
+      return new Returns(asOf, items, f);
+    }
+  }
 
   public Returns returns() {
     // One pass: rank each symbol's EQ closes by recency, then pluck the base closes for each window.

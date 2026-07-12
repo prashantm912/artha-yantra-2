@@ -5,12 +5,14 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.options.OiInterpretation;
 import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OiQuery;
 import in.arthayantra.marketdata.options.OptionsChainService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -59,6 +61,7 @@ public class OptionsAnalyticsController {
   private final int expiryLookbackDays;
   private final int defaultSessionIntervalMinutes;
   private final BigDecimal riskFreeRate;
+  private final Clock clock;
 
   public OptionsAnalyticsController(
       HistoricalOiReader reader,
@@ -85,7 +88,8 @@ public class OptionsAnalyticsController {
       @Value("${artha.options.heatmap-window:10}") int heatmapWindow,
       @Value("${artha.options.expiry-lookback-days:15}") int expiryLookbackDays,
       @Value("${artha.options.snapshot-interval-ms:300000}") long snapshotIntervalMs,
-      @Value("${artha.options.risk-free-rate:0.065}") BigDecimal riskFreeRate) {
+      @Value("${artha.options.risk-free-rate:0.065}") BigDecimal riskFreeRate,
+      Clock clock) {
     this.reader = reader;
     this.chainService = chainService;
     this.activeStrikes = activeStrikes;
@@ -113,9 +117,31 @@ public class OptionsAnalyticsController {
     long minutes = snapshotIntervalMs / 60000L;
     this.defaultSessionIntervalMinutes = minutes <= 0 ? 5 : (int) minutes;
     this.riskFreeRate = riskFreeRate;
+    this.clock = clock;
   }
 
-  public record OiStats(BigDecimal pcr, BigDecimal maxPain, long ceOi, long peOi, OffsetDateTime asOf) {}
+  /**
+   * The freshness envelope for an OI read: {@code live} provenance for a live read OR a past session
+   * whose captured rows carry IV (real snapshots); {@code derived} only when a fully-past read fell
+   * back to the candle-derived chain (iv/greeks all null — the §11.12 sanctioned inference, no reader
+   * plumbing). {@code asOf} + {@code complete} are supplied by the caller from the rows it already read.
+   */
+  private DataFreshness oiFreshness(
+      OiQuery q, OffsetDateTime asOf, List<OptionsSnapshotReader.StrikePoint> rows, boolean complete) {
+    boolean derived =
+        !q.live() && !rows.isEmpty() && rows.stream().allMatch(p -> p.iv() == null);
+    return derived
+        ? DataFreshness.of(asOf, DataFreshness.DERIVED, "candle-derived", null, complete, clock)
+        : DataFreshness.of(asOf, DataFreshness.LIVE, "capture", null, complete, clock);
+  }
+
+  public record OiStats(
+      BigDecimal pcr,
+      BigDecimal maxPain,
+      long ceOi,
+      long peOi,
+      OffsetDateTime asOf,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {}
 
   public record ActiveStrikesResponse(
       BigDecimal sentimentPct,
@@ -131,7 +157,8 @@ public class OptionsAnalyticsController {
       // per-side SPOT-solved IVs (display path — see ActiveStrikeService.activeStrikeSideIvSeries)
       @JsonInclude(JsonInclude.Include.NON_NULL) List<ActiveStrikeService.ActiveStrikeIvPoint>
               activeStrikeSideIvSeries,
-      OffsetDateTime asOf) {}
+      OffsetDateTime asOf,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {}
 
   public record StrikeView(BigDecimal strike, long ceOi, long peOi) {}
 
@@ -165,7 +192,8 @@ public class OptionsAnalyticsController {
       boolean stale,
       OffsetDateTime asOf,
       String interval,
-      List<ChainTableRow> rows) {}
+      List<ChainTableRow> rows,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {}
 
   // ── /multiple-oi (oipulse Multiple OI Chart): per-leg OI line + the underlying price line ────────────
 
@@ -202,6 +230,7 @@ public class OptionsAnalyticsController {
     }
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
     BigDecimal pcr = OptionsChainService.pcr(ce, pe);
+    DataFreshness freshness = oiFreshness(q, asOf, latest, true);
     BigDecimal maxPain = MaxPainCalculator.maxPain(chain);
     // source.optionanalytics=upstox: replace the band-computed PCR/max-pain with Upstox's full-chain
     // values (ceOi/peOi stay native — Upstox exposes only the ratio). Any Upstox miss keeps native.
@@ -217,7 +246,7 @@ public class OptionsAnalyticsController {
         }
       }
     }
-    return new OiStats(pcr, maxPain, ce, pe, asOf);
+    return new OiStats(pcr, maxPain, ce, pe, asOf, freshness);
   }
 
   private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("HH:mm");
@@ -364,9 +393,11 @@ public class OptionsAnalyticsController {
             .map(s -> new StrikeView(s.strike(), s.ceOi(), s.peOi()))
             .toList();
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
+    DataFreshness freshness = oiFreshness(q, asOf, latest, true);
     if (buckets == null) {
       // NON_NULL on all series omits the keys, keeping the absent-buckets response byte-identical.
-      return new ActiveStrikesResponse(sentiment, sentimentLevel, items, null, null, null, null, asOf);
+      return new ActiveStrikesResponse(
+          sentiment, sentimentLevel, items, null, null, null, null, asOf, freshness);
     }
     // Anchor on the newest captured bucket (clock-independent); span the last `buckets` buckets.
     OffsetDateTime newest = latest.get(0).bucket();
@@ -392,7 +423,8 @@ public class OptionsAnalyticsController {
         activeStrikeOiSeries,
         activeStrikeIvSeries,
         activeStrikeSideIvSeries,
-        asOf);
+        asOf,
+        freshness);
   }
 
   /** /oi-analysis: the data-table archetype source (per-strike rows for the latest bucket). */
@@ -463,7 +495,10 @@ public class OptionsAnalyticsController {
         chain.stale(),
         chain.asOf(),
         q.interval().token(),
-        rows);
+        rows,
+        // Live black76 chain — complete unless the underlying quote is stale (off-hours / feed gap).
+        DataFreshness.of(
+            chain.asOf(), DataFreshness.LIVE, "capture", null, !chain.stale(), clock));
   }
 
   /**
@@ -866,7 +901,8 @@ public class OptionsAnalyticsController {
         // outside calendar coverage — serve the session series unchanged
       }
     }
-    return trendingService.trending(filterToBasket(series, strikes));
+    OiTrendingService.TrendSeries out = trendingService.trending(filterToBasket(series, strikes));
+    return out.withFreshness(oiFreshness(q, out.asOf(), latest, true));
   }
 
   /** Restricts the series to the comma-separated strike basket; null/blank = the whole chain. */
@@ -937,7 +973,9 @@ public class OptionsAnalyticsController {
     List<OptionsSnapshotReader.StrikePoint> latest =
         reader.latest(q.name(), exp, q.interval(), q.date());
     if (latest.isEmpty()) {
-      return heatmapService.fold(List.of(), null, heatmapWindow);
+      return heatmapService
+          .fold(List.of(), null, heatmapWindow)
+          .withFreshness(oiFreshness(q, null, List.of(), false));
     }
     OffsetDateTime newest = latest.get(0).bucket();
     LocalDate day = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
@@ -947,7 +985,8 @@ public class OptionsAnalyticsController {
         reader.series(q.name(), exp, q.interval(), from, to);
     BigDecimal spot = latestSpot(latest);
     BigDecimal atm = nearestListedStrike(series, spot);
-    return heatmapService.fold(series, atm, heatmapWindow);
+    OiHeatmapService.Heatmap hm = heatmapService.fold(series, atm, heatmapWindow);
+    return hm.withFreshness(oiFreshness(q, hm.asOf(), latest, true));
   }
 
   /**
@@ -1192,7 +1231,8 @@ public class OptionsAnalyticsController {
             ? null
             : BigDecimal.valueOf(peOi).divide(BigDecimal.valueOf(ceOi), 4, RoundingMode.HALF_UP);
     return new ChainTable(
-        q.name(), exp, spot, null, null, null, pcr, false, asOf, q.interval().token(), rows);
+        q.name(), exp, spot, null, null, null, pcr, false, asOf, q.interval().token(), rows,
+        oiFreshness(q, asOf, latest, true));
   }
 
   /** Builds a chain leg from a captured snapshot point (greeks null — the projection carries IV only). */

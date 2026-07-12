@@ -2,9 +2,14 @@ package in.arthayantra.marketdata.nse.analytics;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
@@ -24,10 +29,12 @@ public class FiiDiiController {
 
   private final NseEodReader reader;
   private final ParticipantBiasService biasService;
+  private final Clock clock;
 
-  public FiiDiiController(NseEodReader reader, ParticipantBiasService biasService) {
+  public FiiDiiController(NseEodReader reader, ParticipantBiasService biasService, Clock clock) {
     this.reader = reader;
     this.biasService = biasService;
+    this.clock = clock;
   }
 
   public record LongShortRow(LocalDate tradeDate, long fiiLong, long fiiShort, BigDecimal ratio) {}
@@ -87,7 +94,12 @@ public class FiiDiiController {
    */
   @GetMapping("/bias")
   public ParticipantBiasService.Bias bias(@RequestParam String date) {
-    return biasService.bias(parseDate(date));
+    ParticipantBiasService.Bias b = biasService.bias(parseDate(date));
+    OffsetDateTime asOf =
+        b.tradeDate() == null
+            ? null
+            : b.tradeDate().atTime(MarketCalendar.SESSION_CLOSE).atOffset(Ist.OFFSET);
+    return b.withFreshness(DataFreshness.eod(asOf, "nse-eod", clock));
   }
 
   private static LocalDate parseDate(String raw) {

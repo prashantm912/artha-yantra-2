@@ -1,8 +1,12 @@
 package in.arthayantra.marketdata.nse.analytics;
 
 import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.nse.preopen.PreOpenEquityScanService;
+import java.time.Clock;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,18 +23,28 @@ public class EquityController {
   private final EquitySectorService sector;
   private final EquityIndexContributionService contribution;
   private final PreOpenEquityScanService preOpenScan;
+  private final Clock clock;
 
   public EquityController(
       EquityDeliveryService delivery,
       EquityReturnsService returns,
       EquitySectorService sector,
       EquityIndexContributionService contribution,
-      PreOpenEquityScanService preOpenScan) {
+      PreOpenEquityScanService preOpenScan,
+      Clock clock) {
     this.delivery = delivery;
     this.returns = returns;
     this.sector = sector;
     this.contribution = contribution;
     this.preOpenScan = preOpenScan;
+    this.clock = clock;
+  }
+
+  /** The bhavcopy EOD freshness envelope for an equity read — asOf pinned to the session close. */
+  private DataFreshness eod(LocalDate asOf) {
+    OffsetDateTime at =
+        asOf == null ? null : asOf.atTime(MarketCalendar.SESSION_CLOSE).atOffset(Ist.OFFSET);
+    return DataFreshness.eod(at, "bhavcopy", clock);
   }
 
   /** One stock's daily delivery series over the most recent {@code days} sessions (default 15). */
@@ -43,19 +57,22 @@ public class EquityController {
   /** Multi-timeframe returns screener over every EQ stock (Current Day / 1W / 1M / 6M / 1Y). */
   @GetMapping("/returns")
   public EquityReturnsService.Returns returns() {
-    return returns.returns();
+    EquityReturnsService.Returns r = returns.returns();
+    return r.withFreshness(eod(r.asOf()));
   }
 
   /** An index's constituents grouped by sector, each stock's latest % change (sector-heatmap treemap). */
   @GetMapping("/sector-heatmap")
   public EquitySectorService.SectorHeatmap sectorHeatmap(@RequestParam String name) {
-    return sector.sectorHeatmap(name);
+    EquitySectorService.SectorHeatmap h = sector.sectorHeatmap(name);
+    return h.withFreshness(eod(h.asOf()));
   }
 
   /** Per-sector roll-up (avg change + advancer/decliner split) + the per-stock factor table. */
   @GetMapping("/sector-stats")
   public EquitySectorService.SectorStats sectorStats() {
-    return sector.sectorStats();
+    EquitySectorService.SectorStats s = sector.sectorStats();
+    return s.withFreshness(eod(s.asOf()));
   }
 
   /**

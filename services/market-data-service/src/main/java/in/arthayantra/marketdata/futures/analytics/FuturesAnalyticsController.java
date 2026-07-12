@@ -3,9 +3,11 @@ package in.arthayantra.marketdata.futures.analytics;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.futures.screener.MarketMoversScreenService;
 import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OiQuery;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
@@ -35,6 +37,7 @@ public class FuturesAnalyticsController {
   private final List<String> bankStocks;
   private final List<String> bankAnalysisStocks;
   private final List<String> niftyRadarStocks;
+  private final Clock clock;
 
   public FuturesAnalyticsController(
       FuturesSnapshotReader reader,
@@ -61,7 +64,8 @@ public class FuturesAnalyticsController {
                   + "TATAMOTORS,TITAN,ONGC,NTPC,POWERGRID,TATASTEEL,ADANIENT,COALINDIA,JSWSTEEL,"
                   + "ULTRACEMCO,GRASIM,HINDALCO,WIPRO,TECHM,BAJAJFINSV,NESTLEIND,M&M,INDUSINDBK,"
                   + "CIPLA,DRREDDY,EICHERMOT,BPCL,HEROMOTOCO,DIVISLAB,BRITANNIA}")
-          List<String> niftyRadarStocks) {
+          List<String> niftyRadarStocks,
+      Clock clock) {
     this.reader = reader;
     this.spurtService = spurtService;
     this.moversService = moversService;
@@ -74,6 +78,7 @@ public class FuturesAnalyticsController {
     this.bankStocks = bankStocks;
     this.bankAnalysisStocks = bankAnalysisStocks;
     this.niftyRadarStocks = niftyRadarStocks;
+    this.clock = clock;
   }
 
   @GetMapping("/oi-analysis")
@@ -190,7 +195,8 @@ public class FuturesAnalyticsController {
     if (pair.isEmpty()) {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name());
     }
-    return spurtService.spurts(pair);
+    FuturesSpurtService.FutSpurtChain out = spurtService.spurts(pair);
+    return out.withFreshness(DataFreshness.live(out.asOf(), clock));
   }
 
   /** /movers: futures gainers/losers by price% (prevClose-based) + OI%. */
@@ -206,7 +212,8 @@ public class FuturesAnalyticsController {
     if (pair.isEmpty()) {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name());
     }
-    return moversService.movers(pair);
+    FuturesMoversService.Movers out = moversService.movers(pair);
+    return out.withFreshness(DataFreshness.live(out.asOf(), clock));
   }
 
   /** /banks: the queried index's futures term structure + calendar-spread basis. */
@@ -222,7 +229,8 @@ public class FuturesAnalyticsController {
     if (pair.isEmpty()) {
       throw new ApiException(422, ErrorCodes.DATA_GAP, "no snapshot for " + q.name());
     }
-    return moversService.banks(pair);
+    FuturesMoversService.Banks out = moversService.banks(pair);
+    return out.withFreshness(DataFreshness.live(out.asOf(), clock));
   }
 
   /**

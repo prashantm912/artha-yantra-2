@@ -1,6 +1,8 @@
 package in.arthayantra.marketdata.nse.analytics;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.marketdata.candles.CandleRepository;
+import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.nse.analytics.NseEodReader.ParticipantOiRow;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -47,10 +49,29 @@ public class ParticipantBiasService {
       long callNet,
       long putNet,
       String legBias,
-      int biasSign) {
+      int biasSign,
+      @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
+
+    public Bias(
+        LocalDate tradeDate,
+        String fiiClassification,
+        String bias,
+        BigDecimal fiiLongPct,
+        long callNet,
+        long putNet,
+        String legBias,
+        int biasSign) {
+      this(tradeDate, fiiClassification, bias, fiiLongPct, callNet, putNet, legBias, biasSign, null);
+    }
 
     static Bias neutral(LocalDate date) {
       return new Bias(date, "INSUFFICIENT", "NEUTRAL", null, 0, 0, "NEUTRAL", 0);
+    }
+
+    /** Returns a copy carrying the freshness envelope (populated at the controller boundary). */
+    public Bias withFreshness(DataFreshness f) {
+      return new Bias(
+          tradeDate, fiiClassification, bias, fiiLongPct, callNet, putNet, legBias, biasSign, f);
     }
   }
 

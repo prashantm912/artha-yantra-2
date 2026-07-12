@@ -83,16 +83,25 @@ public class PaperBracketEvaluator {
    * inverts both. SL is checked before TP. Pure (no I/O) so the breach logic is unit-tested directly.
    */
   static String breach(PositionRow pos, BigDecimal ltp) {
-    boolean isLong = "BUY".equals(pos.side());
-    if (pos.stopLoss() != null) {
-      boolean hit = isLong ? ltp.compareTo(pos.stopLoss()) <= 0 : ltp.compareTo(pos.stopLoss()) >= 0;
+    return breach(pos.side(), pos.stopLoss(), pos.takeProfit(), ltp);
+  }
+
+  /**
+   * The same breach test over raw {@code side} + bracket levels (either level nullable). Extracted so
+   * a bracket EDIT ({@code PATCH .../brackets}) can validate a proposed level against the current LTP
+   * with the EXACT inequalities the live evaluator uses — a level that passes this check will not be
+   * insta-closed on the next poll, and a level that would immediately fire is rejected up front. Pure.
+   */
+  static String breach(String side, BigDecimal stopLoss, BigDecimal takeProfit, BigDecimal ltp) {
+    boolean isLong = "BUY".equals(side);
+    if (stopLoss != null) {
+      boolean hit = isLong ? ltp.compareTo(stopLoss) <= 0 : ltp.compareTo(stopLoss) >= 0;
       if (hit) {
         return "STOP_LOSS";
       }
     }
-    if (pos.takeProfit() != null) {
-      boolean hit =
-          isLong ? ltp.compareTo(pos.takeProfit()) >= 0 : ltp.compareTo(pos.takeProfit()) <= 0;
+    if (takeProfit != null) {
+      boolean hit = isLong ? ltp.compareTo(takeProfit) >= 0 : ltp.compareTo(takeProfit) <= 0;
       if (hit) {
         return "TAKE_PROFIT";
       }

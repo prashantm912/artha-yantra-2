@@ -58,6 +58,18 @@ public class PaperFillService {
     return fills.simulate(request(side, qty, avgEntryPrice, meta, Slippage.ticks(0), Fees.DEFAULTS));
   }
 
+  /**
+   * The itemized statutory cost legs (brokerage + STT/txn/GST/stamp/SEBI) for a FILLED order at its
+   * recorded {@code fillPrice}, recomputed through the same engine cost model — DISPLAY-only provenance
+   * for the position-detail pane (audit §6.4). Deterministic: costs are a pure function of the turnover
+   * (qty × fillPrice), so zero added slippage reproduces exactly what the leg was charged. NOTE: uses the
+   * standard {@link Fees#DEFAULTS} schedule, so an EXPIRY_SETTLEMENT exit's exercise-rate STT is NOT
+   * distinguished here (a display approximation for the rare settlement leg; never touches booked P&amp;L).
+   */
+  public FillSimulator.CostBreakdown costs(Side side, long qty, BigDecimal fillPrice, InstrumentMeta meta) {
+    return fills.simulate(request(side, qty, fillPrice, meta, Slippage.ticks(0), Fees.DEFAULTS)).costs();
+  }
+
   private static FillRequest request(
       Side side, long qty, BigDecimal reference, InstrumentMeta meta, Slippage slippage, Fees fees) {
     Brokerage brokerage =

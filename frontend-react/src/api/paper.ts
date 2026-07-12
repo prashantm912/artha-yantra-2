@@ -61,6 +61,74 @@ export interface PaperTrade {
   closedAt: string;
 }
 
+/** The itemized statutory cost legs of one fill (recomputed for display, money-as-string). */
+export interface FeeBreakdown {
+  brokerage: string | null;
+  stt: string | null;
+  exchangeTxn: string | null;
+  gst: string | null;
+  stamp: string | null;
+  sebi: string | null;
+  total: string | null;
+}
+
+/** One order leg of a position (entry / averaged add / exit) with its fill-audit + recomputed fees. */
+export interface PaperOrderLeg {
+  orderId: number;
+  signalId: number | null;
+  side: 'BUY' | 'SELL';
+  qty: number;
+  status: string;
+  placedAt: string;
+  filledAt: string | null;
+  fillPrice: string | null;
+  fillSimulator: string | null;
+  slippageApplied: string | null;
+  fees: FeeBreakdown | null;
+}
+
+/** The signal that opened a position (audit H5) + its family enrichment side-channels. */
+export interface PaperOpeningSignal {
+  signalId: number;
+  status: string;
+  side: 'BUY' | 'SELL';
+  entryPrice: string | null;
+  stopLoss: string | null;
+  target: string | null;
+  compositeScore: string | null;
+  generatedAt: string;
+  scalperDetail: unknown;
+  minerviniDetail: unknown;
+  manasAroraDetail: unknown;
+}
+
+/** The full detail + provenance of one position (Phase-2 §6.4/§6.5) — the detail-pane + trade-chain payload. */
+export interface PaperPositionDetail {
+  id: number;
+  book: string;
+  exchange: string;
+  tradingsymbol: string;
+  side: 'BUY' | 'SELL';
+  qty: number;
+  avgEntryPrice: string;
+  markPrice: string | null;
+  unrealizedPnl: string | null;
+  realizedPnl: string;
+  status: string;
+  openedAt: string;
+  closedAt: string | null;
+  closeReason: string | null;
+  stopLoss: string | null;
+  takeProfit: string | null;
+  advisedLots: number | null;
+  marginSnapshot: string | null;
+  marginPct: string | null;
+  subaccountIdx: number | null;
+  openingSignalId: number | null;
+  openingSignal: PaperOpeningSignal | null;
+  orders: PaperOrderLeg[];
+}
+
 /** Daily realized-equity point + the aggregate summary. */
 export interface PaperPnl {
   points: { date: string; equity: string }[];
@@ -192,6 +260,40 @@ export function useClosePosition() {
         json: price ? { price } : {},
       }),
     onSuccess: invalidate,
+  });
+}
+
+/** The full detail + provenance of one position (Phase-2 detail pane); disabled when no id is selected. */
+export function usePaperPositionDetail(id: number | null) {
+  return useQuery({
+    queryKey: [PAPER, 'position-detail', id],
+    queryFn: () => apiFetch<PaperPositionDetail>(`/paper/positions/${id}`),
+    enabled: id != null,
+    refetchInterval: MTM_REFETCH_MS,
+  });
+}
+
+/** A manual bracket edit (either level; a level omitted is left unchanged). */
+export interface BracketEditRequest {
+  stopLoss?: string;
+  takeProfit?: string;
+}
+
+/**
+ * Edit an OPEN position's stop-loss / take-profit (HOLD-tier — the live 15s evaluator acts on the new
+ * level next pass). The BE 422s a level that would fire immediately against the current LTP; the fresh
+ * detail is written back into its own cache key on success and the ledger is invalidated.
+ */
+export function useEditBrackets() {
+  const invalidate = usePaperInvalidate();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: number } & BracketEditRequest) =>
+      apiFetch<PaperPositionDetail>(`/paper/positions/${id}/brackets`, { method: 'PATCH', json: body }),
+    onSuccess: (data) => {
+      invalidate();
+      qc.setQueryData([PAPER, 'position-detail', data.id], data);
+    },
   });
 }
 

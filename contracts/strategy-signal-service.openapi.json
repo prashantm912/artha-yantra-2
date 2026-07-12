@@ -1465,6 +1465,53 @@
         }
       }
     },
+    "/api/v1/paper/positions/{id}/brackets" : {
+      "patch" : {
+        "tags" : [ "paper-controller" ],
+        "operationId" : "editBrackets",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BracketBody"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PositionDetail"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/strategies/{id}/versions" : {
       "get" : {
         "tags" : [ "registry-controller" ],
@@ -2491,6 +2538,43 @@
                 "schema" : {
                   "type" : "object",
                   "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/positions/{id}" : {
+      "get" : {
+        "tags" : [ "paper-controller" ],
+        "operationId" : "positionDetail",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PositionDetail"
                 }
               }
             }
@@ -3784,6 +3868,210 @@
           },
           "channel" : {
             "type" : "string"
+          }
+        }
+      },
+      "BracketBody" : {
+        "type" : "object",
+        "properties" : {
+          "stopLoss" : {
+            "type" : "number"
+          },
+          "takeProfit" : {
+            "type" : "number"
+          }
+        }
+      },
+      "FeeBreakdown" : {
+        "type" : "object",
+        "properties" : {
+          "brokerage" : {
+            "type" : "number"
+          },
+          "stt" : {
+            "type" : "number"
+          },
+          "exchangeTxn" : {
+            "type" : "number"
+          },
+          "gst" : {
+            "type" : "number"
+          },
+          "stamp" : {
+            "type" : "number"
+          },
+          "sebi" : {
+            "type" : "number"
+          },
+          "total" : {
+            "type" : "number"
+          }
+        }
+      },
+      "OpeningSignal" : {
+        "type" : "object",
+        "properties" : {
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "entryPrice" : {
+            "type" : "number"
+          },
+          "stopLoss" : {
+            "type" : "number"
+          },
+          "target" : {
+            "type" : "number"
+          },
+          "compositeScore" : {
+            "type" : "number"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "scalperDetail" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "minerviniDetail" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "manasAroraDetail" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          }
+        }
+      },
+      "OrderLeg" : {
+        "type" : "object",
+        "properties" : {
+          "orderId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "placedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "filledAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "fillPrice" : {
+            "type" : "number"
+          },
+          "fillSimulator" : {
+            "type" : "string"
+          },
+          "slippageApplied" : {
+            "type" : "number"
+          },
+          "fees" : {
+            "$ref" : "#/components/schemas/FeeBreakdown"
+          }
+        }
+      },
+      "PositionDetail" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "book" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "avgEntryPrice" : {
+            "type" : "number"
+          },
+          "markPrice" : {
+            "type" : "number"
+          },
+          "unrealizedPnl" : {
+            "type" : "number"
+          },
+          "realizedPnl" : {
+            "type" : "number"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "openedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "closedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "closeReason" : {
+            "type" : "string"
+          },
+          "stopLoss" : {
+            "type" : "number"
+          },
+          "takeProfit" : {
+            "type" : "number"
+          },
+          "advisedLots" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "marginSnapshot" : {
+            "type" : "number"
+          },
+          "marginPct" : {
+            "type" : "number"
+          },
+          "subaccountIdx" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openingSignalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "openingSignal" : {
+            "$ref" : "#/components/schemas/OpeningSignal"
+          },
+          "orders" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OrderLeg"
+            }
           }
         }
       },

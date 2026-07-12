@@ -436,6 +436,22 @@ export interface paths {
         patch: operations["notifications"];
         trace?: never;
     };
+    "/api/v1/paper/positions/{id}/brackets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["editBrackets"];
+        trace?: never;
+    };
     "/api/v1/strategies/{id}/versions": {
         parameters: {
             query?: never;
@@ -780,6 +796,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["positions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/positions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["positionDetail"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1300,6 +1332,84 @@ export interface components {
         NotificationRequest: {
             enabled?: boolean;
             channel?: string;
+        };
+        BracketBody: {
+            stopLoss?: number;
+            takeProfit?: number;
+        };
+        FeeBreakdown: {
+            brokerage?: number;
+            stt?: number;
+            exchangeTxn?: number;
+            gst?: number;
+            stamp?: number;
+            sebi?: number;
+            total?: number;
+        };
+        OpeningSignal: {
+            /** Format: int64 */
+            signalId?: number;
+            status?: string;
+            side?: string;
+            entryPrice?: number;
+            stopLoss?: number;
+            target?: number;
+            compositeScore?: number;
+            /** Format: date-time */
+            generatedAt?: string;
+            scalperDetail?: components["schemas"]["JsonNode"];
+            minerviniDetail?: components["schemas"]["JsonNode"];
+            manasAroraDetail?: components["schemas"]["JsonNode"];
+        };
+        OrderLeg: {
+            /** Format: int64 */
+            orderId?: number;
+            /** Format: int64 */
+            signalId?: number;
+            side?: string;
+            /** Format: int64 */
+            qty?: number;
+            status?: string;
+            /** Format: date-time */
+            placedAt?: string;
+            /** Format: date-time */
+            filledAt?: string;
+            fillPrice?: number;
+            fillSimulator?: string;
+            slippageApplied?: number;
+            fees?: components["schemas"]["FeeBreakdown"];
+        };
+        PositionDetail: {
+            /** Format: int64 */
+            id?: number;
+            book?: string;
+            exchange?: string;
+            tradingsymbol?: string;
+            side?: string;
+            /** Format: int64 */
+            qty?: number;
+            avgEntryPrice?: number;
+            markPrice?: number;
+            unrealizedPnl?: number;
+            realizedPnl?: number;
+            status?: string;
+            /** Format: date-time */
+            openedAt?: string;
+            /** Format: date-time */
+            closedAt?: string;
+            closeReason?: string;
+            stopLoss?: number;
+            takeProfit?: number;
+            /** Format: int64 */
+            advisedLots?: number;
+            marginSnapshot?: number;
+            marginPct?: number;
+            /** Format: int32 */
+            subaccountIdx?: number;
+            /** Format: int64 */
+            openingSignalId?: number;
+            openingSignal?: components["schemas"]["OpeningSignal"];
+            orders?: components["schemas"]["OrderLeg"][];
         };
         AuditLogResponse: {
             items?: components["schemas"]["AuditRow"][];
@@ -2827,6 +2937,41 @@ export interface operations {
             };
         };
     };
+    editBrackets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BracketBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PositionDetail"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     versions: {
         parameters: {
             query?: {
@@ -3543,6 +3688,37 @@ export interface operations {
                     "*/*": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    positionDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PositionDetail"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

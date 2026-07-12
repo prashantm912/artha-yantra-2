@@ -131,24 +131,58 @@ public class PaperOrderRepository {
                fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask
         FROM paper_orders ORDER BY placed_at DESC LIMIT ? OFFSET ?
         """,
-        (rs, n) ->
-            new OrderRow(
-                rs.getLong("id"),
-                (Long) rs.getObject("signal_id"),
-                rs.getString("exchange"),
-                rs.getString("tradingsymbol"),
-                rs.getString("side"),
-                rs.getLong("qty"),
-                rs.getString("status"),
-                rs.getObject("placed_at", OffsetDateTime.class),
-                rs.getObject("filled_at", OffsetDateTime.class),
-                rs.getBigDecimal("fill_price"),
-                rs.getString("fill_simulator"),
-                rs.getBigDecimal("slippage_applied"),
-                rs.getBigDecimal("quote_bid"),
-                rs.getBigDecimal("quote_ask")),
+        PaperOrderRepository::mapOrder,
         Math.min(Math.max(limit, 1), 500),
         Math.max(offset, 0));
+  }
+
+  /**
+   * The order legs of ONE position: every fill for its {@code (book, exchange, tradingsymbol)} whose
+   * fill time falls within the position's lifetime {@code [openedAt, coalesce(closedAt, now())]},
+   * oldest-first. Captures the entry leg(s) — same side, including averaged adds — and the opposite-side
+   * exit leg. Book- + time-scoped so a re-opened key attributes each leg to the right lifetime (the same
+   * disambiguation the V026 opening-signal backfill uses). DISPLAY provenance for the detail pane (§6.4).
+   */
+  public List<OrderRow> legsForPosition(
+      String book,
+      String exchange,
+      String tradingsymbol,
+      OffsetDateTime openedAt,
+      OffsetDateTime closedAt) {
+    return jdbc.query(
+        """
+        SELECT id, signal_id, exchange, tradingsymbol, side, qty, status, placed_at, filled_at,
+               fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask
+        FROM paper_orders
+        WHERE book=? AND exchange=? AND tradingsymbol=?
+          AND COALESCE(filled_at, placed_at) >= ?
+          AND COALESCE(filled_at, placed_at) <= COALESCE(?, now())
+        ORDER BY COALESCE(filled_at, placed_at) ASC, id ASC
+        """,
+        PaperOrderRepository::mapOrder,
+        book,
+        exchange,
+        tradingsymbol,
+        openedAt,
+        closedAt);
+  }
+
+  private static OrderRow mapOrder(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
+    return new OrderRow(
+        rs.getLong("id"),
+        rs.getObject("signal_id", Long.class),
+        rs.getString("exchange"),
+        rs.getString("tradingsymbol"),
+        rs.getString("side"),
+        rs.getLong("qty"),
+        rs.getString("status"),
+        rs.getObject("placed_at", OffsetDateTime.class),
+        rs.getObject("filled_at", OffsetDateTime.class),
+        rs.getBigDecimal("fill_price"),
+        rs.getString("fill_simulator"),
+        rs.getBigDecimal("slippage_applied"),
+        rs.getBigDecimal("quote_bid"),
+        rs.getBigDecimal("quote_ask"));
   }
 
   /** Wipes a book's order log ({@code book} null → all books; paper reset). */

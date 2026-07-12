@@ -11,6 +11,7 @@ import { Skeleton } from '../../components/Skeletons.tsx';
 import { LoadBeat } from '../../components/LoadBeat.tsx';
 import { useLiveTicks } from '../../api/ticks.ts';
 import type { PaperPosition } from '../../api/paper.ts';
+import { PositionDetailDrawer } from '../../components/paper/PositionDetailDrawer.tsx';
 import {
   bookLabel,
   riskEnabled,
@@ -65,6 +66,8 @@ export function PaperPage() {
   const [capitalDraft, setCapitalDraft] = useState('');
   const [maxOpenDraft, setMaxOpenDraft] = useState('');
   const [dailyLossDraft, setDailyLossDraft] = useState('');
+  // The position whose detail drawer is open (an open position id OR a closed trade's id = its position).
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const acct = account.data ?? null;
   const summary = pnl.data?.summary ?? null;
@@ -320,6 +323,13 @@ export function PaperPage() {
                         <td className="px-2 py-2 text-right">
                           <button
                             type="button"
+                            onClick={() => setDetailId(p.id)}
+                            className="rounded px-2 py-1 text-xs text-accent hover:underline"
+                          >
+                            Detail
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => closePosition.mutate({ id: p.id })}
                             className="rounded px-2 py-1 text-xs text-accent hover:underline"
                           >
@@ -352,7 +362,13 @@ export function PaperPage() {
                 {(trades.data?.items ?? []).map((t) => (
                   <tr key={t.id} className="border-t border-ay-border">
                     <td className="px-2 py-2">
-                      {t.exchange}:{t.tradingsymbol}
+                      <button
+                        type="button"
+                        onClick={() => setDetailId(t.id)}
+                        className="text-left text-accent hover:underline"
+                      >
+                        {t.exchange}:{t.tradingsymbol}
+                      </button>
                     </td>
                     <td className="px-2 py-2">{t.side}</td>
                     <td className="px-2 py-2 text-right tabular-nums">{t.qty}</td>
@@ -386,6 +402,14 @@ export function PaperPage() {
           )}
         </section>
       </div>
+
+      <PositionDetailDrawer
+        positionId={detailId}
+        open={detailId != null}
+        onOpenChange={(o) => {
+          if (!o) setDetailId(null);
+        }}
+      />
     </LoadBeat>
   );
 }

@@ -6,6 +6,7 @@ import type {
   BanksAnalysis,
   BigOiLog,
   Breadth,
+  ChainHistory,
   ChainTable,
   ConnectingDots,
   EquityDelivery,
@@ -35,6 +36,7 @@ import type {
   ParticipantOiRow,
   PcrSeriesPoint,
   PremiumChain,
+  PremiumSeries,
   SpurtChain,
   StraddleChart,
   CalendarSpreadChart,
@@ -475,6 +477,49 @@ export function useOptionsPremium() {
     queryFn: () =>
       oiGet<PremiumChain | null>('/market/options/premium', oiParams(ctx, true), null),
     enabled: satisfiable(ctx, true),
+  });
+}
+
+/**
+ * Option Premium Decay (§options/options-premium — the /premium-series feed): the ATM straddle per
+ * bucket over the session's last N intervals. A standard OI read (mode/name/date/interval/expiry) →
+ * 422 DATA_GAP maps to the empty shape (the page renders its empty-state copy).
+ */
+export function usePremiumSeries() {
+  const ctx = useOiCtx();
+  return useQuery({
+    queryKey: ['oi', 'premium-series', ctx.name, ctx.expiry, ctx.interval, ctx.mode, ctx.date],
+    queryFn: () =>
+      oiGet<PremiumSeries | null>('/market/options/premium-series', oiParams(ctx, true), null),
+    enabled: satisfiable(ctx, true),
+  });
+}
+
+/**
+ * Chain time-travel (§6.8 / audit §2.4-2): the stored snapshot NEAREST `at` (a full IST ISO datetime
+ * the caller builds from the history date + slider time). Unlike the fold endpoints this reads the raw
+ * `options_chain_snapshots` rows and 404s when NO snapshot exists for the (underlying, expiry) — that
+ * is the honest pre-capture / derived-history empty state, mapped to null (not a toast). `enabled`
+ * gates the fetch to when the time-travel panel is open with a resolved name/expiry/at.
+ */
+export function useChainHistory(at: string | null, enabled: boolean) {
+  const name = useSymbolContext((s) => s.name);
+  const expiry = useSymbolContext((s) => s.expiry);
+  return useQuery({
+    queryKey: ['oi', 'chain-history', name, expiry, at],
+    queryFn: async (): Promise<ChainHistory | null> => {
+      const p = new URLSearchParams({ underlying: name });
+      if (expiry) p.set('expiry', expiry);
+      if (at) p.set('at', at);
+      try {
+        return await apiFetch<ChainHistory>(`/market/options/chain/history?${p.toString()}`);
+      } catch (err) {
+        // 404 = no stored snapshot near `at` (pre-capture / derived session) → honest empty state.
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
+    },
+    enabled: enabled && !!name && !!expiry && !!at,
   });
 }
 

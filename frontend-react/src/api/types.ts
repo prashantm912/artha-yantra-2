@@ -392,6 +392,41 @@ export interface ChainTable {
   rows: ChainTableRow[];
 }
 
+/**
+ * One raw row of GET /api/v1/market/options/chain/history — a stored snapshot leg (chain time-travel).
+ * Money/greeks ride the wire as decimal STRINGS (BigDecimal-as-string); oi/volume are longs. Unlike the
+ * live /chain-table feed there are NO computed interval deltas — the raw capture carries only oi_change.
+ */
+export interface ChainHistoryRow {
+  ts: string;
+  strike: string;
+  optionType: 'CE' | 'PE';
+  tradingsymbol: string;
+  ltp: string | null;
+  bid: string | null;
+  ask: string | null;
+  volume: number | null;
+  oi: number | null;
+  oiChange: number | null;
+  spotPrice: string | null;
+  iv: string | null;
+  delta: string | null;
+  gamma: string | null;
+  theta: string | null;
+  vega: string | null;
+  rho: string | null;
+  ivReason: string | null;
+  priceSource: string | null;
+}
+
+/** GET /api/v1/market/options/chain/history — the stored snapshot nearest `at` (404 pre-capture). */
+export interface ChainHistory {
+  underlying: string;
+  expiry: string;
+  ts: string;
+  rows: ChainHistoryRow[];
+}
+
 // ── Wave-2 depth pages (master plan §20.3). BigDecimal → string, long → number (see header note).
 
 /** GET /api/v1/market/options/trending — one bucket: total/CE/PE OI + underlying spot + UP/DOWN/FLAT. */
@@ -438,6 +473,20 @@ export interface PremiumChain {
   atmStraddle: string | null;
   spot: string | null;
   asOf: string;
+}
+
+/** One bucket of GET /api/v1/market/options/premium-series — the ATM straddle over the session. */
+export interface PremiumSeriesPoint {
+  bucket: string;
+  atmStrike: string | null;
+  atmStraddle: string | null;
+  spot: string | null;
+}
+
+/** GET /api/v1/market/options/premium-series — the ATM-straddle decay curve; 422 on no snapshot. */
+export interface PremiumSeries {
+  items: PremiumSeriesPoint[];
+  asOf: string | null;
 }
 
 /** One contract of GET /api/v1/market/futures/spurt — interval buildup + day price%. */

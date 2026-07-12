@@ -114,6 +114,7 @@ export function OptionsSpurtPage() {
                 title={q.title}
                 subtitle={q.subtitle}
                 rows={byQuadrant[q.state]}
+                linkStrikeToChart
               />
             ))}
           </BeatBlock>

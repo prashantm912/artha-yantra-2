@@ -1,10 +1,14 @@
 import { useMemo, useState } from 'react';
+import { History } from 'lucide-react';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { nearestStrike } from '../../lib/strikes.ts';
+import { cn } from '../../lib/cn.ts';
 import { loadDensity, saveDensity, type Density } from '../../lib/density.ts';
 import { useChainTable, useVix } from '../../api/oiAnalytics.ts';
+import { useSymbolContext } from '../../stores/symbolContext.store.ts';
 import { FilterBar } from '../../components/FilterBar.tsx';
 import { StockOiWarmBar } from '../../components/StockOiWarmBar.tsx';
+import { ChainTimeTravel } from '../../components/ChainTimeTravel.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { ColumnSettings } from '../../components/ColumnSettings.tsx';
@@ -64,6 +68,10 @@ export function OptionsChainPage() {
   const vixQ = useVix();
   const [optional, setOptional] = useState<Record<string, boolean>>({});
   const [density, setDensity] = useState<Density>(() => loadDensity());
+  const mode = useSymbolContext((s) => s.mode);
+  // Chain time-travel (audit §6.8): a history-mode slider replaying captured snapshot buckets.
+  const [timeTravel, setTimeTravel] = useState(false);
+  const showTimeTravel = mode === 'history' && timeTravel;
 
   const changeDensity = (d: Density) => {
     setDensity(d);
@@ -118,6 +126,21 @@ export function OptionsChainPage() {
           onToggle={(key) => setOptional((v) => ({ ...v, [key]: !v[key] }))}
         />
         <DensityToggle value={density} onChange={changeDensity} />
+        {mode === 'history' && (
+          <button
+            type="button"
+            onClick={() => setTimeTravel((v) => !v)}
+            aria-pressed={timeTravel}
+            title="Rewind the session through the day's captured chain snapshots"
+            className={cn(
+              'inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-sm text-ay-text',
+              timeTravel ? 'border-accent bg-accent/10' : 'border-ay-border bg-surface-2',
+            )}
+          >
+            <History aria-hidden="true" className="size-4" />
+            Time travel
+          </button>
+        )}
       </div>
 
       {/* Stock underlyings: the interval-Δ columns need warmed OI (audit §9.3) — offer the load. */}
@@ -150,28 +173,36 @@ export function OptionsChainPage() {
         </BeatItem>
       </BeatStrip>
 
-      {/* Audit 2026-07-02 §3-P0: the table used to render its FINAL "No chain for this selection"
-          copy while the chain query was still pending (or gated on the expiry cascade) — the operator
-          couldn't tell quiet market from still-loading. QueryState now owns the 4-way split. */}
-      <QueryState
-        query={chainQ}
-        isEmpty={() => rows.length === 0}
-        empty={{ title: 'No chain for this selection — pick an underlying + expiry with a live option chain.' }}
-        errorTitle="Couldn't load the options chain"
-        skeleton={<Skeleton variant="table-rows" rows={14} cols={9} />}
-      >
-        {() => (
-          <BeatBlock>
-            <OptionsChainTable
-              rows={rows}
-              spot={chain?.spot ?? null}
-              atmStrike={atm}
-              optionalKeys={optionalKeys}
-              density={density}
-            />
-          </BeatBlock>
-        )}
-      </QueryState>
+      {/* Chain time-travel (history mode): replay a captured snapshot bucket instead of the live fold. */}
+      {showTimeTravel ? (
+        <BeatBlock>
+          <ChainTimeTravel density={density} />
+        </BeatBlock>
+      ) : (
+        /* Audit 2026-07-02 §3-P0: the table used to render its FINAL "No chain for this selection"
+           copy while the chain query was still pending (or gated on the expiry cascade) — the operator
+           couldn't tell quiet market from still-loading. QueryState now owns the 4-way split. */
+        <QueryState
+          query={chainQ}
+          isEmpty={() => rows.length === 0}
+          empty={{ title: 'No chain for this selection — pick an underlying + expiry with a live option chain.' }}
+          errorTitle="Couldn't load the options chain"
+          skeleton={<Skeleton variant="table-rows" rows={14} cols={9} />}
+        >
+          {() => (
+            <BeatBlock>
+              <OptionsChainTable
+                rows={rows}
+                spot={chain?.spot ?? null}
+                atmStrike={atm}
+                optionalKeys={optionalKeys}
+                density={density}
+                linkStrikeToChart
+              />
+            </BeatBlock>
+          )}
+        </QueryState>
+      )}
     </LoadBeat>
   );
 }

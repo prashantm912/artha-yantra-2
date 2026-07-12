@@ -156,12 +156,19 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     # a fail-soft ntfy client (blank ARTHA_NTFY_TOPIC → no-op), the strategy-signal registry client
     # (create + publish the clone, service-to-service), the jobs factory (read the candidate's sweep
     # for the base config), and the §1.4.3 per-family evo-paper cap.
+    # Slice 3 (§12 item 13) adds the TAKE_ELIGIBLE / PROMOTE / ROLLBACK actions + demoted-champion
+    # counterfactual registration — so it also gets the live-evidence repo (the evo clone's paper
+    # book + config, strategy schema, read as `artha`) + the reconciliation store (the §7.2 live-gap
+    # verdict) for the assessment reads. Still NOTHING self-arms: assessment only advances state to
+    # TAKE_ELIGIBLE and mints owner-inbox proposals; PROMOTE/ROLLBACK stay owner-clicked (execute).
     app.state.proposals = proposals.ProposalService(
         repo_factory=lambda: EvoRepo(open_conn()),
         ntfy=NtfyClient(settings.ntfy_url, settings.ntfy_topic),
         strategy_client=StrategyClient(settings.strategy_signal_base),
         jobs_factory=lambda: JobsRepo(open_conn()),
         evo_paper_cap=settings.evo_paper_cap,
+        live_factory=lambda: LiveEvidenceRepo(open_conn()),
+        recon_factory=lambda: ReconciliationRepo(open_conn()),
     )
 
     @app.get("/health")

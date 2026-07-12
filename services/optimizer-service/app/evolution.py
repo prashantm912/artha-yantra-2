@@ -593,6 +593,9 @@ class SelectionResult(BaseModel):
     survivors: int
     retired: int
     updated: int
+    # §8.2: each newly-RETIRED candidate gets an auto-APPROVED RETIRE acknowledge-row (actor
+    # ``evo:{campaignId}``) — the count minted THIS pass (idempotent: a re-select mints none).
+    retireAcks: int = 0
     items: list[CandidateModel] = []
 
 
@@ -760,6 +763,7 @@ class EvoRecorderService:
             candidates = repo.list_candidates_for_generation(generation_id)
             decisions = _decide_selection(candidates, top_k, n)
             updated: list[dict[str, Any]] = []
+            retire_acks = 0
             for decision in decisions:
                 if decision["changed"]:
                     row = repo.update_candidate_selection(
@@ -767,6 +771,13 @@ class EvoRecorderService:
                     )
                     if row is not None:
                         updated.append(row)
+                # §8.2: RETIRE applies autonomously (no owner gate) — write an auto-APPROVED RETIRE
+                # acknowledge-row so the inbox shows it as a review/acknowledge item (§8.2 audit
+                # trail). Idempotent: one RETIRE ack per candidate (a re-select mints none).
+                if decision["state"] == "RETIRED" and _ensure_retire_ack(
+                    repo, campaign_id, decision, n
+                ):
+                    retire_acks += 1
         finally:
             repo.close()
         return SelectionResult(
@@ -777,8 +788,42 @@ class EvoRecorderService:
             survivors=sum(1 for d in decisions if d["state"] == "SURVIVOR"),
             retired=sum(1 for d in decisions if d["state"] == "RETIRED"),
             updated=len(updated),
+            retireAcks=retire_acks,
             items=[CandidateModel(**r) for r in updated],
         )
+
+
+# The autonomous-RETIRE acknowledge-row kind (§8.2). Kept as a local literal — evolution.py must not
+# import proposals.py (they both hang off the /api/v1/evolution router; a one-way import is harmless
+# today but the literal keeps the modules decoupled).
+_RETIRE_KIND = "RETIRE"
+
+
+def _ensure_retire_ack(
+    repo: Any, campaign_id: str, decision: dict[str, Any], n: int
+) -> bool:
+    """§8.2: write an auto-APPROVED RETIRE acknowledge-row for a newly-RETIRED candidate (actor
+    ``evo:{campaignId}``), idempotently — one RETIRE proposal per candidate (a re-select finds the
+    existing one and mints none). Returns True iff a new ack row was written."""
+    candidate_id = decision["candidateId"]
+    if repo.find_latest_proposal(candidate_id, _RETIRE_KIND) is not None:
+        return False
+    selection = (decision.get("scorecard") or {}).get("selection") or {}
+    evidence = {
+        "kind": _RETIRE_KIND,
+        "candidateId": candidate_id,
+        "decision": "RETIRED",
+        "reason": selection.get("reason"),
+        "generationN": n,
+        "note": (
+            "autonomous RETIRE (§8.2) — auto-APPROVED acknowledge row, no owner gate. Retired != "
+            "deleted: the archived draft + scorecard stay, reversible by re-proposing."
+        ),
+    }
+    repo.insert_acknowledged_proposal(
+        campaign_id, candidate_id, _RETIRE_KIND, evidence, f"evo:{campaign_id}"
+    )
+    return True
 
 
 def _decide_selection(

@@ -792,6 +792,65 @@ class EvoRepo:
         self._conn.commit()
         return _proposal_row(row) if row is not None else None
 
+    # --- E4 slice 3: TAKE_ELIGIBLE / PROMOTE / ROLLBACK + RETIRE acks (§8.1-8.2 / §12 item 13) ----
+
+    def find_latest_proposal(self, candidate_id: str, kind: str) -> dict[str, Any] | None:
+        """The newest proposal for a (candidate, kind) in ANY status — the ROLLBACK generator reads
+        the candidate's prior PROMOTE proposal (for the demoted-champion / rollback target), and the
+        RETIRE-ack write uses it for idempotency (a re-select must not mint a second ack). Distinct
+        from ``find_open_proposal`` (which is PENDING-only, the OPEN-proposal idempotency key)."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_PROPOSAL_COLS} FROM evo_proposals "
+                "WHERE candidate_id=%s AND kind=%s ORDER BY created_at DESC LIMIT 1",
+                (candidate_id, kind),
+            )
+            row = cur.fetchone()
+        return _proposal_row(row) if row is not None else None
+
+    def insert_acknowledged_proposal(
+        self,
+        campaign_id: str,
+        candidate_id: str | None,
+        kind: str,
+        evidence: dict[str, Any] | None,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Insert an already-decided (status APPROVED) proposal — the §8.2 RETIRE acknowledge-row:
+        RETIRE applies autonomously (no owner gate), so its evo_proposals row is auto-APPROVED with
+        actor ``evo:{campaignId}`` and ``decided_at=now()`` at insert (the inbox shows it as a
+        review/acknowledge item, never a pending gate). ``expires_at`` still set (7d) for a uniform
+        row shape, though a terminal row never expires."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO evo_proposals "
+                "(campaign_id, candidate_id, kind, evidence, status, actor, decided_at, "
+                "expires_at) VALUES "
+                "(%s, %s, %s, %s::jsonb, 'APPROVED', %s, now(), now() + interval '7 days') "
+                f"RETURNING {_PROPOSAL_COLS}",
+                (campaign_id, candidate_id, kind, _jsonb(evidence), actor),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _proposal_row(row)
+
+    def update_campaign_champion(
+        self, campaign_id: str, version_id: str | None
+    ) -> dict[str, Any] | None:
+        """Move the campaign's champion pointer (``champion_version_id``) — PROMOTE sets it to the
+        newly-published version, ROLLBACK restores the demoted champion's version. ``updated_at`` is
+        maintained explicitly (the DDL default fires on INSERT only — an UPDATE must set it,
+        V011:74-76). RETURNs the updated campaign row."""
+        with self._conn.cursor() as cur:
+            cur.execute(
+                "UPDATE evo_campaigns SET champion_version_id=%s, updated_at=now() "
+                f"WHERE id=%s RETURNING {_CAMPAIGN_COLS}",
+                (version_id, campaign_id),
+            )
+            row = cur.fetchone()
+        self._conn.commit()
+        return _campaign_row(row) if row is not None else None
+
 
 def _reconciliation_row(r: tuple) -> dict[str, Any]:
     return {

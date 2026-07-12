@@ -196,6 +196,26 @@
       "422"
     ]
   },
+  "POST /api/v1/evolution/campaigns/{campaign_id}/rollback-check": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
+  "POST /api/v1/evolution/campaigns/{campaign_id}/take-eligible": {
+    "params": [
+      "campaign_id"
+    ],
+    "requestBody": false,
+    "responses": [
+      "200",
+      "422"
+    ]
+  },
   "POST /api/v1/evolution/generations/{generation_id}/stress": {
     "params": [
       "generation_id"

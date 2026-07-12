@@ -257,10 +257,12 @@ def test_execute_is_not_double_publishable():
     assert strategy.created == []
 
 
-def test_execute_rejects_a_non_publish_paper_kind():
+def test_execute_rejects_a_non_executable_kind():
+    # RETIRE rows are auto-APPROVED acknowledge items, never executed (PROMOTE/ROLLBACK ARE
+    # executable as of slice 3, so the unexecutable case is now RETIRE).
     repo, jobs = FakeEvoRepo(), FakeJobs()
     client = _app(repo, jobs, FakeTrials(), FakeBacktest(folds=[]), FakeStrategy(_CONFIG))
-    pid = _seed(repo, jobs, kind="PROMOTE")
+    pid = _seed(repo, jobs, kind="RETIRE")
     resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
     assert resp.status_code == 422
     assert resp.json()["code"] == "PROPOSAL_KIND_NOT_EXECUTABLE"

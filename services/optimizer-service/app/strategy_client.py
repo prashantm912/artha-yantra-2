@@ -128,3 +128,41 @@ class StrategyClient:
         resp = self._client.get(f"{self._base}/api/v1/strategies", params=params)
         resp.raise_for_status()
         return resp.json().get("items", [])
+
+    # --- EVO E4 slice 3: PROMOTE / ROLLBACK registry writes (§8.2) -------------------------------
+
+    def rollback(
+        self, strategy_id: str, version: str, and_publish: bool = True
+    ) -> dict[str, Any]:
+        """POST /api/v1/strategies/{id}/rollback — the copy-forward rollback (RegistryController
+        ``RollbackRequest{version, andPublish}``, returns 201). EVO E4 ROLLBACK (§8.2) restores the
+        demoted-champion SEMVER as a new version and republishes it (``andPublish=true``), so the
+        champion pointer moves back. Returns the registry body ``{id, version, status, ...}``."""
+        resp = self._client.post(
+            f"{self._base}/api/v1/strategies/{strategy_id}/rollback",
+            json={"version": version, "andPublish": and_publish},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def register_shadow_variant(
+        self,
+        name: str,
+        campaign_id: str | None,
+        spec: dict[str, Any],
+        created_by: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /api/v1/shadow-variants — register a runtime shadow challenger variant (#733,
+        ``ShadowVariantsController.RegisterRequest{name, campaignId, spec, createdBy}``, returns
+        201). EVO E4 PROMOTE (§8.2) uses this to keep the DEMOTED CHAMPION accruing counterfactual
+        P&L for a scalper family (the shadow book hosts scalper rejection-path entries only).
+        ``spec`` is the variant vocabulary body ``{rails, compositeThreshold}`` (unknown knobs 422).
+        Returns the created ``ShadowVariantView``."""
+        body: dict[str, Any] = {"name": name, "spec": spec}
+        if campaign_id is not None:
+            body["campaignId"] = campaign_id
+        if created_by is not None:
+            body["createdBy"] = created_by
+        resp = self._client.post(f"{self._base}/api/v1/shadow-variants", json=body)
+        resp.raise_for_status()
+        return resp.json()

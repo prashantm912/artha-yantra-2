@@ -126,6 +126,13 @@ const SECTIONS: MenuSection[] = [
     ],
   },
   {
+    title: 'Evolution',
+    items: [
+      { label: 'Campaigns', to: '/evolution' }, // EVO-E6 — campaign board + promotion pipeline
+      { label: 'Proposals', to: '/evolution/proposals' }, // EVO-E6 — owner-gated approval inbox
+    ],
+  },
+  {
     title: 'Features',
     items: [
       { label: 'Connecting Dots', to: '/features/connecting-dots' }, // multi-factor matrix (§20.7.8)

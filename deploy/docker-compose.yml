@@ -426,6 +426,10 @@ services:
       # alerted, never refused). Defaults MIRROR the application.yml @Value defaults.
       ARTHA_PAPER_TICK_MAX_AGE_SECONDS: ${ARTHA_PAPER_TICK_MAX_AGE_SECONDS:-15}
       ARTHA_PAPER_BRACKET_STARVATION_ALERT_MINUTES: ${ARTHA_PAPER_BRACKET_STARVATION_ALERT_MINUTES:-2}
+      # HOLD (task_94f40cf6) signal-freshness gate on the MANUAL take path: a signal-linked hand ticket
+      # whose SIGNAL is older than this (minutes) on a NON-swing book is rejected SIGNAL_STALE. Swing
+      # books (minervini / manas-arora) are exempt; 0/negative disables. Default MIRRORS application.yml.
+      ARTHA_PAPER_SIGNAL_TAKE_MAX_AGE_MINUTES: ${ARTHA_PAPER_SIGNAL_TAKE_MAX_AGE_MINUTES:-60}
       # F7 auto-promotion: the daily 21:00-IST evaluator that marks a strategy GRADUATED (measurement +
       # ntfy only, never a live action). Default off; flip true to arm the marker pass.
       ARTHA_GRADUATION_PROMOTION_ENABLED: ${ARTHA_GRADUATION_PROMOTION_ENABLED:-false}

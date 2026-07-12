@@ -13,6 +13,7 @@ import in.arthayantra.strategyengine.eval.EntryEvaluator;
 import in.arthayantra.strategyengine.eval.ExitEvaluator;
 import in.arthayantra.strategyengine.eval.IndicatorBank;
 import in.arthayantra.strategyengine.eval.ScoreBreakdownJson;
+import in.arthayantra.strategyengine.eval.SeriesProvider;
 import in.arthayantra.strategyengine.golden.TickwiseGoldenRunner;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
@@ -753,7 +754,8 @@ public class SignalEngine {
     }
   }
 
-  private void preCloseEvaluate(
+  // Package-visible for BtstPreCloseExitIntegrationTest (drives the exit sweep directly).
+  void preCloseEvaluate(
       Loaded strategy, StrategyDefinition.InstrumentRef instrument, LocalDate today) {
     EngineSeries oneMinute =
         seriesStore.series(
@@ -766,14 +768,6 @@ public class SignalEngine {
       dayBars.add(oneMinute.candle(i));
     }
     if (dayBars.isEmpty() || !EngineSeries.sessionDate(dayBars.get(0)).equals(today)) {
-      return;
-    }
-    // E12 §3.8 avoid-Friday carry (tag avoid-friday-carry): a BTST/STBT position opened on a Friday
-    // carries weekend-gap risk (2+ nights, beyond the strategy's "<=1 night" mandate) — skip the carry
-    // entirely on Fridays. Default-OFF; only the btst YAMLs carrying the tag opt in.
-    if (strategy.scalper() != null
-        && strategy.scalper().has("avoid-friday-carry")
-        && today.getDayOfWeek() == java.time.DayOfWeek.FRIDAY) {
       return;
     }
     SeriesKey dailyKey =
@@ -802,8 +796,33 @@ public class SignalEngine {
     } catch (IllegalArgumentException alreadyHasToday) {
       // the 1d cagg already rolled today's bucket — evaluate on what's there
     }
-    IndicatorBank bank = IndicatorBank.build(strategy.definition(), instrument, seriesStore);
     int index = daily.size() - 1;
+    // P0-5 live port (chip task_3e95fade): the sim (TickwiseGoldenRunner btst branch) evaluates the
+    // strategy's exit_rules at each SUBSEQUENT pre-close daily bar, so a btst carry EXITS next session
+    // (close→close; time_stop max_holding_days:1 fires one trading day later) instead of never exiting
+    // live. Sweep an active carry from a PRIOR session HERE, before the entry evaluation — mirroring the
+    // runner's exit-before-entry ordering. Runs even for an avoid-friday-carry strategy (a Thursday carry
+    // must still EXIT on Friday; only a fresh Friday ENTRY is skipped below). An active carry is never
+    // ALSO re-opened on the same clock (return after the sweep — conservative vs the sim's same-bar
+    // re-entry). Live-only — the golden replay never runs preCloseClock, so vectors stay byte-identical.
+    Optional<SignalRepository.SignalRow> activeCarry =
+        signals.activeEntry(
+            strategy.versionId(), instrument.exchange(), instrument.tradingsymbol());
+    if (activeCarry.isPresent()) {
+      sweepBtstExit(
+          strategy, instrument, daily, index, dayBars.get(dayBars.size() - 1), activeCarry.get());
+      return;
+    }
+    // E12 §3.8 avoid-Friday carry (tag avoid-friday-carry): a fresh BTST/STBT ENTRY on a Friday carries
+    // weekend-gap risk (2+ nights, beyond the strategy's "<=1 night" mandate) — skip OPENING the carry on
+    // Fridays. Default-OFF; only the btst YAMLs carrying the tag opt in. The EXIT sweep above already ran,
+    // so a carry opened earlier in the week still exits today.
+    if (strategy.scalper() != null
+        && strategy.scalper().has("avoid-friday-carry")
+        && today.getDayOfWeek() == java.time.DayOfWeek.FRIDAY) {
+      return;
+    }
+    IndicatorBank bank = IndicatorBank.build(strategy.definition(), instrument, seriesStore);
     Optional<EntryEvaluator.Evaluation> evaluation =
         EntryEvaluator.evaluate(strategy.definition(), bank, index);
     if (evaluation.isPresent() && evaluation.get().entry()) {
@@ -839,6 +858,53 @@ public class SignalEngine {
       emitEntry(
           strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", lastOneMinute,
           evaluation.get(), null, null);
+    }
+  }
+
+  /**
+   * The BTST exit sweep (P0-5 live port of {@code TickwiseGoldenRunner}'s btst branch): evaluate the
+   * strategy's exit_rules against the pre-close DAILY series — one bar per session — exactly as the sim
+   * does, so a live carry exits close→close (a {@code time_stop max_holding_days:1} fires one trading day
+   * after entry) and a {@code premium_pct} stop reads the same bars. The sim repurposes the
+   * primaryTimeframe-keyed series to HOLD the pre-close daily bars, so its {@code bank.primarySeries()}
+   * IS that daily series; this mirrors that with a provider that maps the primary timeframe to
+   * {@code daily} (non-primary indicator timeframes — e.g. a 1h bias — resolve through the live store,
+   * already refreshed by the caller). The entry anchor is the daily bar at or before the signal's
+   * {@code generated_at} (the entry session's bar); the direction is the HELD side
+   * ({@link #scalperPositionDirection}). Emits the EXIT (which closes the linked paper position via
+   * {@code SignalExited}) only when a rule fires. Live-only — never runs on the deterministic replay.
+   */
+  private void sweepBtstExit(
+      Loaded strategy,
+      StrategyDefinition.InstrumentRef instrument,
+      EngineSeries daily,
+      int index,
+      EngineCandle preCloseBar,
+      SignalRepository.SignalRow activeCarry) {
+    SeriesProvider dailyPrimary =
+        key ->
+            key.exchange().equals(instrument.exchange())
+                    && key.tradingsymbol().equals(instrument.tradingsymbol())
+                    && key.interval().equals(strategy.definition().primaryTimeframe())
+                ? daily
+                : seriesStore.series(key);
+    IndicatorBank bank = IndicatorBank.build(strategy.definition(), instrument, dailyPrimary);
+    // The entry session's daily-bar index: generated_at is the entry-day pre-close instant (~15:20 IST),
+    // and each daily bar starts at 00:00 IST, so indexAtOrBefore lands on the entry session's bar. Clamp
+    // to [0, index] (a warmup-window miss floors to 0; it can never be after today's appended bar).
+    int entryIndex =
+        Math.min(Math.max(daily.indexAtOrBefore(activeCarry.generatedAt().toInstant()), 0), index);
+    Optional<ExitEvaluator.ExitDecision> exit =
+        ExitEvaluator.evaluate(
+            strategy.definition(),
+            bank,
+            new ExitEvaluator.Position(
+                scalperPositionDirection(strategy, activeCarry), activeCarry.entryPrice(), entryIndex),
+            index);
+    if (exit.isPresent()) {
+      emit(
+          strategy, instrument.exchange(), instrument.tradingsymbol(), "1d", "EXIT", preCloseBar,
+          activeCarry, exit.get().type().toUpperCase(java.util.Locale.ROOT));
     }
   }
 

@@ -8,7 +8,7 @@ package in.arthayantra.common.web.error;
  * VALIDATION_*  400      AUTH_*      401/403   KITE_*    401/429/502/503
  * NOT_FOUND_*   404      CONFLICT_*  409       STRATEGY_* 400/422
  * DATA_*        422/503  INTERNAL_*  500       WINDOW_*  422
- * RISK_*        422
+ * RISK_*        422      SIGNAL_*    422
  * </pre>
  *
  * <p>Canonical-spelling pins (COMMON §3): {@code KITE_TOKEN_EXPIRED} wins over the plan's
@@ -69,6 +69,12 @@ public final class ErrorCodes {
   // ---- DATA_* (422/503) ----
   public static final String DATA_GAP = "DATA_GAP";
   public static final String DATA_STALE = "DATA_STALE";
+
+  // ---- SIGNAL_* (422) — a MANUAL paper-take references a SIGNAL that is too old (its thesis has
+  // gone stale even though the fill would price off a fresh tick). Distinct from DATA_STALE, which
+  // guards the tick/FILL price; this guards the SIGNAL's age. Swing books are exempt (their EOD
+  // signals are meant to be taken the next session). The details carry the age + the per-book limit. ----
+  public static final String SIGNAL_STALE = "SIGNAL_STALE";
 
   // ---- stress-test holdout contamination (422) — S1C / §D.6 stress runs ----
   public static final String WINDOW_CONTAMINATED = "WINDOW_CONTAMINATED";

@@ -105,6 +105,18 @@ migrations probed, signals.book 41/41 backfilled, scheduler dormant-verified, E5
 Remaining startables: D3 (8 Phase-4 planes), D4 remainder (P1-3, P2-2..P2-8, #15/#26/#28/#29), D2 residue,
 task_2560273c, task_1b85c64f; NEW OPEN chips: task_9e244d18 (counterfactual IT race), task_a86f2d17
 (stranded-carry reconciler), task_ed6b9d81 (btst publish-time parity validation).**
+**WAVE 2 (D3/D4-remainder) LAUNCHED 2026-07-12 then ABANDONED mid-build (owner paused, token budget) — NOTHING
+MERGED, main clean @ 435e976e (heads still backtest V017 / strategy V040 / marketdata V046).** 10 builders were
+briefed + stopped; their worktree branches hold PARTIAL LOCAL commits only (no push, no PR): feat/d4-exit-reason-attribution
+(P1-3, was to be V018), feat/d4-decision-traces (P2-8, V019), feat/d4-run-tags-export (P2-2+P2-3, V020),
+feat/d3-reference-data (V047, SOURCE-agnostic — the constituent SOURCE pick stays owner-gated), feat/d4-data-quality-report
+(P2-4, V048), feat/d4-latency-instrumentation (P2-5, V041), feat/d3-alert-rules (V042), fix/stranded-carry-reconciler
+(task_a86f2d17), feat/d3-datatable-adoption (FE, unowned pages only), fix/counterfactual-it-race (task_9e244d18).
+**The provisionally-assigned migration numbers (backtest V018/V019/V020, strategy V041/V042, marketdata V047/V048)
+remain FREE on main — reuse them when the build resumes.** Resume plan = re-brief these 10 (the partial worktrees can
+be discarded or salvaged) after Mon 2026-07-13. Held for a later wave (NOT yet attempted): D3 unified job envelope +
+jobs console, Map-return burn-down, event registry, multi-window panes, user_prefs+cmdk; D4 dividends P2-6 /
+margin-feasibility P2-7 / open-next-day #15 / confirm-rerun FE #26 / order-timeline #28 / headless A8-A10 #29.
 Live behavioural notes a new session must know: B1 makes Monday 2026-07-13 a CALIBRATION session
 (entries UP + wider stops expected — judge on `ay_signal_partial_bucket_mismatch_total`, not entry
 count; E8 re-tune consumes the clean sessions); A3 changed exit semantics (settle = last REAL tick

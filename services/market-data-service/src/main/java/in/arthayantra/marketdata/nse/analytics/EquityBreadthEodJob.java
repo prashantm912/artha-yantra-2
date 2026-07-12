@@ -1,6 +1,5 @@
 package in.arthayantra.marketdata.nse.analytics;
 
-import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.nse.NseEodBhavcopyRepository;
 import java.time.LocalDate;
@@ -15,10 +14,12 @@ import org.springframework.stereotype.Component;
 
 /**
  * Materializes the daily market-breadth fold into {@code equity_breadth_daily} (audit §3.3 / §6.10).
- * The PRIMARY trigger is {@link BhavcopyBackfillCompleted} — the fold keys on the bhavcopy watermark,
- * so it must run AFTER the day's EQ rows land (same rationale as the Minervini/Manas screens: the old
- * cron raced the backfill). A boot one-shot (so a fresh stack has breadth history immediately) and a
- * fallback cron (in case the backfill never publishes) remain; all three paths are idempotent upserts.
+ * Runs on a daily cron (19:55 IST, after the ~19:30 bhavcopy + the 19:50 screens) plus a boot one-shot
+ * (so a fresh stack has breadth history immediately); both are idempotent upserts and dedup on the
+ * watermark. It intentionally does NOT listen for {@code BhavcopyBackfillCompleted} — the bhavcopy
+ * module already depends on the {@code nse} module, so a reverse dependency here would form a module
+ * cycle (Modulith). Cron-only mirrors the {@code MarketContextEodJob} EOD precedent; the small delay
+ * from bhavcopy-landing to the 19:55 cron is immaterial for an EOD materialization.
  * Fail-soft: a fold failure is logged, never fatal. Gated by {@code artha.breadth.materialize.enabled}.
  *
  * <p>Registered in the {@code ingest_runs} batch-source ledger under {@code EQUITY_BREADTH}: a {@code
@@ -64,13 +65,7 @@ public class EquityBreadthEodJob {
     runQuietly("startup");
   }
 
-  /** Primary trigger: the day's bhavcopy rows just landed — materialize against the fresh watermark. */
-  @EventListener(BhavcopyBackfillCompleted.class)
-  void onBhavcopyBackfillCompleted() {
-    runQuietly("bhavcopy-complete");
-  }
-
-  /** Fallback cron (bhavcopy backfill failed → no event). 19:55, after the screens' 19:50. */
+  /** Daily cron, 19:55 IST — after the ~19:30 bhavcopy lands and the 19:50 screens run. */
   @Scheduled(cron = "${artha.breadth.materialize-cron:0 55 19 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");

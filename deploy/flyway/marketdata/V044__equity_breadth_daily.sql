@@ -4,10 +4,10 @@
 -- This table stores exactly one row per NSE trading day so the breadth history chart is a zero-read-
 -- cost time series (§3.3 "nightly equity_breadth_daily row appended by the bhavcopy job").
 --
--- Writer: EquityBreadthEodJob, event-chained off BhavcopyBackfillCompleted (the same trigger the
--- Minervini/Manas screens ride) + a boot one-shot + a fallback cron, recorded in ingest_runs under
--- source EQUITY_BREADTH (the batch-source trust ledger). Accumulating upsert (trade_date PK), so a
--- re-run — or a bhavcopy correction — is idempotent. Every value is folded from nse_eod_bhavcopy
+-- Writer: EquityBreadthEodJob, a daily 19:55 IST cron + a boot one-shot (cron-only — the bhavcopy
+-- module already depends on nse, so a reverse event dependency would form a Modulith cycle), recorded
+-- in ingest_runs under source EQUITY_BREADTH (the batch-source trust ledger). Accumulating upsert
+-- (trade_date PK), so a re-run — or a bhavcopy correction — is idempotent. Every value is folded from nse_eod_bhavcopy
 -- 'EQ'-series rows; the above-MA counts use a self-contained SMA window over that same table (no
 -- cross-source candle join). above_sma50/200 are counted only among names with ≥50/≥200 sessions of
 -- history (the *_universe denominators), so the ratio is honest near the start of bhavcopy coverage.

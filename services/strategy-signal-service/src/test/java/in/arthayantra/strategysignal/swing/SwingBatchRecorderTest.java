@@ -3,6 +3,9 @@ package in.arthayantra.strategysignal.swing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -45,7 +48,9 @@ class SwingBatchRecorderTest {
     when(engine.runDaily(doctrine)).thenThrow(new IllegalStateException("funnel unreachable"));
 
     SwingBatchRecorder recorder =
-        new SwingBatchRecorder(engine, mock(SwingBatchRunRepository.class), events, Clock.systemUTC());
+        new SwingBatchRecorder(
+            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class), events,
+            Clock.systemUTC());
     recorder.runScheduled(doctrine);
 
     ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
@@ -66,7 +71,9 @@ class SwingBatchRecorderTest {
     doThrow(new RuntimeException("event bus down")).when(events).publishEvent(any());
 
     SwingBatchRecorder recorder =
-        new SwingBatchRecorder(engine, mock(SwingBatchRunRepository.class), events, Clock.systemUTC());
+        new SwingBatchRecorder(
+            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class), events,
+            Clock.systemUTC());
 
     assertThatCode(() -> recorder.runScheduled(doctrine)).doesNotThrowAnyException();
   }
@@ -81,7 +88,9 @@ class SwingBatchRecorderTest {
             new SwingBatchEngine.SwingRun(3, 12, 2, 1, 0, SwingBatchEngine.AdmissionProbe.empty()));
 
     SwingBatchRecorder recorder =
-        new SwingBatchRecorder(engine, mock(SwingBatchRunRepository.class), events, Clock.systemUTC());
+        new SwingBatchRecorder(
+            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class), events,
+            Clock.systemUTC());
     recorder.runScheduled(doctrine);
 
     // the "done" summary alert may fire, but never a FAILED one
@@ -92,9 +101,10 @@ class SwingBatchRecorderTest {
   }
 
   @Test
-  void runAndRecordForwardsTheAdmissionProbeToTheMarker() {
+  void runAndRecordForwardsTheAdmissionProbeToTheMarkerAndPersistsSellDecisions() {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);
+    SwingSellDecisionService sellDecisions = mock(SwingSellDecisionService.class);
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     SwingDoctrine doctrine = manasDoctrine();
     // A fixed clock (04:00Z = 09:30 IST) pins the run date the recorder stamps.
@@ -105,10 +115,36 @@ class SwingBatchRecorderTest {
     when(engine.runDaily(doctrine))
         .thenReturn(new SwingBatchEngine.SwingRun(3, 12, 6, 1, 0, probe));
 
-    new SwingBatchRecorder(engine, runs, events, clock).runAndRecord(doctrine);
+    new SwingBatchRecorder(engine, runs, sellDecisions, events, clock).runAndRecord(doctrine);
 
     verify(runs)
         .record(
             "manas-arora", LocalDate.of(2026, 7, 12), 3, 12, 6, 1, 0, 5, 8, 6, 2, true, dropped);
+    // The batch also persists the sell-decision snapshot for the family it ran.
+    verify(sellDecisions).persist(doctrine);
+  }
+
+  @Test
+  void runAndRecordSwallowsASellDecisionPersistFailureSoTheBatchNeverPropagates() {
+    // The batch is the swing positions' ONLY exit evaluator; a persist defect must not break the run.
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);
+    SwingSellDecisionService sellDecisions = mock(SwingSellDecisionService.class);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    Clock clock = Clock.fixed(Instant.parse("2026-07-12T04:00:00Z"), ZoneOffset.UTC);
+    when(engine.runDaily(doctrine))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(3, 12, 2, 1, 0, SwingBatchEngine.AdmissionProbe.empty()));
+    when(sellDecisions.persist(doctrine)).thenThrow(new RuntimeException("sell-decision store down"));
+
+    SwingBatchRecorder recorder = new SwingBatchRecorder(engine, runs, sellDecisions, events, clock);
+
+    assertThatCode(() -> recorder.runAndRecord(doctrine)).doesNotThrowAnyException();
+    // The run marker still records despite the persist failure (fail-soft is per-collaborator).
+    verify(runs)
+        .record(
+            eq("manas-arora"), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
+            anyInt(), anyInt(), anyInt(), anyBoolean(), any());
   }
 }

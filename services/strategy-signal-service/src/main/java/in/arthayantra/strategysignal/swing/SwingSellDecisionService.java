@@ -45,6 +45,7 @@ public class SwingSellDecisionService {
    * setupType} for Manas — the other is null), so the FE renders either book from one shape.
    */
   public record SwingSellDecision(
+      long signalId,
       String symbol,
       String setup,
       Integer stage,
@@ -66,16 +67,46 @@ public class SwingSellDecisionService {
   private final StrategyRepository registry;
   private final MarketDataCandlesClient candles;
   private final SignalRepository signals;
+  private final SellDecisionRepository sellDecisions;
   private final Clock clock;
 
-  /** Wires the registry, candle client, and signal repo (family-neutral). */
+  /** Wires the registry, candle client, signal repo + the durable sell-decision store (family-neutral). */
   public SwingSellDecisionService(
       StrategyRepository registry, MarketDataCandlesClient candles, SignalRepository signals,
-      Clock clock) {
+      SellDecisionRepository sellDecisions, Clock clock) {
     this.registry = registry;
     this.candles = candles;
     this.signals = signals;
+    this.sellDecisions = sellDecisions;
     this.clock = clock;
+  }
+
+  /**
+   * Recomputes the family's sell-decision triad and PERSISTS one durable row per holding (V037) — the
+   * batch-time write behind the acknowledgeable history + the INT SELL_DECISION substrate. Called
+   * fail-soft by {@link SwingBatchRecorder} AFTER the batch's passes, so the swing positions' only exit
+   * evaluator is never touched by a persist defect; each row is also written under its own try/catch so
+   * one bad holding cannot lose the rest. Returns how many rows were written. The recompute-on-read {@link
+   * #report} stays the live view.
+   */
+  public int persist(SwingDoctrine doctrine) {
+    SwingSellReport report = report(doctrine);
+    java.time.LocalDate runDate = report.asOf().toLocalDate();
+    int written = 0;
+    for (SwingSellDecision d : report.items()) {
+      try {
+        sellDecisions.upsert(
+            doctrine.book(), runDate, d.signalId(), EX, d.symbol(), d.setup(), d.stage(),
+            d.setupType(), d.footprint(), d.entryPrice(), d.currentPrice(), d.unrealizedPct(),
+            d.stopLevel(), d.trailLevel(), d.stillBuyable(), d.sellingNow(), d.sellReason(), d.verdict());
+        written++;
+      } catch (RuntimeException e) {
+        log.warn(
+            "{} sell-decision persist for {} skipped: {}",
+            doctrine.batchName(), d.symbol(), e.getMessage());
+      }
+    }
+    return written;
   }
 
   /** Builds the sell-decision triad for every open swing position of the given family. */
@@ -148,7 +179,7 @@ public class SwingSellDecisionService {
     }
     String verdict = sellingNow ? "SELL (" + sellReason + ")" : "HOLD";
     return new SwingSellDecision(
-        anchor.tradingsymbol(), text(detail, "setup"), integer(detail, "stage"),
+        anchor.id(), anchor.tradingsymbol(), text(detail, "setup"), integer(detail, "stage"),
         text(detail, "setupType"), text(detail, "footprint"), entryPrice, currentPrice, unrealizedPct,
         stopLevel, trailLevel, stillBuyable, sellingNow, sellReason, verdict);
   }

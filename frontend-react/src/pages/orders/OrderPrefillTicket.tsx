@@ -1,7 +1,14 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
-import { usePlacePaperOrder } from '../../api/paper.ts';
+import { PAPER_BOOKS, usePlacePaperOrder } from '../../api/paper.ts';
+import { Select } from '../../components/atoms/Select.tsx';
+
+/** '' = let the BE route to the signal's own family; else an explicit paper book. */
+const BOOK_OPTIONS = [
+  { value: '', label: 'Signal book (default)' },
+  ...PAPER_BOOKS.map((b) => ({ value: b.book, label: b.label })),
+];
 
 // §18.4 / §18.1 pre-fill order ticket. A scalp-alert phone push deep-links here
 // (`/orders?sig=&symbol=&side=&qty=…`), landing the owner on a paper ticket already filled from the
@@ -70,6 +77,10 @@ function PrefillForm({ prefill }: { prefill: Prefill }) {
   const [qty, setQty] = useState(prefill.qty);
   const [sl, setSl] = useState(prefill.sl ?? '');
   const [tp, setTp] = useState(prefill.tp ?? '');
+  // The book from the deep link when it names a known one; '' routes to the signal-family default.
+  const [book, setBook] = useState(
+    prefill.book && PAPER_BOOKS.some((b) => b.book === prefill.book) ? prefill.book : '',
+  );
   const [placed, setPlaced] = useState(false);
 
   // Clearing the params drops the ticket so a refresh/back doesn't re-open a stale one.
@@ -87,7 +98,7 @@ function PrefillForm({ prefill }: { prefill: Prefill }) {
         price: prefill.price || undefined,
         stopLoss: sl || undefined,
         takeProfit: tp || undefined,
-        book: prefill.book,
+        book: book || undefined,
       },
       { onSuccess: () => setPlaced(true) },
     );
@@ -132,8 +143,19 @@ function PrefillForm({ prefill }: { prefill: Prefill }) {
           <span className={cn('font-semibold', prefill.side === 'BUY' ? 'text-bull' : 'text-bear')}>
             {prefill.side}
           </span>
-          {prefill.book ? <span className="ml-1">· {prefill.book}</span> : null}
         </span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-xs text-ay-muted">Book</span>
+        <Select
+          value={book}
+          options={BOOK_OPTIONS}
+          onChange={setBook}
+          ariaLabel="Paper book"
+          title="Which paper book to log this trade into; default routes to the signal's own strategy family."
+          className="h-8 w-full"
+        />
       </div>
 
       <div className="grid grid-cols-3 gap-2">

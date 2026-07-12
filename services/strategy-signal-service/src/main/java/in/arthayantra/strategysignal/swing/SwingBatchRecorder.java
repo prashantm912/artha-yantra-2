@@ -30,17 +30,20 @@ public class SwingBatchRecorder {
 
   private final SwingBatchEngine engine;
   private final SwingBatchRunRepository runs;
+  private final SwingSellDecisionService sellDecisions;
   private final ApplicationEventPublisher events;
   private final Clock clock;
 
-  /** Wires the shared engine, the marker repo, and the event bus. */
+  /** Wires the shared engine, the marker repo, the sell-decision store, and the event bus. */
   public SwingBatchRecorder(
       SwingBatchEngine engine,
       SwingBatchRunRepository runs,
+      SwingSellDecisionService sellDecisions,
       ApplicationEventPublisher events,
       Clock clock) {
     this.engine = engine;
     this.runs = runs;
+    this.sellDecisions = sellDecisions;
     this.events = events;
     this.clock = clock;
   }
@@ -60,6 +63,15 @@ public class SwingBatchRecorder {
           probe.admitted(), probe.capExceedance(), probe.capBound(), probe.droppedByCap());
     } catch (RuntimeException e) {
       log.warn("{} swing run-marker record failed: {}", doctrine.batchName(), e.getMessage());
+    }
+    // Persist the sell-decision triad snapshot (V037) — fail-soft: this batch is the swing positions'
+    // only exit evaluator, and the entry/exit passes already committed above, so a persist defect must
+    // never propagate out of the run path (mirrors the run-marker record's own fail-soft envelope).
+    try {
+      int rows = sellDecisions.persist(doctrine);
+      log.info("{} swing: persisted {} sell-decision row(s)", doctrine.batchName(), rows);
+    } catch (RuntimeException e) {
+      log.warn("{} swing sell-decision persist failed: {}", doctrine.batchName(), e.getMessage());
     }
     String summary =
         result.candidates() + " candidates, " + result.entries() + " entries, " + result.exits()

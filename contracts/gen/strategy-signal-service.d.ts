@@ -244,6 +244,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signals/sell-decisions/{id}/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["acknowledge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signals/minervini-swing/run": {
         parameters: {
             query?: never;
@@ -580,6 +596,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signals/sell-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_4"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signals/minervini-swing/sell-decisions": {
         parameters: {
             query?: never;
@@ -667,7 +699,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_4"];
+        get: operations["list_5"];
         put?: never;
         post?: never;
         delete?: never;
@@ -859,7 +891,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_5"];
+        get: operations["list_6"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1095,6 +1127,35 @@ export interface components {
             qty?: number;
             note?: string;
         };
+        SellDecisionRow: {
+            /** Format: int64 */
+            id?: number;
+            book?: string;
+            /** Format: date */
+            runDate?: string;
+            /** Format: date-time */
+            evaluatedAt?: string;
+            /** Format: int64 */
+            signalId?: number;
+            exchange?: string;
+            symbol?: string;
+            setup?: string;
+            /** Format: int32 */
+            stage?: number;
+            setupType?: string;
+            footprint?: string;
+            entryPrice?: number;
+            currentPrice?: number;
+            unrealizedPct?: number;
+            stopLevel?: number;
+            trailLevel?: number;
+            stillBuyable?: boolean;
+            sellingNow?: boolean;
+            sellReason?: string;
+            verdict?: string;
+            /** Format: date-time */
+            acknowledgedAt?: string;
+        };
         AdmissionProbe: {
             /** Format: int32 */
             openAtStart?: number;
@@ -1283,7 +1344,12 @@ export interface components {
             sharpe?: number;
             maxDrawdownPct?: number;
         };
+        SellDecisions: {
+            items?: components["schemas"]["SellDecisionRow"][];
+        };
         SwingSellDecision: {
+            /** Format: int64 */
+            signalId?: number;
             symbol?: string;
             setup?: string;
             /** Format: int32 */
@@ -2269,6 +2335,37 @@ export interface operations {
             };
         };
     };
+    acknowledge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SellDecisionRow"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     run: {
         parameters: {
             query?: never;
@@ -3030,6 +3127,40 @@ export interface operations {
             };
         };
     };
+    list_4: {
+        parameters: {
+            query?: {
+                book?: string;
+                unacknowledged?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SellDecisions"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     sellDecisions: {
         parameters: {
             query?: never;
@@ -3181,7 +3312,7 @@ export interface operations {
             };
         };
     };
-    list_4: {
+    list_5: {
         parameters: {
             query?: {
                 strategyVersionId?: string;
@@ -3575,7 +3706,7 @@ export interface operations {
             };
         };
     };
-    list_5: {
+    list_6: {
         parameters: {
             query?: {
                 type?: string;

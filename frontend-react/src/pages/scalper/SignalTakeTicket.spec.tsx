@@ -10,9 +10,10 @@ import type { SignalDto } from '../../api/signals.ts';
 
 const place = vi.fn();
 
-vi.mock('../../api/paper.ts', () => ({
-  usePlacePaperOrder: () => ({ mutate: place, isPending: false }),
-}));
+vi.mock('../../api/paper.ts', async (importActual) => {
+  const actual = await importActual<typeof import('../../api/paper.ts')>();
+  return { ...actual, usePlacePaperOrder: () => ({ mutate: place, isPending: false }) };
+});
 
 const useSignalDetail = vi.fn();
 vi.mock('../../api/signals.ts', () => ({
@@ -111,5 +112,25 @@ describe('SignalTakeTicket', () => {
     const { onDone } = renderTicket();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onDone).toHaveBeenCalled();
+  });
+
+  it('defaults the book to the signal default and posts the chosen book on override', () => {
+    useSignalDetail.mockReturnValue({ data: undefined });
+    place.mockClear();
+    renderTicket();
+    const bookSel = screen.getByLabelText('Paper book') as HTMLSelectElement;
+    expect(bookSel.value).toBe(''); // signal frame omits book → the signal-family default
+    fireEvent.change(bookSel, { target: { value: 'minervini' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Place paper BUY' }));
+    expect(place).toHaveBeenCalledWith(
+      expect.objectContaining({ book: 'minervini' }),
+      expect.anything(),
+    );
+  });
+
+  it('preselects the signal own book when the live frame carries it', () => {
+    useSignalDetail.mockReturnValue({ data: undefined });
+    renderTicket({ ...signal, book: 'minervini' });
+    expect((screen.getByLabelText('Paper book') as HTMLSelectElement).value).toBe('minervini');
   });
 });

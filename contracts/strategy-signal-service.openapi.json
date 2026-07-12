@@ -903,6 +903,43 @@
         }
       }
     },
+    "/api/v1/signals/sell-decisions/{id}/ack" : {
+      "post" : {
+        "tags" : [ "sell-decisions-controller" ],
+        "operationId" : "acknowledge",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SellDecisionRow"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/signals/minervini-swing/run" : {
       "post" : {
         "tags" : [ "minervini-swing-controller" ],
@@ -1906,6 +1943,68 @@
         }
       }
     },
+    "/api/v1/signals/sell-decisions" : {
+      "get" : {
+        "tags" : [ "sell-decisions-controller" ],
+        "operationId" : "list_4",
+        "parameters" : [ {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "unacknowledged",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : false
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 100
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SellDecisions"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/signals/minervini-swing/sell-decisions" : {
       "get" : {
         "tags" : [ "minervini-swing-controller" ],
@@ -2070,7 +2169,7 @@
     "/api/v1/signal-rejections" : {
       "get" : {
         "tags" : [ "signal-rejections-controller" ],
-        "operationId" : "list_4",
+        "operationId" : "list_5",
         "parameters" : [ {
           "name" : "strategyVersionId",
           "in" : "query",
@@ -2600,7 +2699,7 @@
     "/api/v1/insights" : {
       "get" : {
         "tags" : [ "insight-controller" ],
-        "operationId" : "list_5",
+        "operationId" : "list_6",
         "parameters" : [ {
           "name" : "type",
           "in" : "query",
@@ -3216,6 +3315,80 @@
           }
         }
       },
+      "SellDecisionRow" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "book" : {
+            "type" : "string"
+          },
+          "runDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "evaluatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "symbol" : {
+            "type" : "string"
+          },
+          "setup" : {
+            "type" : "string"
+          },
+          "stage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "setupType" : {
+            "type" : "string"
+          },
+          "footprint" : {
+            "type" : "string"
+          },
+          "entryPrice" : {
+            "type" : "number"
+          },
+          "currentPrice" : {
+            "type" : "number"
+          },
+          "unrealizedPct" : {
+            "type" : "number"
+          },
+          "stopLevel" : {
+            "type" : "number"
+          },
+          "trailLevel" : {
+            "type" : "number"
+          },
+          "stillBuyable" : {
+            "type" : "boolean"
+          },
+          "sellingNow" : {
+            "type" : "boolean"
+          },
+          "sellReason" : {
+            "type" : "string"
+          },
+          "verdict" : {
+            "type" : "string"
+          },
+          "acknowledgedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "AdmissionProbe" : {
         "type" : "object",
         "properties" : {
@@ -3705,9 +3878,24 @@
           }
         }
       },
+      "SellDecisions" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SellDecisionRow"
+            }
+          }
+        }
+      },
       "SwingSellDecision" : {
         "type" : "object",
         "properties" : {
+          "signalId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
           "symbol" : {
             "type" : "string"
           },

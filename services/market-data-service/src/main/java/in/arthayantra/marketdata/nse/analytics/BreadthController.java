@@ -3,9 +3,12 @@ package in.arthayantra.marketdata.nse.analytics;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.freshness.DataFreshness;
+import in.arthayantra.marketdata.nse.analytics.EquityBreadthDailyRepository.BreadthDay;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.List;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -19,18 +22,42 @@ public class BreadthController {
   private final BreadthService service;
   private final EquityIndexContributionService contributions;
   private final Clock clock;
+  private final EquityBreadthDailyRepository breadthDaily;
 
   public BreadthController(
-      BreadthService service, EquityIndexContributionService contributions, Clock clock) {
+      BreadthService service,
+      EquityIndexContributionService contributions,
+      Clock clock,
+      EquityBreadthDailyRepository breadthDaily) {
     this.service = service;
     this.contributions = contributions;
     this.clock = clock;
+    this.breadthDaily = breadthDaily;
   }
 
   @GetMapping
   public BreadthService.Breadth breadth(@RequestParam String date) {
     BreadthService.Breadth b = service.breadth(parseDate(date));
     return b.withFreshness(DataFreshness.eod(b.asOf(), "bhavcopy", clock));
+  }
+
+  /** The {@code {items}} envelope for the materialized breadth history series. */
+  public record BreadthHistoryResponse(List<BreadthDay> items, LocalDate from, LocalDate to) {}
+
+  /**
+   * The materialized daily-breadth history (audit §3.3 / §6.10): the A/D + above-MA series read at
+   * zero fold cost from {@code equity_breadth_daily}. {@code to} defaults to today, {@code from} to
+   * {@code to} minus {@code days} (default 180). Rows exist only for dates the EOD materialization has
+   * covered — the table accrues forward from deploy plus the boot backfill window.
+   */
+  @GetMapping("/history")
+  public BreadthHistoryResponse history(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(defaultValue = "180") int days) {
+    LocalDate end = to != null ? to : LocalDate.now();
+    LocalDate start = from != null ? from : end.minusDays(Math.min(Math.max(1, days), 1500));
+    return new BreadthHistoryResponse(breadthDaily.history(start, end), start, end);
   }
 
   /**

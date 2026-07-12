@@ -106,7 +106,9 @@ public class OptionsSnapshotReader {
             + "  public.last(iv, ts) AS iv, "
             + "  public.last(spot_price, ts) AS spot, public.last(volume, ts) AS volume "
             + "FROM options_chain_snapshots "
+            // audit V6: OI folds skip quarantined outlier rows (NULL on old rows = not quarantined)
             + "WHERE underlying = ? AND expiry = ? AND strike = ? AND ts >= ? AND ts < ? "
+            + "  AND (quarantined IS NOT TRUE) "
             + "GROUP BY b, strike, option_type) t "
             + "ORDER BY b, option_type";
     return jdbc.query(
@@ -158,7 +160,8 @@ public class OptionsSnapshotReader {
             + "  public.last(ltp, ts) AS c, public.last(oi, ts) AS oi_close, "
             + "  public.last(volume, ts) AS vol "
             + "FROM options_chain_snapshots "
-            + "WHERE underlying = ? AND expiry = ? AND ts >= ? AND ts < ? "
+            // audit V6: OI folds skip quarantined outlier rows (NULL on old rows = not quarantined)
+            + "WHERE underlying = ? AND expiry = ? AND ts >= ? AND ts < ? AND (quarantined IS NOT TRUE) "
             + "GROUP BY d, strike, option_type "
             + "ORDER BY strike, option_type, d";
     return jdbc.query(
@@ -195,7 +198,8 @@ public class OptionsSnapshotReader {
             + "  public.last(oi_change, ts) AS oi_change, public.last(iv, ts) AS iv, "
             + "  public.last(spot_price, ts) AS spot, public.last(volume, ts) AS volume "
             + "FROM options_chain_snapshots "
-            + "WHERE underlying = ? AND expiry = ? AND ts >= ? AND ts < ? "
+            // audit V6: OI folds skip quarantined outlier rows (NULL on old rows = not quarantined)
+            + "WHERE underlying = ? AND expiry = ? AND ts >= ? AND ts < ? AND (quarantined IS NOT TRUE) "
             + "GROUP BY b, strike, option_type "
             + "ORDER BY b, strike, option_type";
     return jdbc.query(
@@ -382,7 +386,8 @@ public class OptionsSnapshotReader {
             "SELECT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
                 + "', max(ts) - INTERVAL '1 second', 'Asia/Kolkata') AS b "
-                + "FROM options_chain_snapshots WHERE underlying = ? AND expiry = ?");
+                + "FROM options_chain_snapshots "
+                + "WHERE underlying = ? AND expiry = ? AND (quarantined IS NOT TRUE)");
     List<Object> args = new ArrayList<>();
     args.add(underlying);
     args.add(java.sql.Date.valueOf(expiry));
@@ -415,7 +420,8 @@ public class OptionsSnapshotReader {
             "SELECT DISTINCT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
                 + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b "
-                + "FROM options_chain_snapshots WHERE underlying = ? AND expiry = ?");
+                + "FROM options_chain_snapshots "
+                + "WHERE underlying = ? AND expiry = ? AND (quarantined IS NOT TRUE)");
     List<Object> args = new ArrayList<>();
     args.add(underlying);
     args.add(java.sql.Date.valueOf(expiry));

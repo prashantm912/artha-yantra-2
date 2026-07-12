@@ -48,7 +48,9 @@ public class OptionsSnapshotService {
   private final int expiryHorizonDays;
   private final Timer snapshotTimer;
   private final Counter snapshotRows;
+  private final Counter quarantinedRows;
   private final IngestRunLedger ledger;
+  private final OiOutlierDetector outlierDetector;
   // previous-pass OI per leg — oi_change = oi − previous snapshot's oi (null on the first pass)
   private final Map<String, Long> previousOi = new java.util.concurrent.ConcurrentHashMap<>();
   private final ExecutorService executor =
@@ -70,7 +72,8 @@ public class OptionsSnapshotService {
       @Value("${artha.options.snapshot-underlyings:NIFTY 50}") List<String> snapshotUnderlyings,
       @Value("${artha.options.snapshot-expiry-horizon-days:90}") int expiryHorizonDays,
       MeterRegistry meterRegistry,
-      IngestRunLedger ledger) {
+      IngestRunLedger ledger,
+      OiOutlierDetector outlierDetector) {
     this.chainService = chainService;
     this.repository = repository;
     this.redis = redis;
@@ -81,7 +84,9 @@ public class OptionsSnapshotService {
     this.expiryHorizonDays = expiryHorizonDays;
     this.snapshotTimer = meterRegistry.timer("ay_options_snapshot_duration_seconds");
     this.snapshotRows = meterRegistry.counter("ay_options_snapshot_rows_total");
+    this.quarantinedRows = meterRegistry.counter("ay_options_oi_quarantined_total");
     this.ledger = ledger;
+    this.outlierDetector = outlierDetector;
   }
 
   /**
@@ -162,6 +167,17 @@ public class OptionsSnapshotService {
     }
     repository.insertAll(rows);
     snapshotRows.increment(rows.size());
+    // Audit §8 V6: mark implausible OI prints so the OI folds skip them. Detects from the already-
+    // stored (oi, oi_change) — no prior-bucket lookup. Empty in the normal case (a conservative guard).
+    List<OptionsSnapshotRepository.SnapshotRow> outliers =
+        rows.stream().filter(r -> outlierDetector.isOutlier(r.oi(), r.oiChange())).toList();
+    if (!outliers.isEmpty()) {
+      repository.quarantine(outliers);
+      quarantinedRows.increment(outliers.size());
+      log.warn(
+          "quarantined {} implausible OI row(s) for {} {} (audit V6 outlier guard)",
+          outliers.size(), underlying, expiry);
+    }
     // Ingest-run daily capture summary (audit §7.2.3, "1 row/day"): fold this pass's row count into
     // the IST session-day row. Keyed by the session day, not the pass — the day accumulates across
     // every 2-min pass + underlying + expiry. Fail-soft (must never break a capture pass).

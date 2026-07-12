@@ -1900,6 +1900,142 @@
         }
       }
     },
+    "/api/v1/market/screener/minervini/export" : {
+      "get" : {
+        "tags" : [ "screener-csv-export-controller" ],
+        "operationId" : "minerviniCsv",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "passesAllOnly",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : true
+          }
+        }, {
+          "name" : "minRsRank",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "number"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "string",
+                  "format" : "byte"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/minervini/diff" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "diff",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "prior",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ScreenDiff"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/minervini/dates" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "dates",
+        "parameters" : [ {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 30
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ScreenDatesResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/screener/minervini/candidate/{symbol}" : {
       "get" : {
         "tags" : [ "minervini-controller" ],
@@ -1927,6 +2063,43 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/CandidateAnalysis"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/minervini/attrition" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "attrition",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FunnelAttrition"
                 }
               }
             }
@@ -2072,6 +2245,135 @@
         }
       }
     },
+    "/api/v1/market/screener/manas-arora/export" : {
+      "get" : {
+        "tags" : [ "screener-csv-export-controller" ],
+        "operationId" : "manasCsv",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "passesAllOnly",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : true
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "string",
+                  "format" : "byte"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/manas-arora/diff" : {
+      "get" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "diff_1",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "prior",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ScreenDiff"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/manas-arora/dates" : {
+      "get" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "dates_1",
+        "parameters" : [ {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 30
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ScreenDatesResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/screener/manas-arora/candidate/{symbol}" : {
       "get" : {
         "tags" : [ "manas-controller" ],
@@ -2099,6 +2401,43 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/CandidateAnalysis"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/manas-arora/attrition" : {
+      "get" : {
+        "tags" : [ "manas-controller" ],
+        "operationId" : "attrition_1",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/FunnelAttrition"
                 }
               }
             }
@@ -2214,6 +2553,93 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/TrendSeries"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/options/trending/export" : {
+      "get" : {
+        "tags" : [ "options-csv-export-controller" ],
+        "operationId" : "trendingCsv",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "buckets",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }, {
+          "name" : "strikes",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "baseline",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "string",
+                  "format" : "byte"
                 }
               }
             }
@@ -3462,6 +3888,78 @@
         }
       }
     },
+    "/api/v1/market/options/chain-table/export" : {
+      "get" : {
+        "tags" : [ "options-csv-export-controller" ],
+        "operationId" : "chainTableCsv",
+        "parameters" : [ {
+          "name" : "mode",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "name",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "interval",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "expiry",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "window",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "string",
+                  "format" : "byte"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/options/calendar-spread" : {
       "get" : {
         "tags" : [ "options-analytics-controller" ],
@@ -3808,6 +4306,34 @@
         }
       }
     },
+    "/api/v1/market/health/oi-cross-source" : {
+      "get" : {
+        "tags" : [ "oi-cross-source-health-controller" ],
+        "operationId" : "oiCrossSource",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CrossSourceReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/health/ingest" : {
       "get" : {
         "tags" : [ "ingest-health-controller" ],
@@ -3857,6 +4383,43 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/CanaryReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/health/bhavcopy-close" : {
+      "get" : {
+        "tags" : [ "data-health-controller" ],
+        "operationId" : "bhavcopyClose",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BhavcopyCloseReport"
                 }
               }
             }
@@ -5787,6 +6350,60 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/LiveBreadth"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/breadth/history" : {
+      "get" : {
+        "tags" : [ "breadth-controller" ],
+        "operationId" : "history_1",
+        "parameters" : [ {
+          "name" : "from",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "to",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "name" : "days",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 180
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BreadthHistoryResponse"
                 }
               }
             }
@@ -7743,6 +8360,78 @@
           }
         }
       },
+      "DiffRow" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "rsRank" : {
+            "type" : "number"
+          }
+        }
+      },
+      "ScreenDiff" : {
+        "type" : "object",
+        "properties" : {
+          "screenDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "priorDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "enteredCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "leftCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "entered" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DiffRow"
+            }
+          },
+          "left" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DiffRow"
+            }
+          }
+        }
+      },
+      "ScreenDate" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "coverage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "passers" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ScreenDatesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ScreenDate"
+            }
+          }
+        }
+      },
       "CandidateAnalysis" : {
         "type" : "object",
         "properties" : {
@@ -7865,6 +8554,54 @@
           },
           "rejectReason" : {
             "type" : "string"
+          }
+        }
+      },
+      "FunnelAttrition" : {
+        "type" : "object",
+        "properties" : {
+          "screenDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "scanned" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "gates" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/GateCount"
+            }
+          },
+          "passesAll" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "buyable" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "onDeck" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "watch" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "GateCount" : {
+        "type" : "object",
+        "properties" : {
+          "gate" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "passed" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },
@@ -8965,6 +9702,52 @@
           }
         }
       },
+      "CrossSourceReport" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "underlyings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/UnderlyingDivergence"
+            }
+          }
+        }
+      },
+      "UnderlyingDivergence" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "bucketsCompared" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "meanDivergencePct" : {
+            "type" : "number"
+          },
+          "maxDivergencePct" : {
+            "type" : "number"
+          }
+        }
+      },
       "BoardReport" : {
         "type" : "object",
         "properties" : {
@@ -9101,6 +9884,52 @@
           },
           "since" : {
             "type" : "string"
+          }
+        }
+      },
+      "BhavcopyCloseReport" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "compared" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "divergent" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "thresholdPct" : {
+            "type" : "number"
+          },
+          "offenders" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CloseMismatch"
+            }
+          }
+        }
+      },
+      "CloseMismatch" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "bhavClose" : {
+            "type" : "number"
+          },
+          "kiteClose" : {
+            "type" : "number"
+          },
+          "relDiffPct" : {
+            "type" : "number"
           }
         }
       },
@@ -11128,6 +11957,69 @@
           "total" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "BreadthDay" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "advances" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "declines" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "unchanged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "avgDeliveryPct" : {
+            "type" : "number"
+          },
+          "aboveSma50" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "sma50Universe" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "aboveSma200" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "sma200Universe" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "BreadthHistoryResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BreadthDay"
+            }
+          },
+          "from" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "to" : {
+            "type" : "string",
+            "format" : "date"
           }
         }
       },

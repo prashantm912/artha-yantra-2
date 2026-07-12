@@ -24,6 +24,12 @@ const data: Breadth = {
 
 vi.mock('../../api/oiAnalytics.ts', () => ({
   useBreadth: () => ({ data, isFetching: false, refetch: () => {} }),
+  useBreadthHistory: () => ({
+    data: { items: [], from: null, to: null },
+    isPending: false,
+    isError: false,
+    isSuccess: true,
+  }),
 }));
 
 import { BreadthPage } from './BreadthPage.tsx';

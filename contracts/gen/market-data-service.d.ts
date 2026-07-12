@@ -596,6 +596,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/minervini/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["minerviniCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/minervini/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["diff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/minervini/dates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["dates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/screener/minervini/candidate/{symbol}": {
         parameters: {
             query?: never;
@@ -604,6 +652,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["candidate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/minervini/attrition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["attrition"];
         put?: never;
         post?: never;
         delete?: never;
@@ -660,6 +724,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/manas-arora/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["manasCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/manas-arora/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["diff_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/manas-arora/dates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["dates_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/screener/manas-arora/candidate/{symbol}": {
         parameters: {
             query?: never;
@@ -668,6 +780,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["candidate_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/manas-arora/attrition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["attrition_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -700,6 +828,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["trending"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/options/trending/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["trendingCsv"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1012,6 +1156,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/options/chain-table/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["chainTableCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/options/calendar-spread": {
         parameters: {
             query?: never;
@@ -1108,6 +1268,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/health/oi-cross-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["oiCrossSource"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/health/ingest": {
         parameters: {
             query?: never;
@@ -1132,6 +1308,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["data"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/health/bhavcopy-close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["bhavcopyClose"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1804,6 +1996,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["live"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/breadth/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["history_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2597,6 +2805,33 @@ export interface components {
             /** Format: int32 */
             sessions?: number;
         };
+        DiffRow: {
+            symbol?: string;
+            rsRank?: number;
+        };
+        ScreenDiff: {
+            /** Format: date */
+            screenDate?: string;
+            /** Format: date */
+            priorDate?: string;
+            /** Format: int32 */
+            enteredCount?: number;
+            /** Format: int32 */
+            leftCount?: number;
+            entered?: components["schemas"]["DiffRow"][];
+            left?: components["schemas"]["DiffRow"][];
+        };
+        ScreenDate: {
+            /** Format: date */
+            date?: string;
+            /** Format: int32 */
+            coverage?: number;
+            /** Format: int32 */
+            passers?: number;
+        };
+        ScreenDatesResponse: {
+            items?: components["schemas"]["ScreenDate"][];
+        };
         CandidateAnalysis: {
             symbol?: string;
             exchange?: string;
@@ -2642,6 +2877,27 @@ export interface components {
             cheatPivot?: number;
             thrust?: boolean;
             rejectReason?: string;
+        };
+        FunnelAttrition: {
+            /** Format: date */
+            screenDate?: string;
+            /** Format: int64 */
+            scanned?: number;
+            gates?: components["schemas"]["GateCount"][];
+            /** Format: int64 */
+            passesAll?: number;
+            /** Format: int32 */
+            buyable?: number;
+            /** Format: int32 */
+            onDeck?: number;
+            /** Format: int32 */
+            watch?: number;
+        };
+        GateCount: {
+            /** Format: int32 */
+            gate?: number;
+            /** Format: int64 */
+            passed?: number;
         };
         DataFreshness: {
             /** Format: date-time */
@@ -3043,6 +3299,23 @@ export interface components {
             /** Format: int64 */
             peOi?: number;
         };
+        CrossSourceReport: {
+            status?: string;
+            /** Format: date-time */
+            asOf?: string;
+            underlyings?: components["schemas"]["UnderlyingDivergence"][];
+        };
+        UnderlyingDivergence: {
+            underlying?: string;
+            /** Format: date */
+            expiry?: string;
+            status?: string;
+            detail?: string;
+            /** Format: int32 */
+            bucketsCompared?: number;
+            meanDivergencePct?: number;
+            maxDivergencePct?: number;
+        };
         BoardReport: {
             /** Format: date-time */
             generatedAt?: string;
@@ -3094,6 +3367,23 @@ export interface components {
             status?: string;
             detail?: string;
             since?: string;
+        };
+        BhavcopyCloseReport: {
+            /** Format: date */
+            tradeDate?: string;
+            status?: string;
+            /** Format: int32 */
+            compared?: number;
+            /** Format: int32 */
+            divergent?: number;
+            thresholdPct?: number;
+            offenders?: components["schemas"]["CloseMismatch"][];
+        };
+        CloseMismatch: {
+            symbol?: string;
+            bhavClose?: number;
+            kiteClose?: number;
+            relDiffPct?: number;
         };
         DowQuote: {
             ltp?: number;
@@ -3837,6 +4127,34 @@ export interface components {
             unchanged?: number;
             /** Format: int32 */
             total?: number;
+        };
+        BreadthDay: {
+            /** Format: date */
+            tradeDate?: string;
+            /** Format: int32 */
+            advances?: number;
+            /** Format: int32 */
+            declines?: number;
+            /** Format: int32 */
+            unchanged?: number;
+            /** Format: int32 */
+            total?: number;
+            avgDeliveryPct?: number;
+            /** Format: int32 */
+            aboveSma50?: number;
+            /** Format: int32 */
+            sma50Universe?: number;
+            /** Format: int32 */
+            aboveSma200?: number;
+            /** Format: int32 */
+            sma200Universe?: number;
+        };
+        BreadthHistoryResponse: {
+            items?: components["schemas"]["BreadthDay"][];
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
         };
         QuotaStatus: {
             configured?: boolean;
@@ -5500,6 +5818,102 @@ export interface operations {
             };
         };
     };
+    minerviniCsv: {
+        parameters: {
+            query?: {
+                asOf?: string;
+                passesAllOnly?: boolean;
+                minRsRank?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    diff: {
+        parameters: {
+            query?: {
+                asOf?: string;
+                prior?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ScreenDiff"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    dates: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ScreenDatesResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     candidate: {
         parameters: {
             query?: {
@@ -5520,6 +5934,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["CandidateAnalysis"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    attrition: {
+        parameters: {
+            query?: {
+                asOf?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["FunnelAttrition"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5627,6 +6072,101 @@ export interface operations {
             };
         };
     };
+    manasCsv: {
+        parameters: {
+            query?: {
+                asOf?: string;
+                passesAllOnly?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    diff_1: {
+        parameters: {
+            query?: {
+                asOf?: string;
+                prior?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ScreenDiff"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    dates_1: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ScreenDatesResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     candidate_1: {
         parameters: {
             query?: {
@@ -5647,6 +6187,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["CandidateAnalysis"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    attrition_1: {
+        parameters: {
+            query?: {
+                asOf?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["FunnelAttrition"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5716,6 +6287,44 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["TrendSeries"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    trendingCsv: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+                buckets?: number;
+                strikes?: string;
+                baseline?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6407,6 +7016,42 @@ export interface operations {
             };
         };
     };
+    chainTableCsv: {
+        parameters: {
+            query: {
+                mode?: string;
+                name: string;
+                date?: string;
+                interval?: string;
+                expiry?: string;
+                window?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     calendarSpread: {
         parameters: {
             query: {
@@ -6613,6 +7258,35 @@ export interface operations {
             };
         };
     };
+    oiCrossSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CrossSourceReport"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     ingest: {
         parameters: {
             query?: {
@@ -6660,6 +7334,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["CanaryReport"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    bhavcopyClose: {
+        parameters: {
+            query?: {
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["BhavcopyCloseReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8038,6 +8743,39 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["LiveBreadth"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    history_1: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["BreadthHistoryResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

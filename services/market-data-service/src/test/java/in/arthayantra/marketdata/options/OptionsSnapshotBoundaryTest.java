@@ -99,7 +99,9 @@ class OptionsSnapshotBoundaryTest {
         90,
         new SimpleMeterRegistry(),
         // fail-soft ledger: the capture-session write no-ops on the null template (swallowed)
-        new in.arthayantra.marketdata.ingest.IngestRunLedger(null));
+        new in.arthayantra.marketdata.ingest.IngestRunLedger(null),
+        // V6 outlier detector DISABLED so this test's capture behavior is unchanged
+        new OiOutlierDetector(false, 20.0, 5000));
   }
 
   @Test

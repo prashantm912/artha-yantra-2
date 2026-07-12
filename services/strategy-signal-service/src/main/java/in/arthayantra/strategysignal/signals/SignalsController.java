@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.signals;
 
+import in.arthayantra.common.web.csv.CsvExport;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import java.math.BigDecimal;
@@ -60,6 +61,42 @@ public class SignalsController {
     response.put("limit", boundedLimit);
     response.put("offset", boundedOffset);
     return response;
+  }
+
+  /**
+   * The filtered signal history as a CSV download (audit §10 Phase-3 CSV export standard). Same
+   * filters as {@link #list}; the JSON side-channel columns (score breakdown / scalper detail) are
+   * omitted — the scalar signal fields only. Loud truncation via the shared {@link CsvExport} headers.
+   */
+  @GetMapping("/export")
+  public org.springframework.http.ResponseEntity<byte[]> export(
+      @RequestParam(required = false) String status,
+      @RequestParam(required = false) String book,
+      @RequestParam(required = false) UUID strategyVersionId,
+      @RequestParam(required = false) String exchange,
+      @RequestParam(required = false) String tradingsymbol,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
+          OffsetDateTime to) {
+    List<SignalRepository.SignalRow> rows =
+        repository.list(
+            status, book, strategyVersionId, exchange, tradingsymbol, from, to,
+            CsvExport.DEFAULT_MAX_ROWS + 1, 0);
+    CsvExport.Writer w =
+        CsvExport.writer(
+            CsvExport.DEFAULT_MAX_ROWS,
+            "id", "generated_at", "status", "exchange", "tradingsymbol", "interval", "signal_type",
+            "side", "entry_price", "stop_loss", "target", "composite_score", "suggested_qty",
+            "tradeable_exchange", "tradeable_tradingsymbol", "strategy_version_id", "expires_at");
+    for (SignalRepository.SignalRow r : rows) {
+      w.row(
+          r.id(), r.generatedAt(), r.status(), r.exchange(), r.tradingsymbol(), r.interval(),
+          r.signalType(), r.side(), r.entryPrice(), r.stopLoss(), r.target(), r.compositeScore(),
+          r.suggestedQty(), r.tradeableExchange(), r.tradeableTradingsymbol(), r.strategyVersionId(),
+          r.expiresAt());
+    }
+    return w.download("signals.csv");
   }
 
   /** Currently live calls. */

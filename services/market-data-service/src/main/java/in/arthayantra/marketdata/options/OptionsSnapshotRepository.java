@@ -68,6 +68,29 @@ public class OptionsSnapshotRepository {
   }
 
   /**
+   * Marks the given freshly-captured rows quarantined (audit §8 V6) by full PK — one batched UPDATE.
+   * Called only when a pass flagged OI outliers (the common case is an empty list = no-op), and the
+   * targets are today's uncompressed chunk, so the UPDATE is cheap. PK binding mirrors {@link #bind}.
+   */
+  public void quarantine(List<SnapshotRow> rows) {
+    if (rows.isEmpty()) {
+      return;
+    }
+    jdbc.batchUpdate(
+        "UPDATE options_chain_snapshots SET quarantined = TRUE "
+            + "WHERE ts = ? AND underlying = ? AND expiry = ? AND strike = ? AND option_type = ?",
+        rows,
+        rows.size(),
+        (ps, row) -> {
+          ps.setTimestamp(1, Timestamp.from(row.ts().toInstant()));
+          ps.setString(2, row.underlying());
+          ps.setDate(3, java.sql.Date.valueOf(row.expiry()));
+          ps.setBigDecimal(4, row.strike());
+          ps.setString(5, row.optionType());
+        });
+  }
+
+  /**
    * Batch-inserts BACKFILL-provenance rows (the OI-backfill importer, data-foundation milestone) —
    * identical columns/binding, but {@code source='BACKFILL'} so backfilled OI is never confused with
    * live capture (or purged). Idempotent on the PK, so a re-run is a no-op.

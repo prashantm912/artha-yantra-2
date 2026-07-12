@@ -33,7 +33,11 @@ class BreadthControllerTest {
                 "NIFTY 50", new BigDecimal("0.04"), null, null, null, null, null,
                 List.of(up, up, up), List.of(down), LocalDate.of(2026, 7, 3), true));
     BreadthController controller =
-        new BreadthController(mock(BreadthService.class), contributions, Clock.systemUTC());
+        new BreadthController(
+            mock(BreadthService.class),
+            contributions,
+            Clock.systemUTC(),
+            mock(EquityBreadthDailyRepository.class));
 
     BreadthController.LiveBreadth out = controller.live("NIFTY 50");
 

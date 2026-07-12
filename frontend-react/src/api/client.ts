@@ -109,3 +109,38 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
 export function listItems<T>(res: { items?: T[] } | null | undefined): T[] {
   return res?.items ?? [];
 }
+
+/**
+ * Downloads a file from a GET endpoint (the CSV export standard, §10 Phase-3) via a temporary anchor.
+ * Unlike {@link apiFetch} (JSON-only), this reads the response as a blob and honours the server's
+ * {@code Content-Disposition} filename; the D8 error envelope still surfaces as an {@link ApiError}.
+ */
+export async function downloadFile(path: string): Promise<void> {
+  const res = await fetch(BASE + path, { credentials: 'include' });
+  if (!res.ok) {
+    let envelope: ApiErrorBody = {};
+    try {
+      envelope = (await res.json()) as ApiErrorBody;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(
+      res.status,
+      envelope.code,
+      envelope.message ?? res.statusText ?? `HTTP ${res.status}`,
+      envelope.details,
+    );
+  }
+  const dispo = res.headers.get('content-disposition') ?? '';
+  const match = dispo.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : 'export.csv';
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}

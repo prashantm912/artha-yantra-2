@@ -6,6 +6,8 @@ import { LoadBeat, BeatBlock } from '../../components/LoadBeat.tsx';
 import { cn } from '../../lib/cn.ts';
 import { nearestStrike } from '../../lib/strikes.ts';
 import { useChainTable } from '../../api/oiAnalytics.ts';
+import { useMarginQuote, type MarginResponse } from '../../api/margin.ts';
+import { useSymbolContext } from '../../stores/symbolContext.store.ts';
 import { computeRisk, type RiskInput } from '../../core/riskCalculator.ts';
 
 // Risk Calculator (§features/risk-calculator — oipulse "Risk Calculator"). A pure, client-side
@@ -111,6 +113,12 @@ export function RiskCalculatorPage() {
   const pickedLeg = (side === 'CE' ? pickedRow?.ce : pickedRow?.pe)?.leg ?? null;
   const pickedLtp = pickedLeg?.ltp ?? null;
 
+  // F9 SPAN margin tie-in (audit §2.8): price the sized option position against Upstox's real SPAN so
+  // deployment reflects margin, not notional. Exchange is NFO for NIFTY-family, BFO for SENSEX/BANKEX.
+  const { name } = useSymbolContext();
+  const marginExchange = /SENSEX|BANKEX/i.test(name) ? 'BFO' : 'NFO';
+  const margin = useMarginQuote();
+
   const input: RiskInput = {
     capital: Number(capital) || 0,
     riskPct: Number(riskPct) || 0,
@@ -163,7 +171,28 @@ export function RiskCalculatorPage() {
           Use LTP{pickedLtp != null ? ` (${num.format(Number(pickedLtp))})` : ''}
         </button>
         {pickedLeg && <span className="text-xs text-ay-muted">{pickedLeg.tradingsymbol}</span>}
+        <button
+          type="button"
+          disabled={!pickedLeg || !r.valid || margin.isPending}
+          onClick={() =>
+            pickedLeg &&
+            margin.mutate([
+              {
+                exchange: marginExchange,
+                tradingsymbol: pickedLeg.tradingsymbol,
+                quantity: r.units,
+                side: r.side === 'SHORT' ? 'SELL' : 'BUY',
+              },
+            ])
+          }
+          title="Ask Upstox for the real SPAN + exposure margin on the sized option position (F9)."
+          className="h-9 rounded-md border border-ay-border px-3 text-sm text-ay-text hover:border-accent disabled:opacity-50"
+        >
+          {margin.isPending ? 'Checking…' : 'Check SPAN margin'}
+        </button>
       </div>
+
+      {margin.data && <MarginResult data={margin.data} capital={input.capital} />}
 
       <BeatBlock>
         <div className="grid gap-4 lg:grid-cols-2">
@@ -296,5 +325,32 @@ export function RiskCalculatorPage() {
         </div>
       </BeatBlock>
     </LoadBeat>
+  );
+}
+
+/** The F9 SPAN-margin read for the sized option position (fail-soft: shows the unpriced reason). */
+function MarginResult({ data, capital }: { data: MarginResponse; capital: number }) {
+  if (!data.priced) {
+    return (
+      <p className="mb-3 rounded-md border border-ay-border bg-surface-1 px-3 py-2 text-xs text-ay-muted">
+        SPAN margin unavailable: {data.unpricedReason ?? 'not priced'}
+      </p>
+    );
+  }
+  const total = Number(data.finalMargin ?? 0);
+  const pctOfCap = capital > 0 ? (total / capital) * 100 : 0;
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-4 rounded-md border border-accent/40 bg-surface-1 px-3 py-2 text-sm">
+      <span className="text-ay-text">
+        <span className="text-ay-muted">SPAN</span> ₹{num.format(Number(data.spanMargin ?? 0))}
+      </span>
+      <span className="text-ay-text">
+        <span className="text-ay-muted">Exposure</span> ₹{num.format(Number(data.exposureMargin ?? 0))}
+      </span>
+      <span className="font-semibold text-ay-text">
+        <span className="font-normal text-ay-muted">Total required</span> {money(total)}
+      </span>
+      <span className="text-ay-muted">{num.format(pctOfCap)}% of capital</span>
+    </div>
   );
 }

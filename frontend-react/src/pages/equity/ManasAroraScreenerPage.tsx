@@ -16,6 +16,11 @@ import {
   type ManasRow,
   type ManasScreenParams,
 } from '../../api/manasArora.ts';
+import { useScreenerDates, screenerExportPath } from '../../api/screenerHistory.ts';
+import { downloadFile } from '../../api/client.ts';
+import { ScreenerHistoryPanel } from '../../components/ScreenerHistoryPanel.tsx';
+
+const HISTORY_INPUT_CLS = 'h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
 
 // /equity/manas-arora: the daily Manas Arora selection screener. Two views: the flat 6-criteria
 // SCREEN (§4.1 selection filter + §1.2 universe + §4.3 liquidity + §4.4 float), and the FUNNEL that
@@ -31,14 +36,16 @@ const GATE_TITLES = [
   '6. New 52-week high made recently',
 ];
 
-type View = 'screen' | 'funnel';
+type View = 'screen' | 'funnel' | 'history';
 
 export function ManasAroraScreenerPage() {
   const [view, setView] = useState<View>('screen');
   const [passesAllOnly, setPassesAllOnly] = useState(true);
-  const params: ManasScreenParams = { passesAllOnly, limit: 200 };
+  const [asOf, setAsOf] = useState<string | null>(null);
+  const params: ManasScreenParams = { passesAllOnly, limit: 200, asOf };
   const screen = useManasScreen(params, view === 'screen');
-  const funnel = useManasFunnel(undefined, view === 'funnel');
+  const funnel = useManasFunnel(asOf ?? undefined, view === 'funnel');
+  const dates = useScreenerDates('manas-arora');
   const run = useRunManas();
   const qc = useQueryClient();
 
@@ -65,7 +72,7 @@ export function ManasAroraScreenerPage() {
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <div role="tablist" aria-label="View" className="flex rounded-md border border-ay-border p-0.5">
-          {(['screen', 'funnel'] as View[]).map((v) => (
+          {(['screen', 'funnel', 'history'] as View[]).map((v) => (
             <button
               key={v}
               type="button"
@@ -81,6 +88,30 @@ export function ManasAroraScreenerPage() {
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-1.5 text-sm text-ay-text" title="Time-travel to a past screen date.">
+          Date
+          <select
+            value={asOf ?? ''}
+            onChange={(e) => setAsOf(e.target.value || null)}
+            className={`${HISTORY_INPUT_CLS} w-40`}
+            aria-label="Screen date"
+          >
+            <option value="">Latest</option>
+            {(dates.data ?? []).map((d) => (
+              <option key={d.date} value={d.date}>
+                {d.date} ({d.passers})
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => void downloadFile(screenerExportPath('manas-arora', asOf, passesAllOnly))}
+          title="Download the current screen as CSV."
+          className="h-9 rounded-md border border-ay-border bg-surface-1 px-3 text-sm text-ay-text hover:bg-surface-2"
+        >
+          Export CSV
+        </button>
         {view === 'screen' && (
           <>
             <label
@@ -200,7 +231,7 @@ export function ManasAroraScreenerPage() {
               </BeatBlock>
             )}
           </QueryState>
-        ) : (
+        ) : view === 'funnel' ? (
           <QueryState
             query={funnel}
             empty={{ title: 'No funnel yet — the screen has no passers for this date.' }}
@@ -233,6 +264,8 @@ export function ManasAroraScreenerPage() {
               </>
             )}
           </QueryState>
+        ) : (
+          <ScreenerHistoryPanel family="manas-arora" asOf={asOf} />
         )}
       </m.div>
     </LoadBeat>

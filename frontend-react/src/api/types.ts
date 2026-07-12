@@ -793,6 +793,27 @@ export interface Breadth {
   freshness?: DataFreshness;
 }
 
+/** One materialized breadth day (audit §3.3 Phase-3): A/D counts + above-MA counts. */
+export interface BreadthDay {
+  tradeDate: string;
+  advances: number;
+  declines: number;
+  unchanged: number;
+  total: number;
+  avgDeliveryPct: string | null;
+  aboveSma50: number | null;
+  sma50Universe: number | null;
+  aboveSma200: number | null;
+  sma200Universe: number | null;
+}
+
+/** GET /api/v1/market/breadth/history — the materialized daily-breadth series (zero-fold read). */
+export interface BreadthHistory {
+  items: BreadthDay[];
+  from: string | null;
+  to: string | null;
+}
+
 /** One Futures OI Buzz constituent tile — BigDecimal fields are decimal STRINGS; oi/oiChange numbers.
  * oiChange (vs prev-session close OI) + its 4-state interpretation are null until the prev-OI cache warms. */
 export interface OiBuzzTile {

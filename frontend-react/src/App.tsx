@@ -195,6 +195,17 @@ const CockpitPage = lazy(() =>
 const InsightsPage = lazy(() =>
   import('./pages/insights/InsightsPage.tsx').then((m) => ({ default: m.InsightsPage })),
 );
+// The evolution suite (EVO-E6 item 17) — campaign board, workspace (leaderboard/candidate/insights/
+// generations) and the owner proposals inbox; route-lazy (its own read surface, off the main chunk).
+const EvolutionBoardPage = lazy(() =>
+  import('./pages/evolution/EvolutionBoardPage.tsx').then((m) => ({ default: m.EvolutionBoardPage })),
+);
+const CampaignWorkspacePage = lazy(() =>
+  import('./pages/evolution/CampaignWorkspacePage.tsx').then((m) => ({ default: m.CampaignWorkspacePage })),
+);
+const ProposalsInboxPage = lazy(() =>
+  import('./pages/evolution/ProposalsInboxPage.tsx').then((m) => ({ default: m.ProposalsInboxPage })),
+);
 
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<p className="text-sm text-ay-muted">Loading chart…</p>}>{children}</Suspense>;
@@ -294,6 +305,10 @@ export function App() {
           <Route path="/backtests/compare" element={<Lazy><BacktestComparePage /></Lazy>} />
           <Route path="/backtests/:id" element={<Lazy><BacktestResultsPage /></Lazy>} />
           <Route path="/optimizations/:sweepId" element={<Lazy><SweepDetailPage /></Lazy>} />
+          {/* Evolution (EVO-E6 item 17) — static /evolution/proposals ranks above the dynamic :campaignId */}
+          <Route path="/evolution" element={<Lazy><EvolutionBoardPage /></Lazy>} />
+          <Route path="/evolution/proposals" element={<Lazy><ProposalsInboxPage /></Lazy>} />
+          <Route path="/evolution/:campaignId" element={<Lazy><CampaignWorkspacePage /></Lazy>} />
           {/* Features */}
           <Route path="/features/connecting-dots" element={<ConnectingDotsPage />} />
           <Route path="/features/vix-index" element={<Lazy><VixIndexPage /></Lazy>} />

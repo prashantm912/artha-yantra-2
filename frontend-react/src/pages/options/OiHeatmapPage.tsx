@@ -62,6 +62,10 @@ export function OiHeatmapPage() {
             <Link
               to={optionsChartPath(chartStrike ?? '')}
               aria-disabled={!chartStrike}
+              tabIndex={chartStrike ? 0 : -1}
+              onClick={(ev) => {
+                if (!chartStrike) ev.preventDefault();
+              }}
               title="Open this strike in the Options Chart"
               className={cn(
                 'inline-flex h-9 items-center rounded-md border border-ay-border bg-surface-2 px-3 text-sm text-accent hover:underline',

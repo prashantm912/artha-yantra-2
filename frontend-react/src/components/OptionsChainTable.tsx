@@ -183,11 +183,13 @@ export function OptionsChainTable({
   // Per-row cell padding only (headers stay py-1); compact is the scalper default.
   const cellPad = density === 'compact' ? 'py-0.5' : 'py-1';
   // The strike drill-down: a Link to that strike's Options Chart, or the plain number.
-  const strikeCell = (strike: string): ReactNode =>
+  // Underlined at rest (an inline link needs a non-colour cue — axe link-in-text-block); the ATM row
+  // keeps text-ay-text (accent on the warn tint fails 4.5:1 on oipulse-red/light — a11y review HIGH).
+  const strikeCell = (strike: string, isAtm = false): ReactNode =>
     linkStrikeToChart ? (
       <Link
         to={optionsChartPath(strike)}
-        className="text-accent hover:underline"
+        className={isAtm ? 'text-ay-text underline hover:text-accent' : 'text-accent underline'}
         title="Open this strike in the Options Chart"
       >
         {strike}
@@ -341,7 +343,7 @@ export function OptionsChainTable({
                     className={cn('px-2 text-center font-semibold', cellPad)}
                     style={isAtm ? atmStyle : undefined}
                   >
-                    {strikeCell(row.strike)}
+                    {strikeCell(row.strike, isAtm)}
                     {isAtm && <span className="ay-sr-only"> at the money</span>}
                   </td>
                   {putColumns.map((c) => (

@@ -112,7 +112,7 @@ export function ChainTimeTravel({ density }: { density?: Density }) {
             max={SESSION_MINUTES}
             step={1}
             value={minute}
-            onChange={(e) => setMinute(Number(e.target.value))}
+            onChange={(e) = aria-valuetext={`${clockLabel(minute)} IST`}> setMinute(Number(e.target.value))}
             aria-label="Session time"
             title="Rewind the session — the chain snaps to the nearest captured snapshot"
             className="min-w-[8rem] flex-1 accent-[var(--ay-accent)]"

@@ -223,8 +223,10 @@ public class DeepSwingService {
             + " set incl. portfolio-skipped (signalLotCount), per-1-share gross; win_rate/profit_factor ="
             + " gross per-trade stats over that full lot set.");
     caveats.add(
-        "Frictionless per-trade fills (entry+exit at the signal bar's own close); portfolio-level cost"
-            + " netting only (audit B2).");
+        "Frictionless per-trade fills; variant '"
+            + r.variant()
+            + "' uses next-session open when suffixed '-nextopen', otherwise signal-bar close;"
+            + " portfolio-level cost netting only (audit B2).");
     caveats.add(
         "Sortino not computed by the deep-sim (0); equity/drawdown curves are aggregate-only ([]) —"
             + " see the report block for annual/monthly returns.");

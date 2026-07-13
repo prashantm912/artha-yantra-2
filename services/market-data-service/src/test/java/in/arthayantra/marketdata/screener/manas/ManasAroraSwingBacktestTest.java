@@ -84,6 +84,78 @@ class ManasAroraSwingBacktestTest {
         .as("a second lot is added while the first is in the money").contains(1, 2);
   }
 
+  @Test
+  void nextOpenUsesTheFollowingBarsOpenForEntryAndExit() {
+    List<DailyBar> bars = withDistinctOpens(breakoutSeries());
+    Variant nextOpen = nextOpenVariant();
+
+    List<BtTrade> trades =
+        sim.simulate(
+            "TESTCO", bars, vcp, breakout, ENTRY_FROM, null,
+            List.of(ManasAroraSwingBacktest.V1, nextOpen));
+
+    BtTrade atClose = firstBreakout(trades, "v1-technical");
+    BtTrade atNextOpen = firstBreakout(trades, nextOpen.name());
+    assertThat(atNextOpen.entryDate()).isEqualTo(atClose.entryDate());
+    assertThat(atNextOpen.exitDate()).isEqualTo(atClose.exitDate());
+    int entrySignal = indexOfDate(bars, atNextOpen.entryDate());
+    int exitSignal = indexOfDate(bars, atNextOpen.exitDate());
+    assertThat(atClose.entryPrice()).isEqualTo(bars.get(entrySignal).close());
+    assertThat(atClose.exitPrice()).isEqualTo(bars.get(exitSignal).close());
+    assertThat(atNextOpen.entryPrice()).isEqualTo(bars.get(entrySignal + 1).open());
+    assertThat(atNextOpen.exitPrice()).isEqualTo(bars.get(exitSignal + 1).open());
+  }
+
+  @Test
+  void nextOpenPricesPyramidAddsAndWholePositionExitsAtFollowingOpens() {
+    List<DailyBar> bars = withModestDistinctOpens(pyramidSeries());
+    Variant atClosePyramid = new Variant("close-pyramid-test", false, 0, 0, true);
+    Variant nextOpenPyramid = new Variant("next-open-pyramid-test", false, 0, 0, true, "next_open");
+
+    List<BtTrade> trades =
+        sim.simulate(
+            "TESTCO", bars, vcp, breakout, ENTRY_FROM, null,
+            List.of(atClosePyramid, nextOpenPyramid));
+
+    BtTrade atCloseSecondLot = breakoutLot(trades, atClosePyramid.name(), 2);
+    BtTrade nextOpenFirstLot = breakoutLot(trades, nextOpenPyramid.name(), 1);
+    BtTrade nextOpenSecondLot = breakoutLot(trades, nextOpenPyramid.name(), 2);
+    assertThat(nextOpenSecondLot.entryDate()).isEqualTo(atCloseSecondLot.entryDate());
+    int addSignal = indexOfDate(bars, nextOpenSecondLot.entryDate());
+    assertThat(atCloseSecondLot.entryPrice()).isEqualTo(bars.get(addSignal).close());
+    assertThat(nextOpenSecondLot.entryPrice()).isEqualTo(bars.get(addSignal + 1).open());
+
+    assertThat(nextOpenFirstLot.exitDate()).isEqualTo(nextOpenSecondLot.exitDate());
+    assertThat(nextOpenFirstLot.exitReason())
+        .as("the pyramid fixture closes both lots through the whole-position exit path")
+        .isNotEqualTo("STOP_LOSS");
+    assertThat(nextOpenSecondLot.exitReason()).isEqualTo(nextOpenFirstLot.exitReason());
+    int exitSignal = indexOfDate(bars, nextOpenFirstLot.exitDate());
+    assertThat(nextOpenFirstLot.exitPrice()).isEqualTo(bars.get(exitSignal + 1).open());
+    assertThat(nextOpenSecondLot.exitPrice()).isEqualTo(bars.get(exitSignal + 1).open());
+  }
+
+  @Test
+  void nextOpenDropsAnExitSignalOnTheFinalBar() {
+    List<DailyBar> full = breakoutSeries();
+    List<BtTrade> control = sim.simulate("TESTCO", full, vcp, breakout, ENTRY_FROM);
+    int exitSignal = indexOfDate(full, firstBreakout(control, "v1-technical").exitDate());
+    List<DailyBar> endingOnExitSignal = new ArrayList<>(full.subList(0, exitSignal + 1));
+    Variant nextOpen = nextOpenVariant();
+
+    List<BtTrade> trades =
+        sim.simulate(
+            "TESTCO", endingOnExitSignal, vcp, breakout, ENTRY_FROM, null,
+            List.of(ManasAroraSwingBacktest.V1, nextOpen));
+
+    assertThat(trades.stream().filter(t -> t.variant().equals("v1-technical")))
+        .as("at_close can still fill on the final signal bar")
+        .isNotEmpty();
+    assertThat(trades.stream().filter(t -> t.variant().equals(nextOpen.name())))
+        .as("next_open cannot fill without a following bar, so the open lot is dropped")
+        .isEmpty();
+  }
+
   /** Stage-2 uptrend (doubles off the low) → consolidation → fresh-high breakout on 3x vol → rollover. */
   private static List<DailyBar> breakoutSeries() {
     List<DailyBar> bars = new ArrayList<>();
@@ -134,5 +206,57 @@ class ManasAroraSwingBacktestTest {
   private static DailyBar bar(int day, double price, long volume) {
     LocalDate d = LocalDate.of(2020, 1, 1).plusDays(day);
     return new DailyBar(d, price, price, price, price, volume);
+  }
+
+  private static Variant nextOpenVariant() {
+    assertThat(Arrays.stream(Variant.class.getRecordComponents()).map(c -> c.getName()))
+        .as("Variant carries the per-variant fill timing")
+        .contains("fillTiming");
+    return new Variant("next-open-test", false, 0, 0, false, "next_open");
+  }
+
+  private static List<DailyBar> withDistinctOpens(List<DailyBar> source) {
+    List<DailyBar> bars = new ArrayList<>(source.size());
+    for (int i = 0; i < source.size(); i++) {
+      DailyBar b = source.get(i);
+      bars.add(new DailyBar(b.date(), 10_000 + i, b.high(), b.low(), b.close(), b.volume()));
+    }
+    return bars;
+  }
+
+  private static List<DailyBar> withModestDistinctOpens(List<DailyBar> source) {
+    List<DailyBar> bars = new ArrayList<>(source.size());
+    for (int i = 0; i < source.size(); i++) {
+      DailyBar b = source.get(i);
+      bars.add(new DailyBar(b.date(), b.close() + 0.125, b.high(), b.low(), b.close(), b.volume()));
+    }
+    return bars;
+  }
+
+  private static BtTrade firstBreakout(List<BtTrade> trades, String variant) {
+    return trades.stream()
+        .filter(t -> t.variant().equals(variant) && t.setup().equals("breakout"))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  private static BtTrade breakoutLot(List<BtTrade> trades, String variant, int pyramidLevel) {
+    return trades.stream()
+        .filter(
+            t ->
+                t.variant().equals(variant)
+                    && t.setup().equals("breakout")
+                    && t.pyramidLevel() == pyramidLevel)
+        .findFirst()
+        .orElseThrow();
+  }
+
+  private static int indexOfDate(List<DailyBar> bars, LocalDate date) {
+    for (int i = 0; i < bars.size(); i++) {
+      if (bars.get(i).date().equals(date)) {
+        return i;
+      }
+    }
+    throw new IllegalArgumentException("date not found: " + date);
   }
 }

@@ -380,7 +380,9 @@ public class ManasAroraBacktestService {
         new Variant("turnover", false, 0, turnoverFloor, false), // v3: liquidity floor alone
         new Variant("rs-turnover", true, rsMin, turnoverFloor, false), // v4: both (float degrades)
         new Variant("rs-turnover-nopyramid", true, rsMin, turnoverFloor, false), // v5 A: no adds
-        new Variant("rs-turnover-pyramid", true, rsMin, turnoverFloor, true)); // v5 B: add-to-winner
+        new Variant("rs-turnover-pyramid", true, rsMin, turnoverFloor, true), // v5 B: add-to-winner
+        new Variant(
+            "rs-turnover-nopyramid-nextopen", true, rsMin, turnoverFloor, false, "next_open"));
   }
 
   /** The deep-sim compute output shared by {@link #run} and {@link #runForJob} (audit P0-3). */

@@ -1,5 +1,8 @@
 package in.arthayantra.marketdata.screener.minervini;
 
+import static in.arthayantra.marketdata.screener.SwingFillPrice.AT_CLOSE;
+import static in.arthayantra.marketdata.screener.SwingFillPrice.fillPrice;
+
 import in.arthayantra.marketdata.screener.minervini.geometry.DailyBar;
 import in.arthayantra.marketdata.screener.minervini.geometry.VcpDetector;
 import in.arthayantra.marketdata.screener.minervini.geometry.VcpFootprint;
@@ -56,7 +59,13 @@ public final class MinerviniSwingBacktest {
    * {@code rsMin} (else the RS gate is relaxed — fed a passing constant); {@code turnoverFloor} in
    * rupees/day gates on the 20-day average traded value (0 = off).
    */
-  record Variant(String name, boolean useRealRs, double rsMin, double turnoverFloor) {}
+  record Variant(
+      String name, boolean useRealRs, double rsMin, double turnoverFloor, String fillTiming) {
+
+    Variant(String name, boolean useRealRs, double rsMin, double turnoverFloor) {
+      this(name, useRealRs, rsMin, turnoverFloor, AT_CLOSE);
+    }
+  }
 
   /** The technical-only baseline (reproduces the original v1 numbers exactly). */
   static final Variant V1 = new Variant("v1-technical", false, 0, 0);
@@ -164,6 +173,7 @@ public final class MinerviniSwingBacktest {
     boolean inTrade = false;
     int entryIdx = 0;
     double entryPrice = 0;
+    double entrySignalClose = 0;
     for (int i = MIN_BARS; i < n; i++) {
       LocalDate date = bars.get(i).date();
       if (!inTrade) {
@@ -172,14 +182,23 @@ public final class MinerviniSwingBacktest {
         }
         if (entryFires(v, setup, i, close, sma20, sma50, sma150, sma200, high52wPrior, low52w,
             volRatio20, volRatio50, turnover20, rsRank, pivot, cheat, thrust, isVcp)) {
+          double fill = fillPrice(bars, i, v.fillTiming());
+          if (Double.isNaN(fill)) {
+            continue; // next_open signal on the final bar cannot fill
+          }
           inTrade = true;
           entryIdx = i;
-          entryPrice = close[i];
+          entryPrice = fill;
+          // The protective-stop level stays anchored to the signal close; only execution moves.
+          entrySignalClose = close[i];
         }
       } else {
-        String reason = exitFires(i, close, sma50, entryPrice);
+        String reason = exitFires(i, close, sma50, entrySignalClose);
         if (reason != null) {
-          double exitPrice = close[i];
+          double exitPrice = fillPrice(bars, i, v.fillTiming());
+          if (Double.isNaN(exitPrice)) {
+            continue; // unfilled final-bar exit leaves an open-at-end trade, which is dropped
+          }
           out.add(
               new BtTrade(
                   v.name(), setup, symbol, bars.get(entryIdx).date(), entryPrice, date, exitPrice,
@@ -219,8 +238,9 @@ public final class MinerviniSwingBacktest {
   }
 
   /** The exit doctrine on bar {@code i}: the 8% protective stop first, then the 50-day-MA close trail. */
-  private static String exitFires(int i, double[] close, double[] sma50, double entryPrice) {
-    if (close[i] <= entryPrice * (1.0 - STOP_PCT)) {
+  private static String exitFires(
+      int i, double[] close, double[] sma50, double entrySignalClose) {
+    if (close[i] <= entrySignalClose * (1.0 - STOP_PCT)) {
       return "STOP_LOSS";
     }
     if (!Double.isNaN(sma50[i]) && close[i] <= sma50[i]) {

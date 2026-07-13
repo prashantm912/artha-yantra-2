@@ -1,7 +1,12 @@
 package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -11,9 +16,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -26,6 +37,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Phase 43 IT (mock profile): the paper ledger fills through the shared engine JAR (fill-audit
@@ -56,6 +70,9 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private StringRedisTemplate redis;
   @Autowired private ObjectMapper objectMapper;
+  @Autowired private MeterRegistry meterRegistry;
+  @Autowired private PaperOrderRepository orders;
+  @Autowired private PlatformTransactionManager transactionManager;
 
   @Test
   void stopLossBracketAutoClosesOnBreach() throws Exception {
@@ -152,18 +169,21 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
   void takenSignalWithQtyOpensAPaperPosition() throws Exception {
     UUID versionId = jdbc.queryForObject("SELECT id FROM strategy_versions LIMIT 1", UUID.class);
     String sym = "PAPEREQ" + UUID.randomUUID().toString().substring(0, 8);
+    OffsetDateTime generatedAt =
+        OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(5).truncatedTo(ChronoUnit.MILLIS);
     Long signalId =
         jdbc.queryForObject(
             """
             INSERT INTO signals
               (strategy_version_id, exchange, tradingsymbol, "interval", signal_type, side,
-               entry_price, composite_score, score_breakdown)
-            VALUES (?, 'NSE', ?, '1m', 'ENTRY', 'BUY', 100.0000, 0.7000, '{}'::jsonb)
+               entry_price, composite_score, score_breakdown, generated_at)
+            VALUES (?, 'NSE', ?, '1m', 'ENTRY', 'BUY', 100.0000, 0.7000, '{}'::jsonb, ?)
             RETURNING id
             """,
             Long.class,
             versionId,
-            sym);
+            sym,
+            generatedAt);
     redis
         .opsForHash()
         .put(
@@ -171,6 +191,11 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
             "NSE:" + sym,
             objectMapper.writeValueAsString(
                 Map.of("exchange", "NSE", "tradingsymbol", sym, "lastPrice", "105.00")));
+
+    long timerCountBefore =
+        meterRegistry.find("ay_signal_to_fill_seconds").timer() == null
+            ? 0
+            : meterRegistry.find("ay_signal_to_fill_seconds").timer().count();
 
     mockMvc
         .perform(
@@ -180,6 +205,117 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
         .andExpect(status().isOk());
 
     assertThat(positions.findOpen("other", "NSE", sym, "BUY")).isPresent();
+    Map<String, Object> latencyStamp =
+        jdbc.queryForMap(
+            """
+            SELECT s.generated_at, o.tick_to_fill_ms,
+                   (floor(extract(epoch FROM o.filled_at) * 1000)
+                    - floor(extract(epoch FROM s.generated_at) * 1000))::bigint AS expected_latency_ms
+            FROM paper_orders o JOIN signals s ON s.id = o.signal_id
+            WHERE o.signal_id = ?
+            """,
+            signalId);
+    assertThat(((java.sql.Timestamp) latencyStamp.get("generated_at")).toInstant())
+        .as("paper latency instrumentation does not rewrite signals.generated_at")
+        .isEqualTo(generatedAt.toInstant());
+    assertThat(latencyStamp.get("tick_to_fill_ms"))
+        .isEqualTo(latencyStamp.get("expected_latency_ms"));
+    assertThat(meterRegistry.find("ay_signal_to_fill_seconds").timer())
+        .isNotNull()
+        .extracting(timer -> timer.count())
+        .isEqualTo(timerCountBefore + 1);
+    assertThat(
+            java.util.Arrays.stream(
+                    meterRegistry
+                        .find("ay_signal_to_fill_seconds")
+                        .timer()
+                        .takeSnapshot()
+                        .percentileValues())
+                .mapToDouble(value -> value.percentile())
+                .toArray())
+        .contains(0.5, 0.95);
+  }
+
+  @Test
+  void rolledBackFillDoesNotIncrementTheSignalToFillTimer() {
+    String sym = "PAPERROLLBACK" + UUID.randomUUID().toString().substring(0, 8);
+    long timerCountBefore =
+        meterRegistry.find("ay_signal_to_fill_seconds").timer().count();
+    TransactionTemplate tx = new TransactionTemplate(transactionManager);
+
+    assertThatThrownBy(
+            () ->
+                tx.executeWithoutResult(
+                    status -> {
+                      orders.insertFilled(
+                          "other",
+                          null,
+                          "NSE",
+                          sym,
+                          "BUY",
+                          1,
+                          new BigDecimal("100.00"),
+                          "ltp_slippage/v1",
+                          BigDecimal.ZERO,
+                          null,
+                          null,
+                          null,
+                          "SIGNAL_ENTRY",
+                          null,
+                          OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(1));
+                      throw new IllegalStateException("force rollback after fill insert");
+                    }))
+        .isInstanceOf(IllegalStateException.class);
+
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM paper_orders WHERE tradingsymbol = ?", Long.class, sym))
+        .isZero();
+    assertThat(meterRegistry.find("ay_signal_to_fill_seconds").timer().count())
+        .isEqualTo(timerCountBefore);
+  }
+
+  @Test
+  void committedFillIsNotReportedAsFailedWhenTheTimerThrows() {
+    String sym = "PAPERMETERFAIL" + UUID.randomUUID().toString().substring(0, 8);
+    Timer originalTimer =
+        (Timer) ReflectionTestUtils.getField(orders, "signalToFillTimer");
+    Timer throwingTimer = mock(Timer.class);
+    doThrow(new IllegalStateException("meter unavailable"))
+        .when(throwingTimer)
+        .record(anyLong(), eq(TimeUnit.MILLISECONDS));
+    ReflectionTestUtils.setField(orders, "signalToFillTimer", throwingTimer);
+
+    try {
+      TransactionTemplate tx = new TransactionTemplate(transactionManager);
+      assertThatCode(
+              () ->
+                  tx.executeWithoutResult(
+                      status ->
+                          orders.insertFilled(
+                              "other",
+                              null,
+                              "NSE",
+                              sym,
+                              "BUY",
+                              1,
+                              new BigDecimal("100.00"),
+                              "ltp_slippage/v1",
+                              BigDecimal.ZERO,
+                              null,
+                              null,
+                              null,
+                              "SIGNAL_ENTRY",
+                              null,
+                              OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(1))))
+          .doesNotThrowAnyException();
+      assertThat(
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM paper_orders WHERE tradingsymbol = ?", Long.class, sym))
+          .isEqualTo(1L);
+    } finally {
+      ReflectionTestUtils.setField(orders, "signalToFillTimer", originalTimer);
+    }
   }
 
   @Test

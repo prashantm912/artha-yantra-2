@@ -9,7 +9,9 @@ import in.arthayantra.strategysignal.registry.MarketDataInstrumentClient;
 import in.arthayantra.strategysignal.registry.RegistryService;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -31,6 +33,7 @@ import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
@@ -53,6 +56,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   @SuppressWarnings("TimeInStaticInitializer")
   private static final OffsetDateTime WARM_BASE =
       OffsetDateTime.now(IST).truncatedTo(ChronoUnit.MINUTES).minusMinutes(90);
+  private static final OffsetDateTime LIVE_NOW = WARM_BASE.plusMinutes(90);
 
   /** Stubs: instruments always resolve; candle warm-up is a deterministic declining ramp. */
   @TestConfiguration
@@ -61,6 +65,12 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     @Primary
     MarketDataInstrumentClient stubInstruments() {
       return (exchange, tradingsymbol) -> true;
+    }
+
+    @Bean
+    @Primary
+    Clock fixedClock() {
+      return Clock.fixed(LIVE_NOW.toInstant(), ZoneOffset.UTC);
     }
 
     @Bean
@@ -161,6 +171,8 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   @Autowired private RedisConnectionFactory connectionFactory;
   @Autowired private ObjectMapper objectMapper;
   @Autowired private MockMvc mockMvc;
+  @Autowired private JdbcTemplate jdbc;
+  @Autowired private MeterRegistry meterRegistry;
 
   private static UUID strategyId;
   private static long firstSignalId;
@@ -213,6 +225,21 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       assertThat(row.interval()).isEqualTo("1m");
       assertThat(row.stopLoss()).isNotNull();
       assertThat(row.target()).isNotNull();
+
+      Map<String, Object> latencyStamp =
+          jdbc.queryForMap(
+              "SELECT generated_at, emitted_at, emit_latency_ms FROM signals WHERE id = ?",
+              row.id());
+      assertThat(((java.sql.Timestamp) latencyStamp.get("generated_at")).toInstant())
+          .as("latency instrumentation never rewrites the deterministic bar-bucket instant")
+          .isEqualTo(row.generatedAt().toInstant());
+      assertThat(((java.sql.Timestamp) latencyStamp.get("emitted_at")).toInstant())
+          .isEqualTo(LIVE_NOW.toInstant());
+      assertThat(latencyStamp.get("emit_latency_ms")).isEqualTo(0L);
+      assertThat(meterRegistry.find("ay_signal_bar_to_emit_seconds").timer())
+          .isNotNull()
+          .extracting(timer -> timer.count())
+          .isEqualTo(1L);
 
       // renderer invariant on the persisted breakdown
       BigDecimal contributions = BigDecimal.ZERO;

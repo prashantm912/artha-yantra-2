@@ -118,8 +118,14 @@ public class SignalEngine {
   // queue preserves each distinct bar in arrival order; the single-threaded evalExecutor drains it
   // in order. (A latest-value-wins map would drop a bar under a burst, leaving a permanent series
   // gap and potentially skipping a stop-loss EXIT.)
-  private final java.util.Queue<Map.Entry<String, EngineCandle>> pending =
+  private record PendingBar(String symbolKey, EngineCandle candle, long receivedAtMs) {}
+
+  private final java.util.Queue<PendingBar> pending =
       new java.util.concurrent.ConcurrentLinkedQueue<>();
+  // The causal receive stamp for the bar currently running on the eval thread. A ThreadLocal keeps
+  // scheduled BTST/pre-close emissions (which have no Redis receipt) at zero even if they overlap a
+  // live evaluation on the single-thread executor.
+  private final ThreadLocal<Long> currentBarReceivedAtMs = ThreadLocal.withInitial(() -> 0L);
   private final AtomicBoolean drainScheduled = new AtomicBoolean();
   private final AtomicBoolean reloadRequested = new AtomicBoolean(true);
   // Warm ta4j banks per (version|instrument) — cleared on reload/hot-swap (P1-12, D17 live).
@@ -170,6 +176,7 @@ public class SignalEngine {
   private volatile RedisMessageListenerContainer container;
 
   private final Timer evalTimer;
+  private final Timer barToEmitTimer;
   private final Counter emitted;
   private final Counter evalFailures;
   // Audit emit-entry-not-transactional: each emit path's dependent writes commit atomically —
@@ -212,6 +219,10 @@ public class SignalEngine {
     this.emissionGuard = emissionGuard;
     this.scalperGate = scalperGate;
     this.evalTimer = meterRegistry.timer("ay_signal_eval_duration_seconds");
+    this.barToEmitTimer =
+        Timer.builder("ay_signal_bar_to_emit_seconds")
+            .publishPercentiles(0.5, 0.95)
+            .register(meterRegistry);
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
     this.evalFailures = meterRegistry.counter("ay_signal_eval_failures_total");
     this.tx = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
@@ -495,7 +506,8 @@ public class SignalEngine {
 
   /** Redis receive thread: parse + conflate + hand off. NEVER evaluates here. */
   void onCandleMessage(String json) {
-    lastBarReceivedAtMs = clock.millis(); // subscriber-liveness heartbeat (SubscriberHealthCanary)
+    long receivedAtMs = clock.millis();
+    lastBarReceivedAtMs = receivedAtMs; // subscriber-liveness heartbeat (SubscriberHealthCanary)
     try {
       JsonNode node = objectMapper.readTree(json);
       EngineCandle candle =
@@ -508,7 +520,7 @@ public class SignalEngine {
               node.path("volume").asLong(),
               node.hasNonNull("oi") ? new BigDecimal(node.path("oi").asText()) : null);
       String symbolKey = node.path("exchange").asText() + ":" + node.path("tradingsymbol").asText();
-      pending.add(Map.entry(symbolKey, candle)); // queue, never collapse — see the `pending` field
+      pending.add(new PendingBar(symbolKey, candle, receivedAtMs)); // queue, never collapse
       if (drainScheduled.compareAndSet(false, true)) {
         evalExecutor.execute(this::drain);
       }
@@ -522,11 +534,13 @@ public class SignalEngine {
     if (reloadRequested.get()) {
       reload(); // hot-swap lands exactly at a bar boundary, never mid-bar
     }
-    Map.Entry<String, EngineCandle> head;
+    PendingBar head;
     while ((head = pending.poll()) != null) {
-      String[] parts = head.getKey().split(":", 2);
-      EngineCandle bar = head.getValue();
-      evalTimer.record(() -> onClosedBar(parts[0], parts[1], bar));
+      String[] parts = head.symbolKey().split(":", 2);
+      EngineCandle bar = head.candle();
+      long receivedAtMs = head.receivedAtMs();
+      withBarReceiptTimestamp(
+          receivedAtMs, () -> evalTimer.record(() -> onClosedBar(parts[0], parts[1], bar)));
     }
     // Eval-side heartbeat (audit A13): stamped on THIS (signal-eval) thread only when the batch has
     // fully drained, so a stall INSIDE onClosedBar freezes it while bars keep being received — the
@@ -1070,6 +1084,7 @@ public class SignalEngine {
               }
               return newId;
             });
+    stampEmissionLatency(id);
     emitted.increment();
     // Best-effort post-commit stamp of the fired-side diagnostic (§13 row 19): NOT inside the tx above —
     // a scalper contrast diagnostic must never roll back / break the real ENTRY (mirrors recordRejection's
@@ -1342,6 +1357,7 @@ public class SignalEngine {
               signals.transition(anchor.id(), "EXPIRED"); // the entry resolved — the pair is closed
               return newId;
             });
+    stampEmissionLatency(id);
     emitted.increment();
     publisher.publish(
         id, strategy.versionId(), strategy.name(), strategy.slug(), strategy.version(),
@@ -1352,6 +1368,42 @@ public class SignalEngine {
     events.publishEvent(new SignalExited(anchor.id(), id, exitReason));
     log.info("EXIT signal #{} {} {}:{} at {} ({})", id, strategy.slug(), exchange, tradingsymbol,
         bar.close(), exitReason);
+  }
+
+  /** Live-only wall-clock side-channel; deterministic replay never enters either emit method. */
+  void stampEmissionLatency(long signalId) {
+    OffsetDateTime emittedAt = OffsetDateTime.now(clock);
+    Long latencyMs =
+        emitLatencyMs(emittedAt.toInstant().toEpochMilli(), currentBarReceivedAtMs.get());
+    try {
+      signals.stampEmittedAt(signalId, emittedAt, latencyMs);
+    } catch (RuntimeException e) {
+      // Telemetry is a post-commit side-channel. Never strand a committed ENTRY before publish, or
+      // a committed EXIT before SignalExited closes its paper position.
+      log.warn("failed to stamp emission latency for signal #{}: {}", signalId, e.toString());
+    }
+    if (latencyMs != null && latencyMs >= 0) {
+      try {
+        barToEmitTimer.record(latencyMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+      } catch (RuntimeException e) {
+        log.warn("failed to record emission-latency metric for signal #{}: {}", signalId, e.toString());
+      }
+    }
+  }
+
+  /** Scopes one causal Redis receipt timestamp to its evaluation, clearing it on every exit path. */
+  void withBarReceiptTimestamp(long receivedAtMs, Runnable evaluation) {
+    currentBarReceivedAtMs.set(receivedAtMs);
+    try {
+      evaluation.run();
+    } finally {
+      currentBarReceivedAtMs.remove();
+    }
+  }
+
+  /** Null rather than a bogus duration until the receive path has observed a bar timestamp. */
+  static Long emitLatencyMs(long nowMs, long lastBarReceivedAtMs) {
+    return lastBarReceivedAtMs == 0 ? null : nowMs - lastBarReceivedAtMs;
   }
 
   /** The 15:45 sweep: stale ACTIVE signals expire (C-2.14). */

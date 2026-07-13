@@ -320,6 +320,19 @@ public class SignalRepository {
   }
 
   /**
+   * Stamps the live-only emit wall-clock and the bar-publish-to-emit latency. {@code latencyMs} is
+   * null when no bar-receipt timestamp exists; the deterministic {@code generated_at} column is
+   * deliberately absent from this update.
+   */
+  public void stampEmittedAt(long id, OffsetDateTime emittedAt, Long latencyMs) {
+    jdbc.update(
+        "UPDATE signals SET emitted_at = ?, emit_latency_ms = ? WHERE id = ?",
+        emittedAt,
+        latencyMs,
+        id);
+  }
+
+  /**
    * Stamps the MV-6.8 minervini side-channel: the fired swing setup's detail (setup type, stage, VCP
    * footprint, pivot, gate booleans) as JSON — outside the frozen score breakdown, the same rule as
    * {@link #stampScalperDetail}. NULL for every non-minervini signal (never stamped).

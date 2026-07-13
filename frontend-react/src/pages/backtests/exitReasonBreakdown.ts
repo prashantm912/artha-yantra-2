@@ -22,7 +22,10 @@ export interface ExitReasonStat {
 export function exitReasonBreakdown(trades: TradeRow[]): ExitReasonStat[] {
   const acc = new Map<string, { count: number; wins: number; totalPnl: string }>();
   for (const t of trades) {
-    const reason = t.exitReason || '—';
+    // Group case-insensitively (belt-and-suspenders for chip task_cf5d58c8): the API now persists
+    // exit_reason UPPERCASE, but any lingering lowercase row (pre-backfill, or a stale cache) must
+    // still bucket with its uppercase twin — stop_loss and STOP_LOSS are one exit reason, not two.
+    const reason = (t.exitReason || '—').toUpperCase();
     const cur = acc.get(reason) ?? { count: 0, wins: 0, totalPnl: '0' };
     cur.count += 1;
     if (!isNegative(t.pnl)) cur.wins += 1;

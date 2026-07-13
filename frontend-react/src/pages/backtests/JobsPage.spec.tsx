@@ -1,9 +1,27 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+// Radix DropdownMenu (Popper-based) needs these jsdom shims to open in a test.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
+Element.prototype.scrollIntoView ??= () => {};
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.setPointerCapture ??= () => {};
+Element.prototype.releasePointerCapture ??= () => {};
+
 const cancel = vi.fn();
+const annotate = vi.fn();
+const createView = vi.fn();
+const deleteView = vi.fn();
+// Latest args useJobs was called with (index 7 = the D4 per-job tag filter) + the saved-view store the
+// Views dropdown reads. Reset per test via renderPage's callers.
+let lastJobsArgs: unknown[] = [];
+let savedViews: Array<{ id: string; kind: string; name: string; filter: unknown }> = [];
 
 vi.mock('../../api/strategies.ts', () => ({
   // s1's newest version is 1.0.1 (id v-cur) → a job on 1.0.1 is "latest", 1.0.0 is "old".
@@ -19,9 +37,10 @@ vi.mock('../../api/backtests.ts', async (orig) => {
   const actual = await orig<typeof import('../../api/backtests.ts')>();
   return {
     ...actual, // keep JOB_STATUSES + fetchResultRef
-    // arg 7 = currentVersions (server-side "latest only", "strategyId:version" pairs): model the
-    // server filter keeping only jobs on the current version.
+    // arg 6 = currentVersions (server-side "latest only", "strategyId:version" pairs); arg 7 = the
+    // NEW per-job tag filter. Model the server filter keeping only jobs on the current version.
     useJobs: (...args: unknown[]) => {
+      lastJobsArgs = args;
       const currentVersions = args[6];
       const items = currentVersions ? JOBS.filter((j) => j.strategyVersion === '1.0.1') : JOBS;
       return { data: { items }, isFetching: false, isLoading: false, refetch: () => {} };
@@ -30,6 +49,11 @@ vi.mock('../../api/backtests.ts', async (orig) => {
     useCancelJob: () => ({ mutate: cancel }),
     // The detail endpoint is the only source of jobs.error — the dialog reads it from here.
     useJobDetail: () => ({ isPending: false, isError: false, data: { error: 'Kaboom: preflight DATA_GAP at 2026-06-23' } }),
+    // D4 P2-2 annotation + saved-view hooks (asserted at the URL/body level in backtests.spec.ts).
+    useAnnotateJob: () => ({ mutate: annotate, isPending: false }),
+    useSavedViews: () => ({ data: { items: savedViews } }),
+    useCreateSavedView: () => ({ mutate: createView, isPending: false }),
+    useDeleteSavedView: () => ({ mutate: deleteView, isPending: false }),
   };
 });
 
@@ -47,6 +71,15 @@ function renderPage() {
 }
 
 describe('JobsPage', () => {
+  beforeEach(() => {
+    cancel.mockClear();
+    annotate.mockClear();
+    createView.mockClear();
+    deleteView.mockClear();
+    savedViews = [];
+    lastJobsArgs = [];
+  });
+
   it('lists jobs with status, version badges, a results link for completed backtests, and cancels a running job', () => {
     renderPage();
     expect(screen.getByText('aaaa1111')).toBeInTheDocument();
@@ -86,5 +119,57 @@ describe('JobsPage', () => {
     // The dialog surfaces the BE-served error text (fetched lazily from the detail endpoint).
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText(/Kaboom: preflight DATA_GAP/)).toBeInTheDocument();
+  });
+
+  // --- D4 P2-2: per-job tags/note + saved views ---
+
+  it('the per-job tag filter feeds useJobs its own `tag` arg (separate from the strategy-tag filter)', () => {
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Filter by job tag'), { target: { value: 'alpha' } });
+    // arg 7 = the NEW per-job tag; the strategy-tag → strategyIds path (arg 5) is left untouched.
+    expect(lastJobsArgs[7]).toBe('alpha');
+    expect(lastJobsArgs[5]).toBeNull();
+  });
+
+  it('edits a run’s tags + note and PATCHes the full annotation set', () => {
+    renderPage();
+    fireEvent.click(screen.getAllByLabelText(/Edit tags and note for job aaaa1111/)[0]);
+    const dialog = screen.getByRole('dialog');
+    const tagInput = within(dialog).getByLabelText('Add a tag');
+    fireEvent.change(tagInput, { target: { value: 'newtag' } });
+    fireEvent.keyDown(tagInput, { key: 'Enter' });
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'checked' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(annotate).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 'aaaa1111-bb', tags: ['newtag'], note: 'checked' }),
+      expect.anything(),
+    );
+  });
+
+  it('saves the CURRENT filter set as a named view', () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Save view' })); // toolbar trigger
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('View name'), { target: { value: 'my view' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save view' })); // dialog submit
+    expect(createView).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'backtest_jobs',
+        name: 'my view',
+        filter: expect.objectContaining({ status: null, strategyId: null, jobTag: null, latestOnly: false }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('applies a saved view back onto the page filters', () => {
+    savedViews = [
+      { id: 'v1', kind: 'backtest_jobs', name: 'Running only', filter: { status: 'running', strategyId: null, jobTag: null, latestOnly: false, sort: null } },
+    ];
+    renderPage();
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Load a saved view' }), { button: 0 });
+    fireEvent.click(screen.getByText('Running only'));
+    // Applying restores status='running' → the next render re-queries useJobs with it (arg 0).
+    expect(lastJobsArgs[0]).toBe('running');
   });
 });

@@ -1,6 +1,7 @@
 package in.arthayantra.backtest.replay;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.backtest.analytics.BenchmarkAnalytics;
@@ -78,6 +79,8 @@ public class BacktestRunner {
   private final in.arthayantra.backtest.replay.counterfactual.CounterfactualService counterfactual;
   private final in.arthayantra.backtest.replay.deepswing.DeepSwingService deepSwing;
   private final DatasetEpochRepository datasetEpochs;
+  private final DecisionTraceRepository decisionTraces;
+  private final ObjectMapper objectMapper;
 
   /** Wires the replay collaborators. */
   public BacktestRunner(
@@ -98,7 +101,9 @@ public class BacktestRunner {
       MarketDataClient marketData,
       in.arthayantra.backtest.replay.counterfactual.CounterfactualService counterfactual,
       in.arthayantra.backtest.replay.deepswing.DeepSwingService deepSwing,
-      DatasetEpochRepository datasetEpochs) {
+      DatasetEpochRepository datasetEpochs,
+      DecisionTraceRepository decisionTraces,
+      ObjectMapper objectMapper) {
     this.versions = versions;
     this.candleReader = candleReader;
     this.replayEngine = replayEngine;
@@ -117,6 +122,8 @@ public class BacktestRunner {
     this.counterfactual = counterfactual;
     this.deepSwing = deepSwing;
     this.datasetEpochs = datasetEpochs;
+    this.decisionTraces = decisionTraces;
+    this.objectMapper = objectMapper;
   }
 
   /** Runs the job; throws {@link JobCancelledException} on cancel and other exceptions on failure. */
@@ -243,6 +250,10 @@ public class BacktestRunner {
     // (MarketDataClient swallows failures) — the gate then degrades to no-filtering. Tally
     // fetched-vs-total per run so a degraded-gate run is distinguishable on the metrics JSONB.
     OptionsPremiumReplay.GateCoverage oiGateCoverage = new OptionsPremiumReplay.GateCoverage();
+    DecisionTraceCollector decisionTraceCollector =
+        request.path("traceDecisions").asBoolean(false) && !optionsStrategy
+            ? new DecisionTraceCollector(objectMapper)
+            : null;
     ReplayResult result =
         optionsStrategy
             ? optionsPremiumReplay.replay(
@@ -267,7 +278,8 @@ public class BacktestRunner {
                 oneMinuteCovered,
                 // D17b: smooth intra-replay progress over the 40→80 band so the bar no longer sits at 40
                 // for the whole replay. Pure progress side-channel — replay numerics are unchanged.
-                pct -> progress.accept(40 + pct * 40 / 100));
+                pct -> progress.accept(40 + pct * 40 / 100),
+                decisionTraceCollector);
     checkpoint(cancelled, job.id(), progress, 80);
 
     MetricsCalculator.Metrics m =
@@ -415,6 +427,13 @@ public class BacktestRunner {
             // whoever submitted the job (owner backtest, or optimizer:{sweepId} for a TRIAL).
             job.createdBy());
     trades.insertAll(runId, result.trades());
+    if (decisionTraceCollector != null) {
+      try {
+        decisionTraces.insertAll(runId, decisionTraceCollector.rows());
+      } catch (RuntimeException traceFailure) {
+        log.warn("decision traces failed to persist for run {}; continuing", runId, traceFailure);
+      }
+    }
 
     // §D.7 ask/tell back-half: a TRIAL emits its metrics onto optimizations.results so the
     // optimizer can study.tell() and (Phase 34) feed per-fold OOS objectives to the pruner.

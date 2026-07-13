@@ -15,6 +15,7 @@ import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategyengine.fills.TouchBasis;
 import in.arthayantra.strategyengine.golden.GoldenSignalsJson.SignalEvent;
 import in.arthayantra.strategyengine.golden.TickwiseGoldenRunner;
+import in.arthayantra.strategyengine.golden.TickwiseGoldenRunner.DecisionListener;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import java.math.BigDecimal;
@@ -84,6 +85,31 @@ public class ReplayEngine {
       CostConfig costs,
       boolean oneMinuteCovered,
       IntConsumer replayProgress) {
+    return replay(
+        definition,
+        exchange,
+        tradingsymbol,
+        primaryOneMinute,
+        contextCandles,
+        initialEquity,
+        costs,
+        oneMinuteCovered,
+        replayProgress,
+        null);
+  }
+
+  /** As above, with an optional decision-diagnostics side-channel. */
+  public ReplayResult replay(
+      StrategyDefinition definition,
+      String exchange,
+      String tradingsymbol,
+      List<EngineCandle> primaryOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      BigDecimal initialEquity,
+      CostConfig costs,
+      boolean oneMinuteCovered,
+      IntConsumer replayProgress,
+      DecisionListener decisionListener) {
 
     int barCount = primaryOneMinute.size();
     int sigStep = Math.max(1, barCount / 20);
@@ -98,7 +124,7 @@ public class ReplayEngine {
 
     List<SignalEvent> signals =
         new TickwiseGoldenRunner(definition, exchange, tradingsymbol)
-            .run(primaryOneMinute, contextCandles, signalProgress);
+            .run(primaryOneMinute, contextCandles, signalProgress, false, decisionListener);
 
     FillTiming timing =
         ReferencePriceSelector.defaultFor(

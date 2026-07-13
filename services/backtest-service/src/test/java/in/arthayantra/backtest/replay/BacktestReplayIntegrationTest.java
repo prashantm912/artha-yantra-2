@@ -16,6 +16,7 @@ import in.arthayantra.backtest.client.StrategyVersionClient.ResolvedVersion;
 import in.arthayantra.backtest.jobs.Job;
 import in.arthayantra.backtest.jobs.JobKind;
 import in.arthayantra.backtest.jobs.JobRepository;
+import in.arthayantra.backtest.regime.RegimePreflight;
 import in.arthayantra.backtest.testsupport.BacktestIntegrationTestBase;
 import in.arthayantra.strategyengine.golden.GoldenCandleCsv;
 import in.arthayantra.strategyengine.series.EngineCandle;
@@ -53,6 +54,7 @@ class BacktestReplayIntegrationTest extends BacktestIntegrationTestBase {
   private static final UUID STRATEGY_ID = UUID.fromString("33333333-3333-3333-3333-333333333333");
 
   @MockitoBean private StrategyVersionClient versions;
+  @MockitoBean private RegimePreflight regimePreflight;
   @Autowired private BacktestRunner runner;
   @Autowired private JobRepository jobs;
   @Autowired private RunRepository runs;
@@ -117,6 +119,60 @@ class BacktestReplayIntegrationTest extends BacktestIntegrationTestBase {
     runner.run(job2, pct -> {}, () -> false);
     UUID runId2 = runs.findRunIdByJobId(job2.id()).orElseThrow();
     assertThat(dataHash(runId2)).isEqualTo(dataHash(runId));
+  }
+
+  @Test
+  void tracedReplayServesTypedDecisionDaysAndUnknownRunIs404() throws Exception {
+    Job job =
+        jobs.insertQueued(
+            JobKind.BACKTEST,
+            null,
+            STRATEGY_ID,
+            objectMapper
+                .createObjectNode()
+                .put("strategyId", STRATEGY_ID.toString())
+                .put("from", "2026-01-05")
+                .put("to", "2026-01-10")
+                .put("traceDecisions", true),
+            "corr-decision-traces",
+            "owner");
+
+    runner.run(job, pct -> {}, () -> false);
+
+    UUID runId = runs.findRunIdByJobId(job.id()).orElseThrow();
+    mockMvc
+        .perform(get("/api/v1/backtests/" + runId + "/decision-traces"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items").isArray())
+        .andExpect(jsonPath("$.items[0].sessionDate").exists())
+        .andExpect(jsonPath("$.items[0].reason").exists())
+        .andExpect(jsonPath("$.items[0].bars").isNumber())
+        .andExpect(jsonPath("$.items[0].sampleBucket").exists());
+
+    mockMvc
+        .perform(get("/api/v1/backtests/" + UUID.randomUUID() + "/decision-traces"))
+        .andExpect(status().isNotFound());
+  }
+
+  @Test
+  void submissionPinsTraceDecisionsOnlyWhenEnabled() throws Exception {
+    String response =
+        mockMvc
+            .perform(
+                post("/api/v1/backtests/run")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        "{\"strategyId\":\""
+                            + STRATEGY_ID
+                            + "\",\"from\":\"2026-01-05\",\"to\":\"2026-01-10\","
+                            + "\"traceDecisions\":true}"))
+            .andExpect(status().isAccepted())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    UUID jobId = UUID.fromString(objectMapper.readTree(response).path("jobId").asText());
+    assertThat(jobs.find(jobId).orElseThrow().request().path("traceDecisions").asBoolean()).isTrue();
   }
 
   @Test

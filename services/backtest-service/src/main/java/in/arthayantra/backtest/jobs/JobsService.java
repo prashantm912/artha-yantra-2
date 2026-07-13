@@ -137,6 +137,9 @@ public class JobsService {
     if (req.seed() != null) {
       request.put("seed", req.seed());
     }
+    if (Boolean.TRUE.equals(req.traceDecisions())) {
+      request.put("traceDecisions", true);
+    }
     // EVO §3.2.5 cost-stress: validate the multiplier (422 on out-of-range) and pin it into the
     // request JSONB — this is the run's provenance record of the stress it was executed under, which
     // BacktestRunner reads back to scale the fill slippage. An explicit 1 IS unstressed, so it is

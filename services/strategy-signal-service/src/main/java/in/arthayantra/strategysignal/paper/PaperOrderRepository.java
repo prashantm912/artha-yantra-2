@@ -1,11 +1,17 @@
 package in.arthayantra.strategysignal.paper;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * JDBC access to {@code paper_orders} — the simulated order log with the fill-audit columns sourced
@@ -14,6 +20,10 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class PaperOrderRepository {
+
+  private static final Logger log = LoggerFactory.getLogger(PaperOrderRepository.class);
+
+  private record InsertedOrder(long id, Long tickToFillMs) {}
 
   /** One order row (fill-audit included, plus the P1-5 fill-reference provenance). */
   public record OrderRow(
@@ -38,10 +48,15 @@ public class PaperOrderRepository {
   public record OrderKey(String exchange, String tradingsymbol, String side) {}
 
   private final JdbcTemplate jdbc;
+  private final Timer signalToFillTimer;
 
   /** Wires the strategy datasource. */
-  public PaperOrderRepository(JdbcTemplate jdbc) {
+  public PaperOrderRepository(JdbcTemplate jdbc, MeterRegistry meterRegistry) {
     this.jdbc = jdbc;
+    this.signalToFillTimer =
+        Timer.builder("ay_signal_to_fill_seconds")
+            .publishPercentiles(0.5, 0.95)
+            .register(meterRegistry);
   }
 
   /** Inserts a FILLED order with its fill-audit trail, no idempotency key (engine/taken/exit fills). */
@@ -78,7 +93,7 @@ public class PaperOrderRepository {
       String clientOrderId) {
     return insertFilled(
         book, signalId, exchange, tradingsymbol, side, qty, fillPrice, fillSimulator, slippageApplied,
-        quoteBid, quoteAsk, clientOrderId, null, null);
+        quoteBid, quoteAsk, clientOrderId, null, null, null);
   }
 
   /**
@@ -103,18 +118,21 @@ public class PaperOrderRepository {
       BigDecimal quoteAsk,
       String clientOrderId,
       String refSource,
-      Long refTickAgeMs) {
-    Long id =
+      Long refTickAgeMs,
+      OffsetDateTime signalGeneratedAt) {
+    InsertedOrder inserted =
         jdbc.queryForObject(
             """
             INSERT INTO paper_orders
               (book, signal_id, exchange, tradingsymbol, side, qty, order_type, status, placed_at,
-               filled_at, fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask,
-               client_order_id, ref_source, ref_tick_age_ms)
-            VALUES (?,?,?,?,?,?, 'MARKET', 'FILLED', now(), now(), ?,?,?,?,?,?,?,?)
-            RETURNING id
+                filled_at, fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask,
+                client_order_id, ref_source, ref_tick_age_ms, tick_to_fill_ms)
+            VALUES (?,?,?,?,?,?, 'MARKET', 'FILLED', now(), now(), ?,?,?,?,?,?,?,?,
+                    (floor(extract(epoch FROM now()) * 1000)
+                     - floor(extract(epoch FROM ?::timestamptz) * 1000))::bigint)
+            RETURNING id, tick_to_fill_ms
             """,
-            Long.class,
+            (rs, rowNum) -> new InsertedOrder(rs.getLong("id"), rs.getObject("tick_to_fill_ms", Long.class)),
             book,
             signalId,
             exchange,
@@ -128,8 +146,35 @@ public class PaperOrderRepository {
             quoteAsk,
             clientOrderId,
             refSource,
-            refTickAgeMs);
-    return id == null ? 0 : id;
+            refTickAgeMs,
+            signalGeneratedAt);
+    if (inserted != null && inserted.tickToFillMs() != null && inserted.tickToFillMs() >= 0) {
+      recordSignalToFillAfterCommit(inserted.tickToFillMs());
+    }
+    return inserted == null ? 0 : inserted.id();
+  }
+
+  private void recordSignalToFillAfterCommit(long latencyMs) {
+    if (TransactionSynchronizationManager.isActualTransactionActive()
+        && TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              recordSignalToFill(latencyMs);
+            }
+          });
+      return;
+    }
+    recordSignalToFill(latencyMs);
+  }
+
+  private void recordSignalToFill(long latencyMs) {
+    try {
+      signalToFillTimer.record(latencyMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+    } catch (RuntimeException e) {
+      log.warn("failed to record signal-to-fill metric: {}", e.toString());
+    }
   }
 
   /**

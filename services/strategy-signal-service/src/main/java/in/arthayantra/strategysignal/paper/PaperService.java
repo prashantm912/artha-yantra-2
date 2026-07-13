@@ -403,6 +403,7 @@ public class PaperService {
     String tradingsymbol = request.tradingsymbol();
     String side = request.side();
     BigDecimal signalEntry = null;
+    OffsetDateTime signalGeneratedAt = null;
     if (request.signalId() != null) {
       SignalRepository.SignalRow signal =
           signals
@@ -415,6 +416,7 @@ public class PaperService {
       tradingsymbol = tradingsymbol != null ? tradingsymbol : signal.tradingsymbol();
       side = side != null ? side : signal.side();
       signalEntry = signal.entryPrice();
+      signalGeneratedAt = signal.generatedAt();
     }
     if (exchange == null || tradingsymbol == null || side == null) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "exchange, tradingsymbol and side are required");
@@ -467,7 +469,7 @@ public class PaperService {
     orders.insertFilled(
         book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
         fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId(), refSource,
-        refTickAgeMs);
+        refTickAgeMs, signalGeneratedAt);
     Long advisedLots = advisedLots(book, fill.fillPrice(), request.stopLoss());
     upsertPosition(
         book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
@@ -669,7 +671,7 @@ public class PaperService {
     }
     orders.insertFilled(
         pos.book(), null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
-        fills.simulatorId(), exit.slippageApplied(), null, null, null, refSource, refTickAgeMs);
+        fills.simulatorId(), exit.slippageApplied(), null, null, null, refSource, refTickAgeMs, null);
     // Auto-journal hook: the journal module listens AFTER_COMMIT (so a journal failure can never
     // roll back the close). Publishing inside the close tx is fine — delivery is deferred to commit.
     events.publishEvent(new PaperPositionClosed(pos.id(), realized, closeReason));

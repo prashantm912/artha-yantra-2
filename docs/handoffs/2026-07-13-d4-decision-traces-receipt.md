@@ -4,7 +4,7 @@ Date: 2026-07-13
 
 Branch: `feat/d4-decision-traces` from `origin/main@ac8b11b49f1ef8feef811162291d67d83dddcc6c`
 
-PR: pending creation; this field will be replaced with the open PR URL after `gh pr create`.
+PR: https://github.com/prashantm912/artha-yantra-2/pull/807 (OPEN)
 
 ## Diff summary
 
@@ -15,6 +15,7 @@ The implementation adds an opt-in engine decision side-channel, bounded daily ag
 | `contracts/backtest-service.openapi.json` | 77 | 0 |
 | `contracts/gen/backtest-service.d.ts` | 62 | 0 |
 | `deploy/flyway/backtest/V019__backtest_decision_traces.sql` | 17 | 0 |
+| `docs/handoffs/2026-07-13-d4-decision-traces-receipt.md` | 121 | 0 |
 | `libs/strategy-engine/src/main/java/in/arthayantra/strategyengine/golden/TickwiseGoldenRunner.java` | 96 | 3 |
 | `services/backtest-service/src/main/java/in/arthayantra/backtest/jobs/BacktestRunRequest.java` | 2 | 1 |
 | `services/backtest-service/src/main/java/in/arthayantra/backtest/jobs/JobsService.java` | 3 | 0 |

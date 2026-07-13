@@ -176,4 +176,31 @@ class DeepSwingEndpointIntegrationTest extends MarketDataIntegrationTestBase {
         .andExpect(jsonPath("$.result.family").value("minervini"))
         .andExpect(jsonPath("$.result.variant").value("technical"));
   }
+
+  @Test
+  void nextOpenVariantsFlowThroughBothDeepSwingFamilies() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/market/screener/deep-swing/run")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"family\":\"manas\",\"from\":\""
+                        + FROM
+                        + "\",\"variant\":\"rs-turnover-nopyramid-nextopen\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.result.family").value("manas"))
+        .andExpect(jsonPath("$.result.variant").value("rs-turnover-nopyramid-nextopen"));
+
+    mockMvc
+        .perform(
+            post("/api/v1/market/screener/deep-swing/run")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"family\":\"minervini\",\"from\":\""
+                        + FROM
+                        + "\",\"variant\":\"rs-turnover-nextopen\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.result.family").value("minervini"))
+        .andExpect(jsonPath("$.result.variant").value("rs-turnover-nextopen"));
+  }
 }

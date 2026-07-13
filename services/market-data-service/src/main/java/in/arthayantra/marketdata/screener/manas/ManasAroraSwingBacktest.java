@@ -1,5 +1,8 @@
 package in.arthayantra.marketdata.screener.manas;
 
+import static in.arthayantra.marketdata.screener.SwingFillPrice.AT_CLOSE;
+import static in.arthayantra.marketdata.screener.SwingFillPrice.fillPrice;
+
 import in.arthayantra.marketdata.screener.minervini.geometry.DailyBar;
 import in.arthayantra.marketdata.screener.minervini.geometry.VcpDetector;
 import in.arthayantra.marketdata.screener.minervini.geometry.VcpFootprint;
@@ -71,7 +74,18 @@ public final class ManasAroraSwingBacktest {
    * add-to-winner behaviour (off = one lot per position, the A/B baseline).
    */
   public record Variant(
-      String name, boolean useRealRs, double rsMin, double turnoverFloor, boolean pyramiding) {}
+      String name,
+      boolean useRealRs,
+      double rsMin,
+      double turnoverFloor,
+      boolean pyramiding,
+      String fillTiming) {
+
+    public Variant(
+        String name, boolean useRealRs, double rsMin, double turnoverFloor, boolean pyramiding) {
+      this(name, useRealRs, rsMin, turnoverFloor, pyramiding, AT_CLOSE);
+    }
+  }
 
   /** The technical-only, single-lot baseline (the v1 numbers). */
   public static final Variant V1 = new Variant("v1-technical", false, 0, 0, false);
@@ -252,7 +266,7 @@ public final class ManasAroraSwingBacktest {
       double[] vcpPivot, boolean[] isVcp, double[] breakoutPivot, List<BtTrade> out) {
     int n = close.length;
     List<Lot> lots = new ArrayList<>();
-    double basisCost = 0; // the position's cost basis (first-lot entry) — the ATR trail anchor
+    double basisCost = 0; // first signal-bar close — the unchanged stop/trail level anchor
     boolean trailArmed = false;
     double trailStop = 0;
     double runHigh = 0; // H4: running highest HIGH since entry — the Chandelier trail anchor
@@ -264,8 +278,13 @@ public final class ManasAroraSwingBacktest {
         }
         if (entryFires(v, setup, i, close, sma50, sma200, high52wIncl, low52w, recentHigh,
             volRatio50, turnover20, rsRank, vcpPivot, isVcp, breakoutPivot)) {
+          double fill = fillPrice(bars, i, v.fillTiming());
+          if (Double.isNaN(fill)) {
+            continue; // next_open signal on the final bar cannot fill
+          }
+          // The initial-stop level stays on the signal close; only the execution price moves.
           double stop = initialStop(close[i], atr[i]);
-          lots.add(new Lot(i, close[i], stop, 1));
+          lots.add(new Lot(i, fill, stop, 1));
           basisCost = close[i];
           trailArmed = false;
           trailStop = 0;
@@ -291,8 +310,12 @@ public final class ManasAroraSwingBacktest {
       // 1) whole-position square-offs (trailing stop / fast-move / parabolic) close EVERY lot.
       String positionExit = positionExit(i, close, sma10, trailArmed, trailStop);
       if (positionExit != null) {
+        double exitPrice = fillPrice(bars, i, v.fillTiming());
+        if (Double.isNaN(exitPrice)) {
+          continue; // unfilled final-bar exit leaves open-at-end lots, which are dropped
+        }
         for (Lot lot : lots) {
-          out.add(closeLot(v, setup, symbol, bars, lot, i, close[i], positionExit, rsRank, turnover20));
+          out.add(closeLot(v, setup, symbol, bars, lot, i, exitPrice, positionExit, rsRank, turnover20));
         }
         lots.clear();
         trailArmed = false;
@@ -303,7 +326,14 @@ public final class ManasAroraSwingBacktest {
       List<Lot> survivors = new ArrayList<>();
       for (Lot lot : lots) {
         if (close[i] <= lot.initialStop) {
-          out.add(closeLot(v, setup, symbol, bars, lot, i, close[i], "STOP_LOSS", rsRank, turnover20));
+          double exitPrice = fillPrice(bars, i, v.fillTiming());
+          if (Double.isNaN(exitPrice)) {
+            survivors.add(lot); // final-bar stop cannot execute at a nonexistent next open
+          } else {
+            out.add(
+                closeLot(
+                    v, setup, symbol, bars, lot, i, exitPrice, "STOP_LOSS", rsRank, turnover20));
+          }
         } else {
           survivors.add(lot);
         }
@@ -322,9 +352,11 @@ public final class ManasAroraSwingBacktest {
           && close[i] >= basisCost * (1.0 + pyramidArmPct)
           && entryFires(v, setup, i, close, sma50, sma200, high52wIncl, low52w, recentHigh,
               volRatio50, turnover20, rsRank, vcpPivot, isVcp, breakoutPivot)) {
+        double fill = fillPrice(bars, i, v.fillTiming());
+        // The new lot's stop level stays on the signal close; only the execution price moves.
         double stop = initialStop(close[i], atr[i]);
-        if (withinRiskBudget(lots, close[i], stop, trailArmed, trailStop)) {
-          lots.add(new Lot(i, close[i], stop, lots.size() + 1));
+        if (!Double.isNaN(fill) && withinRiskBudget(lots, fill, stop, trailArmed, trailStop)) {
+          lots.add(new Lot(i, fill, stop, lots.size() + 1));
         }
       }
     }

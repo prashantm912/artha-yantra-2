@@ -87,6 +87,51 @@ class MinerviniSwingBacktestTest {
     assertThat(trades).as("the ~₹185k/day turnover is far below the floor → no trade").isEmpty();
   }
 
+  @Test
+  void nextOpenUsesTheFollowingBarsOpenForEntryAndExit() {
+    List<DailyBar> bars = withDistinctOpens(breakoutSeries());
+    Variant nextOpen = nextOpenVariant();
+
+    List<BtTrade> trades =
+        MinerviniSwingBacktest.simulate(
+            "TESTCO", bars, detector, LocalDate.of(2020, 1, 1).plusDays(264), null,
+            List.of(MinerviniSwingBacktest.V1, nextOpen));
+
+    BtTrade atClose = firstPrimaryBase(trades, "v1-technical");
+    BtTrade atNextOpen = firstPrimaryBase(trades, nextOpen.name());
+    assertThat(atNextOpen.entryDate()).isEqualTo(atClose.entryDate());
+    assertThat(atNextOpen.exitDate()).isEqualTo(atClose.exitDate());
+    int entrySignal = indexOfDate(bars, atNextOpen.entryDate());
+    int exitSignal = indexOfDate(bars, atNextOpen.exitDate());
+    assertThat(atClose.entryPrice()).isEqualTo(bars.get(entrySignal).close());
+    assertThat(atClose.exitPrice()).isEqualTo(bars.get(exitSignal).close());
+    assertThat(atNextOpen.entryPrice()).isEqualTo(bars.get(entrySignal + 1).open());
+    assertThat(atNextOpen.exitPrice()).isEqualTo(bars.get(exitSignal + 1).open());
+  }
+
+  @Test
+  void nextOpenDropsAnExitSignalOnTheFinalBar() {
+    List<DailyBar> full = breakoutSeries();
+    List<BtTrade> control =
+        MinerviniSwingBacktest.simulate(
+            "TESTCO", full, detector, LocalDate.of(2020, 1, 1).plusDays(264));
+    int exitSignal = indexOfDate(full, firstPrimaryBase(control, "v1-technical").exitDate());
+    List<DailyBar> endingOnExitSignal = new ArrayList<>(full.subList(0, exitSignal + 1));
+    Variant nextOpen = nextOpenVariant();
+
+    List<BtTrade> trades =
+        MinerviniSwingBacktest.simulate(
+            "TESTCO", endingOnExitSignal, detector, LocalDate.of(2020, 1, 1).plusDays(264), null,
+            List.of(MinerviniSwingBacktest.V1, nextOpen));
+
+    assertThat(trades.stream().filter(t -> t.variant().equals("v1-technical")))
+        .as("at_close can still fill on the final signal bar")
+        .isNotEmpty();
+    assertThat(trades.stream().filter(t -> t.variant().equals(nextOpen.name())))
+        .as("next_open cannot fill without a following bar, so the open trade is dropped")
+        .isEmpty();
+  }
+
   /** The shared synthetic series: Stage-2 uptrend → consolidation → fresh-high breakout → rollover. */
   private static List<DailyBar> breakoutSeries() {
     List<DailyBar> bars = new ArrayList<>();
@@ -108,5 +153,37 @@ class MinerviniSwingBacktestTest {
   private static DailyBar bar(int day, double price, long volume) {
     LocalDate d = LocalDate.of(2020, 1, 1).plusDays(day);
     return new DailyBar(d, price, price, price, price, volume);
+  }
+
+  private static Variant nextOpenVariant() {
+    assertThat(Arrays.stream(Variant.class.getRecordComponents()).map(c -> c.getName()))
+        .as("Variant carries the per-variant fill timing")
+        .contains("fillTiming");
+    return new Variant("next-open-test", false, 0, 0, "next_open");
+  }
+
+  private static List<DailyBar> withDistinctOpens(List<DailyBar> source) {
+    List<DailyBar> bars = new ArrayList<>(source.size());
+    for (int i = 0; i < source.size(); i++) {
+      DailyBar b = source.get(i);
+      bars.add(new DailyBar(b.date(), 10_000 + i, b.high(), b.low(), b.close(), b.volume()));
+    }
+    return bars;
+  }
+
+  private static BtTrade firstPrimaryBase(List<BtTrade> trades, String variant) {
+    return trades.stream()
+        .filter(t -> t.variant().equals(variant) && t.setup().equals("primary-base"))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  private static int indexOfDate(List<DailyBar> bars, LocalDate date) {
+    for (int i = 0; i < bars.size(); i++) {
+      if (bars.get(i).date().equals(date)) {
+        return i;
+      }
+    }
+    throw new IllegalArgumentException("date not found: " + date);
   }
 }

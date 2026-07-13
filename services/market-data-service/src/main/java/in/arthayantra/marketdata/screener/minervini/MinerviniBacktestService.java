@@ -382,7 +382,8 @@ public class MinerviniBacktestService {
         new Variant("technical", false, 0, 0), // v1: neither filter
         new Variant("rs-only", true, rsMin, 0), // RS-rank gate alone
         new Variant("turnover-only", false, 0, turnoverFloor), // liquidity floor alone
-        new Variant("rs-turnover", true, rsMin, turnoverFloor)); // both (the live-funnel analogue)
+        new Variant("rs-turnover", true, rsMin, turnoverFloor), // both (the live-funnel analogue)
+        new Variant("rs-turnover-nextopen", true, rsMin, turnoverFloor, "next_open"));
   }
 
   /** The deep-sim compute output shared by {@link #run} and {@link #runForJob} (audit P0-3). */

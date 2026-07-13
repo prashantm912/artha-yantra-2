@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Tags } from 'lucide-react';
+import { AlertTriangle, Bookmark, Pencil, StickyNote, Tags, Trash2, X } from 'lucide-react';
 import { cn } from '../../lib/cn.ts';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
+import { Button } from '../../components/atoms/Button.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -17,6 +19,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '../../components/ui/dialog.tsx';
@@ -28,12 +31,17 @@ import {
   JOB_STATUSES,
   JOBS_PAGE_SIZE,
   fetchResultRef,
+  useAnnotateJob,
   useCancelJob,
+  useCreateSavedView,
+  useDeleteSavedView,
   useJobDetail,
   useJobs,
   useJobsLive,
+  useSavedViews,
   type JobDto,
   type JobStatus,
+  type SavedView,
 } from '../../api/backtests.ts';
 
 // /backtests/jobs (master plan §20 parity, E-11 screen 4): every backtest/sweep job with live
@@ -119,6 +127,191 @@ function JobErrorDialog({
   );
 }
 
+// The saved-view `kind` + the opaque filter payload we persist: the CURRENT Jobs-page filter set.
+// NOTE: this is the NEW per-job `jobTag` filter, NOT the strategy-tag multiselect (`tags`) — the two
+// stay deliberately separate (see the naming trap in the D4 brief).
+const SAVED_VIEW_KIND = 'backtest_jobs';
+interface JobsViewFilter {
+  status: string | null;
+  strategyId: string | null;
+  jobTag: string | null;
+  latestOnly: boolean;
+  sort: { id: string; dir: 'asc' | 'desc' } | null;
+}
+
+// Per-job annotation editor (D4 P2-2): edit the run's TAGS (chips add/remove) + free-text NOTE, then
+// PATCH .../annotations (replaces both). Reuses the accessible Radix Dialog; the server validates the
+// caps and the global mutation-error toast surfaces a 422. Focus returns to the invoking pencil.
+function JobAnnotateDialog({
+  job,
+  onClose,
+  returnFocusTo,
+}: {
+  job: JobDto;
+  onClose: () => void;
+  returnFocusTo: HTMLElement | null;
+}) {
+  const annotate = useAnnotateJob();
+  const [tagList, setTagList] = useState<string[]>(job.tags ?? []);
+  const [draft, setDraft] = useState('');
+  const [note, setNote] = useState(job.note ?? '');
+
+  const addTag = () => {
+    const t = draft.trim();
+    if (!t) return;
+    setTagList((prev) => (prev.includes(t) ? prev : [...prev, t]));
+    setDraft('');
+  };
+  const removeTag = (t: string) => setTagList((prev) => prev.filter((x) => x !== t));
+  const save = () =>
+    annotate.mutate(
+      { jobId: job.jobId, tags: tagList, note: note.trim() || null },
+      { onSuccess: () => onClose() },
+    );
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
+      <DialogContent
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          returnFocusTo?.focus();
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Tags &amp; note</DialogTitle>
+          <DialogDescription>Label and annotate run {job.jobId.slice(0, 8)}.</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <div>
+            <div className="mb-1.5 flex flex-wrap gap-1">
+              {tagList.length === 0 ? (
+                <span className="text-caption text-ay-muted">No tags yet.</span>
+              ) : (
+                tagList.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center gap-1 rounded bg-surface-2 px-1.5 py-0.5 text-caption text-ay-text ring-1 ring-ay-border"
+                  >
+                    {t}
+                    <button
+                      type="button"
+                      aria-label={`Remove tag ${t}`}
+                      onClick={() => removeTag(t)}
+                      className="text-ay-muted hover:text-bear focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                    >
+                      <X aria-hidden="true" className="size-3" />
+                    </button>
+                  </span>
+                ))
+              )}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    addTag();
+                  }
+                }}
+                aria-label="Add a tag"
+                placeholder="Add a tag, press Enter"
+                className="h-9 flex-1 rounded-md border border-ay-border bg-surface-1 px-3 text-sm text-ay-text focus-visible:border-accent focus-visible:outline-none"
+              />
+              <Button type="button" variant="outline" size="sm" onClick={addTag} disabled={!draft.trim()}>
+                Add
+              </Button>
+            </div>
+          </div>
+          <label className="flex flex-col gap-1 text-caption text-ay-muted">
+            Note
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              aria-label="Note"
+              rows={4}
+              className="rounded-md border border-ay-border bg-surface-1 p-2 text-sm text-ay-text focus-visible:border-accent focus-visible:outline-none"
+            />
+          </label>
+        </div>
+        <DialogFooter showCloseButton>
+          <Button type="button" onClick={save} loading={annotate.isPending}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Save-view dialog (D4 P2-2): name the CURRENT Jobs-page filter set → POST /saved-views. A duplicate
+// (owner, kind, name) 409s server-side and surfaces via the global mutation-error toast.
+function SaveViewDialog({
+  filter,
+  onClose,
+  returnFocusTo,
+}: {
+  filter: JobsViewFilter;
+  onClose: () => void;
+  returnFocusTo: HTMLElement | null;
+}) {
+  const create = useCreateSavedView();
+  const [name, setName] = useState('');
+  const save = () => {
+    const n = name.trim();
+    if (!n) return;
+    create.mutate({ kind: SAVED_VIEW_KIND, name: n, filter }, { onSuccess: () => onClose() });
+  };
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
+      <DialogContent
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          returnFocusTo?.focus();
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Save this view</DialogTitle>
+          <DialogDescription>Save the current filters under a name to reload later.</DialogDescription>
+        </DialogHeader>
+        <label className="flex flex-col gap-1 text-caption text-ay-muted">
+          View name
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                save();
+              }
+            }}
+            aria-label="View name"
+            className="h-9 rounded-md border border-ay-border bg-surface-1 px-3 text-sm text-ay-text focus-visible:border-accent focus-visible:outline-none"
+          />
+        </label>
+        <DialogFooter showCloseButton>
+          <Button type="button" onClick={save} loading={create.isPending} disabled={!name.trim()}>
+            Save view
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // DataTable column id → backend sort key (server-side sort so a header click sorts EVERY page, not
 // just the loaded one). Columns without an entry (Test Window, Actions) aren't server-sortable.
 const SORT_API: Record<string, string> = {
@@ -135,9 +328,20 @@ export function JobsPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [strategyId, setStrategyId] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>([]);
+  // NEW (D4 P2-2): per-JOB annotation-tag filter → the backend `?tag=` param (single tag). This is a
+  // SEPARATE control from the strategy-tag multiselect `tags` above — do not conflate the two.
+  const [jobTagFilter, setJobTagFilter] = useState<string | null>(null);
   // The failed job whose error dialog is open (null = closed). The list omits `error` → fetched lazily.
   const [errorJobId, setErrorJobId] = useState<string | null>(null);
   const errorTriggerRef = useRef<HTMLElement | null>(null);
+  // The job whose tags/note editor is open (null = closed); focus returns to the invoking pencil.
+  const [annotateJob, setAnnotateJob] = useState<JobDto | null>(null);
+  const annotateTriggerRef = useRef<HTMLElement | null>(null);
+  // Saved-views: the save-name dialog open flag + the load/delete store.
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const saveViewTriggerRef = useRef<HTMLElement | null>(null);
+  const savedViews = useSavedViews(SAVED_VIEW_KIND);
+  const deleteView = useDeleteSavedView();
   // Server-side filter: keep only jobs whose pinned version is its strategy's NEWEST version. Sends the
   // set of current-version ids so the filter spans EVERY page, not just the loaded one.
   const [latestOnly, setLatestOnly] = useState(false);
@@ -173,8 +377,8 @@ export function JobsPage() {
     return pairs.length ? pairs.join(',') : '__none__';
   }, [latestOnly, strategies.data]);
 
-  const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, currentVersionPairs);
-  useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, currentVersionPairs);
+  const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, currentVersionPairs, jobTagFilter);
+  useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, currentVersionPairs, jobTagFilter);
   const cancel = useCancelJob();
 
   const nameById = useMemo(
@@ -204,7 +408,18 @@ export function JobsPage() {
   );
 
   // Reset to the first page whenever a filter OR the sort changes (a stale offset can land past the set).
-  useEffect(() => setOffset(0), [status, strategyId, tags, sort, latestOnly]);
+  useEffect(() => setOffset(0), [status, strategyId, tags, sort, latestOnly, jobTagFilter]);
+
+  // Saved-views: the CURRENT filter set we persist, and applying a stored one back onto page state.
+  const currentFilter: JobsViewFilter = { status, strategyId, jobTag: jobTagFilter, latestOnly, sort };
+  const applyView = (view: SavedView) => {
+    const f = (view.filter ?? {}) as Partial<JobsViewFilter>;
+    setStatus(f.status ?? null);
+    setStrategyId(f.strategyId ?? null);
+    setJobTagFilter(f.jobTag ?? null);
+    setLatestOnly(!!f.latestOnly);
+    setSort(f.sort ?? null);
+  };
 
   const viewResults = async (jobId: string) => {
     const ref = await fetchResultRef(jobId);
@@ -406,6 +621,44 @@ export function JobsPage() {
         mobileLabel: 'Created',
       },
       {
+        id: 'tags',
+        header: 'Tags',
+        align: 'left',
+        help: 'Your own labels + note on this run (distinct from the strategy tags). Click the pencil to edit.',
+        render: (job) => (
+          <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap gap-1">
+              {(job.tags ?? []).map((t) => (
+                <span
+                  key={t}
+                  className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-ay-muted ring-1 ring-ay-border"
+                >
+                  {t}
+                </span>
+              ))}
+            </div>
+            {job.note ? (
+              <span title={job.note}>
+                <StickyNote role="img" aria-label="This run has a note" className="size-3.5 text-ay-muted" />
+              </span>
+            ) : null}
+            <button
+              type="button"
+              onClick={(e) => {
+                annotateTriggerRef.current = e.currentTarget; // focus returns here on dialog close
+                setAnnotateJob(job);
+              }}
+              aria-label={`Edit tags and note for job ${job.jobId.slice(0, 8)}`}
+              className="rounded p-0.5 text-ay-muted hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+            >
+              <Pencil aria-hidden="true" className="size-3.5" />
+            </button>
+          </div>
+        ),
+        mobileLabel: 'Tags',
+        mono: false,
+      },
+      {
         id: 'actions',
         header: 'Actions',
         align: 'right',
@@ -504,6 +757,15 @@ export function JobsPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+        <input
+          type="text"
+          value={jobTagFilter ?? ''}
+          onChange={(e) => setJobTagFilter(e.target.value || null)}
+          aria-label="Filter by job tag"
+          placeholder="Job tag…"
+          title="Show only runs you annotated with this job tag (a single tag)."
+          className="h-9 w-36 rounded-md border border-ay-border bg-surface-1 px-3 text-sm text-ay-text focus-visible:border-accent focus-visible:outline-none"
+        />
         <label
           className="flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-ay-border px-3 text-sm hover:border-accent"
           title="Hide jobs that ran an older version — keep only jobs on each strategy's newest version (across all pages)."
@@ -517,7 +779,7 @@ export function JobsPage() {
           />
           Latest version only
         </label>
-        {(status || strategyId || tags.length > 0 || latestOnly) && (
+        {(status || strategyId || tags.length > 0 || latestOnly || jobTagFilter) && (
           <button
             type="button"
             onClick={() => {
@@ -525,6 +787,7 @@ export function JobsPage() {
               setStrategyId(null);
               setTags([]);
               setLatestOnly(false);
+              setJobTagFilter(null);
             }}
             className="h-9 rounded-md border border-ay-border px-3 text-sm text-ay-muted hover:border-accent"
           >
@@ -539,6 +802,55 @@ export function JobsPage() {
         >
           {q.isFetching ? '…' : '↻ Reload'}
         </button>
+        <button
+          type="button"
+          onClick={(e) => {
+            saveViewTriggerRef.current = e.currentTarget;
+            setSaveViewOpen(true);
+          }}
+          title="Save the current filters under a name to reload later."
+          className="h-9 rounded-md border border-ay-border px-3 text-sm hover:border-accent"
+        >
+          Save view
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="Load a saved view"
+              title="Load or delete one of your saved filter sets."
+              className="flex h-9 items-center gap-1.5 rounded-md border border-ay-border px-3 text-sm hover:border-accent"
+            >
+              <Bookmark className="size-4 text-ay-muted" aria-hidden="true" />
+              {savedViews.data?.items?.length ? `Views (${savedViews.data.items.length})` : 'Views'}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-72 w-56 overflow-auto">
+            <DropdownMenuLabel>Saved views</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {(savedViews.data?.items ?? []).length === 0 ? (
+              <DropdownMenuItem disabled>No saved views yet</DropdownMenuItem>
+            ) : (
+              (savedViews.data?.items ?? []).map((v) => (
+                <div key={v.id} className="flex items-center">
+                  <DropdownMenuItem className="flex-1" onSelect={() => applyView(v)}>
+                    {v.name}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    aria-label={`Delete saved view ${v.name}`}
+                    className="text-bear"
+                    onSelect={(e) => {
+                      e.preventDefault(); // keep the menu open so several can be deleted
+                      deleteView.mutate(v.id);
+                    }}
+                  >
+                    <Trash2 aria-hidden="true" className="size-3.5" />
+                  </DropdownMenuItem>
+                </div>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
         {compareIds.length > 0 && (
           <button
             type="button"
@@ -590,6 +902,22 @@ export function JobsPage() {
           jobId={errorJobId}
           onClose={() => setErrorJobId(null)}
           returnFocusTo={errorTriggerRef.current}
+        />
+      )}
+
+      {annotateJob && (
+        <JobAnnotateDialog
+          job={annotateJob}
+          onClose={() => setAnnotateJob(null)}
+          returnFocusTo={annotateTriggerRef.current}
+        />
+      )}
+
+      {saveViewOpen && (
+        <SaveViewDialog
+          filter={currentFilter}
+          onClose={() => setSaveViewOpen(false)}
+          returnFocusTo={saveViewTriggerRef.current}
         />
       )}
     </LoadBeat>

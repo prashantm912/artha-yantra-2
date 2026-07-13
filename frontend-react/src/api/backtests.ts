@@ -31,6 +31,10 @@ export interface JobDto {
   resultRef?: string | null;
   error?: string | null;
   bestSoFar?: number | string | null;
+  /** Per-JOB annotation tags (D4 P2-2) — distinct from the STRATEGY tags the strategy filter uses. */
+  tags?: string[];
+  /** Free-text annotation on this run (D4 P2-2); null/absent when unannotated. */
+  note?: string | null;
 }
 
 interface JobProgressFrame {
@@ -79,9 +83,10 @@ export function useJobs(
   sortDir?: 'asc' | 'desc' | null,
   strategyIds?: string | null,
   currentVersions?: string | null,
+  jobTag?: string | null,
 ) {
   return useQuery({
-    queryKey: [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null, strategyIds ?? null, currentVersions ?? null],
+    queryKey: [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null, strategyIds ?? null, currentVersions ?? null, jobTag ?? null],
     queryFn: () => {
       const params = new URLSearchParams({ limit: String(JOBS_PAGE_SIZE), offset: String(offset) });
       if (status) params.set('status', status);
@@ -90,6 +95,8 @@ export function useJobs(
       if (sortDir) params.set('sortDir', sortDir);
       if (strategyIds) params.set('strategyIds', strategyIds);
       if (currentVersions) params.set('currentVersions', currentVersions);
+      // Per-JOB annotation tag filter (backend `?tag=`, single tag) — SEPARATE from `strategyIds`.
+      if (jobTag) params.set('tag', jobTag);
       return apiFetch<{ items: JobDto[] }>(`/backtests/jobs?${params.toString()}`);
     },
   });
@@ -104,10 +111,11 @@ export function useJobsLive(
   sortDir?: 'asc' | 'desc' | null,
   strategyIds?: string | null,
   currentVersions?: string | null,
+  jobTag?: string | null,
 ) {
   const qc = useQueryClient();
   useEffect(() => {
-    const key = [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null, strategyIds ?? null, currentVersions ?? null];
+    const key = [JOBS_KEY, 'list', status, strategyId, offset, sortBy ?? null, sortDir ?? null, strategyIds ?? null, currentVersions ?? null, jobTag ?? null];
     const merge = (body: string) => {
       let f: JobProgressFrame;
       try {
@@ -138,7 +146,7 @@ export function useJobsLive(
       offTopic();
       offReconnect();
     };
-  }, [qc, status, strategyId, offset, sortBy, sortDir, strategyIds, currentVersions]);
+  }, [qc, status, strategyId, offset, sortBy, sortDir, strategyIds, currentVersions, jobTag]);
 }
 
 export function useSubmitRun() {
@@ -174,6 +182,61 @@ export function useCancelJob() {
       qc.setQueriesData<{ items: JobDto[] }>({ queryKey: [JOBS_KEY] }, (prev) =>
         prev ? { items: prev.items.map((j) => (j.jobId === jobId ? { ...j, status } : j)) } : prev,
       ),
+  });
+}
+
+// --- per-job annotations + saved views (D4 P2-2) — backend #817 ---
+
+/** PATCH a job's tags + note (replaces BOTH — send the full desired set). Server 422s past the
+ *  caps (<=20 tags, <=40 chars/tag, <=2000 char note); the global mutation-error toast surfaces it.
+ *  On success invalidates the jobs LIST so the annotated row refreshes. */
+export function useAnnotateJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ jobId, tags, note }: { jobId: string; tags: string[]; note: string | null }) =>
+      apiFetch<{ jobId: string; tags: string[]; note: string | null }>(
+        `/backtests/jobs/${jobId}/annotations`,
+        { method: 'PATCH', json: { tags, note } },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [JOBS_KEY, 'list'] }),
+  });
+}
+
+const SAVED_VIEWS_KEY = 'saved-views';
+
+/** A per-owner saved filter set; `filter` is opaque JSON the caller defines (we store the Jobs-page
+ *  filter state). Keyed by `(owner, kind, name)` server-side — a duplicate name 409s on create. */
+export interface SavedView {
+  id: string;
+  kind: string;
+  name: string;
+  filter: unknown;
+  createdAt?: string;
+}
+
+export function useSavedViews(kind: string) {
+  return useQuery({
+    queryKey: [SAVED_VIEWS_KEY, kind],
+    queryFn: () =>
+      apiFetch<{ items: SavedView[] }>(`/backtests/saved-views?kind=${encodeURIComponent(kind)}`),
+  });
+}
+
+export function useCreateSavedView() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { kind: string; name: string; filter: unknown }) =>
+      apiFetch<SavedView>('/backtests/saved-views', { method: 'POST', json: body }),
+    onSuccess: (_view, vars) => qc.invalidateQueries({ queryKey: [SAVED_VIEWS_KEY, vars.kind] }),
+  });
+}
+
+export function useDeleteSavedView() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<undefined>(`/backtests/saved-views/${id}`, { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [SAVED_VIEWS_KEY] }),
   });
 }
 

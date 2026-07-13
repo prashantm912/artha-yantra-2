@@ -9,6 +9,7 @@ import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.candles.EodCorporateActionRepository;
 import in.arthayantra.marketdata.candles.EquitySplitBonusAdjuster;
+import in.arthayantra.marketdata.dividends.DividendRepository;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher;
 import in.arthayantra.marketdata.nse.NseCorporateActionFetcher;
 import in.arthayantra.marketdata.nse.NseEodBhavcopyRepository;
@@ -53,6 +54,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired NseEodBhavcopyRepository nseRepo;
   @Autowired BseEodBhavcopyRepository bseRepo;
   @Autowired EodCorporateActionRepository caRepo;
+  @Autowired DividendRepository dividendRepo;
   @Autowired EquitySplitBonusAdjuster adjuster;
   @Autowired in.arthayantra.marketdata.ingest.IngestRunLedger ledger;
   @Autowired JdbcTemplate jdbc;
@@ -64,8 +66,8 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
 
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
-            nseStub(), nseRepo, bseStub(), bseRepo, caStub(), bseCaStub(), caRepo, candles, CLOCK,
-            event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+            nseStub(), nseRepo, bseStub(), bseRepo, caStub(), bseCaStub(), caRepo, dividendRepo,
+            candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     // A Kite-owned 1d bar must survive the bhavcopy projection (DO NOTHING; source not in PK).
     candles.upsertAuthoritativeAll(
@@ -146,8 +148,8 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
         };
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
-            flaky, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles, CLOCK,
-            event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+            flaky, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo,
+            candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     // Run 1: trd2 missed; the watermark must NOT advance past it.
     svc.runNse();
@@ -171,8 +173,9 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     List<Object> published = new java.util.concurrent.CopyOnWriteArrayList<>();
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
-            emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles,
-            CLOCK, published::add, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+            emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo,
+            dividendRepo, candles, CLOCK, published::add, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
+            420);
 
     svc.runIfFree(); // the scheduler/startup entry — submits runLocked to the service's executor
 
@@ -195,8 +198,9 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
 
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
-            emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles,
-            CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+            emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo,
+            dividendRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
+            420);
 
     svc.runIfFree(); // scheduler/startup entry — submits runLocked to the service's executor
 
@@ -247,8 +251,8 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
         };
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
-            full, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, candles, CLOCK,
-            event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+            full, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo,
+            candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     BhavcopyBackfillService.RefetchResult result = svc.refetchDate(day);
 
@@ -257,6 +261,86 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(rawNseCount("RFTB")).isEqualTo(1);
     assertThat(close("NSE", "RFTB", day)).isEqualByComparingTo("20");
     assertThat(close("NSE", "RFTA", day)).isEqualByComparingTo("10"); // existing row untouched
+  }
+
+  @Test
+  @Order(6)
+  void dividendsLandSeparatelyWithoutCrossingIntoRatiosOrCandles() {
+    NseCorporateActionFetcher nseActions =
+        (from, to) ->
+            List.of(
+                new NseCorporateActionFetcher.CaRecord(
+                    "DIVITNSE", "INEDIVIT0001", D2, "FINAL DIVIDEND RS 2.50 PER SHARE"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "DIVITPCT", "INEDIVIT0003", D2, "DIVIDEND 50%"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "DIVITSPLIT",
+                    "INEDIVIT0002",
+                    D2,
+                    "Face Value Split From Rs 10/- To Rs 2/-"));
+    BseCorporateActionFetcher bseActions =
+        (from, to) ->
+            List.of(
+                new BseCorporateActionFetcher.BseCaRecord(
+                    "990001", "DIVITBSE", D2, "INTERIM DIVIDEND - RE 1 PER SHARE"),
+                new BseCorporateActionFetcher.BseCaRecord(
+                    "990002", "DIVITBONUS", D2, "Bonus issue 1:1"));
+    BhavcopyBackfillService svc =
+        new BhavcopyBackfillService(
+            emptyNse(), nseRepo, emptyBse(), bseRepo, nseActions, bseActions, caRepo,
+            dividendRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
+            420);
+
+    assertThat(svc.runRatios()).isEqualTo(2); // only the split + bonus ratio writes are counted
+    assertThat(svc.runRatios()).isEqualTo(2); // replay is idempotent for both side tables
+
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT amount, subject, isin, source FROM dividends"
+                    + " WHERE exchange = 'NSE' AND tradingsymbol = 'DIVITNSE' AND ex_date = ?",
+                D2))
+        .containsEntry("amount", new BigDecimal("2.5000"))
+        .containsEntry("subject", "FINAL DIVIDEND RS 2.50 PER SHARE")
+        .containsEntry("isin", "INEDIVIT0001")
+        .containsEntry("source", "NSE");
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT amount, subject, isin, source FROM dividends"
+                    + " WHERE exchange = 'BSE' AND tradingsymbol = 'DIVITBSE' AND ex_date = ?",
+                D2))
+        .containsEntry("amount", new BigDecimal("1.0000"))
+        .containsEntry("subject", "INTERIM DIVIDEND - RE 1 PER SHARE")
+        .containsEntry("isin", null)
+        .containsEntry("source", "BSE");
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT amount, subject FROM dividends"
+                    + " WHERE exchange = 'NSE' AND tradingsymbol = 'DIVITPCT' AND ex_date = ?",
+                D2))
+        .containsEntry("amount", null)
+        .containsEntry("subject", "DIVIDEND 50%");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM dividends WHERE tradingsymbol LIKE 'DIVIT%'", Long.class))
+        .isEqualTo(3L);
+
+    assertThat(caRepo.ratiosFor("NSE", "DIVITNSE")).isEmpty();
+    assertThat(caRepo.ratiosFor("BSE", "DIVITBSE")).isEmpty();
+    assertThat(caRepo.ratiosFor("NSE", "DIVITSPLIT"))
+        .singleElement()
+        .satisfies(r -> assertThat(r.ratio()).isEqualByComparingTo("0.2"));
+    assertThat(caRepo.ratiosFor("BSE", "DIVITBONUS"))
+        .singleElement()
+        .satisfies(r -> assertThat(r.ratio()).isEqualByComparingTo("0.5"));
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM dividends WHERE tradingsymbol IN ('DIVITSPLIT','DIVITBONUS')",
+                Long.class))
+        .isZero();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM candles WHERE tradingsymbol LIKE 'DIVIT%'", Long.class))
+        .isZero();
   }
 
   private static BhavcopyFetcher emptyNse() {

@@ -230,26 +230,48 @@ There is **no official "Codex plugin for Claude Code"**. There doesn't need to b
 CLI is scriptable and Claude Code can run shell commands and register MCP servers. Both of
 these work today:
 
-### Mechanism 1 (recommended): Claude shells out to `codex exec` (headless)
-Claude runs, via its Bash tool (in the background, like any builder):
+### Mechanism 1 (recommended): Claude shells out to `codex exec` (headless) — the DESIGNED-HANDOFF division
 
+**Windows sandbox reality (learned the hard way, 2026-07-13 run #810).** On Windows, `codex
+exec --profile artha` runs the model's shell commands under a **Windows restricted-token
+sandbox** — a distinct SID (`CodexSandboxOnline`, not your `prash` user). Codex isolates its
+work in a clone it makes (e.g. `<repo>/codex-work/<slug>/`). This is STRONG isolation (Codex
+cannot touch your real repo, credentials, or prod) — but the restricted token has **no git
+credentials (push fails, `SEC_E_NO_CREDENTIALS`) and no Node execution (contract TS regen
+fails)**. The Maven build + tests run fine. This is not a bug to fix; it is the sandbox doing
+its job. So DON'T ask Codex to do what the sandbox forbids — split the work:
+
+| Codex (sandboxed) | Claude (Architect, as `prash`) |
+|---|---|
+| branch, build (`-am`), write + run tests, commit LOCALLY, write the receipt | fetch Codex's branch, finish env-blocked steps (contract regen), push, audit, merge, deploy, ledger |
+
+Claude runs Codex in the background:
 ```bash
-git worktree add ../codex-<slug> origin/main   # isolation, same as Opus worktree builders
-codex exec \
-  --profile artha \
-  --cd ../codex-<slug> \
-  "Read docs/handoffs/2026-07-XX-<slug>-brief.md and execute it exactly. \
-   Write the receipt file it names before finishing." \
-  > docs/handoffs/2026-07-XX-<slug>-codex.log 2>&1
+codex exec --profile artha --cd "<repo>" -o <lastmsg-file> \
+  "Read docs/handoffs/<brief>. Execute it. Build, test, and COMMIT LOCALLY on a fresh
+   feat/<slug> branch. Do NOT push, do NOT open a PR, do NOT regenerate contracts
+   (the sandbox blocks git creds + Node — the Architect does those). Write the receipt
+   file and state the branch + local HEAD sha + per-step pass/fail in your final message."
 ```
 
-- Output/receipt land in files Claude then audits — the same receipt loop as today.
-- Parallelism: one worktree per concurrent Codex task; **rebase before push** (worktree
-  branches base on spawn-time main — existing repo rule).
-- Approvals: `codex exec` is non-interactive; anything the sandbox blocks fails visibly
-  in the log rather than hanging. Keep `workspace-write` + network on (Maven).
-- This needs zero new infrastructure. It is the closest analogue to the current
-  `Agent(model:"opus")` call, with Codex as the engine.
+Then Claude retrieves + finishes (proven recipe, ~5 min, scriptable):
+```bash
+git config --global --add safe.directory "<repo>/codex-work/<slug>"   # cross-user read (one-time per clone)
+git fetch "<repo>/codex-work/<slug>/.git" <branch> && git branch -f <branch> FETCH_HEAD
+# if the change added endpoints, regen contracts AS prash (Node works here):
+(cd frontend-react && npx --yes openapi-typescript@7 ../contracts/<svc>.openapi.json -o ../contracts/gen/<svc>.d.ts \
+   && ./node_modules/.bin/tsc --strict --noEmit --skipLibCheck ../contracts/gen/<svc>.d.ts)
+git checkout <branch> && git add -A && git commit -F- <<< "chore(contracts): regen"   # if regen changed anything
+git push -u origin <branch> && gh pr create ... # then audit → merge → deploy
+```
+- Add `codex-work/` + `.m2-codex/` to `.git/info/exclude` (the clone pollutes the tree; you
+  can't `rm -rf` it — it's deny-fenced + cross-user-owned; harmless once excluded).
+- **Why not run sandboxless** (`--dangerously-bypass-approvals-and-sandbox`, in-place as `prash`)?
+  It removes ALL the friction (creds + Node + no clone) but runs Codex with full access to your
+  machine and NO `rm -rf` fence — the isolation is worth the 5 min. The audit is the real safety
+  net regardless (run #810's audit caught a silent scope-escape); keep the sandbox on.
+- The receipt loop, tier rules, and adversarial-review on parity surfaces are unchanged. This
+  is the closest analogue to the `Agent(model:"opus")` call, with Codex as the engine.
 
 ### Mechanism 2: Codex as an MCP server inside Claude Code
 Codex CLI ships an (experimental) MCP server mode. Register it once:

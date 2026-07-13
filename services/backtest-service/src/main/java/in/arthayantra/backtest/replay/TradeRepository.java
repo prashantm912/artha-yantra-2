@@ -2,6 +2,7 @@ package in.arthayantra.backtest.replay;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.common.web.time.Ist;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -135,9 +136,9 @@ public class TradeRepository {
           row.put("seq", rs.getInt("seq"));
           row.put("side", rs.getString("side"));
           row.put("qty", rs.getLong("qty"));
-          row.put("entryTs", rs.getString("entry_ts"));
+          row.put("entryTs", ist(rs.getObject("entry_ts", OffsetDateTime.class)));
           row.put("entryPrice", rs.getBigDecimal("entry_price"));
-          row.put("exitTs", rs.getString("exit_ts"));
+          row.put("exitTs", ist(rs.getObject("exit_ts", OffsetDateTime.class)));
           row.put("exitPrice", rs.getBigDecimal("exit_price"));
           row.put("pnl", rs.getBigDecimal("pnl"));
           row.put("pnlPct", rs.getBigDecimal("pnl_pct"));
@@ -184,5 +185,11 @@ public class TradeRepository {
     } catch (JsonProcessingException e) {
       throw new IllegalStateException("corrupt trade contributions", e);
     }
+  }
+
+  private static String ist(OffsetDateTime timestamp) {
+    return timestamp == null
+        ? null
+        : timestamp.withOffsetSameInstant(Ist.OFFSET).format(Ist.FORMATTER);
   }
 }

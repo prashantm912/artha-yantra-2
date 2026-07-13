@@ -10,6 +10,7 @@ import in.arthayantra.backtest.jobs.EngineIdentity;
 import in.arthayantra.backtest.replay.MetricsCalculator.Metrics;
 import in.arthayantra.backtest.replay.folds.FoldPersistence;
 import in.arthayantra.backtest.replay.options.PremiumSource;
+import in.arthayantra.common.web.time.Ist;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
@@ -341,7 +342,7 @@ public class RunRepository {
           row.put("sharpe", plain(rs.getBigDecimal("sharpe")));
           row.put("totalReturn", plain(rs.getBigDecimal("total_return")));
           row.put("maxDrawdown", plain(rs.getBigDecimal("max_drawdown")));
-          row.put("completedAt", rs.getString("completed_at"));
+          row.put("completedAt", ist(rs.getObject("completed_at", OffsetDateTime.class)));
           row.put("equity", compactEquity(parse(rs.getString("equity_curve")), 32));
           return row;
         },
@@ -350,6 +351,12 @@ public class RunRepository {
 
   private static String plain(BigDecimal value) {
     return value == null ? null : value.toPlainString();
+  }
+
+  private static String ist(OffsetDateTime timestamp) {
+    return timestamp == null
+        ? null
+        : timestamp.withOffsetSameInstant(Ist.OFFSET).format(Ist.FORMATTER);
   }
 
   /** Downsamples a persisted equity curve to ~{@code target} value strings for a sparkline. */

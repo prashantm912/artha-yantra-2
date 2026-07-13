@@ -5,6 +5,7 @@ import type { EChartsOption } from 'echarts';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
+import { Button } from '../../components/atoms/Button.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
@@ -21,6 +22,12 @@ import {
   type TradeRow,
 } from '../../api/backtests.ts';
 import { useStrategies } from '../../api/strategies.ts';
+import {
+  exportEquity,
+  exportFolds,
+  exportTrades,
+  type ExportFormat,
+} from '../../api/backtestExport.ts';
 import { exitReasonBreakdown } from './exitReasonBreakdown.ts';
 
 const OI_INTERVALS = ['3m', '5m', '10m', '15m'] as const;
@@ -84,6 +91,32 @@ const nums = (a: string[] | undefined) => (a ?? []).map(Number);
 const curveNums = (c: CurvePoint[] | null | undefined) => (c ?? []).map((p) => Number(p.value));
 
 type Tab = 'overview' | 'trades' | 'folds' | 'mc' | 'oi';
+
+function ExportControls({
+  artifact,
+  onExport,
+}: {
+  artifact: 'equity' | 'trades' | 'folds';
+  onExport: (format: ExportFormat) => Promise<void>;
+}) {
+  return (
+    <div role="group" aria-label={`Download ${artifact}`} className="flex items-center gap-1">
+      <span className="mr-1 text-caption uppercase tracking-wide text-ay-muted">Export</span>
+      {(['csv', 'json'] as const).map((format) => (
+        <Button
+          key={format}
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => void onExport(format)}
+        >
+          <span className="sr-only">Download {artifact} as {format.toUpperCase()}</span>
+          <span aria-hidden>{format.toUpperCase()}</span>
+        </Button>
+      ))}
+    </div>
+  );
+}
 
 export function BacktestResultsPage() {
   const { id = '' } = useParams();
@@ -281,6 +314,10 @@ export function BacktestResultsPage() {
             </p>
           )}
           <BeatBlock className="card shadow-e1">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-h3">Equity curve</h2>
+              <ExportControls artifact="equity" onExport={(format) => exportEquity(id, format)} />
+            </div>
             <EChart makeOption={equityOption} height={320} ariaLabel="Equity, benchmark and drawdown curves" />
           </BeatBlock>
           <p className="mt-2 text-xs tabular-nums text-ay-muted">
@@ -299,6 +336,10 @@ export function BacktestResultsPage() {
 
       {tab === 'trades' && (
         <>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-h3">Trades</h2>
+            <ExportControls artifact="trades" onExport={(format) => exportTrades(id, format)} />
+          </div>
           {exitStats.length > 0 && (
             <div className="mb-3">
               <h3 className="mb-1.5 text-caption uppercase tracking-wide text-ay-muted">
@@ -428,6 +469,11 @@ export function BacktestResultsPage() {
       )}
 
       {tab === 'folds' && (
+        <>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-h3">Walk-forward folds</h2>
+          <ExportControls artifact="folds" onExport={(format) => exportFolds(id, format)} />
+        </div>
         <div className="overflow-auto rounded-lg border border-ay-border">
           <table className="w-full border-collapse text-sm">
             <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
@@ -458,6 +504,7 @@ export function BacktestResultsPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {tab === 'mc' && mcData && (

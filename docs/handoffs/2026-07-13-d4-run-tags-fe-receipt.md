@@ -14,7 +14,7 @@ FE-only; 4 files (1 new). `git show --stat HEAD`:
 
 Total: 576 insertions, 12 deletions. Commit `a24d7e46`. Branch is exactly 1 commit ahead of `origin/main` (based on current main).
 
-PR: <FILLED BELOW AFTER PUSH>
+PR: https://github.com/prashantm912/artha-yantra-2/pull/820 (OPEN)
 
 ## Verify ladder (real outputs, from `frontend-react`)
 1. `npm run lint` — clean (no output; eslint exited 0).

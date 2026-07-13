@@ -42,12 +42,13 @@ Results key by variant already: `manas_arora_backtest_runs` `Report.variant` (`M
 - The deep-sims are `market-data-service` only — do NOT touch `strategy-signal-service`'s `SwingBatchEngine` (the LIVE batch stays same-bar per B8), and do NOT touch `libs/strategy-engine` or any golden vector.
 
 ## Mode & boundaries (UNSANDBOXED)
-Run as the real user in THIS worktree. **HARD NEVER LIST:** deploy / docker / flyway-migrate / edit `.env`/secrets / `rm -rf` / `git reset --hard` / `git clean -fdx` / push to `main` / merge / force-push / edit an applied migration / edit the ledger or `docs/superpowers/plans/*` / edit `SwingBatchEngine` / edit `libs/strategy-engine`. Touch ONLY `services/market-data-service/**` + this brief's receipt. STOP + doubt if anything on the NEVER list is needed.
+Run as the real user in THIS worktree. **HARD NEVER LIST:** deploy / docker / flyway-migrate / edit `.env`/secrets / `rm -rf` / `git reset --hard` / `git clean -fdx` / push to `main` / merge / force-push / edit an applied migration / edit the ledger or `docs/superpowers/plans/*` / edit `SwingBatchEngine` / edit `libs/strategy-engine`. Touch ONLY `services/market-data-service/**`, the SINGLE file `services/backtest-service/src/main/java/in/arthayantra/backtest/replay/deepswing/DeepSwingService.java` (for the item-4 variant-aware caveat ONLY — an additive doc/log string change, nothing else in that file), and this brief's receipt. STOP + doubt if anything else outside these is needed. (Scope corrected 2026-07-14: the item-4 caveat file is in backtest-service, not market-data-service; it is explicitly allowed here for that one additive change.)
 You MAY: direct-mvn, commit, push THIS branch, `gh pr create` (leave OPEN).
 
 ## Verify ladder (run ALL; paste real outputs)
 1. `... -pl services/market-data-service -am -q -DskipTests package -o` — compiles.
 2. `... -pl services/market-data-service -am verify -o` — ALL green, incl. the EXISTING deep-sim tests UNCHANGED (proves default-preserving) + your new next_open test + ModularityTest + JaCoCo. Paste `Tests run:`.
+2b. **The item-4 caveat lives in backtest-service (a sibling, NOT built by the market-data `-am`)** — separately compile it: `... -pl services/backtest-service -am -q -DskipTests package -o` (and if the caveat has any test, `-pl services/backtest-service -am verify -o`). Paste the exit. If the caveat change is purely a string/comment with no logic, a compile is sufficient.
 3. `gh pr create --base main --head feat/d4-open-next-day --title "feat(market-data): swing open-next-day fill variant (#15)" --body "<what/why + additive opt-in + default-preserving + the 6 fill sites + test evidence + receipt path>"` — leave OPEN.
 
 ## Receipt (write to `docs/handoffs/2026-07-14-d4-open-next-day-receipt.md`)

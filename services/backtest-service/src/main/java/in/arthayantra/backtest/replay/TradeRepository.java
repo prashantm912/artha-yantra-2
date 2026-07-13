@@ -79,7 +79,11 @@ public class TradeRepository {
           ps.setBigDecimal(8, trade.exitPrice());
           ps.setBigDecimal(9, trade.pnl());
           ps.setBigDecimal(10, trade.pnlPct());
-          ps.setString(11, trade.exitReason());
+          // Canonical UPPERCASE casing at the single persistence chokepoint for every replay path
+          // (candle / options-premium / deep-swing), so the shared table never mixes casing and lines
+          // up with the UPPERCASE live-paper close_reason for the (still-dormant) reconciliation
+          // metric (chip task_cf5d58c8).
+          ps.setString(11, ExitReasons.canonical(trade.exitReason()));
           ps.setInt(12, trade.barsHeld());
           ps.setString(13, trade.touchBasis() == null ? null : trade.touchBasis().name());
           ps.setString(14, contributionsJson(trade));

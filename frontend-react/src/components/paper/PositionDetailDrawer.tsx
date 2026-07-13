@@ -6,6 +6,7 @@ import { ApiError } from '../../api/client.ts';
 import { SentimentBadge } from '../atoms/SentimentBadge.tsx';
 import { QueryState } from '../QueryState.tsx';
 import { Skeleton } from '../Skeletons.tsx';
+import { OrderEventTimeline } from './OrderEventTimeline.tsx';
 import {
   bookLabel,
   useEditBrackets,
@@ -27,8 +28,8 @@ import {
 // lots / margin snapshot, book, sub-account), the entry/exit order legs with a recomputed fee
 // breakdown, an editable bracket form (PATCH .../brackets, HOLD-tier — live-effective on the next 15s
 // evaluator pass), and the signal → entry → position → exit trade chain assembled from the same
-// payload. Bracket-HIT events aren't separately recorded (paper.events is a later slice), so the chain
-// degrades honestly: the terminal close reason (STOP_LOSS / TAKE_PROFIT / MANUAL / …) is the outcome.
+// payload. The adjacent order-event timeline consumes the append-only paper.events lifecycle stream,
+// including explicit BRACKET_HIT and SETTLED events.
 
 const money = (v: string | null | undefined): string => (v == null ? '—' : formatDecimal(v, 2));
 const toneClass = (v: string | null | undefined) =>
@@ -312,6 +313,19 @@ export function PositionDetailDrawer({ positionId, open, onOpenChange }: Positio
                         </div>
                       </div>
                     )}
+                  </section>
+
+                  <section
+                    aria-labelledby={`position-${d.id}-order-events-heading`}
+                    className="flex flex-col gap-2"
+                  >
+                    <h3
+                      id={`position-${d.id}-order-events-heading`}
+                      className="text-caption font-semibold uppercase tracking-wide text-ay-muted"
+                    >
+                      Order events
+                    </h3>
+                    <OrderEventTimeline positionId={d.id} />
                   </section>
                 </div>
               );

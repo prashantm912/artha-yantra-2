@@ -1,6 +1,6 @@
 # Receipt: d4-open-next-day (#15)
 
-**Verdict — computed:** the two swing deep-sims now expose one opt-in `next_open` variant each while every existing variant continues through the byte-identical `at_close` fill path. The required direct-Maven verification ladder is green. PR: PR_URL_PENDING (`OPEN`, base `main`, head `feat/d4-open-next-day-v2`).
+**Verdict — computed:** the two swing deep-sims now expose one opt-in `next_open` variant each while every existing variant continues through the byte-identical `at_close` fill path. The required direct-Maven verification ladder is green. PR: https://github.com/prashantm912/artha-yantra-2/pull/843 (`OPEN`, base `main`, head `feat/d4-open-next-day-v2`).
 
 ## Diff summary
 
@@ -15,7 +15,7 @@
 - `services/backtest-service/src/main/java/in/arthayantra/backtest/replay/deepswing/DeepSwingService.java`: +4 / -2 — the frictionless-fill caveat identifies next-open variants.
 - `docs/handoffs/2026-07-14-d4-open-next-day-receipt.md`: +118 / -0 — this execution receipt.
 - Implementation subtotal before this receipt: 9 files, +327 / -17.
-- PR: PR_URL_PENDING (`OPEN`, base `main`, head `feat/d4-open-next-day-v2`).
+- PR: https://github.com/prashantm912/artha-yantra-2/pull/843 (`OPEN`, base `main`, head `feat/d4-open-next-day-v2`).
 
 ## Verification evidence
 

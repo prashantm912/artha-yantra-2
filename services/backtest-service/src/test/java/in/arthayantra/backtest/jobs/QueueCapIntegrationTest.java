@@ -58,7 +58,7 @@ class QueueCapIntegrationTest extends BacktestIntegrationTestBase {
       BacktestRunRequest req =
           new BacktestRunRequest(
               UUID.randomUUID().toString(), null, null, null, null, null, null, null, null, null, null,
-              null, null);
+              null, null, null, null);
       assertThatThrownBy(() -> service.submit(req, "corr-cap"))
           .isInstanceOfSatisfying(
               ApiException.class,

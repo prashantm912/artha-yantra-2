@@ -82,7 +82,7 @@ class CounterfactualReplayTest {
     variants.addObject().put("name", "hold").putObject("exitKnobs"); // no knobs → END_OF_DATA
     return new Job(
         UUID.randomUUID(), JobKind.COUNTERFACTUAL, null, JobStatus.RUNNING, 0, null, req,
-        null, null, "corr", null, null, null, "owner");
+        null, null, "corr", null, null, null, "owner", List.of(), null);
   }
 
   private static void variant(ArrayNode variants, String name, String knob, BigDecimal value) {

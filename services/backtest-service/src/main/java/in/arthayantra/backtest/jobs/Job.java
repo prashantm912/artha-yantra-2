@@ -2,6 +2,7 @@ package in.arthayantra.backtest.jobs;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -26,4 +27,6 @@ public record Job(
     OffsetDateTime createdAt,
     OffsetDateTime startedAt,
     OffsetDateTime finishedAt,
-    String createdBy) {}
+    String createdBy,
+    List<String> tags,
+    String note) {}

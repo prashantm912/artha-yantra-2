@@ -6,6 +6,78 @@
     "version" : "v1"
   },
   "paths" : {
+    "/api/v1/backtests/saved-views" : {
+      "get" : {
+        "tags" : [ "jobs-controller" ],
+        "operationId" : "savedViews",
+        "parameters" : [ {
+          "name" : "kind",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SavedViewsResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "jobs-controller" ],
+        "operationId" : "createSavedView",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SavedViewRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SavedView"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests/run" : {
       "post" : {
         "tags" : [ "jobs-controller" ],
@@ -187,6 +259,53 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/CounterfactualSubmitResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/jobs/{jobId}/annotations" : {
+      "patch" : {
+        "tags" : [ "jobs-controller" ],
+        "operationId" : "annotate",
+        "parameters" : [ {
+          "name" : "jobId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/JobAnnotationRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/JobAnnotationResponse"
                 }
               }
             }
@@ -1054,6 +1173,13 @@
             "type" : "string"
           }
         }, {
+          "name" : "tag",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
           "name" : "sortBy",
           "in" : "query",
           "required" : false,
@@ -1330,10 +1456,76 @@
           }
         }
       }
+    },
+    "/api/v1/backtests/saved-views/{id}" : {
+      "delete" : {
+        "tags" : [ "jobs-controller" ],
+        "operationId" : "deleteSavedView",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK"
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components" : {
     "schemas" : {
+      "JsonNode" : { },
+      "SavedViewRequest" : {
+        "type" : "object",
+        "properties" : {
+          "kind" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "filter" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          }
+        }
+      },
+      "SavedView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "filter" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "BacktestRunRequest" : {
         "type" : "object",
         "properties" : {
@@ -1376,10 +1568,18 @@
           },
           "traceDecisions" : {
             "type" : "boolean"
+          },
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "note" : {
+            "type" : "string"
           }
         }
       },
-      "JsonNode" : { },
       "SessionOverrides" : {
         "type" : "object",
         "properties" : {
@@ -1585,6 +1785,37 @@
           }
         }
       },
+      "JobAnnotationRequest" : {
+        "type" : "object",
+        "properties" : {
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
+      "JobAnnotationResponse" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : "string"
+          },
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "note" : {
+            "type" : "string"
+          }
+        }
+      },
       "SwingReportCard" : {
         "type" : "object",
         "properties" : {
@@ -1660,6 +1891,17 @@
           },
           "sampleBreakdown" : {
             "$ref" : "#/components/schemas/JsonNode"
+          }
+        }
+      },
+      "SavedViewsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SavedView"
+            }
           }
         }
       },

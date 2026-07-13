@@ -3,7 +3,7 @@
 Date: 2026-07-14
 Branch: `feat/d4-rerun-clone-confirm`
 Tier: clean
-PR URL: PENDING (filled after `gh pr create`)
+PR URL: https://github.com/prashantm912/artha-yantra-2/pull/836
 
 ## Diff summary
 

@@ -2,6 +2,8 @@ package in.arthayantra.marketdata.nse;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -32,6 +34,23 @@ public class NseEodBhavcopyRepository {
         "SELECT DISTINCT trade_date FROM nse_eod_bhavcopy WHERE trade_date BETWEEN ? AND ?",
         (rs, n) -> rs.getObject("trade_date", LocalDate.class),
         from, to);
+  }
+
+  /** EQ-series symbols present on one settled trade date, sorted for deterministic diff output. */
+  public Set<String> eqSymbolsOn(LocalDate date) {
+    return new TreeSet<>(
+        jdbc.query(
+            "SELECT symbol FROM nse_eod_bhavcopy WHERE trade_date = ? AND series = 'EQ'",
+            (rs, n) -> rs.getString("symbol"),
+            java.sql.Date.valueOf(date)));
+  }
+
+  /** Previous settled trade date with any bhavcopy rows, or null on cold start. */
+  public LocalDate prevTradeDate(LocalDate before) {
+    return jdbc.query(
+        "SELECT max(trade_date) AS d FROM nse_eod_bhavcopy WHERE trade_date < ?",
+        rs -> rs.next() ? rs.getObject("d", LocalDate.class) : null,
+        java.sql.Date.valueOf(before));
   }
 
   public void upsertAll(List<BhavcopyFetcher.BhavcopyRow> rows) {

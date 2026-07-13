@@ -204,6 +204,15 @@ artha:
     snapshot-underlyings: NIFTY 50,NIFTY BANK,NIFTY FIN SERVICE,NIFTY MID SELECT,SENSEX,BANKEX
     snapshot-interval-ms: 60000
     snapshot-expiry-horizon-days: 90
+  data-quality:
+    # FID P2-4: settled-day per-symbol completeness (chain capture, primary 1m, NSE EQ bhavcopy).
+    eod-cron: "0 50 19 * * MON-FRI"
+    enabled: true
+    chain-expected-passes: 187
+    chain-min-coverage-pct: 80
+    intraday-1m-instruments: NSE:NIFTY 50,NSE:NIFTY BANK,BSE:SENSEX
+    intraday-min-coverage-pct: 95
+    bhavcopy-min-ratio: 0.98
   futures:
     # WS ticker pinned futures (front/next/far, auto-roll) — the 6 F&O indices.
     # Drives FuturesPinner (live ticker) + ContinuousFuturesRoller (EOD roll).

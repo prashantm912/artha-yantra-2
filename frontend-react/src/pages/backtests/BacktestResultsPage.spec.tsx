@@ -1,9 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('../../components/atoms/EChart.tsx', () => ({ EChart: () => null }));
+const exportMocks = vi.hoisted(() => ({
+  trades: vi.fn(),
+  folds: vi.fn(),
+  equity: vi.fn(),
+}));
+vi.mock('../../api/backtestExport.ts', () => ({
+  exportTrades: exportMocks.trades,
+  exportFolds: exportMocks.folds,
+  exportEquity: exportMocks.equity,
+}));
 vi.mock('../../api/backtests.ts', () => ({
   useBacktestResults: () => ({
     data: {
@@ -88,6 +98,10 @@ function renderPage() {
 }
 
 describe('BacktestResultsPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('shows metrics, trades, folds and the Monte Carlo tab', () => {
     renderPage();
     expect(screen.getByText('Sharpe')).toBeInTheDocument();
@@ -120,5 +134,26 @@ describe('BacktestResultsPage', () => {
     const buckets = screen.getByRole('table', { name: 'OI-confluence attribution buckets' });
     const row = within(buckets).getByText('Ext.Bullish').closest('tr')!;
     expect(within(row).getByText('1.000')).toBeInTheDocument(); // win rate
+  });
+
+  it('downloads equity, trades and folds in CSV and JSON formats', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download equity as CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download equity as JSON' }));
+    expect(exportMocks.equity).toHaveBeenNthCalledWith(1, 'run-1', 'csv');
+    expect(exportMocks.equity).toHaveBeenNthCalledWith(2, 'run-1', 'json');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Trades' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download trades as CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download trades as JSON' }));
+    expect(exportMocks.trades).toHaveBeenNthCalledWith(1, 'run-1', 'csv');
+    expect(exportMocks.trades).toHaveBeenNthCalledWith(2, 'run-1', 'json');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Folds' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download folds as CSV' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download folds as JSON' }));
+    expect(exportMocks.folds).toHaveBeenNthCalledWith(1, 'run-1', 'csv');
+    expect(exportMocks.folds).toHaveBeenNthCalledWith(2, 'run-1', 'json');
   });
 });

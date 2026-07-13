@@ -196,6 +196,15 @@ public class JobsController {
     // offset date-time as the request carries it; the UI slices to the date for the Start/End columns.
     map.put("testFrom", job.request() == null ? null : job.request().path("from").asText(null));
     map.put("testTo", job.request() == null ? null : job.request().path("to").asText(null));
+    map.put("interval", job.request() == null ? null : job.request().path("interval").asText(null));
+    map.put(
+        "initialCapital",
+        job.request() == null ? null : job.request().path("initialCapital").asText(null));
+    map.put(
+        "seed",
+        job.request() == null || !job.request().hasNonNull("seed")
+            ? null
+            : job.request().path("seed").asLong());
     map.put("tags", job.tags());
     map.put("note", job.note());
     return map;

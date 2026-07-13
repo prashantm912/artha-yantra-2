@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Bookmark, Pencil, StickyNote, Tags, Trash2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '../../lib/cn.ts';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { Button } from '../../components/atoms/Button.tsx';
@@ -39,8 +40,10 @@ import {
   useJobs,
   useJobsLive,
   useSavedViews,
+  useSubmitRun,
   type JobDto,
   type JobStatus,
+  type RunRequest,
   type SavedView,
 } from '../../api/backtests.ts';
 
@@ -65,6 +68,40 @@ function statusTone(status: JobStatus): string {
 }
 
 const cancellable = (s: JobStatus) => s === 'queued' || s === 'running';
+
+function cloneRequest(job: JobDto): Partial<RunRequest> {
+  return {
+    ...(job.strategyId ? { strategyId: job.strategyId } : {}),
+    ...(job.strategyVersion ? { strategyVersion: job.strategyVersion } : {}),
+    ...(job.testFrom ? { from: job.testFrom } : {}),
+    ...(job.testTo ? { to: job.testTo } : {}),
+    ...(job.interval ? { interval: job.interval } : {}),
+    ...(job.initialCapital ? { initialCapital: job.initialCapital } : {}),
+    ...(job.seed != null ? { seed: job.seed } : {}),
+  };
+}
+
+function rerunRequest(job: JobDto): RunRequest | null {
+  if (
+    !job.strategyId ||
+    !job.testFrom ||
+    !job.testTo ||
+    !job.interval ||
+    !job.initialCapital ||
+    job.seed == null
+  ) {
+    return null;
+  }
+  return {
+    strategyId: job.strategyId,
+    ...(job.strategyVersion ? { strategyVersion: job.strategyVersion } : {}),
+    from: job.testFrom,
+    to: job.testTo,
+    interval: job.interval,
+    initialCapital: job.initialCapital,
+    seed: job.seed,
+  };
+}
 
 // Failed-job detail dialog: the jobs LIST omits `jobs.error`, so a failed row's message is fetched
 // lazily from the detail endpoint (audit §2.7 — the BE already serves it). Accessible modal (Radix
@@ -380,6 +417,7 @@ export function JobsPage() {
   const q = useJobs(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, currentVersionPairs, jobTagFilter);
   useJobsLive(status, strategyId, offset, apiSortBy, apiSortDir, tagStrategyIds, currentVersionPairs, jobTagFilter);
   const cancel = useCancelJob();
+  const submitRerun = useSubmitRun();
 
   const nameById = useMemo(
     () => new Map((strategies.data?.items ?? []).map((s) => [s.id, s.name])),
@@ -424,6 +462,14 @@ export function JobsPage() {
   const viewResults = async (jobId: string) => {
     const ref = await fetchResultRef(jobId);
     if (ref) navigate(`/backtests/${ref}`);
+  };
+
+  const rerun = (job: JobDto) => {
+    const request = rerunRequest(job);
+    if (!request) return;
+    submitRerun.mutate(request, {
+      onSuccess: ({ jobId }) => toast.success(`Rerun queued: ${jobId.slice(0, 8)}`),
+    });
   };
 
   // Compare picker (audit 2026-07-02 §10.2-3 / §11 item 15): tick 2-6 completed runs, press Compare —
@@ -662,7 +708,7 @@ export function JobsPage() {
         id: 'actions',
         header: 'Actions',
         align: 'right',
-        help: 'Open the run results or sweep explorer, or cancel a queued/running job.',
+        help: 'Open results, rerun or clone a backtest, open a sweep, or cancel a queued/running job.',
         headerClassName: 'ay-sr-only',
         render: (job) => (
           <>
@@ -683,6 +729,29 @@ export function JobsPage() {
               >
                 Results
               </button>
+            )}
+            {job.kind === 'BACKTEST' && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => rerun(job)}
+                  disabled={!rerunRequest(job) || submitRerun.isPending}
+                  aria-label={`Rerun job ${job.jobId.slice(0, 8)}`}
+                  title={rerunRequest(job) ? 'Submit a new run with the same parameters.' : 'This legacy row is missing parameters required for a faithful rerun.'}
+                  className="px-1.5 text-xs text-accent hover:underline disabled:text-ay-muted/40"
+                >
+                  Rerun
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/backtests/run', { state: { clone: cloneRequest(job) } })}
+                  aria-label={`Clone job ${job.jobId.slice(0, 8)}`}
+                  title="Open these parameters in the runner for editing."
+                  className="px-1.5 text-xs text-accent hover:underline"
+                >
+                  Clone
+                </button>
+              </>
             )}
             <button
               type="button"

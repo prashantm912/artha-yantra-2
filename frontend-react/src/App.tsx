@@ -32,6 +32,7 @@ import { GraduationPage } from './pages/strategies/GraduationPage.tsx';
 import { SwingSellDecisionsPage } from './pages/strategies/SwingSellDecisionsPage.tsx';
 import { BacktestRunnerPage } from './pages/backtests/BacktestRunnerPage.tsx';
 import { JobsPage } from './pages/backtests/JobsPage.tsx';
+import { SweepsPage } from './pages/backtests/SweepsPage.tsx';
 import { JournalPage } from './pages/journal/JournalPage.tsx';
 import { OrdersPage } from './pages/orders/OrdersPage.tsx';
 import { WatchlistsPage } from './pages/watchlists/WatchlistsPage.tsx';
@@ -312,6 +313,7 @@ export function App() {
           {/* Backtests */}
           <Route path="/backtests/run" element={<BacktestRunnerPage />} />
           <Route path="/backtests/jobs" element={<JobsPage />} />
+          <Route path="/backtests/sweeps" element={<SweepsPage />} />
           <Route path="/backtests/compare" element={<Lazy><BacktestComparePage /></Lazy>} />
           <Route path="/backtests/:id" element={<Lazy><BacktestResultsPage /></Lazy>} />
           <Route path="/optimizations/:sweepId" element={<Lazy><SweepDetailPage /></Lazy>} />

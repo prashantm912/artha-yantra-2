@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Radix DropdownMenu (Popper-based) needs these jsdom shims to open in a test.
@@ -18,6 +18,7 @@ const cancel = vi.fn();
 const annotate = vi.fn();
 const createView = vi.fn();
 const deleteView = vi.fn();
+const rerun = vi.fn();
 // Latest args useJobs was called with (index 7 = the D4 per-job tag filter) + the saved-view store the
 // Views dropdown reads. Reset per test via renderPage's callers.
 let lastJobsArgs: unknown[] = [];
@@ -28,7 +29,12 @@ vi.mock('../../api/strategies.ts', () => ({
   useStrategies: () => ({ data: { items: [{ id: 's1', name: 'EMA Cross', currentVersion: '1.0.1', currentVersionId: 'v-cur', tags: [] }] } }),
 }));
 const JOBS = [
-  { jobId: 'aaaa1111-bb', kind: 'BACKTEST', status: 'completed', progress: 100, createdAt: '2026-06-23T10:00:00', strategyId: 's1', strategyVersion: '1.0.1' },
+  {
+    jobId: 'aaaa1111-bb', kind: 'BACKTEST', status: 'completed', progress: 100,
+    createdAt: '2026-06-23T10:00:00', strategyId: 's1', strategyVersion: '1.0.1',
+    testFrom: '2026-05-01T00:00:00.000Z', testTo: '2026-06-01T00:00:00.000Z',
+    interval: '1d', initialCapital: '100000', seed: 42,
+  },
   { jobId: 'cccc2222-dd', kind: 'OPTIMIZATION', status: 'running', progress: 40, createdAt: '2026-06-23T10:05:00', strategyId: 's1', strategyVersion: '1.0.0' },
   // A failed run — the LIST carries no `error`; the failure dialog fetches it via useJobDetail.
   { jobId: 'eeee3333-ff', kind: 'BACKTEST', status: 'failed', progress: 0, createdAt: '2026-06-23T10:10:00', strategyId: 's1', strategyVersion: '1.0.1' },
@@ -47,6 +53,7 @@ vi.mock('../../api/backtests.ts', async (orig) => {
     },
     useJobsLive: () => {},
     useCancelJob: () => ({ mutate: cancel }),
+    useSubmitRun: () => ({ mutate: rerun, isPending: false }),
     // The detail endpoint is the only source of jobs.error — the dialog reads it from here.
     useJobDetail: () => ({ isPending: false, isError: false, data: { error: 'Kaboom: preflight DATA_GAP at 2026-06-23' } }),
     // D4 P2-2 annotation + saved-view hooks (asserted at the URL/body level in backtests.spec.ts).
@@ -59,12 +66,20 @@ vi.mock('../../api/backtests.ts', async (orig) => {
 
 import { JobsPage } from './JobsPage.tsx';
 
+function LocationProbe() {
+  const location = useLocation();
+  return <pre data-testid="location">{JSON.stringify({ pathname: location.pathname, state: location.state })}</pre>;
+}
+
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <JobsPage />
+        <Routes>
+          <Route path="*" element={<JobsPage />} />
+          <Route path="/backtests/run" element={<LocationProbe />} />
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -76,6 +91,7 @@ describe('JobsPage', () => {
     annotate.mockClear();
     createView.mockClear();
     deleteView.mockClear();
+    rerun.mockClear();
     savedViews = [];
     lastJobsArgs = [];
   });
@@ -119,6 +135,32 @@ describe('JobsPage', () => {
     // The dialog surfaces the BE-served error text (fetched lazily from the detail endpoint).
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText(/Kaboom: preflight DATA_GAP/)).toBeInTheDocument();
+  });
+
+  it('reruns a backtest with the exact echoed parameters', () => {
+    renderPage();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Rerun job aaaa1111' })[0]);
+    expect(rerun).toHaveBeenCalledWith(
+      {
+        strategyId: 's1',
+        strategyVersion: '1.0.1',
+        from: '2026-05-01T00:00:00.000Z',
+        to: '2026-06-01T00:00:00.000Z',
+        interval: '1d',
+        initialCapital: '100000',
+        seed: 42,
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it('clones a backtest into the runner through router state', () => {
+    renderPage();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clone job aaaa1111' })[0]);
+    expect(screen.getByTestId('location')).toHaveTextContent('"pathname":"/backtests/run"');
+    expect(screen.getByTestId('location')).toHaveTextContent('"strategyId":"s1"');
+    expect(screen.getByTestId('location')).toHaveTextContent('"initialCapital":"100000"');
+    expect(screen.getByTestId('location')).toHaveTextContent('"seed":42');
   });
 
   // --- D4 P2-2: per-job tags/note + saved views ---

@@ -3,7 +3,7 @@
 Date: 2026-07-13
 Branch: `feat/d4-data-quality`
 Base: `origin/main` at `45c94faa`
-PR: PENDING_PR_URL
+PR: https://github.com/prashantm912/artha-yantra-2/pull/823
 
 ## Outcome
 

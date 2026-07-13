@@ -27,6 +27,10 @@ export interface JobDto {
   /** The tested window [from, to] (a date or ISO datetime); the UI shows the date part as Start/End. */
   testFrom?: string | null;
   testTo?: string | null;
+  /** Submit parameters echoed by the jobs list so a run can be faithfully rerun or cloned. */
+  interval?: string | null;
+  initialCapital?: string | null;
+  seed?: number | null;
   parentJobId?: string | null;
   resultRef?: string | null;
   error?: string | null;

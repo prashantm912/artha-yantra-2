@@ -9,6 +9,35 @@ import { apiFetch } from './client.ts';
 export type SortMode = 'plateau' | 'raw';
 export type TrialState = 'RUNNING' | 'COMPLETE' | 'PRUNED' | 'FAILED';
 
+export const SWEEPS_PAGE_SIZE = 25;
+
+export interface SweepObjective {
+  metric?: string;
+  direction?: string;
+  fold_aggregation?: string;
+  objectives?: Array<{ metric?: string; direction?: string }>;
+}
+
+/** Native optimizer sweep-list row (`GET /optimizations/jobs`), newest first. */
+export interface SweepSummary {
+  jobId: string;
+  status: string;
+  progress: number;
+  error?: string | null;
+  createdAt?: string | null;
+  strategyId?: string | null;
+  method?: string | null;
+  objective?: SweepObjective | null;
+  from?: string | null;
+  to?: string | null;
+}
+
+export interface SweepsEnvelope {
+  items: SweepSummary[];
+  limit: number;
+  offset: number;
+}
+
 /** The §D.4 walk-forward guard outputs for a fold run (absent for legacy/full-window trials). */
 export interface GuardMetrics {
   dataHash?: string | null;
@@ -90,6 +119,17 @@ export function useTrialFolds(sweepId: string, trialNumber: number | null) {
 }
 
 const REFETCH_MS = 4000;
+
+export function useSweeps(offset: number) {
+  return useQuery({
+    queryKey: ['sweeps', 'list', offset],
+    queryFn: () =>
+      apiFetch<SweepsEnvelope>(
+        `/optimizations/jobs?limit=${SWEEPS_PAGE_SIZE}&offset=${offset}`,
+      ),
+    refetchInterval: REFETCH_MS,
+  });
+}
 
 export function useSweepBest(sweepId: string, sort: SortMode) {
   return useQuery({

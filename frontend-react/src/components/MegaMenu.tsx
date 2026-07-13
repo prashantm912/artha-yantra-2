@@ -123,6 +123,7 @@ const SECTIONS: MenuSection[] = [
     items: [
       { label: 'Runner', to: '/backtests/run' }, // cockpit — backtest + sweep launcher (E-8)
       { label: 'Jobs', to: '/backtests/jobs' }, // cockpit — live job monitor (jobs.progress WS)
+      { label: 'Sweeps', to: '/backtests/sweeps' }, // optimizer-native sweep list + detail links
       { label: 'Compare', to: '/backtests/compare' }, // cockpit — up-to-6-run metric matrix + equity overlay
     ],
   },

@@ -1,8 +1,17 @@
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { m } from 'motion/react';
 import { cn } from '../../lib/cn.ts';
+import { Button } from '../../components/atoms/Button.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { useStrategies, useStrategyVersions } from '../../api/strategies.ts';
@@ -14,6 +23,8 @@ import {
   SWEEP_METHODS,
   useSubmitRun,
   useSubmitSweep,
+  type RunRequest,
+  type SweepRequest,
 } from '../../api/backtests.ts';
 
 // /backtests/run (master plan §20 parity, E-8): the runner (full-parameter backtest) and the sweep
@@ -21,6 +32,15 @@ import {
 // jobs monitor. On the mock stack, windowed runs need benchmark history (see the guide).
 
 const dayISO = (offsetDays = 0) => new Date(Date.now() - offsetDays * 86_400_000).toISOString().slice(0, 10);
+const dateInput = (value?: string) => value?.slice(0, 10);
+
+type PendingSubmission =
+  | { kind: 'backtest'; request: RunRequest }
+  | { kind: 'sweep'; request: SweepRequest };
+
+interface RunnerLocationState {
+  clone?: Partial<RunRequest>;
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -33,21 +53,87 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const numberCls = 'h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
 
+function ConfirmRunDialog({
+  submission,
+  strategyName,
+  isPending,
+  onCancel,
+  onConfirm,
+  returnFocusTo,
+}: {
+  submission: PendingSubmission;
+  strategyName: string;
+  isPending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+  returnFocusTo: HTMLElement | null;
+}) {
+  const request = submission.request;
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
+      <DialogContent
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          returnFocusTo?.focus();
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Confirm {submission.kind}</DialogTitle>
+          <DialogDescription>Review the inputs before this research job is submitted.</DialogDescription>
+        </DialogHeader>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded border border-ay-border bg-surface-1 p-3 text-sm">
+          <dt className="text-ay-muted">Strategy</dt>
+          <dd>{strategyName}</dd>
+          <dt className="text-ay-muted">Window</dt>
+          <dd className="tabular-nums">{request.from.slice(0, 10)} to {request.to.slice(0, 10)}</dd>
+          <dt className="text-ay-muted">Interval</dt>
+          <dd>{request.interval}</dd>
+          <dt className="text-ay-muted">Initial capital</dt>
+          <dd className="tabular-nums">{request.initialCapital}</dd>
+          <dt className="text-ay-muted">Seed</dt>
+          <dd className="tabular-nums">{request.seed}</dd>
+          {submission.kind === 'sweep' && (
+            <>
+              <dt className="text-ay-muted">Method</dt>
+              <dd>{submission.request.method}</dd>
+              <dt className="text-ay-muted">Max trials</dt>
+              <dd className="tabular-nums">{submission.request.maxTrials}</dd>
+              <dt className="text-ay-muted">Objective</dt>
+              <dd>
+                {submission.request.objective.metric} / {submission.request.objective.direction} /{' '}
+                {submission.request.objective.fold_aggregation}
+              </dd>
+            </>
+          )}
+        </dl>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+          <Button type="button" onClick={onConfirm} loading={isPending}>Confirm &amp; run</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function BacktestRunnerPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const clone = (location.state as RunnerLocationState | null)?.clone;
   const strategies = useStrategies('', null);
   const submitRun = useSubmitRun();
   const submitSweep = useSubmitSweep();
+  const confirmTriggerRef = useRef<HTMLElement | null>(null);
 
   const [tab, setTab] = useState<'backtest' | 'sweep'>('backtest');
-  const [strategyId, setStrategyId] = useState<string | null>(null);
+  const [strategyId, setStrategyId] = useState<string | null>(clone?.strategyId ?? null);
   // '' = latest (the backend pins latest published, else latest draft); a version string runs that version.
-  const [strategyVersion, setStrategyVersion] = useState('');
-  const [interval, setInterval] = useState('1d');
-  const [from, setFrom] = useState(dayISO(60));
-  const [to, setTo] = useState(dayISO(0));
-  const [capital, setCapital] = useState('100000');
-  const [seed, setSeed] = useState('42');
+  const [strategyVersion, setStrategyVersion] = useState(clone?.strategyVersion ?? '');
+  const [interval, setInterval] = useState(clone?.interval ?? '1d');
+  const [from, setFrom] = useState(dateInput(clone?.from) ?? dayISO(60));
+  const [to, setTo] = useState(dateInput(clone?.to) ?? dayISO(0));
+  const [capital, setCapital] = useState(clone?.initialCapital ?? '100000');
+  const [seed, setSeed] = useState(String(clone?.seed ?? 42));
+  const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
   // sweep-only
   const [method, setMethod] = useState('tpe');
   const [maxTrials, setMaxTrials] = useState('30');
@@ -76,16 +162,17 @@ export function BacktestRunnerPage() {
 
   const runBacktest = () => {
     if (!strategyId) return;
-    submitRun.mutate(
-      { strategyId, ...versionField, from: iso(from), to: iso(to), interval, initialCapital: capital, seed: Number(seed) },
-      { onSuccess: () => navigate('/backtests/jobs') },
-    );
+    setPendingSubmission({
+      kind: 'backtest',
+      request: { strategyId, ...versionField, from: iso(from), to: iso(to), interval, initialCapital: capital, seed: Number(seed) },
+    });
   };
 
   const launchSweep = () => {
     if (!strategyId) return;
-    submitSweep.mutate(
-      {
+    setPendingSubmission({
+      kind: 'sweep',
+      request: {
         strategyId,
         ...versionField,
         from: iso(from),
@@ -98,9 +185,22 @@ export function BacktestRunnerPage() {
         constraints: { min_trades: Number(minTrades) },
         seed: Number(seed),
       },
-      { onSuccess: () => navigate('/backtests/jobs') },
-    );
+    });
   };
+
+  const confirmSubmission = () => {
+    if (!pendingSubmission) return;
+    const submission = pendingSubmission;
+    setPendingSubmission(null);
+    if (submission.kind === 'backtest') {
+      submitRun.mutate(submission.request, { onSuccess: () => navigate('/backtests/jobs') });
+    } else {
+      submitSweep.mutate(submission.request, { onSuccess: () => navigate('/backtests/jobs') });
+    }
+  };
+
+  const selectedStrategyName =
+    strategyOptions.find((option) => option.value === strategyId)?.label ?? strategyId ?? 'Unknown strategy';
 
   return (
     <LoadBeat>
@@ -191,7 +291,10 @@ export function BacktestRunnerPage() {
         {tab === 'backtest' ? (
           <button
             type="button"
-            onClick={runBacktest}
+            onClick={(event) => {
+              confirmTriggerRef.current = event.currentTarget;
+              runBacktest();
+            }}
             disabled={!strategyId || submitRun.isPending}
             title="Submit the backtest and jump to the Jobs monitor to watch its progress."
             className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
@@ -201,7 +304,10 @@ export function BacktestRunnerPage() {
         ) : (
           <button
             type="button"
-            onClick={launchSweep}
+            onClick={(event) => {
+              confirmTriggerRef.current = event.currentTarget;
+              launchSweep();
+            }}
             disabled={!strategyId || submitSweep.isPending}
             title="Submit the parameter sweep and jump to the Jobs monitor to watch its progress."
             className="h-9 rounded-md bg-accent px-4 text-sm font-medium text-surface-0 hover:opacity-90 disabled:opacity-50"
@@ -211,6 +317,16 @@ export function BacktestRunnerPage() {
         )}
       </div>
       </m.div>
+      {pendingSubmission && (
+        <ConfirmRunDialog
+          submission={pendingSubmission}
+          strategyName={selectedStrategyName}
+          isPending={pendingSubmission.kind === 'backtest' ? submitRun.isPending : submitSweep.isPending}
+          onCancel={() => setPendingSubmission(null)}
+          onConfirm={confirmSubmission}
+          returnFocusTo={confirmTriggerRef.current}
+        />
+      )}
     </LoadBeat>
   );
 }

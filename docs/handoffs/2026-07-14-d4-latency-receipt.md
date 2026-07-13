@@ -4,7 +4,7 @@ Date: 2026-07-14
 Branch: `feat/d4-latency`
 Base: `origin/main` at `f60d6d3f2387b469eca8f2dca9204a73bdaf6ac9`
 Tier: **PARITY-SENSITIVE / HOLD** — Architect review and owner presentation remain required.
-PR URL: **PENDING — populated immediately after `gh pr create`**
+PR URL: https://github.com/prashantm912/artha-yantra-2/pull/829
 
 ## Outcome
 

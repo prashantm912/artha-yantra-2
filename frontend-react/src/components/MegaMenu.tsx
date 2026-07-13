@@ -149,6 +149,7 @@ const SECTIONS: MenuSection[] = [
     items: [
       { label: 'Collection Status', to: '/data-ops/status' }, // PR-DO1 — live backfill progress + logs
       { label: 'Ingest Health', to: '/data-ops/ingest-health' }, // A11 — EOD per-source ingest_runs health board
+      { label: 'Data Quality', to: '/data-ops/data-quality' }, // P2-4 — nightly per-symbol completeness report
       { label: 'Coverage', to: '/data-ops/coverage' }, // PR-DO2 — per-underlying contract/candle coverage
       { label: 'Run Backfill', to: '/data-ops/collection' }, // PR-DO3 — guided collection wizard
       { label: 'Query Console', to: '/data-ops/query' }, // PR-DO5 — read-only SQL over the candle store

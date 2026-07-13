@@ -102,6 +102,27 @@ class ExitReasonAttributionTest {
         .containsExactly("signal_exit", "end_of_data");
   }
 
+  /**
+   * Direct pin on every {@link ReplayEngine#mapExitReason} branch — including the ones no golden
+   * fixture may exercise: the {@code scaled_exit → take_profit} collapse (a sell-into-strength tier),
+   * the {@code square_off}/{@code time_stop} pass-throughs, and the null/unknown defensive fallback
+   * to {@code signal_exit}. Guards the persisted {@code backtest_trades.exit_reason} enum contract.
+   */
+  @Test
+  void mapExitReasonCoversEveryExitDecisionType() {
+    assertThat(ReplayEngine.mapExitReason("stop_loss")).isEqualTo("stop_loss");
+    assertThat(ReplayEngine.mapExitReason("trailing_stop")).isEqualTo("trailing_stop");
+    assertThat(ReplayEngine.mapExitReason("take_profit")).isEqualTo("take_profit");
+    assertThat(ReplayEngine.mapExitReason("square_off")).isEqualTo("square_off");
+    assertThat(ReplayEngine.mapExitReason("time_stop")).isEqualTo("time_stop");
+    assertThat(ReplayEngine.mapExitReason("signal_exit")).isEqualTo("signal_exit");
+    // a sell-into-strength scaled tier is a profit take → collapses into the DoD's 6-value enum
+    assertThat(ReplayEngine.mapExitReason("scaled_exit")).isEqualTo("take_profit");
+    // defensive: a null (entry event) or an unrecognised type never NPEs — falls back to signal_exit
+    assertThat(ReplayEngine.mapExitReason(null)).isEqualTo("signal_exit");
+    assertThat(ReplayEngine.mapExitReason("something_new")).isEqualTo("signal_exit");
+  }
+
   private List<Trade> replay(String feature) throws IOException {
     Path root = goldenRoot();
     String yaml =

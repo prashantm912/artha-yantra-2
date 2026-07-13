@@ -12,6 +12,7 @@ import in.arthayantra.marketdata.bse.BseEodBhavcopyRepository;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.candles.EodCorporateActionRepository;
+import in.arthayantra.marketdata.dividends.DividendRepository;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher.BhavcopyRow;
@@ -65,6 +66,7 @@ public class BhavcopyBackfillService {
   private final NseCorporateActionFetcher nseCa;
   private final BseCorporateActionFetcher bseCa;
   private final EodCorporateActionRepository caRepo;
+  private final DividendRepository dividendRepo;
   private final CandleRepository candles;
   private final Clock clock;
   private final ApplicationEventPublisher events;
@@ -110,6 +112,7 @@ public class BhavcopyBackfillService {
       NseCorporateActionFetcher nseCa,
       BseCorporateActionFetcher bseCa,
       EodCorporateActionRepository caRepo,
+      DividendRepository dividendRepo,
       CandleRepository candles,
       Clock clock,
       ApplicationEventPublisher events,
@@ -127,6 +130,7 @@ public class BhavcopyBackfillService {
     this.nseCa = nseCa;
     this.bseCa = bseCa;
     this.caRepo = caRepo;
+    this.dividendRepo = dividendRepo;
     this.candles = candles;
     this.clock = clock;
     this.events = events;
@@ -476,6 +480,16 @@ public class BhavcopyBackfillService {
       Optional<CorporateActionSubjectParser.Parsed> parsed =
           CorporateActionSubjectParser.parse(a.subject());
       if (parsed.isEmpty()) {
+        if (DividendSubjectParser.isDividend(a.subject())) {
+          dividendRepo.upsert(
+              "NSE",
+              a.symbol(),
+              a.exDate(),
+              DividendSubjectParser.parseAmount(a.subject()).orElse(null),
+              a.subject(),
+              a.isin(),
+              "NSE");
+        }
         continue; // dividend / buyback / AGM — not a price adjustment
       }
       CorporateActionSubjectParser.Parsed p = parsed.get();
@@ -505,6 +519,22 @@ public class BhavcopyBackfillService {
       Optional<CorporateActionSubjectParser.Parsed> parsed =
           CorporateActionSubjectParser.parse(a.purpose());
       if (parsed.isEmpty()) {
+        if (DividendSubjectParser.isDividend(a.purpose())) {
+          String dividendTicker = bseRepo.tickerForScrip(a.scripCode());
+          if (dividendTicker == null) {
+            dividendTicker = a.shortName();
+          }
+          if (dividendTicker != null && !dividendTicker.isBlank()) {
+            dividendRepo.upsert(
+                "BSE",
+                dividendTicker,
+                a.exDate(),
+                DividendSubjectParser.parseAmount(a.purpose()).orElse(null),
+                a.purpose(),
+                null,
+                "BSE");
+          }
+        }
         continue;
       }
       String ticker = bseRepo.tickerForScrip(a.scripCode());

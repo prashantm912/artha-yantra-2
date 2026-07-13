@@ -4,7 +4,7 @@ Date: 2026-07-13
 
 Branch: `feat/d4-export-endpoints` from `origin/main@2e5ef47cf5360929d5a9a2cded1e437bebeb34f1`
 
-PR: PENDING — populated immediately after `gh pr create`.
+PR: **NOT OPENED** — the managed sandbox could not access any non-interactive GitHub credential; see open doubt 6.
 
 ## Diff summary
 
@@ -13,7 +13,7 @@ The backend slice adds bounded per-run CSV/JSON downloads for trades, folds, equ
 | File | + | - |
 | --- | ---: | ---: |
 | `contracts/backtest-service.openapi.json` | 194 | 3 |
-| `docs/handoffs/2026-07-13-d4-export-endpoints-receipt.md` | 101 | 0 |
+| `docs/handoffs/2026-07-13-d4-export-endpoints-receipt.md` | 102 | 0 |
 | `services/backtest-service/src/main/java/in/arthayantra/backtest/replay/CsvEncoder.java` | 52 | 0 |
 | `services/backtest-service/src/main/java/in/arthayantra/backtest/replay/ExportController.java` | 280 | 0 |
 | `services/backtest-service/src/main/java/in/arthayantra/backtest/replay/RunRepository.java` | 8 | 1 |
@@ -99,3 +99,4 @@ tsc --strict: NOT RUN (environment — Node execution denied)
 3. **Truncation cap:** The chosen cap is 1,000 rows, matching the existing trades endpoint's hard maximum. Every export sends `X-Result-Truncated` and `X-Result-Rows`; the controller test proves the 1,001-row trade probe truncates to 1,000.
 4. **Environment stop:** The required full reactor was green before Docker pipe access became unavailable. The later dedicated contract capture failed for that external reason, while TypeScript regeneration and `tsc` were blocked by Node execution policy/TLS. The committed OpenAPI came from the earlier green full run; the generated TypeScript declaration remains stale and CI is expected to surface its documented drift warning.
 5. **Scope:** No migration number was used and no `.env`, deployment, frontend, ledger, or applied Flyway file was touched.
+6. **Push/PR stop:** Commit `f013e10d` was created locally. HTTPS push failed in Schannel with `SEC_E_NO_CREDENTIALS`; explicit Git Credential Manager hit the same boundary; the SSH agent returned `Permission denied (publickey)`; `gh auth status` could not read its user-profile config (`Access is denied`); and the verified OpenSSL/Avast-root path reached an interactive credential wait rather than a non-interactive credential. The user explicitly stated that no human is available, so no OAuth/device prompt was requested. The branch was not pushed and no PR number or URL exists.

@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    "/api/v1/backtests/saved-views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["savedViews"];
+        put?: never;
+        post: operations["createSavedView"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/run": {
         parameters: {
             query?: never;
@@ -66,6 +82,22 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/jobs/{jobId}/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["annotate"];
         trace?: never;
     };
     "/api/v1/indicators": {
@@ -436,10 +468,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/saved-views/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteSavedView"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        JsonNode: unknown;
+        SavedViewRequest: {
+            kind?: string;
+            name?: string;
+            filter?: components["schemas"]["JsonNode"];
+        };
+        SavedView: {
+            id?: string;
+            kind?: string;
+            name?: string;
+            filter?: components["schemas"]["JsonNode"];
+            /** Format: date-time */
+            createdAt?: string;
+        };
         BacktestRunRequest: {
             strategyId?: string;
             strategyVersion?: string;
@@ -455,8 +517,9 @@ export interface components {
             stressOverrides?: components["schemas"]["StressOverrides"];
             sessionOverrides?: components["schemas"]["SessionOverrides"];
             traceDecisions?: boolean;
+            tags?: string[];
+            note?: string;
         };
-        JsonNode: unknown;
         SessionOverrides: {
             fillTiming?: string;
         };
@@ -527,6 +590,15 @@ export interface components {
             jobId?: string;
             status?: string;
         };
+        JobAnnotationRequest: {
+            tags?: string[];
+            note?: string;
+        };
+        JobAnnotationResponse: {
+            jobId?: string;
+            tags?: string[];
+            note?: string;
+        };
         SwingReportCard: {
             /** Format: int32 */
             trades?: number;
@@ -556,6 +628,9 @@ export interface components {
             /** Format: date-time */
             sampleBucket?: string;
             sampleBreakdown?: components["schemas"]["JsonNode"];
+        };
+        SavedViewsResponse: {
+            items?: components["schemas"]["SavedView"][];
         };
         ProvenanceBlock: {
             engineSha?: string;
@@ -706,6 +781,70 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    savedViews: {
+        parameters: {
+            query: {
+                kind: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SavedViewsResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createSavedView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavedViewRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SavedView"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     run: {
         parameters: {
             query?: never;
@@ -859,6 +998,41 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["CounterfactualSubmitResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    annotate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobAnnotationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["JobAnnotationResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1478,6 +1652,7 @@ export interface operations {
                 strategyId?: string;
                 strategyIds?: string;
                 currentVersions?: string;
+                tag?: string;
                 sortBy?: string;
                 sortDir?: string;
                 limit?: number;
@@ -1662,6 +1837,35 @@ export interface operations {
                 content: {
                     "*/*": components["schemas"]["CounterfactualResult"];
                 };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteSavedView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error envelope (COMMON 8.3) */
             default: {

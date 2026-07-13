@@ -11,9 +11,11 @@ import java.util.Map;
 import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -90,6 +92,7 @@ public class JobsController {
       @RequestParam(required = false) String strategyId,
       @RequestParam(required = false) String strategyIds,
       @RequestParam(required = false) String currentVersions,
+      @RequestParam(required = false) String tag,
       @RequestParam(required = false) String sortBy,
       @RequestParam(required = false) String sortDir,
       @RequestParam(defaultValue = "50") int limit,
@@ -98,7 +101,14 @@ public class JobsController {
     int boundedOffset = Math.max(offset, 0);
     List<Job> jobs =
         service.list(
-            status, strategyId, strategyIds, currentVersions, boundedLimit, boundedOffset, sortBy,
+            status,
+            strategyId,
+            strategyIds,
+            currentVersions,
+            tag,
+            boundedLimit,
+            boundedOffset,
+            sortBy,
             sortDir);
     // One batch query for the page's completed-run returns, so the list shows a returns column
     // without an N+1 per-row fetch.
@@ -114,6 +124,35 @@ public class JobsController {
   public Map<String, Object> job(@PathVariable UUID jobId) {
     Job job = service.get(jobId);
     return detail(job, resultRef(job));
+  }
+
+  /** Replaces a job's mutable tags/note while preserving its submitted request JSONB. */
+  @PatchMapping("/jobs/{jobId}/annotations")
+  public JobAnnotationResponse annotate(
+      @PathVariable UUID jobId, @RequestBody JobAnnotationRequest request) {
+    service.annotate(jobId, request.tags(), request.note());
+    Job job = service.get(jobId);
+    return new JobAnnotationResponse(job.id().toString(), job.tags(), job.note());
+  }
+
+  /** Lists the single owner's named views for one free-text surface kind. */
+  @GetMapping("/saved-views")
+  public SavedViewsResponse savedViews(@RequestParam String kind) {
+    return new SavedViewsResponse(service.list("owner", kind));
+  }
+
+  /** Persists one opaque filter set for the single owner. */
+  @PostMapping("/saved-views")
+  public ResponseEntity<SavedView> createSavedView(@RequestBody SavedViewRequest request) {
+    SavedView saved = service.create("owner", request.kind(), request.name(), request.filter());
+    return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+  }
+
+  /** Idempotently deletes one of the single owner's saved views. */
+  @DeleteMapping("/saved-views/{id}")
+  public ResponseEntity<Void> deleteSavedView(@PathVariable UUID id) {
+    service.delete("owner", id);
+    return ResponseEntity.noContent().build();
   }
 
   /**
@@ -157,6 +196,8 @@ public class JobsController {
     // offset date-time as the request carries it; the UI slices to the date for the Start/End columns.
     map.put("testFrom", job.request() == null ? null : job.request().path("from").asText(null));
     map.put("testTo", job.request() == null ? null : job.request().path("to").asText(null));
+    map.put("tags", job.tags());
+    map.put("note", job.note());
     return map;
   }
 
@@ -172,4 +213,16 @@ public class JobsController {
     map.put("resultRef", resultRef);
     return map;
   }
+
+  /** PATCH body for mutable job annotations. */
+  public record JobAnnotationRequest(List<String> tags, String note) {}
+
+  /** Typed PATCH response so the new handler remains visible in the OpenAPI contract. */
+  public record JobAnnotationResponse(String jobId, List<String> tags, String note) {}
+
+  /** POST body for one owner-scoped opaque filter set. */
+  public record SavedViewRequest(String kind, String name, JsonNode filter) {}
+
+  /** Typed list envelope used by all collection endpoints. */
+  public record SavedViewsResponse(List<SavedView> items) {}
 }

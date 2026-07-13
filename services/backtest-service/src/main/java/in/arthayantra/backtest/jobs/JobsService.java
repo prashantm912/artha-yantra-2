@@ -1,8 +1,8 @@
 package in.arthayantra.backtest.jobs;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.backtest.client.MarketDataClient;
 import in.arthayantra.backtest.client.StrategyVersionClient;
 import in.arthayantra.backtest.dispatch.JobStreamDispatcher;
@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -41,8 +42,12 @@ public class JobsService {
   // only ever exercises 2× and 4×.
   private static final BigDecimal MIN_SLIPPAGE_MULTIPLIER = BigDecimal.ONE;
   private static final BigDecimal MAX_SLIPPAGE_MULTIPLIER = new BigDecimal("100");
+  private static final int MAX_TAGS = 20;
+  private static final int MAX_TAG_LENGTH = 40;
+  private static final int MAX_NOTE_LENGTH = 2000;
 
   private final JobRepository repository;
+  private final SavedViewRepository savedViews;
   private final JobStreamDispatcher dispatcher;
   private final StrategyVersionClient versions;
   private final ProgressPublisher progress;
@@ -57,6 +62,7 @@ public class JobsService {
   /** Wires the collaborators. */
   public JobsService(
       JobRepository repository,
+      SavedViewRepository savedViews,
       JobStreamDispatcher dispatcher,
       StrategyVersionClient versions,
       ProgressPublisher progress,
@@ -68,6 +74,7 @@ public class JobsService {
       MarketDataClient marketData,
       @Value("${artha.backtest.max-queued:500}") int maxQueued) {
     this.repository = repository;
+    this.savedViews = savedViews;
     this.dispatcher = dispatcher;
     this.versions = versions;
     this.progress = progress;
@@ -105,6 +112,7 @@ public class JobsService {
               + maxQueued
               + "); wait for running jobs to drain before submitting more");
     }
+    Annotations annotations = validateAnnotations(req.tags(), req.note());
 
     StrategyVersionClient.ResolvedVersion v =
         versions.resolve(req.strategyId(), req.strategyVersion());
@@ -232,7 +240,14 @@ public class JobsService {
     // (one PHC login); the actor is derived from the write-site context, not an auth claim.
     Job job =
         repository.insertQueued(
-            JobKind.BACKTEST, null, v.versionId(), request, correlationId, "owner");
+            JobKind.BACKTEST,
+            null,
+            v.versionId(),
+            request,
+            correlationId,
+            "owner",
+            annotations.tags(),
+            annotations.note());
     dispatcher.dispatchBacktest(job.id());
     progress.refreshSummary();
     return job;
@@ -245,6 +260,13 @@ public class JobsService {
         .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_JOB, "job not found: " + id));
   }
 
+  /** Replaces a job's mutable tags/note after confirming that the job exists. */
+  public void annotate(UUID id, List<String> tags, String note) {
+    get(id);
+    Annotations annotations = validateAnnotations(tags, note);
+    repository.updateAnnotations(id, annotations.tags(), annotations.note());
+  }
+
   /**
    * Paged listing filtered by optional status + strategyId (+ a strategyIds CSV + a version-id CSV),
    * ordered by a key.
@@ -254,12 +276,48 @@ public class JobsService {
       String strategyId,
       String strategyIds,
       String currentVersions,
+      String tag,
       int limit,
       int offset,
       String sortBy,
       String sortDir) {
     return repository.list(
-        parseStatus(status), strategyId, strategyIds, currentVersions, limit, offset, sortBy, sortDir);
+        parseStatus(status),
+        strategyId,
+        strategyIds,
+        currentVersions,
+        tag,
+        limit,
+        offset,
+        sortBy,
+        sortDir);
+  }
+
+  /** Creates one owner-scoped named filter view. */
+  public SavedView create(String owner, String kind, String name, JsonNode filter) {
+    String normalizedKind = requiredSavedViewField("kind", kind);
+    String normalizedName = requiredSavedViewField("name", name);
+    if (filter == null || filter.isNull()) {
+      throw new ApiException(
+          422, ErrorCodes.VALIDATION_FAILED, "saved view filter is required");
+    }
+    try {
+      return savedViews.create(owner, normalizedKind, normalizedName, filter);
+    } catch (DuplicateKeyException duplicate) {
+      throw new ConflictException(
+          ErrorCodes.CONFLICT_WATCHLIST_NAME,
+          "saved view name already exists for owner and kind: " + normalizedName);
+    }
+  }
+
+  /** Lists one owner's saved views for a free-text surface kind. */
+  public List<SavedView> list(String owner, String kind) {
+    return savedViews.list(owner, requiredSavedViewField("kind", kind));
+  }
+
+  /** Deletes an owner-scoped saved view; missing or foreign-owner ids are idempotent. */
+  public void delete(String owner, UUID id) {
+    savedViews.delete(owner, id);
   }
 
   /** Cancels a job: queued → 204 cancelled now; running → 202 flag set for the checkpoint. */
@@ -330,6 +388,51 @@ public class JobsService {
       node.put(field, value);
     }
   }
+
+  /** Shared submit/edit validation and canonicalization for mutable job annotations. */
+  private static Annotations validateAnnotations(List<String> tags, String note) {
+    List<String> normalizedTags =
+        tags == null
+            ? List.of()
+            : tags.stream()
+                .filter(tag -> tag != null && !tag.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
+    if (normalizedTags.size() > MAX_TAGS) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "tags must contain at most " + MAX_TAGS + " non-blank values");
+    }
+    normalizedTags.stream()
+        .filter(tag -> tag.length() > MAX_TAG_LENGTH)
+        .findFirst()
+        .ifPresent(
+            tag -> {
+              throw new ApiException(
+                  422,
+                  ErrorCodes.VALIDATION_FAILED,
+                  "each tag must be at most " + MAX_TAG_LENGTH + " characters");
+            });
+    if (note != null && note.length() > MAX_NOTE_LENGTH) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "note must be at most " + MAX_NOTE_LENGTH + " characters");
+    }
+    return new Annotations(normalizedTags, note);
+  }
+
+  private static String requiredSavedViewField(String field, String value) {
+    if (value == null || value.isBlank()) {
+      throw new ApiException(
+          422, ErrorCodes.VALIDATION_FAILED, "saved view " + field + " is required");
+    }
+    return value.trim();
+  }
+
+  private record Annotations(List<String> tags, String note) {}
 
   /**
    * Validates a cost-stress {@code stressOverrides} block (EVO §3.2.5) and returns its

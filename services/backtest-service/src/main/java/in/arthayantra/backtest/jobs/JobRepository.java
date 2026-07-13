@@ -3,11 +3,13 @@ package in.arthayantra.backtest.jobs;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -42,6 +44,9 @@ public class JobRepository {
     } catch (JsonProcessingException e) {
       throw new SQLException("corrupt request JSONB on job " + rs.getString("id"), e);
     }
+    Array tagsArray = rs.getArray("tags");
+    List<String> tags =
+        tagsArray == null ? List.of() : Arrays.asList((String[]) tagsArray.getArray());
     return new Job(
         UUID.fromString(rs.getString("id")),
         JobKind.valueOf(rs.getString("kind")),
@@ -60,7 +65,9 @@ public class JobRepository {
         offset(rs.getTimestamp("created_at")),
         offset(rs.getTimestamp("started_at")),
         offset(rs.getTimestamp("finished_at")),
-        rs.getString("created_by"));
+        rs.getString("created_by"),
+        tags,
+        rs.getString("note"));
   }
 
   private static OffsetDateTime offset(Timestamp ts) {
@@ -79,28 +86,75 @@ public class JobRepository {
       JsonNode request,
       String correlationId,
       String createdBy) {
+    return insertQueued(
+        kind,
+        parentJobId,
+        strategyVersionId,
+        request,
+        correlationId,
+        createdBy,
+        List.of(),
+        null);
+  }
+
+  /**
+   * Inserts a queued row with normalized annotations. The six-argument overload preserves the
+   * non-interactive job writers, which submit without tags or a note.
+   */
+  public Job insertQueued(
+      JobKind kind,
+      UUID parentJobId,
+      UUID strategyVersionId,
+      JsonNode request,
+      String correlationId,
+      String createdBy,
+      List<String> tags,
+      String note) {
     String requestJson;
     try {
       requestJson = objectMapper.writeValueAsString(request);
     } catch (JsonProcessingException e) {
       throw new IllegalArgumentException("job request not serializable", e);
     }
-    return jdbc.queryForObject(
-        """
-        INSERT INTO jobs (kind, parent_job_id, strategy_version_id, request, correlation_id,
-                          engine_sha, engine_image, created_by)
-        VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?)
-        RETURNING *
-        """,
-        this::mapRow,
-        kind.name(),
-        parentJobId,
-        strategyVersionId,
-        requestJson,
-        correlationId,
-        engineIdentity.sha(),
-        engineIdentity.image(),
-        createdBy);
+    List<String> safeTags = tags == null ? List.of() : tags;
+    return jdbc.query(
+            connection -> {
+              var statement =
+                  connection.prepareStatement(
+                      """
+                      INSERT INTO jobs (kind, parent_job_id, strategy_version_id, request,
+                                        correlation_id, engine_sha, engine_image, created_by,
+                                        tags, note)
+                      VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)
+                      RETURNING *
+                      """);
+              statement.setString(1, kind.name());
+              statement.setObject(2, parentJobId);
+              statement.setObject(3, strategyVersionId);
+              statement.setString(4, requestJson);
+              statement.setString(5, correlationId);
+              statement.setString(6, engineIdentity.sha());
+              statement.setString(7, engineIdentity.image());
+              statement.setString(8, createdBy);
+              statement.setArray(9, connection.createArrayOf("text", safeTags.toArray()));
+              statement.setString(10, note);
+              return statement;
+            },
+            this::mapRow)
+        .get(0);
+  }
+
+  /** Replaces mutable annotations without touching the immutable request JSONB. */
+  public void updateAnnotations(UUID id, List<String> tags, String note) {
+    jdbc.update(
+        connection -> {
+          var statement =
+              connection.prepareStatement("UPDATE jobs SET tags=?, note=? WHERE id=?");
+          statement.setArray(1, connection.createArrayOf("text", tags.toArray()));
+          statement.setString(2, note);
+          statement.setObject(3, id);
+          return statement;
+        });
   }
 
   /** Conditional claim: {@code running} only if still {@code queued}. Returns true on win. */
@@ -214,6 +268,7 @@ public class JobRepository {
       String strategyId,
       String strategyIds,
       String currentVersions,
+      String tag,
       int limit,
       int offset,
       String sortBy,
@@ -248,6 +303,10 @@ public class JobRepository {
           " AND (jobs.request->>'strategyId' || ':' || (jobs.request->>'strategyVersion'))"
               + " = ANY(string_to_array(?, ','))");
       args.add(currentVersions);
+    }
+    if (tag != null && !tag.isBlank()) {
+      sql.append(" AND jobs.tags @> ARRAY[?]::text[]");
+      args.add(tag.trim());
     }
     // NB: Map.of#getOrDefault throws on a null key — guard before the lookup (a no-sortBy request,
     // e.g. a tag-only filter call, otherwise NPEs).

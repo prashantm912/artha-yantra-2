@@ -3,7 +3,7 @@
 Date: 2026-07-13
 Branch: `feat/d4-export-fe-buttons`
 Tier: clean (FE-only, additive)
-PR: **PENDING — populated immediately after `gh pr create`**
+PR: https://github.com/prashantm912/artha-yantra-2/pull/814
 
 ## Diff summary
 

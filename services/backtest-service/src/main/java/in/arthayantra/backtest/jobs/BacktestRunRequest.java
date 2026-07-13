@@ -32,7 +32,8 @@ public record BacktestRunRequest(
     Long seed,
     String purpose,
     StressOverrides stressOverrides,
-    SessionOverrides sessionOverrides) {
+    SessionOverrides sessionOverrides,
+    Boolean traceDecisions) {
 
   /**
    * Request-level cost-stress overrides (EVO §3.2.5). {@code slippageMultiplier} (≥ 1) multiplies the

@@ -641,6 +641,43 @@
         }
       }
     },
+    "/api/v1/backtests/{backtestId}/decision-traces" : {
+      "get" : {
+        "tags" : [ "results-controller" ],
+        "operationId" : "decisionTraces",
+        "parameters" : [ {
+          "name" : "backtestId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DecisionTraceResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests/summary" : {
       "get" : {
         "tags" : [ "results-controller" ],
@@ -1145,6 +1182,9 @@
           },
           "sessionOverrides" : {
             "$ref" : "#/components/schemas/SessionOverrides"
+          },
+          "traceDecisions" : {
+            "type" : "boolean"
           }
         }
       },
@@ -1392,6 +1432,43 @@
           },
           "grade" : {
             "type" : "string"
+          }
+        }
+      },
+      "DecisionTraceResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Trace"
+            }
+          }
+        }
+      },
+      "Trace" : {
+        "type" : "object",
+        "properties" : {
+          "sessionDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "bars" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "maxComposite" : {
+            "type" : "number"
+          },
+          "sampleBucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "sampleBreakdown" : {
+            "$ref" : "#/components/schemas/JsonNode"
           }
         }
       },

@@ -42,6 +42,17 @@ import java.util.function.IntConsumer;
  */
 public final class TickwiseGoldenRunner {
 
+  /** Optional rejected-entry diagnostics side-channel; never serialized into the event stream. */
+  @FunctionalInterface
+  public interface DecisionListener {
+    /** Receives one classification for one primary decision bar. */
+    void onDecision(
+        LocalDate sessionDate,
+        OffsetDateTime bucketStart,
+        String reason,
+        ScoreBreakdown breakdown);
+  }
+
   private final StrategyDefinition definition;
   private final String exchange;
   private final String tradingsymbol;
@@ -86,6 +97,16 @@ public final class TickwiseGoldenRunner {
       Map<SeriesKey, List<EngineCandle>> contextCandles,
       IntConsumer onBar,
       boolean relaxSession) {
+    return run(primaryOneMinute, contextCandles, onBar, relaxSession, null);
+  }
+
+  /** As above, with an optional decision-diagnostics side-channel. */
+  public List<GoldenSignalsJson.SignalEvent> run(
+      List<EngineCandle> primaryOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      IntConsumer onBar,
+      boolean relaxSession,
+      DecisionListener decisionListener) {
     boolean btst = "btst".equals(definition.session().style());
     boolean coarsePrimary = !definition.primaryTimeframe().equals("1m") && !btst;
     EngineSeries live1m = new EngineSeries(new SeriesKey(exchange, tradingsymbol, "1m"));
@@ -184,12 +205,30 @@ public final class TickwiseGoldenRunner {
           if (open == null) {
             Optional<EntryEvaluator.Evaluation> evaluation =
                 EntryEvaluator.evaluate(definition, bank, primaryIndex);
-            if (evaluation.isPresent() && evaluation.get().entry() && gate.entryAllowed(barTime, barDay)) {
+            boolean entryAllowed =
+                evaluation.isPresent()
+                    && evaluation.get().entry()
+                    && gate.entryAllowed(barTime, barDay);
+            if (decisionListener != null) {
+              emitDecision(
+                  decisionListener,
+                  primary.candle(primaryIndex),
+                  bar.bucketStart(),
+                  evaluation,
+                  entryAllowed);
+            }
+            if (entryAllowed) {
               events.add(
                   entryEvent(
                       bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, primaryIndex)));
               open = openPosition(primary, primaryIndex, live1m.size(), evaluation.get());
             }
+          } else if (decisionListener != null) {
+            decisionListener.onDecision(
+                EngineSeries.sessionDate(primary.candle(primaryIndex)),
+                bar.bucketStart(),
+                "position_open",
+                null);
           }
         }
         currentBucketFloor = floor;
@@ -239,11 +278,29 @@ public final class TickwiseGoldenRunner {
           if (open == null) {
             Optional<EntryEvaluator.Evaluation> evaluation =
                 EntryEvaluator.evaluate(definition, bank, index);
-            if (evaluation.isPresent() && evaluation.get().entry() && gate.entryAllowed(barTime, barDay)) {
+            boolean entryAllowed =
+                evaluation.isPresent()
+                    && evaluation.get().entry()
+                    && gate.entryAllowed(barTime, barDay);
+            if (decisionListener != null) {
+              emitDecision(
+                  decisionListener,
+                  primary.candle(index),
+                  bar.bucketStart(),
+                  evaluation,
+                  entryAllowed);
+            }
+            if (entryAllowed) {
               events.add(
                   entryEvent(bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, index)));
               open = openPosition(primary, index, live1m.size() - 1, evaluation.get());
             }
+          } else if (decisionListener != null) {
+            decisionListener.onDecision(
+                EngineSeries.sessionDate(primary.candle(index)),
+                bar.bucketStart(),
+                "position_open",
+                null);
           }
         }
         continue;
@@ -269,14 +326,50 @@ public final class TickwiseGoldenRunner {
       if (open == null) {
         Optional<EntryEvaluator.Evaluation> evaluation =
             EntryEvaluator.evaluate(definition, bank, index);
-        if (evaluation.isPresent() && evaluation.get().entry() && gate.entryAllowed(barTime, barDay)) {
+        boolean entryAllowed =
+            evaluation.isPresent()
+                && evaluation.get().entry()
+                && gate.entryAllowed(barTime, barDay);
+        if (decisionListener != null) {
+          emitDecision(
+              decisionListener, primary.candle(index), bar.bucketStart(), evaluation, entryAllowed);
+        }
+        if (entryAllowed) {
           events.add(
               entryEvent(bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, index)));
           open = openPosition(primary, index, live1m.size() - 1, evaluation.get());
         }
+      } else if (decisionListener != null) {
+        decisionListener.onDecision(
+            EngineSeries.sessionDate(primary.candle(index)),
+            bar.bucketStart(),
+            "position_open",
+            null);
       }
     }
     return events;
+  }
+
+  private static void emitDecision(
+      DecisionListener listener,
+      EngineCandle decisionBar,
+      OffsetDateTime bucketStart,
+      Optional<EntryEvaluator.Evaluation> evaluation,
+      boolean entryAllowed) {
+    if (evaluation.isEmpty()) {
+      listener.onDecision(
+          EngineSeries.sessionDate(decisionBar), bucketStart, "not_evaluable", null);
+      return;
+    }
+    EntryEvaluator.Evaluation value = evaluation.get();
+    String reason;
+    if (value.entry()) {
+      reason = entryAllowed ? "entered" : "session_window";
+    } else {
+      reason = value.breakdown().gate().passed() ? "composite_below_threshold" : "gate_fail";
+    }
+    listener.onDecision(
+        EngineSeries.sessionDate(decisionBar), bucketStart, reason, value.breakdown());
   }
 
   private void advanceContexts(

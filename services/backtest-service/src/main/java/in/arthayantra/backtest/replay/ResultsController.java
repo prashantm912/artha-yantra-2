@@ -20,11 +20,14 @@ public class ResultsController {
 
   private final RunRepository runs;
   private final TradeRepository trades;
+  private final DecisionTraceRepository decisionTraces;
 
   /** Wires the repositories. */
-  public ResultsController(RunRepository runs, TradeRepository trades) {
+  public ResultsController(
+      RunRepository runs, TradeRepository trades, DecisionTraceRepository decisionTraces) {
     this.runs = runs;
     this.trades = trades;
+    this.decisionTraces = decisionTraces;
   }
 
   /** Metrics + curves + reproducibility triple for one run. */
@@ -59,6 +62,21 @@ public class ResultsController {
         trades.findByRun(backtestId, boundedLimit, boundedOffset, symbol, from, to);
     return Map.of("items", items, "limit", boundedLimit, "offset", boundedOffset);
   }
+
+  /** Per-session rejected-entry rollups for an opt-in traced run. */
+  @GetMapping("/{backtestId}/decision-traces")
+  public DecisionTraceResponse decisionTraces(@PathVariable UUID backtestId) {
+    return decisionTraces
+        .findByRun(backtestId)
+        .map(DecisionTraceResponse::new)
+        .orElseThrow(
+            () ->
+                new NotFoundException(
+                    ErrorCodes.NOT_FOUND_RESOURCE, "no such backtest run: " + backtestId));
+  }
+
+  /** Typed list envelope for springdoc and frontend generation. */
+  public record DecisionTraceResponse(List<DecisionTraceCollector.Trace> items) {}
 
   /**
    * MV-10.1/10.2: the Minervini swing report card for one run — grades the run's closed trades A/B/C/D

@@ -71,28 +71,41 @@ codex exec "reply with the single word ready"
 
 ---
 
-## 3. Configure Codex for this repo
+## 3. Configure Codex for this repo — the `artha` profile (VERIFIED 2026-07-13)
 
-`~/.codex/config.toml` (create if absent). Suggested baseline:
+**State on this box (verified):** Codex CLI 0.144.3 installed natively on Windows, logged
+in via ChatGPT, Node v24. The Codex desktop app owns the GLOBAL `~/.codex/config.toml` and
+sets `approval_policy = "never"` + `sandbox_mode = "danger-full-access"` there (it needs
+that for its computer-use features). **Do not run repo builder work on those globals** —
+the whole Codex boundary model (§9) would be instruction-only with no enforcement.
+
+Instead, repo work uses a named profile. Codex ≥0.144 keeps profiles in SEPARATE files
+(the old `[profiles.X]` table inside config.toml is rejected as legacy). Created and
+smoke-tested on this box — `~/.codex/artha.config.toml`:
 
 ```toml
-# Model: leave default (Codex picks its current best coding model) or pin with -m per run.
-approval_policy = "on-request"     # Codex asks before escalating outside the sandbox
-sandbox_mode    = "workspace-write"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
 
 [sandbox_workspace_write]
 network_access = true              # REQUIRED: Maven/npm dependency downloads, gh pushes
 ```
+
+**Every builder invocation carries `--profile artha`** (interactive `codex --profile artha`
+or headless `codex exec --profile artha ...`). Verified end-to-end 2026-07-13: a headless
+`codex exec --profile artha --cd <repo>` run read AGENTS.md, ran git, and self-reported
+`workspace-write` — the fence holds.
 
 Notes that matter on this box:
 - **Maven + AV TLS interception:** builds need
   `MAVEN_OPTS="-Djavax.net.ssl.trustStoreType=Windows-ROOT"` (native Windows) — this is in
   CLAUDE.md/AGENTS.md; under WSL the AV interception generally doesn't apply, but the
   wrapper may re-download Maven the first time.
-- **Codex reads `AGENTS.md` automatically** (repo root; also `~/.codex/AGENTS.md` global).
-  That's the whole sharing mechanism — see §4.
-- Codex CLI also supports per-run flags that override config:
-  `codex exec --cd <dir> --sandbox workspace-write --full-auto "..."`.
+- **Codex reads `AGENTS.md` automatically** (repo root; the global `~/.codex/AGENTS.md`
+  exists but is empty — no conflict). That's the whole sharing mechanism — see §4.
+- Per-run flags still override anything: `codex exec --cd <dir> --sandbox workspace-write "..."`.
+- Codex on native Windows executes via PowerShell 5.1 — AGENTS.md's PS-safe-syntax note is
+  live, and its raw file reads may show UTF-8 mojibake (`â€”` for em-dash); cosmetic only.
 
 ---
 
@@ -223,8 +236,8 @@ Claude runs, via its Bash tool (in the background, like any builder):
 ```bash
 git worktree add ../codex-<slug> origin/main   # isolation, same as Opus worktree builders
 codex exec \
+  --profile artha \
   --cd ../codex-<slug> \
-  --sandbox workspace-write \
   "Read docs/handoffs/2026-07-XX-<slug>-brief.md and execute it exactly. \
    Write the receipt file it names before finishing." \
   > docs/handoffs/2026-07-XX-<slug>-codex.log 2>&1

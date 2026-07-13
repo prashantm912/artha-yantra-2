@@ -1,0 +1,141 @@
+package in.arthayantra.backtest.replay;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.strategyengine.config.StrategyCompiler;
+import in.arthayantra.strategyengine.config.StrategyDefinition;
+import in.arthayantra.strategyengine.golden.GoldenCandleCsv;
+import in.arthayantra.strategyengine.series.EngineCandle;
+import in.arthayantra.strategyschema.StrategyDocuments;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestFactory;
+
+/**
+ * B11 / P1-3 candle-path exit-reason attribution: the close-basis event-driven replay must persist
+ * the REAL exit reason ({@code stop_loss}/{@code trailing_stop}/{@code take_profit}/{@code
+ * square_off}/{@code time_stop}/{@code signal_exit}) that {@link
+ * in.arthayantra.strategyengine.eval.ExitEvaluator} fired — not the old universal {@code
+ * signal_exit}. Drives the SAME frozen golden fixtures {@link BacktestParityTest} uses (covered
+ * path, so the P1-10 bar_hl_worstof overlay stays inert), so the assertion is on the plain
+ * default candle path exactly as it persists to {@code backtest_trades.exit_reason}.
+ */
+class ExitReasonAttributionTest {
+
+  // feature YAML -> the exit reasons its trades may legitimately carry (from its exit_rules). Every
+  // fixture here is BALANCED (entry count == EXIT-event count), so no position is open at end and
+  // every trade closes on a real ExitEvaluator decision (the open-at-end end_of_data case is covered
+  // separately by ema-crossover below).
+  private static final Map<String, Set<String>> EXPECTED =
+      Map.of(
+          "signal-exit-volume", Set.of("signal_exit"),
+          "stop-points", Set.of("stop_loss", "take_profit"),
+          "trailing-points", Set.of("trailing_stop"),
+          "trailing-indicator", Set.of("trailing_stop"));
+
+  private static final String[] PRIMARY_DAYS = {
+    "NSE_NIFTY50_1m_day1.csv", "NSE_NIFTY50_1m_day2.csv", "NSE_NIFTY50_1m_day3.csv",
+    "NSE_NIFTY50_1m_day4.csv", "NSE_NIFTY50_1m_day5.csv"
+  };
+
+  private final ReplayEngine engine = new ReplayEngine(new ObjectMapper());
+
+  @TestFactory
+  Stream<DynamicTest> tradesCarryTheRealExitReason() {
+    return EXPECTED.entrySet().stream()
+        .map(
+            e ->
+                DynamicTest.dynamicTest(
+                    e.getKey(),
+                    () -> {
+                      List<Trade> trades = replay(e.getKey());
+                      assertThat(trades)
+                          .as("fixture %s produces at least one closed trade to attribute", e.getKey())
+                          .isNotEmpty();
+                      assertThat(trades)
+                          .allSatisfy(
+                              t ->
+                                  assertThat(t.exitReason())
+                                      .as(
+                                          "%s trade #%d exit reason is the real ExitEvaluator type",
+                                          e.getKey(), t.seq())
+                                      .isIn(e.getValue()));
+                    }));
+  }
+
+  /**
+   * Direct guard against the B11 regression: before the fix, a trailing-stop strategy's exits were
+   * all recorded as {@code signal_exit}. Assert the trailing fixtures NEVER carry {@code signal_exit}.
+   */
+  @Test
+  void trailingExitsAreNeverMisattributedAsSignalExit() throws IOException {
+    for (String feature : new String[] {"trailing-points", "trailing-indicator"}) {
+      assertThat(replay(feature))
+          .as("%s trades attribute trailing_stop, not the old universal signal_exit", feature)
+          .isNotEmpty()
+          .allSatisfy(t -> assertThat(t.exitReason()).isEqualTo("trailing_stop"));
+    }
+  }
+
+  /**
+   * A signal-driven exit is attributed {@code signal_exit} while a position still open when data runs
+   * out honestly keeps {@code end_of_data} (NOT mapped to a strategy exit reason it never fired). The
+   * ema-crossover fixture emits one crossunder EXIT then leaves the re-entry open at the last bar.
+   */
+  @Test
+  void closedLegKeepsRealReasonAndOpenAtEndKeepsEndOfData() throws IOException {
+    assertThat(replay("ema-crossover"))
+        .extracting(Trade::exitReason)
+        .containsExactly("signal_exit", "end_of_data");
+  }
+
+  private List<Trade> replay(String feature) throws IOException {
+    Path root = goldenRoot();
+    String yaml =
+        Files.readString(root.resolve("strategies/" + feature + ".yaml"), StandardCharsets.UTF_8);
+    StrategyDefinition definition =
+        StrategyCompiler.compile(StrategyDocuments.parse(yaml).config());
+    List<EngineCandle> primary = new ArrayList<>();
+    for (String day : PRIMARY_DAYS) {
+      primary.addAll(readCandles(root.resolve("candles/" + day)));
+    }
+    // covered path (oneMinuteCovered=true): the bar_hl_worstof overlay is inert, so exits come
+    // purely from the tick-wise ExitEvaluator event stream — the default candle path B11 describes.
+    return engine
+        .replay(
+            definition, "NSE", "NIFTY 50", primary, new LinkedHashMap<>(),
+            new BigDecimal("1000000"), CostConfig.defaults(), true)
+        .trades();
+  }
+
+  private static List<EngineCandle> readCandles(Path file) throws IOException {
+    try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+      return GoldenCandleCsv.parse(reader);
+    }
+  }
+
+  private static Path goldenRoot() {
+    Path dir = Path.of("").toAbsolutePath();
+    while (dir != null) {
+      Path candidate = dir.resolve("libs/strategy-engine/src/test/resources/golden");
+      if (Files.isDirectory(candidate)) {
+        return candidate;
+      }
+      dir = dir.getParent();
+    }
+    throw new IllegalStateException("golden root not found");
+  }
+}

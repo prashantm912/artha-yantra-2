@@ -53,18 +53,6 @@ public final class GoldenSignalsJson {
       this(timestamp, exchange, tradingsymbol, direction, breakdown, stopLoss, takeProfit,
           BigDecimal.ONE, null);
     }
-
-    /**
-     * A full-position event carrying an explicit {@code qtyFraction} but no exit attribution
-     * ({@code exitType == null}) — retained for callers that predate the B11 exit-reason
-     * side-channel. Same byte-identity guarantee as the canonical constructor.
-     */
-    public SignalEvent(
-        String timestamp, String exchange, String tradingsymbol, String direction,
-        ScoreBreakdown breakdown, BigDecimal stopLoss, BigDecimal takeProfit, BigDecimal qtyFraction) {
-      this(timestamp, exchange, tradingsymbol, direction, breakdown, stopLoss, takeProfit,
-          qtyFraction, null);
-    }
   }
 
   private static final JsonNodeFactory F = JsonNodeFactory.instance;

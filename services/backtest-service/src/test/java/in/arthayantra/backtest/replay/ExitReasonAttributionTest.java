@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.golden.GoldenCandleCsv;
+import in.arthayantra.strategyengine.golden.GoldenSignalsJson.SignalEvent;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyschema.StrategyDocuments;
 import java.io.BufferedReader;
@@ -14,6 +15,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -121,6 +123,46 @@ class ExitReasonAttributionTest {
     // defensive: a null (entry event) or an unrecognised type never NPEs — falls back to signal_exit
     assertThat(ReplayEngine.mapExitReason(null)).isEqualTo("signal_exit");
     assertThat(ReplayEngine.mapExitReason("something_new")).isEqualTo("signal_exit");
+  }
+
+  /**
+   * Direct plumbing pin (B11): {@link ReplayEngine#legs} reads the EXIT event's {@code exitType}
+   * side-channel and maps it onto the paired leg's persisted exit reason. Covers the exit types no
+   * covered golden fixture reaches at the leg/Trade layer — the session/Manas {@code square_off}, a
+   * {@code scaled_exit} profit tier, and {@code time_stop} — plus a pre-side-channel EXIT event
+   * ({@code exitType == null}) collapsing to {@code signal_exit}, all without crafted price action.
+   */
+  @Test
+  void legsMapTheExitEventTypeOntoTheLegReason() {
+    assertThat(legReasonFor("square_off")).isEqualTo("square_off");
+    assertThat(legReasonFor("scaled_exit")).isEqualTo("take_profit");
+    assertThat(legReasonFor("time_stop")).isEqualTo("time_stop");
+    assertThat(legReasonFor("stop_loss")).isEqualTo("stop_loss");
+    assertThat(legReasonFor(null)).isEqualTo("signal_exit"); // pre-side-channel EXIT event
+  }
+
+  /** Pairs a LONG entry with a single full-close EXIT event carrying {@code exitType}. */
+  private static String legReasonFor(String exitType) {
+    List<EngineCandle> bars =
+        List.of(
+            barAt("2026-07-03T09:15:00+05:30"),
+            barAt("2026-07-03T09:16:00+05:30"),
+            barAt("2026-07-03T09:17:00+05:30"));
+    SignalEvent entry =
+        new SignalEvent("2026-07-03T09:15:00+05:30", "NSE", "NIFTY 50", "LONG", null, null, null);
+    SignalEvent exit =
+        new SignalEvent(
+            "2026-07-03T09:17:00+05:30", "NSE", "NIFTY 50", "EXIT", null, null, null,
+            BigDecimal.ONE, exitType);
+    var legs = ReplayEngine.legs(List.of(entry, exit), new BarIndexResolver(bars), bars.size());
+    assertThat(legs).hasSize(1);
+    return legs.get(0).exitReason();
+  }
+
+  private static EngineCandle barAt(String iso) {
+    return new EngineCandle(
+        OffsetDateTime.parse(iso), new BigDecimal("100"), new BigDecimal("101"),
+        new BigDecimal("99"), new BigDecimal("100.5"), 10L, null);
   }
 
   private List<Trade> replay(String feature) throws IOException {

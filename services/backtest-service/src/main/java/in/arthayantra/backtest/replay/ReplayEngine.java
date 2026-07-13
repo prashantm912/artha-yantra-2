@@ -357,7 +357,7 @@ public class ReplayEngine {
                   "SHORT".equals(openEntry.direction()),
                   entryIndex,
                   exitIndex >= 0 ? exitIndex : bars - 1,
-                  "signal_exit",
+                  mapExitReason(ev.exitType()),
                   openEntry.breakdown(),
                   openEntry.stopLoss(),
                   openEntry.takeProfit(),
@@ -385,7 +385,10 @@ public class ReplayEngine {
       }
     }
     if (openEntry != null && entryIndex >= 0) {
-      // open (or partially open) at end → forced close of the remainder at the last bar
+      // open (or partially open) at end → forced close of the remainder at the last bar. This leg
+      // has NO EXIT event (the strategy never signalled an exit), so it keeps the "end_of_data"
+      // convention rather than a mapped exit reason — it is honestly "ran out of data", not a
+      // stop/trail/TP/square-off.
       legs.add(
           new Leg(
               "SHORT".equals(openEntry.direction()),
@@ -400,6 +403,30 @@ public class ReplayEngine {
               true));
     }
     return legs;
+  }
+
+  /**
+   * Maps a tick-wise EXIT event's raw {@link in.arthayantra.strategyengine.eval.ExitEvaluator.ExitDecision}
+   * type (carried on the {@code SignalEvent.exitType} side-channel) to the persisted
+   * {@code backtest_trades.exit_reason} enum {stop_loss, trailing_stop, take_profit, square_off,
+   * time_stop, signal_exit}. Those six enum types pass through unchanged; a {@code scaled_exit}
+   * (sell-into-strength profit tier) collapses to {@code take_profit}; a session force-close arrives
+   * pre-labelled {@code square_off}. A {@code null} or unrecognised type falls back to
+   * {@code signal_exit} (defensive — every EXIT event now carries a type). B11 / P1-3: before this,
+   * every close-basis candle-path exit was persisted as {@code signal_exit}, losing the real
+   * attribution. Deterministic (a pure function of the deterministically-computed exit type), so the
+   * golden/parity replays stay byte-identical and record-equal.
+   */
+  static String mapExitReason(String exitType) {
+    if (exitType == null) {
+      return "signal_exit";
+    }
+    return switch (exitType) {
+      case "stop_loss", "trailing_stop", "take_profit", "square_off", "time_stop", "signal_exit" ->
+          exitType;
+      case "scaled_exit" -> "take_profit";
+      default -> "signal_exit";
+    };
   }
 
   private Fill fill(CostConfig costs, Side side, long qty, BigDecimal reference) {

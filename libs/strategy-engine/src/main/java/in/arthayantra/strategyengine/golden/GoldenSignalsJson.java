@@ -20,9 +20,13 @@ public final class GoldenSignalsJson {
    * One emitted signal event (the tick-wise runner's output). {@code stopLoss}/{@code takeProfit}
    * are the entry-time protective levels (absolute prices, direction-aware) computed by
    * {@link in.arthayantra.strategyengine.eval.ExitEvaluator#entryLevels}; both are {@code null} on
-   * EXIT events and on entries whose strategy declares no stop_loss / take_profit rule. They are a
-   * pure SIDE-CHANNEL: {@link #write} never serializes them, so the frozen golden vectors stay
-   * byte-identical (same contract as the D17b progress side-channel).
+   * EXIT events and on entries whose strategy declares no stop_loss / take_profit rule.
+   * {@code exitType} is the raw {@link in.arthayantra.strategyengine.eval.ExitEvaluator.ExitDecision}
+   * type that closed the leg (stop_loss / trailing_stop / take_profit / scaled_exit / square_off /
+   * time_stop / signal_exit), or {@code "square_off"} for a session force-close; {@code null} on
+   * entry events (B11 / P1-3 candle-path exit attribution). All three are a pure SIDE-CHANNEL:
+   * {@link #write} never serializes them, so the frozen golden vectors stay byte-identical (same
+   * contract as the D17b progress side-channel).
    */
   public record SignalEvent(
       String timestamp,
@@ -32,20 +36,22 @@ public final class GoldenSignalsJson {
       ScoreBreakdown breakdown,
       BigDecimal stopLoss,
       BigDecimal takeProfit,
-      BigDecimal qtyFraction) {
+      BigDecimal qtyFraction,
+      String exitType) {
 
     /**
      * A full-position event (entry, or an exit that closes the whole remaining position):
-     * {@code qtyFraction} defaults to 1. Partial (scaled) exits use the canonical constructor with
-     * the fraction of the ORIGINAL position closed on this leg. {@code qtyFraction} is a pure
-     * side-channel like {@code stopLoss}/{@code takeProfit} — {@link #write} never serializes it, so
-     * the frozen golden vectors stay byte-identical.
+     * {@code qtyFraction} defaults to 1 and {@code exitType} to {@code null}. Partial (scaled) exits
+     * use the {@code exitType}-carrying constructor with the fraction of the ORIGINAL position
+     * closed on this leg. {@code qtyFraction}/{@code exitType} are a pure side-channel like
+     * {@code stopLoss}/{@code takeProfit} — {@link #write} never serializes them, so the frozen
+     * golden vectors stay byte-identical.
      */
     public SignalEvent(
         String timestamp, String exchange, String tradingsymbol, String direction,
         ScoreBreakdown breakdown, BigDecimal stopLoss, BigDecimal takeProfit) {
       this(timestamp, exchange, tradingsymbol, direction, breakdown, stopLoss, takeProfit,
-          BigDecimal.ONE);
+          BigDecimal.ONE, null);
     }
   }
 

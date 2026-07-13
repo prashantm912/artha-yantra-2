@@ -167,7 +167,7 @@ public final class TickwiseGoldenRunner {
           bucketBuffer.clear();
           int primaryIndex = primary.size() - 1;
           if (open != null && gate.pastSquareOff(barTime)) {
-            events.add(exitEvent(bar.bucketStart(), open));
+            events.add(exitEvent(bar.bucketStart(), open, "square_off"));
             open = null;
           }
           if (open != null) {
@@ -252,7 +252,7 @@ public final class TickwiseGoldenRunner {
       // 1m primary: exits resolve before a new entry on the same bar
       int index = primary.size() - 1;
       if (open != null && gate.pastSquareOff(barTime)) {
-        events.add(exitEvent(bar.bucketStart(), open));
+        events.add(exitEvent(bar.bucketStart(), open, "square_off"));
         open = null;
       }
       if (open != null) {
@@ -350,15 +350,16 @@ public final class TickwiseGoldenRunner {
         levels.stopLoss(), levels.takeProfit());
   }
 
-  private GoldenSignalsJson.SignalEvent exitEvent(OffsetDateTime at, OpenPosition open) {
-    return exitEvent(at, open, open.remainingFraction());
+  private GoldenSignalsJson.SignalEvent exitEvent(
+      OffsetDateTime at, OpenPosition open, String exitType) {
+    return exitEvent(at, open, open.remainingFraction(), exitType);
   }
 
   private GoldenSignalsJson.SignalEvent exitEvent(
-      OffsetDateTime at, OpenPosition open, BigDecimal qtyFraction) {
+      OffsetDateTime at, OpenPosition open, BigDecimal qtyFraction, String exitType) {
     return new GoldenSignalsJson.SignalEvent(
         at.toString(), exchange, tradingsymbol, "EXIT", open.entryBreakdown(), null, null,
-        qtyFraction);
+        qtyFraction, exitType);
   }
 
   /** Entry-time protective levels at {@code primaryIndex} (both {@code null} when no such rule). */
@@ -404,7 +405,7 @@ public final class TickwiseGoldenRunner {
     boolean fullClose = decision.tier() < 0;
     BigDecimal legFraction =
         fullClose ? open.remainingFraction() : decision.qtyFraction().min(open.remainingFraction());
-    events.add(exitEvent(at, open, legFraction));
+    events.add(exitEvent(at, open, legFraction, decision.type()));
     BigDecimal remaining = open.remainingFraction().subtract(legFraction);
     if (fullClose || remaining.signum() <= 0) {
       return null;

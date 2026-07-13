@@ -1,0 +1,110 @@
+---
+name: delegated-ship
+description: Use when shipping queue items via Opus builder subagents under the owner's delegation standing rule — the full delegated lifecycle (self-contained brief → receipt audit → review scaling → fix-rounds via SendMessage → rebase/CI/merge → deploy+probe → ledger flip). Use for autonomous multi-item runs or any "delegate the build" task; ship-a-change stays the single-session variant.
+---
+
+# delegated-ship
+
+The delegated variant of [ship-a-change], proven over the 21-item overnight run
+2026-07-10/11 (#683–#718: zero reverts, zero red merges, 3 HIGH-class defects caught
+pre-merge). The main loop NEVER builds substantive code — it briefs, audits, reviews,
+fixes small, merges, deploys, verifies, records. Outcome log + trap details: memory
+topic `opus-delegation-standard`.
+
+## 1. Brief the builder (Agent tool, `model:"opus"`, `isolation:"worktree"`)
+
+A brief is SELF-CONTAINED — the builder gets AGENTS.md but never memory. Every brief
+carries, in this order:
+1. **Goal** + the source-doc § that is the spec ("read it FIRST; it is the spec").
+2. **Verify-before-building**: confirm the gap still exists on main; STOP-and-report
+   if already fixed (3 of 10 items in one past batch were already built).
+3. **Design constraints** — decide forks YOURSELF where you can; say "design already
+   decided — do not redesign" when you have.
+4. **Pasted memory traps** relevant to the surfaces touched (test naming, `-am`,
+   singleton DB, Modulith rules, goldens/side-channel, #653 knob names, UTC/IST…).
+5. **Worktree hygiene**: ALL git inside the worktree (`git status -sb` check — two
+   builders polluted the shared checkout); never pipe a git command whose failure
+   must stop a chain; commit locally, NEVER push/PR.
+6. **Required receipt shape**: branch+SHA, full diff, verify tails, claims WITH
+   file:line evidence, call-site/coverage tables where relevant, and a mandatory
+   **open-doubts** section (builders' self-flagged doubts caught real regressions
+   repeatedly — the field earns its keep).
+
+Parallelism: 2 builders max concurrently (audit bandwidth is the constraint), only
+across DIFFERENT services; same-file items run sequentially (B6/B7 conflicted anyway —
+resolve rebase conflicts as a field UNION when both sides are additive).
+
+A builder that stops mid-verify ("waiting for the build result") resumes cleanly with
+one SendMessage nudge: "check the output, finish, full receipt."
+
+## 2. Audit the receipt (never trust the summary)
+
+Depth tiered by risk — docs/mechanical = diff read; engine/money/parity = full ladder:
+- `git show <sha>` the ACTUAL diff; confirm scope (`git diff main.. --stat`).
+- Spot-rerun the new tests + one adjacent regression suite YOURSELF in the builder's
+  worktree (cached-maven invocation per [build-service]).
+- Verify 2–3 load-bearing citations against the code.
+- Check the shared checkout for strays: `git status -sb` on the MAIN checkout after
+  every worktree receipt; repoint with `git branch -f <branch> <sha>` if polluted.
+- Read the open-doubts hardest — resolve each one yourself (a one-grep answer like
+  "does the funnel sort by RS?" is YOURS to close, not to ship as a doubt).
+
+## 3. Scale the review to the tier (proven lens counts)
+
+| Change class | Reviewers |
+|---|---|
+| parity-adjacent / live-eval semantics | 4 lenses (parity/golden, IST-time, concurrency, blast-radius) |
+| scoped HOLD (money/exit path) | 2 lenses (domain semantics, tx/concurrency) |
+| plain migration | 1 × timescale-domain-reviewer |
+| FE page/component | 1 × ui-a11y-reviewer |
+| alert-only ops code, docs | 0 extra — main-loop audit suffices |
+
+Reviewers are REFUTERS with one lens each, spawned in ONE message. HOLD reviews must
+trace **operational loops** (who retries, what state is already committed, which cron
+runs once) — line-diff review missed the A3 strandings; loop-tracing found them.
+Verify every finding in code yourself before acting: prescribed-fix findings ≤ ~10
+lines land directly (then RERUN the verify — a main-loop edit broke a build once);
+bigger fixes go BACK TO THE SAME BUILDER via SendMessage with mechanism + prescribed
+fix, and the second receipt gets the same audit.
+
+## 4. Ship (the race-proof chain)
+
+From the builder's worktree: `git fetch origin main && git rebase origin/main` —
+UNPIPED, then `git status -sb` (a `## HEAD (no branch)` line = conflicted rebase;
+resolve, `git rebase --continue`, rerun that service's tests). Push, `gh pr create`
+with tier + review tally + test evidence.
+
+CI: `gh pr checks <n> --watch`. On an e2e fail, ALWAYS discriminate before acting:
+```bash
+gh run view <run-id> --log-failed | grep -oE "✘ +[0-9]+ tests/[a-z-]+\.spec\.ts:[0-9]+" | sort -u
+```
+Known pair = signals.spec.ts:38 + ws-reconnect.spec.ts:23. Then the reachability
+test: can THIS diff touch the failing spec's surface? (Read the spec's flow if
+unsure — the take-flow uses /signals/{id}/taken, and the flake fails PRE-take.)
+Signals/WS-adjacent diff → rerun-to-green; unreachable diff → admin-merge once every
+other gate is green. A <60s e2e death = infra (read the log; one was a runner
+Maven-fetch), not specs. ci-optimizer/ci-margin are SEPARATE path-filtered workflows —
+absence from `gh pr checks` ≠ skipped; CI's ruff can be newer than local.
+
+Merge: `gh pr merge --squash --admin`, then **verify `git log origin/main -1` equals
+the PR's mergeCommit BEFORE building** — `merge && pull` races the remote (a stale
+pull once deployed a migration-less "healthy" service).
+
+## 5. Deploy + probe (per service batch, not per item)
+
+Batch consecutive merges touching the same services into ONE deploy round. Follow
+[ship-a-change] §5 for the compose invocation. Two hard adds:
+- Migration in the batch → `up -d --force-recreate flyway-init` FIRST, then **DB-probe
+  the new object** (`to_regclass` / information_schema) — healthy + "up to date" log
+  prove nothing.
+- Live-verify one behavioural artifact per item where cheap (a counter at 0.0 on
+  /actuator/prometheus, an endpoint smoke via in-container python — slim images lack
+  curl/wget-to-localhost on the wrong port; find the port via `docker inspect`).
+
+## 6. Closeout per item, not per session
+
+Ledger row flipped (PR#+SHA+one-line outcome) BEFORE picking the next item; docs-only
+ledger PRs admin-merge past the e2e flakes freely. Out-of-scope findings → spawn_task
+chips with self-contained prompts. Memory topic append when a pattern/trap is new.
+End of run: fix-log entries in the source audit docs + a state note in the queue
+header so a NEW session starts accurate.

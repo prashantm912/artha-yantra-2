@@ -39,6 +39,8 @@ public class IngestRunLedger {
   public static final String SOURCE_MARKET_CONTEXT_DAY = "MARKET_CONTEXT_DAY";
   // Audit §3.3/§6.10 (Phase-3): the daily market-breadth materialization (equity_breadth_daily).
   public static final String SOURCE_EQUITY_BREADTH = "EQUITY_BREADTH";
+  // FID P2-4 / audit D8: nightly per-symbol chain, 1m, and EQ-bhavcopy completeness.
+  public static final String SOURCE_DATA_QUALITY = "DATA_QUALITY";
 
   private static final Logger log = LoggerFactory.getLogger(IngestRunLedger.class);
 

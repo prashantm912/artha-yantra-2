@@ -1316,6 +1316,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/health/completeness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["completeness"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/health/bhavcopy-close": {
         parameters: {
             query?: never;
@@ -3367,6 +3383,24 @@ export interface components {
             status?: string;
             detail?: string;
             since?: string;
+        };
+        CompletenessReport: {
+            /** Format: date */
+            date?: string;
+            items?: components["schemas"]["CompletenessRow"][];
+        };
+        CompletenessRow: {
+            scope?: string;
+            symbol?: string;
+            /** Format: int64 */
+            expected?: number;
+            /** Format: int64 */
+            present?: number;
+            coveragePct?: number;
+            ok?: boolean;
+            detail?: string;
+            /** Format: date-time */
+            computedAt?: string;
         };
         BhavcopyCloseReport: {
             /** Format: date */
@@ -7334,6 +7368,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["CanaryReport"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    completeness: {
+        parameters: {
+            query?: {
+                date?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CompletenessReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

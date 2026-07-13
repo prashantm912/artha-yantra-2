@@ -4400,6 +4400,42 @@
         }
       }
     },
+    "/api/v1/market/health/completeness" : {
+      "get" : {
+        "tags" : [ "data-quality-controller" ],
+        "operationId" : "completeness",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CompletenessReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/health/bhavcopy-close" : {
       "get" : {
         "tags" : [ "data-health-controller" ],
@@ -9884,6 +9920,53 @@
           },
           "since" : {
             "type" : "string"
+          }
+        }
+      },
+      "CompletenessReport" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CompletenessRow"
+            }
+          }
+        }
+      },
+      "CompletenessRow" : {
+        "type" : "object",
+        "properties" : {
+          "scope" : {
+            "type" : "string"
+          },
+          "symbol" : {
+            "type" : "string"
+          },
+          "expected" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "present" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "coveragePct" : {
+            "type" : "number"
+          },
+          "ok" : {
+            "type" : "boolean"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "computedAt" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },

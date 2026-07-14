@@ -6,7 +6,10 @@ description: Iterative cross-vendor Codex review of an uncommitted diff against 
 # Codex Code Review
 
 Cross-vendor (GPT) review of uncommitted changes via Codex CLI, threaded so multi-round review
-converges with retained context instead of re-briefing from scratch. Codex reads the diff
+converges with retained context instead of re-briefing from scratch. **Use this for CLAUDE/OPUS-built
+changes** (`ship-a-change`, Architect-direct, `delegated-ship`) — the opposite vendor. For
+**Codex-built** changes use `claude-review` instead (the review router in ROUTING.md keeps the reviewer
+the opposite vendor of the builder). Codex reads the diff
 (`git status -s` / `git diff HEAD`) in a **read-only** sandbox and judges it against
 `.claude/skills/codex/checklist.md` (our load-bearing invariants). Runs in `delegated-ship` AFTER a
 builder returns and BEFORE the Architect audit — it makes the audit lighter, it does not replace the

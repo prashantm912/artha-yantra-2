@@ -59,6 +59,14 @@ Depth tiered by risk — docs/mechanical = diff read; engine/money/parity = full
 | FE page/component | 1 × ui-a11y-reviewer |
 | alert-only ops code, docs | 0 extra — main-loop audit suffices |
 
+**Cross-vendor gate (review router, `.claude/skills/codex/ROUTING.md`):** the builder here is an Opus
+subagent (Anthropic), so for every non-trivial change ALSO run `codex-code-review` (Codex = the opposite
+vendor) — the tier lenses above are same-vendor (Opus) and do not satisfy the cross-vendor requirement on
+their own. It slots into ROUTING's canonical order (testing gate → cross-vendor review → Architect audit
+= final gate → tiered promotion); the receipt-vs-diff check in §2 is a fast sanity pass, the Architect's
+audit is the final gate after review. Codex down → record the same-vendor loss and lean on the lenses +
+audit. Trivial/docs → skip.
+
 Reviewers are REFUTERS with one lens each, spawned in ONE message. HOLD reviews must
 trace **operational loops** (who retries, what state is already committed, which cron
 runs once) — line-diff review missed the A3 strandings; loop-tracing found them.

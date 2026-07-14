@@ -1,6 +1,6 @@
 ---
 name: session-analysis
-description: Run the ArthaYantra signal/rejection analysis agent — post-market session forensics or live in-session data-health + counterfactual watch. Use when asked to "analyze the session", "analyze rejections", "run session analysis", "/session-analysis", or to check live whether strategy data is being gathered correctly.
+description: Run the ArthaYantra signal/rejection analysis agent — post-market session forensics, live in-session data-health + counterfactual watch, or a market-open signal-liveness gate (catches the silent "capture healthy but engine emitting nothing" starvation). Use when asked to "analyze the session", "analyze rejections", "run session analysis", "/session-analysis", "check signals are firing / the engine is alive at open", or to check live whether strategy data is being gathered correctly.
 ---
 
 # session-analysis
@@ -11,7 +11,7 @@ dimensions; never run from memory of an old version). This skill only tells you 
 and the guardrails; the README owns the how.
 
 Arguments: `post [YYYY-MM-DD]` (default: the most recent completed session) · `live` ·
-`rollup` (multi-session).
+`open` (market-open signal-liveness gate) · `rollup` (multi-session).
 
 ## Mode: post — post-market forensics (default)
 
@@ -53,6 +53,24 @@ config changes, no `ay` verbs that touch containers. SELECTs + `docker logs` onl
    path so far → provisional WOULD-WIN/LOSE. Keep results in the scratchpad during the session.
 3. Report anomalies immediately (that is the point of live mode); fold the counterfactual outcomes
    into that evening's `post` findings file rather than writing a separate doc.
+
+## Mode: open — market-open signal-liveness gate
+
+A fast, read-only PASS/FAIL run ~15–20 min after the open (or on ask) that catches the silent
+**starvation class**: capture healthy but the engine emitting nothing (the 2026-07-14 zero-signals
+incident — no canary alarmed on "healthy feed + zero rejections"). **HARD guardrails: read-only** — no
+deploys, no restarts, no writes; SELECTs + `docker logs` + in-container health GETs only.
+
+Follow README **§4.3** exactly (it owns the queries + the gate):
+1. Confirm it's a trading day + inside 09:15–15:30 IST (clock trap: containers are UTC).
+2. Stack healthy + today's Kite login + market-data canary GREEN.
+3. Capture fresh — the signal future's 1m series tracks minutes-since-open.
+4. **THE GATE:** rejections flowing? `>0` recent ⇒ **PASS**; `0` while capture is healthy ⇒
+   **FAIL = starvation** — alert the owner immediately.
+5. On FAIL: localize read-only (`subscriber_health_events` eval-stall, the eval-thread dump, dot-health);
+   **snapshot `docker logs` to a file BEFORE proposing any recreate**. Propose a fix; NEVER restart/
+   redeploy mid-session — the owner/architect acts (post-market or pre-open).
+6. Report PASS/FAIL + evidence; fold a FAIL into that evening's `post` findings file.
 
 ## Mode: rollup — multi-session consolidation
 

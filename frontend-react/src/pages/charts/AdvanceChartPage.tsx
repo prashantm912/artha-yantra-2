@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AdvanceChart, type TradeMark } from '../../components/charts/AdvanceChart.tsx';
+import {
+  AdvanceChart,
+  C_RSI,
+  C_VWAP,
+  C_VWMA,
+  type TradeMark,
+} from '../../components/charts/AdvanceChart.tsx';
 import { Select } from '../../components/atoms/Select.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -42,10 +48,10 @@ function beep() {
 }
 
 const LEGEND: { label: string; color: string }[] = [
-  { label: 'VWAP', color: '#3b82f6' },
-  { label: 'VWMA 20', color: '#f59e0b' },
+  { label: 'VWAP', color: C_VWAP },
+  { label: 'VWMA 20', color: C_VWMA },
   { label: 'SuperTrend 10,2', color: 'var(--ay-bull)' },
-  { label: 'RSI 14 / SMA 14', color: '#8b5cf6' },
+  { label: 'RSI 14 / SMA 14', color: C_RSI },
 ];
 
 export function AdvanceChartPage() {

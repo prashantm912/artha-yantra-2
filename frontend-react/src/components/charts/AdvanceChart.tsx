@@ -41,9 +41,9 @@ import { crossedThreshold } from '../../core/priceAlert.ts';
 const sec = (iso: string) => Math.floor(Date.parse(iso) / 1000) as UTCTimestamp;
 
 // Indicator line colours (conventional; SuperTrend rides the bull/bear theme tokens).
-const C_VWAP = '#3b82f6';
-const C_VWMA = '#f59e0b';
-const C_RSI = '#8b5cf6';
+export const C_VWAP = '#3b82f6';
+export const C_VWMA = '#f59e0b';
+export const C_RSI = '#8b5cf6';
 
 function vars(el: HTMLElement) {
   const s = getComputedStyle(el);

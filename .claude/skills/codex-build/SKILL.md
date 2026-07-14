@@ -60,8 +60,11 @@ export STATE_DIR=".claude/skills/codex-build/state"
 
 4. **Parse the trailing tag** of the receipt:
    - `IMPLEMENTATION_COMPLETE` → hand back to the Architect: audit the RECEIPT against the real diff
-     (read the diff, spot-rerun tests, verify citations), then testing gate → `codex-code-review` →
-     merge/deploy. Fixes are the Architect's job — do NOT ping-pong fixes to Codex.
+     (read the diff, spot-rerun tests, verify citations), then testing gate → **`claude-review`**
+     (the builder was Codex, so the structured review loop is the OPPOSITE vendor — Opus — per
+     ROUTING.md's review router; NOT `codex-code-review`). On `APPROVED`, promotion follows the normal
+     tiered policy (Architect decides; owner approval for money/arming/HOLD) — never an auto-merge.
+     Fixes are the Architect's job — do NOT ping-pong fixes to Codex.
    - `IMPLEMENTATION_PARTIAL` → read the receipt; resume for the remainder, or finish small leftovers
      during self-review.
 

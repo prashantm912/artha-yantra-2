@@ -357,3 +357,8 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   AGENTS.md carries the matching exception). **Model routing + availability fallback:
   `.claude/skills/codex/ROUTING.md`** — the harness auto-retries the codex chain on
   at-capacity errors; codex-down → Opus subagent per the table, same receipt contract.
+  **Review router (ROUTING.md): the reviewer is the opposite vendor of the builder** (normal path;
+  during an outage fall back to same-vendor and record the loss) — Codex-built → `claude-review`
+  (Opus subagent); Claude/Opus-built → `codex-code-review` (Codex); both judge the same
+  `checklist.md`. Plan review is already cross-vendor (Claude writes, `codex-plan-review` = Codex).
+  Canonical order: testing gate → cross-vendor review → Architect audit (final gate) → tiered promotion.

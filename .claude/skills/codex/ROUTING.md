@@ -14,6 +14,27 @@ never hardcode a fallback decision inline in a brief or an ad-hoc command.
 | **Advisory ask** | Codex via `codex-ask` | `gpt-5.6-luna` | Opus subagent (plain Agent question) — or skip; ask is never load-bearing |
 | **Recon / Explore** | Claude Explore agents | — | no Codex dependency; always available |
 
+## Review router — reviewer is the opposite vendor of the builder
+
+Every **non-trivial** change gets a *structured* review loop from the OTHER vendor (not just the
+Architect's audit); trivial/docs-only changes skip it (say so instead of running a round). This is the
+NORMAL path — when the opposite vendor is in an outage (see the ladder below), fall back to same-vendor
+review and RECORD the cross-vendor loss in the review. Pick the review skill by who built it:
+
+| Builder | Vendor | Review with | Reviewer vendor |
+| --- | --- | --- | --- |
+| `codex-build` | OpenAI (Codex) | **`claude-review`** (Opus subagent) | Anthropic ✓ opposite |
+| `ship-a-change` / Architect-direct | Anthropic (Claude) | **`codex-code-review`** (Codex) | OpenAI ✓ opposite |
+| `delegated-ship` (Opus subagent) | Anthropic (Opus) | **`codex-code-review`** (Codex) | OpenAI ✓ opposite |
+
+Both reviewers judge against the SAME `.claude/skills/codex/checklist.md` and emit the same
+`APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` tags, so the gate is identical whichever vendor reviews.
+**Plan review is already cross-vendor** (Claude writes the plan, `codex-plan-review` = Codex).
+
+**Canonical order for any change (one sequence everywhere):** testing gate → cross-vendor review loop
+(converge to `APPROVED`) → **Architect receipt audit = the final gate** → tiered promotion (owner
+approval for money/arming/HOLD). The audit is on top of the review, never the cross-vendor layer itself.
+
 ## Detection → response ladder
 
 1. **Model at capacity** (codex runs but errors `at capacity` / `overloaded` / `temporarily

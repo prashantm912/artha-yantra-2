@@ -81,6 +81,42 @@ class LiveSeriesStoreTest {
   }
 
   @Test
+  void refreshFromRestFetchesOncePerKeyPerBucketBoundary() {
+    // The eval loop calls refreshFromRest per-strategy, but a key is shared across strategies; a
+    // repeat within the same bucket must NOT re-fetch (else a slow market-data is hit N× and starves
+    // the single eval thread — the 2026-07-14 incident). Fetch once per key per boundary.
+    MutableClock clock = new MutableClock(instant("2026-07-03T09:19:00+05:30"));
+    FakeCandlesClient client = new FakeCandlesClient();
+    LiveSeriesStore store = new LiveSeriesStore(client, clock);
+
+    store.refreshFromRest(NIFTY_3M);
+    store.refreshFromRest(NIFTY_3M);
+    store.refreshFromRest(NIFTY_3M);
+    assertThat(client.fetchCount).isEqualTo(1);
+
+    clock.set(instant("2026-07-03T09:22:00+05:30")); // the next 3m bucket → a fresh fetch (self-heal)
+    store.refreshFromRest(NIFTY_3M);
+    assertThat(client.fetchCount).isEqualTo(2);
+  }
+
+  @Test
+  void hourlyDedupBucketsOnTheIstClockNotRawEpoch() {
+    // candles_1h is IST-hour aligned (V029). 09:30 and 10:00 IST are in DIFFERENT hourly buckets, but
+    // raw-epoch flooring aligns to the UTC hour (:30 IST) and would wrongly dedup the 10:00 refresh.
+    SeriesKey nifty1h = new SeriesKey(NIFTY_3M.exchange(), NIFTY_3M.tradingsymbol(), "1h");
+    MutableClock clock = new MutableClock(instant("2026-07-03T09:30:00+05:30"));
+    FakeCandlesClient client = new FakeCandlesClient();
+    LiveSeriesStore store = new LiveSeriesStore(client, clock);
+
+    store.refreshFromRest(nifty1h); // the 09:00–10:00 IST hour
+    assertThat(client.fetchCount).isEqualTo(1);
+
+    clock.set(instant("2026-07-03T10:00:00+05:30")); // the 10:00–11:00 IST hour — NOT deduped
+    store.refreshFromRest(nifty1h);
+    assertThat(client.fetchCount).isEqualTo(2);
+  }
+
+  @Test
   void theFrozenPartialRegressionIsGoneAcrossTwoBucketBoundaries() {
     MutableClock clock = new MutableClock(instant("2026-07-03T09:19:00+05:30"));
     FakeCandlesClient client = new FakeCandlesClient();
@@ -204,9 +240,10 @@ class LiveSeriesStoreTest {
     private final Deque<List<EngineCandle>> responses = new ArrayDeque<>();
     private OffsetDateTime lastFrom;
     private OffsetDateTime lastTo;
+    private int fetchCount;
 
     FakeCandlesClient() {
-      super(RestClient.builder(), new ObjectMapper(), "http://market-data:8081");
+      super(RestClient.builder(), new ObjectMapper(), "http://market-data:8081", 10_000);
     }
 
     void enqueue(List<EngineCandle> response) {
@@ -217,6 +254,7 @@ class LiveSeriesStoreTest {
     public List<EngineCandle> fetch(
         String exchange, String tradingsymbol, String interval,
         OffsetDateTime from, OffsetDateTime to) {
+      this.fetchCount++;
       this.lastFrom = from;
       this.lastTo = to;
       return responses.isEmpty() ? List.of() : responses.removeFirst();

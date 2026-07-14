@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -31,8 +33,19 @@ public class MarketDataCandlesClient {
   public MarketDataCandlesClient(
       RestClient.Builder builder,
       ObjectMapper objectMapper,
-      @Value("${artha.marketdata.base-url}") String baseUrl) {
-    this.restClient = builder.baseUrl(baseUrl).build();
+      @Value("${artha.marketdata.base-url}") String baseUrl,
+      @Value("${artha.marketdata.candles-fetch-timeout-ms:10000}") long fetchTimeoutMs) {
+    // Fail fast — this client runs on the SINGLE-THREADED signal-eval loop
+    // (refreshFromRest fetches at every coarse bucket boundary). Without a bounded
+    // TOTAL timeout, one slow-but-alive market-data parks the whole eval loop for the
+    // rest of the session and never recovers (2026-07-14 incident: a post-restart cold
+    // warmup fetch blocked ~229s → zero signals all day). JdkClientHttpRequestFactory's
+    // read-timeout maps to the JDK HttpRequest total-response timeout, so a slow fetch
+    // throws → the catch below returns empty → the engine keeps evaluating on the warm
+    // series and self-heals once market-data recovers.
+    JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory();
+    factory.setReadTimeout(Duration.ofMillis(fetchTimeoutMs));
+    this.restClient = builder.baseUrl(baseUrl).requestFactory(factory).build();
     this.objectMapper = objectMapper;
   }
 

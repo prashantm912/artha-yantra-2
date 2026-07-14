@@ -39,6 +39,9 @@ artha:
     # D8: context-instrument existence checks resolve via market-data REST
     # (strategy-signal-service holds NO marketdata grant)
     base-url: ${ARTHA_MARKETDATA_BASE_URL:http://market-data-service:8081}
+    # Total-response timeout (ms) for the eval-loop candle warm-up fetch — a slow market-data must
+    # fail fast so it can never park signal generation for the session (2026-07-14 incident).
+    candles-fetch-timeout-ms: ${ARTHA_MARKETDATA_CANDLES_FETCH_TIMEOUT_MS:10000}
   openalgo:
     # §18.1 order-READ surface (orderbook/positions/tradebook/funds). Default OFF — the
     # DisabledOrderGateway then returns empty lists + a NOT_CONFIGURED funds row, so a mock or

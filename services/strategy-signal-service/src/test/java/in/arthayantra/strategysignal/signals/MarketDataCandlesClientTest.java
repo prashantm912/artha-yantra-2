@@ -1,39 +1,56 @@
 package in.arthayantra.strategysignal.signals;
 
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import in.arthayantra.strategyengine.series.EngineCandle;
 import java.time.OffsetDateTime;
-import org.hamcrest.Matchers;
+import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 /**
- * Locks the candle warm-up query encoding (Phase 27): an IST {@code +05:30} timestamp must reach
- * the wire as a UTC {@code …Z} instant, never a literal {@code +} — which the receiver decodes as a
- * space (x-www-form rules) and rejects with a 500, leaving the engine permanently cold.
+ * WireMock test (real HTTP, so the explicit request-factory timeout applies). Locks two contracts:
+ * (1) the candle warm-up query encoding — an IST {@code +05:30} timestamp reaches the wire as a UTC
+ * {@code …Z} instant, never a literal {@code +} (which the receiver decodes as a space and 500s,
+ * leaving the engine permanently cold); (2) a slow/failing market-data fetch is bounded by the total
+ * timeout and returns empty rather than parking the single-threaded eval loop (2026-07-14 incident).
  */
 class MarketDataCandlesClientTest {
 
+  private WireMockServer wireMock;
+
+  @BeforeEach
+  void setUp() {
+    wireMock = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
+    wireMock.start();
+  }
+
+  @AfterEach
+  void tearDown() {
+    wireMock.stop();
+  }
+
   @Test
   void sendsUtcInstantsSoThePlusOffsetIsNeverDecodedAsASpace() {
-    RestClient.Builder builder = RestClient.builder();
-    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    wireMock.stubFor(
+        get(urlPathEqualTo("/api/v1/market/candles"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody("{\"items\":[]}")));
     MarketDataCandlesClient client =
-        new MarketDataCandlesClient(builder, new ObjectMapper(), "http://market-data:8081");
-
-    server
-        .expect(
-            requestTo(
-                Matchers.allOf(
-                    Matchers.containsString("from=2026-06-09T03:41:17.871210208Z"),
-                    Matchers.containsString("to=2026-06-09T04:41:17Z"),
-                    Matchers.not(Matchers.containsString("+05:30")),
-                    Matchers.not(Matchers.containsString("%2B")))))
-        .andRespond(withSuccess("{\"items\":[]}", MediaType.APPLICATION_JSON));
+        new MarketDataCandlesClient(
+            RestClient.builder(), new ObjectMapper(), wireMock.baseUrl(), 10_000);
 
     client.fetch(
         "NSE",
@@ -42,6 +59,41 @@ class MarketDataCandlesClientTest {
         OffsetDateTime.parse("2026-06-09T09:11:17.871210208+05:30"),
         OffsetDateTime.parse("2026-06-09T10:11:17+05:30"));
 
-    server.verify();
+    wireMock.verify(
+        getRequestedFor(urlPathEqualTo("/api/v1/market/candles"))
+            .withQueryParam("from", equalTo("2026-06-09T03:41:17.871210208Z"))
+            .withQueryParam("to", equalTo("2026-06-09T04:41:17Z")));
+  }
+
+  @Test
+  void returnsEmptyAndDoesNotThrowWhenTheFetchExceedsTheTimeout() {
+    // A NON-empty response held 3s past a 300ms client timeout: `isEmpty()` proves the empty came
+    // from the total-timeout catch (not the body), and the elapsed ceiling proves the fetch did NOT
+    // wait the full delay — so a slow-but-alive market-data can't park the single-threaded eval loop.
+    wireMock.stubFor(
+        get(urlPathEqualTo("/api/v1/market/candles"))
+            .willReturn(
+                aResponse()
+                    .withFixedDelay(3_000)
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        "{\"items\":[{\"bucket\":\"2026-06-09T09:15:00+05:30\",\"open\":\"1\","
+                            + "\"high\":\"1\",\"low\":\"1\",\"close\":\"1\",\"volume\":1,\"oi\":null}]}")));
+    MarketDataCandlesClient slowClient =
+        new MarketDataCandlesClient(
+            RestClient.builder(), new ObjectMapper(), wireMock.baseUrl(), 300);
+
+    long startedAt = System.nanoTime();
+    List<EngineCandle> result =
+        slowClient.fetch(
+            "NSE",
+            "RELIANCE",
+            "1m",
+            OffsetDateTime.parse("2026-06-09T09:11:17+05:30"),
+            OffsetDateTime.parse("2026-06-09T10:11:17+05:30"));
+    long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+    assertThat(result).isEmpty();
+    assertThat(elapsedMs).isLessThan(2_000);
   }
 }

@@ -139,8 +139,15 @@ public class PaperController {
       @RequestParam(defaultValue = "0") int offset) {
     String tradingsymbol =
         symbol == null ? null : symbol.contains(":") ? symbol.substring(symbol.indexOf(':') + 1) : symbol;
+    int boundedLimit = Math.min(Math.max(limit, 1), 500);
+    int boundedOffset = Math.max(offset, 0);
     return Map.of(
-        "items", paper.trades(book, from, to, tradingsymbol, limit, offset), "limit", limit, "offset", offset);
+        "items",
+        paper.trades(book, from, to, tradingsymbol, boundedLimit, boundedOffset),
+        "limit",
+        boundedLimit,
+        "offset",
+        boundedOffset);
   }
 
   /**

@@ -49,7 +49,7 @@ export function StraddleChart({ items, callStrike, putStrike, underlying }: Stra
                 symbol: 'pin',
                 symbolSize: 42,
                 itemStyle: { color: t.bull },
-                label: { color: '#fff', fontSize: 9, offset: [0, -3] },
+                label: { color: t.surface1, fontSize: 9, offset: [0, -3] },
               },
               {
                 name: 'Day Low',
@@ -59,7 +59,7 @@ export function StraddleChart({ items, callStrike, putStrike, underlying }: Stra
                 symbolRotate: 180,
                 symbolSize: 42,
                 itemStyle: { color: t.bear },
-                label: { color: '#fff', fontSize: 9, offset: [0, 3] },
+                label: { color: t.surface1, fontSize: 9, offset: [0, 3] },
               },
             ]
           : [];

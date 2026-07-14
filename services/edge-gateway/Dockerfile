@@ -2,7 +2,7 @@
 # (`mvnw -pl services/edge-gateway -am package`) before `docker compose
 # build` — both locally and in CI the same host-built artifact is copied in,
 # so the image build needs no network. Non-root, wget healthcheck, explicit
-# heap cap under the 384 MB compose mem_limit. (AOT/AppCDS land in Stage G
+# heap cap under the 512 MB compose mem_limit. (AOT/AppCDS land in Stage G
 # hardening, Phase 47.)
 FROM eclipse-temurin:21-jre-alpine
 

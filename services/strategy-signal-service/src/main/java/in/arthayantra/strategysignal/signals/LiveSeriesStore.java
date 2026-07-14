@@ -30,6 +30,12 @@ public class LiveSeriesStore implements SeriesProvider {
   private final MarketDataCandlesClient candlesClient;
   private final Clock clock;
   private final Map<SeriesKey, EngineSeries> series = new ConcurrentHashMap<>();
+  // The coarse-bucket epoch each key was last REST-refreshed for. The eval loop calls
+  // refreshFromRest PER STRATEGY, but a key is shared (e.g. 39 scalpers on the same NIFTY future),
+  // so without this dedup a slow market-data is fetched once per strategy (~78×/boundary) and
+  // starves the single-threaded eval loop (2026-07-14 incident). One fetch attempt per key per
+  // boundary; the series map is shared so every strategy still reads the same refreshed series.
+  private final Map<SeriesKey, Long> lastRefreshBucket = new ConcurrentHashMap<>();
 
   /** Wires the warm-up client. */
   public LiveSeriesStore(MarketDataCandlesClient candlesClient, Clock clock) {
@@ -81,8 +87,25 @@ public class LiveSeriesStore implements SeriesProvider {
 
   /** Refreshes a non-1m series from the caggs (called at primary bucket boundaries). */
   public void refreshFromRest(SeriesKey key) {
-    EngineSeries existing = series.get(key);
     OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
+    // Dedup per coarse boundary: skip if this key was already refreshed this bucket (a shared key
+    // is asked to refresh once per strategy). Intervals without a coarse duration (1d/1w) are not
+    // deduped — rare, and not the intraday fan-out.
+    Duration interval = filterDuration(key.interval());
+    if (interval != null) {
+      // Floor the IST WALL-CLOCK, not the raw UTC epoch: candles_1h is IST-hour aligned (V029), and
+      // IST = UTC+5:30, so a raw-epoch hour bucket boundary lands at :30 IST — it would dedup away
+      // the real 10:00-IST refresh. Treating the IST local time as an epoch aligns dedup buckets to
+      // the candle boundaries (3m/5m/15m are unaffected — 5:30h is a whole multiple of each).
+      long istWallSeconds = now.toLocalDateTime().toEpochSecond(ZoneOffset.UTC);
+      long bucket = Math.floorDiv(istWallSeconds, interval.toSeconds());
+      Long done = lastRefreshBucket.get(key);
+      if (done != null && done == bucket) {
+        return;
+      }
+      lastRefreshBucket.put(key, bucket);
+    }
+    EngineSeries existing = series.get(key);
     OffsetDateTime from =
         existing == null || existing.lastBarTime() == null
             ? now.minusDays(warmupDays(key.interval()))

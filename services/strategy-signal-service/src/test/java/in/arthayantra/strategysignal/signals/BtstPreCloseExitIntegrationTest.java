@@ -106,7 +106,7 @@ class BtstPreCloseExitIntegrationTest extends StrategySignalIntegrationTestBase 
     @Bean
     @Primary
     MarketDataCandlesClient stubCandles(RestClient.Builder builder, ObjectMapper objectMapper) {
-      return new MarketDataCandlesClient(builder, objectMapper, "http://localhost:0") {
+      return new MarketDataCandlesClient(builder, objectMapper, "http://localhost:0", 10_000) {
         @Override
         public List<EngineCandle> fetch(
             String exchange, String tradingsymbol, String interval,

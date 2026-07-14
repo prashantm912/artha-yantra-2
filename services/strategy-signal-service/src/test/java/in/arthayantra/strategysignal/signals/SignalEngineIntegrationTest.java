@@ -77,7 +77,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     @Primary
     MarketDataCandlesClient stubCandles(
         org.springframework.web.client.RestClient.Builder builder, ObjectMapper objectMapper) {
-      return new MarketDataCandlesClient(builder, objectMapper, "http://127.0.0.1:1") {
+      return new MarketDataCandlesClient(builder, objectMapper, "http://127.0.0.1:1", 10_000) {
         @Override
         public List<EngineCandle> fetch(
             String exchange, String tradingsymbol, String interval,

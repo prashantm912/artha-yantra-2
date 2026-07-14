@@ -319,6 +319,7 @@ the chip is gone. Status: OPEN · DONE (how) · STALE.
 | task_d6872aa3 | 2026-07-10 | Regime-label vocabulary mismatch | **DONE #705** (B10) |
 | task_8972447b | 2026-07-10 | Partial coarse-bucket poisoning | **DONE #683** (B1) |
 | task_fc239b57 | 2026-07-05 | Registry reconcile-loop bug | **DONE #579** |
+| task_a6c12601 | 2026-07-14 | Arm the signal-starvation watchdog canary (shipped DORMANT in [#868](https://github.com/prashantm912/artha-yantra-2/pull/868)). Prereqs before owner flips `ARTHA_SIGNALS_STARVATION_WATCHDOG_ENABLED=true`: (1) warmup-grace arm fix (separate `sessionAnchorMs` from `lastGateOutputAtMs`, add `boot-grace-ms` ~30min, predicate `alarm iff now−anchor>grace AND now−reference>window` — else a session whose first gate output lands after ~09:20 false-alarms every morning; Opus review finding 1); (2) direct seed/boot-grace SignalEngine test (finding 3); (3) validate window-ms + boot-grace-ms against the LIVE p99 inter-rejection gap and report an owner-facing arm proposal. Parity firewall must stay byte-identical; luna→sol→Opus pipeline. | OPEN |
 
 ## 5. Small optional nits — **CLOSED 2026-07-04** (with the fix-queue batch)
 

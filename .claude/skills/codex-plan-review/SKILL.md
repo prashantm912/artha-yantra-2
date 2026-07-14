@@ -52,3 +52,5 @@ export STATE_DIR=".claude/skills/codex-plan-review/state"
 - Thread ids per-plan (absolute-path keyed) — concurrent reviews never collide.
 - Skip for trivial plans (single-file, low-risk); run for anything touching engine/money/parity or a
   new module.
+- **Model unavailable?** `.claude/skills/codex/ROUTING.md` — at-capacity auto-retries the chain;
+  codex down → Opus subagent fresh thread (cross-vendor lost, say so) or defer the review.

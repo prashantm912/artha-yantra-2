@@ -32,4 +32,27 @@ k1="$(thread_file plan.md)"
 [ "$k0" != "$k1" ] || fail "CDKEY did not change the key"
 [ "$k1" = "${k0%.thread}__wt_x.thread" ] || fail "CDKEY fold shape: $k1"
 
-echo "harness selftest: OK (C1 abs-state-dir, C2 literal-substitution, M3 worktree-key-fold)"
+# Key collisions — targets that sanitize identically must still get distinct
+# keys (the cksum suffix), and the key must be stable for the same input.
+ka="$(target_key 'a/b')"; kb="$(target_key 'a__b')"; kc="$(target_key 'a/b')"
+[ "$ka" != "$kb" ] || fail "sanitize-collision: 'a/b' and 'a__b' share a key"
+[ "$ka" = "$kc" ] || fail "target_key not stable for the same input"
+
+# Legacy-key migration — pre-cksum state files must be moved to the new key
+# on first touch, so old sessions stay resumable.
+unset CDKEY
+newk="$(target_key 'legacy-topic')"
+printf 'tid-123\n' > "$STATE_DIR/${newk%.*}.thread"     # legacy (unsuffixed) name
+migrate_legacy_state 'legacy-topic'
+[ -f "$STATE_DIR/${newk}.thread" ] || fail "legacy state not migrated to new key"
+[ "$(cat "$STATE_DIR/${newk}.thread")" = "tid-123" ] || fail "migrated content mangled"
+
+# ROUTING — capacity_error matches the retryable patterns and nothing else;
+# the fallback chain default is non-empty.
+printf 'ERROR: Selected model is at capacity\n' > "$TMP/cap.txt"
+capacity_error "$TMP/cap.txt" || fail "capacity_error missed 'at capacity'"
+printf 'error: invalid prompt\n' > "$TMP/nocap.txt"
+! capacity_error "$TMP/nocap.txt" || fail "capacity_error false-positive on a real failure"
+[ -n "$CODEX_FALLBACK_MODELS" ] || fail "CODEX_FALLBACK_MODELS default is empty"
+
+echo "harness selftest: OK (C1 abs-state-dir, C2 literal-substitution, M3 worktree-key-fold, capacity-fallback)"

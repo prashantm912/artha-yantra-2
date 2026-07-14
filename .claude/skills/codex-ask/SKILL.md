@@ -62,3 +62,5 @@ export STATE_DIR=".claude/skills/codex-ask/state"
 - `--sandbox read-only`. Model/effort from `_common.sh` (gpt-5.6-sol, xhigh); override per run.
 - Surface Codex's answer to the owner verbatim when it disagrees with your position — the
   disagreement is the valuable output.
+- **Model unavailable?** `.claude/skills/codex/ROUTING.md` — ask is never load-bearing: use an Opus
+  subagent for the second opinion, or skip.

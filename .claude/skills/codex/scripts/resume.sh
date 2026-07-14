@@ -42,6 +42,7 @@ export TARGET EXTRA_PROMPT IMPLEMENTER_NOTES
 
 # Same worktree->key fold as start.sh, so resume targets the same state files (M3).
 set_cdkey "$CD_DIR"
+migrate_legacy_state "$TARGET"
 
 THREAD_FILE="$(thread_file "$TARGET")"
 REVIEW_FILE="$(review_file "$TARGET")"
@@ -57,28 +58,45 @@ PROMPT="$(load_prompt "$PROMPT_FILE")"
 
 # resume inherits the sandbox from the start session; --cd is a physical cd
 # (resume has no --cd flag). Absolute state-file paths were resolved above,
-# so cd'ing away is safe.
-( [ -n "$CD_DIR" ] && cd "$CD_DIR"; \
-  codex exec resume "$THREAD_ID" \
-    --skip-git-repo-check \
-    --json \
-    -c model="$CODEX_MODEL" \
-    -c model_reasoning_effort="$CODEX_EFFORT" \
-    -o "$REVIEW_FILE" \
-    "$PROMPT" \
-    </dev/null \
-    >"$EVENTS_FILE" \
-    2> "$EVENTS_FILE.stderr" ) || {
+# so cd'ing away is safe. Model chain (ROUTING.md): retry fallbacks on an
+# at-capacity error only — resume accepts -c model, so a fallback model can
+# continue the same thread.
+RAN_MODEL=""
+for MODEL in $CODEX_MODEL $CODEX_FALLBACK_MODELS; do
+    if ( [ -n "$CD_DIR" ] && cd "$CD_DIR"; \
+      codex exec resume "$THREAD_ID" \
+        --skip-git-repo-check \
+        --json \
+        -c model="$MODEL" \
+        -c model_reasoning_effort="$CODEX_EFFORT" \
+        -o "$REVIEW_FILE" \
+        "$PROMPT" \
+        </dev/null \
+        >"$EVENTS_FILE" \
+        2> "$EVENTS_FILE.stderr" ); then
+        RAN_MODEL="$MODEL"
+        break
+    else
         rc=$?
-        echo "error: codex exec resume failed (rc=$rc)" >&2
+        if capacity_error "$EVENTS_FILE.stderr"; then
+            echo "warn: model $MODEL unavailable (capacity) — trying next in chain" >&2
+            continue
+        fi
+        echo "error: codex exec resume failed (rc=$rc, model $MODEL)" >&2
         echo "stderr tail:" >&2
         tail -20 "$EVENTS_FILE.stderr" >&2
         exit 1
-    }
+    fi
+done
+if [ -z "$RAN_MODEL" ]; then
+    echo "error: every model in the chain is at capacity: $CODEX_MODEL $CODEX_FALLBACK_MODELS" >&2
+    echo "       retry later, or go cross-vendor per .claude/skills/codex/ROUTING.md" >&2
+    exit 75
+fi
 
 echo "resumed session for $TARGET"
 echo "  thread id:    $THREAD_ID"
-echo "  model/effort: $CODEX_MODEL / $CODEX_EFFORT"
+echo "  model/effort: $RAN_MODEL / $CODEX_EFFORT$([ "$RAN_MODEL" != "$CODEX_MODEL" ] && echo '  (FALLBACK — primary was at capacity)')"
 echo "  review file:  $REVIEW_FILE"
 echo "---"
 cat "$REVIEW_FILE"

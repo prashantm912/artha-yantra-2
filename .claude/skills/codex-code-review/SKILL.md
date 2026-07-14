@@ -38,7 +38,10 @@ export STATE_DIR=".claude/skills/codex-code-review/state"
 
    `$GATE_SUMMARY` = the requester's testing-gate line (`lint: clean | typecheck: clean | tests: N passed (M new)`).
 
-3. **Reset**: `bash .claude/skills/codex/scripts/reset.sh <target>` · **Show**: `.../show.sh <target>`
+3. **Reset**: `bash .claude/skills/codex/scripts/reset.sh [--cd <worktree>] <target>` · **Show**:
+   `.../show.sh [--cd <worktree>] <target>`. **A worktree session is keyed by its `--cd`** — every
+   state operation (resume, synthesize, reset, show) must pass the SAME `--cd` or it targets a
+   different (usually nonexistent) session.
 
 4. **Parse the trailing tag**:
    - `APPROVED` → synthesize (below), then hand back to the Architect audit.
@@ -50,12 +53,13 @@ export STATE_DIR=".claude/skills/codex-code-review/state"
 
 ## Synthesize (after multi-round convergence)
 
-Skip if it converged on turn 1 (the state file already holds the full review). Otherwise:
+Skip if it converged on turn 1 (the state file already holds the full review). Otherwise (pass the
+same `--cd <worktree>` the session was started with, if any):
 
 ```bash
 bash .claude/skills/codex/scripts/resume.sh \
     --prompt-file .claude/skills/codex-code-review/prompts/synthesize.tpl \
-    <target> "Today's date is YYYY-MM-DD"
+    [--cd <worktree>] <target> "Today's date is YYYY-MM-DD"
 ```
 
 Outputs `PROMOTION_READY`. The consolidated review is the record the Architect audits against.
@@ -76,6 +80,18 @@ to the start/resume prompt text.
 - Surface reviews verbatim; keep edits scoped to findings; reset the thread only if context is
   genuinely confused. The testing gate must be green before `APPROVED`.
 - Skip for trivial/docs-only changes (state that instead of running a round).
+- **Foreground-timeout trap:** a big-diff review at `xhigh` can exceed the Bash tool's 5-min
+  foreground cap and get KILLED mid-exec (no thread written). Run reviews via `run_in_background`,
+  and/or `CODEX_EFFORT=medium` for large diffs.
+- **Killed-wrapper salvage:** if the wrapper dies AFTER codex ran (timeout, crash, script edited
+  mid-run), the review/receipt (`-o`) and events file usually survived — salvage the thread id and
+  write it back, then resume normally:
+  `jq -r 'select(.type=="thread.started").thread_id' <events.ndjson> | head -1 > <key>.thread`
+- **Never edit a harness script while a run is in flight** — bash reads scripts incrementally; an
+  edit shifts offsets under the running interpreter and crashes it mid-run (hit live 2026-07-14).
+- **Model unavailable?** `.claude/skills/codex/ROUTING.md`. At-capacity auto-retries the chain in
+  the harness; codex down entirely → Opus subagent on a FRESH thread (writer≠reviewer holds via the
+  separate thread; cross-vendor is lost — say so in the review record).
 
 ## Loop shape
 

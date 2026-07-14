@@ -351,4 +351,9 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   (threaded read-only review against `.claude/skills/codex/checklist.md` = our invariants,
   `APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` convergence), `codex-ask` (advisory second
   opinion, no gate). Model/effort in one file (`codex/scripts/_common.sh`); state is
-  per-target + gitignored. Codex never commits/merges/deploys — Architect keeps that.
+  per-target + gitignored. Codex never merges/deploys — Architect keeps that. Two builder
+  modes (D1): the `docs/handoffs/` brief lane = SHIP mode (Codex commits + opens the PR, per
+  AGENTS.md); `codex-build` = EDIT-ONLY mode (Codex edits the tree, Architect commits —
+  AGENTS.md carries the matching exception). **Model routing + availability fallback:
+  `.claude/skills/codex/ROUTING.md`** — the harness auto-retries the codex chain on
+  at-capacity errors; codex-down → Opus subagent per the table, same receipt contract.

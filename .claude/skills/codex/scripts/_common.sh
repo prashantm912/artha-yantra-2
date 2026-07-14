@@ -24,22 +24,29 @@ export STATE_DIR
 : "${CDKEY:=}"
 
 # Model / effort per flow (single source of truth for all codex skills).
-# D3 decision (2026-07-14): build + reviews both run gpt-5.6-sol for now
-# (writer != reviewer is preserved by using a SEPARATE THREAD, not a
-# separate model). Trial gpt-5.6-luna for the build flow later by editing
-# the *codex-build* case below. CODEX_MODEL / CODEX_EFFORT override per run.
+# D3 (revised 2026-07-14): the codex-build DRAFT runs gpt-5.6-luna (fast + cheap
+# for the bulk edit); a sol review+fix pass then refines it (the codex-build skill
+# runs that pass with CODEX_MODEL=gpt-5.6-sol on a fresh -refine thread); and
+# REVIEW/ask/plan flows run gpt-5.6-sol. After the sol refine, the Opus cross-vendor
+# review (claude-review, ROUTING.md) still runs — luna != sol != Opus, three
+# perspectives. CODEX_MODEL / CODEX_EFFORT override per run.
+# The at-capacity fallback is the OTHER tier per flow (build luna->sol, review
+# sol->luna) so a retry uses a different model, not the same one again.
 case "$STATE_DIR" in
-    *codex-build*) CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-sol}" ;;
-    *)             CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-sol}" ;;
+    *codex-build*)
+        CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-luna}"
+        CODEX_FALLBACK_MODELS="${CODEX_FALLBACK_MODELS-gpt-5.6-sol}" ;;
+    *)
+        CODEX_MODEL="${CODEX_MODEL:-gpt-5.6-sol}"
+        CODEX_FALLBACK_MODELS="${CODEX_FALLBACK_MODELS-gpt-5.6-luna}" ;;
 esac
 CODEX_EFFORT="${CODEX_EFFORT:-xhigh}"
 export CODEX_MODEL CODEX_EFFORT
 
 # Capacity fallback chain (ROUTING.md): when a run fails with an at-capacity
-# error, start.sh/resume.sh retry with each model here, in order. Space-
-# separated; set to "" to disable. Codex-down-entirely is NOT handled here —
-# that's the cross-vendor (Opus subagent) column of ROUTING.md.
-CODEX_FALLBACK_MODELS="${CODEX_FALLBACK_MODELS-gpt-5.6-luna}"
+# error, start.sh/resume.sh retry with each model above, in order. Set to "" to
+# disable. Codex-down-entirely is NOT handled here — that's the cross-vendor
+# (Opus subagent) column of ROUTING.md.
 export CODEX_FALLBACK_MODELS
 
 # True iff the stderr capture shows a capacity/availability error — retryable
@@ -78,9 +85,13 @@ set_cdkey() {
     return 0
 }
 
-thread_file() { printf '%s/%s%s.thread'         "$STATE_DIR" "$(target_key "$1")" "${CDKEY-}"; }
-review_file() { printf '%s/%s%s.review.txt'     "$STATE_DIR" "$(target_key "$1")" "${CDKEY-}"; }
-events_file() { printf '%s/%s%s.events.ndjson'  "$STATE_DIR" "$(target_key "$1")" "${CDKEY-}"; }
+# KEY_SUFFIX lets a caller give the SAME target a distinct thread (e.g. the
+# codex-build sol-refine pass, KEY_SUFFIX=_refine) without mangling the TARGET
+# string the prompt sees. Empty by default.
+: "${KEY_SUFFIX:=}"
+thread_file() { printf '%s/%s%s%s.thread'        "$STATE_DIR" "$(target_key "$1")" "${CDKEY-}" "${KEY_SUFFIX-}"; }
+review_file() { printf '%s/%s%s%s.review.txt'    "$STATE_DIR" "$(target_key "$1")" "${CDKEY-}" "${KEY_SUFFIX-}"; }
+events_file() { printf '%s/%s%s%s.events.ndjson' "$STATE_DIR" "$(target_key "$1")" "${CDKEY-}" "${KEY_SUFFIX-}"; }
 
 # One-time migration: state written before the cksum-suffixed key format
 # (2026-07-14) lives under the unsuffixed legacy name and would otherwise
@@ -91,8 +102,9 @@ migrate_legacy_state() {
     key="$(target_key "$1")" || return 0
     legacy="${key%.*}"   # strip the trailing .<cksum> -> the pre-change key
     for ext in thread review.txt events.ndjson events.ndjson.stderr; do
-        if [ ! -f "$STATE_DIR/${key}${CDKEY-}.$ext" ] && [ -f "$STATE_DIR/${legacy}${CDKEY-}.$ext" ]; then
-            mv -- "$STATE_DIR/${legacy}${CDKEY-}.$ext" "$STATE_DIR/${key}${CDKEY-}.$ext"
+        if [ ! -f "$STATE_DIR/${key}${CDKEY-}${KEY_SUFFIX-}.$ext" ] \
+           && [ -f "$STATE_DIR/${legacy}${CDKEY-}${KEY_SUFFIX-}.$ext" ]; then
+            mv -- "$STATE_DIR/${legacy}${CDKEY-}${KEY_SUFFIX-}.$ext" "$STATE_DIR/${key}${CDKEY-}${KEY_SUFFIX-}.$ext"
         fi
     done
     return 0

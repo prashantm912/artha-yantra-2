@@ -29,17 +29,20 @@ fi
 set_cdkey "$CD_DIR"
 migrate_legacy_state "$1"
 
-THREAD_FILE="$(thread_file "$1")"
-REVIEW_FILE="$(review_file "$1")"
-EVENTS_FILE="$(events_file "$1")"
-
+# Remove state for this target+worktree across the KNOWN flow suffixes — the base
+# thread ("") and the codex-build sol `_refine` thread. Enumerated (not a prefix
+# glob) so it stays worktree-safe: a glob on `...wt-foo` would also match
+# `...wt-foo2`; exact filenames per suffix cannot bleed across worktrees.
 removed=0
-for f in "$THREAD_FILE" "$REVIEW_FILE" "$EVENTS_FILE" "$EVENTS_FILE.stderr"; do
-    if [ -f "$f" ]; then
-        rm -- "$f"
-        echo "removed $f"
-        removed=$((removed + 1))
-    fi
+for KEY_SUFFIX in "" "_refine"; do
+    for f in "$(thread_file "$1")" "$(review_file "$1")" \
+             "$(events_file "$1")" "$(events_file "$1").stderr"; do
+        if [ -f "$f" ]; then
+            rm -- "$f"
+            echo "removed $f"
+            removed=$((removed + 1))
+        fi
+    done
 done
 
 [ "$removed" = 0 ] && echo "no state on file for $1"

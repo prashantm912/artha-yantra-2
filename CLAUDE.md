@@ -347,7 +347,8 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - **Codex skill suite** (`.claude/skills/codex-*`, shared harness `.claude/skills/codex/`) =
   the skill-based, templated form of the codex-builder-lane — persistent-thread Codex sessions
   instead of on-the-fly `codex exec` strings: `codex-build` (delegate a build in a worktree,
-  our receipt contract baked in, `--bypass`), `codex-code-review` + `codex-plan-review`
+  `--bypass` — **luna DRAFTS fast/cheap → sol REVIEWS+FIXES on a fresh thread → then Opus cross-vendor
+  review**, three perspectives, receipt contract baked in), `codex-code-review` + `codex-plan-review`
   (threaded read-only review against `.claude/skills/codex/checklist.md` = our invariants,
   `APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` convergence), `codex-ask` (advisory second
   opinion, no gate). Model/effort in one file (`codex/scripts/_common.sh`); state is

@@ -35,22 +35,38 @@ esac
 CODEX_EFFORT="${CODEX_EFFORT:-xhigh}"
 export CODEX_MODEL CODEX_EFFORT
 
+# Capacity fallback chain (ROUTING.md): when a run fails with an at-capacity
+# error, start.sh/resume.sh retry with each model here, in order. Space-
+# separated; set to "" to disable. Codex-down-entirely is NOT handled here —
+# that's the cross-vendor (Opus subagent) column of ROUTING.md.
+CODEX_FALLBACK_MODELS="${CODEX_FALLBACK_MODELS-gpt-5.6-luna}"
+export CODEX_FALLBACK_MODELS
+
+# True iff the stderr capture shows a capacity/availability error — retryable
+# with the next model in the chain, as opposed to a real failure (fail fast).
+capacity_error() {
+    grep -qiE 'at capacity|overloaded|temporarily unavailable' "$1" 2>/dev/null
+}
+
 # Derive a per-target key. Real paths resolve to absolute (so two worktrees
 # reviewing the "same" plan path never collide); non-path targets (labels,
 # branch names) are sanitized in place. '/' -> '__', other unsafe chars -> '_'.
+# A short cksum of the UNSANITIZED value is appended so distinct targets that
+# sanitize identically ('a/b' vs 'a__b', 'x y' vs 'x_y') can never share state.
 target_key() {
-    local target="$1"
+    local target="$1" raw
     if [ -e "$target" ]; then
-        local abs
-        abs="$(realpath -- "$target" 2>/dev/null || readlink -f -- "$target")"
-        if [ -z "$abs" ]; then
+        raw="$(realpath -- "$target" 2>/dev/null || readlink -f -- "$target")"
+        if [ -z "$raw" ]; then
             echo "error: cannot resolve target path: $target" >&2
             return 1
         fi
-        printf '%s' "$abs" | sed 's|^/||; s|/|__|g; s|[^A-Za-z0-9._-]|_|g'
     else
-        printf '%s' "$target" | sed 's|^/||; s|/|__|g; s|[^A-Za-z0-9._-]|_|g'
+        raw="$target"
     fi
+    printf '%s.%s' \
+        "$(printf '%s' "$raw" | sed 's|^/||; s|/|__|g; s|[^A-Za-z0-9._-]|_|g')" \
+        "$(printf '%s' "$raw" | cksum | cut -d' ' -f1)"
 }
 
 # Fold a worktree dir into the state key (concurrent same-target reviews in
@@ -65,6 +81,22 @@ set_cdkey() {
 thread_file() { printf '%s/%s%s.thread'         "$STATE_DIR" "$(target_key "$1")" "${CDKEY-}"; }
 review_file() { printf '%s/%s%s.review.txt'     "$STATE_DIR" "$(target_key "$1")" "${CDKEY-}"; }
 events_file() { printf '%s/%s%s.events.ndjson'  "$STATE_DIR" "$(target_key "$1")" "${CDKEY-}"; }
+
+# One-time migration: state written before the cksum-suffixed key format
+# (2026-07-14) lives under the unsuffixed legacy name and would otherwise
+# read as "no session". Move it to the new key on first touch. Call after
+# set_cdkey in every command that resolves a target.
+migrate_legacy_state() {
+    local key legacy ext
+    key="$(target_key "$1")" || return 0
+    legacy="${key%.*}"   # strip the trailing .<cksum> -> the pre-change key
+    for ext in thread review.txt events.ndjson events.ndjson.stderr; do
+        if [ ! -f "$STATE_DIR/${key}${CDKEY-}.$ext" ] && [ -f "$STATE_DIR/${legacy}${CDKEY-}.$ext" ]; then
+            mv -- "$STATE_DIR/${legacy}${CDKEY-}.$ext" "$STATE_DIR/${key}${CDKEY-}.$ext"
+        fi
+    done
+    return 0
+}
 
 # Load a prompt template and substitute {{TARGET}}, {{EXTRA_PROMPT}},
 # {{IMPLEMENTER_NOTES}} from the like-named env vars. Uses bash literal

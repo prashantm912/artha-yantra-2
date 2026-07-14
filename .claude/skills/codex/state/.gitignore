@@ -1,0 +1,4 @@
+# Default STATE_DIR fallback when a caller forgets to export their skill's
+# state dir — session state must never be committed from here either.
+*
+!.gitignore

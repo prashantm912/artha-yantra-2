@@ -25,8 +25,11 @@ read ALL of it and implement it. Otherwise implement from the instruction block 
 - Never edit an applied Flyway migration (checksum-locked) — new suffix-versioned file only.
 - Run the project's lint / build for the module you touched and fix YOUR OWN failures.
 - Do NOT write tests unless the instruction block asks — the requester owns the testing gate.
-- Do NOT commit, push, tag, bump versions, touch `.env`/secrets, or edit CI — the requester (the
-  Architect) owns everything after implementation, including merge and deploy.
+- **This session runs in EDIT-ONLY mode (the AGENTS.md mode exception applies):** unlike the
+  `docs/handoffs/` brief lane, do NOT branch, commit, push, open a PR, or write a receipt file —
+  your final message below IS the receipt. Do not tag, bump versions, touch `.env`/secrets, or
+  edit CI either — the requester (the Architect) owns everything after implementation, including
+  commit, merge, and deploy. All AGENTS.md NEVER rules still apply.
 
 ## Report (your final message) — the RECEIPT
 

@@ -45,3 +45,12 @@ You execute ONE brief at a time from `docs/handoffs/<date>-<slug>-brief.md`.
 - If a brief conflicts with `CLAUDE.md`, STOP and write the conflict into the receipt's
   open-doubts instead of picking silently. Two failures of the same approach = stop and
   doubt (two-strikes rule).
+
+## Mode exception — edit-only sessions (the `codex-build` skill lane)
+
+The rules above describe **ship mode** (the `docs/handoffs/` brief lane): you branch, commit,
+push, open the PR, and write a receipt FILE. A session whose prompt declares **edit-only mode**
+(launched via `.claude/skills/codex-build/`) replaces the ship steps: do NOT branch, commit,
+push, open a PR, or write a receipt file — you edit the working tree only, and your **final
+message IS the receipt** (same shape: labeled claims + mandatory open-doubts). Every NEVER rule
+above still applies unchanged. The prompt states the mode; if it doesn't, assume ship mode.

@@ -50,6 +50,7 @@ export TARGET EXTRA_PROMPT
 
 # Fold the worktree into the state key (M3). Must be set before *_file.
 set_cdkey "$CD_DIR"
+migrate_legacy_state "$TARGET"
 
 THREAD_FILE="$(thread_file "$TARGET")"
 REVIEW_FILE="$(review_file "$TARGET")"
@@ -73,25 +74,42 @@ fi
 CD_ARGS=()
 [ -n "$CD_DIR" ] && CD_ARGS=(--cd "$CD_DIR")
 
-codex exec \
-    --json \
-    --skip-git-repo-check \
-    --color never \
-    "${SANDBOX_ARGS[@]}" \
-    "${CD_ARGS[@]}" \
-    -c model="$CODEX_MODEL" \
-    -c model_reasoning_effort="$CODEX_EFFORT" \
-    -o "$REVIEW_FILE" \
-    "$PROMPT" \
-    </dev/null \
-    >"$EVENTS_FILE" \
-    2> "$EVENTS_FILE.stderr" || {
+# Try the model chain (ROUTING.md): primary, then each fallback on an
+# at-capacity error. Any other failure fails fast.
+RAN_MODEL=""
+for MODEL in $CODEX_MODEL $CODEX_FALLBACK_MODELS; do
+    if codex exec \
+        --json \
+        --skip-git-repo-check \
+        --color never \
+        "${SANDBOX_ARGS[@]}" \
+        "${CD_ARGS[@]}" \
+        -c model="$MODEL" \
+        -c model_reasoning_effort="$CODEX_EFFORT" \
+        -o "$REVIEW_FILE" \
+        "$PROMPT" \
+        </dev/null \
+        >"$EVENTS_FILE" \
+        2> "$EVENTS_FILE.stderr"; then
+        RAN_MODEL="$MODEL"
+        break
+    else
         rc=$?
-        echo "error: codex exec failed (rc=$rc)" >&2
+        if capacity_error "$EVENTS_FILE.stderr"; then
+            echo "warn: model $MODEL unavailable (capacity) — trying next in chain" >&2
+            continue
+        fi
+        echo "error: codex exec failed (rc=$rc, model $MODEL)" >&2
         echo "stderr tail:" >&2
         tail -20 "$EVENTS_FILE.stderr" >&2
         exit 1
-    }
+    fi
+done
+if [ -z "$RAN_MODEL" ]; then
+    echo "error: every model in the chain is at capacity: $CODEX_MODEL $CODEX_FALLBACK_MODELS" >&2
+    echo "       retry later, or go cross-vendor per .claude/skills/codex/ROUTING.md" >&2
+    exit 75
+fi
 
 THREAD_ID="$(jq -r 'select(.type == "thread.started") | .thread_id' \
                 "$EVENTS_FILE" 2>/dev/null | head -1)"
@@ -106,7 +124,7 @@ fi
 printf '%s\n' "$THREAD_ID" > "$THREAD_FILE"
 echo "started session for $TARGET"
 echo "  thread id:    $THREAD_ID"
-echo "  model/effort: $CODEX_MODEL / $CODEX_EFFORT"
+echo "  model/effort: $RAN_MODEL / $CODEX_EFFORT$([ "$RAN_MODEL" != "$CODEX_MODEL" ] && echo '  (FALLBACK — primary was at capacity)')"
 echo "  sandbox:      $([ "$BYPASS" = 1 ] && echo bypass || echo "$SANDBOX")"
 echo "  review file:  $REVIEW_FILE"
 echo "---"

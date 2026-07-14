@@ -25,6 +25,7 @@ if [ $# -ne 1 ]; then
     exit 64
 fi
 set_cdkey "$CD_DIR"
+migrate_legacy_state "$1"
 
 REVIEW_FILE="$(review_file "$1")"
 THREAD_FILE="$(thread_file "$1")"

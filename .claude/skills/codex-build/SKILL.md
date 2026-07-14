@@ -10,9 +10,17 @@ Delegate implementation of a plan/brief to Codex CLI — the skill-based replace
 returns a **receipt** (files + labeled claims + mandatory open-doubts). One persistent thread per
 target, so multi-phase plans delegate phase-by-phase with context retained.
 
-**Delegation contract (unchanged):** Codex never commits, pushes, versions, touches `.env`/secrets,
-or edits applied migrations. The Architect owns self-review, fixes, the testing gate, merge, and
-deploy. This skill is the executable form of the `codex-builder-lane` memory.
+**Two builder modes exist (D1) — this skill is EDIT-ONLY mode:**
+- **Ship mode** (the `docs/handoffs/` brief lane, per `AGENTS.md`): Codex branches, commits, pushes,
+  opens the PR, writes a receipt file. Default for queue items / parallel autonomous runs.
+- **Edit-only mode** (THIS skill): Codex edits the worktree only — no branch/commit/push/PR; the
+  final message is the receipt. The prompt declares the mode (`AGENTS.md` has the matching
+  exception, so Codex gets ONE consistent contract). Use for interactive phase-by-phase work and
+  high-stakes (parity/money) changes where the Architect must audit before anything is committed.
+
+In both modes Codex never merges, deploys, touches `.env`/secrets, or edits applied migrations.
+The Architect owns self-review, fixes, the testing gate, commit (edit-only), merge, and deploy.
+This skill is the executable form of the `codex-builder-lane` memory.
 
 State: `.claude/skills/codex-build/state/<sanitized-target>.{thread,review.txt,events.ndjson}`
 (`review.txt` holds Codex's receipt). Shared scripts in `.claude/skills/codex/scripts/`. Export first:
@@ -69,3 +77,21 @@ export STATE_DIR=".claude/skills/codex-build/state"
   worktree to trust or run from inside it. Verify on first use (see the spike plan Phase 5).
 - Audit depth is tiered by risk (CLAUDE.md delegation model): docs/mechanical = diff read;
   engine/money/parity = full verify-ladder rerun by the Architect, never delegated.
+
+## Ops notes (builds run LONG)
+
+- **Always launch via a background run** — a build easily exceeds the Bash tool's 5-min foreground
+  cap; a killed wrapper strands the remote thread with no local `.thread` file.
+- **Killed-wrapper salvage:** the receipt (`-o`) + events file usually survived — recover the
+  thread and resume normally:
+  `jq -r 'select(.type=="thread.started").thread_id' <events.ndjson> | head -1 > <key>.thread`
+- **Never edit a harness script while a run is in flight** — bash reads scripts incrementally; the
+  edit crashes the running interpreter mid-run (hit live 2026-07-14).
+
+## Model unavailable?
+
+Routing lives in `.claude/skills/codex/ROUTING.md` — follow it, don't improvise. Short form: an
+at-capacity error auto-retries the chain (sol → luna) inside the harness; the WHOLE chain down →
+retry later or go cross-vendor NOW (autonomous runs don't stall): Opus subagent, `model: "opus"`,
+`isolation: "worktree"`, the SAME brief content + receipt contract. Codex died mid-build with files
+on disk → salvage the worktree, the Architect finishes verify/commit personally (proven #817).

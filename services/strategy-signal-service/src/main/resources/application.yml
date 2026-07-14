@@ -56,6 +56,16 @@ artha:
     strategy: ${ARTHA_OPENALGO_STRATEGY:ArthaYantra}
   signals:
     engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
+    # Live signal-output watchdog (the 2026-07-14 zero-signals starvation signature). Default OFF —
+    # DORMANT until the owner arms it (flip ARTHA_SIGNALS_STARVATION_WATCHDOG_ENABLED=true in .env,
+    # no image rebuild). Arming prerequisites: (1) validate window-ms against the live p99 inter-
+    # rejection gap (slow open / lunch lull) so a genuinely-quiet-but-healthy stretch doesn't page;
+    # (2) the warmup-grace arm fix (a session whose first gate output lands after ~09:20 would else
+    # false-alarm). The ${ENV} names MUST match the compose passthroughs exactly (#653 trap).
+    starvation-watchdog:
+      enabled: ${ARTHA_SIGNALS_STARVATION_WATCHDOG_ENABLED:false}
+      bar-gap-ms: ${ARTHA_SIGNALS_STARVATION_WATCHDOG_BAR_GAP_MS:180000}
+      window-ms: ${ARTHA_SIGNALS_STARVATION_WATCHDOG_WINDOW_MS:300000}
   notifier:
     # Z1 scalp-signal alerts: a richer ntfy/Telegram push (underlying/strike/option-side, entry/SL/
     # target, confluence) for SCALPER entries, on top of the per-strategy opt-in. Default OFF so a

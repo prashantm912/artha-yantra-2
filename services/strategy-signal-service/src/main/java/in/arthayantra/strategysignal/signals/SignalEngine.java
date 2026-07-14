@@ -166,6 +166,10 @@ public class SignalEngine {
   // received−evaluated (NOT wall-clock, so a quiet market that freezes both does not false-alarm) to
   // catch bars-arriving-but-not-processed. Sole writer is the eval thread (single-threaded → no race).
   private volatile long lastBarEvaluatedAtMs;
+  // Live-only gate-output heartbeat: seeded by the first valid candle of each session date, then
+  // stamped by every block or fire. Zero means no live candle has arrived yet (replay never touches it).
+  private volatile long lastGateOutputAtMs;
+  private volatile LocalDate lastGateOutputSeedDate;
   /**
    * The registry's published+enabled version-id set AS OF the last {@link #reload()} — the reconcile
    * baseline. Comparing the CURRENT published set against this (not against the LOADED subset) is what
@@ -450,6 +454,11 @@ public class SignalEngine {
     return lastBarEvaluatedAtMs;
   }
 
+  /** Wall-clock millis of the last live gate decision (block or fire). */
+  long lastGateOutputAtMs() {
+    return lastGateOutputAtMs;
+  }
+
   /**
    * True iff any loaded strategy subscribes a 1m channel, so {@link SubscriberHealthCanary} stays
    * quiet when there is nothing to receive (no intraday strategy loaded / all-empty-universe session).
@@ -519,6 +528,15 @@ public class SignalEngine {
               new BigDecimal(node.path("close").asText()),
               node.path("volume").asLong(),
               node.hasNonNull("oi") ? new BigDecimal(node.path("oi").asText()) : null);
+      LocalDate sessionDate = candle.bucketStart().atZoneSameInstant(Ist.ZONE).toLocalDate();
+      if (lastGateOutputSeedDate == null || sessionDate.isAfter(lastGateOutputSeedDate)) {
+        // Start each session's output-stall window at its first VALID live bar, not at the Unix
+        // epoch or yesterday's output. This also preserves the pre-first-bar boot grace. Advance
+        // ONLY (never on a backward/mis-dated redelivered bar) so a stale intraday bar cannot
+        // refresh the output heartbeat to now and briefly mask a real starvation.
+        lastGateOutputAtMs = receivedAtMs;
+        lastGateOutputSeedDate = sessionDate;
+      }
       String symbolKey = node.path("exchange").asText() + ":" + node.path("tradingsymbol").asText();
       pending.add(new PendingBar(symbolKey, candle, receivedAtMs)); // queue, never collapse
       if (drainScheduled.compareAndSet(false, true)) {
@@ -965,6 +983,7 @@ public class SignalEngine {
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
       EntryEvaluator.Evaluation evaluation, ScalperConfluenceGate.Decision decision,
       ScalperConfluenceGate.FiredDiagnostic firedDiagnostic) {
+    lastGateOutputAtMs = clock.millis();
     // Per-book risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission for
     // this strategy's book for the rest of the IST day — exit/stop evaluation (emit()) is NOT gated.
     if (emissionGuard.isPresent() && !emissionGuard.get().entryAllowed(strategy.book())) {
@@ -1202,6 +1221,7 @@ public class SignalEngine {
   private void recordRejection(
       Loaded strategy, String exchange, String tradingsymbol, String interval, OffsetDateTime barTime,
       ScalperConfluenceGate.RejectionDiagnostic d) {
+    lastGateOutputAtMs = clock.millis();
     if (d == null) {
       log.info("scalper confluence blocked entry: {} {}:{} (no diagnostic)", strategy.slug(), exchange, tradingsymbol);
       return;
@@ -1341,6 +1361,7 @@ public class SignalEngine {
   private void emit(
       Loaded strategy, String exchange, String tradingsymbol, String interval, String type,
       EngineCandle bar, SignalRepository.SignalRow anchor, String exitReason) {
+    lastGateOutputAtMs = clock.millis();
     String side = "SELL".equals(anchor.side()) ? "BUY" : "SELL"; // the closing side
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     // Insert + anchor transition commit atomically: a failure between them left the entry ACTIVE

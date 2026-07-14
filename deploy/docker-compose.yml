@@ -389,6 +389,12 @@ services:
       # Total-response timeout (ms) for the eval-loop candle warm-up fetch — a slow market-data must
       # fail fast, never park signal generation (2026-07-14 incident). Default 10s.
       ARTHA_MARKETDATA_CANDLES_FETCH_TIMEOUT_MS: ${ARTHA_MARKETDATA_CANDLES_FETCH_TIMEOUT_MS:-10000}
+      # Output-starvation watchdog: page only when live bars arrive and evaluation keeps up but the
+      # gate produces neither a rejection nor a signal for the configured window. DORMANT by default
+      # (`:-false`) — owner arms via .env after validating window-ms + the warmup-grace fix land.
+      ARTHA_SIGNALS_STARVATION_WATCHDOG_ENABLED: ${ARTHA_SIGNALS_STARVATION_WATCHDOG_ENABLED:-false}
+      ARTHA_SIGNALS_STARVATION_WATCHDOG_BAR_GAP_MS: ${ARTHA_SIGNALS_STARVATION_WATCHDOG_BAR_GAP_MS:-180000}
+      ARTHA_SIGNALS_STARVATION_WATCHDOG_WINDOW_MS: ${ARTHA_SIGNALS_STARVATION_WATCHDOG_WINDOW_MS:-300000}
       # Phase 41 notifier (Q6): the signal-push ntfy endpoint + its OWN topic (distinct from the
       # ops topic). Under mock this points at the WireMock stub; live mode overrides both.
       # Fail-CLOSED defaults (audit P0-6): the old wiremock fallback ran in LIVE too — every

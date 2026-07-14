@@ -61,8 +61,11 @@ public class JournalController {
       @RequestParam(required = false) String linkedTo,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(defaultValue = "0") int offset) {
-    List<Entry> items = repository.list(tag, from, to, minRating, linkedTo, limit, offset);
-    return Map.of("items", items, "limit", limit, "offset", offset);
+    int boundedLimit = Math.min(Math.max(limit, 1), 500);
+    int boundedOffset = Math.max(offset, 0);
+    List<Entry> items =
+        repository.list(tag, from, to, minRating, linkedTo, boundedLimit, boundedOffset);
+    return Map.of("items", items, "limit", boundedLimit, "offset", boundedOffset);
   }
 
   /**

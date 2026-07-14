@@ -340,8 +340,10 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `ship-a-change` (single-session), `delegated-ship` (Opus-builder pipeline for queue
   items / autonomous runs — the delegation model's executable form), `build-service`,
   `adversarial-review`, `swing-backtest`, `scalper-backtest`, `live-verify`, `arm-flag`,
-  `daily-ops`, `session-analysis`, `run-artha-yantra`, `mock-walk`, `new-migration` —
-  instead of improvising inline.
+  `daily-ops`, `session-analysis`, `run-artha-yantra`, `mock-walk`, `new-migration`,
+  `research` (no-code spike → findings + BUILD/DEFER verdict), `write-tests` (author tests in
+  our harness — naming/Testcontainers/parity/seam-ladder/coverage-debt), `hotfix` (live-incident
+  fast-lane: snapshot-first, minimal fix, admin-merge, deploy + canary) — instead of improvising inline.
 - **Codex skill suite** (`.claude/skills/codex-*`, shared harness `.claude/skills/codex/`) =
   the skill-based, templated form of the codex-builder-lane — persistent-thread Codex sessions
   instead of on-the-fly `codex exec` strings: `codex-build` (delegate a build in a worktree,

@@ -34,14 +34,16 @@ public class ScreenerController {
       @RequestParam(defaultValue = "25") int limit,
       @RequestParam(defaultValue = "0") int offset) {
     Integer effectiveLookback = lookbackDays != null ? lookbackDays : lookback;
+    int effectiveLimit = Math.max(0, Math.min(limit, 500));
+    int effectiveOffset = Math.max(0, offset);
     List<ScreenerService.Row> items =
         screener.run(
             preset,
             window,
             effectiveLookback,
             new ScreenerService.Filters(minReturnPct, minAvgVolume, minPrice, maxPrice, exchange),
-            Math.min(limit, 500),
-            offset);
-    return Map.of("items", items, "limit", Math.min(limit, 500), "offset", offset);
+            effectiveLimit,
+            effectiveOffset);
+    return Map.of("items", items, "limit", effectiveLimit, "offset", effectiveOffset);
   }
 }

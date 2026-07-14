@@ -342,3 +342,11 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `adversarial-review`, `swing-backtest`, `scalper-backtest`, `live-verify`, `arm-flag`,
   `daily-ops`, `session-analysis`, `run-artha-yantra`, `mock-walk`, `new-migration` —
   instead of improvising inline.
+- **Codex skill suite** (`.claude/skills/codex-*`, shared harness `.claude/skills/codex/`) =
+  the skill-based, templated form of the codex-builder-lane — persistent-thread Codex sessions
+  instead of on-the-fly `codex exec` strings: `codex-build` (delegate a build in a worktree,
+  our receipt contract baked in, `--bypass`), `codex-code-review` + `codex-plan-review`
+  (threaded read-only review against `.claude/skills/codex/checklist.md` = our invariants,
+  `APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` convergence), `codex-ask` (advisory second
+  opinion, no gate). Model/effort in one file (`codex/scripts/_common.sh`); state is
+  per-target + gitignored. Codex never commits/merges/deploys — Architect keeps that.

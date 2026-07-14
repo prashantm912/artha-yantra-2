@@ -15,6 +15,10 @@ mvnw text eol=lf
 # SQL migrations are checksummed by Flyway — keep them byte-stable as LF.
 *.sql text eol=lf
 
+# Codex skill prompt templates — substituted by the harness scripts and sent
+# to Codex; keep LF so no stray CR leaks into the prompt on Windows checkouts.
+*.tpl text eol=lf
+
 # JSON (schema files, OpenAPI contracts, fixtures) — byte-stable as LF so the
 # Maven JAR resource and the on-disk file are identical on all platforms.
 *.json text eol=lf

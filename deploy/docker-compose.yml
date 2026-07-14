@@ -212,7 +212,11 @@ services:
       interval: 10s
       retries: 12
       start_period: 40s
-    mem_limit: 384m
+    # 512m (was 384m): the JVM idles ~310MiB RSS (-Xmx256m heap + ~70-130MiB
+    # metaspace/netty-direct/threads/code-cache) = 81% of 384m, so a GC/traffic
+    # spike total-RSS OOM-killed it (exit 137, ~38h front-door outage 2026-07-12).
+    # Heap stays capped at -Xmx256m; the extra 128m is off-heap headroom → ~61% idle.
+    mem_limit: 512m
     restart: unless-stopped
     logging: *default-logging
 

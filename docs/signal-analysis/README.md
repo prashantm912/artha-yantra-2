@@ -135,6 +135,45 @@ exit approximated. **v2 (exact) needs a small build:** persist the would-be leg
 (strike/expiry/entry-LTP) on each rejection row at evaluation time — then the counterfactual is exact
 and mechanical (see §7 improvement list).
 
+### 4.3 Market-open signal-liveness gate (the `open` routine)
+
+A fast, read-only PASS/FAIL check run ~15–20 min after the open (or anytime in-session) that catches the
+**silent starvation class** — capture healthy but the engine emitting nothing (the 2026-07-14 incident:
+zero signals/rejections all session while candles captured fine, because the single-threaded eval loop
+was parked on an unbounded market-data fetch; fixed #866). No canary alarmed on "healthy feed + zero
+rejections," so this gate closes that gap. Run it every trading morning (schedule it, or on ask).
+
+Steps (all read-only — never restart/deploy/write mid-session):
+
+1. **Time + trading-day** — `TZ='Asia/Kolkata' date`; confirm 09:15–15:30 IST and not a holiday
+   (`libs/market-calendar`). Off-hours/holiday ⇒ STOP (zero is normal). **Clock trap:** the containers
+   run UTC — the `market/health/data` `asOf` is UTC; `10:41Z` = 16:11 IST.
+2. **Stack + login** — the four signal containers healthy; `marketdata.kite_session.last_validated_at`
+   is today (daily login done); market-data canary GREEN (`GET /api/v1/market/health/data`, in-container
+   `wget` on `:8081` bypasses gateway auth).
+3. **Capture fresh** — the scalper signal future has a full recent 1m series:
+   `SELECT count(*), max(bucket AT TIME ZONE 'Asia/Kolkata') FROM marketdata.candles WHERE exchange='NFO'
+   AND interval='1m' AND tradingsymbol=<front-fut> AND bucket >= <today 09:15 +05:30>;` — count should
+   track minutes-since-open, max ≈ now−1m.
+4. **THE GATE — rejections flowing?**
+   `SELECT count(*), max(generated_at AT TIME ZONE 'Asia/Kolkata') FROM strategy.signal_rejections
+    WHERE generated_at >= <today 09:15 +05:30>;`
+   - **>0 and max within a few min of now ⇒ PASS** (the strict ~30-rail gate blocking every bar is
+     normal; zero *fires* is fine, zero *rejections* is not).
+   - **0 while step 3 shows healthy capture ⇒ FAIL = STARVATION.** Alert the owner immediately.
+5. **On FAIL, localize (read-only):** `strategy.subscriber_health_events` for an `eval-stall` today; the
+   eval-thread dump in `docker logs ay-strategy-signal-service` (look for a frame parked in
+   `MarketDataCandlesClient.fetch` / `LiveSeriesStore.refreshFromRest`); `GET
+   /api/v1/signal-rejections/dot-health`. **Snapshot `docker logs` to a file BEFORE proposing any
+   recreate** (a post-incident recreate destroys the evidence — burned us twice).
+6. **Report PASS/FAIL + evidence.** A FAIL fold into that evening's `post` findings file. **Never restart
+   or redeploy to fix it mid-session** — propose; the owner/architect acts (a live fix waits for
+   post-market or pre-open).
+
+Durable follow-up (owner-gated code): a `SignalStarvationCanary` (FeedWatchdog pattern) that auto-alarms
+on "session open + capture fresh + zero rejections for >N min" would make this gate automatic — this
+routine is the interim manual/scheduled version.
+
 ## 5. Findings-file template
 
 ```markdown

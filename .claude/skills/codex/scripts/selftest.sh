@@ -47,6 +47,20 @@ migrate_legacy_state 'legacy-topic'
 [ -f "$STATE_DIR/${newk}.thread" ] || fail "legacy state not migrated to new key"
 [ "$(cat "$STATE_DIR/${newk}.thread")" = "tid-123" ] || fail "migrated content mangled"
 
+# Reset clears base + _refine for a target/worktree, and is worktree-SAFE:
+# resetting worktree 'foo' must NOT touch sibling 'foo2' (whose CDKEY shares a
+# prefix). Enumerated suffixes (as in reset.sh), never a prefix glob.
+export CDKEY="__wt_foo"; unset KEY_SUFFIX
+foo_base="$(thread_file rt)"; : > "$foo_base"
+KEY_SUFFIX=_refine; foo_ref="$(thread_file rt)"; : > "$foo_ref"; unset KEY_SUFFIX
+export CDKEY="__wt_foo2"; foo2_base="$(thread_file rt)"; : > "$foo2_base"
+export CDKEY="__wt_foo"
+for KEY_SUFFIX in "" "_refine"; do rm -f "$(thread_file rt)"; done
+unset KEY_SUFFIX CDKEY
+[ ! -e "$foo_base" ] || fail "reset left foo base state"
+[ ! -e "$foo_ref" ]  || fail "reset left foo _refine state"
+[ -e "$foo2_base" ]  || fail "reset deleted sibling worktree foo2 state (not worktree-safe)"
+
 # ROUTING — capacity_error matches the retryable patterns and nothing else;
 # the fallback chain default is non-empty.
 printf 'ERROR: Selected model is at capacity\n' > "$TMP/cap.txt"

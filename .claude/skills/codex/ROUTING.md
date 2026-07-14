@@ -8,11 +8,18 @@ never hardcode a fallback decision inline in a brief or an ad-hoc command.
 | Role | Primary | Auto fallback (bash) | Cross-vendor fallback (manual) |
 | --- | --- | --- | --- |
 | **Main loop (Architect)** | Fable 5 (owner's `/model` pick) | — | Opus 4.8 via `/model` — owner/summoner choice; all skills are main-loop-model-agnostic |
-| **Builder** | Codex `gpt-5.6-sol` via `codex-build` | `gpt-5.6-luna` (harness retries the chain) | **Opus subagent** — Agent tool, `model: "opus"`, `isolation: "worktree"`, the SAME brief content + receipt contract (the `delegated-ship` path) |
+| **Builder (draft)** | Codex `gpt-5.6-luna` via `codex-build` — fast/cheap bulk build | `gpt-5.6-sol` (harness retries the chain) | **Opus subagent** — Agent tool, `model: "opus"`, `isolation: "worktree"`, the SAME brief content + receipt contract (the `delegated-ship` path) |
+| **Builder (refine)** | Codex `gpt-5.6-sol` — reviews+FIXES luna's draft on a fresh `-refine` thread (write access) | — | Architect finishes the fix during self-review if sol is down |
 | **Code review** | Codex `gpt-5.6-sol` via `codex-code-review` | `gpt-5.6-luna` | **Opus subagent, fresh thread** — writer≠reviewer is preserved (different thread) but cross-VENDOR is lost: label the review "same-vendor" in the record |
 | **Plan review** | Codex via `codex-plan-review` | `gpt-5.6-luna` | same as code review |
 | **Advisory ask** | Codex via `codex-ask` | `gpt-5.6-luna` | Opus subagent (plain Agent question) — or skip; ask is never load-bearing |
 | **Recon / Explore** | Claude Explore agents | — | no Codex dependency; always available |
+
+**codex-build pipeline (three perspectives, luna ≠ sol ≠ Opus):** luna DRAFTS (fast/cheap) → sol
+REVIEWS+FIXES the draft (fresh Codex thread, write access) → Architect testing gate → **Opus**
+cross-vendor review (`claude-review`, per the router below) → **Architect receipt audit = final gate**
+→ tiered promotion. Same canonical order as everything else (below); the sol refine is a Codex-internal
+quality pass BEFORE handoff, the Opus review is the cross-vendor gate — both run, not alternatives.
 
 ## Review router — reviewer is the opposite vendor of the builder
 

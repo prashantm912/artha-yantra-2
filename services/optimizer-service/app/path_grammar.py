@@ -43,7 +43,7 @@ class InvalidParameterPath(ValueError):
 
 
 def is_valid(path: str) -> bool:
-    """True when ``path`` matches one of the four closed productions."""
+    """True when ``path`` matches one of the six closed productions."""
     return any(pattern.match(path) for pattern in _PATTERNS)
 
 

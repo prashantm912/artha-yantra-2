@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.watchlists;
 
+import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ConflictException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
@@ -51,6 +52,9 @@ public class WatchlistController {
   /** Creates a watchlist; duplicate names are 409. */
   @PostMapping
   public ResponseEntity<Map<String, Object>> create(@RequestBody NameRequest request) {
+    if (request.name() == null || request.name().isBlank()) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "watchlist name is required");
+    }
     UUID id = UUID.randomUUID();
     try {
       jdbc.update("INSERT INTO watchlists (id, name) VALUES (?, ?)", id, request.name());

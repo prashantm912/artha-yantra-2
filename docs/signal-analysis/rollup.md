@@ -22,6 +22,9 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 | 2026-07-07 | 638 (09:19–**14:22** — strategy-signal EVAL STALL, feed alive) | 31 | **3** (straddle) | volume-floor 458/638 (RELATIVE #605) | 184 (all CE; **189 PE rows appeared**) | **0 opens** (would-have-fired class dissolved) | 4 (breadth 0% today = REGIME, data alive) | **expiry Tue, −94 pts rangebound. FIRST FIRES: 2× `scalp-straddle-nifty` 0DTE straddles, BOTH LOST (−19%, −6.8%), advisory-only. Relative floor's 1st live session — correctly blocked no-expansion morning. NEW: eval stall 14:22; findings `2026-07-07-session-findings.md` |
 | *(2026-07-08, 2026-07-09)* | 0 | — | — | — | — | — | — | **OUTAGE — zero rejection rows both days (confirmed capture hole through market hours); no session analysis** |
 | 2026-07-10 | 701 (09:19–**14:52** — 3rd EVAL STALL, feed alive to 15:29) | 35 | **9** (3 ENTRY + exits/re-entries) | volume-floor 424/701 (RELATIVE #605) | **219 (all CE — richest yet)** | 19, 9W/19, −24.3 pts, **−₹3,027.30** | 4 (breadth 86.7% = REGIME up-day) | **up-trend +110 pts. FIRST DIRECTIONAL FIRES: `golden-crossover` + `connect-the-dots` CE (comp 0.688) + straddle re-fire — relative floor passed volume-expansion bars. All small LOSERS (afternoon whipsaw, −2% to −9%), advisory-only. ALARM: 3rd eval stall 14:52; #634 canary in image but 0 logs + no recovery; findings `2026-07-10-session-findings.md` |
+| *(2026-07-11 – 2026-07-13)* | — | — | — | — | — | — | — | no findings files run (skipped; weekend + owner-paused days per ledger) |
+| 2026-07-14 | — (starvation incident, see [[live-mode-findings]]) | — | 0 | — | — | — | — | **ZERO SIGNALS ALL SESSION — the eval loop parked on an unbounded market-data candle fetch (different root cause than the 07-07/07-10 subscriber-drop class). Fixed #866 (bounded fetch + dedup), deployed post-market. No dedicated findings file (incident tracked in `live-mode-findings` memory + ledger).** |
+| 2026-07-15 | 396 (09:50–15:21, **4th EVAL STALL 11:49–14:10, self-recovered, thread-level PROVEN, #634/#679 logged nothing**) | 33 | **3** (straddle only) | volume-floor 241/396 | 144 (all CE, max 0.7 — no 0.8 bucket) | 12, 0W/12, −54.7 avg pts, −656.3 pts total | 4 (breadth 72.0% = REGIME) | **rangy/flat day (24,073.5→24,072.0, ±212pt range). 4th confirmed eval stall, DIRECT thread-log proof this time (exactly 1 `signal-eval` line in 2h21m) — capture + an unrelated scheduled canary stayed healthy throughout, masking it from casual checks. SEPARATE finding: 16/17 paper positions had zero live ticks all session (`PaperStaleTickAlerter`). oi_spurt dot showed first-ever life (1.6%) post-#675/#676 recalibration; iv_pair still 0% despite its recalibration. findings `2026-07-15-session-findings.md`** |
 
 ## Per-variant league (cumulative — refresh each rollup pass from the §6 league SQL)
 
@@ -56,14 +59,28 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 - **`context.macro.vix` NULL while vix dot works** (07-06/07) — macro snapshot mirror blind though the dot
   path is fine (60.9% support on 07-07); candidate for a data-health flag, not a gate defect.
 - **shadow entry latency p95 ~105s** (07-06 F8 measure) — no new shadows on 07-07 (0 opens); carry.
-- **strategy-signal EVAL STALL — RECURRING, HIGH (07-07, 07-10).** Silent Redis `candles.1m.*` subscriber
-  drop → `signal-eval` executor starves → nothing logs; **market-data feed healthy throughout** (candles to
-  15:29). 07-07 stalled 14:22 (+ a self-recovered 12:18–13:20 gap); 07-10 stalled 14:52, no recovery before
-  close. **`SubscriberHealthCanary` (#634) was DEPLOYED to catch exactly this** and IS in the 07-10 running
-  image — but it logged nothing and eval did not auto-recover. **Priority: verify #634 actually pages +
-  re-subscribes on a mid-session GREEN-feed-no-bar gap; its stall window or market-hours guard likely needs
-  tightening** (both stalls were in the last ~40 min of the session — a window that clears at 15:30 close
-  would miss them). Thread-dump on the next occurrence.
+- **strategy-signal EVAL STALL — RECURRING, HIGHEST PRIORITY (07-07, 07-10, 07-15; 07-14 was a DIFFERENT
+  root cause, see below).** Silent Redis `candles.1m.*` subscriber drop → `signal-eval` executor starves →
+  nothing logs; **market-data feed healthy throughout** every time. 07-07 stalled 14:22 (+ a self-recovered
+  12:18–13:20 gap); 07-10 stalled 14:52, no recovery before close; **07-15 stalled 11:49–14:10 (2h21m,
+  mid-session, self-recovered) — this time with DIRECT thread-level proof** (`docker logs` filtered to the
+  `signal-eval` thread shows exactly one line in the whole gap) confirming this is the eval-dispatch thread
+  itself going silent, not a sampling artifact, while a DIFFERENT unrelated scheduled thread
+  (`PartialBucketCanary`) kept ticking the whole time — proving the JVM was alive and candle capture was
+  healthy, which is exactly why casual health checks miss this class. **`SubscriberHealthCanary` (#634) +
+  the #679 eval-vs-receipt heartbeat were DEPLOYED to catch exactly this and are in every running image
+  since — 0 telemetry rows across all 3 confirmed occurrences.** Working theory (07-15 analysis): if the
+  Redis SUBSCRIBER drops, `lastBarReceivedAtMs` and `lastBarEvaluatedAtMs` freeze TOGETHER, so #679's
+  receipt-relative heartbeat (deliberately quiet-market-safe) never sees a growing lag and never alarms —
+  a structural blind spot, not a tuning issue. **Priority is no longer "tune #634's window" but "prove #634
+  CAN log a row at all"** — recommend a forced fault-drill (`artha.canary.drill-suppress-key`, already
+  built) before arming anything new on top of it. **The dormant `SignalStarvationCanary` (#868, shipped
+  2026-07-14) explicitly does NOT cover this class either** (its predicate defers to the subscriber
+  watchdog on any receive/eval-gap signature) — its arming timeline is orthogonal to this item.
+- **strategy-signal ZERO-SIGNALS incident, 2026-07-14 — DIFFERENT root cause, FIXED.** The eval loop parked
+  on an UNBOUNDED market-data candle fetch (no subscriber drop — a blocking-call-with-no-timeout bug).
+  Fixed #866 (bounded fetch + dedup), deployed post-market 07-14. Do not conflate with the recurring
+  subscriber-drop class above; the fixes are independent and both needed.
 - **`scalp-straddle-nifty` fires 0DTE/short-dated ATM straddles (07-07, 07-10)** — 07-07 both LOST (−19%,
   −6.8%), 07-10 re-fired (13:09, 14:42) for a small loss. None auto-papered. Owner: confirm straddle-path
   threshold + whether these should route to a paper book.
@@ -84,9 +101,12 @@ already passing at 0.68–0.89.
 - **LANDED #675** (2026-07-10, owner-approved) — env-wired (`ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP`, application.yml + compose passthrough) + default retuned 0.10 → 0.02. NOT merged/deployed.
 - **Diff:** `application.yml` / env `ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP: 0.02` (verify exact passthrough name
   in `ScalperOiProps.java` before landing — CLAUDE.md `${ENV_NAME}` mismatch trap).
-- **Evidence:** iv_pair dot support **0% on all 5 sessions** (2026-07-02/03/06/07/10). The rail asks for a
-  ≥0.10 IV gap between the two 6-strike averages; that gap never occurs on NIFTY weeklies → the 0.8-weight
-  dot is permanently dead, contributing to the 0.816 cap.
+- **Evidence:** iv_pair dot support **0% on all 6 sessions including 07-15** (2026-07-02/03/06/07/10/15) —
+  **still 0% even after this recalibration landed and is live in the running config** (`application.yml`
+  default 0.02, confirmed 07-15). The rail asks for a ≥0.02 IV gap between the two 6-strike averages; that
+  gap apparently still never occurs on NIFTY weeklies → **escalate to a ground-truth check of the real
+  IV-pair-gap distribution** (README §3.8-class query) before assuming 0.02 is the fix — the recalibration
+  may not have been large enough, or the dot's formula itself may need review.
 - **Risk:** loosening to 0.02 makes the dot *reachable*, adding up to 0.8/19.6 ≈ 0.041 of composite headroom
   on rows where the small IV skew genuinely supports the side. Low risk (it can only *activate* a currently
   never-firing dot); measure whether it then over-supports.
@@ -94,8 +114,10 @@ already passing at 0.68–0.89.
 **P2 — `oi_spurt` price floor: `artha.scalper.oi.spurtPricePct` 50 → 5–10.**
 - **LANDED #675** (2026-07-10, owner-approved) — env-wired (`ARTHA_SCALPER_OI_SPURT_PRICE_PCT`, application.yml + compose passthrough) + default retuned 50 → **8** (chosen from the 2,104-bar distribution: ≥8 on 17%). NOT merged/deployed.
 - **Diff:** env `ARTHA_SCALPER_OI_SPURT_PRICE_PCT: 8` (verify passthrough name in `ScalperOiProps.java`).
-- **Evidence:** oi_spurt dot support **0% on all 5 sessions**. The 50(%) price-move floor is unreachable on
-  a 3m scalper bar (`macro.spurtPricePct` is populated non-zero but never near 50). 1.0-weight dead dot.
+- **Evidence:** oi_spurt dot support **0% on 5 sessions, then FIRST LIFE on 07-15 (1.6%, 4/246 rows)** —
+  the floor-8 recalibration is confirmed live in config and producing its first measurable effect. Still
+  tiny; keep watching, do not re-tune yet (need more sessions to judge if 8 is the right floor or just
+  barely reachable).
 - **Risk:** 8% is still a real spurt filter on a 3m bar; setting it too low frees the dot (≈100% support).
   Pick the value from the observed `spurtPricePct` distribution (a rollup ground-truth query) before landing.
 

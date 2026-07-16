@@ -82,6 +82,18 @@ UNPIPED, then `git status -sb` (a `## HEAD (no branch)` line = conflicted rebase
 resolve, `git rebase --continue`, rerun that service's tests). Push, `gh pr create`
 with tier + review tally + test evidence.
 
+**The PR body MUST carry the review verdict in this EXACT greppable shape** (task_07199525):
+```
+Cross-vendor review: APPROVED | REQUEST_CHANGES (resolved) | NEEDS_REWORK (resolved) | SKIPPED (<reason>)
+```
+plus the reviewer's vendor/model. `SKIPPED (<reason>)` is FIRST-CLASS — ROUTING.md legitimately
+allows skipping trivial/docs, and *a rule that cannot express the legitimate case gets ignored in
+the illegitimate one*. The verdict lives ONLY in `state/*.review.txt`, which is **gitignored** and
+dies with the worktree — **the PR body is the only durable record**. Verified 2026-07-17: of three
+PRs shipped the same night through this lane, one carried the verdict, one carried a finding but no
+verdict, and one carried nothing — that review is permanently lost. Do NOT write a separate review
+doc (the PR IS the record; CLAUDE.md forbids proactive doc files).
+
 CI: `gh pr checks <n> --watch`. On an e2e fail, ALWAYS discriminate before acting:
 ```bash
 gh run view <run-id> --log-failed | grep -oE "✘ +[0-9]+ tests/[a-z-]+\.spec\.ts:[0-9]+" | sort -u

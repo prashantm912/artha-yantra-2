@@ -36,6 +36,26 @@ Non-negotiables:
 - End the message with the `Co-Authored-By:` trailer your system prompt specifies.
 - `*.json` is pinned `eol=lf` — after touching `.gitattributes`, `git add --renormalize`.
 - `gh pr create` with: what/why, tier (clean vs HOLD), test evidence, review outcome.
+- **The PR body MUST carry the cross-vendor review verdict in this EXACT greppable shape**
+  (task_07199525) — one line, verbatim keyword, on its own:
+
+  ```
+  Cross-vendor review: APPROVED | REQUEST_CHANGES (resolved) | NEEDS_REWORK (resolved) | SKIPPED (<reason>)
+  ```
+
+  …plus the reviewer's vendor/model (e.g. `— Opus (Anthropic)` / `— gpt-5.6-sol (OpenAI)`).
+
+  **`SKIPPED (<reason>)` is FIRST-CLASS, not an admission.** `ROUTING.md` legitimately allows skipping
+  trivial/docs-only changes — and *a rule that cannot express the legitimate case gets ignored in the
+  illegitimate one*. `SKIPPED (docs-only)` is a complete, correct answer.
+
+  **Why the PR body and not a file:** the verdict is written to `.claude/skills/*/state/*.review.txt`,
+  and everything under `state/` is **gitignored** — per-run scratch on one machine, deleted with the
+  worktree. **The PR body is the only durable record.** Verified 2026-07-17 across three PRs shipped the
+  same night through the same lane: #878 carried the verdict; #877 carried a review *finding* but no
+  verdict; **#879 carried nothing — that review is now permanently unrecoverable.** Do not create a
+  separate review doc: in a solo repo the PR IS the record, GitHub retains it, and CLAUDE.md forbids
+  proactive doc files.
 
 ## 4. CI → merge
 

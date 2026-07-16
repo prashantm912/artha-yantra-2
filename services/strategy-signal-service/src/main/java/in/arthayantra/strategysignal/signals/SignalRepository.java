@@ -133,10 +133,11 @@ public class SignalRepository {
     return jdbc.query(sql.toString(), this::row, args.toArray());
   }
 
-  /** All ACTIVE signals, newest first. */
+  /** All active ENTRY signals that may appear in the takeable feed, newest first. */
   public List<SignalRow> active() {
     return jdbc.query(
-        "SELECT * FROM signals WHERE status = 'ACTIVE' ORDER BY generated_at DESC, id DESC",
+        "SELECT * FROM signals WHERE signal_type = 'ENTRY' AND status = 'ACTIVE'"
+            + " ORDER BY generated_at DESC, id DESC",
         this::row);
   }
 

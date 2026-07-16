@@ -306,6 +306,8 @@ public class PaperService {
                 throw new DuplicateOrderException(original);
               });
     }
+    // A linked EXIT row is a close advisory, never a proposition to open new exposure. This guard applies
+    // to every book; only the separate age gate below exempts swing books.
     // HOLD (task_94f40cf6) signal-freshness gate: a signal TAKEN by hand hours after emission fills at
     // today's tick, but the SIGNAL's thesis is stale (a scalper's option premium has moved, the setup
     // is gone). Reject a too-old signal-linked take with 422 SIGNAL_STALE (age + limit in the body).
@@ -315,27 +317,35 @@ public class PaperService {
     // hand ticket with no signalId (a MANUAL order) has no signal to age-check. Runs AFTER the
     // idempotency replay (a replay of an already-filled order must return the original even if the
     // signal has since aged out) and, like the governor, OUTSIDE the fill txn.
-    if (request.signalId() != null
-        && signalTakeMaxAge.compareTo(Duration.ZERO) > 0
-        && !isSwingBook(book)) {
+    if (request.signalId() != null) {
       long signalId = request.signalId();
       signals
           .find(signalId)
           .ifPresent(
               signal -> {
-                Duration age = Duration.between(signal.generatedAt().toInstant(), java.time.Instant.now());
-                if (age.compareTo(signalTakeMaxAge) > 0) {
+                if (!"ENTRY".equals(signal.signalType())) {
                   throw new ApiException(
                       422,
-                      ErrorCodes.SIGNAL_STALE,
-                      "signal #" + signalId + " is " + age.toMinutes() + "m old (max "
-                          + signalTakeMaxAge.toMinutes() + "m for book " + book
-                          + ") — refusing a stale-signal take",
-                      Map.of(
-                          "signalId", signalId,
-                          "book", book,
-                          "signalAgeMinutes", age.toMinutes(),
-                          "maxAgeMinutes", signalTakeMaxAge.toMinutes()));
+                      ErrorCodes.VALIDATION_FAILED,
+                      "signal #" + signalId + " is " + signal.signalType()
+                          + " and cannot open a paper position",
+                      Map.of("signalId", signalId, "signalType", signal.signalType()));
+                }
+                if (signalTakeMaxAge.compareTo(Duration.ZERO) > 0 && !isSwingBook(book)) {
+                  Duration age = Duration.between(signal.generatedAt().toInstant(), java.time.Instant.now());
+                  if (age.compareTo(signalTakeMaxAge) > 0) {
+                    throw new ApiException(
+                        422,
+                        ErrorCodes.SIGNAL_STALE,
+                        "signal #" + signalId + " is " + age.toMinutes() + "m old (max "
+                            + signalTakeMaxAge.toMinutes() + "m for book " + book
+                            + ") — refusing a stale-signal take",
+                        Map.of(
+                            "signalId", signalId,
+                            "book", book,
+                            "signalAgeMinutes", age.toMinutes(),
+                            "maxAgeMinutes", signalTakeMaxAge.toMinutes()));
+                  }
                 }
               });
     }
@@ -409,6 +419,19 @@ public class PaperService {
           signals
               .find(request.signalId())
               .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_SIGNAL, "no such signal"));
+      // STRUCTURAL INVARIANT — an EXIT never opens exposure. The callers are guarded too
+      // (openManualOrder + SignalsController.taken), but this is the layer that actually WRITES the
+      // position, so the assert belongs here: a future SignalTaken publisher or a direct openOrder
+      // caller would otherwise silently reopen the defect that put a live SELL into the long-only
+      // manas-arora book on 2026-07-12. Free — the row is already loaded.
+      if (!"ENTRY".equals(signal.signalType())) {
+        throw new ApiException(
+            422,
+            ErrorCodes.VALIDATION_FAILED,
+            "signal #" + request.signalId() + " is " + signal.signalType()
+                + " and cannot open a paper position",
+            Map.of("signalId", request.signalId(), "signalType", signal.signalType()));
+      }
       // Prefer the request's EXPLICIT instrument when given (the #11 straddle opens its PE leg with an
       // explicit symbol/side/price while still linking the fill to the parent signal); fall back to the
       // signal's primary leg otherwise — backward-identical for every directional take (passes nulls).

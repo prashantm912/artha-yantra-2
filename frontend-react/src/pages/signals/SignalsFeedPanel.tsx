@@ -62,7 +62,12 @@ export function SignalsFeedPanel({
                     </span>
                   </span>
                 </Link>
-                {takeable && openId !== s.id && (
+                {/* ENTRY only: an EXIT is an advisory to CLOSE, never a tradeable proposition. Its
+                    `side` is the CLOSING action (a long's exit is a SELL), so an ungated button here
+                    reads as a short entry and opens one — that is exactly how a live SELL was opened
+                    in the long-only manas-arora book on 2026-07-12. The server 422s it now, but an
+                    offered-then-silently-refused button is its own hazard. */}
+                {takeable && s.signalType === 'ENTRY' && openId !== s.id && (
                   <button
                     type="button"
                     onClick={() => setOpenId(s.id)}
@@ -73,7 +78,7 @@ export function SignalsFeedPanel({
                   </button>
                 )}
               </div>
-              {takeable && openId === s.id && (
+              {takeable && s.signalType === 'ENTRY' && openId === s.id && (
                 <SignalTakeTicket signal={s} onDone={() => setOpenId(null)} />
               )}
             </li>

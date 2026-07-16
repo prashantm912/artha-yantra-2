@@ -259,7 +259,19 @@ export function SignalsPage() {
                 <ManualVerifyChecklist detail={scalperDetail} onConfirmedChange={onConfirmedChange} />
               </div>
             )}
+            {/* Without this the refusal was silent: the page rendered only take.isPending, so a
+                422 (non-ENTRY, stale, or risk-vetoed) left "✓ Taken" doing nothing — which reads as
+                success. */}
+            {take.isError && (
+              <p className="mb-2 text-xs text-bear" role="alert">
+                Couldn&apos;t mark this signal taken — it was refused. An EXIT advisory cannot be
+                taken as an entry; a stale signal is also refused.
+              </p>
+            )}
             <div className="mb-4 flex flex-wrap gap-2">
+              {/* ENTRY only — an EXIT is an advisory to CLOSE (its `side` is the closing action), and
+                  taking one opens exposure in the wrong direction. The server 422s it; do not offer it. */}
+              {selected.signalType === 'ENTRY' && (
               <button
                 type="button"
                 onClick={() => take.mutate({ id: selected.id, qty: takenQty(selected) })}
@@ -269,6 +281,7 @@ export function SignalsPage() {
               >
                 ✓ Taken
               </button>
+              )}
               <button
                 type="button"
                 onClick={() => dismiss.mutate(selected.id)}

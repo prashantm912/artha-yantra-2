@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.signals;
 
 import in.arthayantra.common.web.csv.CsvExport;
+import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import java.math.BigDecimal;
@@ -99,7 +100,7 @@ public class SignalsController {
     return w.download("signals.csv");
   }
 
-  /** Currently live calls. */
+  /** Currently takeable ENTRY calls; EXIT advisories remain on history and sell-decision surfaces. */
   @GetMapping("/active")
   public Map<String, Object> active() {
     return Map.of("items", repository.active().stream().map(SignalsController::dto).toList());
@@ -114,17 +115,24 @@ public class SignalsController {
     return dto(row);
   }
 
-  /** Owner executed manually at the broker; optionally opens a paper position (when a qty is given). */
+  /** Owner executed an ENTRY manually at the broker; optionally opens paper when a qty is given. */
   @PostMapping("/{id}/taken")
   public Map<String, Object> taken(
       @PathVariable long id, @RequestBody(required = false) TakenRequest request) {
-    requireExists(id);
+    SignalRepository.SignalRow signal = requireExists(id);
+    if (!"ENTRY".equals(signal.signalType())) {
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "signal #" + id + " is " + signal.signalType() + " and cannot be taken as an entry",
+          Map.of("signalId", id, "signalType", signal.signalType()));
+    }
     Integer qty = request == null ? null : request.qty();
     BigDecimal fillPrice =
         request == null || request.fillPrice() == null ? null : new BigDecimal(request.fillPrice());
     // A signal carries a scalper_detail side-channel iff a scalper strategy emitted it (E10) — the
     // flag rides the event so the paper listener charges the open to a 5-account sub-ledger.
-    boolean scalper = repository.find(id).map(r -> r.scalperDetail() != null).orElse(false);
+    boolean scalper = signal.scalperDetail() != null;
     // Guarded CAS ACTIVE→TAKEN: publish (and thus open a paper position) only if THIS call won the
     // transition — an already-TAKEN signal (auto-paper or a double-submit) is an idempotent no-op.
     if (repository.transitionIf(id, "ACTIVE", "TAKEN")) {
@@ -141,10 +149,9 @@ public class SignalsController {
     return detail(id);
   }
 
-  private void requireExists(long id) {
-    if (repository.find(id).isEmpty()) {
-      throw new NotFoundException(ErrorCodes.NOT_FOUND_SIGNAL, "no such signal");
-    }
+  private SignalRepository.SignalRow requireExists(long id) {
+    return repository.find(id)
+        .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_SIGNAL, "no such signal"));
   }
 
   private static Map<String, Object> dto(SignalRepository.SignalRow row) {

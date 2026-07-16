@@ -10,7 +10,9 @@ import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -22,9 +24,9 @@ import org.springframework.test.web.servlet.MockMvc;
  * INT increment I2 (intelligence-layer design §6.1.2–4 / §6.4): the market-data futures / equity /
  * FII digests, the cross-expiry compare, and the three NEW bhavcopy folds (above-MA counts, universe
  * delivery-z, date-parameterized sector rotation), exercised against the Timescale container + the
- * real deploy/flyway marketdata lineage. Isolation on the shared singleton DB (no per-method
- * cleanup): UNIQUE synthetic symbols/underlyings and UNIQUE far-past session dates so each fold
- * anchors on this test's rows. The futures universe is overridden to a unique underlying so the
+ * real deploy/flyway marketdata lineage. Isolation on the shared singleton DB uses unique synthetic
+ * identifiers where possible plus symbol-and-date-scoped cleanup for bhavcopy rows that require
+ * real sector-mapped tickers. The futures universe is overridden to a unique underlying so the
  * digest only sees the seeded snapshots.
  */
 @SpringBootTest(
@@ -40,19 +42,50 @@ import org.springframework.test.web.servlet.MockMvc;
 class MarketContextI2IntegrationTest extends MarketDataIntegrationTestBase {
 
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
+  private static final LocalDate OWN_BHAVCOPY_FROM = LocalDate.of(2026, 11, 2);
+  private static final LocalDate OWN_BHAVCOPY_TO = LocalDate.of(2026, 12, 15);
+  private static final List<String> OWN_BHAVCOPY_SYMBOLS =
+      List.of("CTXRISER", "CTXFALLER", "TCS", "INFY", "HDFCBANK");
 
   @Autowired MockMvc mockMvc;
   @Autowired JdbcTemplate jdbc;
 
   /**
-   * The equity digest folds are universe-wide and {@code max(trade_date)}-sensitive for OTHER tests
-   * (returns / sector-stats / index-contribution read the latest EQ session). This test seeds FUTURE
-   * bhavcopy sessions for clean isolation, so it must not leave them behind to shift that global
-   * latest session on the shared singleton DB. No other test seeds bhavcopy beyond 2026-07-06.
+   * OWN the FII-derivative trust precondition instead of assuming it.
+   *
+   * <p>{@code fiiDigestGatesDerivativeOnAnalyticsAndFoldsCashAndParticipant} asserts the
+   * analytics-disabled reason, which {@code FiiDigestService:265-270} only emits when the
+   * {@code NSE_FII_DERIVATIVE} ingest trust is NOT "OK". That trust is the {@link
+   * in.arthayantra.marketdata.canary.IngestHealthBoard} verdict for {@code
+   * previousTradingDay(today)} — read off the REAL clock ({@code ClockConfig} = {@code
+   * Clock.systemUTC()}).
+   *
+   * <p>Meanwhile {@code NseEodScheduler:54} ({@code @EventListener(ApplicationReadyEvent)}) fires on
+   * EVERY Spring context boot in this suite and writes a real SUCCESS {@code NSE_FII_DERIVATIVE}
+   * ledger row stamped {@code now()} (the mock fetcher is {@code @Profile("!live")}, so it is always
+   * present here). While that row is still "today" it sits OUTSIDE the board's window and the test
+   * passes — but the instant IST midnight rolls, it becomes the board's newest settled day, flips
+   * the verdict GREEN, and the reason silently changes to "no FII derivative row for the session".
+   *
+   * <p>That made the test fail for roughly one minute per day (reproduced 2026-07-17 by seeding this
+   * exact row) — an empty-diff main-red generator, and CI's 18:30 UTC window IS IST midnight.
+   * Purging the source's ledger rows makes the precondition deterministic regardless of wall-clock.
    */
+  @BeforeEach
+  void ownFiiDerivativeTrustPrecondition() {
+    jdbc.update("DELETE FROM ingest_runs WHERE source = 'NSE_FII_DERIVATIVE'");
+  }
+
+  /** Remove only this class's symbols within its seeded date envelope from the shared singleton DB. */
   @AfterEach
-  void dropSeededFutureBhavcopy() {
-    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE trade_date >= DATE '2026-08-01'");
+  void dropSeededBhavcopy() {
+    for (String symbol : OWN_BHAVCOPY_SYMBOLS) {
+      jdbc.update(
+          "DELETE FROM nse_eod_bhavcopy WHERE symbol = ? AND trade_date BETWEEN ? AND ?",
+          symbol,
+          java.sql.Date.valueOf(OWN_BHAVCOPY_FROM),
+          java.sql.Date.valueOf(OWN_BHAVCOPY_TO));
+    }
   }
 
   // ---- futures-digest --------------------------------------------------------------------------
@@ -86,7 +119,7 @@ class MarketContextI2IntegrationTest extends MarketDataIntegrationTestBase {
     // Future session dates so the universe-wide folds isolate cleanly on the shared singleton DB
     // (no test seeds EQ bhavcopy beyond 2026-07-06, so this window holds only these rows).
     // 22 ascending sessions for a riser, 22 descending for a faller.
-    LocalDate end = LocalDate.of(2026, 12, 15);
+    LocalDate end = OWN_BHAVCOPY_TO;
     for (int i = 21; i >= 0; i--) {
       LocalDate d = end.minusDays(i);
       double riser = 100 + (21 - i); // ascending ⇒ latest close is the highest ⇒ above its MA20
@@ -122,7 +155,7 @@ class MarketContextI2IntegrationTest extends MarketDataIntegrationTestBase {
     // sector performance, plus a LATER session; a digest for the middle date must reflect THAT
     // session (proving it is not hardwired to the latest session, the pre-I2 behavior). Future
     // dates isolate cleanly on the shared DB.
-    LocalDate prior = LocalDate.of(2026, 11, 2);
+    LocalDate prior = OWN_BHAVCOPY_FROM;
     LocalDate target = LocalDate.of(2026, 11, 3);
     LocalDate later = LocalDate.of(2026, 11, 4);
     // target session: IT sector strong (+5%), Financials weak (-3%).

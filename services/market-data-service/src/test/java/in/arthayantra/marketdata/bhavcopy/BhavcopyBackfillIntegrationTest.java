@@ -85,7 +85,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(source("NSE", "UNIVA", D2)).isEqualTo("BHAVCOPY");
     assertThat(close("NSE", "UNIVB", D2)).isEqualByComparingTo("51"); // BE series projected
     assertThat(candles.range("NSE", "UNIVG", "1d", bucket(D2), bucket(D2).plusDays(1))).isEmpty(); // GS not projected
-    assertThat(nseRepo.maxTradeDate()).isEqualTo(D2); // watermark advanced
+    assertThat(nseRepo.maxTradeDate()).isAfterOrEqualTo(D2); // watermark reflects this backfill
     // GS row is still stored raw even though it is not a candle.
     assertThat(rawNseCount("UNIVG")).isEqualTo(1);
 

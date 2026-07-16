@@ -39,15 +39,23 @@ class BreadthControllerIntegrationTest extends MarketDataIntegrationTestBase {
         delivPer);
   }
 
+  // Breadth AGGREGATES every bhavcopy row for its date, and the ITs share one singleton DB with no
+  // per-method cleanup — so this date must belong to this test alone. It previously used 2026-06-12,
+  // which EquityControllerIntegrationTest also seeds (prev_close=100 -> close=108, an advancer):
+  // whenever that class happened to run first, advances came back 3 instead of 2. Nothing in
+  // market-data uses 2024, and the date is inside the bundled market-calendar range (2024-2026).
+  // Do NOT reuse this date elsewhere.
+  private static final LocalDate BREADTH_ONLY_DATE = LocalDate.of(2024, 6, 12);
+
   @Test
   void breadthCountsAdvancesDeclinesAndDeliveryLeaders() throws Exception {
-    LocalDate d = LocalDate.of(2026, 6, 12);
+    LocalDate d = BREADTH_ONLY_DATE;
     insertBhav(d, "RELIANCE", "100", "110", "55.50"); // advancer
     insertBhav(d, "TCS", "200", "210", "60.00"); // advancer, top delivery
     insertBhav(d, "INFY", "300", "290", "40.00"); // decliner
 
     mockMvc
-        .perform(get("/api/v1/market/breadth").param("date", "2026-06-12"))
+        .perform(get("/api/v1/market/breadth").param("date", BREADTH_ONLY_DATE.toString()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.summary.advances").value(2))
         .andExpect(jsonPath("$.summary.declines").value(1))

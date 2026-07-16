@@ -35,6 +35,7 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -49,6 +50,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +60,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
@@ -79,6 +84,17 @@ import org.springframework.stereotype.Component;
 public class SignalEngine {
 
   private static final Logger log = LoggerFactory.getLogger(SignalEngine.class);
+  // Canonical source: market-data's SessionStatusPublisher.STATUS_CHANNEL / STATUS_KEY. The CHANNEL
+  // is edge-only (publish-on-change); the KEY is level-triggered (re-set every 5 min by
+  // market-data's SessionHealthProbe) — start() reads the key so a CONNECTED published before this
+  // engine subscribed cannot be missed forever (Redis pub/sub is fire-and-forget).
+  private static final String KITE_STATUS_CHANNEL = "kite.status";
+  private static final String KITE_STATUS_KEY = "kite:session:status";
+  private static final String KITE_STATUS_CONNECTED = "CONNECTED";
+  // kite-rest remains OPEN for 30s (market-data application.yml wait-duration-in-open-state);
+  // attempts at t=0, ~35s and ~70s outlive it with margin.
+  private static final int KITE_CONNECTED_RELOAD_MAX_ATTEMPTS = 3;
+  private static final long KITE_CONNECTED_RELOAD_DELAY_MILLIS = 35_000L;
 
   /** One loaded (strategy, version) with its resolved universe; {@code scalper} non-null = Track-2. */
   record Loaded(
@@ -128,6 +144,16 @@ public class SignalEngine {
   private final ThreadLocal<Long> currentBarReceivedAtMs = ThreadLocal.withInitial(() -> 0L);
   private final AtomicBoolean drainScheduled = new AtomicBoolean();
   private final AtomicBoolean reloadRequested = new AtomicBoolean(true);
+  private final AtomicBoolean kiteConnectedReloadInFlight = new AtomicBoolean();
+  private final AtomicBoolean stopped = new AtomicBoolean();
+  // How many strategies the LAST reload dropped because their universe would not resolve (the
+  // Kite-dependent skip only — swing/non-rollable/load-failure skips are legitimate and excluded).
+  // >0 means that reload was DEGRADED, which is what the CONNECTED retry chain converges on:
+  // "loaded is non-empty" is NOT a recovery signal, because the drop is PER strategy and a breaker
+  // that re-opens mid-reload can leave a partial set loaded (1 of 39) that looks like success.
+  private volatile int lastReloadEmptyUniverseDrops;
+  // Package-visible so tests can shorten it; ONE source of truth (no @Value default to drift from).
+  long kiteConnectedReloadDelayMillis = KITE_CONNECTED_RELOAD_DELAY_MILLIS;
   // Warm ta4j banks per (version|instrument) — cleared on reload/hot-swap (P1-12, D17 live).
   private final Map<String, IndicatorBank> bankCache = new ConcurrentHashMap<>();
   private final Map<String, LocalDate> preCloseDone = new ConcurrentHashMap<>();
@@ -147,6 +173,13 @@ public class SignalEngine {
       Executors.newSingleThreadExecutor(
           r -> {
             Thread t = new Thread(r, "subscriber-recovery");
+            t.setDaemon(true);
+            return t;
+          });
+  private final ScheduledExecutorService kiteConnectedReloadScheduler =
+      Executors.newSingleThreadScheduledExecutor(
+          r -> {
+            Thread t = new Thread(r, "kite-connected-reload");
             t.setDaemon(true);
             return t;
           });
@@ -236,22 +269,54 @@ public class SignalEngine {
   @EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
   public synchronized void start() {
     reload();
+    // reload() -> resubscribe() has now registered the kite.status listener. The CHANNEL is edge-only
+    // (SessionStatusPublisher publishes on CHANGE) and Redis pub/sub is fire-and-forget, so a
+    // CONNECTED published while this engine was still booting is lost FOREVER — and no further
+    // CONNECTED ever comes, because the state is already CONNECTED. That would strand the engine at
+    // 0 strategies for the session: exactly the 2026-07-16 outage this fix exists to prevent.
+    // The KEY is level-triggered, so read it once here to close that boot race.
+    if (lastReloadEmptyUniverseDrops > 0 && KITE_STATUS_CONNECTED.equals(readKiteSessionStatus())) {
+      log.info("boot: kite session already CONNECTED and universes unresolved — reloading");
+      requestKiteConnectedReload();
+    }
+  }
+
+  /** The level-triggered {@code kite:session:status} key; null when absent or Redis is unreachable. */
+  private String readKiteSessionStatus() {
+    try (RedisConnection connection = connectionFactory.getConnection()) {
+      byte[] value =
+          connection.stringCommands().get(KITE_STATUS_KEY.getBytes(StandardCharsets.UTF_8));
+      return value == null ? null : new String(value, StandardCharsets.UTF_8);
+    } catch (RuntimeException e) {
+      log.warn("could not read {}: {}", KITE_STATUS_KEY, e.toString());
+      return null;
+    }
   }
 
   @EventListener(ContextClosedEvent.class)
   void stop() {
-    if (container != null) {
-      container.stop();
-    }
+    stopped.set(true);
+    kiteConnectedReloadInFlight.set(false);
+    kiteConnectedReloadScheduler.shutdownNow();
     evalExecutor.shutdownNow();
     recoveryExecutor.shutdownNow();
+    synchronized (this) {
+      if (container != null) {
+        container.stop();
+        container = null;
+      }
+    }
   }
 
   /** (Re)loads published+enabled strategies and rebuilds subscriptions. */
   public synchronized void reload() {
+    if (stopped.get()) {
+      return;
+    }
     reloadRequested.set(false);
     bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
     List<Loaded> fresh = new ArrayList<>();
+    int emptyUniverseDrops = 0;
     List<StrategyRepository.StrategyRow> all = registry.listAll();
     for (StrategyRepository.StrategyRow strategy : all) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
@@ -305,6 +370,17 @@ public class SignalEngine {
         }
         List<StrategyDefinition.InstrumentRef> universe = resolveUniverse(config);
         if (universe.isEmpty()) {
+          // Counted (NOT the swing/non-rollable skips above, which are by design): this is the
+          // Kite-dependent drop — market-data's term-structure 503s while the session is expired or
+          // the kite-rest breaker is open, so the resolver yields nothing. It is what the CONNECTED
+          // retry converges on. Per strategy, so a breaker re-opening mid-reload drops SOME.
+          // EXCEPT futures_screener: resolveScreener() returns empty for BOTH a resolution failure
+          // AND a legitimately empty screen (no qualifying movers), so it cannot signal a
+          // Kite-dependent drop. Counting it would make a flat-market screener report drops
+          // FOREVER — a permanent false DEGRADED plus a bankCache wipe per retry, every login.
+          if (!"futures_screener".equals(config.path("universe").path("mode").asText())) {
+            emptyUniverseDrops++;
+          }
           log.warn("strategy {} resolves to an empty universe — not loaded", strategy.slug());
           continue;
         }
@@ -349,11 +425,14 @@ public class SignalEngine {
       }
     }
     this.loaded = List.copyOf(fresh);
+    this.lastReloadEmptyUniverseDrops = emptyUniverseDrops;
     // Snapshot the published set THIS reload was based on (from the same registry read), so the 20s
     // reconcile compares registry-vs-registry and converges even though `loaded` is a subset.
     this.lastReloadedPublishedSet = publishedVersionSetOf(all);
     resubscribe();
-    log.info("signal engine loaded {} published strategies", fresh.size());
+    log.info(
+        "signal engine loaded {} published strategies ({} dropped on an unresolved universe)",
+        fresh.size(), emptyUniverseDrops);
   }
 
   private List<StrategyDefinition.InstrumentRef> resolveUniverse(JsonNode config) {
@@ -406,6 +485,9 @@ public class SignalEngine {
   }
 
   private synchronized void resubscribe() {
+    if (stopped.get()) {
+      return;
+    }
     // Start the NEW container BEFORE stopping the old one: Redis pub/sub is fire-and-forget, so a
     // stop-then-start gap permanently loses any 1m bar published in between (the 1m series is
     // never re-fetched after warm-up — audit resubscribe-gap-drops-1m-bars). A bar delivered by
@@ -434,8 +516,19 @@ public class SignalEngine {
           evalExecutor.execute(this::drainReloadOnly);
         },
         new ChannelTopic(in.arthayantra.strategysignal.registry.StrategyChangedPublisher.CHANNEL));
+    fresh.addMessageListener(
+        (message, pattern) -> {
+          if (KITE_STATUS_CONNECTED.equals(new String(message.getBody(), StandardCharsets.UTF_8))) {
+            requestKiteConnectedReload();
+          }
+        },
+        new ChannelTopic(KITE_STATUS_CHANNEL));
     fresh.afterPropertiesSet();
     fresh.start();
+    if (stopped.get()) {
+      fresh.stop();
+      return;
+    }
     RedisMessageListenerContainer old = this.container;
     this.container = fresh;
     if (old != null) {
@@ -1446,6 +1539,99 @@ public class SignalEngine {
   private void drainReloadOnly() {
     if (reloadRequested.get()) {
       reload();
+    }
+  }
+
+  /** True while a CONNECTED retry chain is still running (tests wait for quiescence). */
+  boolean kiteConnectedReloadInFlight() {
+    return kiteConnectedReloadInFlight.get();
+  }
+
+  private void requestKiteConnectedReload() {
+    if (stopped.get()) {
+      return;
+    }
+    if (!kiteConnectedReloadInFlight.compareAndSet(false, true)) {
+      log.info("kite.status CONNECTED received — reload retry already in flight");
+      return;
+    }
+    log.info("kite.status CONNECTED received — requesting bounded strategy reload");
+    submitKiteConnectedReloadAttempt(1);
+  }
+
+  private void submitKiteConnectedReloadAttempt(int attempt) {
+    boolean handedOff = false;
+    try {
+      if (stopped.get()) {
+        return;
+      }
+      evalExecutor.execute(() -> runKiteConnectedReloadAttempt(attempt));
+      handedOff = true;
+    } catch (RejectedExecutionException e) {
+      if (!evalExecutor.isShutdown()) {
+        log.warn("kite.status reload attempt {} was rejected: {}", attempt, e.toString());
+      }
+    } finally {
+      // Clear unless the attempt now OWNS the flag. `finally` (not scattered set(false) calls) so an
+      // Error — not just a RuntimeException — can never strand the flag true: a stuck flag would make
+      // the CAS in requestKiteConnectedReload() reject every future CONNECTED, silently disabling
+      // this self-heal for the life of the JVM.
+      if (!handedOff) {
+        kiteConnectedReloadInFlight.set(false);
+      }
+    }
+  }
+
+  private void runKiteConnectedReloadAttempt(int attempt) {
+    boolean retryScheduled = false;
+    try {
+      if (stopped.get()) {
+        return;
+      }
+      boolean reloadCompleted = false;
+      try {
+        reloadRequested.set(true);
+        drainReloadOnly();
+        reloadCompleted = true;
+      } catch (RuntimeException e) {
+        log.warn("kite.status reload attempt {} failed: {}", attempt, e.toString());
+      }
+
+      // Converge on "every universe resolved", NOT on "something loaded": the drop is per strategy,
+      // so a breaker that re-opens partway through a reload can leave 1-of-39 loaded — a non-empty
+      // `loaded` that is really a DEGRADED session. Stopping there would turn a loud total outage
+      // into a silent partial one. Drops are the Kite-dependent skip only, so a legitimately
+      // all-swing registry reports 0 drops and this completes on attempt 1.
+      if (reloadCompleted && lastReloadEmptyUniverseDrops == 0) {
+        log.info("kite.status reload attempt {} resolved every universe — retry complete", attempt);
+        return;
+      }
+      if (attempt >= KITE_CONNECTED_RELOAD_MAX_ATTEMPTS) {
+        log.error(
+            "kite.status reload exhausted {} attempts — {} strategies still unresolved; the engine "
+                + "is DEGRADED until the next 08:40 reload or a republish",
+            KITE_CONNECTED_RELOAD_MAX_ATTEMPTS, lastReloadEmptyUniverseDrops);
+        return;
+      }
+
+      log.info(
+          "kite.status reload attempt {} left {} strategies unresolved — retrying in {} ms",
+          attempt, lastReloadEmptyUniverseDrops, kiteConnectedReloadDelayMillis);
+      try {
+        kiteConnectedReloadScheduler.schedule(
+            () -> submitKiteConnectedReloadAttempt(attempt + 1),
+            kiteConnectedReloadDelayMillis,
+            TimeUnit.MILLISECONDS);
+        retryScheduled = true;
+      } catch (RejectedExecutionException e) {
+        if (!kiteConnectedReloadScheduler.isShutdown()) {
+          log.warn("kite.status reload retry scheduling failed: {}", e.toString());
+        }
+      }
+    } finally {
+      if (!retryScheduled) {
+        kiteConnectedReloadInFlight.set(false);
+      }
     }
   }
 

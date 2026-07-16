@@ -2,8 +2,13 @@ package in.arthayantra.strategysignal.signals;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategysignal.registry.MarketDataInstrumentClient;
 import in.arthayantra.strategysignal.registry.RegistryService;
@@ -18,8 +23,12 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -51,6 +60,12 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
 class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
 
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
+  private static final String COLD_START_UNDERLYING = "ENGINE-COLDSTART";
+  private static final String COLD_START_RETRY_UNDERLYING = "ENGINE-COLDSTART-RETRY";
+  private static final String COLD_START_PARTIAL_A_UNDERLYING = "ENGINE-COLDSTART-PARTIAL-A";
+  private static final String COLD_START_PARTIAL_B_UNDERLYING = "ENGINE-COLDSTART-PARTIAL-B";
+  private static final String COLD_START_BOOT_KEY_UNDERLYING = "ENGINE-COLDSTART-BOOT-KEY";
+  private static final AtomicBoolean FUTURES_UNIVERSE_AVAILABLE = new AtomicBoolean();
 
   // intentional load-time capture: one fixed warm-up anchor shared by the stub and the bars
   @SuppressWarnings("TimeInStaticInitializer")
@@ -65,6 +80,21 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     @Primary
     MarketDataInstrumentClient stubInstruments() {
       return (exchange, tradingsymbol) -> true;
+    }
+
+    @Bean
+    @Primary
+    FuturesUniverseResolver stubFuturesResolver() {
+      FuturesUniverseResolver resolver = mock(FuturesUniverseResolver.class);
+      when(resolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+          .thenAnswer(
+              invocation -> {
+                boolean available = FUTURES_UNIVERSE_AVAILABLE.get();
+                return available
+                    ? List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))
+                    : List.of();
+              });
+      return resolver;
     }
 
     @Bean
@@ -163,6 +193,40 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         session: { style: swing }
       """;
 
+  private static final String COLD_START_YAML =
+      STRATEGY_YAML
+          .replace("id: engine-it-momentum", "id: engine-it-coldstart")
+          .replace("name: \"Engine IT Momentum\"", "name: \"Engine IT Coldstart\"")
+          .replace(
+              "universe:\n  mode: explicit\n  instruments:\n    - { exchange: NSE, tradingsymbol: SIGTEST }\n",
+              "universe:\n  mode: futures_of_underlying\n  underlying: { exchange: NSE, tradingsymbol: "
+                  + COLD_START_UNDERLYING
+                  + " }\n  futures: { contract: front_month, roll_days_before_expiry: 1 }\n");
+
+  private static final String COLD_START_RETRY_YAML =
+      COLD_START_YAML
+          .replace("id: engine-it-coldstart", "id: engine-it-coldstart-retry")
+          .replace("name: \"Engine IT Coldstart\"", "name: \"Engine IT Coldstart Retry\"")
+          .replace(COLD_START_UNDERLYING, COLD_START_RETRY_UNDERLYING);
+
+  private static final String COLD_START_PARTIAL_A_YAML =
+      COLD_START_YAML
+          .replace("id: engine-it-coldstart", "id: engine-it-coldstart-partial-a")
+          .replace("name: \"Engine IT Coldstart\"", "name: \"Engine IT Coldstart Partial A\"")
+          .replace(COLD_START_UNDERLYING, COLD_START_PARTIAL_A_UNDERLYING);
+
+  private static final String COLD_START_PARTIAL_B_YAML =
+      COLD_START_YAML
+          .replace("id: engine-it-coldstart", "id: engine-it-coldstart-partial-b")
+          .replace("name: \"Engine IT Coldstart\"", "name: \"Engine IT Coldstart Partial B\"")
+          .replace(COLD_START_UNDERLYING, COLD_START_PARTIAL_B_UNDERLYING);
+
+  private static final String COLD_START_BOOT_KEY_YAML =
+      COLD_START_YAML
+          .replace("id: engine-it-coldstart", "id: engine-it-coldstart-boot-key")
+          .replace("name: \"Engine IT Coldstart\"", "name: \"Engine IT Coldstart Boot Key\"")
+          .replace(COLD_START_UNDERLYING, COLD_START_BOOT_KEY_UNDERLYING);
+
   @Autowired private RegistryService registryService;
   @Autowired private StrategyRepository repository;
   @Autowired private SignalEngine engine;
@@ -176,6 +240,21 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
 
   private static UUID strategyId;
   private static long firstSignalId;
+
+  /**
+   * The CONNECTED retry now converges on "no unresolved universes", so a test that publishes
+   * CONNECTED while the stub universe is unavailable leaves a REAL retry chain running on the shared
+   * autowired engine. Shorten it so those attempts cannot bleed reloads (each clearing bankCache and
+   * rebuilding the listener container) into later @Order methods.
+   */
+  @BeforeEach
+  void shortenKiteConnectedRetry() {
+    engine.kiteConnectedReloadDelayMillis = 500L;
+    // Every kite.status publish in this class also reaches the SHARED autowired engine, and a retry
+    // chain now outlives its test while universes stay unresolved. Drain any leftover chain so its
+    // reloads cannot land mid-assertion in the next @Order method.
+    await().atMost(Duration.ofSeconds(20)).until(() -> !engine.kiteConnectedReloadInFlight());
+  }
 
   @Test
   @Order(1)
@@ -376,6 +455,265 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     engine.reload();
     assertThat(engine.loadedSlugs()).contains("engine-it-toggle");
     assertThat(engine.publishedSetDrifted()).isFalse();
+  }
+
+  @Test
+  @Order(6)
+  void kiteConnectedRetriesUntilAColdStartUniverseBecomesAvailable() {
+    FUTURES_UNIVERSE_AVAILABLE.set(false);
+    UUID id =
+        (UUID)
+            registryService
+                .create("Engine IT Coldstart Retry", null, null, COLD_START_RETRY_YAML)
+                .get("id");
+    registryService.publish(id, null, null);
+    StrategyRepository.StrategyRow strategy = repository.findById(id).orElseThrow();
+    StrategyRepository.VersionRow version =
+        repository.findVersionById(strategy.publishedVersionId()).orElseThrow();
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(strategy));
+    when(isolatedRegistry.findVersionById(version.id())).thenReturn(Optional.of(version));
+    AtomicInteger isolatedResolutionCount = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              boolean available = FUTURES_UNIVERSE_AVAILABLE.get();
+              isolatedResolutionCount.incrementAndGet();
+              return available
+                  ? List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))
+                  : List.of();
+            });
+    SignalEngine isolatedEngine =
+        new SignalEngine(
+            isolatedRegistry,
+            mock(SignalRepository.class),
+            mock(SignalPublisher.class),
+            mock(org.springframework.context.ApplicationEventPublisher.class),
+            mock(LiveSeriesStore.class),
+            isolatedResolver,
+            connectionFactory,
+            objectMapper,
+            Clock.fixed(LIVE_NOW.toInstant(), ZoneOffset.UTC),
+            meterRegistry,
+            Optional.empty(),
+            Optional.empty(),
+            mock(SignalRejectionRepository.class),
+            mock(ShadowBookService.class),
+            mock(org.springframework.transaction.PlatformTransactionManager.class),
+            60);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 500L;
+
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+      int resolutionsBeforeConnected = isolatedResolutionCount.get();
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      await()
+          .atMost(Duration.ofSeconds(20))
+          .until(() -> isolatedResolutionCount.get() > resolutionsBeforeConnected);
+      assertThat(isolatedEngine.loadedSlugs()).doesNotContain("engine-it-coldstart-retry");
+
+      int resolutionsAfterUnavailableAttempt = isolatedResolutionCount.get();
+      FUTURES_UNIVERSE_AVAILABLE.set(true);
+
+      await()
+          .atMost(Duration.ofSeconds(20))
+          .until(
+              () ->
+                  isolatedResolutionCount.get() > resolutionsAfterUnavailableAttempt
+                      && isolatedEngine.loadedSlugs().contains("engine-it-coldstart-retry"));
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  @Test
+  @Order(7)
+  void kiteConnectedReloadsStrategiesSkippedDuringColdStartButTokenExpiredDoesNot() {
+    FUTURES_UNIVERSE_AVAILABLE.set(false);
+    UUID id =
+        (UUID)
+            registryService.create("Engine IT Coldstart", null, null, COLD_START_YAML).get("id");
+    registryService.publish(id, null, null);
+    engine.reload();
+
+    assertThat(engine.loadedSlugs()).doesNotContain("engine-it-coldstart");
+    await()
+        .during(Duration.ofSeconds(1))
+        .untilAsserted(
+            () -> assertThat(engine.loadedSlugs()).doesNotContain("engine-it-coldstart"));
+
+    FUTURES_UNIVERSE_AVAILABLE.set(true);
+    redis.convertAndSend("kite.status", "CONNECTED");
+
+    await()
+        .atMost(Duration.ofSeconds(20))
+        .until(() -> engine.loadedSlugs().contains("engine-it-coldstart"));
+    // Let the CONNECTED chain finish BEFORE flipping the universe away: an in-flight retry would
+    // re-reload against the now-unavailable stub and drop the strategy, so the TOKEN_EXPIRED
+    // assertion below would be racing this test's own retry rather than testing TOKEN_EXPIRED.
+    await().atMost(Duration.ofSeconds(20)).until(() -> !engine.kiteConnectedReloadInFlight());
+
+    FUTURES_UNIVERSE_AVAILABLE.set(false);
+    redis.convertAndSend("kite.status", "TOKEN_EXPIRED");
+
+    await()
+        .during(Duration.ofSeconds(2))
+        .untilAsserted(
+            () -> assertThat(engine.loadedSlugs()).contains("engine-it-coldstart"));
+
+    // The first CONNECTED rebuilt the listener container; a later CONNECTED must reach its
+    // replacement as well, even when the universe is empty again.
+    redis.convertAndSend("kite.status", "CONNECTED");
+    await()
+        .atMost(Duration.ofSeconds(20))
+        .until(() -> !engine.loadedSlugs().contains("engine-it-coldstart"));
+    await()
+        .during(Duration.ofSeconds(1))
+        .untilAsserted(
+            () -> assertThat(engine.loadedSlugs()).doesNotContain("engine-it-coldstart"));
+  }
+
+  /**
+   * Regression: the retry must converge on "every universe resolved", NOT on "something loaded". A
+   * breaker that re-opens partway through a reload leaves a PARTIAL set loaded — a non-empty
+   * {@code loaded} that is really a degraded session. Stopping there would strand the rest for the
+   * whole session, turning a loud total outage into a silent partial one. Fails against a
+   * {@code !loaded.isEmpty()} predicate: A loads on attempt 1 and the chain would stop with B dead.
+   */
+  @Test
+  @Order(8)
+  void kiteConnectedKeepsRetryingWhenOnlySomeUniversesResolved() {
+    AtomicBoolean partialBAvailable = new AtomicBoolean(false);
+    StrategyRepository.StrategyRow rowA = publishedRow(COLD_START_PARTIAL_A_YAML, "Partial A");
+    StrategyRepository.StrategyRow rowB = publishedRow(COLD_START_PARTIAL_B_YAML, "Partial B");
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(rowA, rowB));
+    when(isolatedRegistry.findVersionById(rowA.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowA.publishedVersionId()));
+    when(isolatedRegistry.findVersionById(rowB.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowB.publishedVersionId()));
+
+    // A always resolves; B only once the (simulated) breaker lets its call through.
+    AtomicInteger bResolutionAttempts = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              String underlying = invocation.getArgument(1);
+              if (COLD_START_PARTIAL_A_UNDERLYING.equals(underlying)) {
+                return List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"));
+              }
+              bResolutionAttempts.incrementAndGet();
+              return partialBAvailable.get()
+                  ? List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))
+                  : List.of();
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 500L;
+    try {
+      isolatedEngine.start();
+      // The partial state: A up, B dropped — `loaded` is NON-EMPTY but the session is degraded.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly("engine-it-coldstart-partial-a");
+
+      int bAttemptsAtBoot = bResolutionAttempts.get();
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      // B must stay unavailable until CONNECTED's FIRST attempt has been and gone — otherwise that
+      // attempt loads B itself and the test would pass without the retry ever running (it would then
+      // pass against the old `!loaded.isEmpty()` predicate too, proving nothing).
+      await().atMost(Duration.ofSeconds(20)).until(() -> bResolutionAttempts.get() > bAttemptsAtBoot);
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly("engine-it-coldstart-partial-a");
+
+      partialBAvailable.set(true);
+
+      // No second CONNECTED is ever published: only a RETRY can pick B up. The old predicate stopped
+      // the chain at attempt 1 (A was loaded ⇒ "success"), so B would stay dead and this times out.
+      await()
+          .atMost(Duration.ofSeconds(20))
+          .until(
+              () ->
+                  isolatedEngine
+                      .loadedSlugs()
+                      .containsAll(
+                          List.of("engine-it-coldstart-partial-a", "engine-it-coldstart-partial-b")));
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * The CONNECTED channel is edge-only and Redis pub/sub is fire-and-forget, so a CONNECTED
+   * published while this engine was still booting is lost forever — and none ever follows, because
+   * the state is already CONNECTED. start() must therefore fall back to the level-triggered
+   * {@code kite:session:status} KEY. Without this test that path is entirely unexercised: a typo in
+   * the key literal would silently disable it and only a live cold boot would ever notice.
+   */
+  @Test
+  @Order(9)
+  void bootReadsTheKiteStatusKeyWhenTheConnectedPublishWasMissed() {
+    FUTURES_UNIVERSE_AVAILABLE.set(false);
+    StrategyRepository.StrategyRow row = publishedRow(COLD_START_BOOT_KEY_YAML, "Boot Key");
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(row));
+    when(isolatedRegistry.findVersionById(row.publishedVersionId()))
+        .thenReturn(repository.findVersionById(row.publishedVersionId()));
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation ->
+                FUTURES_UNIVERSE_AVAILABLE.get()
+                    ? List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))
+                    : List.of());
+
+    // The session is ALREADY CONNECTED before this engine exists — the edge is long gone.
+    redis.opsForValue().set("kite:session:status", "CONNECTED");
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 500L;
+    try {
+      isolatedEngine.start();
+      // Boot resolved nothing, so start() must have read the KEY and armed a retry off it alone.
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+      FUTURES_UNIVERSE_AVAILABLE.set(true);
+
+      // No CONNECTED is ever published on the channel: only the key-triggered chain can load this.
+      await()
+          .atMost(Duration.ofSeconds(20))
+          .until(() -> isolatedEngine.loadedSlugs().contains("engine-it-coldstart-boot-key"));
+    } finally {
+      isolatedEngine.stop();
+      redis.delete("kite:session:status");
+    }
+  }
+
+  private StrategyRepository.StrategyRow publishedRow(String yaml, String name) {
+    UUID id = (UUID) registryService.create("Engine IT Coldstart " + name, null, null, yaml).get("id");
+    registryService.publish(id, null, null);
+    return repository.findById(id).orElseThrow();
+  }
+
+  private SignalEngine isolatedEngine(
+      StrategyRepository isolatedRegistry, FuturesUniverseResolver isolatedResolver) {
+    return new SignalEngine(
+        isolatedRegistry,
+        mock(SignalRepository.class),
+        mock(SignalPublisher.class),
+        mock(org.springframework.context.ApplicationEventPublisher.class),
+        mock(LiveSeriesStore.class),
+        isolatedResolver,
+        connectionFactory,
+        objectMapper,
+        Clock.fixed(LIVE_NOW.toInstant(), ZoneOffset.UTC),
+        meterRegistry,
+        Optional.empty(),
+        Optional.empty(),
+        mock(SignalRejectionRepository.class),
+        mock(ShadowBookService.class),
+        mock(org.springframework.transaction.PlatformTransactionManager.class),
+        60);
   }
 
   private void publishBar(String tradingsymbol, OffsetDateTime bucket, BigDecimal close)

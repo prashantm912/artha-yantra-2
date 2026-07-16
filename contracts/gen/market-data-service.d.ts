@@ -4294,6 +4294,17 @@ export interface components {
             durationMs?: number;
             error?: string;
         };
+        Constituent: {
+            exchange?: string;
+            tradingsymbol?: string;
+        };
+        ConstituentsResponse: {
+            index?: string;
+            /** Format: date */
+            asOf?: string;
+            checksum?: string;
+            items?: components["schemas"]["Constituent"][];
+        };
         KiteStatus: {
             connected?: boolean;
             profile?: string;
@@ -9364,9 +9375,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ConstituentsResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

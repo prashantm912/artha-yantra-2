@@ -1,7 +1,19 @@
 # Spike Plan — Codex Skill Suite (skill-based, templated builder lane)
 
 **Date:** 2026-07-14
-**Status:** Phase 0 (feasibility) PASSED — build phases not yet started
+**Status:** ✅ **BUILT AND IN PRODUCTION USE — this plan is HISTORICAL, not forward work.**
+(Was "Phase 0 PASSED — build phases not yet started"; that line went stale once the suite shipped.)
+All five skills exist and are the live lane: `.claude/skills/codex{,-ask,-build,-code-review,-plan-review}`,
+shared harness `.claude/skills/codex/scripts/`, `checklist.md`, `ROUTING.md`.
+**The authority is now the SKILLS themselves + the `codex-builder-lane` memory topic — not this plan.**
+Read this only for the original design rationale.
+**Proven end-to-end 2026-07-16** on [#874](https://github.com/prashantm912/artha-yantra-2/pull/874)
+(F10 engine cold-start self-heal): luna DRAFT → sol REFINE (self-caught 3 issues incl. its own
+convergence bug, and ran its own adversarial sub-agent fan-out) → Opus cross-vendor `claude-review`
+(**REQUEST_CHANGES twice — caught 2 blockers a green 785-test suite did not**) → Architect audit + fixes
+→ merge → live drill. That run is the strongest evidence the lane works as designed; it also confirmed
+the receipt contract's value (luna's thin receipt was caught by reading the real diff, per the
+audit-the-artifact-not-the-receipt rule).
 **Origin:** analysis of [TRIP-workflow](https://github.com/PiLastDigit/TRIP-workflow) vs our Architect +
 codex-builder-lane workflow. Superseded the earlier review-only framing (owner asked to skillify the
 *whole* Codex lane, not just review).

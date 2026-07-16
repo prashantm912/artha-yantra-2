@@ -25,6 +25,7 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 | *(2026-07-11 – 2026-07-13)* | — | — | — | — | — | — | — | no findings files run (skipped; weekend + owner-paused days per ledger) |
 | 2026-07-14 | — (starvation incident, see [[live-mode-findings]]) | — | 0 | — | — | — | — | **ZERO SIGNALS ALL SESSION — the eval loop parked on an unbounded market-data candle fetch (different root cause than the 07-07/07-10 subscriber-drop class). Fixed #866 (bounded fetch + dedup), deployed post-market. No dedicated findings file (incident tracked in `live-mode-findings` memory + ledger).** |
 | 2026-07-15 | 396 (09:50–15:21, **4th EVAL STALL 11:49–14:10, self-recovered, thread-level PROVEN, #634/#679 logged nothing**) | 33 | **3** (straddle only) | volume-floor 241/396 | 144 (all CE, max 0.7 — no 0.8 bucket) | 12, 0W/12, −54.7 avg pts, −656.3 pts total | 4 (breadth 72.0% = REGIME) | **rangy/flat day (24,073.5→24,072.0, ±212pt range). 4th confirmed eval stall, DIRECT thread-log proof this time (exactly 1 `signal-eval` line in 2h21m) — capture + an unrelated scheduled canary stayed healthy throughout, masking it from casual checks. SEPARATE finding: 16/17 paper positions had zero live ticks all session (`PaperStaleTickAlerter`). oi_spurt dot showed first-ever life (1.6%) post-#675/#676 recalibration; iv_pair still 0% despite its recalibration. findings `2026-07-15-session-findings.md`** |
+| 2026-07-16 | **0** (NULL SESSION — engine never evaluated a bar) | **0** of 39 published | 0 | — | — | — | — (dot-health: `rowsInspected 0`, every dot `alive:false`) | **F10 COLD-START STARVATION, 2nd occurrence (1st was 07-15, filed not fixed → recurred in a day). Stack cold-booted 08:57:04; engine `reload()` at 08:57:19–31 hit term-structure 403/DATA_STALE/breaker-open because market-data's IN-MEMORY `lastGood` cache is empty on a cold boot (a WARM container survives the same expired-token window off yesterday's cache — why only cold starts break); all 39 dropped → `loaded 0 published strategies` 08:57:31. Owner's Kite login landed 08:58:22 — **missed by 51s**. No reload path could recover (08:40 cron passed; 20s reconcile compares registry-vs-last-reload-SNAPSHOT so total failure ≡ steady state; no `kite.status` listener existed). CAPTURE WAS PERFECT throughout (375/375 1m bars, 373 OI snaps) — every health signal green while the engine did nothing. 18 paper positions unmanaged (28,441 `PaperStaleTickAlerter` WARNs) — supersedes 07-15's §6.2 "16/17 tickless" finding, SAME cause. **FIXED SAME NIGHT: [#874](https://github.com/prashantm912/artha-yantra-2/pull/874) @ d9f30a8f deployed + drill-proven live** (self-healed 0→39 from a `CONNECTED` alone). findings `2026-07-16-session-findings.md`** |
 
 ## Per-variant league (cumulative — refresh each rollup pass from the §6 league SQL)
 
@@ -81,6 +82,26 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
   on an UNBOUNDED market-data candle fetch (no subscriber drop — a blocking-call-with-no-timeout bug).
   Fixed #866 (bounded fetch + dedup), deployed post-market 07-14. Do not conflate with the recurring
   subscriber-drop class above; the fixes are independent and both needed.
+- **F10 COLD-START STARVATION, 2026-07-15 + 2026-07-16 — a THIRD, distinct class. Part A FIXED, Part B OPEN.**
+  Do not conflate with either class above: there is no subscriber drop and no parked fetch — **the engine
+  never loads a strategy at all**, because it resolves universes ONCE at boot and a cold boot lands before
+  the daily Kite login. market-data's `lastGood` term-structure cache is **in-memory**, so a cold container
+  has nothing to fall back on and 503s; a WARM container silently survives the identical expired-token
+  window off yesterday's cache — which is why this hid for months and why "it works most mornings" was never
+  evidence of correctness. Signature: `loaded 0 published strategies` / `subscribed 0 candle channels` at
+  boot, zero rejections all session, **capture and every canary green**. Occurred 07-15 (manual restart to
+  recover; filed as ledger F10, NOT built) and recurred **07-16 within one day**. **Part A SHIPPED
+  [#874](https://github.com/prashantm912/artha-yantra-2/pull/874) @ d9f30a8f** — `kite.status` listener +
+  bounded 3×~35s retry converging on `unresolved == 0`, plus a level-triggered `kite:session:status` key read
+  at boot (the channel is edge-only and fire-and-forget, so a `CONNECTED` published before the engine
+  subscribes is lost FOREVER and none ever follows). Drill-proven live 07-16 21:49–21:52 (0→39 from a
+  `CONNECTED` alone, no restart). **Three standing cautions:** (1) the drill recovered on **attempt 3 of 3**
+  with ~10s of margin — widen the bound (chip); (2) a cold boot produces a **PARTIAL** load (observed 32/39),
+  so the honest health signal is **`unresolved == 0`, never `loaded > 0`** — a "something loaded" predicate
+  reads a degraded session as success; (3) **Part B (detection) is still OPEN** — an exhausted retry only
+  LOGS `DEGRADED`, nothing pages, and `SignalStarvationCanary` (#868) cannot cover this class (it
+  early-returns on `!hasOneMinuteSubscriptions()` and `outputAtMs==0` — exactly this signature).
+  See `2026-07-16-session-findings.md` §6.1/§6.3/§7.
 - **`scalp-straddle-nifty` fires 0DTE/short-dated ATM straddles (07-07, 07-10)** — 07-07 both LOST (−19%,
   −6.8%), 07-10 re-fired (13:09, 14:42) for a small loss. None auto-papered. Owner: confirm straddle-path
   threshold + whether these should route to a paper book.

@@ -2,16 +2,21 @@ package in.arthayantra.strategysignal.signals;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.common.web.error.ErrorResponse;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -43,9 +48,30 @@ public class FuturesUniverseResolver {
     this.clock = clock;
   }
 
-  /** The contract(s) the strategy trades right now; empty on resolution failure. */
-  public List<StrategyDefinition.InstrumentRef> resolve(
+  /**
+   * The contract(s) the strategy trades right now; empty Optional when resolution FAILS.
+   *
+   * <p>A 404 {@code NOT_FOUND_INSTRUMENT} from term-structure is a FAILURE here, deliberately. It
+   * means "no non-expired active FUT row for this underlying" — for an INDEX root (NIFTY 50 /
+   * SENSEX, i.e. every live strategy) that can never legitimately mean "nothing to trade": the
+   * index always has listed futures, so a 404 is definitionally a data fault (a tombstoned NFO
+   * sync, a drifted underlying derivation, a typo'd ref). Reading it as a genuine empty is exactly
+   * the 2026-07-15/16 outage — the engine loads 0 strategies, counts 0 drops, and the retry chain
+   * reports "resolved every universe". Only {@link #resolveScreener} may treat it as empty, via
+   * {@code missingInstrumentIsEmpty}, because there a picked STOCK mover legitimately may be
+   * cash-only.
+   */
+  public Optional<List<StrategyDefinition.InstrumentRef>> resolve(
       String underlyingExchange, String underlying, String contract, int rollDaysBeforeExpiry) {
+    return resolve(underlyingExchange, underlying, contract, rollDaysBeforeExpiry, false);
+  }
+
+  private Optional<List<StrategyDefinition.InstrumentRef>> resolve(
+      String underlyingExchange,
+      String underlying,
+      String contract,
+      int rollDaysBeforeExpiry,
+      boolean missingInstrumentIsEmpty) {
     try {
       String body =
           restClient
@@ -58,10 +84,15 @@ public class FuturesUniverseResolver {
                           .build())
               .retrieve()
               .body(String.class);
-      JsonNode contracts = objectMapper.readTree(body).path("contracts");
-      if (!contracts.isArray() || contracts.isEmpty()) {
+      JsonNode response = body == null || body.isBlank() ? null : objectMapper.readTree(body);
+      JsonNode contracts = response == null ? null : response.path("contracts");
+      if (contracts == null || !contracts.isArray()) {
+        log.warn("malformed futures contracts response for {} — unresolved universe", underlying);
+        return Optional.empty();
+      }
+      if (contracts.isEmpty()) {
         log.warn("no futures contracts for underlying {} — empty universe", underlying);
-        return List.of();
+        return Optional.of(List.of());
       }
       int index = "next_month".equals(contract) ? 1 : 0;
       // roll window: within N days of the front expiry, slide one contract out
@@ -78,12 +109,26 @@ public class FuturesUniverseResolver {
         index = contracts.size() - 1;
       }
       JsonNode chosen = contracts.get(index);
-      return List.of(
-          new StrategyDefinition.InstrumentRef(
-              chosen.path("exchange").asText("NFO"), chosen.path("tradingsymbol").asText()));
-    } catch (RestClientException | java.io.IOException e) {
+      String exchange = chosen.path("exchange").asText("NFO");
+      String tradingsymbol = chosen.path("tradingsymbol").asText("");
+      if (exchange.isBlank() || tradingsymbol.isBlank()) {
+        log.warn("malformed futures contract for {} — unresolved universe", underlying);
+        return Optional.empty();
+      }
+      return Optional.of(
+          List.of(
+              new StrategyDefinition.InstrumentRef(exchange, tradingsymbol)));
+    } catch (HttpClientErrorException.NotFound e) {
+      if (missingInstrumentIsEmpty && isMissingInstrument(e)) {
+        // Screener path ONLY: a picked stock mover with no listed futures is cash-only — skip it.
+        log.warn("no futures contracts for underlying {} — empty universe", underlying);
+        return Optional.of(List.of());
+      }
       log.warn("futures universe resolution failed for {}: {}", underlying, e.getMessage());
-      return List.of();
+      return Optional.empty();
+    } catch (RestClientException | java.io.IOException | DateTimeException e) {
+      log.warn("futures universe resolution failed for {}: {}", underlying, e.getMessage());
+      return Optional.empty();
     }
   }
 
@@ -91,12 +136,14 @@ public class FuturesUniverseResolver {
    * E1 §3.3: resolves a {@code futures_screener} universe to the top {@code maxPicks} stock movers'
    * FRONT futures. Re-screens at each live reload (the picks roll daily): GETs the Market-Movers
    * screen, takes the conviction-ranked candidates for {@code side}, then maps each picked underlying
-   * to its actual front contract via {@link #resolve} (so roll handling is shared). Empty on any
-   * screener/term-structure failure (the strategy simply has no movers to trade that reload).
+   * to its actual front contract via {@link #resolve} (so roll handling is shared). Empty when the
+   * screen or any picked term structure fails; a picked mover with no listed futures is skipped, and
+   * an empty present list means the screen resolved with no tradable movers.
    * {@code source} selects the screener radar: default = the captured NIFTY-Bank snapshot set;
    * {@code upstox} (E1 v2) = the full NIFTY-50 from on-demand Upstox daily candles.
    */
-  public List<StrategyDefinition.InstrumentRef> resolveScreener(String side, int maxPicks, String source) {
+  public Optional<List<StrategyDefinition.InstrumentRef>> resolveScreener(
+      String side, int maxPicks, String source) {
     boolean upstox = "upstox".equals(source);
     List<String> underlyings;
     try {
@@ -113,20 +160,44 @@ public class FuturesUniverseResolver {
                   })
               .retrieve()
               .body(String.class);
-      underlyings = screenerPicks(objectMapper.readTree(body), side, maxPicks);
+      JsonNode response = body == null || body.isBlank() ? null : objectMapper.readTree(body);
+      String candidatesKey = "short".equals(side) ? "shortCandidates" : "longCandidates";
+      JsonNode candidates = response == null ? null : response.path(candidatesKey);
+      if (candidates == null || !candidates.isArray()) {
+        log.warn("malformed movers-screen response — unresolved universe");
+        return Optional.empty();
+      }
+      underlyings = screenerPicks(response, side, maxPicks);
     } catch (RestClientException | java.io.IOException e) {
       log.warn("movers-screen universe resolution failed: {}", e.getMessage());
-      return List.of();
+      return Optional.empty();
     }
     List<StrategyDefinition.InstrumentRef> out = new ArrayList<>();
     for (String underlying : underlyings) {
-      for (StrategyDefinition.InstrumentRef ref : resolve("NSE", underlying, "front_month", 2)) {
+      // missingInstrumentIsEmpty=true: a picked mover with no listed futures is legitimately
+      // cash-only, NOT an upstream fault — skipping it must not brick the whole screen.
+      Optional<List<StrategyDefinition.InstrumentRef>> resolved =
+          resolve("NSE", underlying, "front_month", 2, true);
+      if (resolved.isEmpty()) {
+        return Optional.empty();
+      }
+      for (StrategyDefinition.InstrumentRef ref : resolved.get()) {
         if (!out.contains(ref)) {
           out.add(ref);
         }
       }
     }
-    return out;
+    return Optional.of(out);
+  }
+
+  private boolean isMissingInstrument(HttpClientErrorException.NotFound notFound) {
+    try {
+      ErrorResponse error =
+          objectMapper.readValue(notFound.getResponseBodyAsByteArray(), ErrorResponse.class);
+      return error != null && ErrorCodes.NOT_FOUND_INSTRUMENT.equals(error.code());
+    } catch (java.io.IOException malformedError) {
+      return false;
+    }
   }
 
   /** The screener's conviction-ranked picked UNDERLYINGS for {@code side}, capped at {@code maxPicks}. */

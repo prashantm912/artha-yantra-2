@@ -110,6 +110,15 @@ public class SignalEngine {
       ScalperConfig scalper,
       String book) {}
 
+  private enum UniverseResolutionStatus {
+    RESOLVED,
+    UNRESOLVED,
+    NOT_LIVE_RESOLVABLE
+  }
+
+  private record UniverseResolution(
+      UniverseResolutionStatus status, List<StrategyDefinition.InstrumentRef> instruments) {}
+
   private final StrategyRepository registry;
   private final SignalRepository signals;
   private final SignalPublisher publisher;
@@ -151,7 +160,7 @@ public class SignalEngine {
   // >0 means that reload was DEGRADED, which is what the CONNECTED retry chain converges on:
   // "loaded is non-empty" is NOT a recovery signal, because the drop is PER strategy and a breaker
   // that re-opens mid-reload can leave a partial set loaded (1 of 39) that looks like success.
-  private volatile int lastReloadEmptyUniverseDrops;
+  private volatile int lastReloadUnresolvedDrops;
   // Package-visible so tests can shorten it; ONE source of truth (no @Value default to drift from).
   long kiteConnectedReloadDelayMillis = KITE_CONNECTED_RELOAD_DELAY_MILLIS;
   // Warm ta4j banks per (version|instrument) — cleared on reload/hot-swap (P1-12, D17 live).
@@ -275,7 +284,7 @@ public class SignalEngine {
     // CONNECTED ever comes, because the state is already CONNECTED. That would strand the engine at
     // 0 strategies for the session: exactly the 2026-07-16 outage this fix exists to prevent.
     // The KEY is level-triggered, so read it once here to close that boot race.
-    if (lastReloadEmptyUniverseDrops > 0 && KITE_STATUS_CONNECTED.equals(readKiteSessionStatus())) {
+    if (lastReloadUnresolvedDrops > 0 && KITE_STATUS_CONNECTED.equals(readKiteSessionStatus())) {
       log.info("boot: kite session already CONNECTED and universes unresolved — reloading");
       requestKiteConnectedReload();
     }
@@ -316,7 +325,7 @@ public class SignalEngine {
     reloadRequested.set(false);
     bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
     List<Loaded> fresh = new ArrayList<>();
-    int emptyUniverseDrops = 0;
+    int unresolvedDrops = 0;
     List<StrategyRepository.StrategyRow> all = registry.listAll();
     for (StrategyRepository.StrategyRow strategy : all) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
@@ -368,19 +377,23 @@ public class SignalEngine {
               strategy.slug(), definition.primaryTimeframe());
           continue;
         }
-        List<StrategyDefinition.InstrumentRef> universe = resolveUniverse(config);
+        UniverseResolution resolution = resolveUniverse(config);
+        if (resolution.status() == UniverseResolutionStatus.UNRESOLVED) {
+          unresolvedDrops++;
+          log.warn("strategy {} has an unresolved universe — not loaded", strategy.slug());
+          continue;
+        }
+        if (resolution.status() == UniverseResolutionStatus.NOT_LIVE_RESOLVABLE) {
+          // NOT counted: a config/capability error is not an upstream fault, and retrying it is
+          // pointless (it would burn the CONNECTED chain to a permanent false DEGRADED). But it
+          // must never be SILENT — name the slug, or a published-and-enabled strategy vanishes
+          // with the engine still reporting "0 dropped on an unresolved universe".
+          log.warn(
+              "strategy {} universe mode is not live-resolvable — not loaded", strategy.slug());
+          continue;
+        }
+        List<StrategyDefinition.InstrumentRef> universe = resolution.instruments();
         if (universe.isEmpty()) {
-          // Counted (NOT the swing/non-rollable skips above, which are by design): this is the
-          // Kite-dependent drop — market-data's term-structure 503s while the session is expired or
-          // the kite-rest breaker is open, so the resolver yields nothing. It is what the CONNECTED
-          // retry converges on. Per strategy, so a breaker re-opening mid-reload drops SOME.
-          // EXCEPT futures_screener: resolveScreener() returns empty for BOTH a resolution failure
-          // AND a legitimately empty screen (no qualifying movers), so it cannot signal a
-          // Kite-dependent drop. Counting it would make a flat-market screener report drops
-          // FOREVER — a permanent false DEGRADED plus a bankCache wipe per retry, every login.
-          if (!"futures_screener".equals(config.path("universe").path("mode").asText())) {
-            emptyUniverseDrops++;
-          }
           log.warn("strategy {} resolves to an empty universe — not loaded", strategy.slug());
           continue;
         }
@@ -425,17 +438,17 @@ public class SignalEngine {
       }
     }
     this.loaded = List.copyOf(fresh);
-    this.lastReloadEmptyUniverseDrops = emptyUniverseDrops;
+    this.lastReloadUnresolvedDrops = unresolvedDrops;
     // Snapshot the published set THIS reload was based on (from the same registry read), so the 20s
     // reconcile compares registry-vs-registry and converges even though `loaded` is a subset.
     this.lastReloadedPublishedSet = publishedVersionSetOf(all);
     resubscribe();
     log.info(
         "signal engine loaded {} published strategies ({} dropped on an unresolved universe)",
-        fresh.size(), emptyUniverseDrops);
+        fresh.size(), unresolvedDrops);
   }
 
-  private List<StrategyDefinition.InstrumentRef> resolveUniverse(JsonNode config) {
+  private UniverseResolution resolveUniverse(JsonNode config) {
     JsonNode universe = config.path("universe");
     String mode = universe.path("mode").asText();
     return switch (mode) {
@@ -446,16 +459,17 @@ public class SignalEngine {
               new StrategyDefinition.InstrumentRef(
                   node.path("exchange").asText(), node.path("tradingsymbol").asText()));
         }
-        yield instruments;
+        yield new UniverseResolution(UniverseResolutionStatus.RESOLVED, instruments);
       }
       case "futures_of_underlying" ->
           // A7/A11: live trades the ACTUAL front/next contract; roll re-subscribe is the
           // daily re-resolution below
-          futuresResolver.resolve(
-              universe.path("underlying").path("exchange").asText(),
-              universe.path("underlying").path("tradingsymbol").asText(),
-              universe.path("futures").path("contract").asText("front_month"),
-              universe.path("futures").path("roll_days_before_expiry").asInt(1));
+          fromResolver(
+              futuresResolver.resolve(
+                  universe.path("underlying").path("exchange").asText(),
+                  universe.path("underlying").path("tradingsymbol").asText(),
+                  universe.path("futures").path("contract").asText("front_month"),
+                  universe.path("futures").path("roll_days_before_expiry").asInt(1)));
       case "options_of_underlying" -> {
         // Phase 3 / Model A: the scalper EVALUATES + CHARTS on the index FRONT FUTURE (it carries the
         // volume the §0B VWAP/VWMA gates need); the option to TRADE is picked at signal time by the
@@ -463,25 +477,37 @@ public class SignalEngine {
         // future is resolved from the SIGNAL index (universe.signal_underlying mapped to its index),
         // not the option-root underlying. Absent signal_underlying ⇒ the underlying (unchanged).
         ScalperConfig.IndexRef sig = ScalperConfig.signalIndex(universe);
-        yield futuresResolver.resolve(
-            sig.exchange(),
-            sig.tradingsymbol(),
-            universe.path("futures").path("contract").asText("front_month"),
-            universe.path("futures").path("roll_days_before_expiry").asInt(2));
+        yield fromResolver(
+            futuresResolver.resolve(
+                sig.exchange(),
+                sig.tradingsymbol(),
+                universe.path("futures").path("contract").asText("front_month"),
+                universe.path("futures").path("roll_days_before_expiry").asInt(2)));
       }
       case "futures_screener" ->
           // E1 §3.3: the dynamic Market-Movers stock-future universe — re-screened each reload
           // (08:40 + hot-swap), each picked mover mapped to its front contract + auto-subscribed.
-          futuresResolver.resolveScreener(
-              universe.path("side").asText("long"),
-              universe.path("max_picks").asInt(5),
-              universe.path("source").asText("captured"));
+          fromResolver(
+              futuresResolver.resolveScreener(
+                  universe.path("side").asText("long"),
+                  universe.path("max_picks").asInt(5),
+                  universe.path("source").asText("captured")));
       default -> {
-        // index_constituents cannot publish until Phase 44 (the registry guard) — defensive
+        // This schema-supported mode is not live-resolvable yet — defensive
         log.warn("universe mode '{}' is not live-resolvable yet", mode);
-        yield List.of();
+        yield new UniverseResolution(UniverseResolutionStatus.NOT_LIVE_RESOLVABLE, List.of());
       }
     };
+  }
+
+  private static UniverseResolution fromResolver(
+      Optional<List<StrategyDefinition.InstrumentRef>> resolved) {
+    if (resolved == null) {
+      return new UniverseResolution(UniverseResolutionStatus.UNRESOLVED, List.of());
+    }
+    return resolved
+        .map(instruments -> new UniverseResolution(UniverseResolutionStatus.RESOLVED, instruments))
+        .orElseGet(() -> new UniverseResolution(UniverseResolutionStatus.UNRESOLVED, List.of()));
   }
 
   private synchronized void resubscribe() {
@@ -1602,7 +1628,7 @@ public class SignalEngine {
       // `loaded` that is really a DEGRADED session. Stopping there would turn a loud total outage
       // into a silent partial one. Drops are the Kite-dependent skip only, so a legitimately
       // all-swing registry reports 0 drops and this completes on attempt 1.
-      if (reloadCompleted && lastReloadEmptyUniverseDrops == 0) {
+      if (reloadCompleted && lastReloadUnresolvedDrops == 0) {
         log.info("kite.status reload attempt {} resolved every universe — retry complete", attempt);
         return;
       }
@@ -1610,13 +1636,13 @@ public class SignalEngine {
         log.error(
             "kite.status reload exhausted {} attempts — {} strategies still unresolved; the engine "
                 + "is DEGRADED until the next 08:40 reload or a republish",
-            KITE_CONNECTED_RELOAD_MAX_ATTEMPTS, lastReloadEmptyUniverseDrops);
+            KITE_CONNECTED_RELOAD_MAX_ATTEMPTS, lastReloadUnresolvedDrops);
         return;
       }
 
       log.info(
           "kite.status reload attempt {} left {} strategies unresolved — retrying in {} ms",
-          attempt, lastReloadEmptyUniverseDrops, kiteConnectedReloadDelayMillis);
+          attempt, lastReloadUnresolvedDrops, kiteConnectedReloadDelayMillis);
       try {
         kiteConnectedReloadScheduler.schedule(
             () -> submitKiteConnectedReloadAttempt(attempt + 1),

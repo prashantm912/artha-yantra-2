@@ -46,6 +46,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Phase 23 IT (Flow 5 Part B): publish a strategy → closed bars on the candle channel produce a
@@ -61,6 +62,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
 
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
   private static final String COLD_START_UNDERLYING = "ENGINE-COLDSTART";
+  private static final String COLD_START_EMPTY_UNDERLYING = "ENGINE-COLDSTART-EMPTY";
   private static final String COLD_START_RETRY_UNDERLYING = "ENGINE-COLDSTART-RETRY";
   private static final String COLD_START_PARTIAL_A_UNDERLYING = "ENGINE-COLDSTART-PARTIAL-A";
   private static final String COLD_START_PARTIAL_B_UNDERLYING = "ENGINE-COLDSTART-PARTIAL-B";
@@ -91,8 +93,8 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
               invocation -> {
                 boolean available = FUTURES_UNIVERSE_AVAILABLE.get();
                 return available
-                    ? List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))
-                    : List.of();
+                    ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                    : Optional.empty();
               });
       return resolver;
     }
@@ -208,6 +210,20 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
           .replace("id: engine-it-coldstart", "id: engine-it-coldstart-retry")
           .replace("name: \"Engine IT Coldstart\"", "name: \"Engine IT Coldstart Retry\"")
           .replace(COLD_START_UNDERLYING, COLD_START_RETRY_UNDERLYING);
+
+  private static final String COLD_START_EMPTY_YAML =
+      COLD_START_YAML
+          .replace("id: engine-it-coldstart", "id: engine-it-coldstart-empty")
+          .replace("name: \"Engine IT Coldstart\"", "name: \"Engine IT Coldstart Empty\"")
+          .replace(COLD_START_UNDERLYING, COLD_START_EMPTY_UNDERLYING);
+
+  private static final String UNSUPPORTED_LIVE_UNIVERSE_YAML =
+      STRATEGY_YAML
+          .replace("id: engine-it-momentum", "id: engine-it-index-constituents")
+          .replace("name: \"Engine IT Momentum\"", "name: \"Engine IT Index Constituents\"")
+          .replace(
+              "universe:\n  mode: explicit\n  instruments:\n    - { exchange: NSE, tradingsymbol: SIGTEST }\n",
+              "universe:\n  mode: index_constituents\n  index: NIFTY 50\n");
 
   private static final String COLD_START_PARTIAL_A_YAML =
       COLD_START_YAML
@@ -481,8 +497,8 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
               boolean available = FUTURES_UNIVERSE_AVAILABLE.get();
               isolatedResolutionCount.incrementAndGet();
               return available
-                  ? List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))
-                  : List.of();
+                  ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                  : Optional.empty();
             });
     SignalEngine isolatedEngine =
         new SignalEngine(
@@ -604,12 +620,12 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
             invocation -> {
               String underlying = invocation.getArgument(1);
               if (COLD_START_PARTIAL_A_UNDERLYING.equals(underlying)) {
-                return List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"));
+                return Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
               }
               bResolutionAttempts.incrementAndGet();
               return partialBAvailable.get()
-                  ? List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))
-                  : List.of();
+                  ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                  : Optional.empty();
             });
 
     SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
@@ -666,8 +682,8 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         .thenAnswer(
             invocation ->
                 FUTURES_UNIVERSE_AVAILABLE.get()
-                    ? List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))
-                    : List.of());
+                    ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                    : Optional.empty());
 
     // The session is ALREADY CONNECTED before this engine exists — the edge is long gone.
     redis.opsForValue().set("kite:session:status", "CONNECTED");
@@ -689,10 +705,90 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     }
   }
 
+  @Test
+  @Order(10)
+  void failedUniverseResolutionIncrementsTheUnresolvedDropCounter() {
+    StrategyRepository.StrategyRow failed =
+        uniquePublishedRow(COLD_START_YAML, "engine-it-unresolved", "Unresolved");
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(invocation -> Optional.empty());
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(failed), isolatedResolver);
+    try {
+      isolatedEngine.reload();
+
+      assertThat(ReflectionTestUtils.getField(isolatedEngine, "lastReloadUnresolvedDrops"))
+          .isEqualTo(1);
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  @Test
+  @Order(11)
+  void genuineEmptyUniverseDoesNotIncrementTheUnresolvedDropCounter() {
+    StrategyRepository.StrategyRow genuinelyEmpty =
+        uniquePublishedRow(COLD_START_EMPTY_YAML, "engine-it-genuine-empty", "Genuine Empty");
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(invocation -> Optional.of(List.of()));
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(genuinelyEmpty), isolatedResolver);
+    try {
+      isolatedEngine.reload();
+
+      assertThat(ReflectionTestUtils.getField(isolatedEngine, "lastReloadUnresolvedDrops"))
+          .isEqualTo(0);
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  @Test
+  @Order(12)
+  void unsupportedLiveUniverseModeDoesNotIncrementTheUnresolvedDropCounter() {
+    StrategyRepository.StrategyRow unsupported =
+        uniquePublishedRow(
+            UNSUPPORTED_LIVE_UNIVERSE_YAML, "engine-it-unsupported-universe", "Unsupported Universe");
+
+    SignalEngine isolatedEngine =
+        isolatedEngine(isolatedRegistry(unsupported), mock(FuturesUniverseResolver.class));
+    try {
+      isolatedEngine.reload();
+
+      assertThat(ReflectionTestUtils.getField(isolatedEngine, "lastReloadUnresolvedDrops"))
+          .isEqualTo(0);
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
   private StrategyRepository.StrategyRow publishedRow(String yaml, String name) {
     UUID id = (UUID) registryService.create("Engine IT Coldstart " + name, null, null, yaml).get("id");
     registryService.publish(id, null, null);
     return repository.findById(id).orElseThrow();
+  }
+
+  private StrategyRepository.StrategyRow uniquePublishedRow(
+      String template, String idPrefix, String namePrefix) {
+    String suffix = UUID.randomUUID().toString().replace("-", "");
+    String yaml =
+        template
+            .replaceFirst("id: [^\\r\\n]+", "id: " + idPrefix + "-" + suffix)
+            .replaceFirst("name: \"[^\"]+\"", "name: \"" + namePrefix + " " + suffix + "\"");
+    return publishedRow(yaml, namePrefix + " " + suffix);
+  }
+
+  private StrategyRepository isolatedRegistry(StrategyRepository.StrategyRow row) {
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(row));
+    when(isolatedRegistry.findVersionById(row.publishedVersionId()))
+        .thenReturn(repository.findVersionById(row.publishedVersionId()));
+    return isolatedRegistry;
   }
 
   private SignalEngine isolatedEngine(

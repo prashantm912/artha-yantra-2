@@ -14,6 +14,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -39,6 +40,12 @@ class PreOpenEquityScanIntegrationTest extends MarketDataIntegrationTestBase {
 
   @Autowired MockMvc mockMvc;
   @Autowired JdbcTemplate jdbc;
+
+  @AfterEach
+  void clean() {
+    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol = ?", SYM);
+    jdbc.update("DELETE FROM instruments WHERE tradingsymbol = ?", SYM + "26JULFUT");
+  }
 
   /** Canned pre-open quote: 107 vs prev close 100 (+7.00%), above the prev high 105 → 'H' break. */
   @TestConfiguration

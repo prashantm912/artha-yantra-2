@@ -7,7 +7,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
+import java.sql.Date;
 import java.time.LocalDate;
+import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -24,11 +27,34 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 class EquityControllerIntegrationTest extends MarketDataIntegrationTestBase {
 
+  /** Synthetic and unique to this class — safe to purge whole-series. */
+  private static final String SYM = "DLVTSYM";
+
+  /**
+   * REAL, sector-mapped tickers: this class needs them because its queries rank mapped symbols, so
+   * they are NOT exclusively ours. {@code BreadthControllerIntegrationTest:52-56} seeds RELIANCE /
+   * TCS / INFY at 2024-06-12 and has no cleanup of its own. Every seed here lands within ~40 days of
+   * today, so the purge is floored well clear of that — an unbounded delete would reach into another
+   * class's fixture on the shared singleton DB, which is the very contamination this test file is
+   * being fixed for.
+   */
+  private static final List<String> OWN_REAL_SYMBOLS =
+      List.of("AARTIIND", "WIPRO", "SUNPHARMA", "CIPLA", "RELIANCE");
+
+  private static final int OWN_SEED_FLOOR_DAYS = 60;
+
   @Autowired MockMvc mockMvc;
   @Autowired JdbcTemplate jdbc;
 
-  // Unique symbol — the IT singleton DB has no per-method cleanup.
-  private static final String SYM = "DLVTSYM";
+  @AfterEach
+  void clean() {
+    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol = ?", SYM);
+    Date floor = Date.valueOf(LocalDate.now(Ist.ZONE).minusDays(OWN_SEED_FLOOR_DAYS));
+    for (String symbol : OWN_REAL_SYMBOLS) {
+      jdbc.update(
+          "DELETE FROM nse_eod_bhavcopy WHERE symbol = ? AND trade_date >= ?", symbol, floor);
+    }
+  }
 
   private void insertBhav(
       LocalDate d,

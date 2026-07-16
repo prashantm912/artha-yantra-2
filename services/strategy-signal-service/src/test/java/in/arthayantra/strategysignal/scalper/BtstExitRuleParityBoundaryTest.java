@@ -1,12 +1,13 @@
 package in.arthayantra.strategysignal.scalper;
 
+import static in.arthayantra.strategysignal.registry.BtstExitRuleParityRules.SAFE_LEVEL_BASES;
+import static in.arthayantra.strategysignal.registry.BtstExitRuleParityRules.SAFE_TYPES;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.strategyschema.StrategyDocuments;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -34,12 +35,6 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
  * the SAME bars (or pinning the semantics in a shared fixture, the exit-equivalence.json pattern).
  */
 class BtstExitRuleParityBoundaryTest {
-
-  /** Exit types safe on the btst pre-close sweep regardless of the sim/live daily-bar divergence. */
-  private static final Set<String> SAFE_TYPES = Set.of("time_stop", "stop_loss", "take_profit");
-
-  /** Level bases that read ONLY the persisted entry price (never price history). */
-  private static final Set<String> SAFE_LEVEL_BASES = Set.of("premium_pct", "percent");
 
   @Test
   void everyBtstStrategyUsesOnlyParitySafeExitRules() throws IOException {

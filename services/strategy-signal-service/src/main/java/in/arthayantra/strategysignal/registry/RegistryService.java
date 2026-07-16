@@ -637,6 +637,35 @@ public class RegistryService {
     // Phase 44: the index_constituents publish guard is LIFTED — the submission-time universe
     // resolver (UniverseResolver) now pins membership by copy, so these strategies are publishable.
     List<ValidationIssue> hardIssues = new ArrayList<>();
+    if ("btst".equals(target.config().at("/risk/session/style").asText())) {
+      String preCloseAt =
+          target.config().at("/risk/session/pre_close_at").asText("15:20");
+      for (JsonNode rule : target.config().path("exit_rules")) {
+        String type = rule.path("type").asText();
+        if (!BtstExitRuleParityRules.SAFE_TYPES.contains(type)) {
+          hardIssues.add(
+              new ValidationIssue(
+                  "/exit_rules",
+                  "BTST exit type '" + type
+                      + "' cannot be published: simulation reads a synthetic " + preCloseAt
+                      + " bar while live"
+                      + " reads dense 15:30 daily bars, so this exit would drift; allowed types are "
+                      + BtstExitRuleParityRules.SAFE_TYPES));
+        } else if (("stop_loss".equals(type) || "take_profit".equals(type))
+            && !BtstExitRuleParityRules.SAFE_LEVEL_BASES
+                .contains(rule.path("params").path("basis").asText())) {
+          String basis = rule.path("params").path("basis").asText();
+          hardIssues.add(
+              new ValidationIssue(
+                  "/exit_rules",
+                  "BTST " + type + " basis '" + basis
+                      + "' cannot be published: simulation reads a synthetic " + preCloseAt
+                      + " bar while live"
+                      + " reads dense 15:30 daily bars, so this exit would drift; allowed bases are "
+                      + BtstExitRuleParityRules.SAFE_LEVEL_BASES));
+        }
+      }
+    }
     for (JsonNode indicator : target.config().path("indicators")) {
       String name = indicator.path("name").asText();
       if (!IndicatorRegistry.exists(name)) {

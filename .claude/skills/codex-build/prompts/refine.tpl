@@ -12,6 +12,17 @@ The target is `{{TARGET}}`.
 
 ## Do
 
+- **FIRST: re-verify the BRIEF against the CODE — do not inherit the drafter's premises.** The drafter
+  was asked for a `BRIEF-CONFIRMED`/`BRIEF-CORRECTED`/`BRIEF-INVALID` verdict; it may be missing,
+  wrong, or too generous. Every other gate judges CODE against BRIEF; only this step judges BRIEF
+  against CODE, so a false premise survives every later reviewer *by construction*. Spot-check the
+  brief's load-bearing claims yourself: `file:line` cites, "X currently does Y", "there is no Z",
+  and every named symbol/column/config-key/endpoint **spelled exactly**.
+  Measured 2026-07-17: 4 of 5 briefs were factually wrong, AND a draft once built a fetcher against a
+  URL that 404s **while its own WireMock test stubbed the same wrong path** — five green tests
+  validating a fiction. **When a claim is cheap to test for real (an HTTP GET, a SQL query, a grep),
+  TEST IT rather than reading it.** That is what a fast first pass misses.
+  Report your verdict in the receipt; if it differs from the drafter's, say why.
 - Verify the draft actually implements the plan/brief — nothing missing, nothing out of scope.
 - **Fix directly** any: correctness/logic bug, off-by-one, missed null/negative/blank guard, wrong
   status code, a broken test, a style/convention deviation the project's linter/checkstyle would reject.
@@ -25,6 +36,8 @@ The target is `{{TARGET}}`.
 
 ## Report (your final message)
 
+- **Brief verdict** (FIRST LINE): `BRIEF-CONFIRMED` / `BRIEF-CORRECTED` (+ corrections with evidence)
+  / `BRIEF-INVALID` (+ what is actually true — and STOP). Say whether you agree with the drafter's.
 - **Fixes applied** — one line each: what was wrong in the draft, what you changed (file:line).
 - **Confirmed-good** — parts of the draft you checked and left as-is.
 - **Claims** — labeled computed / sourced (file:line or command+result) / recalled / assumed.

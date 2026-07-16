@@ -1,0 +1,74 @@
+# task_07199525: the cross-vendor review verdict must survive the run.
+#
+# The verdict is written to .claude/skills/*/state/*.review.txt — and everything under
+# state/ is gitignored: per-run scratch on one machine, deleted with the worktree. So the
+# PR body is the ONLY durable record. ship-a-change already required it in prose and it did
+# not bind: of three PRs shipped the same night through the same lane on 2026-07-17, #878
+# carried the verdict, #877 carried a review FINDING but no verdict, and #879 carried
+# nothing — that review is now permanently unrecoverable.
+#
+# This is a REMINDER, not a wall. It reads the PR body only — no checkout, no build, ~2s.
+#   - hotfix/* branches are exempt BY DESIGN (a live incident must never wait on a doc gate).
+#   - SKIPPED (<reason>) is a first-class PASS: ROUTING.md legitimately allows skipping
+#     trivial/docs-only changes, and a rule that cannot express the legitimate case gets
+#     ignored in the illegitimate one.
+#   - It is not a required check: `--admin` merges past it. That is intentional — the point
+#     is to make an omission VISIBLE, not to hold the repo hostage to a regex.
+name: ci-review-verdict
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verdict:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert the PR body records a cross-vendor review verdict
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          case "$PR_BRANCH" in
+            hotfix/*)
+              echo "::notice::hotfix branch — review-verdict gate exempt by design (a live incident must not wait on a doc gate)."
+              exit 0
+              ;;
+          esac
+
+          # One line, verbatim keyword. SKIPPED needs a non-empty parenthesised reason.
+          PATTERN='Cross-vendor review:[[:space:]]*(APPROVED|REQUEST_CHANGES \(resolved\)|NEEDS_REWORK \(resolved\)|SKIPPED \(.+\))'
+
+          if printf '%s' "$PR_BODY" | grep -qE "$PATTERN"; then
+            echo "Found:"
+            printf '%s' "$PR_BODY" | grep -oE "$PATTERN" | head -1
+            exit 0
+          fi
+
+          cat >&2 <<'MSG'
+          The PR body carries no cross-vendor review verdict.
+
+          Add ONE line, verbatim, plus the reviewer's vendor/model:
+
+            Cross-vendor review: APPROVED — Opus (Anthropic)
+            Cross-vendor review: REQUEST_CHANGES (resolved) — gpt-5.6-sol (OpenAI)
+            Cross-vendor review: NEEDS_REWORK (resolved) — Opus (Anthropic)
+            Cross-vendor review: SKIPPED (docs-only)
+
+          SKIPPED (<reason>) is a first-class, correct answer — ROUTING.md allows skipping
+          trivial/docs-only changes. Do NOT invent a review to satisfy this check; state
+          honestly that it was skipped and why.
+
+          Why this exists: the verdict lives only in .claude/skills/*/state/*.review.txt,
+          which is gitignored and dies with the worktree. The PR body is the ONLY durable
+          record. On 2026-07-17 a real review was lost exactly this way (PR #879).
+
+          Exempt: hotfix/* branches. Bypass: an --admin merge (deliberately possible).
+          MSG
+          exit 1

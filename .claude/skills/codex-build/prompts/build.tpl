@@ -12,6 +12,42 @@ read ALL of it and implement it. Otherwise implement from the instruction block 
 2. The plan/brief `{{TARGET}}` (if a path), including any pasted memory traps in the block below —
    you do NOT have the memory files; the requester pastes the relevant traps for you.
 
+## STEP 0 — VERIFY THE BRIEF AGAINST THE CODE. Do this BEFORE you write a line.
+
+**Every other gate in this pipeline judges CODE against BRIEF. Nothing else judges BRIEF against
+CODE.** So a brief with a false premise yields well-tested, green-on-every-gate work that is wrong —
+and no later reviewer can catch it, *by construction*, because the code genuinely does match the
+brief. You are the only gate on this. It is not optional and it is not a formality.
+
+This is measured, not hypothetical: on 2026-07-17's first full pipeline run, **4 of 5 briefs were
+factually wrong** about the code (a "denylist" that is really an allowlist; a "date collision" that is
+really a `MAX()` collision; a 2-way conflation that is 4-way; a named method that nothing calls).
+Briefs are often written from chips filed weeks earlier — **the code moves underneath them.** One task
+burned an entire build before review killed its premise.
+
+Check EVERY load-bearing factual claim in the brief against the CURRENT tree:
+- every `file:line` citation — does that line say what the brief claims?
+- every "X currently does Y" — read X.
+- every "there is no Z" / "nothing calls W" — grep for it. Absence claims are the ones that rot.
+- every named symbol, column, config key, endpoint path, or status value — confirm it exists **and is
+  spelled exactly as written**. A guessed key name is a silent no-op.
+
+Keep it proportionate: this rides the reading you must do anyway to implement. Do not turn it into an
+audit of the whole service — check what the brief ASSERTS, not what it omits.
+
+Then open your receipt with exactly one verdict on its own line:
+
+- `BRIEF-CONFIRMED` — every load-bearing claim checks out. Proceed.
+- `BRIEF-CORRECTED` — some claim was wrong but the GOAL still stands. **List each correction with the
+  evidence, implement against the CODE (not the brief), and say so.** This is the common case; it is a
+  success, not a complaint.
+- `BRIEF-INVALID` — a wrong premise means the requested change is wrong, unnecessary, or would cause
+  harm. **STOP. Do not implement.** Explain what is actually true and what you would do instead. A
+  correct refusal here is worth more than a green build on a false premise.
+
+If `{{TARGET}}` is a free-form label rather than a plan file, the instruction block at the bottom IS
+the brief — verify that.
+
 ## Scope & hard rules
 
 - Implement EXACTLY what the plan says — nothing speculative. If the instruction block narrows scope
@@ -33,6 +69,9 @@ read ALL of it and implement it. Otherwise implement from the instruction block 
 
 ## Report (your final message) — the RECEIPT
 
+- **Brief verdict** (FIRST LINE — see STEP 0): `BRIEF-CONFIRMED` / `BRIEF-CORRECTED` (+ each
+  correction with evidence) / `BRIEF-INVALID` (+ what is actually true). A receipt without this is
+  incomplete and will be sent back.
 - **Files changed** — one line each: what and why.
 - **Diff summary** — the shape of the change (`git diff --stat HEAD`).
 - **Claims** — each material claim labeled `computed` / `sourced` (file:line or command+result) /

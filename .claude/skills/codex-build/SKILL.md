@@ -66,6 +66,26 @@ export STATE_DIR=".claude/skills/codex-build/state"
    - `IMPLEMENTATION_PARTIAL` → resume for the remainder before refining.
    - `IMPLEMENTATION_COMPLETE` → go to the sol refine pass (step 5).
 
+   **…and parse the receipt's FIRST line — the BRIEF verdict (task_587984d1).** `build.tpl` STEP 0
+   makes the builder verify the brief's factual claims against the CURRENT tree before writing code:
+   - `BRIEF-CONFIRMED` → proceed.
+   - `BRIEF-CORRECTED` → **read the corrections.** The builder implemented against the CODE, not your
+     brief. Fold them back into the chip/ledger row so the next reader doesn't inherit the same wrong
+     premise. This is the common case and it is a success.
+   - `BRIEF-INVALID` → **STOP. Do not push the build through.** Re-file the chip with what is actually
+     true (the `task_a86f2d17` → `task_9059519d` shape: mark the old row "DO NOT REBUILD FROM THIS ROW").
+   - **Verdict missing** → the receipt is incomplete; resume the thread and ask for it. Do not proceed
+     on an unverified brief.
+
+   **Why this gate exists and why it cannot be moved later:** every other gate in the lane — sol,
+   `claude-review`, your own audit — judges **CODE against BRIEF**. Nothing else judges **BRIEF against
+   CODE**. So a factually wrong brief produces well-tested, green-on-every-gate work on a false
+   premise, and no downstream reviewer can catch it *by construction*, because the code genuinely does
+   match the brief. Measured on the 2026-07-17 first full pipeline run: **4 of 5 briefs were wrong**
+   (chips filed weeks earlier; the code moved underneath them), and `task_a86f2d17` burned a whole
+   build before review killed its premise. Verifying chips during recon is a HABIT — habits get skipped
+   under time pressure and on autonomous runs, i.e. exactly when nothing else is watching.
+
 5. **Sol review+fix pass (a more careful model refines luna's draft, still Codex-side).** A FRESH sol
    thread (`KEY_SUFFIX=_refine` gives the SAME `<target>` a distinct thread — pass the ORIGINAL target,
    NOT a suffixed one, so the prompt still resolves the plan) reads luna's uncommitted diff, fixes issues

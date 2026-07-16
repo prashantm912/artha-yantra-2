@@ -1,10 +1,20 @@
 package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import in.arthayantra.strategysignal.notifier.NotifierClient;
 import in.arthayantra.strategysignal.paper.PaperReconciliationService.ReconciliationResult;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
  * Audit §8 V5 + V16 (app-platform audit 2026-07-10): the nightly paper-ledger reconciliation runs
@@ -39,6 +50,8 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   @Autowired private PaperReconciliationService reconciliation;
   @Autowired private PaperReconciliationScheduler scheduler; // present ⇒ bean loaded in engine-disabled ctx
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private MeterRegistry meters;
+  @MockitoBean private NotifierClient notifier;
 
   private UUID versionId;
 
@@ -89,6 +102,146 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
     assertThat(r.v5MissingExitOrder()).doesNotContain(posId);
     assertThat(r.v16TakenWithoutOrder()).doesNotContain(signalId);
     assertThat(r.v16PositionWithoutSignal()).doesNotContain(posId);
+  }
+
+  @Test
+  void openEntryPositionWithItsPersistedExitIsFlaggedInRunDetail() {
+    OffsetDateTime now = OffsetDateTime.now();
+    String sym = sym("CARRY");
+    long anchorId = seedSignal(sym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(3));
+    OffsetDateTime transitionAt = now.minusHours(2);
+    seedSignal(sym, "EXPIRED", null, "EXIT", "SELL", transitionAt);
+    // A later ENTRY can be persisted after the EXIT with the same candle timestamp. Signal id is the
+    // causal tie-break: the EXIT still belongs to the older anchor because it was inserted first.
+    seedSignal(sym, "EXPIRED", 50, "ENTRY", "BUY", transitionAt);
+    long positionId = seedPosition(sym, "BUY", 50, "OPEN", now.minusHours(3), null, anchorId, "book1");
+
+    ReconciliationResult r = run();
+
+    assertThat(strandedCarryIds(latestRunId())).contains(positionId);
+    assertThat(meters.find("ay_paper_recon_stranded_carry").gauge().value())
+        .isEqualTo(r.strandedCarryDiscrepancies());
+    assertThat(meters.find("ay_paper_recon_stranded_carry").counter()).isNull();
+  }
+
+  @Test
+  void exitAnchoredOpenPositionIsExcludedByTheEntryAnchorGuard() {
+    OffsetDateTime now = OffsetDateTime.now();
+    String sym = sym("EXITANCHOR");
+    long anchorId = seedSignal(sym, "EXPIRED", null, "EXIT", "SELL", now.minusHours(2));
+    seedSignal(sym, "EXPIRED", null, "EXIT", "BUY", now.minusHours(1));
+    long positionId = seedPosition(sym, "SELL", 50, "OPEN", now.minusHours(2), null, anchorId, "book1");
+
+    run();
+
+    assertThat(strandedCarryIds(latestRunId())).doesNotContain(positionId);
+  }
+
+  /**
+   * Pins guard 2 (`x.side <> s.side`): a sibling position's EXIT must not match the other side.
+   *
+   * <p><b>SEED ORDER IS LOAD-BEARING — do not "tidy" it.</b> Both anchors share a generated_at, so the
+   * predicate's `(generated_at, id)` tie-break makes seed order = causal order. The BUY anchor must be
+   * seeded LAST so it is the newest ENTRY before the EXIT: with the BUY anchor first, the SELL anchor
+   * became an intervening ENTRY that closed the BUY's window, so `buyPosition` was excluded by the
+   * WINDOW BOUND and never by the side guard — the assertion then passed identically with
+   * `x.side <> s.side` deleted (proven by mutation against live Postgres). A test that cannot fail is
+   * exactly what got v1 of this reconciler rejected.
+   */
+  @Test
+  void oppositeSideOpenPositionDoesNotMatchAnotherSidesExit() {
+    OffsetDateTime now = OffsetDateTime.now();
+    String sym = sym("SIDEMATCH");
+    long sellAnchor = seedSignal(sym, "EXPIRED", 50, "ENTRY", "SELL", now.minusHours(2));
+    long buyAnchor = seedSignal(sym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(2));
+    long sellPosition = seedPosition(sym, "SELL", 50, "OPEN", now.minusHours(2), null, sellAnchor, "book1");
+    long buyPosition = seedPosition(sym, "BUY", 50, "OPEN", now.minusHours(2), null, buyAnchor, "book1");
+    // A BUY-side EXIT: it closes the SELL anchor (opposite side) and must NOT match the BUY anchor.
+    seedSignal(sym, "EXPIRED", null, "EXIT", "BUY", now.minusHours(1));
+
+    run();
+
+    // sellPosition IS flagged: the BUY anchor is opposite-side, so `n.side = s.side` keeps it from
+    // bounding the SELL's window, and the BUY EXIT satisfies `x.side <> s.side`.
+    // buyPosition is NOT flagged: the EXIT is its OWN side, which only guard 2 can exclude.
+    assertThat(strandedCarryIds(latestRunId())).contains(sellPosition).doesNotContain(buyPosition);
+  }
+
+  @Test
+  void pyramidAddDoesNotEndWindowButLaterEntryDoes() {
+    OffsetDateTime now = OffsetDateTime.now();
+    String pyramidSym = sym("PYRAMID");
+    long pyramidAnchor =
+        seedSignal(pyramidSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(4));
+    long pyramidAdd =
+        seedSignal(pyramidSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(3));
+    jdbc.update(
+        "UPDATE signals SET manas_arora_detail = '{\"pyramidLot\":2}'::jsonb WHERE id = ?",
+        pyramidAdd);
+    long pyramidPosition =
+        seedPosition(
+            pyramidSym, "BUY", 100, "OPEN", now.minusHours(4), null, pyramidAnchor, "book-pyramid");
+    seedSignal(pyramidSym, "EXPIRED", null, "EXIT", "SELL", now.minusHours(2));
+
+    String sym = sym("WINDOW");
+    OffsetDateTime entryAt = now.minusHours(3);
+    // Equal generated_at is legal. The later identity is the later anchor and must own the EXIT.
+    long sweptAnchor = seedSignal(sym, "EXPIRED", null, "ENTRY", "BUY", entryAt);
+    long laterAnchor = seedSignal(sym, "EXPIRED", 50, "ENTRY", "BUY", entryAt);
+    long sweptPosition =
+        seedPosition(sym, "BUY", 50, "OPEN", entryAt, null, sweptAnchor, "book-swept");
+    long laterPosition =
+        seedPosition(sym, "BUY", 50, "OPEN", entryAt, null, laterAnchor, "book-later");
+    seedSignal(sym, "EXPIRED", null, "EXIT", "SELL", entryAt);
+
+    run();
+
+    assertThat(strandedCarryIds(latestRunId()))
+        .contains(pyramidPosition, laterPosition)
+        .doesNotContain(sweptPosition);
+  }
+
+  @Test
+  void healthyClosedPositionIsExcludedAlongsideAFlaggedOpenCarry() {
+    OffsetDateTime now = OffsetDateTime.now();
+    String openSym = sym("OPENPOS");
+    long openAnchor = seedSignal(openSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(3));
+    long openPosition = seedPosition(openSym, "BUY", 50, "OPEN", now.minusHours(3), null, openAnchor, "book1");
+    seedSignal(openSym, "EXPIRED", null, "EXIT", "SELL", now.minusHours(2));
+
+    String closedSym = sym("CLOSED");
+    long closedAnchor = seedSignal(closedSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(3));
+    OffsetDateTime closedAt = now.minusHours(2);
+    long closedPosition = seedPosition(closedSym, "BUY", 50, "CLOSED", now.minusHours(3), closedAt, closedAnchor, "book1");
+    seedOrder("book1", closedAnchor, closedSym, "BUY", 50, now.minusHours(3));
+    seedOrder("book1", null, closedSym, "SELL", 50, closedAt);
+
+    run();
+
+    assertThat(strandedCarryIds(latestRunId())).contains(openPosition).doesNotContain(closedPosition);
+  }
+
+  @Test
+  void repeatedCarryAlertsOnlyForNewIdsAndDoNotEnterActivityTotal() {
+    OffsetDateTime now = OffsetDateTime.now();
+    String sym = sym("ALERT");
+    long anchorId = seedSignal(sym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(2));
+    long positionId = seedPosition(sym, "BUY", 50, "OPEN", now.minusHours(2), null, anchorId, "book1");
+    seedSignal(sym, "EXPIRED", null, "EXIT", "SELL", now.minusHours(1));
+    when(notifier.configured("NTFY")).thenReturn(true);
+
+    ReconciliationResult first = run();
+    verify(notifier, times(1)).send(eq("NTFY"), contains("stranded carry"), contains(Long.toString(positionId)));
+    clearInvocations(notifier);
+    ReconciliationResult second = run();
+
+    assertThat(first.totalDiscrepancies())
+        .isEqualTo(first.v5Discrepancies() + first.v16Discrepancies());
+    assertThat(second.totalDiscrepancies())
+        .isEqualTo(second.v5Discrepancies() + second.v16Discrepancies());
+    assertThat(latestRunTotal()).isEqualTo(second.totalDiscrepancies());
+    assertThat(strandedCarryIds(latestRunId())).contains(positionId);
+    verify(notifier, never()).send(eq("NTFY"), contains("stranded carry"), contains(Long.toString(positionId)));
   }
 
   @Test
@@ -208,18 +361,30 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   private long seedSignal(String sym, String status, Integer suggestedQty, OffsetDateTime generatedAt) {
+    return seedSignal(sym, status, suggestedQty, "ENTRY", "BUY", generatedAt);
+  }
+
+  private long seedSignal(
+      String sym,
+      String status,
+      Integer suggestedQty,
+      String signalType,
+      String side,
+      OffsetDateTime generatedAt) {
     Long id =
         jdbc.queryForObject(
             """
             INSERT INTO signals
               (strategy_version_id, exchange, tradingsymbol, "interval", signal_type, side,
                composite_score, score_breakdown, status, generated_at, suggested_qty)
-            VALUES (?, 'NFO', ?, '1m', 'ENTRY', 'BUY', 0.8000, '{}'::jsonb, ?, ?, ?)
+            VALUES (?, 'NFO', ?, '1m', ?, ?, 0.8000, '{}'::jsonb, ?, ?, ?)
             RETURNING id
             """,
             Long.class,
             versionId,
             sym,
+            signalType,
+            side,
             status,
             generatedAt,
             suggestedQty);
@@ -277,5 +442,31 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   private int countRuns() {
     Integer c = jdbc.queryForObject("SELECT count(*) FROM paper_reconciliation_runs", Integer.class);
     return c == null ? 0 : c;
+  }
+
+  private long latestRunId() {
+    Long id = jdbc.queryForObject(
+        "SELECT id FROM paper_reconciliation_runs ORDER BY ran_at DESC, id DESC LIMIT 1", Long.class);
+    return id == null ? 0 : id;
+  }
+
+  private List<Long> strandedCarryIds(long runId) {
+    return jdbc.query(
+        """
+        SELECT v::bigint
+        FROM paper_reconciliation_runs r,
+             jsonb_array_elements_text(r.detail->'strandedCarry'->'positions') v
+        WHERE r.id = ?
+        ORDER BY v::bigint
+        """,
+        (rs, rowNum) -> rs.getLong(1),
+        runId);
+  }
+
+  private int latestRunTotal() {
+    Integer total = jdbc.queryForObject(
+        "SELECT total_discrepancies FROM paper_reconciliation_runs ORDER BY ran_at DESC, id DESC LIMIT 1",
+        Integer.class);
+    return total == null ? 0 : total;
   }
 }

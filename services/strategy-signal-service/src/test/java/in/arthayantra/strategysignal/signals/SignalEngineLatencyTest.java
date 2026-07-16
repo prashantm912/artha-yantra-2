@@ -3,13 +3,16 @@ package in.arthayantra.strategysignal.signals;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
@@ -20,6 +23,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -103,6 +107,9 @@ class SignalEngineLatencyTest {
     SignalRepository signals = mock(SignalRepository.class);
     PrometheusMeterRegistry meters = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
     Clock clock = Clock.fixed(Instant.ofEpochMilli(2_000L), ZoneOffset.UTC);
+    FuturesUniverseResolver resolver = mock(FuturesUniverseResolver.class);
+    when(resolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenReturn(Optional.of(List.of()));
     SignalEngine engine =
         new SignalEngine(
             mock(StrategyRepository.class),
@@ -110,7 +117,7 @@ class SignalEngineLatencyTest {
             mock(SignalPublisher.class),
             mock(ApplicationEventPublisher.class),
             mock(LiveSeriesStore.class),
-            mock(FuturesUniverseResolver.class),
+            resolver,
             mock(RedisConnectionFactory.class),
             new ObjectMapper(),
             clock,

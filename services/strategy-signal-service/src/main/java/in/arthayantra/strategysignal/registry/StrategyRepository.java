@@ -145,6 +145,20 @@ public class StrategyRepository {
         "SELECT * FROM strategies ORDER BY updated_at DESC LIMIT 10000", this::strategyRow);
   }
 
+  /** Number of enabled strategies whose published version is still marked published. */
+  public long countEnabledPublished() {
+    Long count =
+        jdbc.queryForObject(
+            """
+            SELECT count(*)
+            FROM strategies s
+            JOIN strategy_versions v ON v.id = s.published_version_id
+            WHERE s.enabled = TRUE AND v.status = 'published'
+            """,
+            Long.class);
+    return count == null ? 0L : count;
+  }
+
   /** All versions of a strategy, newest first. */
   public List<VersionRow> versions(UUID strategyId, int limit, int offset) {
     return jdbc.query(

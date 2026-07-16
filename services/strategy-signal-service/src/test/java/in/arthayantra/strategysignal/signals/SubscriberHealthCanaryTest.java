@@ -9,6 +9,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.signals.SubscriberHealthCanary.SubscriberStallAlert;
 import java.time.Clock;
 import java.time.Instant;
@@ -37,6 +38,7 @@ class SubscriberHealthCanaryTest {
   private static final long NOW_MS = IN_SESSION.toEpochMilli();
 
   private final SignalEngine engine = mock(SignalEngine.class);
+  private final StrategyRepository registry = mock(StrategyRepository.class);
   private final StringRedisTemplate redis = mock(StringRedisTemplate.class);
   @SuppressWarnings("unchecked")
   private final ValueOperations<String, String> valueOps = mock(ValueOperations.class);
@@ -44,8 +46,9 @@ class SubscriberHealthCanaryTest {
   private final SubscriberHealthTelemetry telemetry = mock(SubscriberHealthTelemetry.class);
 
   private SubscriberHealthCanary canary(boolean enabled) {
+    when(registry.countEnabledPublished()).thenReturn(1L);
     return new SubscriberHealthCanary(
-        engine, redis, events, telemetry, CLOCK, enabled, BAR_GAP, FEED_FRESH);
+        engine, registry, redis, events, telemetry, CLOCK, enabled, BAR_GAP, FEED_FRESH);
   }
 
   /** Eval keeps pace with receipt (evalLag ~0) — so the eval-stall branch never trips these tests. */
@@ -77,7 +80,7 @@ class SubscriberHealthCanaryTest {
   }
 
   @Test
-  void feedAlsoStale_doesNotActOrPage() {
+  void feedActuallyStale_remainsQuietForSubscriberOwnership() {
     when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
     evalKeepingUp(NOW_MS - 200_000);
     feedAgeMs(200_000); // feed itself is stale — market-data's canary owns this, not us
@@ -89,16 +92,16 @@ class SubscriberHealthCanaryTest {
   }
 
   @Test
-  void feedHeartbeatMissing_doesNotAct() {
+  void feedHeartbeatMissing_isSuspiciousAndActs() {
     when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
     evalKeepingUp(NOW_MS - 200_000);
     when(redis.opsForValue()).thenReturn(valueOps);
-    when(valueOps.get("ticks:last-at")).thenReturn(null); // unknown ⇒ conservative: stay quiet
+    when(valueOps.get("ticks:last-at")).thenReturn(null); // unknown ⇒ suspicious, never silent
 
     canary(true).sweep();
 
-    verify(engine, never()).forceResubscribe(anyString());
-    verify(events, never()).publishEvent(any());
+    verify(engine, times(1)).forceResubscribe(anyString());
+    verify(events, times(1)).publishEvent(any(SubscriberStallAlert.class));
   }
 
   @Test
@@ -113,10 +116,24 @@ class SubscriberHealthCanaryTest {
   }
 
   @Test
-  void noOneMinuteSubscriptions_noAction() {
+  void noOneMinuteSubscriptions_butPublishedStrategy_isSuspicious() {
     when(engine.hasOneMinuteSubscriptions()).thenReturn(false); // nothing to receive
+    evalKeepingUp(NOW_MS - 200_000);
+    feedAgeMs(10_000);
 
     canary(true).sweep();
+
+    verify(engine, times(1)).forceResubscribe(anyString());
+    verify(events, times(1)).publishEvent(any(SubscriberStallAlert.class));
+  }
+
+  @Test
+  void zeroEnabledPublishedStrategies_noOneMinuteSubscriptions_staysQuiet() {
+    when(engine.hasOneMinuteSubscriptions()).thenReturn(false);
+    SubscriberHealthCanary c = canary(true);
+    when(registry.countEnabledPublished()).thenReturn(0L);
+
+    c.sweep();
 
     verify(engine, never()).forceResubscribe(anyString());
     verify(events, never()).publishEvent(any());
@@ -135,6 +152,7 @@ class SubscriberHealthCanaryTest {
   @Test
   void stillStarved_retriesResubscribeButDoesNotRepage() {
     MutableClock advancing = new MutableClock(IN_SESSION);
+    when(registry.countEnabledPublished()).thenReturn(1L);
     when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
     // heartbeats fixed in the past — receiveGap keeps growing as the clock advances (stays starved);
     // evaluated == received so evalLag is 0 (this is a RECEIVE drop, not an eval stall).
@@ -145,7 +163,7 @@ class SubscriberHealthCanaryTest {
 
     SubscriberHealthCanary c =
         new SubscriberHealthCanary(
-            engine, redis, events, telemetry, advancing, true, BAR_GAP, FEED_FRESH);
+            engine, registry, redis, events, telemetry, advancing, true, BAR_GAP, FEED_FRESH);
     c.sweep(); // first detection: re-subscribe #1 + page #1
     advancing.advanceMs(BAR_GAP); // a full window later, still no bar
     c.sweep(); // retry: re-subscribe #2, NO repeat page
@@ -177,7 +195,7 @@ class SubscriberHealthCanaryTest {
 
   /** Quiet market: both heartbeats frozen together (evalLag ~0) — the eval alarm must stay silent. */
   @Test
-  void quietMarketBothFrozen_noEvalAlarm() {
+  void quietMarketBothFrozen_doesNotClaimAnEvalStall() {
     when(engine.hasOneMinuteSubscriptions()).thenReturn(true);
     when(engine.lastBarReceivedAtMs()).thenReturn(NOW_MS - 200_000); // frozen
     when(engine.lastBarEvaluatedAtMs()).thenReturn(NOW_MS - 200_000); // frozen ≈ received ⇒ evalLag 0

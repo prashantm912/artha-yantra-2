@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.signals;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.strategysignal.registry.StrategyRepository;
 import java.time.Clock;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
@@ -27,9 +28,10 @@ import org.springframework.stereotype.Component;
  * {@code DataHealthCanary} could not catch it because it watches bar CLOSES on the PRODUCER side, not
  * consumer receipt.
  *
- * <p>Every minute in-session, if the engine has 1m subscriptions yet has received no candle for
- * {@code bar-gap-ms} WHILE the feed is provably alive (market-data's {@code ticks:last-at} heartbeat
- * is fresh within {@code feed-fresh-ms}), this force-re-subscribes (overlap-safe) and pages ntfy. The
+ * <p>Every minute in-session, if enabled+published strategies exist yet the engine has received no
+ * candle for {@code bar-gap-ms} WHILE the feed is provably alive (market-data's
+ * {@code ticks:last-at} heartbeat is fresh within {@code feed-fresh-ms}), this force-re-subscribes
+ * (overlap-safe) and pages ntfy. The
  * feed-fresh cross-check is the discriminator: a genuine feed outage is the market-data canary's job,
  * so this stays silent then (no false page, no pointless re-subscribe churn). Reading
  * {@code ticks:last-at} on the shared Redis keeps it HTTP-free. Safety net, default ON — a
@@ -75,6 +77,7 @@ public class SubscriberHealthCanary {
   public record SubscriberStallAlert(String title, String message) {}
 
   private final SignalEngine engine;
+  private final StrategyRepository registry;
   private final StringRedisTemplate redis;
   private final ApplicationEventPublisher events;
   private final SubscriberHealthTelemetry telemetry;
@@ -92,6 +95,7 @@ public class SubscriberHealthCanary {
   /** Wires the engine, the shared Redis, the event bus, telemetry, and the (tunable) thresholds. */
   public SubscriberHealthCanary(
       SignalEngine engine,
+      StrategyRepository registry,
       StringRedisTemplate redis,
       ApplicationEventPublisher events,
       SubscriberHealthTelemetry telemetry,
@@ -100,6 +104,7 @@ public class SubscriberHealthCanary {
       @Value("${artha.signals.subscriber-watchdog.bar-gap-ms:180000}") long barGapMs,
       @Value("${artha.signals.subscriber-watchdog.feed-fresh-ms:90000}") long feedFreshMs) {
     this.engine = engine;
+    this.registry = registry;
     this.redis = redis;
     this.events = events;
     this.telemetry = telemetry;
@@ -117,8 +122,8 @@ public class SubscriberHealthCanary {
         return;
       }
       ZonedDateTime now = clock.instant().atZone(Ist.ZONE);
-      if (!inSession(now) || !engine.hasOneMinuteSubscriptions()) {
-        return; // out of session, or nothing to receive — no false alarm
+      if (!inSession(now) || registry.countEnabledPublished() == 0) {
+        return; // out of session, or genuinely idle by registry intent
       }
       long nowMs = clock.millis();
       long received = engine.lastBarReceivedAtMs();
@@ -164,14 +169,20 @@ public class SubscriberHealthCanary {
         return; // receiving normally
       }
       long feedAge = feedAgeMs(nowMs);
-      if (feedAge > feedFreshMs) {
-        return; // the FEED itself is stale/down/unreadable — market-data's canary owns that
+      if (feedAge != Long.MAX_VALUE && feedAge > feedFreshMs) {
+        return; // a known stale producer is market-data's ownership
       }
-      // Feed provably fresh but this consumer received no bar for receiveGap ⇒ the subscription dropped.
+      // Feed is fresh, or its heartbeat is unavailable; this consumer received no bar for receiveGap.
       String detail =
           "no candle received for " + (receiveGap / 1000) + "s while the feed is live (ticks "
               + (feedAge / 1000) + "s old) — Redis candles.1m subscription dropped; re-subscribing";
       if (!stalled) {
+        if (feedAge == Long.MAX_VALUE) {
+          detail =
+              "no candle received for "
+                  + (receiveGap / 1000)
+                  + "s while the feed heartbeat is unavailable; Redis candles.1m subscription is suspicious; re-subscribing";
+        }
         // First detection: latch, re-subscribe, and page ONCE.
         stalled = true;
         lastResubscribeAtMs = nowMs;
@@ -236,7 +247,8 @@ public class SubscriberHealthCanary {
       }
       return Math.max(0, nowMs - Long.parseLong(raw));
     } catch (RuntimeException unreadable) {
-      return Long.MAX_VALUE; // can't confirm the feed is alive ⇒ stay quiet (conservative)
+      log.warn("subscriber watchdog: feed heartbeat unreadable; treating it as suspicious");
+      return Long.MAX_VALUE; // unknown feed age is suspicious; the caller must not stay quiet
     }
   }
 

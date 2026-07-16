@@ -1,6 +1,7 @@
 package in.arthayantra.backtest.replay.counterfactual;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -16,8 +17,10 @@ import in.arthayantra.backtest.jobs.JobRepository;
 import in.arthayantra.backtest.replay.BacktestRunner;
 import in.arthayantra.backtest.testsupport.BacktestIntegrationTestBase;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,8 +114,24 @@ class CounterfactualIntegrationTest extends BacktestIntegrationTestBase {
 
   private UUID runToRun(UUID jobId) {
     Job job = jobs.find(jobId).orElseThrow();
-    runner.run(job, pct -> {}, () -> false);
-    return cfRuns.findRunIdByJobId(jobId).orElseThrow();
+    // The singleton IT Redis is shared across contexts, and every worker-pool-enabled IT context
+    // (JobLifecycle / CrashRecovery / WorkerPoolPriority / FunnelUniversePin) leaves a live WorkerPool
+    // in the Spring context cache consuming the shared jobs.backtest stream. submit() dispatched this
+    // job onto that stream, so an ambient pool can duplicate-execute it concurrently with this
+    // hand-run — and CounterfactualRunRepository.insert() does a DELETE-by-job then re-INSERT, so a
+    // second concurrent execution invalidates the runId this test just read (the cross-context race).
+    // Guard it with the SAME atomic claim the real worker uses: at most one executor wins the
+    // queued->running transition. If we win, run it by hand and mark it terminal so it is never
+    // re-run; if an ambient worker claimed first, it runs the (deterministic) replay itself and we
+    // just await the resulting run row. Either way exactly one execution produces the row we read.
+    if (jobs.claim(jobId, "cf-test")) {
+      runner.run(job, pct -> {}, () -> false);
+      jobs.markCompleted(jobId);
+    }
+    return await()
+        .atMost(Duration.ofSeconds(20))
+        .until(() -> cfRuns.findRunIdByJobId(jobId), Optional::isPresent)
+        .orElseThrow();
   }
 
   @Test

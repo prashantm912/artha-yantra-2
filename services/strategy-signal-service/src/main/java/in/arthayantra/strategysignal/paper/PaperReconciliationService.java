@@ -15,6 +15,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,7 +24,7 @@ import org.springframework.stereotype.Service;
 /**
  * Nightly paper-ledger reconciliation (app-platform audit 2026-07-10 §8, findings V5 + V16). READ-ONLY
  * over the paper/signal tables; the only write is its own append-only {@code paper_reconciliation_runs}
- * row. Two integrity checks over a bounded IST-day window:
+ * row. V5 and V16 are bounded IST-day activity checks; stranded carry is a global state check:
  *
  * <ul>
  *   <li><b>V5</b> — every CLOSED position's lifecycle is explicable by its order legs: Σ(entry-leg qty)
@@ -32,11 +33,15 @@ import org.springframework.stereotype.Service;
  *   <li><b>V16</b> — every TAKEN signal expected to open a position ({@code suggested_qty > 0}) has ≥ 1
  *       {@code paper_orders.signal_id} row (the A1 "taken-but-never-opened" residual), plus the inverse:
  *       a position on an auto-paper book with no {@code opening_signal_id}.
+ *   <li><b>Stranded carry</b> — every OPEN position anchored to an ENTRY with a persisted opposite-side
+ *       EXIT in that anchor's own ENTRY-to-next-non-pyramid-ENTRY window. It alerts only when a position
+ *       id is newly seen.
  * </ul>
  *
  * <p>The audit's "report to the ingest health board" is served IN-SCHEMA (that board is marketdata's —
- * a cross-schema write violates D10): the run row + {@code ay_paper_recon_*} Micrometer counters + a
- * once-per-run fail-soft ntfy when discrepancies &gt; 0 (the {@link RiskService} governor-trip idiom).
+ * a cross-schema write violates D10): the run row + {@code ay_paper_recon_*} Micrometer counters/gauge +
+ * the V5/V16 once-per-run fail-soft ntfy plus a separate newly-seen stranded-carry ntfy (the
+ * {@link RiskService} governor-trip idiom).
  * A plain paper-module {@code @Service} — NO {@code SignalEngine} dependency, so it loads in the
  * engine-disabled paper contexts.
  */
@@ -55,6 +60,7 @@ public class PaperReconciliationService {
   private final Counter runsTotal;
   private final Counter v5DiscrepanciesTotal;
   private final Counter v16DiscrepanciesTotal;
+  private final AtomicInteger strandedCarryGauge;
 
   /** Wires the reconciliation repo, notifier, JSON mapper, clock, meters + the lookback window. */
   public PaperReconciliationService(
@@ -72,6 +78,7 @@ public class PaperReconciliationService {
     this.runsTotal = meterRegistry.counter("ay_paper_recon_runs_total");
     this.v5DiscrepanciesTotal = meterRegistry.counter("ay_paper_recon_v5_discrepancies_total");
     this.v16DiscrepanciesTotal = meterRegistry.counter("ay_paper_recon_v16_discrepancies_total");
+    this.strandedCarryGauge = meterRegistry.gauge("ay_paper_recon_stranded_carry", new AtomicInteger());
   }
 
   /** The full result of one reconciliation pass (ids per discrepancy class, for the run row + tests). */
@@ -84,7 +91,8 @@ public class PaperReconciliationService {
       List<Long> v5EntryQtyMismatch,
       List<Long> v5MissingExitOrder,
       List<Long> v16TakenWithoutOrder,
-      List<Long> v16PositionWithoutSignal) {
+      List<Long> v16PositionWithoutSignal,
+      List<Long> strandedCarryPositions) {
 
     /** Distinct positions failing any V5 invariant (a fully-orphaned position hits two classes). */
     public int v5Discrepancies() {
@@ -103,6 +111,11 @@ public class PaperReconciliationService {
     public int totalDiscrepancies() {
       return v5Discrepancies() + v16Discrepancies();
     }
+
+    /** Persistent OPEN positions whose exit was persisted but whose settle did not complete. */
+    public int strandedCarryDiscrepancies() {
+      return strandedCarryPositions.size();
+    }
   }
 
   /** The nightly entry point: reconcile over the default lookback window (IST-day bounded). */
@@ -118,8 +131,9 @@ public class PaperReconciliationService {
 
   /**
    * Reconcile over an EXPLICIT window (both bounds absolute instants). Package-visible so an IT can pin
-   * a deterministic window independent of the wall clock. Runs the two checks, persists the run row,
-   * bumps the counters, and pushes ONE fail-soft ntfy when anything is off.
+   * a deterministic window independent of the wall clock. Runs the bounded checks plus the global
+   * stranded-carry check, persists the run row, bumps the metrics, and pushes each applicable fail-soft
+   * alert independently.
    */
   ReconciliationResult reconcile(OffsetDateTime windowStart, OffsetDateTime windowEnd) {
     // V5 — closed position ↔ order legs.
@@ -142,6 +156,7 @@ public class PaperReconciliationService {
     int takenChecked = repo.takenSignalsExpectedToOpen(windowStart, windowEnd);
     List<Long> takenWithoutOrder = repo.takenSignalsWithoutOrder(windowStart, windowEnd);
     List<Long> positionWithoutSignal = repo.autoPaperPositionsWithoutSignal(windowStart, windowEnd);
+    List<Long> strandedCarryPositions = repo.strandedCarryPositions();
 
     ReconciliationResult result =
         new ReconciliationResult(
@@ -153,13 +168,21 @@ public class PaperReconciliationService {
             qtyMismatch,
             missingExit,
             takenWithoutOrder,
-            positionWithoutSignal);
+            positionWithoutSignal,
+            strandedCarryPositions);
 
     persistAndAlert(result);
     return result;
   }
 
   private void persistAndAlert(ReconciliationResult r) {
+    // Must precede insertRun: the just-written row would otherwise be selected as "previous" and
+    // every persistent carry would be incorrectly treated as already seen.
+    Set<Long> previousStrandedCarryIds = new LinkedHashSet<>(repo.previousStrandedCarryIds());
+    Set<Long> newlySeenStrandedCarryIds = new LinkedHashSet<>(r.strandedCarryPositions());
+    newlySeenStrandedCarryIds.removeAll(previousStrandedCarryIds);
+    strandedCarryGauge.set(r.strandedCarryDiscrepancies());
+
     runsTotal.increment();
     v5DiscrepanciesTotal.increment(r.v5Discrepancies());
     v16DiscrepanciesTotal.increment(r.v16Discrepancies());
@@ -177,17 +200,26 @@ public class PaperReconciliationService {
       log.info(
           "paper reconciliation clean: {} closed positions + {} taken signals checked ({} → {})",
           r.positionsChecked(), r.takenSignalsChecked(), r.windowStart(), r.windowEnd());
-      return;
+    } else {
+      String detail =
+          "V5 position↔order-leg: " + r.v5Discrepancies() + " (missing-entry "
+              + r.v5MissingEntryOrder().size() + ", qty-mismatch " + r.v5EntryQtyMismatch().size()
+              + ", missing-exit " + r.v5MissingExitOrder().size() + "); "
+              + "V16 taken↔position: taken-without-order " + r.v16TakenWithoutOrder().size()
+              + ", position-without-signal " + r.v16PositionWithoutSignal().size()
+              + " — window " + r.windowStart() + " → " + r.windowEnd();
+      log.warn("paper reconciliation found {} discrepancies: {}", r.totalDiscrepancies(), detail);
+      pushAlert("ArthaYantra Paper — reconciliation drift (" + r.totalDiscrepancies() + ")", detail);
     }
-    String detail =
-        "V5 position↔order-leg: " + r.v5Discrepancies() + " (missing-entry "
-            + r.v5MissingEntryOrder().size() + ", qty-mismatch " + r.v5EntryQtyMismatch().size()
-            + ", missing-exit " + r.v5MissingExitOrder().size() + "); "
-            + "V16 taken↔position: taken-without-order " + r.v16TakenWithoutOrder().size()
-            + ", position-without-signal " + r.v16PositionWithoutSignal().size()
-            + " — window " + r.windowStart() + " → " + r.windowEnd();
-    log.warn("paper reconciliation found {} discrepancies: {}", r.totalDiscrepancies(), detail);
-    pushAlert("ArthaYantra Paper — reconciliation drift (" + r.totalDiscrepancies() + ")", detail);
+    if (!newlySeenStrandedCarryIds.isEmpty()) {
+      String detail =
+          "New stranded-carry OPEN positions with persisted EXIT signals: "
+              + newlySeenStrandedCarryIds + " — global state requires human repair";
+      log.warn("paper reconciliation found {} newly-seen stranded carries: {}",
+          newlySeenStrandedCarryIds.size(), newlySeenStrandedCarryIds);
+      pushAlert(
+          "ArthaYantra Paper — stranded carry (" + newlySeenStrandedCarryIds.size() + ")", detail);
+    }
   }
 
   private String detailJson(ReconciliationResult r) {
@@ -198,9 +230,12 @@ public class PaperReconciliationService {
     Map<String, Object> v16 = new LinkedHashMap<>();
     v16.put("takenWithoutOrder", r.v16TakenWithoutOrder());
     v16.put("positionWithoutSignal", r.v16PositionWithoutSignal());
+    Map<String, Object> strandedCarry = new LinkedHashMap<>();
+    strandedCarry.put("positions", r.strandedCarryPositions());
     Map<String, Object> root = new LinkedHashMap<>();
     root.put("v5", v5);
     root.put("v16", v16);
+    root.put("strandedCarry", strandedCarry);
     try {
       return mapper.writeValueAsString(root);
     } catch (JsonProcessingException e) {

@@ -1299,29 +1299,62 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     int bars = 20;
     OffsetDateTime base = WARM_BASE.plusMinutes(30);
     BigDecimal price = new BigDecimal("120.00");
+    // Publish each bar and CONFIRM it was evaluated (Σ += 2, once per strategy) before publishing the
+    // next. This is what makes the exact-count assertion deterministic on a constrained 2-core CI
+    // runner (the pre-existing red). This fresh COLD symbol's per-token candle channel is subscribed
+    // only AFTER the reload that loads A+B flips loadedSlugs() (SignalEngine.java:680) and THEN
+    // rebuilds the Redis listener container (:685, resubscribe() :829-880) with an async SUBSCRIBE, so
+    // a bar published into that gap is dropped (Redis pub/sub is fire-and-forget) and the series never
+    // warms — an undelivered bar is not a missed COUNT (the invariant is Σ == evaluations PERFORMED),
+    // it simply could not be delivered reliably. A single "prove the subscription is live" probe is
+    // NOT enough: loadedSlugs flips at :680 BEFORE resubscribe() at :685, and resubscribe starts the
+    // new listener container before stopping the old, so a probe can be answered by an outgoing
+    // container while the replacement SUBSCRIBE is still pending — after which the ordered bars still
+    // drop. Re-publishing the SAME bar until its +2 lands rides out that gap AND any mid-publish
+    // container rebuild. Because bar i is confirmed before bar i+1 is published, the buckets still
+    // append in strict order (no lower bucket ever arrives after a higher one has warmed the series),
+    // and a same-bucket redelivery dedups in the strictly-increasing LiveSeriesStore.append — so each
+    // bar counts EXACTLY +2. Nothing about the ENGINE changes.
+    // The per-bar count is asserted EXACT, not >=, and on BOTH sides of each publish. A cumulative
+    // >= target would let a double-count on bar i pre-satisfy bar i+1 (whose await would then return
+    // without confirming delivery); a coincident dropped bar i+1 would cancel the surplus and the
+    // final equality would still pass — masking both. No legitimate surplus is possible: nothing but
+    // A+B on this symbol is published during the test, so Σ rises only by these bars.
     for (int i = 0; i < bars; i++) {
       price = price.subtract(new BigDecimal("0.25"));
-      publishBar(symbol, base.plusMinutes(i), price);
+      final OffsetDateTime barTime = base.plusMinutes(i);
+      final BigDecimal barPrice = price;
+      final double carriedIn = sumBefore + 2.0 * i;
+      final double target = sumBefore + 2.0 * (i + 1);
+      // No surplus carried in — a prior bar that double-counted surfaces HERE, before its extra could
+      // silently pay for a later dropped bar.
+      assertThat(outcomeSum())
+          .as("bar %d starts with no carried-in surplus (Σ == %s)", i, carriedIn)
+          .isEqualTo(carriedIn);
+      await()
+          .atMost(Duration.ofSeconds(20))
+          .pollInterval(Duration.ofMillis(200))
+          .until(
+              () -> {
+                publishBar(symbol, barTime, barPrice);
+                return outcomeSum() >= target;
+              });
+      // Exactly this bar's +2 landed — a double-count overshoots and is caught at THIS bar, never
+      // masked by a later drop.
+      assertThat(outcomeSum())
+          .as("bar %d counted exactly +2 (Σ == %s), once per strategy", i, target)
+          .isEqualTo(target);
     }
     double expected = sumBefore + 2.0 * bars;
 
-    // Reach the expected sum, then let any EXTRA (double-counted) increment land before asserting
-    // equality — a >= assertion would go green mid-flight on an engine that counts twice.
-    await()
-        .atMost(Duration.ofSeconds(20))
-        .untilAsserted(
-            () ->
-                assertThat(outcomeSum())
-                    .as("Σ(outcomes) must reach %s (%d bars × 2 strategies) — a silent, uncounted"
-                        + " branch shows up here as an undercount", expected, bars)
-                    .isGreaterThanOrEqualTo(expected));
+    // The per-bar exact checks already pin Σ == expected; give a delayed double-count a beat to surface.
     await()
         .pollDelay(Duration.ofMillis(500))
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(
             () ->
                 assertThat(outcomeSum())
-                    .as("Σ(outcomes) == evaluations: %d bars × 2 strategies, counted exactly once", bars)
+                    .as("Σ(outcomes) stays == %s — no delayed double-count", expected)
                     .isEqualTo(expected));
 
     // The test's own premise: nothing fired, so no active entry ever diverted a bar to the exit

@@ -419,11 +419,7 @@ public class SignalEngine {
     List<Loaded> fresh = new ArrayList<>();
     int unresolvedDrops = 0;
     int loadErrors = 0;
-    // The strategies whose OWN resolution/load failed retryably THIS reload — recorded as it
-    // happens, never derived afterwards by differencing sets. That distinction is the whole point:
-    // a strategy ABSENT from the registry read did not fail, it is gone, and it must be DROPPED.
-    // Inferring state from a gap is the single mistake that produced every defect in round 1.
-    Set<UUID> retryablyFailed = new java.util.HashSet<>();
+    int retained = 0;
     List<StrategyRepository.StrategyRow> all = registry.listAll();
     for (StrategyRepository.StrategyRow strategy : all) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
@@ -478,7 +474,7 @@ public class SignalEngine {
         UniverseResolution resolution = resolveUniverse(config);
         if (resolution.status() == UniverseResolutionStatus.UNRESOLVED) {
           unresolvedDrops++;
-          retryablyFailed.add(strategy.id());
+          retained += retainLastGood(fresh, strategy.id(), keepBest);
           log.warn("strategy {} has an unresolved universe — not loaded", strategy.slug());
           continue;
         }
@@ -544,11 +540,10 @@ public class SignalEngine {
         // error also lands here and will burn the chain to a bounded DEGRADED; that is the correct
         // trade, because the alternative is a silently dead engine.
         loadErrors++;
-        retryablyFailed.add(strategy.id());
+        retained += retainLastGood(fresh, strategy.id(), keepBest);
         log.error("strategy {} failed to load — skipped: {}", strategy.slug(), e.getMessage());
       }
     }
-    int retained = keepBest ? retainLastGood(fresh, retryablyFailed) : 0;
     if (retained > 0) {
       log.warn(
           "KEEP_BEST_RETAINED_LAST_GOOD: {} strategies failed this retry ({} unresolved, {} load "
@@ -629,17 +624,28 @@ public class SignalEngine {
    *
    * <p>Chain-only ({@code keepBest}). Every other path — hot-swap, the 08:40 roll cron, the 20s
    * reconcile — installs unconditionally, so a stale contract can never survive a roll.
+   *
+   * <p><b>Called AT the failing strategy's position in the registry walk, and that is load-bearing,
+   * not tidiness.</b> {@code loaded} order IS evaluation order ({@code onClosedBar} iterates it),
+   * and strategies sharing a book are NOT independent: they compete for one
+   * {@code RiskService} MAX_OPEN slot per book, so whichever evaluates first takes it. Appending
+   * retained entries after the successes instead would make an {@code {A,B}} registry trade B after
+   * a retry but A after a clean reload — the same registry and the same market producing a
+   * different trade because an unrelated strategy happened to fail. Retaining in place keeps the
+   * reconciled order byte-for-byte what a clean reload of the same registry would have produced.
    */
-  private int retainLastGood(List<Loaded> fresh, Set<UUID> retryablyFailed) {
-    int retained = 0;
+  private int retainLastGood(List<Loaded> fresh, UUID strategyId, boolean keepBest) {
+    if (!keepBest) {
+      return 0;
+    }
     for (Loaded previous : loaded) {
-      // A strategy that failed took a `continue` before reaching fresh, so it cannot be duplicated.
-      if (retryablyFailed.contains(previous.strategyId())) {
+      // The caller has already `continue`d past fresh.add for this strategy, so no duplicate.
+      if (previous.strategyId().equals(strategyId)) {
         fresh.add(previous);
-        retained++;
+        return 1;
       }
     }
-    return retained;
+    return 0; // nothing to retain — it was not loaded before either
   }
 
   private UniverseResolution resolveUniverse(JsonNode config) {
@@ -1844,10 +1850,10 @@ public class SignalEngine {
         return;
       }
       if (attempt >= KITE_CONNECTED_RELOAD_MAX_ATTEMPTS) {
-        // Both states, no derived verdict: suppression fires on identity, so neither a loaded-count
-        // nor a drops comparison can honestly say "the guard retained something" — and a misleading
-        // telemetry line is worse than none. KEEP_BEST_SUPPRESSED_REGRESSION is the factual signal,
-        // logged per suppression at the moment it happens.
+        // Both states, no derived verdict: keep-best reconciles PER STRATEGY, so no aggregate
+        // comparison here could honestly say what it retained — and a misleading telemetry line is
+        // worse than none. KEEP_BEST_RETAINED_LAST_GOOD is the factual signal, logged by the reload
+        // itself with the count, at the moment the retention happens.
         log.error(
             "kite.status reload exhausted {} attempts — the engine holds {} loaded / {} unresolved "
                 + "and is DEGRADED until the next 08:40 reload or a republish; attempt 1 computed "

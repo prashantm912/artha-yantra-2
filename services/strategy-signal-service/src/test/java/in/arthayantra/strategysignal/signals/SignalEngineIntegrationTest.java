@@ -953,6 +953,12 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
    * FAILED, so it keeps its last-good entry; B SUCCEEDED, so its load installs on its own merit.
    * Fails against a count comparison (A is silently replaced by B) and equally against
    * whole-reload suppression (A survives, but B's legitimate load is vetoed by A's fault).
+   *
+   * <p>Asserts exact ORDER, not membership: `loaded` order is evaluation order (onClosedBar
+   * iterates it) and strategies sharing a book compete for one RiskService MAX_OPEN slot, so
+   * whichever evaluates first takes it. The reconciled order must therefore be indistinguishable
+   * from a clean reload of the same registry — registry order, A before B. Appending retained
+   * entries after the successes yields B,A and changes which strategy trades.
    */
   @Test
   @Order(16)
@@ -999,8 +1005,9 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
 
       // Same count, different identity: A must NOT have been swapped out for B (its own load
       // failed ⇒ last-good retained), and B must NOT have been vetoed by A's fault (it succeeded).
-      assertThat(isolatedEngine.loadedSlugs())
-          .containsExactlyInAnyOrder(rowA.slug(), rowB.slug());
+      // Exact order — registry order, as a clean reload would produce. A retained entry appended
+      // after the successes would give [B, A] and hand B the shared per-book MAX_OPEN slot.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(rowA.slug(), rowB.slug());
     } finally {
       isolatedEngine.stop();
     }

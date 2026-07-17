@@ -270,9 +270,7 @@ public class PaperReconciliationRepository {
    *       {@code SwingBatchRecorder.runAndRecord:61-63} returns BEFORE the record + announce ("disarmed
    *       no-op — nothing ran, nothing to record or announce"). No run row, no alert, no counter.
    *   <li><b>A rejected swing adoption.</b> {@code adoptVersion:216-247} returns empty when the config
-   *       fails to compile or its COMPILED {@code session.style} is not swing — and note this check reads
-   *       the RAW {@code config->'risk'->'session'->>'style'}, so the raw and compiled styles can
-   *       disagree and the swing arm would still call it healthy. {@code openLotsBySymbol:354-361} then
+   *       fails to compile. {@code openLotsBySymbol:354-361} then
    *       silently omits the anchor ({@code resolve(...).isPresent()}), and {@code exitSkipped}
    *       ({@code ExitResult.skipped():112}, reported at {@code :178}) only counts lots that REACHED the
    *       exit pass — a rejected anchor never does, so it increments nothing. (The {@code universe.mode}

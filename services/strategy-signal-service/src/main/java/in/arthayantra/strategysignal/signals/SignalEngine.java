@@ -91,9 +91,23 @@ public class SignalEngine {
   private static final String KITE_STATUS_CHANNEL = "kite.status";
   private static final String KITE_STATUS_KEY = "kite:session:status";
   private static final String KITE_STATUS_CONNECTED = "CONNECTED";
-  // kite-rest remains OPEN for 30s (market-data application.yml wait-duration-in-open-state);
-  // attempts at t=0, ~35s and ~70s outlive it with margin.
-  private static final int KITE_CONNECTED_RELOAD_MAX_ATTEMPTS = 3;
+  // The DELAY outlives the kite-rest breaker: it remains OPEN for 30s (market-data application.yml
+  // wait-duration-in-open-state), so 35s guarantees every attempt gets a CLOSED-breaker call.
+  // The BOUND is sized off measured faults instead. An attempt runs its reload SYNCHRONOUSLY and
+  // only then schedules the next (see runKiteConnectedReloadAttempt), so with a failing-reload
+  // duration D the chain issues its LAST attempt at (attempts-1) * (delay + D) and terminates one
+  // reload later. It stays BOUNDED either way — an unbounded retry predicate reintroduces #579.
+  //   * D ~= 37s (39 strategies x REST timeouts; the ~72s attempt2->attempt3 gap observed
+  //     2026-07-17 minus the 35s delay) => last attempt at 7 * 72s ~= 8.4 min, chain ends ~9.0 min.
+  //   * D -> 0 (breaker OPEN => the call is rejected immediately) => last attempt at 7 * 35s = 245s.
+  // Only the D->0 figure is GUARANTEED, and at the old 3 attempts it was just 2 * 35s = 70s — SHORTER
+  // than both measured cold-start faults (2026-07-16 ~73s, 2026-07-17 ~81s for market-data to serve
+  // term-structure). Those drills recovered only because their failing reloads happened to be slow;
+  // a fast-failing chain would have missed both. 8 attempts put the guaranteed floor at 245s ~= 3x
+  // the ~81s worst case, with headroom for the TRUE fault (an expired token — market-data cannot warm
+  // its lastGood cache at all until the owner logs in), which is slower still. Two data points is all
+  // that exists; the floor, not the distribution, is what the bound is sized against.
+  private static final int KITE_CONNECTED_RELOAD_MAX_ATTEMPTS = 8;
   private static final long KITE_CONNECTED_RELOAD_DELAY_MILLIS = 35_000L;
 
   /** One loaded (strategy, version) with its resolved universe; {@code scalper} non-null = Track-2. */
@@ -118,6 +132,35 @@ public class SignalEngine {
 
   private record UniverseResolution(
       UniverseResolutionStatus status, List<StrategyDefinition.InstrumentRef> instruments) {}
+
+  /**
+   * What one {@link #reload()} COMPUTED — whether or not it was installed.
+   *
+   * @param liveCandidates published+enabled strategies this reload could have loaded LIVE: past the
+   *     swing / non-rollable / hard-SL screens AND live-resolvable. The denominator for "did
+   *     anything load at all".
+   * @param loadedCount strategies actually loaded
+   * @param unresolvedDrops strategies dropped on a FAILED (Kite-dependent) universe resolution
+   */
+  private record ReloadOutcome(int liveCandidates, int loadedCount, int unresolvedDrops) {
+
+    /**
+     * The ONLY success signal. {@code unresolvedDrops == 0} alone is NOT enough: a drop is counted
+     * only for a resolution FAILURE, so an empty-universe or load-error skip is invisible to it —
+     * a reload where EVERY strategy took one of those paths reports "0 loaded, 0 drops" and a
+     * drops-only predicate logs "resolved every universe" over a completely dead engine. That is
+     * the 2026-07-15/16 outage's exact signature, so it is made structurally unrepresentable here:
+     * success additionally requires that when there WAS something live to load, something did.
+     *
+     * <p>{@code loadedCount > 0} is NOT the health signal either (a cold boot legitimately loads a
+     * PARTIAL 32/39) — it is only the floor under the drops check, never a substitute for it.
+     * A registry with no live candidates at all (all-swing, or all not-live-resolvable) reports
+     * healthy on attempt 1: there is nothing a retry could fix.
+     */
+    boolean healthy() {
+      return unresolvedDrops == 0 && (liveCandidates == 0 || loadedCount > 0);
+    }
+  }
 
   private final StrategyRepository registry;
   private final SignalRepository signals;
@@ -319,13 +362,27 @@ public class SignalEngine {
 
   /** (Re)loads published+enabled strategies and rebuilds subscriptions. */
   public synchronized void reload() {
+    reload(false);
+  }
+
+  /**
+   * (Re)loads published+enabled strategies and rebuilds subscriptions, reporting what it computed.
+   *
+   * @param keepBest true ⇒ refuse to install a result that leaves the engine worse off than what it
+   *     already holds (see {@link #wouldRegressTheEngine}). ONLY the bounded CONNECTED retry chain
+   *     sets this: its attempts all read the SAME registry state, so a regression across them is
+   *     upstream damage, never a registry edit. Every other path (hot-swap, the 08:40 cron, the 20s
+   *     reconcile) installs unconditionally.
+   * @return what this reload COMPUTED (installed or not), or null when the engine is stopped
+   */
+  private synchronized ReloadOutcome reload(boolean keepBest) {
     if (stopped.get()) {
-      return;
+      return null;
     }
     reloadRequested.set(false);
-    bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
     List<Loaded> fresh = new ArrayList<>();
     int unresolvedDrops = 0;
+    int liveCandidates = 0;
     List<StrategyRepository.StrategyRow> all = registry.listAll();
     for (StrategyRepository.StrategyRow strategy : all) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
@@ -378,6 +435,14 @@ public class SignalEngine {
           continue;
         }
         UniverseResolution resolution = resolveUniverse(config);
+        if (resolution.status() != UniverseResolutionStatus.NOT_LIVE_RESOLVABLE) {
+          // Counted BEFORE the drop/empty/error checks below: this is "could have loaded live" —
+          // the denominator that makes a 0-loaded reload detectable even when NOTHING incremented
+          // unresolvedDrops (see ReloadOutcome.healthy). NOT_LIVE_RESOLVABLE is excluded for the
+          // same reason it is not counted as a drop: it is a config/capability error, and treating
+          // it as a live candidate would burn the CONNECTED chain to a permanent false DEGRADED.
+          liveCandidates++;
+        }
         if (resolution.status() == UniverseResolutionStatus.UNRESOLVED) {
           unresolvedDrops++;
           log.warn("strategy {} has an unresolved universe — not loaded", strategy.slug());
@@ -437,6 +502,21 @@ public class SignalEngine {
         log.error("strategy {} failed to load — skipped: {}", strategy.slug(), e.getMessage());
       }
     }
+    ReloadOutcome outcome = new ReloadOutcome(liveCandidates, fresh.size(), unresolvedDrops);
+    if (keepBest && wouldRegressTheEngine(outcome)) {
+      log.error(
+          "KEEP_BEST_SUPPRESSED_REGRESSION: reload computed {} loaded / {} unresolved over {} live "
+              + "candidates — WORSE than the {} loaded / {} unresolved already installed; keeping "
+              + "the installed set (the retry would have HARMED the engine)",
+          outcome.loadedCount(), outcome.unresolvedDrops(), outcome.liveCandidates(),
+          loaded.size(), lastReloadUnresolvedDrops);
+      return outcome;
+    }
+    // Cleared only on the INSTALL path: a suppressed reload changes nothing, so clearing there
+    // would be pure thrash on the eval thread. Order within this synchronized method is otherwise
+    // immaterial — no evaluation can interleave with it (chip task_f10a03 tracks skipping the clear
+    // entirely when the (version-set, universe-set) is unchanged).
+    bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
     this.loaded = List.copyOf(fresh);
     this.lastReloadUnresolvedDrops = unresolvedDrops;
     // Snapshot the published set THIS reload was based on (from the same registry read), so the 20s
@@ -446,6 +526,31 @@ public class SignalEngine {
     log.info(
         "signal engine loaded {} published strategies ({} dropped on an unresolved universe)",
         fresh.size(), unresolvedDrops);
+    return outcome;
+  }
+
+  /**
+   * True when installing {@code outcome} would leave the engine holding LESS than it already does.
+   * This is the retry chain's "ends worse than no retry at all" hazard: the terminal state used to
+   * be unconditionally the LAST attempt's result, so a market-data regression across the retry
+   * window could take a live 19-of-39 engine down to 0 for the session — where simply not retrying
+   * would have kept 19.
+   *
+   * <p>Worse is judged on BOTH axes of the 3-state resolution model, never on {@code loaded} alone:
+   * more FAILED universes, or fewer strategies actually loaded. Drops alone would miss the
+   * "0 loaded / 0 drops" collapse (nothing increments the counter on that path); loaded alone would
+   * miss a partial set silently shedding universes.
+   *
+   * <p>Only an UNHEALTHY outcome can ever be suppressed, which is what keeps this from freezing the
+   * engine on a stale set: a healthy reload is the registry's truth and ALWAYS installs. A
+   * suppressed reload also leaves {@link #lastReloadedPublishedSet} untouched, so if the registry
+   * genuinely changed, {@link #reconcilePublishedStrategies()} still sees drift within 20s and
+   * re-drives an UNGUARDED reload that does install it.
+   */
+  private boolean wouldRegressTheEngine(ReloadOutcome outcome) {
+    return !outcome.healthy()
+        && (outcome.unresolvedDrops() > lastReloadUnresolvedDrops
+            || outcome.loadedCount() < loaded.size());
   }
 
   private UniverseResolution resolveUniverse(JsonNode config) {
@@ -1582,16 +1687,16 @@ public class SignalEngine {
       return;
     }
     log.info("kite.status CONNECTED received — requesting bounded strategy reload");
-    submitKiteConnectedReloadAttempt(1);
+    submitKiteConnectedReloadAttempt(1, null);
   }
 
-  private void submitKiteConnectedReloadAttempt(int attempt) {
+  private void submitKiteConnectedReloadAttempt(int attempt, ReloadOutcome firstOutcome) {
     boolean handedOff = false;
     try {
       if (stopped.get()) {
         return;
       }
-      evalExecutor.execute(() -> runKiteConnectedReloadAttempt(attempt));
+      evalExecutor.execute(() -> runKiteConnectedReloadAttempt(attempt, firstOutcome));
       handedOff = true;
     } catch (RejectedExecutionException e) {
       if (!evalExecutor.isShutdown()) {
@@ -1608,44 +1713,52 @@ public class SignalEngine {
     }
   }
 
-  private void runKiteConnectedReloadAttempt(int attempt) {
+  private void runKiteConnectedReloadAttempt(int attempt, ReloadOutcome firstOutcome) {
     boolean retryScheduled = false;
     try {
       if (stopped.get()) {
         return;
       }
-      boolean reloadCompleted = false;
+      ReloadOutcome outcome = null;
       try {
-        reloadRequested.set(true);
-        drainReloadOnly();
-        reloadCompleted = true;
+        // keep-best: a RETRY must never leave the engine holding less than it already does.
+        outcome = reload(true);
       } catch (RuntimeException e) {
         log.warn("kite.status reload attempt {} failed: {}", attempt, e.toString());
       }
+      ReloadOutcome first = attempt == 1 ? outcome : firstOutcome;
 
-      // Converge on "every universe resolved", NOT on "something loaded": the drop is per strategy,
-      // so a breaker that re-opens partway through a reload can leave 1-of-39 loaded — a non-empty
-      // `loaded` that is really a DEGRADED session. Stopping there would turn a loud total outage
-      // into a silent partial one. Drops are the Kite-dependent skip only, so a legitimately
-      // all-swing registry reports 0 drops and this completes on attempt 1.
-      if (reloadCompleted && lastReloadUnresolvedDrops == 0) {
-        log.info("kite.status reload attempt {} resolved every universe — retry complete", attempt);
+      // Converge on a HEALTHY reload — NOT on "something loaded", and NOT on "0 unresolved" alone.
+      // The drop is per strategy, so a breaker re-opening partway through leaves 1-of-39 loaded (a
+      // non-empty `loaded` that is really a DEGRADED session); and a reload where every strategy
+      // took an UNCOUNTED skip reports 0 drops over a DEAD engine. ReloadOutcome.healthy rejects
+      // both, so success can never be reported while the engine holds zero usable strategies. A
+      // legitimately all-swing registry has no live candidates ⇒ healthy on attempt 1.
+      if (outcome != null && outcome.healthy()) {
+        log.info(
+            "kite.status reload attempt {} resolved every universe ({} loaded) — retry complete",
+            attempt, outcome.loadedCount());
         return;
       }
       if (attempt >= KITE_CONNECTED_RELOAD_MAX_ATTEMPTS) {
         log.error(
-            "kite.status reload exhausted {} attempts — {} strategies still unresolved; the engine "
-                + "is DEGRADED until the next 08:40 reload or a republish",
-            KITE_CONNECTED_RELOAD_MAX_ATTEMPTS, lastReloadUnresolvedDrops);
+            "kite.status reload exhausted {} attempts — the engine holds {} loaded / {} unresolved "
+                + "and is DEGRADED until the next 08:40 reload or a republish; attempt 1 computed "
+                + "{} loaded / {} unresolved (KEEP_BEST_RETAINED_EARLIER_RELOAD={})",
+            KITE_CONNECTED_RELOAD_MAX_ATTEMPTS, loaded.size(), lastReloadUnresolvedDrops,
+            first == null ? -1 : first.loadedCount(),
+            first == null ? -1 : first.unresolvedDrops(),
+            first != null && loaded.size() > first.loadedCount());
         return;
       }
 
       log.info(
-          "kite.status reload attempt {} left {} strategies unresolved — retrying in {} ms",
-          attempt, lastReloadUnresolvedDrops, kiteConnectedReloadDelayMillis);
+          "kite.status reload attempt {} left the engine at {} loaded / {} unresolved — retrying "
+              + "in {} ms",
+          attempt, loaded.size(), lastReloadUnresolvedDrops, kiteConnectedReloadDelayMillis);
       try {
         kiteConnectedReloadScheduler.schedule(
-            () -> submitKiteConnectedReloadAttempt(attempt + 1),
+            () -> submitKiteConnectedReloadAttempt(attempt + 1, first),
             kiteConnectedReloadDelayMillis,
             TimeUnit.MILLISECONDS);
         retryScheduled = true;

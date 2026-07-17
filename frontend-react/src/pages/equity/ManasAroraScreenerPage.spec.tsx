@@ -63,11 +63,14 @@ function renderPage() {
 describe('ManasAroraScreenerPage', () => {
   it('renders the selection screen table with the passer row and its gates', () => {
     renderPage();
-    const table = screen.getByRole('table');
+    const table = screen.getByRole('table', { name: 'Manas Arora screen' });
     for (const h of ['Symbol', 'Close', '% from high', '% above low', 'Gates']) {
       expect(within(table).getByRole('columnheader', { name: new RegExp(h) })).toBeInTheDocument();
     }
-    const link = screen.getByRole('link', { name: 'SANGINITA' });
+    // The screen renders through the shared DataTable, which paints a desktop <table> AND a
+    // md:hidden mobile card list — so the symbol link exists twice in jsdom (CSS doesn't apply).
+    // Scope to the desktop table so the query stays exactly-one.
+    const link = within(table).getByRole('link', { name: 'SANGINITA' });
     expect(link).toHaveAttribute('href', '/equity/manas-arora/SANGINITA');
     expect(screen.getByText(/1590 scanned/)).toBeInTheDocument();
   });

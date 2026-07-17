@@ -7,6 +7,7 @@ import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import {
   useCloneStrategy,
   usePublish,
@@ -18,6 +19,7 @@ import {
   useStrategyVersions,
   useStressWindow,
   type AuditEntry,
+  type VersionRow,
 } from '../../api/strategies.ts';
 
 // /strategies/:id/versions (master plan §20 parity, E-11 screen 6): the immutable version timeline,
@@ -131,6 +133,66 @@ export function StrategyVersionsPage() {
     }
   };
 
+  const versionColumns: DataColumn<VersionRow>[] = useMemo(
+    () => [
+      { id: 'version', header: 'Version', align: 'left', mobileLabel: 'Version', mono: true, render: (v) => v.version },
+      {
+        id: 'status',
+        header: 'Status',
+        align: 'left',
+        mobileLabel: 'Status',
+        render: (v) => (
+          <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold ring-1', statusTone(v.status))}>
+            {v.status}
+          </span>
+        ),
+      },
+      {
+        id: 'checksum',
+        header: 'Checksum',
+        align: 'left',
+        mobileLabel: 'Checksum',
+        render: (v) => <span className="font-mono text-xs">{v.checksum?.slice(0, 10)}</span>,
+      },
+      {
+        id: 'created',
+        header: 'Created',
+        align: 'left',
+        mobileLabel: 'Created',
+        mono: true,
+        render: (v) => (v.createdAt ? v.createdAt.slice(0, 10) : '—'),
+      },
+      {
+        id: 'actions',
+        header: 'Actions',
+        headerClassName: 'ay-sr-only',
+        mobileLabel: 'Actions',
+        mono: false,
+        render: (v) => (
+          <>
+            <button
+              type="button"
+              onClick={() => setFrom(v.version)}
+              className="px-1.5 text-xs text-accent hover:underline"
+            >
+              Diff
+            </button>
+            <button
+              type="button"
+              onClick={() => doRollback(v.version)}
+              className="px-1.5 text-xs text-warn hover:underline"
+            >
+              Rollback
+            </button>
+          </>
+        ),
+      },
+    ],
+    // doRollback closes over the stable rollback mutation; setFrom is a stable setState.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   return (
     <LoadBeat>
       <PageHeader
@@ -193,48 +255,13 @@ export function StrategyVersionsPage() {
             skeleton={<Skeleton variant="table-rows" rows={5} cols={5} />}
           >
             {() => (
-          <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-            <table className="w-full border-collapse text-sm">
-              <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                <tr>
-                  <th className="px-2 py-2 font-medium">Version</th>
-                  <th className="px-2 py-2 font-medium">Status</th>
-                  <th className="px-2 py-2 font-medium">Checksum</th>
-                  <th className="px-2 py-2 font-medium">Created</th>
-                  <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((v) => (
-                  <tr key={v.version} className="border-t border-ay-border">
-                    <td className="px-2 py-2 tabular-nums">{v.version}</td>
-                    <td className="px-2 py-2">
-                      <span className={cn('rounded px-1.5 py-0.5 text-xs font-semibold ring-1', statusTone(v.status))}>
-                        {v.status}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 font-mono text-xs">{v.checksum?.slice(0, 10)}</td>
-                    <td className="px-2 py-2 tabular-nums">{v.createdAt ? v.createdAt.slice(0, 10) : '—'}</td>
-                    <td className="px-2 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() => setFrom(v.version)}
-                        className="px-1.5 text-xs text-accent hover:underline"
-                      >
-                        Diff
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => doRollback(v.version)}
-                        className="px-1.5 text-xs text-warn hover:underline"
-                      >
-                        Rollback
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <BeatBlock>
+            <DataTable
+              columns={versionColumns}
+              rows={rows}
+              rowKey={(v) => v.version}
+              ariaLabel="Strategy versions"
+            />
           </BeatBlock>
             )}
           </QueryState>

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -72,7 +72,11 @@ describe('StrategyDossierPage', () => {
     expect(screen.getByText('PF crossed above 1.3')).toBeInTheDocument();
     // rejection profile.
     expect(screen.getByText('volume_floor')).toBeInTheDocument();
-    // open sell-decisions.
-    expect(screen.getByText('INFY')).toBeInTheDocument();
+    // open sell-decisions. The grid renders through the shared DataTable, which paints a desktop
+    // <table> AND a md:hidden mobile card list — so each cell text exists twice in jsdom (CSS
+    // doesn't apply). Scope to the desktop table so getByText stays exactly-one.
+    expect(
+      within(screen.getByRole('table', { name: 'Open sell-decisions' })).getByText('INFY'),
+    ).toBeInTheDocument();
   });
 });

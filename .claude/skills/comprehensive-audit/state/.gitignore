@@ -1,0 +1,3 @@
+# Per-shard Codex session state (thread ids, findings, event logs) — never committed.
+*
+!.gitignore

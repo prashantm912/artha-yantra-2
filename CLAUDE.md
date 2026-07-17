@@ -246,6 +246,10 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
 - **In-container `now()`/`::date` is UTC, not IST:** a 02:xx-IST row is the *previous* calendar day in
   the DB (e.g. 02:xx IST on 06-29 stores as `2026-06-28` UTC). Filter `signals.generated_at` / candle
   `bucket` by explicit `+05:30` ISO bounds, never `::date = CURRENT_DATE` (off-by-one across IST midnight).
+  **But `+05:30` is for BOUNDS, not DISPLAY:** `AT TIME ZONE '+05:30'` **INVERTS** (POSIX sign convention) — it renders
+  14:20 IST as 03:20. Bound literals (`timestamptz '2026-07-17T09:15:00+05:30'`) are correct; to RENDER use
+  `AT TIME ZONE 'Asia/Kolkata'`. Cost a live investigation a false path 2026-07-17. Same class on the host:
+  **Git Bash ignores `TZ=`** — `TZ=Asia/Kolkata date` prints UTC. Use python `zoneinfo` for wall-clock IST.
 - **Rebuild + redeploy ONE service (no `ay` build verb):** build the artifact (`(cd frontend-react &&
   npm run build)` or the service JAR), set `$env:ARTHA_DB_NAME`/`$env:ARTHA_REDIS_DB` to the LIVE
   values (`artha`/`0`, mock `artha_mock`/`1`), then `docker compose -f deploy/docker-compose.yml

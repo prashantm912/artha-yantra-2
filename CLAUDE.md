@@ -381,7 +381,9 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `daily-ops`, `session-analysis`, `run-artha-yantra`, `mock-walk`, `new-migration`,
   `research` (no-code spike → findings + BUILD/DEFER verdict), `write-tests` (author tests in
   our harness — naming/Testcontainers/parity/seam-ladder/coverage-debt), `hotfix` (live-incident
-  fast-lane: snapshot-first, minimal fix, admin-merge, deploy + canary) — instead of improvising inline.
+  fast-lane: snapshot-first, minimal fix, admin-merge, deploy + canary), `comprehensive-audit`
+  (owner-triggered 360° platform audit — tiered sharded Codex-Sol convergence → one dual-signed
+  doc in `docs/audits/`) — instead of improvising inline.
 - **Codex skill suite** (`.claude/skills/codex-*`, shared harness `.claude/skills/codex/`) =
   the skill-based, templated form of the codex-builder-lane — persistent-thread Codex sessions
   instead of on-the-fly `codex exec` strings: `codex-build` (delegate a build in a worktree,

@@ -36,7 +36,13 @@ import org.springframework.stereotype.Service;
  *   <li><b>Stranded carry</b> — every OPEN position anchored to an ENTRY with a persisted opposite-side
  *       EXIT in that anchor's own ENTRY-to-next-non-pyramid-ENTRY window. It alerts only when a position
  *       id is newly seen.
+ *   <li><b>Dead-anchor orphans</b> — every OPEN position that no exit evaluator will ever anchor, so no
+ *       EXIT is ever emitted for it. Stranded carry needs a persisted EXIT row to see a position and is
+ *       therefore structurally blind to this class; the two are complementary halves of one net. Also
+ *       newly-seen-gated.
  * </ul>
+ *
+ * <p>Both state checks stay OUT of {@link ReconciliationResult#totalDiscrepancies()} — see its javadoc.
  *
  * <p>The audit's "report to the ingest health board" is served IN-SCHEMA (that board is marketdata's —
  * a cross-schema write violates D10): the run row + {@code ay_paper_recon_*} Micrometer counters/gauge +
@@ -61,6 +67,7 @@ public class PaperReconciliationService {
   private final Counter v5DiscrepanciesTotal;
   private final Counter v16DiscrepanciesTotal;
   private final AtomicInteger strandedCarryGauge;
+  private final AtomicInteger deadAnchorOrphanGauge;
 
   /** Wires the reconciliation repo, notifier, JSON mapper, clock, meters + the lookback window. */
   public PaperReconciliationService(
@@ -79,6 +86,10 @@ public class PaperReconciliationService {
     this.v5DiscrepanciesTotal = meterRegistry.counter("ay_paper_recon_v5_discrepancies_total");
     this.v16DiscrepanciesTotal = meterRegistry.counter("ay_paper_recon_v16_discrepancies_total");
     this.strandedCarryGauge = meterRegistry.gauge("ay_paper_recon_stranded_carry", new AtomicInteger());
+    // A Gauge, never a Counter: this is persistent STATE, and a Counter fed a state value re-reports the
+    // same standing orphan every night forever.
+    this.deadAnchorOrphanGauge =
+        meterRegistry.gauge("ay_paper_recon_dead_anchor_orphans", new AtomicInteger());
   }
 
   /** The full result of one reconciliation pass (ids per discrepancy class, for the run row + tests). */
@@ -92,7 +103,8 @@ public class PaperReconciliationService {
       List<Long> v5MissingExitOrder,
       List<Long> v16TakenWithoutOrder,
       List<Long> v16PositionWithoutSignal,
-      List<Long> strandedCarryPositions) {
+      List<Long> strandedCarryPositions,
+      List<Long> deadAnchorOrphanPositions) {
 
     /** Distinct positions failing any V5 invariant (a fully-orphaned position hits two classes). */
     public int v5Discrepancies() {
@@ -107,7 +119,12 @@ public class PaperReconciliationService {
       return v16TakenWithoutOrder.size() + v16PositionWithoutSignal.size();
     }
 
-    /** Total discrepancies across both checks. */
+    /**
+     * Total discrepancies across both ACTIVITY checks. Deliberately V5 + V16 ONLY: it gates the nightly
+     * ntfy push at {@code == 0}, so folding either persistent-STATE count in would push an identical
+     * alert every night until the owner muted the channel — taking V5 and V16 blind with it. Each state
+     * check reports through its own gauge + its own newly-seen-only alert instead.
+     */
     public int totalDiscrepancies() {
       return v5Discrepancies() + v16Discrepancies();
     }
@@ -115,6 +132,11 @@ public class PaperReconciliationService {
     /** Persistent OPEN positions whose exit was persisted but whose settle did not complete. */
     public int strandedCarryDiscrepancies() {
       return strandedCarryPositions.size();
+    }
+
+    /** Persistent OPEN positions that no exit evaluator will ever anchor (so no EXIT is ever emitted). */
+    public int deadAnchorOrphanDiscrepancies() {
+      return deadAnchorOrphanPositions.size();
     }
   }
 
@@ -157,6 +179,7 @@ public class PaperReconciliationService {
     List<Long> takenWithoutOrder = repo.takenSignalsWithoutOrder(windowStart, windowEnd);
     List<Long> positionWithoutSignal = repo.autoPaperPositionsWithoutSignal(windowStart, windowEnd);
     List<Long> strandedCarryPositions = repo.strandedCarryPositions();
+    List<Long> deadAnchorOrphanPositions = repo.deadAnchorOrphanPositions();
 
     ReconciliationResult result =
         new ReconciliationResult(
@@ -169,7 +192,8 @@ public class PaperReconciliationService {
             missingExit,
             takenWithoutOrder,
             positionWithoutSignal,
-            strandedCarryPositions);
+            strandedCarryPositions,
+            deadAnchorOrphanPositions);
 
     persistAndAlert(result);
     return result;
@@ -182,6 +206,11 @@ public class PaperReconciliationService {
     Set<Long> newlySeenStrandedCarryIds = new LinkedHashSet<>(r.strandedCarryPositions());
     newlySeenStrandedCarryIds.removeAll(previousStrandedCarryIds);
     strandedCarryGauge.set(r.strandedCarryDiscrepancies());
+
+    Set<Long> previousDeadAnchorOrphanIds = new LinkedHashSet<>(repo.previousDeadAnchorOrphanIds());
+    Set<Long> newlySeenDeadAnchorOrphanIds = new LinkedHashSet<>(r.deadAnchorOrphanPositions());
+    newlySeenDeadAnchorOrphanIds.removeAll(previousDeadAnchorOrphanIds);
+    deadAnchorOrphanGauge.set(r.deadAnchorOrphanDiscrepancies());
 
     runsTotal.increment();
     v5DiscrepanciesTotal.increment(r.v5Discrepancies());
@@ -220,6 +249,17 @@ public class PaperReconciliationService {
       pushAlert(
           "ArthaYantra Paper — stranded carry (" + newlySeenStrandedCarryIds.size() + ")", detail);
     }
+    if (!newlySeenDeadAnchorOrphanIds.isEmpty()) {
+      String detail =
+          "New dead-anchor orphan OPEN positions (no live ENTRY anchor ⇒ no exit will ever be"
+              + " evaluated, so no EXIT signal can ever be written): " + newlySeenDeadAnchorOrphanIds
+              + " — global state requires human repair";
+      log.warn("paper reconciliation found {} newly-seen dead-anchor orphans: {}",
+          newlySeenDeadAnchorOrphanIds.size(), newlySeenDeadAnchorOrphanIds);
+      pushAlert(
+          "ArthaYantra Paper — dead-anchor orphan (" + newlySeenDeadAnchorOrphanIds.size() + ")",
+          detail);
+    }
   }
 
   private String detailJson(ReconciliationResult r) {
@@ -232,10 +272,13 @@ public class PaperReconciliationService {
     v16.put("positionWithoutSignal", r.v16PositionWithoutSignal());
     Map<String, Object> strandedCarry = new LinkedHashMap<>();
     strandedCarry.put("positions", r.strandedCarryPositions());
+    Map<String, Object> deadAnchorOrphans = new LinkedHashMap<>();
+    deadAnchorOrphans.put("positions", r.deadAnchorOrphanPositions());
     Map<String, Object> root = new LinkedHashMap<>();
     root.put("v5", v5);
     root.put("v16", v16);
     root.put("strandedCarry", strandedCarry);
+    root.put("deadAnchorOrphans", deadAnchorOrphans);
     try {
       return mapper.writeValueAsString(root);
     } catch (JsonProcessingException e) {

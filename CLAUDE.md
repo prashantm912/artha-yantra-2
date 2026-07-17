@@ -351,9 +351,20 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   fail several CI iterations (cold start, constrained cores). Gate e2e readiness on
   container healthchecks, not gateway HTTP (a 401 is the gateway auth filter, not
   upstream readiness).
-- **The `e2e` job has two known 2-core flakes** — `tests/signals.spec.ts` (live-signal breakdown) +
-  `tests/ws-reconnect.spec.ts` (WS pill on /signals). A change that can't touch signals/WS/app-shell may
-  be admin-merged past them once every OTHER gate is green — don't "fix" them, rerun or admin-merge.
+- **The `e2e` job's two former 2-core flakes are FIXED (#903, 2026-07-18)** — `tests/signals.spec.ts` +
+  `tests/ws-reconnect.spec.ts` intermittently timed out on the cold-stack `/signals` table-settle for two
+  reasons: while `GET /api/v1/signals` was pending the page showed a `qs-loading` skeleton the locator
+  didn't match, and a stale `tr[role="button"]` locator matched NO real row (rows became plain `<tr>` in
+  `<tbody>` after the M23 audit). Fixed by a `global-setup` readiness gate (warm `GET /api/v1/signals` to
+  200, authenticated + best-effort, before any test), correct `table tbody tr` locators, and CI retries
+  1→2. **If `e2e` reds now, INVESTIGATE — do not reflexively admin-merge it as a "known flake".** (Proven
+  green 4× consecutively at merge.)
+- **`build-images` is skipped on `pull_request` (#903)** — on a PR it only VALIDATED that the Dockerfiles
+  build (the push is main-only), yet `needs: build-test` made it wait out the ~8 m market-data shard first;
+  ~2.5 m of serial tail off every PR. The Dockerfile build still runs on the main-push (pre-deploy); it is
+  NOT a required check. **The ~8 m `build-test (market-data)` shard is now the PR floor** — a source-level
+  module split (breaks the per-module JaCoCo BUNDLE gate as one shard) or a larger runner is the only way
+  under it, both owner decisions.
 
 ## Where things live
 - `services/` services · `libs/` shared libs · `deploy/` compose + flyway · `e2e/`

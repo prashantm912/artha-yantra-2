@@ -36,6 +36,9 @@ fired-side rail side-channel → #763, row 20 `notification_events` migration �
 (the compare/dossier/act views over #778's endpoints) **+ I4** (delivery arming + calibration, owner-gated).
 Nothing here self-arms.
 
+**Status (2026-07-12 wave 8 — supersedes the line above).** **I3-FE shipped #789** → **I1 / I2 / I3 are
+FULLY DONE**; the only remainder is **I4** (delivery arming + calibration), owner-gated.
+
 ---
 
 ## 0. Reading guide + hard boundaries

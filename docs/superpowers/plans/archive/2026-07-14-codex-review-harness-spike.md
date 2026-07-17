@@ -1,6 +1,7 @@
 # Spike Plan — Codex Skill Suite (skill-based, templated builder lane)
 
 **Date:** 2026-07-14
+**ARCHIVED 2026-07-18** — moved to `plans/archive/`; authority is the `.claude/skills/codex*` skills + the `codex-builder-lane` memory topic, not this plan.
 **Status:** ✅ **BUILT AND IN PRODUCTION USE — this plan is HISTORICAL, not forward work.**
 (Was "Phase 0 PASSED — build phases not yet started"; that line went stale once the suite shipped.)
 All five skills exist and are the live lane: `.claude/skills/codex{,-ask,-build,-code-review,-plan-review}`,

@@ -53,6 +53,11 @@ gate-candidate suggesters) **then E6** (autonomy scheduler + FE suite; owner-gat
 regime-gate Stage-D amendment + authored Manas `backtest.optimize` block pre-decisions). Nothing here
 self-arms; autonomy is still switched on last (E6).
 
+**Status (2026-07-12 wave 8 — supersedes the block above).** **E5** shipped **#792**; **E6** backend
+**#793** + FE **#787** → **E1–E6 are all BUILT + LIVE**. The only remainder is owner-gated **E6-autonomy
+arming** (the autonomy scheduler is deployed default-OFF; nothing self-arms) plus the parked regime-gate
+Stage-D amendment (regimes stay frozen — "reported, not optimized"; hard revisit ~2026-08-14).
+
 ---
 
 ## 1. Optimization engine design

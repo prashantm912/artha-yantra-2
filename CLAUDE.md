@@ -84,7 +84,18 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   re-capture with `-Dcontracts.capture=true`, regen TS via `npx openapi-typescript@7` →
   `contracts/gen/*.d.ts`. Generic `Map<String,Object>` returns are NOT enumerated, so adding
   response keys does NOT drift the spec; new query params + new `@*Mapping` paths DO.
-  ci-contracts fails on BREAKING spec diffs, warns on gen drift, requires `tsc --strict`.
+  ci-contracts warns on gen drift and requires `tsc --strict`. Its breaking gate diffs the
+  **MERGE BASE**'s committed spec vs THIS branch's code spec (task_b3b59719 — it used to diff the
+  branch against itself, so re-capturing the spec, which we mandate, silently blinded it; both
+  sides were the branch and it never saw main). Re-capturing no longer silences it. **It catches
+  only removed endpoints / removed response codes / newly-required request params** — NOT any
+  schema-shape change: openapi-diff 2.1.7 does not diff `openapi: 3.1.0` schemas (a response field
+  retyped string→integer reads "No differences"; the same bytes relabelled 3.0.1 correctly fail),
+  and springdoc emits no `required` for record responses, so a removed/renamed OPTIONAL response
+  key is "backward compatible" by construction (openapi-diff has no response-property-removed rule,
+  only `incompatible.response.required.decreased`). So a renamed response key still reaches live
+  un-caught — the `UniverseResolver` wire-read class of break. Intentional breaks: a
+  `Contract break: APPROVED (<reason>)` line in the PR body; `hotfix/*` exempt.
 - **EVERY new endpoint returns a typed record, never `Map<String,Object>`** — edge-gateway's
   `MapReturnRatchetTest` freezes the Map-returning handler COUNT per service (Maps are invisible
   to the contract gate); a new Map endpoint fails the strategy-gateway CI shard. Cost 2 CI cycles

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const remove = vi.fn();
@@ -31,14 +31,34 @@ function renderPage() {
 describe('WatchlistsPage', () => {
   it('shows the selected list items, removes one, and switches to the screener tab', () => {
     renderPage();
-    expect(screen.getByText('NSE:RELIANCE')).toBeInTheDocument();
+    // Both tables render through the shared DataTable, which paints a desktop <table> AND a
+    // md:hidden mobile card list — every cell exists twice in jsdom (CSS doesn't apply), so
+    // scope to the desktop table to keep these assertions exactly-one.
+    const table = screen.getByRole('table');
+    expect(within(table).getByText('NSE:RELIANCE')).toBeInTheDocument();
     // Remove now confirms first (§10.2-2).
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    fireEvent.click(screen.getByText('Remove'));
+    fireEvent.click(within(table).getByText('Remove'));
     expect(remove).toHaveBeenCalledWith({ id: 'w1', item: { exchange: 'NSE', tradingsymbol: 'RELIANCE' } });
     confirmSpy.mockRestore();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Screener' }));
-    expect(screen.getByText(/Pick a preset and run the screener/)).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).getByText(/Pick a preset and run the screener/)).toBeInTheDocument();
+  });
+
+  it('keeps the actions column header accessible but visually hidden', () => {
+    renderPage();
+    const actions = within(screen.getByRole('table')).getByRole('columnheader', { name: 'Actions' });
+    expect(actions).toHaveClass('ay-sr-only');
+  });
+
+  it('renders the screener columns in their declared order', () => {
+    renderPage();
+    fireEvent.click(screen.getByRole('tab', { name: 'Screener' }));
+    expect(
+      within(screen.getByRole('table'))
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toEqual(['Instrument', 'Close', 'Value', 'Label']);
   });
 });

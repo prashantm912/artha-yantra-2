@@ -3,6 +3,7 @@ import { m } from 'motion/react';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
@@ -15,6 +16,8 @@ import {
   useRemoveWatchItem,
   useScreener,
   useWatchlists,
+  type ScreenerRow,
+  type WatchItem,
 } from '../../api/watchlists.ts';
 
 // /watchlists (master plan §20 parity, E-8): named watchlists (create / add / remove instruments via
@@ -45,6 +48,66 @@ export function WatchlistsPage() {
   const screener = useScreener(runPreset ?? 'momentum', !!runPreset);
 
   const inputCls = 'h-9 rounded-md border border-ay-border bg-surface-1 px-2 text-sm text-ay-text';
+
+  const itemColumns: DataColumn<WatchItem>[] = useMemo(
+    () => [
+      {
+        id: 'instrument',
+        header: 'Instrument',
+        align: 'left',
+        mobileLabel: 'Instrument',
+        render: (it) => `${it.exchange}:${it.tradingsymbol}`,
+      },
+      {
+        // Visually-hidden header (the house pattern — JobsPage/ScalperCockpitPage) keeps the
+        // column's accessible name without painting a redundant "Actions" label. Unlike those
+        // two, this one keeps a mobileLabel: Remove is reachable on a phone today via the
+        // scrolling table, and dropping it from card mode would be a real regression.
+        id: 'actions',
+        header: 'Actions',
+        headerClassName: 'ay-sr-only',
+        mono: false,
+        mobileLabel: 'Actions',
+        render: (it) => (
+          <button
+            type="button"
+            onClick={() => { if (selectedId && window.confirm(`Remove ${it.exchange}:${it.tradingsymbol} from this watchlist?`)) removeItem.mutate({ id: selectedId, item: it }); }}
+            className="px-1.5 text-xs text-bear hover:underline"
+          >
+            Remove
+          </button>
+        ),
+      },
+    ],
+    [selectedId, removeItem],
+  );
+
+  const screenerColumns: DataColumn<ScreenerRow>[] = useMemo(
+    () => [
+      {
+        id: 'instrument',
+        header: 'Instrument',
+        align: 'left',
+        mobileLabel: 'Instrument',
+        render: (r) => `${r.exchange}:${r.tradingsymbol}`,
+      },
+      {
+        id: 'close',
+        header: 'Close',
+        mobileLabel: 'Close',
+        render: (r) => formatDecimal(r.latestClose, 2),
+      },
+      { id: 'value', header: 'Value', mobileLabel: 'Value', render: (r) => r.value },
+      {
+        id: 'label',
+        header: 'Label',
+        align: 'left',
+        mobileLabel: 'Label',
+        render: (r) => r.label ?? '—',
+      },
+    ],
+    [],
+  );
 
   return (
     <LoadBeat>
@@ -121,36 +184,14 @@ export function WatchlistsPage() {
                     )}
                   </div>
 
-                  <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-                    <table className="w-full border-collapse text-sm">
-                      <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                        <tr>
-                          <th className="px-2 py-2 font-medium">Instrument</th>
-                          <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selected.items.map((it) => (
-                          <tr key={`${it.exchange}:${it.tradingsymbol}`} className="border-t border-ay-border">
-                            <td className="px-2 py-2">{it.exchange}:{it.tradingsymbol}</td>
-                            <td className="px-2 py-2 text-right">
-                              <button
-                                type="button"
-                                onClick={() => { if (window.confirm(`Remove ${it.exchange}:${it.tradingsymbol} from this watchlist?`)) removeItem.mutate({ id: selected.id, item: it }); }}
-                                className="px-1.5 text-xs text-bear hover:underline"
-                              >
-                                Remove
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {selected.items.length === 0 && (
-                          <tr>
-                            <td colSpan={2} className="px-2 py-6 text-center text-ay-muted">Empty — add an instrument above.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                  <BeatBlock>
+                    <DataTable
+                      columns={itemColumns}
+                      rows={selected.items}
+                      rowKey={(it) => `${it.exchange}:${it.tradingsymbol}`}
+                      ariaLabel="Watchlist instruments"
+                      emptyMessage="Empty — add an instrument above."
+                    />
                   </BeatBlock>
                 </>
               ) : (
@@ -174,34 +215,14 @@ export function WatchlistsPage() {
               Run
             </button>
           </div>
-          <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-            <table className="w-full border-collapse text-sm">
-              <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                <tr>
-                  <th className="px-2 py-2 font-medium">Instrument</th>
-                  <th className="px-2 py-2 text-right font-medium">Close</th>
-                  <th className="px-2 py-2 text-right font-medium">Value</th>
-                  <th className="px-2 py-2 font-medium">Label</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(screener.data?.items ?? []).map((r) => (
-                  <tr key={`${r.exchange}:${r.tradingsymbol}`} className="border-t border-ay-border">
-                    <td className="px-2 py-2">{r.exchange}:{r.tradingsymbol}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{formatDecimal(r.latestClose, 2)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{r.value}</td>
-                    <td className="px-2 py-2">{r.label ?? '—'}</td>
-                  </tr>
-                ))}
-                {(!runPreset || (screener.data?.items ?? []).length === 0) && (
-                  <tr>
-                    <td colSpan={4} className="px-2 py-6 text-center text-ay-muted">
-                      {runPreset ? 'No matches.' : 'Pick a preset and run the screener.'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <BeatBlock>
+            <DataTable
+              columns={screenerColumns}
+              rows={screener.data?.items ?? []}
+              rowKey={(r) => `${r.exchange}:${r.tradingsymbol}`}
+              ariaLabel="Screener results"
+              emptyMessage={runPreset ? 'No matches.' : 'Pick a preset and run the screener.'}
+            />
           </BeatBlock>
         </>
       )}

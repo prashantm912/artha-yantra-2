@@ -53,10 +53,14 @@ function VerdictCell({ d }: { d: { sellingNow: boolean; verdict: string } }) {
   );
 }
 
-/** The trail level, muted, with the not-armed-yet hint kept on hover. */
+/** The trail level, muted, with the not-armed-yet hint kept on hover. The hint fires exactly when
+ *  trailLevel is null — i.e. when the text is just '—' — so the span spans the full cell width
+ *  (`block`), keeping the padded hover target the original <td> had. */
 function TrailCell({ trailLevel }: { trailLevel: string | null }) {
   return (
-    <span title={trailLevel == null ? 'Trail not armed yet' : undefined}>{money(trailLevel)}</span>
+    <span className="block" title={trailLevel == null ? 'Trail not armed yet' : undefined}>
+      {money(trailLevel)}
+    </span>
   );
 }
 

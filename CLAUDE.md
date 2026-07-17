@@ -386,7 +386,10 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   the skill-based, templated form of the codex-builder-lane — persistent-thread Codex sessions
   instead of on-the-fly `codex exec` strings: `codex-build` (delegate a build in a worktree,
   `--bypass` — **luna DRAFTS fast/cheap → sol REVIEWS+FIXES on a fresh thread → then Opus cross-vendor
-  review**, three perspectives, receipt contract baked in), `codex-code-review` + `codex-plan-review`
+  review**, three perspectives, receipt contract baked in; **a >~4-checkbox plan uses BATCHED mode** —
+  delegate risk-sized batches on one thread, review each batch's git-index delta, feed fixes forward as
+  binding `--notes`, cross-vendor + audit run ONCE at the end; same analog in `delegated-ship` for Opus
+  builders), `codex-code-review` + `codex-plan-review`
   (threaded read-only review against `.claude/skills/codex/checklist.md` = our invariants,
   `APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` convergence), `codex-ask` (advisory second
   opinion, no gate). Model/effort in one file (`codex/scripts/_common.sh`); state is

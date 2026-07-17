@@ -114,6 +114,65 @@ export STATE_DIR=".claude/skills/codex-build/state"
    pipeline for that target — both the luna draft thread and the sol `_refine` thread — so the next run
    starts clean.
 
+## Batched delegation (large multi-part plans)
+
+A one-shot delegation of a large plan produces a diff too big to review well, and lets luna drift for
+many checkboxes before you catch it. For a plan of **more than ~4 checkboxes (or a diff likely >~300
+lines)**, delegate it in **batches** on the SAME persistent thread — implement a few checkboxes, review
+the delta, feed your corrections forward, then request the next. Context + conventions compound across
+turns; the sol refine, cross-vendor review, and Architect audit still run **ONCE at the very end**,
+never per batch. (Adapted from `PiLastDigit/TRIP-workflow`'s batched codex-implement, 2026-07-15.)
+
+**Small plans (≤3–4 low-risk checkboxes) skip this — one-shot them via the Execution flow above.**
+
+### 1. Split the plan into batches
+- A batch is the **smallest set of checkboxes that leaves the tree green** (compiles + lints). Never
+  split an interface from its implementation + wiring; never span a phase boundary.
+- Target a reviewable diff — roughly **≤300 changed lines**. A checkbox that alone exceeds this is its own batch.
+- **Size by risk:** novel / architectural / parity / money / security work → small batches (down to one
+  checkbox); mechanical, repetitive work → larger batches.
+- **Filter out non-Codex items FIRST** — checkboxes needing owner input, numbers, credentials, arming,
+  or ops actions are YOURS; resolve them with the owner before/between batches, never delegate them.
+
+### 2. Delegate batch by batch (one luna thread)
+Start the first batch with `build.tpl` (Execution step 2), scoping the trailing text to it:
+`"Implement only: <batch-1 checkboxes>.  <pasted memory traps>"`. Each next batch **resumes the same
+thread** (`continue.tpl`) carrying your review corrections as `--notes` (now wired into the prompt as a
+binding-conventions block):
+```bash
+bash .claude/skills/codex/scripts/resume.sh \
+    --prompt-file .claude/skills/codex-build/prompts/continue.tpl \
+    --notes "<what you fixed after the last batch + why; conventions binding from now on>" \
+    --cd <worktree> \
+    <target> "Now implement only: <next batch checkboxes>"
+```
+Parse the DRAFT tag as usual (`IMPLEMENTATION_PARTIAL` → resume for the remainder first).
+
+### 3. Review each batch's DELTA (git-index checkpoint)
+Between batches — this is where batching pays off:
+1. **Review the delta only:** in the worktree, `git status -s && git diff` shows *just this batch*
+   because prior reviewed batches are staged. Judge it against the plan, the parity firewall, Modulith
+   boundaries, and the change-area conventions.
+2. **Fix problems directly yourself** — do NOT ping-pong fixes back to luna. What you fixed + why
+   becomes the `--notes` of the next resume (binding for the rest of the thread).
+3. **Micro-gate:** run only the touched module's lint + typecheck/build (the full testing gate waits
+   for the end). Fix failures now.
+4. **Checkpoint:** `git add -A` in the worktree — stages the reviewed batch so the next `git diff`
+   starts clean. NO commits (the Architect still owns the single commit at the end).
+5. Verify the checkboxes luna ticked match what the diff actually contains.
+
+**Adapt as you go:** clean batch → grow the next; heavy corrections → shrink the next + spell out the
+fix pattern in the notes. If luna ignores notes or repeats a corrected mistake late in a long thread,
+`reset` at the next batch boundary — the plan + a summary note rebuilds context.
+
+### 4. Final pass, then the normal gates ONCE
+After the last batch, read the **full feature diff** (`git diff HEAD` in the worktree) to catch
+cross-batch drift — duplicated helpers, divergent naming, dead code from course corrections; fix
+directly. Then run the pipeline's end exactly as one-shot mode: **sol refine (once, step 5) → hand to
+the Architect → testing gate → `claude-review` cross-vendor → receipt audit → tiered promotion.** The
+between-batch reviews replace none of these — they just make the diff that reaches them clean. Our
+cross-vendor final gate is the edge TRIP's Codex-only lane lacks; keep it.
+
 ## Notes
 
 - `--bypass` = `--dangerously-bypass-approvals-and-sandbox` — Codex runs unsandboxed (needs maven +

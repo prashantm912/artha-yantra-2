@@ -37,6 +37,13 @@ resolve rebase conflicts as a field UNION when both sides are additive).
 A builder that stops mid-verify ("waiting for the build result") resumes cleanly with
 one SendMessage nudge: "check the output, finish, full receipt."
 
+**Large plan? Batch it** (the Opus-subagent analog of `codex-build`'s batched mode). A single brief
+for a >~4-checkbox plan returns a diff too big to audit well and lets the builder drift before you
+catch it. Instead delegate a risk-sized batch (smallest green set; novel/parity/money → small,
+mechanical → large), audit its delta, then SendMessage the next batch with what you fixed + why as
+binding conventions — same builder, context compounds. The review scaling + Architect audit (§3–§4)
+still run ONCE on the final feature diff, never per batch.
+
 ## 2. Audit the receipt (never trust the summary)
 
 Depth tiered by risk — docs/mechanical = diff read; engine/money/parity = full ladder:

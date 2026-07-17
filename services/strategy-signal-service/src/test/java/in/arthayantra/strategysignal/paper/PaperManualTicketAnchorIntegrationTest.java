@@ -88,6 +88,7 @@ class PaperManualTicketAnchorIntegrationTest extends StrategySignalIntegrationTe
   @Autowired private SignalRepository signalRepo;
   @Autowired private RiskService risk;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private in.arthayantra.strategysignal.signals.SignalsController signalsController;
 
   @BeforeEach
   void disableGovernors() {
@@ -181,6 +182,42 @@ class PaperManualTicketAnchorIntegrationTest extends StrategySignalIntegrationTe
         jdbc.queryForObject(
             "SELECT count(*) FROM paper_orders WHERE tradingsymbol = ?", Integer.class, f.symbol);
     assertThat(orders).isZero();
+  }
+
+  @Test
+  void dismissingTheAnchorOfAnOpenPositionIsRefused422AndTheAnchorSurvives() {
+    // The THIRD door into the same orphan, reachable by an ordinary owner click: the ticket fills, the
+    // CAS anchors the signal TAKEN, and then Dismiss (an unconditional transition before this fix)
+    // drove it to DISMISSED — activeEntry resolves only ACTIVE/TAKEN, so the engine could never emit
+    // that open position's exit. Not a regression this chip introduced (pre-fix the anchor sat ACTIVE
+    // and Dismiss stranded it just the same) — a pre-existing door the chip's mandate has to close.
+    Fixture f = openBtstTicketFor("BTSTDISMISS");
+    assertThat(signalRepo.find(f.signalId).orElseThrow().status()).isEqualTo("TAKEN");
+
+    ApiException refused =
+        catchThrowableOfType(ApiException.class, () -> signalsController.dismiss(f.signalId));
+
+    assertThat(refused).isNotNull();
+    assertThat(refused.httpStatus()).isEqualTo(422);
+    assertThat(refused.code()).isEqualTo(ErrorCodes.VALIDATION_FAILED);
+    assertThat(refused.details()).containsEntry("signalStatus", "TAKEN");
+
+    // THE consequence that matters: the anchor SURVIVED, so the engine can still exit the position.
+    assertThat(signalRepo.find(f.signalId).orElseThrow().status()).isEqualTo("TAKEN");
+    assertThat(signalRepo.activeEntry(f.versionId, "NFO", f.symbol))
+        .as("the open position's exit anchor must survive a refused dismiss")
+        .isPresent();
+    assertThat(positions.findOpen(BOOK, "NFO", f.symbol, "BUY")).isPresent();
+  }
+
+  @Test
+  void dismissingAnActiveSignalStillWorks() {
+    // The legitimate path must stay byte-identical: an ACTIVE signal with no position is dismissable.
+    Fixture f = newBtstSignal("BTSTDISMISSOK");
+
+    signalsController.dismiss(f.signalId);
+
+    assertThat(signalRepo.find(f.signalId).orElseThrow().status()).isEqualTo("DISMISSED");
   }
 
   /** A published btst strategy + a fresh ACTIVE ENTRY signal + one filled manual ticket against it. */

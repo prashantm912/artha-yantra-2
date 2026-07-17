@@ -268,6 +268,14 @@ export function SignalsPage() {
                 taken as an entry; a stale signal is also refused.
               </p>
             )}
+            {/* Same rule as take.isError above: the server 422s a dismiss of a non-ACTIVE signal, so
+                a silent failure would leave "✕ Dismiss" doing nothing — which reads as success. */}
+            {dismiss.isError && (
+              <p className="mb-2 text-xs text-bear" role="alert">
+                Couldn&apos;t dismiss this signal — it was refused. Only an ACTIVE signal can be
+                discarded; a TAKEN one holds an open paper position, so close the position instead.
+              </p>
+            )}
             <div className="mb-4 flex flex-wrap gap-2">
               {/* ENTRY only — an EXIT is an advisory to CLOSE (its `side` is the closing action), and
                   taking one opens exposure in the wrong direction. The server 422s it; do not offer it. */}
@@ -282,6 +290,11 @@ export function SignalsPage() {
                 ✓ Taken
               </button>
               )}
+              {/* ACTIVE only — dismissing a TAKEN anchor is a third door into the manual-ticket
+                  orphan: the engine resolves a position's exit ONLY through an ACTIVE/TAKEN entry, so
+                  discarding the anchor of an open position strands it un-exitable. The server 422s it;
+                  do not offer it. EXPIRED/DISMISSED are already terminal — nothing left to discard. */}
+              {selected.status === 'ACTIVE' && (
               <button
                 type="button"
                 onClick={() => dismiss.mutate(selected.id)}
@@ -291,6 +304,7 @@ export function SignalsPage() {
               >
                 ✕ Dismiss
               </button>
+              )}
               <Link
                 to={`/charts?symbol=${encodeURIComponent(`${selected.exchange}:${selected.tradingsymbol}`)}&interval=${selected.interval}&signalId=${selected.id}`}
                 className="rounded-md border border-ay-border px-3 py-1.5 text-sm hover:border-accent"

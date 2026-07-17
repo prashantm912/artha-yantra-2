@@ -141,11 +141,37 @@ public class SignalsController {
     return detail(id);
   }
 
-  /** Reject a call. */
+  /**
+   * Reject a call — legal from ACTIVE only (task_6f1372da). This was an UNCONDITIONAL {@code
+   * transition}, which made the Dismiss button a third door into the manual-ticket orphan: a hand
+   * ticket fills → the anchor is TAKEN → the owner clicks Dismiss → the anchor is DISMISSED → {@code
+   * SignalRepository.activeEntry:166-178} (ACTIVE/TAKEN only) stops resolving it → the live engine can
+   * never emit that position's exit, ever. A TAKEN anchor means a position is OPEN, and the answer to
+   * that is to CLOSE the position, not to discard its anchor — a TAKEN signal whose position has since
+   * closed is already resolved TAKEN→EXPIRED by {@link
+   * in.arthayantra.strategysignal.paper.TakenSignalResolver}, so dismissing TAKEN is never right.
+   *
+   * <p>A lost CAS is a 422, NOT the idempotent no-op {@link #taken} uses two methods above. The
+   * precedents differ because the END STATE differs: a double-take lands on TAKEN, which IS the
+   * caller's intent, so no-op is honest. A dismiss that loses the CAS leaves the row NOT dismissed —
+   * reporting 200 would tell the owner their click worked while the signal stays in the feed, the same
+   * "silently refused button reads as success" hazard #881 was built to kill. The status is re-read
+   * AFTER the failed CAS so the body names the state that actually blocked it, not a pre-CAS read that
+   * a concurrent 15:45 sweep may already have invalidated.
+   */
   @PostMapping("/{id}/dismiss")
   public Map<String, Object> dismiss(@PathVariable long id) {
     requireExists(id);
-    repository.transition(id, "DISMISSED");
+    if (!repository.transitionIf(id, "ACTIVE", "DISMISSED")) {
+      String status = repository.find(id).map(SignalRepository.SignalRow::status).orElse(null);
+      throw new ApiException(
+          422,
+          ErrorCodes.VALIDATION_FAILED,
+          "signal #" + id + " is " + status + " and can no longer be dismissed — only an ACTIVE"
+              + " signal can be discarded; a TAKEN anchor holds an open paper position, so close the"
+              + " position instead of discarding the anchor the engine exits through",
+          Map.of("signalId", id, "signalStatus", String.valueOf(status)));
+    }
     return detail(id);
   }
 

@@ -1,10 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { SignalDto } from '../../api/signals.ts';
 
-const signal: SignalDto = {
+const baseSignal: SignalDto = {
   id: 7,
   strategyId: 'ema-cross',
   version: '1.2.0',
@@ -48,6 +48,11 @@ const signal: SignalDto = {
   },
 };
 
+// Mutable per-test state: the mock factory's arrow functions dereference these lazily (at render), so
+// a test can vary the signal's status / the mutation's error state before calling renderPage().
+let signal: SignalDto = baseSignal;
+let dismissIsError = false;
+
 const take = vi.fn();
 const dismiss = vi.fn();
 
@@ -58,7 +63,7 @@ vi.mock('../../api/signals.ts', () => ({
   useSignalsLive: () => {},
   useSignalDetail: () => ({ data: signal }),
   useTakeSignal: () => ({ mutate: take, isPending: false }),
-  useDismissSignal: () => ({ mutate: dismiss, isPending: false }),
+  useDismissSignal: () => ({ mutate: dismiss, isPending: false, isError: dismissIsError }),
 }));
 
 import { SignalsPage } from './SignalsPage.tsx';
@@ -75,6 +80,35 @@ function renderPage() {
 }
 
 describe('SignalsPage', () => {
+  beforeEach(() => {
+    signal = baseSignal;
+    dismissIsError = false;
+    take.mockClear();
+    dismiss.mockClear();
+  });
+
+  it('hides Dismiss for a TAKEN signal — discarding an open position\'s anchor would strand it', () => {
+    // task_6f1372da third door: a TAKEN anchor holds an open paper position, and the engine resolves
+    // that position's exit ONLY through an ACTIVE/TAKEN entry. Dismissing it strands the position
+    // un-exitable, so the server 422s it — and an offered-then-refused button is its own hazard.
+    signal = { ...baseSignal, status: 'TAKEN' };
+    renderPage();
+    fireEvent.click(screen.getByText('NSE:RELIANCE'));
+
+    // The positive assertion is load-bearing: it proves the action panel actually rendered, so the
+    // absence of Dismiss below is a real gate rather than a vacuously-empty page.
+    expect(screen.getByText('✓ Taken')).toBeInTheDocument();
+    expect(screen.queryByText('✕ Dismiss')).not.toBeInTheDocument();
+  });
+
+  it('surfaces a refused dismiss rather than failing silently', () => {
+    dismissIsError = true;
+    renderPage();
+    fireEvent.click(screen.getByText('NSE:RELIANCE'));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/Couldn't dismiss this signal/);
+  });
+
   it('lists the signal and shows reasoning on row select, then takes it with suggested qty', () => {
     renderPage();
     // feed row

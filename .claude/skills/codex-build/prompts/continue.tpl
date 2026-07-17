@@ -4,6 +4,13 @@ The working tree may have changed since your last turn — the Architect reviews
 adjust it directly. Run `git status -s` and `git diff HEAD` to resync first; treat the current tree
 as authoritative and do NOT revert the Architect's adjustments.
 
+## Architect's review corrections (may be empty)
+
+{{IMPLEMENTER_NOTES}}
+
+These explain what the Architect fixed after your last batch and why. Any convention stated here is
+BINDING for the rest of the session — do not reintroduce a corrected pattern.
+
 ## New instructions
 
 {{EXTRA_PROMPT}}

@@ -426,9 +426,11 @@ public class PaperService {
    * <p><b>Losing the CAS.</b> Already TAKEN (auto-paper or a prior take won the race) is a correct
    * no-op — the anchor is live either way, which is all the exit passes need. Any other state means the
    * dead-anchor gate's read raced the 15:45 sweep (or a dismiss) landing between the gate and this CAS;
-   * that re-throws the gate's own 422 from INSIDE the fill transaction, so the fill rolls back and the
-   * refusal still leaves zero trace. Without this the narrow TOCTOU window would leak exactly the orphan
-   * the gate exists to block.
+   * that re-throws the gate's own 422 from INSIDE the fill transaction, so the fill and the anchor
+   * transition both roll back. NOTE the refusal is not literally traceless on this path: an earlier
+   * {@code risk.entryVeto} audit row is written OUTSIDE the transaction by design and survives (the
+   * pre-fill gate, which runs before the governor, IS traceless). Without this CAS-side re-throw the
+   * narrow TOCTOU window would leak exactly the orphan the gate exists to block.
    */
   private void anchorTaken(Long signalId) {
     if (signalId == null) {

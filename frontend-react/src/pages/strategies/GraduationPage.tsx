@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/cn.ts';
 import { formatDecimal, isNegative, multiplyByInt } from '../../lib/decimal.ts';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
@@ -9,6 +11,7 @@ import {
   useGraduationBoard,
   useGraduationPromotions,
   type Criterion,
+  type Promotion,
   type StrategyGraduation,
 } from '../../api/graduation.ts';
 
@@ -65,11 +68,132 @@ function Money({ value }: { value: string }) {
 export function GraduationPage() {
   const board = useGraduationBoard();
   const promotions = useGraduationPromotions();
-  const rows = board.data?.strategies ?? [];
+  const rows = useMemo(() => board.data?.strategies ?? [], [board.data]);
   const th = board.data?.thresholds;
   const promos = promotions.data ?? [];
   // Board rows carry the display name/slug; the promotions row is id-keyed — join for a friendly label.
-  const labelById = new Map(rows.map((s) => [s.strategyId, s]));
+  const labelById = useMemo(() => new Map(rows.map((s) => [s.strategyId, s])), [rows]);
+
+  const promoColumns: DataColumn<Promotion>[] = useMemo(
+    () => [
+      {
+        id: 'strategy',
+        header: 'Strategy',
+        align: 'left',
+        mobileLabel: 'Strategy',
+        render: (p) => {
+          const s = labelById.get(p.strategyId);
+          return (
+            <>
+              <div className="font-medium text-ay-text">{s?.name ?? p.strategyId}</div>
+              {s?.slug && <div className="text-xs text-ay-muted">{s.slug}</div>}
+            </>
+          );
+        },
+      },
+      {
+        id: 'graduatedAt',
+        header: 'Graduated at',
+        align: 'left',
+        mono: true,
+        mobileLabel: 'Graduated at',
+        render: (p) => (p.graduatedAt ? p.graduatedAt.slice(0, 10) : '—'),
+      },
+      { id: 'trades', header: 'Trades', mobileLabel: 'Trades', render: (p) => p.trades },
+      {
+        id: 'expectancy',
+        header: 'Expectancy',
+        mobileLabel: 'Expectancy',
+        render: (p) => fmt(p.expectancy, 2),
+      },
+      { id: 'sharpe', header: 'Sharpe', mobileLabel: 'Sharpe', render: (p) => fmt(p.sharpe, 2) },
+      {
+        id: 'maxDd',
+        header: 'Max DD',
+        mobileLabel: 'Max DD',
+        render: (p) => `${fmt(p.maxDrawdownPct, 2)}%`,
+      },
+    ],
+    [labelById],
+  );
+
+  const boardColumns: DataColumn<StrategyGraduation>[] = useMemo(
+    () => [
+      {
+        id: 'strategy',
+        header: 'Strategy',
+        align: 'left',
+        mobileLabel: 'Strategy',
+        render: (s) => (
+          <>
+            <div className="font-medium text-ay-text">{s.name}</div>
+            <div className="text-xs text-ay-muted">{s.slug}</div>
+            {/* INT-I3 dossier link (§8.6) — graduation evidence + crossing timeline + rejections. */}
+            <Link
+              to={`/insights/strategy-dossier/${s.strategyId}`}
+              className="text-xs text-accent hover:underline"
+            >
+              Dossier →
+            </Link>
+          </>
+        ),
+      },
+      {
+        id: 'stage',
+        header: 'Stage',
+        align: 'left',
+        mobileLabel: 'Stage',
+        render: (s) => <StageBadge stage={s.stage} />,
+      },
+      { id: 'trades', header: 'Trades', mobileLabel: 'Trades', render: (s) => s.trades },
+      {
+        id: 'net',
+        header: 'Net',
+        mobileLabel: 'Net',
+        render: (s) => <Money value={s.netRealized} />,
+      },
+      {
+        id: 'winRate',
+        header: 'Win%',
+        mobileLabel: 'Win%',
+        // Audit M21: winRate is a 0-1 fraction on the wire — render as a percent
+        // under the "Win%" header (was "0.7500", now "75.0%").
+        render: (s) =>
+          s.winRate == null ? '—' : `${formatDecimal(multiplyByInt(s.winRate, 100), 1)}%`,
+      },
+      { id: 'pf', header: 'PF', mobileLabel: 'PF', render: (s) => fmt(s.profitFactor, 2) },
+      {
+        id: 'expectancy',
+        header: 'Expectancy',
+        mobileLabel: 'Expectancy',
+        render: (s) => (
+          <span className={isNegative(s.expectancy) ? 'text-bear' : 'text-ay-text'}>
+            {fmt(s.expectancy, 2)}
+          </span>
+        ),
+      },
+      {
+        id: 'maxDd',
+        header: 'Max DD',
+        mobileLabel: 'Max DD',
+        render: (s) => `${fmt(s.maxDrawdownPct, 2)}%`,
+      },
+      {
+        id: 'criteria',
+        header: 'Criteria',
+        align: 'left',
+        mobileLabel: 'Criteria',
+        render: (s) => (
+          <span className="flex items-center gap-1.5">
+            {s.criteria.map((c) => (
+              <CriterionDot key={c.name} c={c} />
+            ))}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
 
   return (
     <LoadBeat>
@@ -95,39 +219,13 @@ export function GraduationPage() {
             </span>
             <span className="text-ay-muted">strategies the F7 evaluator has marked graduated</span>
           </h2>
-          <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-            <table className="w-full border-collapse text-sm">
-              <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                <tr>
-                  <th className="px-2 py-2 font-medium">Strategy</th>
-                  <th className="px-2 py-2 font-medium">Graduated at</th>
-                  <th className="px-2 py-2 text-right font-medium">Trades</th>
-                  <th className="px-2 py-2 text-right font-medium">Expectancy</th>
-                  <th className="px-2 py-2 text-right font-medium">Sharpe</th>
-                  <th className="px-2 py-2 text-right font-medium">Max DD</th>
-                </tr>
-              </thead>
-              <tbody>
-                {promos.map((p) => {
-                  const s = labelById.get(p.strategyId);
-                  return (
-                    <tr key={`${p.strategyId}:${p.graduatedAt}`} className="border-t border-ay-border">
-                      <td className="px-2 py-2">
-                        <div className="font-medium text-ay-text">{s?.name ?? p.strategyId}</div>
-                        {s?.slug && <div className="text-xs text-ay-muted">{s.slug}</div>}
-                      </td>
-                      <td className="px-2 py-2 tabular-nums">
-                        {p.graduatedAt ? p.graduatedAt.slice(0, 10) : '—'}
-                      </td>
-                      <td className="px-2 py-2 text-right tabular-nums">{p.trades}</td>
-                      <td className="px-2 py-2 text-right tabular-nums">{fmt(p.expectancy, 2)}</td>
-                      <td className="px-2 py-2 text-right tabular-nums">{fmt(p.sharpe, 2)}</td>
-                      <td className="px-2 py-2 text-right tabular-nums">{fmt(p.maxDrawdownPct, 2)}%</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <BeatBlock>
+            <DataTable
+              columns={promoColumns}
+              rows={promos}
+              rowKey={(p) => `${p.strategyId}:${p.graduatedAt}`}
+              ariaLabel="Graduated strategies"
+            />
           </BeatBlock>
         </section>
       )}
@@ -140,65 +238,13 @@ export function GraduationPage() {
         skeleton={<Skeleton variant="table-rows" rows={6} cols={8} />}
       >
         {() => (
-          <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-            <table className="w-full border-collapse text-sm">
-              <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                <tr>
-                  <th className="px-2 py-2 font-medium">Strategy</th>
-                  <th className="px-2 py-2 font-medium">Stage</th>
-                  <th className="px-2 py-2 text-right font-medium">Trades</th>
-                  <th className="px-2 py-2 text-right font-medium">Net</th>
-                  <th className="px-2 py-2 text-right font-medium">Win%</th>
-                  <th className="px-2 py-2 text-right font-medium">PF</th>
-                  <th className="px-2 py-2 text-right font-medium">Expectancy</th>
-                  <th className="px-2 py-2 text-right font-medium">Max DD</th>
-                  <th className="px-2 py-2 font-medium">Criteria</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((s) => (
-                  <tr key={s.strategyId} className="border-t border-ay-border">
-                    <td className="px-2 py-2">
-                      <div className="font-medium text-ay-text">{s.name}</div>
-                      <div className="text-xs text-ay-muted">{s.slug}</div>
-                      {/* INT-I3 dossier link (§8.6) — graduation evidence + crossing timeline + rejections. */}
-                      <Link
-                        to={`/insights/strategy-dossier/${s.strategyId}`}
-                        className="text-xs text-accent hover:underline"
-                      >
-                        Dossier →
-                      </Link>
-                    </td>
-                    <td className="px-2 py-2">
-                      <StageBadge stage={s.stage} />
-                    </td>
-                    <td className="px-2 py-2 text-right tabular-nums">{s.trades}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">
-                      <Money value={s.netRealized} />
-                    </td>
-                    <td className="px-2 py-2 text-right tabular-nums">
-                      {/* Audit M21: winRate is a 0-1 fraction on the wire — render as a percent
-                          under the "Win%" header (was "0.7500", now "75.0%"). */}
-                      {s.winRate == null ? '—' : `${formatDecimal(multiplyByInt(s.winRate, 100), 1)}%`}
-                    </td>
-                    <td className="px-2 py-2 text-right tabular-nums">{fmt(s.profitFactor, 2)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">
-                      <span className={isNegative(s.expectancy) ? 'text-bear' : 'text-ay-text'}>
-                        {fmt(s.expectancy, 2)}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2 text-right tabular-nums">{fmt(s.maxDrawdownPct, 2)}%</td>
-                    <td className="px-2 py-2">
-                      <span className="flex items-center gap-1.5">
-                        {s.criteria.map((c) => (
-                          <CriterionDot key={c.name} c={c} />
-                        ))}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <BeatBlock>
+            <DataTable
+              columns={boardColumns}
+              rows={rows}
+              rowKey={(s) => s.strategyId}
+              ariaLabel="Graduation board"
+            />
           </BeatBlock>
         )}
       </QueryState>

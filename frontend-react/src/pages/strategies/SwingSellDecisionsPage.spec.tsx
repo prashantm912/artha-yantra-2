@@ -123,6 +123,22 @@ describe('SwingSellDecisionsPage', () => {
     expect(within(table).getByText('-8.00%')).toBeInTheDocument();
   });
 
+  it('renders the live columns in their declared order', () => {
+    renderPage();
+    const table = screen.getByRole('table');
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
+      'Symbol',
+      'Setup',
+      'Entry',
+      'Current',
+      'Unrealized',
+      'Stop',
+      'Trail',
+      'Buy now?',
+      'Verdict',
+    ]);
+  });
+
   it('summarises the holding + selling counts and offers a book toggle', () => {
     renderPage();
     expect(screen.getByText(/2 holding · 1 selling/)).toBeInTheDocument();
@@ -133,10 +149,14 @@ describe('SwingSellDecisionsPage', () => {
   it('switches to the Recorded view and acknowledges a persisted decision', () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Recorded' }));
+    // The table renders through the shared DataTable, which paints a desktop <table> AND a
+    // md:hidden mobile card list — every cell exists twice in jsdom (CSS doesn't apply), so
+    // scope to the desktop table to keep these assertions exactly-one.
+    const table = screen.getByRole('table');
     // the recorded snapshot carries the run date + an unacknowledged verdict
-    expect(screen.getByText('2026-07-09')).toBeInTheDocument();
+    expect(within(table).getByText('2026-07-09')).toBeInTheDocument();
     expect(screen.getByText(/1 recorded · 1 unacknowledged/)).toBeInTheDocument();
-    const ackBtn = screen.getByRole('button', { name: 'Acknowledge' });
+    const ackBtn = within(table).getByRole('button', { name: 'Acknowledge' });
     fireEvent.click(ackBtn);
     expect(ackMutate).toHaveBeenCalledWith(7);
   });

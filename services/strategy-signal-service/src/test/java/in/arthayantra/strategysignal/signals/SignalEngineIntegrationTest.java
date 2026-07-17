@@ -388,17 +388,32 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
 
   @Test
   @Order(3)
-  void takenAndDismissTransitionsWork() throws Exception {
+  void takenTransitionWorksAndDismissingATakenAnchorIsRefused() throws Exception {
     mockMvc
         .perform(MockMvcRequestBuilders.post("/api/v1/signals/" + firstSignalId + "/taken"))
         .andExpect(MockMvcResultMatchers.status().isOk())
         .andExpect(MockMvcResultMatchers.jsonPath("$.status").value("TAKEN"));
 
+    // task_6f1372da: this method used to assert TAKEN→dismiss returned 200 DISMISSED — it PINNED the
+    // defect. A TAKEN anchor holds an open paper position, and the engine resolves that position's exit
+    // ONLY through an ACTIVE/TAKEN entry (SignalRepository.activeEntry:166-178), so discarding the
+    // anchor strands the position un-exitable forever. Dismiss is legal from ACTIVE only; the row keeps
+    // its status. The happy-path dismiss (from ACTIVE) is covered by
+    // PaperManualTicketAnchorIntegrationTest.dismissingAnActiveSignalStillWorks.
     mockMvc
         .perform(MockMvcRequestBuilders.post("/api/v1/signals/" + firstSignalId + "/dismiss"))
-        .andExpect(MockMvcResultMatchers.status().isOk())
-        .andExpect(MockMvcResultMatchers.jsonPath("$.status").value("DISMISSED"));
+        .andExpect(MockMvcResultMatchers.status().isUnprocessableEntity())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.code").value("VALIDATION_FAILED"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.details.signalStatus").value("TAKEN"));
 
+    mockMvc
+        .perform(MockMvcRequestBuilders.get("/api/v1/signals/" + firstSignalId))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.status").value("TAKEN"));
+
+    // Unchanged intent: the signal is no longer a live call. /active lists status='ACTIVE' only, so a
+    // TAKEN signal drops out of it exactly as a DISMISSED one did — this assertion never depended on
+    // the dismiss.
     mockMvc
         .perform(MockMvcRequestBuilders.get("/api/v1/signals/active"))
         .andExpect(MockMvcResultMatchers.status().isOk())

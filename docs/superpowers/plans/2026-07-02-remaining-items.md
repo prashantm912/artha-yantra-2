@@ -157,6 +157,15 @@ login, no restart. Fallback if it does not: login first, then restart strategy-s
 
 ---
 
+**UPDATE 2026-07-17 (weekend-safe batch, session cont.).** Four weekend-safe items landed + one
+red-main regression found:
+- **DataTable adoption wave 2** ([#897](https://github.com/prashantm912/artha-yantra-2/pull/897)) — 4 screener/dossier/versions pages; e2e = the two known 2-core flakes only, admin-merged.
+- **CriterionDot WCAG 1.4.1** ([#899](https://github.com/prashantm912/artha-yantra-2/pull/899)) — graduation dots now carry a ✓/✗ glyph (non-colour channel), `role="img"` makes the `aria-label` legal + the glyph presentational; Codex APPROVED (no findings).
+- **ci-contracts sees a renamed/retyped RESPONSE key** ([#900](https://github.com/prashantm912/artha-yantra-2/pull/900), task_ade97df8) — **CLOSES the CLAUDE.md "renamed response key reaches live un-caught / UniverseResolver wire-read" blind spot.** Relabels specs to 3.0.1 for the diff step + validates the relabel against the 3.0 schema (openapi-spec-validator, fail-closed) + `RecordRequiredModelConverter`/`ResponseRequiredCustomizer` emit `required` on response-only record schemas. Codex converged over 3 rounds (deny-list → 3.0-schema-validate backstop → explicit `$ref`-sibling reject). Committed specs stay 3.1.0; regen byte-identical.
+- **docs** ([#898](https://github.com/prashantm912/artha-yantra-2/pull/898)) — DataTable-jsdom/header/refactor traps + the `AT TIME ZONE '+05:30'` display-INVERSION correction.
+- ⚠️ **RED ON MAIN since #895 merged (`17a69ea2`, yesterday):** `SignalEngineIntegrationTest.everyEvaluationIsCountedExactlyOnceSoTheOutcomeSumIsTheEvaluationCount` (task_37ee83e0) fails **deterministically on the 2-core strategy-gateway shard** — the cold `SIGSUM<rand>` series "never warmed (REST back-fill empty at load)" → Σ(outcomes) short of 43. NOT caused by #900 (proven: same test red on the #895 merge commit with no #900 in it; #900's shard shows only this one pre-existing error). **Fix in flight** (`fix/signal-eval-count-it-green`) — diagnosing real-uncounted-branch vs test-harness-warmup. **A red main baseline normalises admin-merges + hides real regressions — treat as the next priority.**
+- **PENDING:** one batched `frontend-react` rebuild+redeploy for #897+#899 (market closed → low urgency; #900 is CI/spec-gen only, no deploy).
+
 **UPDATE 2026-07-17 (chip-wave, Codex builder lane; PRs #877/#878/#879 merged, main = `ea6211a4`,
 strategy-signal DEPLOYED + drill-proven live).** First full run of the `codex-build` pipeline
 (luna draft → sol refine → Opus `claude-review` → Architect audit) across 5 parallel worktrees.
@@ -262,10 +271,45 @@ series indistinguishable from a dead engine — the same ambiguity, one level up
 now RETURNS an `Outcome` and `evaluateAtBarClose` holds the ONLY increment site, so **a future silent `return;` is a
 COMPILE ERROR, not a blind spot**. The `Σ(outcomes) == evaluations` invariant is mutation-proven BOTH ways (undercount
 34 RED, double-count 80 RED, real 40 GREEN) — **`>= 40` would have gone green at 80**, hence an exact assertion.
-**So a future F10 Part B revival now HAS a sound liveness primitive it lacked**: `ay_signal_eval_outcome_total` sums to
-the evaluation count by construction, so "the engine evaluated nothing" is finally distinguishable from "every strategy
-correctly declined" — which is exactly what "bars present + rejections absent" could never do. **Re-read §3.1 before
-building anything on it regardless: REST and JDBC both remain blind.** Also found: **the PE variants score a LONG-BIASED composite** (`direction` = bullish→1) so
+⚠️ **RETRACTED 2026-07-18 — an earlier version of THIS BLOCK claimed #895 "gives a future F10 Part B revival a sound
+liveness primitive it lacked". THAT CLAIM IS FALSE and was the Architect's, written the same day, unverified.**
+`ay_signal_eval_outcome_total`'s increment site sits INSIDE the `else` of `if (activeEntry.isPresent())`
+(`SignalEngine:1063`, counter at `:1105-1113`), BELOW two `continue`s — `!inUniverse` (`:1017`) and
+`!withinSessionWindow` (`:1020-1022`) — and btst is never evaluated from `onClosedBar` at all (`:1026-1029`).
+**So Σ(outcomes) is LEGITIMATELY FLAT while bars flow** in four normal states: outside a session window, whole book in
+position, context-only symbols, btst. **Measured live: 51 of the intraday strategies close their window at
+15:00/12:00/14:30 while the watchdog arms 09:20→15:30 (`SubscriberHealthCanary:72-73`) — so Σ(outcomes) is
+STRUCTURALLY FLAT 15:00–15:30 EVERY non-expiry day.** A "bars arriving + Σ flat ⇒ alarm" detector **pages every
+afternoon**. It is **the same mistake as the dead design, one layer up**: rejections were *direction*-dependent;
+Σ(outcomes) is *window*- and *position*-dependent. **#895 is an ATTRIBUTION primitive — an evidence panel. NEVER arm
+anything on it.**
+**THE ONLY signals safe to key liveness on** are `lastBarReceivedAtMs` (`SignalEngine:361`, stamped at `:954` as the
+FIRST line of `onCandleMessage` — before ANY universe/window/position/loaded logic) and `lastBarEvaluatedAtMs`. Both
+are direction-, window- AND position-independent. Rejections / `signals` / gate output / Σ(outcomes) are all confounded.
+**PART B IS ALREADY SHIPPED — IT IS #886, AND THE OWNER'S FORK IS MOOT.** Post-#886 `SubscriberHealthCanary`: gate 3 is
+`registry.countEnabledPublished() == 0` (`:125`; live = 69) so `loaded == 0` no longer disarms it (pinned by
+`SubscriberHealthCanaryTest:119`); gate 4 is `feedAge != Long.MAX_VALUE && feedAge > feedFreshMs` (`:172`) so
+"can't tell" is suspicious not healthy; knobs wired (`application.yml:63-66`, `docker-compose.yml:393-395`).
+**F10 replay against the live code: boot ~08:45 → `loaded=0` → no subscriptions → no bars; `lastBarReceivedAtMs` seeded
+at boot (`:424`); at the 09:20 sweep `receiveGap ≈ 35min ≫ 180s`, `evalLag ≈ 0`, feed fresh → IT FIRES.** The
+cold-start is detected today. **And the market-data-contract-vs-cross-schema-grant fork is moot on BOTH prongs** — the
+engine already holds `lastBarReceivedAtMs`, a strictly BETTER oracle than either: a market-data contract answers "did
+market-data WRITE bars", whose YES does not imply the engine RECEIVED them (the 07-07 subscription drop is exactly that
+gap), and the grant punctures D10 for a worse answer. **Build neither.**
+**⚠️ DO NOT ARM chip task_a6c12601 / #868 `SignalStarvationCanary` — it is a LIVE LANDMINE (→ chip task_3a928626,
+retire the class).** It keys on `lastGateOutputAtMs`, written only PAST the chart gate, so on a SuperTrend-DOWN leg
+`outputGap > windowMs` while its guards (`receiveGap < barGapMs`, `evalLag < barGapMs`) are BOTH satisfied ⇒ **it
+pages**. **The 2026-07-17 false alarm was this canary's exact signature, executed by hand.** Arming it automates that
+mistake daily.
+**The one GENUINE gap:** `SwingBatchHeartbeat` (`:36`, cron `0 15 20 * * MON-FRI` at `:51`) pings ONCE at 20:15 IST and
+proves only that the swing BATCH ran — **a stack dead 09:15–15:30 that recovers by 20:15 pings happily while the whole
+session is lost.** A session-cadence heartbeat (~10min, 09:30–15:20 IST, gated ONLY on `receiveGap < barGapMs`, never on
+outcomes) on the existing external dead-man's-switch closes it; absence-is-the-alarm survives process death and cannot
+be muted in-process. Owner-gated on creating the external check.
+**HIGHEST-VALUE NEXT ACTION IS A DRILL, NOT A BUILD:** #886's receive-gap path is drill-proven on COLD-START ONLY; a
+mid-session subscription drop is reconstructed, not observed. If a drill shows it not firing there, the eval/receive
+composition needs rework — and that would overturn "Part B is already shipped". **Re-read §3.1 regardless: REST and JDBC
+both remain blind.** Also found: **the PE variants score a LONG-BIASED composite** (`direction` = bullish→1) so
 they can essentially only fire when their own thesis is wrong — owner-gated, chip **task_79092520**. Chip
 task_87a94cb2 was filed then WITHDRAWN — its premise (a 3m partial-bucket mismatch) was refuted: `PartialBucketCanary`
 is *purely observational* and its 0.7% skew is the benign tick-agg-vs-persisted noise its own javadoc anticipates,

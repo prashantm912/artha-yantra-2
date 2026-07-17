@@ -1,11 +1,56 @@
 # Engine-liveness detector (unified) — design
 
-**Status:** designed 2026-07-16 with the owner, ready to build. Supersedes the F10-Part-B sketch in
-the ledger row (`p1-phase4-platform-planes` neighbour `F10`) and absorbs chip `task_7f6642c4`.
+> # ⛔ STOP — DO NOT BUILD §3 AS WRITTEN. THE PREMISE IS FALSE.
+>
+> **Status: INVALIDATED at §3.1 on 2026-07-17.** This design was written by Claude and approved by the
+> owner on 2026-07-16. Both of us were wrong, and it was the new brief-vs-code gate (#884) that killed
+> it — ~20 minutes after that gate shipped, applied to its own author's work.
+>
+> **§3.1 assumes a detector inside strategy-signal can ask "are bars flowing?". It cannot — by either
+> route the design proposes. Measured live 2026-07-17, not reasoned:**
+>
+> - **REST cannot answer it.** `GET /api/v1/market/health/data` at 03:46 IST — market shut, zero bars
+>   flowing — returned `{"status":"GREEN","marketOpen":false,"tickedTokens":25,"problems":[]}`.
+>   `tickedTokens` is the size of a **process-lifetime** map (`DataHealthState:25`), not a recent-bar
+>   count, and `TICK_BAR_DIVERGENCE` **skips** stale-tick tokens (`DataHealthCanary:136`). It reports
+>   GREEN on a dead feed by construction. A detector built on it inherits exactly the blindness it exists
+>   to remove.
+> - **JDBC cannot answer it either.** The owner's chosen fork was "in strategy-signal, JDBC-only", but
+>   `SET ROLE ay_strategy; SELECT ... FROM marketdata.candles` → **`permission denied for schema
+>   marketdata`** (`admin/V001:18`). The grant does not exist. No amount of query tuning fixes a role
+>   that cannot see the schema.
+>
+> **Corrections to §2's supporting numbers** (they do not rescue §3, but do not re-derive them wrong):
+> the 4–10 min gap band is **not** empty — 07-06 had a 267.1s and a 331.8s gap; and the "82 bars" figure
+> is 81 bars plus a boundary bucket.
+>
+> **What survives: §1 and §2 remain AUTHORITATIVE** — the 9-of-9 measurement (the engine produced zero or
+> truncated rejection output on 9 of the last 9 trading days, all canary-green) and the analysis of why
+> every existing detector is blind. The problem statement is real and unaddressed. Only the §3 *mechanism*
+> is dead.
+>
+> **Partial progress since:** [#886](https://github.com/prashantm912/artha-yantra-2/pull/886) fixed the two
+> blind gates §2 identified (vacuous-truth disarm at `loaded == 0`; `Long.MAX_VALUE` read as "fresh"), so
+> the existing watchdog can now fire on a cold boot. That is the F10 cold-start class, not the general
+> bar-flow oracle this design was reaching for.
+>
+> **Reviving this needs an OWNER decision, not a rewrite**, because both viable routes cross a boundary
+> the owner owns: (a) a **market-data contract** exposing a bounded recent-closed-bar count (the honest
+> fix — market-data owns that data), or (b) a **cross-schema grant to `ay_strategy` + an ADR** (cheaper,
+> but it punctures the D10 schema-isolation convention). Do not pick one silently.
+>
+> **Lesson worth more than the design: an owner-APPROVED design is not a VERIFIED design.** Approval
+> reviews the reasoning; it cannot review a premise nobody tested. Recon the premise even when the brief
+> is your own and even when it is already signed off.
+
+**Status:** ~~designed 2026-07-16 with the owner, ready to build~~ — **INVALIDATED, see the STOP block
+above.** Supersedes the F10-Part-B sketch in the ledger row (`p1-phase4-platform-planes` neighbour `F10`)
+and absorbs chip `task_7f6642c4`.
 
 **Owner decisions taken 2026-07-16 (all four forks):** build BOTH the new cross-service detector AND
 the canary-gate fixes · bar-anchored K-consecutive-bars predicate · in strategy-signal, JDBC-only ·
-alert + bounded auto-heal via `forceResubscribe`.
+alert + bounded auto-heal via `forceResubscribe`. **(The gate fixes SHIPPED as #886. The JDBC-only fork
+is the one proven impossible — see the STOP block.)**
 
 ---
 
@@ -75,10 +120,20 @@ intentionally off" with "nothing loaded because we're broken".
 
 ## 3. The design
 
+> ⛔ **EVERYTHING FROM HERE DOWN IS INVALIDATED — see the STOP block at the top of this file.** The
+> "bars present" half of §3.1's predicate is not observable from strategy-signal: REST reports GREEN on
+> a dead feed, and the JDBC route is denied on `marketdata`. §3.2–§3.4 are internally consistent but rest
+> on that dead premise. Kept for the reasoning, not as a build spec.
+
 ### 3.1 Core idea — cross-service divergence
 
 > **market-data** writes candles. **strategy-signal** writes rejections. Two services, two tables,
 > one database. During a session: **bars present + rejections absent = the engine is dead.**
+>
+> ⛔ **FALSE PREMISE (proven live 2026-07-17):** strategy-signal cannot establish "bars present".
+> `SET ROLE ay_strategy; SELECT ... marketdata.candles` → `permission denied for schema marketdata`
+> (`admin/V001:18`) — the two tables are NOT reachable from one role, which is the whole basis of this
+> section. The REST fallback is worse: it returns GREEN with zero bars flowing.
 
 Survives every blind spot **by construction, not by tuning**:
 

@@ -894,30 +894,31 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   /**
-   * The chain must NEVER report success while the engine holds zero usable strategies. A drop is
-   * counted only for a resolution FAILURE, so a reload where every strategy resolves to a genuinely
-   * EMPTY universe reports "0 loaded, 0 drops" — and an `unresolvedDrops == 0` success predicate
-   * reads that as "resolved every universe — retry complete" over a completely dead engine. That is
-   * the 2026-07-15/16 outage's exact signature, and the shape a previous fix on this path silently
-   * re-issued while logging success. Fails against that predicate: the chain stops after ONE
-   * attempt, so the universe coming back later is never picked up.
+   * The chain must NEVER report success while every strategy is failing to load. A drop is counted
+   * only for a resolution FAILURE, so a reload where every strategy THROWS reports "0 loaded, 0
+   * unresolved" — and an `unresolvedDrops == 0` success predicate reads that as "resolved every
+   * universe — retry complete" over a completely dead engine. That is the 2026-07-15/16 outage's
+   * exact signature, and the shape a previous fix on this path silently re-issued while logging
+   * success. Fails against that predicate: the chain stops after ONE attempt, so the strategy
+   * becoming loadable later is never picked up.
    */
   @Test
   @Order(15)
-  void kiteConnectedRetryNeverReportsSuccessWhileTheEngineHoldsZeroStrategies() {
+  void kiteConnectedRetryNeverReportsSuccessWhileEveryStrategyFailsToLoad() {
     StrategyRepository.StrategyRow row =
         uniquePublishedRow(COLD_START_EMPTY_YAML, "engine-it-zero-success", "Zero Success");
-    AtomicBoolean genuinelyEmpty = new AtomicBoolean(true);
+    AtomicBoolean loadFails = new AtomicBoolean(true);
     AtomicInteger resolutions = new AtomicInteger();
     FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
     when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
         .thenAnswer(
             invocation -> {
               resolutions.incrementAndGet();
-              // RESOLVED-but-empty (the #877 "genuinely none" shape): 0 loaded AND 0 drops counted.
-              return genuinelyEmpty.get()
-                  ? Optional.of(List.of())
-                  : Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
+              if (loadFails.get()) {
+                // A load failure: counted by NEITHER loadedCount NOR unresolvedDrops.
+                throw new IllegalStateException("simulated load failure");
+              }
+              return Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
             });
 
     SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(row), isolatedResolver);
@@ -932,11 +933,196 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       int atBoot = resolutions.get();
       redis.convertAndSend("kite.status", "CONNECTED");
 
-      // Despite 0 drops, the chain must NOT declare success — it is holding zero strategies.
+      // Despite 0 drops, the chain must NOT declare success — every strategy is failing.
       await().atMost(Duration.ofSeconds(30)).until(() -> resolutions.get() >= atBoot + 2);
 
-      genuinelyEmpty.set(false);
+      loadFails.set(false);
       await().atMost(Duration.ofSeconds(30)).until(() -> isolatedEngine.loadedSlugs().size() == 1);
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * CRITICAL-1 regression: keep-best must judge IDENTITY, not counts. A reload that swaps which
+   * strategy loaded is "1 loaded / 1 unresolved" either way, so a count-based guard installs it —
+   * removing A from `loaded`, which is the only thing exit evaluation walks, so A's open position
+   * loses its exits for the session. Fails against a count comparison: A is silently replaced by B.
+   */
+  @Test
+  @Order(16)
+  void keepBestSuppressesAnEqualCountReloadThatSwapsStrategyIdentity() {
+    StrategyRepository.StrategyRow rowA =
+        uniquePublishedRow(KEEP_BEST_A_YAML, "engine-it-swap-a", "Swap A");
+    StrategyRepository.StrategyRow rowB =
+        uniquePublishedRow(KEEP_BEST_B_YAML, "engine-it-swap-b", "Swap B");
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(rowA, rowB));
+    when(isolatedRegistry.findVersionById(rowA.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowA.publishedVersionId()));
+    when(isolatedRegistry.findVersionById(rowB.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowB.publishedVersionId()));
+
+    // Phase 1 (boot): A resolves, B fails. Phase 2: exactly inverted — same counts, swapped identity.
+    AtomicBoolean swapped = new AtomicBoolean(false);
+    AtomicInteger resolutions = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              resolutions.incrementAndGet();
+              boolean isA = KEEP_BEST_A_UNDERLYING.equals(invocation.<String>getArgument(1));
+              return isA != swapped.get()
+                  ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                  : Optional.empty();
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(rowA.slug());
+
+      swapped.set(true);
+      int atBoot = resolutions.get();
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      await().atMost(Duration.ofSeconds(30)).until(() -> resolutions.get() > atBoot);
+      await()
+          .atMost(Duration.ofSeconds(30))
+          .until(() -> !isolatedEngine.kiteConnectedReloadInFlight());
+
+      // Same count, different identity — A must NOT have been swapped out for B.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(rowA.slug());
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * CRITICAL-2 regression: a universe that RESOLVES to empty is a legitimate stand-aside (a
+   * futures_screener whose movers screen picked nobody), NOT a fault. It must INSTALL — loading
+   * nothing is the correct outcome. Treating it as unhealthy makes keep-best suppress it, and the
+   * engine then keeps trading YESTERDAY's universe, which is worse than the bug keep-best fixes.
+   * Fails against a `liveCandidates > 0 && loaded == 0 ⇒ unhealthy` predicate: the stale set stays.
+   */
+  @Test
+  @Order(17)
+  void aResolvedEmptyUniverseInstallsAsAStandAsideAndIsNeverSuppressed() {
+    StrategyRepository.StrategyRow row =
+        uniquePublishedRow(COLD_START_EMPTY_YAML, "engine-it-stand-aside", "Stand Aside");
+    AtomicBoolean standAside = new AtomicBoolean(false);
+    AtomicInteger resolutions = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              resolutions.incrementAndGet();
+              // Present-but-empty = "resolved, nothing to trade today" (resolveScreener's contract).
+              return standAside.get()
+                  ? Optional.of(List.of())
+                  : Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(row), isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      // The engine is holding a universe that must be RELINQUISHED when the screen empties.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(row.slug());
+
+      standAside.set(true);
+      int atBoot = resolutions.get();
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      await().atMost(Duration.ofSeconds(30)).until(() -> resolutions.get() > atBoot);
+      // Standing aside is HEALTHY, so the chain installs it and completes rather than retrying.
+      await()
+          .atMost(Duration.ofSeconds(30))
+          .until(() -> !isolatedEngine.kiteConnectedReloadInFlight());
+
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * CRITICAL-3 regression: the boot gate must arm from the load's retryable-failure state, not from
+   * `drops > 0`. A boot where every strategy THROWS yields 0 loaded / 0 unresolved, so a drops-only
+   * gate never arms the chain, the reconcile sees no registry drift, and the engine stays dead all
+   * session — the 2026-07-16 shape. Deliberately drives the boot-KEY path ONLY: the session is
+   * already CONNECTED before the engine exists and no channel edge is ever published, because the
+   * boot-KEY path is the one that broke. Fails against the `drops > 0` gate: nothing ever arms.
+   */
+  @Test
+  @Order(18)
+  void bootArmsTheRetryFromTheKiteStatusKeyWhenEveryStrategyFailsToLoad() {
+    StrategyRepository.StrategyRow row =
+        uniquePublishedRow(COLD_START_BOOT_KEY_YAML, "engine-it-boot-loaderr", "Boot Load Error");
+    AtomicBoolean loadFails = new AtomicBoolean(true);
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              if (loadFails.get()) {
+                throw new IllegalStateException("simulated boot load failure");
+              }
+              return Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
+            });
+
+    // Already CONNECTED before this engine exists — the channel edge is long gone.
+    redis.opsForValue().set("kite:session:status", "CONNECTED");
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(row), isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      // 0 loaded AND 0 unresolved — the state a drops-only gate reads as "nothing to retry".
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+      assertThat(ReflectionTestUtils.getField(isolatedEngine, "lastReloadUnresolvedDrops"))
+          .isEqualTo(0);
+
+      loadFails.set(false);
+
+      // No CONNECTED is ever published on the channel: only a chain armed from the KEY can load it.
+      await().atMost(Duration.ofSeconds(30)).until(() -> isolatedEngine.loadedSlugs().size() == 1);
+    } finally {
+      isolatedEngine.stop();
+      redis.delete("kite:session:status");
+    }
+  }
+
+  /**
+   * MAJOR-4: a structurally identical reload must not cold-start every indicator bank. Equal
+   * unhealthy outcomes still install, and installing clears bankCache — recomputing recursive ta4j
+   * indicators from bar 0 in BigDecimal math on the single eval thread. Widening the chain to 8
+   * attempts would drive that up to 8 times per CONNECTED on a persistently degraded engine.
+   */
+  @Test
+  @Order(19)
+  @SuppressWarnings("unchecked")
+  void anIdenticalReloadRetainsTheWarmIndicatorBanks() {
+    StrategyRepository.StrategyRow row =
+        uniquePublishedRow(COLD_START_YAML, "engine-it-bank-retain", "Bank Retain");
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation ->
+                Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))));
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(row), isolatedResolver);
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(row.slug());
+
+      Map<String, Object> banks =
+          (Map<String, Object>) ReflectionTestUtils.getField(isolatedEngine, "bankCache");
+      banks.put("warm-sentinel", mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+
+      // Nothing changed in the registry or the universe — the banks must survive.
+      isolatedEngine.reload();
+
+      assertThat(banks).containsKey("warm-sentinel");
     } finally {
       isolatedEngine.stop();
     }

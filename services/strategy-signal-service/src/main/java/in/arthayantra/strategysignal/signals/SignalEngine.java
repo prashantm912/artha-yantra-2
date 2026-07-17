@@ -125,8 +125,21 @@ public class SignalEngine {
       String book) {}
 
   private enum UniverseResolutionStatus {
+    /** Resolved to at least one tradable instrument. */
     RESOLVED,
+    /**
+     * Resolved, with NOTHING to trade today — a legitimate STAND-ASIDE, not a fault. A
+     * {@code futures_screener} whose movers screen picked nobody returns a present-but-empty list
+     * on purpose ({@code FuturesUniverseResolver.resolveScreener}). Loading nothing IS the correct
+     * outcome, so this is HEALTHY and must be INSTALLED: refusing it would leave the engine holding
+     * — and trading — YESTERDAY's universe. (Whether an empty {@code contracts} array on an INDEX
+     * ladder should instead be a FAULT is a different question, owned by chip task_f624fca7; that
+     * classification lives in the resolver and is deliberately untouched here.)
+     */
+    RESOLVED_EMPTY,
+    /** Resolution FAILED upstream (Kite/market-data) — RETRYABLE. */
     UNRESOLVED,
+    /** A config/capability error — permanent, never retryable. */
     NOT_LIVE_RESOLVABLE
   }
 
@@ -134,31 +147,46 @@ public class SignalEngine {
       UniverseResolutionStatus status, List<StrategyDefinition.InstrumentRef> instruments) {}
 
   /**
-   * What one {@link #reload()} COMPUTED — whether or not it was installed.
+   * The identity of one loaded entry — what the engine would LOSE if a reload dropped it. Counts
+   * are not identity: {@code {A}} and {@code {B}} are both "1 loaded", but installing B over A
+   * removes A from {@link #loaded}, and exit evaluation only ever walks {@code loaded} — so A's
+   * open position would silently lose its exit evaluation for the session.
    *
-   * @param liveCandidates published+enabled strategies this reload could have loaded LIVE: past the
-   *     swing / non-rollable / hard-SL screens AND live-resolvable. The denominator for "did
-   *     anything load at all".
+   * <p>{@code book} rides along because it is derived from the identity row's tags rather than the
+   * pinned version, so it can change without the versionId changing.
+   */
+  private record LoadedIdentity(
+      UUID versionId, Set<StrategyDefinition.InstrumentRef> universe, String book) {}
+
+  /**
+   * What one {@link #reload()} COMPUTED — whether or not it was installed. Every way a reload can
+   * fail RETRYABLY is counted EXPLICITLY here; nothing is inferred from the gap between "how many
+   * could have loaded" and "how many did", because that gap cannot tell a strategy that correctly
+   * loaded NOTHING (a screener standing aside) from one where everything blew up.
+   *
    * @param loadedCount strategies actually loaded
    * @param unresolvedDrops strategies dropped on a FAILED (Kite-dependent) universe resolution
+   * @param loadErrors strategies dropped by an exception thrown while loading — counted by neither
+   *     of the other two, which is exactly how a totally dead engine used to report "0 loaded,
+   *     0 unresolved" and be read as success
    */
-  private record ReloadOutcome(int liveCandidates, int loadedCount, int unresolvedDrops) {
+  private record ReloadOutcome(int loadedCount, int unresolvedDrops, int loadErrors) {
 
     /**
-     * The ONLY success signal. {@code unresolvedDrops == 0} alone is NOT enough: a drop is counted
-     * only for a resolution FAILURE, so an empty-universe or load-error skip is invisible to it —
-     * a reload where EVERY strategy took one of those paths reports "0 loaded, 0 drops" and a
-     * drops-only predicate logs "resolved every universe" over a completely dead engine. That is
-     * the 2026-07-15/16 outage's exact signature, so it is made structurally unrepresentable here:
-     * success additionally requires that when there WAS something live to load, something did.
+     * The ONLY success signal: NOTHING failed in a way a retry could fix.
      *
-     * <p>{@code loadedCount > 0} is NOT the health signal either (a cold boot legitimately loads a
-     * PARTIAL 32/39) — it is only the floor under the drops check, never a substitute for it.
-     * A registry with no live candidates at all (all-swing, or all not-live-resolvable) reports
-     * healthy on attempt 1: there is nothing a retry could fix.
+     * <p>{@code loadedCount} is deliberately absent. {@code loaded > 0} is NOT health — a cold boot
+     * legitimately loads a PARTIAL 32/39 — and {@code loaded == 0} is NOT sickness either, because
+     * an all-swing registry, an all-not-live-resolvable one, and a screener with no movers today
+     * all correctly load nothing. Health is about FAILURES, so only failures are consulted.
+     *
+     * <p>{@code unresolvedDrops == 0} alone was not enough: a drop is counted only for a resolution
+     * FAILURE, so a reload where every strategy threw reported "0 loaded, 0 unresolved" and a
+     * drops-only predicate logged "resolved every universe" over a dead engine — the 2026-07-15/16
+     * outage's exact signature. Counting {@code loadErrors} closes that route at the source.
      */
     boolean healthy() {
-      return unresolvedDrops == 0 && (liveCandidates == 0 || loadedCount > 0);
+      return unresolvedDrops == 0 && loadErrors == 0;
     }
   }
 
@@ -320,15 +348,22 @@ public class SignalEngine {
   /** Boots subscriptions once the app is ready. */
   @EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
   public synchronized void start() {
-    reload();
+    ReloadOutcome boot = reload(false);
     // reload() -> resubscribe() has now registered the kite.status listener. The CHANNEL is edge-only
     // (SessionStatusPublisher publishes on CHANGE) and Redis pub/sub is fire-and-forget, so a
     // CONNECTED published while this engine was still booting is lost FOREVER — and no further
     // CONNECTED ever comes, because the state is already CONNECTED. That would strand the engine at
     // 0 strategies for the session: exactly the 2026-07-16 outage this fix exists to prevent.
     // The KEY is level-triggered, so read it once here to close that boot race.
-    if (lastReloadUnresolvedDrops > 0 && KITE_STATUS_CONNECTED.equals(readKiteSessionStatus())) {
-      log.info("boot: kite session already CONNECTED and universes unresolved — reloading");
+    // Armed off the boot outcome's explicit retryable-failure state, NOT `drops > 0`: a boot where
+    // every strategy threw yields 0 loaded / 0 unresolved, so a drops-only gate would never arm the
+    // chain, the reconcile would see no registry drift, and the engine would stay dead ALL SESSION
+    // — the 2026-07-16 shape, straight through the gate that exists to prevent it.
+    if (boot != null && !boot.healthy() && KITE_STATUS_CONNECTED.equals(readKiteSessionStatus())) {
+      log.info(
+          "boot: kite session already CONNECTED and the load had retryable failures ({} unresolved,"
+              + " {} load errors) — reloading",
+          boot.unresolvedDrops(), boot.loadErrors());
       requestKiteConnectedReload();
     }
   }
@@ -382,7 +417,7 @@ public class SignalEngine {
     reloadRequested.set(false);
     List<Loaded> fresh = new ArrayList<>();
     int unresolvedDrops = 0;
-    int liveCandidates = 0;
+    int loadErrors = 0;
     List<StrategyRepository.StrategyRow> all = registry.listAll();
     for (StrategyRepository.StrategyRow strategy : all) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
@@ -435,14 +470,6 @@ public class SignalEngine {
           continue;
         }
         UniverseResolution resolution = resolveUniverse(config);
-        if (resolution.status() != UniverseResolutionStatus.NOT_LIVE_RESOLVABLE) {
-          // Counted BEFORE the drop/empty/error checks below: this is "could have loaded live" —
-          // the denominator that makes a 0-loaded reload detectable even when NOTHING incremented
-          // unresolvedDrops (see ReloadOutcome.healthy). NOT_LIVE_RESOLVABLE is excluded for the
-          // same reason it is not counted as a drop: it is a config/capability error, and treating
-          // it as a live candidate would burn the CONNECTED chain to a permanent false DEGRADED.
-          liveCandidates++;
-        }
         if (resolution.status() == UniverseResolutionStatus.UNRESOLVED) {
           unresolvedDrops++;
           log.warn("strategy {} has an unresolved universe — not loaded", strategy.slug());
@@ -457,11 +484,16 @@ public class SignalEngine {
               "strategy {} universe mode is not live-resolvable — not loaded", strategy.slug());
           continue;
         }
-        List<StrategyDefinition.InstrumentRef> universe = resolution.instruments();
-        if (universe.isEmpty()) {
-          log.warn("strategy {} resolves to an empty universe — not loaded", strategy.slug());
+        if (resolution.status() == UniverseResolutionStatus.RESOLVED_EMPTY) {
+          // NOT a failure: the universe resolved and there is genuinely nothing to trade today (a
+          // screener that picked no movers). Loading nothing is the CORRECT outcome and this result
+          // must still be installed — standing aside is the whole point. Never counted, so it can
+          // neither block the retry chain from completing nor make the engine look degraded.
+          log.info(
+              "strategy {} resolves to an empty universe — standing aside today", strategy.slug());
           continue;
         }
+        List<StrategyDefinition.InstrumentRef> universe = resolution.instruments();
         Set<SeriesKey> keys = new LinkedHashSet<>();
         for (StrategyDefinition.InstrumentRef instrument : universe) {
           keys.add(new SeriesKey(instrument.exchange(), instrument.tradingsymbol(), "1m"));
@@ -499,23 +531,47 @@ public class SignalEngine {
                 versionRow.get().version(), versionRow.get().checksum(), definition,
                 universe, keys, scalper, Books.fromTags(strategy.tags())));
       } catch (RuntimeException e) {
+        // RETRYABLE by construction: this catch spans the market-data-dependent work (universe
+        // resolution, series warm-up), so a transient upstream fault lands here — and a boot where
+        // EVERY strategy lands here is the 0-loaded/0-unresolved outage shape. A permanent config
+        // error also lands here and will burn the chain to a bounded DEGRADED; that is the correct
+        // trade, because the alternative is a silently dead engine.
+        loadErrors++;
         log.error("strategy {} failed to load — skipped: {}", strategy.slug(), e.getMessage());
       }
     }
-    ReloadOutcome outcome = new ReloadOutcome(liveCandidates, fresh.size(), unresolvedDrops);
-    if (keepBest && wouldRegressTheEngine(outcome)) {
-      log.error(
-          "KEEP_BEST_SUPPRESSED_REGRESSION: reload computed {} loaded / {} unresolved over {} live "
-              + "candidates — WORSE than the {} loaded / {} unresolved already installed; keeping "
-              + "the installed set (the retry would have HARMED the engine)",
-          outcome.loadedCount(), outcome.unresolvedDrops(), outcome.liveCandidates(),
-          loaded.size(), lastReloadUnresolvedDrops);
+    ReloadOutcome outcome = new ReloadOutcome(fresh.size(), unresolvedDrops, loadErrors);
+    Set<LoadedIdentity> freshIdentities = identitiesOf(fresh);
+    Set<LoadedIdentity> installedIdentities = identitiesOf(loaded);
+
+    // Structurally identical to what is already installed ⇒ nothing to install. Reassigning would
+    // be a no-op, but bankCache.clear() would NOT: it cold-starts every ta4j indicator, which then
+    // recomputes recursively from bar 0 in BigDecimal math on the single eval thread (the D17/P1-12
+    // lesson). A persistent DEGRADED state now drives up to KITE_CONNECTED_RELOAD_MAX_ATTEMPTS
+    // reloads per CONNECTED, so re-clearing warm banks each time is the thrash that constrains this
+    // whole design. `container != null` keeps BOOT on the install path — it MUST resubscribe, since
+    // that is what registers the kite.status listener the retry chain depends on. Telemetry still
+    // refreshes: the published-set snapshot must stay current or the 20s reconcile would see
+    // phantom drift. (The cheap half of chip task_f10a03; its broader unconditional-clear question
+    // is untouched.)
+    if (container != null && freshIdentities.equals(installedIdentities)) {
+      this.lastReloadUnresolvedDrops = unresolvedDrops;
+      this.lastReloadedPublishedSet = publishedVersionSetOf(all);
+      log.info(
+          "signal engine reload unchanged ({} loaded, {} unresolved, {} load errors) — indicator "
+              + "banks and subscriptions retained",
+          fresh.size(), unresolvedDrops, loadErrors);
       return outcome;
     }
-    // Cleared only on the INSTALL path: a suppressed reload changes nothing, so clearing there
-    // would be pure thrash on the eval thread. Order within this synchronized method is otherwise
-    // immaterial — no evaluation can interleave with it (chip task_f10a03 tracks skipping the clear
-    // entirely when the (version-set, universe-set) is unchanged).
+    if (keepBest && wouldRegressTheEngine(outcome, freshIdentities)) {
+      log.error(
+          "KEEP_BEST_SUPPRESSED_REGRESSION: reload computed {} loaded / {} unresolved / {} load "
+              + "errors and would have DROPPED {} of the {} strategies currently loaded; keeping "
+              + "the installed set (the retry would have HARMED the engine)",
+          outcome.loadedCount(), outcome.unresolvedDrops(), outcome.loadErrors(),
+          droppedCount(installedIdentities, freshIdentities), loaded.size());
+      return outcome;
+    }
     bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
     this.loaded = List.copyOf(fresh);
     this.lastReloadUnresolvedDrops = unresolvedDrops;
@@ -524,33 +580,54 @@ public class SignalEngine {
     this.lastReloadedPublishedSet = publishedVersionSetOf(all);
     resubscribe();
     log.info(
-        "signal engine loaded {} published strategies ({} dropped on an unresolved universe)",
-        fresh.size(), unresolvedDrops);
+        "signal engine loaded {} published strategies ({} dropped on an unresolved universe, {} "
+            + "failed to load)",
+        fresh.size(), unresolvedDrops, loadErrors);
     return outcome;
   }
 
+  /** The {@link LoadedIdentity} of every entry — what the engine would LOSE by not installing. */
+  private static Set<LoadedIdentity> identitiesOf(List<Loaded> entries) {
+    Set<LoadedIdentity> out = new java.util.HashSet<>();
+    for (Loaded entry : entries) {
+      out.add(new LoadedIdentity(entry.versionId(), Set.copyOf(entry.universe()), entry.book()));
+    }
+    return out;
+  }
+
+  private static int droppedCount(Set<LoadedIdentity> installed, Set<LoadedIdentity> fresh) {
+    int dropped = 0;
+    for (LoadedIdentity identity : installed) {
+      if (!fresh.contains(identity)) {
+        dropped++;
+      }
+    }
+    return dropped;
+  }
+
   /**
-   * True when installing {@code outcome} would leave the engine holding LESS than it already does.
-   * This is the retry chain's "ends worse than no retry at all" hazard: the terminal state used to
-   * be unconditionally the LAST attempt's result, so a market-data regression across the retry
-   * window could take a live 19-of-39 engine down to 0 for the session — where simply not retrying
-   * would have kept 19.
+   * True when a FAILING reload would drop a strategy the engine currently holds. This is the retry
+   * chain's "ends worse than no retry at all" hazard: the terminal state used to be unconditionally
+   * the LAST attempt's result, so a market-data regression across the retry window could take a
+   * live 19-of-39 engine down to 0 for the session — where simply not retrying would have kept 19.
    *
-   * <p>Worse is judged on BOTH axes of the 3-state resolution model, never on {@code loaded} alone:
-   * more FAILED universes, or fewer strategies actually loaded. Drops alone would miss the
-   * "0 loaded / 0 drops" collapse (nothing increments the counter on that path); loaded alone would
-   * miss a partial set silently shedding universes.
+   * <p>Judged on IDENTITY, never on counts: {@code {A}} → {@code {B}} is "1 loaded" either way, but
+   * installing it removes A from {@link #loaded}, and exit evaluation only walks {@code loaded} —
+   * so A's open position would silently lose its exits for the session. The rule is therefore
+   * SUPERSET-or-suppress: an unhealthy result may only install if it keeps everything already
+   * loaded. Deliberately NOT a union of additions across attempts — that would keep a genuinely
+   * removed strategy alive forever.
    *
-   * <p>Only an UNHEALTHY outcome can ever be suppressed, which is what keeps this from freezing the
-   * engine on a stale set: a healthy reload is the registry's truth and ALWAYS installs. A
-   * suppressed reload also leaves {@link #lastReloadedPublishedSet} untouched, so if the registry
-   * genuinely changed, {@link #reconcilePublishedStrategies()} still sees drift within 20s and
-   * re-drives an UNGUARDED reload that does install it.
+   * <p>This is sound only because every attempt in a chain reads the SAME registry state, so a
+   * non-superset unhealthy result is upstream damage rather than a registry edit. Two properties
+   * keep it from freezing the engine: a HEALTHY reload is the registry's truth and always installs
+   * (so a screener standing aside, or a genuine unpublish, lands immediately); and a suppressed
+   * reload leaves {@link #lastReloadedPublishedSet} untouched, so a real registry change is still
+   * seen as drift by {@link #reconcilePublishedStrategies()} within 20s and installed by an
+   * UNGUARDED reload. Every non-chain path (hot-swap, the 08:40 cron, the reconcile) is unguarded.
    */
-  private boolean wouldRegressTheEngine(ReloadOutcome outcome) {
-    return !outcome.healthy()
-        && (outcome.unresolvedDrops() > lastReloadUnresolvedDrops
-            || outcome.loadedCount() < loaded.size());
+  private boolean wouldRegressTheEngine(ReloadOutcome outcome, Set<LoadedIdentity> freshIdentities) {
+    return !outcome.healthy() && !freshIdentities.containsAll(identitiesOf(loaded));
   }
 
   private UniverseResolution resolveUniverse(JsonNode config) {
@@ -564,7 +641,7 @@ public class SignalEngine {
               new StrategyDefinition.InstrumentRef(
                   node.path("exchange").asText(), node.path("tradingsymbol").asText()));
         }
-        yield new UniverseResolution(UniverseResolutionStatus.RESOLVED, instruments);
+        yield resolvedUniverse(instruments);
       }
       case "futures_of_underlying" ->
           // A7/A11: live trades the ACTUAL front/next contract; roll re-subscribe is the
@@ -605,14 +682,28 @@ public class SignalEngine {
     };
   }
 
+  /**
+   * Maps the resolver's Optional to the resolution model: absent = FAILED, present = resolved, and
+   * present-but-EMPTY = a legitimate stand-aside. Reading the resolver's own contract only — how it
+   * DECIDES that an empty result is genuine rather than a fault stays entirely its business.
+   */
   private static UniverseResolution fromResolver(
       Optional<List<StrategyDefinition.InstrumentRef>> resolved) {
     if (resolved == null) {
       return new UniverseResolution(UniverseResolutionStatus.UNRESOLVED, List.of());
     }
     return resolved
-        .map(instruments -> new UniverseResolution(UniverseResolutionStatus.RESOLVED, instruments))
+        .map(SignalEngine::resolvedUniverse)
         .orElseGet(() -> new UniverseResolution(UniverseResolutionStatus.UNRESOLVED, List.of()));
+  }
+
+  private static UniverseResolution resolvedUniverse(
+      List<StrategyDefinition.InstrumentRef> instruments) {
+    return new UniverseResolution(
+        instruments.isEmpty()
+            ? UniverseResolutionStatus.RESOLVED_EMPTY
+            : UniverseResolutionStatus.RESOLVED,
+        instruments);
   }
 
   private synchronized void resubscribe() {
@@ -1741,14 +1832,18 @@ public class SignalEngine {
         return;
       }
       if (attempt >= KITE_CONNECTED_RELOAD_MAX_ATTEMPTS) {
+        // Both states, no derived verdict: suppression fires on identity, so neither a loaded-count
+        // nor a drops comparison can honestly say "the guard retained something" — and a misleading
+        // telemetry line is worse than none. KEEP_BEST_SUPPRESSED_REGRESSION is the factual signal,
+        // logged per suppression at the moment it happens.
         log.error(
             "kite.status reload exhausted {} attempts — the engine holds {} loaded / {} unresolved "
                 + "and is DEGRADED until the next 08:40 reload or a republish; attempt 1 computed "
-                + "{} loaded / {} unresolved (KEEP_BEST_RETAINED_EARLIER_RELOAD={})",
+                + "{} loaded / {} unresolved / {} load errors",
             KITE_CONNECTED_RELOAD_MAX_ATTEMPTS, loaded.size(), lastReloadUnresolvedDrops,
             first == null ? -1 : first.loadedCount(),
             first == null ? -1 : first.unresolvedDrops(),
-            first != null && loaded.size() > first.loadedCount());
+            first == null ? -1 : first.loadErrors());
         return;
       }
 

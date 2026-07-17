@@ -15,7 +15,7 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
   authority** (Phases 0–6); its §17 Errata + §18 Gap Addendum override §1–§16 on conflict.
 
 ## Active — forward-work plans (`superpowers/plans/`)
-*(The master plan above is the authority; these are the only open plans after the 2026-07-02 archive sweep.)*
+*(The master plan above is the authority; the docs below are the current open forward-work plans.)*
 - `2026-07-02-remaining-items.md` — the **single forward ledger of everything still open** across the
   whole platform: the current build frontier is the later increments of the two design programs (EVO
   E5/E6, INT I3-FE/I4) plus APP Phase 4 / FID Phase-2–4 remainder (§0 groups C/D), then the owner-gated
@@ -32,16 +32,25 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
   two design authorities (slow research loop / fast decision loop), each consuming one 2026-07-10 audit
   as its fixed input: `docs/audits/2026-07-10-research-fidelity-audit.md` (evolution) and
   `docs/audits/2026-07-10-app-platform-audit.md` (intelligence). The shared E0/I1 build prerequisites
-  shipped 2026-07-11 (#683–#717) and **both engines are now substantially BUILT + LIVE — evolution
-  through E4, intelligence through I3-backend (2026-07-11/12, #720–#782)**; both audits carry §-appended
-  fix-logs and the designs each carry a dated Status block. The remaining frontier (EVO E5/E6, INT
-  I3-FE/I4) is the ledger's §0 group C. Build gating: each doc's §13 + Status block + the ledger rows
+  shipped 2026-07-11 (#683–#717) and **both engines are now BUILT + LIVE — evolution
+  through E6 (#792 / #793 / #787), intelligence through I3-FE (#789) (2026-07-11/12 waves, #720–#782)**; both audits carry §-appended
+  fix-logs and the designs each carry a dated Status block. The remaining frontier (owner-gated **EVO E6-autonomy arming + INT I4**) is the ledger's §0 group C. Build gating: each doc's §13 + Status block + the ledger rows
   `evolution-engine` / `intelligence-layer`.
+- `2026-07-12-minute-research-system-design.md` — a 14-feature minute-research gap analysis; **DORMANT /
+  parked** (10 of 14 already built; excluded from the ledger §0 queue — the owner activates it once the
+  current queue empties).
+- `2026-07-16-engine-liveness-detector.md` — the F10 Part B engine-liveness detector design. Its **§3
+  mechanism was INVALIDATED live 2026-07-17** (the "REST/JDBC can see bar flow" premise is false); §1/§2
+  stay authoritative, and reviving Part B is an owner decision (a market-data bounded-recent-bar contract
+  vs a cross-schema grant + ADR). Carries a STOP block up top.
 - `superpowers/plans/archive/` — everything completed / decided / superseded, each with an ARCHIVED
   status banner. **2026-07-10 sweep added:** the full **Minervini SEPA set** (implementation plan +
   build-log + phase6/partial-close build-specs — all phases shipped+live #524–#563; only the
   forward-paper watch remains, tracked in the ledger), **manas-arora-and-book-separation-plan**
   (fully shipped #566–#575), **swing-doctrine-port-build-spec** (M31 shipped #655).
+  **2026-07-18 sweep added:** **codex-review-harness-spike** (the Codex skill suite it specced shipped +
+  is the live builder lane; authority = the `.claude/skills/codex*` skills + the `codex-builder-lane`
+  memory topic).
   2026-07-02 sweep added: the **scalper-to-100 roadmap + `2026-06-27-backlog/` design
   streams** (build complete, #274–#404 arc), **remaining-build-inventory** (superseded), the two
   **2026-07-02 audits + findings register** (fix queues fully closed — UI #440–#475, codebase

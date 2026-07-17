@@ -21,17 +21,25 @@ import {
 // derived stage (PAPER while any criterion fails, TAKE_ELIGIBLE once all pass). MEASUREMENT ONLY —
 // nothing here promotes or arms a strategy; graduating a strategy to live stays an owner action.
 
-/** A green (pass) / red (fail) dot for one criterion, its detail in the title tooltip. */
+/**
+ * A green ✓ (pass) / red ✗ (fail) dot for one criterion, its detail in the title tooltip. The GLYPH,
+ * not the fill, is what carries pass/fail to a colour-blind sighted user (WCAG 1.4.1) — the fill was
+ * once the only channel. It rides in `text-surface-0`, the opposite end of the palette from the
+ * saturated fill, so it stays ≥AA-contrast in every theme; same idiom as the ConnectingDots
+ * FactorCell / OiBadge4. `aria-label` still carries the accessible name (it overrides the glyph).
+ */
 function CriterionDot({ c }: { c: Criterion }) {
   return (
     <span
       title={`${c.name}: ${c.actual} (needs ${c.required}) — ${c.pass ? 'pass' : 'fail'}`}
       className={cn(
-        'inline-block size-2.5 rounded-full',
+        'inline-flex size-4 items-center justify-center rounded-full text-[10px] font-bold leading-none text-surface-0',
         c.pass ? 'bg-bull' : 'bg-bear',
       )}
       aria-label={`${c.name} ${c.pass ? 'pass' : 'fail'}`}
-    />
+    >
+      {c.pass ? '✓' : '✗'}
+    </span>
   );
 }
 

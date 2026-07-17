@@ -100,6 +100,22 @@ describe('GraduationPage', () => {
     expect(board().getAllByLabelText(/pass|fail/).length).toBe(8);
   });
 
+  // a11y — WCAG 1.4.1 (Use of Color): the criterion dots must not encode pass/fail in COLOUR ALONE,
+  // so each carries a glyph (✓/✗) a colour-blind sighted user can read. Our axe + role/name gates
+  // can't catch this class: the accessible tree was already correct via aria-label, and the failure
+  // was visual-only. Pin the glyph per state, and keep the aria-label/title SR path intact.
+  it('distinguishes a passing from a failing criterion by a glyph, not colour alone', () => {
+    renderPage();
+    const dots = board().getAllByLabelText(/pass|fail/);
+    expect(dots.length).toBe(8);
+    for (const dot of dots) {
+      const passed = dot.getAttribute('aria-label')?.endsWith('pass');
+      expect(dot.textContent).toBe(passed ? '✓' : '✗');
+      // the SR path stays the detail-bearing one (aria-label overrides the glyph as the name)
+      expect(dot).toHaveAttribute('title', expect.stringContaining(passed ? 'pass' : 'fail'));
+    }
+  });
+
   it('renders the board columns in their declared order', () => {
     renderPage();
     expect(board().getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
@@ -127,7 +143,7 @@ describe('GraduationPage', () => {
       '1.80',
       '50.00',
       '8.50%',
-      '',
+      '✓✓✓✓', // 4 passing criteria — the glyph, not just the fill (see the 1.4.1 test above)
     ]);
   });
 

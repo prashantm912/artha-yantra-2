@@ -1,1 +1,2 @@
 in.arthayantra.common.web.jackson.ArthaJacksonAutoConfiguration
+in.arthayantra.common.web.openapi.ArthaOpenApiAutoConfiguration

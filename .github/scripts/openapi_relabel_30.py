@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Relabel an OpenAPI document to 3.0.x for the breaking-change diff step ONLY.
+
+task_ade97df8. openapi-diff 2.1.7 cannot diff `openapi: 3.1.0` schemas. Measured against our
+real specs with the real image:
+
+  * a RENAMED response property reports "No differences. Specifications are equivalent" (exit 0)
+    — the property-set change is not even recorded;
+  * a retype reports the nonsense "Changed property type: checksum (object -> object)" — the
+    parser never resolves `type: string` at 3.1, so it trips on schema identity, not on types.
+
+The SAME BYTES labelled 3.0.1 diff correctly and report `Missing property: items[n].tradingsymbol
+(string)`. So the gate relabels both sides before handing them to openapi-diff. The COMMITTED specs
+stay 3.1.0 — this is a transform on throwaway copies.
+
+The relabel is lossless ONLY while the specs use no 3.1-only construct, and this GUARANTEES that
+rather than assuming it — with an ALLOW-LIST, not a deny-list. After relabeling, it VALIDATES the
+document against the official OpenAPI 3.0 schema (openapi-spec-validator) and refuses (exit 2) on
+ANY validation error. A deny-list is incomplete by construction — the earlier one silently accepted
+`if`/`then`/`else`, `$id`, bare `type: "null"` (only the LIST form was caught), schema-level
+`examples` arrays, and `components.pathItems`. The 3.0 validator cannot miss a construct 3.0
+forbids: whatever 3.1-only shape reaches it, a document labelled 3.0.1 that is not valid 3.0 is
+rejected, so the gate fails closed instead of diffing a silently-mangled spec.
+
+The two checks are complementary and together complete. The 3.0 schema validation is the backstop
+for every construct 3.0 forbids SYNTACTICALLY (a deny-list cannot match that coverage). The scan()
+deny-list adds two things the validator alone does not give: (a) a FAST, HUMAN-READABLE hint that
+names the exact keyword and path — what the owner needs to decide between upgrading openapi-diff and
+dropping the construct; and (b) the ONE class the structural validator is blind to — a $ref with
+sibling keys, which is valid 3.0 yet means something different at 3.1 (3.0 ignores the siblings, 3.1
+applies them). A silently mangled spec would make the gate answer the wrong question, which is worse
+than the blindness it replaces, so if either check fires, do not delete it — decide, with the owner,
+between upgrading openapi-diff and dropping the construct.
+
+Usage: openapi_relabel_30.py <src> <dst> [label]
+Exits 2 (a TOOL failure, never a compatibility verdict) if the relabeled document is not valid
+OpenAPI 3.0 — including when the validator library is missing (a loud refusal, never a silent skip).
+"""
+
+import json
+import sys
+
+# JSON-Schema 2020-12 keywords OpenAPI 3.0 does not understand. `examples` is deliberately absent:
+# as a MAP it is valid in both, and openapi-diff ignores examples for compatibility either way.
+# This set is NOT exhaustive and is NOT relied on to be — it only sharpens the pre-check message;
+# the OpenAPI-3.0 schema validation in main() is the authoritative backstop for every SYNTACTIC
+# 3.1-only construct (the $ref-sibling semantic class is caught separately in scan(), see docstring).
+SCHEMA_31_ONLY = {
+    "const", "$schema", "$defs", "unevaluatedProperties", "unevaluatedItems", "prefixItems",
+    "contains", "minContains", "maxContains", "dependentSchemas", "dependentRequired",
+    "propertyNames", "patternProperties", "contentMediaType", "contentEncoding", "contentSchema",
+    "$anchor", "$dynamicRef", "$dynamicAnchor",
+}
+DOC_31_ONLY = {"webhooks", "jsonSchemaDialect"}
+
+
+def scan(node, path, found):
+    if isinstance(node, dict):
+        # A $ref with sibling keys is the ONE version-divergent shape the 3.0 SCHEMA validator
+        # cannot catch: it is structurally VALID 3.0, but 3.0 IGNORES the siblings while 3.1
+        # APPLIES them, so relabeling would silently drop a constraint. The structural backstop is
+        # blind here, so the deny-list is load-bearing for this class — refuse rather than mangle.
+        if "$ref" in node and len(node) > 1:
+            siblings = sorted(k for k in node if k != "$ref")
+            found.append((path or "/", "$ref with sibling keys %r (3.0 ignores them, 3.1 applies)" % siblings))
+        for key, value in node.items():
+            here = "%s/%s" % (path, key)
+            if key in SCHEMA_31_ONLY:
+                found.append((here, "3.1-only schema keyword: %s" % key))
+            # `type: ["string","null"]` is 3.1's nullability; 3.0 wants `nullable: true`.
+            if key == "type" and isinstance(value, list):
+                found.append((here, "3.1-only type array: %r" % (value,)))
+            # 3.0 spells these as booleans; 3.1 as numbers.
+            if key in ("exclusiveMinimum", "exclusiveMaximum") and not isinstance(value, bool):
+                found.append((here, "3.1-style numeric %s: %r" % (key, value)))
+            scan(value, here, found)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            scan(value, "%s/%d" % (path, index), found)
+
+
+def deny_list_hits(spec):
+    """Fast pre-check: the 3.1-only constructs we can name precisely for the owner."""
+    found = []
+    for key in DOC_31_ONLY:
+        if key in spec:
+            found.append(("/%s" % key, "3.1-only document key: %s" % key))
+    scan(spec.get("components"), "/components", found)
+    scan(spec.get("paths"), "/paths", found)
+    return found
+
+
+def is_valid_30(spec, src):
+    """Authoritative backstop: the relabeled doc must be valid OpenAPI 3.0, or the gate fails
+    closed. openapi-spec-validator selects the 3.0 schema from the `openapi` field just set, so any
+    3.1-only construct 3.0 forbids is rejected here even when the deny-list never listed it. A
+    missing library is a LOUD refusal (exit 2), never a silent skip."""
+    try:
+        from openapi_spec_validator import validate
+    except ImportError:
+        print(
+            "::error::openapi-spec-validator is not installed, so the OpenAPI-3.0 backstop that "
+            "makes this relabel sound cannot run. The gate refuses to diff a possibly-mangled spec "
+            "rather than pass blind. Install it: python3 -m pip install openapi-spec-validator"
+        )
+        return False
+    try:
+        validate(spec)
+        return True
+    except Exception as error:  # OpenAPIValidationError and any resolver/parse failure.
+        where = getattr(error, "json_path", "<root>")
+        message = str(getattr(error, "message", error)).splitlines()[0][:200]
+        print(
+            "::error::%s is not valid OpenAPI 3.0 after the relabel, so the 3.0 diff would read a "
+            "SILENTLY MANGLED spec — a 3.1-only construct 3.0 does not permit. The gate cannot "
+            "answer its question and fails." % src
+        )
+        print("  at %s -> %s" % (where, message))
+        return False
+
+
+def main():
+    src, dst = sys.argv[1], sys.argv[2]
+    label = sys.argv[3] if len(sys.argv) > 3 else "3.0.1"
+
+    with open(src, encoding="utf-8") as handle:
+        spec = json.load(handle)
+
+    found = deny_list_hits(spec)
+    if found:
+        print(
+            "::error::%s uses OpenAPI 3.1-only constructs, so the 3.0 relabel the breaking gate "
+            "needs would SILENTLY MANGLE it. The gate cannot answer its question and fails." % src
+        )
+        for where, why in found:
+            print("  %s -> %s" % (where, why))
+        return 2
+
+    spec["openapi"] = label
+
+    # An allow-list validator cannot miss a construct the deny-list above omits — this is the
+    # real guarantee that the relabel is lossless.
+    if not is_valid_30(spec, src):
+        return 2
+
+    with open(dst, "w", encoding="utf-8") as handle:
+        json.dump(spec, handle)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

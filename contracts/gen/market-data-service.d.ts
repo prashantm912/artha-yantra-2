@@ -2371,11 +2371,11 @@ export interface components {
         };
         WatchlistView: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
+            id: string;
+            name: string;
             /** Format: date-time */
-            createdAt?: string;
-            items?: components["schemas"]["ItemRequest"][];
+            createdAt: string;
+            items: components["schemas"]["ItemRequest"][];
         };
         SubscribeRequest: {
             exchange?: string;
@@ -2386,135 +2386,135 @@ export interface components {
         };
         PortfolioStat: {
             /** Format: int32 */
-            slots?: number;
-            totalReturnPct?: number;
-            cagrPct?: number;
-            maxDrawdownPct?: number;
-            sharpe?: number;
+            slots: number;
+            totalReturnPct: number;
+            cagrPct: number;
+            maxDrawdownPct: number;
+            sharpe: number;
             /** Format: int32 */
-            tradesTaken?: number;
+            tradesTaken: number;
             /** Format: int32 */
-            tradesSkipped?: number;
-            avgExposurePct?: number;
+            tradesSkipped: number;
+            avgExposurePct: number;
             /** Format: int32 */
-            months?: number;
-            positiveMonthsPct?: number;
-            bestMonthPct?: number;
-            worstMonthPct?: number;
-            avgMonthPct?: number;
-            annual?: components["schemas"]["YearReturn"][];
+            months: number;
+            positiveMonthsPct: number;
+            bestMonthPct: number;
+            worstMonthPct: number;
+            avgMonthPct: number;
+            annual: components["schemas"]["YearReturn"][];
         };
         Report: {
-            status?: string;
-            variant?: string;
+            status: string;
+            variant: string;
             /** Format: date */
-            fromDate?: string;
-            runAt?: string;
+            fromDate: string;
+            runAt: string;
             /** Format: int32 */
-            symbolsScanned?: number;
+            symbolsScanned: number;
             /** Format: int32 */
-            totalTrades?: number;
-            setups?: components["schemas"]["SetupStat"][];
-            portfolio?: components["schemas"]["PortfolioStat"];
-            portfolioRsPriority?: components["schemas"]["PortfolioStat"];
-            portfolioRsPriorityNet?: components["schemas"]["PortfolioStat"];
-            note?: string;
+            totalTrades: number;
+            setups: components["schemas"]["SetupStat"][];
+            portfolio: components["schemas"]["PortfolioStat"];
+            portfolioRsPriority: components["schemas"]["PortfolioStat"];
+            portfolioRsPriorityNet: components["schemas"]["PortfolioStat"];
+            note: string;
         };
         SetupStat: {
-            setup?: string;
+            setup: string;
             /** Format: int32 */
-            trades?: number;
+            trades: number;
             /** Format: int32 */
-            wins?: number;
+            wins: number;
             /** Format: int32 */
-            losses?: number;
-            winRatePct?: number;
-            avgWinPct?: number;
-            avgLossPct?: number;
-            payoffRatio?: number;
-            expectancyPct?: number;
-            profitFactor?: number;
-            avgBarsHeld?: number;
-            bestTradePct?: number;
-            worstTradePct?: number;
+            losses: number;
+            winRatePct: number;
+            avgWinPct: number;
+            avgLossPct: number;
+            payoffRatio: number;
+            expectancyPct: number;
+            profitFactor: number;
+            avgBarsHeld: number;
+            bestTradePct: number;
+            worstTradePct: number;
             /** Format: int32 */
-            longestHoldBars?: number;
+            longestHoldBars: number;
             /** Format: int32 */
-            shortestHoldBars?: number;
+            shortestHoldBars: number;
             /** Format: int32 */
-            maxWinStreak?: number;
+            maxWinStreak: number;
             /** Format: int32 */
-            maxLossStreak?: number;
-            stopOutPct?: number;
+            maxLossStreak: number;
+            stopOutPct: number;
         };
         YearReturn: {
             /** Format: int32 */
-            year?: number;
-            returnPct?: number;
+            year: number;
+            returnPct: number;
             /** Format: int32 */
-            trades?: number;
+            trades: number;
         };
         Row: {
-            symbol?: string;
-            exchange?: string;
-            close?: number;
-            sma50?: number;
+            symbol: string;
+            exchange: string;
+            close: number;
+            sma50: number;
             sma150?: number;
-            sma200?: number;
-            high52w?: number;
-            low52w?: number;
+            sma200: number;
+            high52w: number;
+            low52w: number;
             pctFromHigh?: number;
             pctAboveLow?: number;
-            rsRank?: number;
+            rsRank: number;
             avgTurnover50?: number;
-            freeFloatMcapCr?: number;
-            freeFloatPct?: number;
-            gates?: boolean[];
+            freeFloatMcapCr: number;
+            freeFloatPct: number;
+            gates: boolean[];
             /** Format: int32 */
-            gatesPassed?: number;
-            passesAll?: boolean;
+            gatesPassed: number;
+            passesAll: boolean;
             /** Format: int32 */
             stage?: number;
         };
         ScreenResponse: {
-            items?: components["schemas"]["Row"][];
+            items: components["schemas"]["Row"][];
             /** Format: date */
-            screenDate?: string;
+            screenDate: string;
             /** Format: int32 */
-            coverage?: number;
+            coverage: number;
             /** Format: int32 */
-            limit?: number;
+            limit: number;
             /** Format: int32 */
-            offset?: number;
+            offset: number;
         };
         HitRateReport: {
             /** Format: date */
-            from?: string;
+            from: string;
             /** Format: date */
-            to?: string;
+            to: string;
             /** Format: int32 */
-            stepSessions?: number;
+            stepSessions: number;
             /** Format: int32 */
-            asOfCount?: number;
+            asOfCount: number;
             /** Format: int32 */
-            universeCount?: number;
+            universeCount: number;
             /** Format: int32 */
-            totalPasserSamples?: number;
-            benchmark?: string;
-            note?: string;
-            horizons?: components["schemas"]["HorizonStat"][];
+            totalPasserSamples: number;
+            benchmark: string;
+            note: string;
+            horizons: components["schemas"]["HorizonStat"][];
         };
         HorizonStat: {
             /** Format: int32 */
-            horizonSessions?: number;
+            horizonSessions: number;
             /** Format: int32 */
-            sampleCount?: number;
-            winRatePct?: number;
-            beatBenchmarkRatePct?: number;
-            meanReturnPct?: number;
-            meanBenchmarkReturnPct?: number;
-            meanExcessReturnPct?: number;
-            medianReturnPct?: number;
+            sampleCount: number;
+            winRatePct: number;
+            beatBenchmarkRatePct: number;
+            meanReturnPct: number;
+            meanBenchmarkReturnPct: number;
+            meanExcessReturnPct: number;
+            medianReturnPct: number;
         };
         DeepSwingRunRequest: {
             family?: string;
@@ -2523,61 +2523,61 @@ export interface components {
             variant?: string;
         };
         DeepSwingRunResponse: {
-            engineSha?: string;
-            engineImage?: string;
-            result?: components["schemas"]["DeepSwingRunResult"];
+            engineSha: string;
+            engineImage: string;
+            result: components["schemas"]["DeepSwingRunResult"];
         };
         DeepSwingRunResult: {
-            family?: string;
-            variant?: string;
+            family: string;
+            variant: string;
             /** Format: date */
-            fromDate?: string;
-            runAt?: string;
+            fromDate: string;
+            runAt: string;
             /** Format: int32 */
-            symbolsScanned?: number;
-            capital?: number;
-            totalReturnPct?: number;
-            cagrPct?: number;
-            maxDrawdownPct?: number;
-            sharpe?: number;
+            symbolsScanned: number;
+            capital: number;
+            totalReturnPct: number;
+            cagrPct: number;
+            maxDrawdownPct: number;
+            sharpe: number;
             /** Format: int32 */
-            tradesTaken?: number;
+            tradesTaken: number;
             /** Format: int32 */
-            tradesSkipped?: number;
-            winRatePct?: number;
-            profitFactor?: number;
-            report?: components["schemas"]["JsonNode"];
-            trades?: components["schemas"]["DeepSwingTrade"][];
+            tradesSkipped: number;
+            winRatePct: number;
+            profitFactor: number;
+            report: components["schemas"]["JsonNode"];
+            trades: components["schemas"]["DeepSwingTrade"][];
         };
         DeepSwingTrade: {
-            symbol?: string;
-            setup?: string;
+            symbol: string;
+            setup: string;
             /** Format: date */
-            entryDate?: string;
-            entryPrice?: number;
+            entryDate: string;
+            entryPrice: number;
             /** Format: date */
-            exitDate?: string;
-            exitPrice?: number;
-            pnlPct?: number;
+            exitDate: string;
+            exitPrice: number;
+            pnlPct: number;
             /** Format: int32 */
-            barsHeld?: number;
-            exitReason?: string;
-            rsRankAtEntry?: number;
+            barsHeld: number;
+            exitReason: string;
+            rsRankAtEntry: number;
         };
         JsonNode: unknown;
         WarmStatus: {
-            underlying?: string;
+            underlying: string;
             /** Format: date */
-            expiry?: string;
+            expiry: string;
             /** Format: date */
-            day?: string;
-            state?: string;
+            day: string;
+            state: string;
             /** Format: int32 */
-            totalLegs?: number;
+            totalLegs: number;
             /** Format: int32 */
-            fetchedLegs?: number;
+            fetchedLegs: number;
             /** Format: int64 */
-            rowsInStore?: number;
+            rowsInStore: number;
         };
         SnapshotRequest: {
             underlying?: string;
@@ -2608,44 +2608,44 @@ export interface components {
             legs?: components["schemas"]["MarginLeg"][];
         };
         MarginResponse: {
-            priced?: boolean;
-            unpricedReason?: string;
-            spanMargin?: number;
-            exposureMargin?: number;
-            equityMargin?: number;
-            netBuyPremium?: number;
-            additionalMargin?: number;
-            totalMargin?: number;
-            requiredMargin?: number;
-            finalMargin?: number;
+            priced: boolean;
+            unpricedReason: string;
+            spanMargin: number;
+            exposureMargin: number;
+            equityMargin: number;
+            netBuyPremium: number;
+            additionalMargin: number;
+            totalMargin: number;
+            requiredMargin: number;
+            finalMargin: number;
         };
         RefreshResponse: {
-            available?: boolean;
+            available: boolean;
             /** Format: int32 */
-            requested?: number;
+            requested: number;
             /** Format: int32 */
-            written?: number;
+            written: number;
             /** Format: int32 */
-            skipped?: number;
+            skipped: number;
         };
         CaptureResult: {
             /** Format: date */
-            date?: string;
+            date: string;
             /** Format: int32 */
-            captured?: number;
+            captured: number;
         };
         ExchangeResult: {
             /** Format: int32 */
-            days?: number;
+            days: number;
             /** Format: int32 */
-            bhavRows?: number;
+            bhavRows: number;
             /** Format: int32 */
-            candleRows?: number;
+            candleRows: number;
         };
         RefetchResult: {
-            date?: string;
-            nse?: components["schemas"]["ExchangeResult"];
-            bse?: components["schemas"]["ExchangeResult"];
+            date: string;
+            nse: components["schemas"]["ExchangeResult"];
+            bse: components["schemas"]["ExchangeResult"];
         };
         RefreshRequest: {
             exchange?: string;
@@ -2662,11 +2662,11 @@ export interface components {
             rowLimit?: number;
         };
         QueryResult: {
-            columns?: string[];
-            rows?: string[][];
+            columns: string[];
+            rows: string[][];
             /** Format: int32 */
-            rowCount?: number;
-            truncated?: boolean;
+            rowCount: number;
+            truncated: boolean;
         };
         ExportRequest: {
             sql?: string;
@@ -2717,203 +2717,203 @@ export interface components {
             requestToken?: string;
         };
         VixQuote: {
-            ltp?: number;
-            dayHigh?: number;
-            dayLow?: number;
-            dayOpen?: number;
-            prevClose?: number;
-            change?: number;
-            changePct?: number;
+            ltp: number;
+            dayHigh: number;
+            dayLow: number;
+            dayOpen: number;
+            prevClose: number;
+            change: number;
+            changePct: number;
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         NormalizedTick: {
-            exchange?: string;
-            tradingsymbol?: string;
-            lastPrice?: number;
+            exchange: string;
+            tradingsymbol: string;
+            lastPrice: number;
             /** Format: int64 */
-            cumulativeDayVolume?: number;
+            cumulativeDayVolume: number;
             /** Format: int64 */
-            openInterest?: number;
+            openInterest: number;
             /** Format: date-time */
-            timestamp?: string;
+            timestamp: string;
             /** Format: int64 */
-            seq?: number;
+            seq: number;
         };
         SubscriptionView: {
-            exchange?: string;
-            tradingsymbol?: string;
+            exchange: string;
+            tradingsymbol: string;
             /** Format: int64 */
-            instrumentToken?: number;
+            instrumentToken: number;
             /** @enum {string} */
-            mode?: "LTP" | "QUOTE" | "FULL";
+            mode: "LTP" | "QUOTE" | "FULL";
             /** @enum {string} */
-            priority?: "PINNED_INDEX" | "STRATEGY" | "UI" | "SPECULATIVE";
+            priority: "PINNED_INDEX" | "STRATEGY" | "UI" | "SPECULATIVE";
             /** Format: int32 */
-            subscribers?: number;
+            subscribers: number;
         };
         BacktestResult: {
-            status?: string;
+            status: string;
             /** Format: date */
-            fromDate?: string;
-            runAt?: string;
-            variants?: components["schemas"]["Report"][];
+            fromDate: string;
+            runAt: string;
+            variants: components["schemas"]["Report"][];
             sweep?: components["schemas"]["SweepCell"][];
-            slotSweep?: components["schemas"]["SlotCell"][];
+            slotSweep: components["schemas"]["SlotCell"][];
             rotation?: components["schemas"]["RotationResult"];
-            note?: string;
+            note: string;
         };
         RotationResult: {
             /** Format: int32 */
-            slots?: number;
-            marginPct?: number;
+            slots: number;
+            marginPct: number;
             /** Format: int32 */
-            rotations?: number;
-            net?: components["schemas"]["PortfolioStat"];
+            rotations: number;
+            net: components["schemas"]["PortfolioStat"];
         };
         SlotCell: {
             /** Format: int32 */
-            slots?: number;
+            slots: number;
             /** Format: int32 */
-            tradesTaken?: number;
+            tradesTaken: number;
             /** Format: int32 */
-            tradesSkipped?: number;
-            grossCagrPct?: number;
-            netCagrPct?: number;
-            netDrawdownPct?: number;
-            netSharpe?: number;
+            tradesSkipped: number;
+            grossCagrPct: number;
+            netCagrPct: number;
+            netDrawdownPct: number;
+            netSharpe: number;
         };
         SweepCell: {
             /** Format: int64 */
-            capital?: number;
+            capital: number;
             /** Format: int64 */
-            floorTurnover?: number;
+            floorTurnover: number;
             /** Format: int32 */
-            trades?: number;
-            netCagrPct?: number;
-            netDrawdownPct?: number;
-            netSharpe?: number;
+            trades: number;
+            netCagrPct: number;
+            netDrawdownPct: number;
+            netSharpe: number;
         };
         Funnel: {
             /** Format: date */
-            screenDate?: string;
-            regime?: components["schemas"]["Regime"];
-            immediatelyBuyable?: components["schemas"]["FunnelRow"][];
-            onDeck?: components["schemas"]["FunnelRow"][];
-            watch?: components["schemas"]["FunnelRow"][];
+            screenDate: string;
+            regime: components["schemas"]["Regime"];
+            immediatelyBuyable: components["schemas"]["FunnelRow"][];
+            onDeck: components["schemas"]["FunnelRow"][];
+            watch: components["schemas"]["FunnelRow"][];
         };
         FunnelRow: {
-            symbol?: string;
-            close?: number;
-            rsRank?: number;
+            symbol: string;
+            close: number;
+            rsRank: number;
             /** Format: int32 */
             stage?: number;
             isVcp?: boolean;
-            pivot?: number;
+            pivot: number;
             cheatPivot?: number;
             thrust?: boolean;
-            footprint?: string;
-            pctToPivot?: number;
+            footprint: string;
+            pctToPivot: number;
         };
         Regime: {
-            regime?: string;
-            advanceRatio?: number;
+            regime: string;
+            advanceRatio: number;
             /** Format: int32 */
-            sessions?: number;
+            sessions: number;
         };
         DiffRow: {
-            symbol?: string;
-            rsRank?: number;
+            symbol: string;
+            rsRank: number;
         };
         ScreenDiff: {
             /** Format: date */
-            screenDate?: string;
+            screenDate: string;
             /** Format: date */
-            priorDate?: string;
+            priorDate: string;
             /** Format: int32 */
-            enteredCount?: number;
+            enteredCount: number;
             /** Format: int32 */
-            leftCount?: number;
-            entered?: components["schemas"]["DiffRow"][];
-            left?: components["schemas"]["DiffRow"][];
+            leftCount: number;
+            entered: components["schemas"]["DiffRow"][];
+            left: components["schemas"]["DiffRow"][];
         };
         ScreenDate: {
             /** Format: date */
-            date?: string;
+            date: string;
             /** Format: int32 */
-            coverage?: number;
+            coverage: number;
             /** Format: int32 */
-            passers?: number;
+            passers: number;
         };
         ScreenDatesResponse: {
-            items?: components["schemas"]["ScreenDate"][];
+            items: components["schemas"]["ScreenDate"][];
         };
         CandidateAnalysis: {
-            symbol?: string;
-            exchange?: string;
+            symbol: string;
+            exchange: string;
             /** Format: date */
-            screenDate?: string;
-            scanned?: boolean;
-            close?: number;
-            sma50?: number;
+            screenDate: string;
+            scanned: boolean;
+            close: number;
+            sma50: number;
             sma150?: number;
-            sma200?: number;
-            high52w?: number;
-            low52w?: number;
+            sma200: number;
+            high52w: number;
+            low52w: number;
             pctFromHigh?: number;
             pctAboveLow?: number;
             rsRank?: number;
             avgTurnover50?: number;
-            freeFloatMcapCr?: number;
-            freeFloatPct?: number;
-            gates?: boolean[];
+            freeFloatMcapCr: number;
+            freeFloatPct: number;
+            gates: boolean[];
             /** Format: int32 */
-            gatesPassed?: number;
-            passesAll?: boolean;
+            gatesPassed: number;
+            passesAll: boolean;
             /** Format: int32 */
             stage?: number;
             geometry?: components["schemas"]["Geometry"];
         };
         Geometry: {
-            isVcp?: boolean;
-            footprint?: string;
-            pivot?: number;
-            deepestPct?: number;
-            tightestPct?: number;
+            isVcp: boolean;
+            footprint: string;
+            pivot: number;
+            deepestPct: number;
+            tightestPct: number;
             /** Format: int32 */
-            contractionCount?: number;
+            contractionCount: number;
             /** Format: int32 */
-            baseWeeks?: number;
+            baseWeeks: number;
             /** Format: int32 */
-            baseDurationDays?: number;
-            volumeDryUp?: boolean;
-            shakeout?: boolean;
+            baseDurationDays: number;
+            volumeDryUp: boolean;
+            shakeout: boolean;
             /** Format: int32 */
-            baseCount?: number;
-            cheatPivot?: number;
-            thrust?: boolean;
-            rejectReason?: string;
+            baseCount: number;
+            cheatPivot: number;
+            thrust: boolean;
+            rejectReason: string;
         };
         FunnelAttrition: {
             /** Format: date */
-            screenDate?: string;
+            screenDate: string;
             /** Format: int64 */
-            scanned?: number;
-            gates?: components["schemas"]["GateCount"][];
+            scanned: number;
+            gates: components["schemas"]["GateCount"][];
             /** Format: int64 */
-            passesAll?: number;
+            passesAll: number;
             /** Format: int32 */
-            buyable?: number;
+            buyable: number;
             /** Format: int32 */
-            onDeck?: number;
+            onDeck: number;
             /** Format: int32 */
-            watch?: number;
+            watch: number;
         };
         GateCount: {
             /** Format: int32 */
-            gate?: number;
+            gate: number;
             /** Format: int64 */
-            passed?: number;
+            passed: number;
         };
         DataFreshness: {
             /** Format: date-time */
@@ -2928,164 +2928,164 @@ export interface components {
         };
         TrendPoint: {
             /** Format: date-time */
-            bucket?: string;
+            bucket: string;
             /** Format: int64 */
-            totalOi?: number;
+            totalOi: number;
             /** Format: int64 */
-            ceOi?: number;
+            ceOi: number;
             /** Format: int64 */
-            peOi?: number;
-            spot?: number;
+            peOi: number;
+            spot: number;
             /** @enum {string} */
             trend?: "UP" | "DOWN" | "FLAT";
-            ceLtp?: number;
-            peLtp?: number;
+            ceLtp: number;
+            peLtp: number;
         };
         TrendSeries: {
-            items?: components["schemas"]["TrendPoint"][];
+            items: components["schemas"]["TrendPoint"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
             freshness?: components["schemas"]["DataFreshness"];
         };
         StrikeSessionStat: {
-            strike?: number;
-            optionType?: string;
-            open?: number;
-            high?: number;
-            low?: number;
-            last?: number;
+            strike: number;
+            optionType: string;
+            open: number;
+            high: number;
+            low: number;
+            last: number;
             /** Format: int64 */
-            dayVolume?: number;
+            dayVolume: number;
             /** Format: int64 */
-            declineVolume?: number;
-            prevClose?: number;
-            ohMark?: boolean;
-            olMark?: boolean;
-            fallPctFromOpen?: number;
-            fallPctFromPrevClose?: number;
-            oiChangePct?: number;
+            declineVolume: number;
+            prevClose: number;
+            ohMark: boolean;
+            olMark: boolean;
+            fallPctFromOpen: number;
+            fallPctFromPrevClose: number;
+            oiChangePct: number;
         };
         StrikeSessionStats: {
             /** Format: date-time */
-            asOf?: string;
-            underlying?: string;
+            asOf: string;
+            underlying: string;
             /** Format: date */
-            expiry?: string;
-            spot?: number;
-            atmStrike?: number;
+            expiry: string;
+            spot: number;
+            atmStrike: number;
             /** Format: int32 */
-            interval?: number;
-            items?: components["schemas"]["StrikeSessionStat"][];
+            interval: number;
+            items: components["schemas"]["StrikeSessionStat"][];
         };
         StraddleCandle: {
             /** Format: date-time */
-            time?: string;
-            open?: number;
-            high?: number;
-            low?: number;
-            close?: number;
-            ceClose?: number;
-            peClose?: number;
+            time: string;
+            open: number;
+            high: number;
+            low: number;
+            close: number;
+            ceClose: number;
+            peClose: number;
             /** Format: int64 */
-            volume?: number;
+            volume: number;
         };
         StraddleChart: {
-            underlying?: string;
+            underlying: string;
             /** Format: date */
-            expiry?: string;
-            callStrike?: number;
-            putStrike?: number;
-            interval?: string;
-            underlyingLtp?: number;
-            underlyingDayOpen?: number;
+            expiry: string;
+            callStrike: number;
+            putStrike: number;
+            interval: string;
+            underlyingLtp: number;
+            underlyingDayOpen: number;
             /** Format: date-time */
-            asOf?: string;
-            combinedVwap?: number;
-            slBufferPoints?: number;
-            slLevel?: number;
-            items?: components["schemas"]["StraddleCandle"][];
+            asOf: string;
+            combinedVwap: number;
+            slBufferPoints: number;
+            slLevel: number;
+            items: components["schemas"]["StraddleCandle"][];
         };
         SpurtChain: {
-            items?: components["schemas"]["StrikeSpurt"][];
-            summary?: components["schemas"]["SpurtSummary"];
+            items: components["schemas"]["StrikeSpurt"][];
+            summary: components["schemas"]["SpurtSummary"];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         SpurtSummary: {
             /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
-            spotDelta?: number;
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            spotDelta: number;
             /** Format: int64 */
-            oiChange?: number;
-            oiChangePct?: number;
-            priceChangePct?: number;
+            oiChange: number;
+            oiChangePct: number;
+            priceChangePct: number;
         };
         StrikeSpurt: {
-            strike?: number;
-            optionType?: string;
-            ltp?: number;
-            prevLtp?: number;
+            strike: number;
+            optionType: string;
+            ltp: number;
+            prevLtp: number;
             /** Format: int64 */
-            oi?: number;
+            oi: number;
             /** Format: int64 */
-            oiChange?: number;
-            spurtPct?: number;
-            ltpChange?: number;
-            ltpChangePct?: number;
+            oiChange: number;
+            spurtPct: number;
+            ltpChange: number;
+            ltpChangePct: number;
             /** Format: int64 */
-            volume?: number;
+            volume: number;
             /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         PremiumChain: {
-            items?: components["schemas"]["PremiumRow"][];
-            atmStrike?: number;
-            atmStraddle?: number;
-            spot?: number;
+            items: components["schemas"]["PremiumRow"][];
+            atmStrike: number;
+            atmStraddle: number;
+            spot: number;
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         PremiumRow: {
-            strike?: number;
-            straddle?: number;
-            ce?: number;
-            pe?: number;
+            strike: number;
+            straddle: number;
+            ce: number;
+            pe: number;
         };
         PremiumSeries: {
-            items?: components["schemas"]["PremiumSeriesPoint"][];
+            items: components["schemas"]["PremiumSeriesPoint"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         PremiumSeriesPoint: {
             /** Format: date-time */
-            bucket?: string;
-            atmStrike?: number;
-            atmStraddle?: number;
-            spot?: number;
+            bucket: string;
+            atmStrike: number;
+            atmStraddle: number;
+            spot: number;
         };
         PcrSeriesPoint: {
-            time?: string;
-            pcr?: number;
-            spot?: number;
+            time: string;
+            pcr: number;
+            spot: number;
         };
         OiStats: {
-            pcr?: number;
-            maxPain?: number;
+            pcr: number;
+            maxPain: number;
             /** Format: int64 */
-            ceOi?: number;
+            ceOi: number;
             /** Format: int64 */
-            peOi?: number;
+            peOi: number;
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
             freshness?: components["schemas"]["DataFreshness"];
         };
         Cell: {
             /** Format: int32 */
-            x?: number;
+            x: number;
             /** Format: int32 */
-            y?: number;
+            y: number;
             /** Format: int64 */
-            value?: number;
+            value: number;
         };
         Heatmap: {
             buckets?: string[];
@@ -3095,1230 +3095,1230 @@ export interface components {
             /** Format: int64 */
             maxAbs?: number;
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
             freshness?: components["schemas"]["DataFreshness"];
         };
         HistoryPoint: {
             /** Format: date */
-            date?: string;
-            iv?: number;
-            atmIv?: number;
-            iv30d?: number;
-            spot?: number;
+            date: string;
+            iv: number;
+            atmIv: number;
+            iv30d: number;
+            spot: number;
         };
         IvHistory: {
-            underlying?: string;
-            series?: components["schemas"]["HistoryPoint"][];
-            currentIv?: number;
-            rank?: number;
+            underlying: string;
+            series: components["schemas"]["HistoryPoint"][];
+            currentIv: number;
+            rank: number;
             /** Format: int32 */
-            percentile?: number;
+            percentile: number;
             /** Format: int32 */
-            windowDays?: number;
+            windowDays: number;
             /** Format: int32 */
-            floorDays?: number;
-            insufficientHistory?: boolean;
+            floorDays: number;
+            insufficientHistory: boolean;
         };
         IntervalWiseOi: {
-            gainers15?: components["schemas"]["StrikeMove"][];
-            losers15?: components["schemas"]["StrikeMove"][];
-            gainers60?: components["schemas"]["StrikeMove"][];
-            losers60?: components["schemas"]["StrikeMove"][];
-            gainersDaily?: components["schemas"]["StrikeMove"][];
-            losersDaily?: components["schemas"]["StrikeMove"][];
+            gainers15: components["schemas"]["StrikeMove"][];
+            losers15: components["schemas"]["StrikeMove"][];
+            gainers60: components["schemas"]["StrikeMove"][];
+            losers60: components["schemas"]["StrikeMove"][];
+            gainersDaily: components["schemas"]["StrikeMove"][];
+            losersDaily: components["schemas"]["StrikeMove"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         StrikeMove: {
-            strike?: string;
+            strike: string;
             /** Format: int64 */
-            oiChange?: number;
+            oiChange: number;
             /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         Chain: {
-            underlying?: string;
+            underlying: string;
             /** Format: date */
-            expiry?: string;
-            spot?: number;
-            forward?: number;
-            forwardSource?: string;
-            riskFreeRate?: number;
-            pcr?: number;
-            stale?: boolean;
+            expiry: string;
+            spot: number;
+            forward: number;
+            forwardSource: string;
+            riskFreeRate: number;
+            pcr: number;
+            stale: boolean;
             /** Format: date-time */
-            asOf?: string;
-            rows?: components["schemas"]["StrikeRow"][];
+            asOf: string;
+            rows: components["schemas"]["StrikeRow"][];
         };
         Leg: {
-            tradingsymbol?: string;
-            ltp?: number;
-            bid?: number;
-            ask?: number;
+            tradingsymbol: string;
+            ltp: number;
+            bid: number;
+            ask: number;
             /** Format: int64 */
-            volume?: number;
+            volume: number;
             /** Format: int64 */
-            oi?: number;
+            oi: number;
             /** Format: int64 */
-            prevOi?: number;
-            iv?: number;
-            delta?: number;
-            gamma?: number;
-            theta?: number;
-            vega?: number;
-            rho?: number;
-            vanna?: number;
-            charm?: number;
-            vomma?: number;
-            speed?: number;
-            zomma?: number;
-            color?: number;
-            ivReason?: string;
-            priceSource?: string;
+            prevOi: number;
+            iv: number;
+            delta: number;
+            gamma: number;
+            theta: number;
+            vega: number;
+            rho: number;
+            vanna: number;
+            charm: number;
+            vomma: number;
+            speed: number;
+            zomma: number;
+            color: number;
+            ivReason: string;
+            priceSource: string;
         };
         StrikeRow: {
-            strike?: number;
-            ce?: components["schemas"]["Leg"];
-            pe?: components["schemas"]["Leg"];
+            strike: number;
+            ce: components["schemas"]["Leg"];
+            pe: components["schemas"]["Leg"];
         };
         ChainTable: {
-            underlying?: string;
+            underlying: string;
             /** Format: date */
-            expiry?: string;
-            spot?: number;
-            forward?: number;
-            forwardSource?: string;
-            riskFreeRate?: number;
-            pcr?: number;
-            stale?: boolean;
+            expiry: string;
+            spot: number;
+            forward: number;
+            forwardSource: string;
+            riskFreeRate: number;
+            pcr: number;
+            stale: boolean;
             /** Format: date-time */
-            asOf?: string;
-            interval?: string;
-            rows?: components["schemas"]["ChainTableRow"][];
+            asOf: string;
+            interval: string;
+            rows: components["schemas"]["ChainTableRow"][];
             freshness?: components["schemas"]["DataFreshness"];
         };
         ChainTableLeg: {
-            leg?: components["schemas"]["Leg"];
-            deltas?: components["schemas"]["LegDeltas"];
+            leg: components["schemas"]["Leg"];
+            deltas: components["schemas"]["LegDeltas"];
         };
         ChainTableRow: {
-            strike?: number;
-            ce?: components["schemas"]["ChainTableLeg"];
-            pe?: components["schemas"]["ChainTableLeg"];
+            strike: number;
+            ce: components["schemas"]["ChainTableLeg"];
+            pe: components["schemas"]["ChainTableLeg"];
         };
         LegDeltas: {
             /** Format: int64 */
-            oiChange?: number;
-            oiChangePct?: number;
-            ltpChange?: number;
-            ltpChangePct?: number;
+            oiChange: number;
+            oiChangePct: number;
+            ltpChange: number;
+            ltpChangePct: number;
             /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         CalendarSpreadChart: {
-            underlying?: string;
-            strike?: number;
-            optionType?: string;
+            underlying: string;
+            strike: number;
+            optionType: string;
             /** Format: date */
-            nearExpiry?: string;
+            nearExpiry: string;
             /** Format: date */
-            farExpiry?: string;
-            interval?: string;
-            underlyingLtp?: number;
-            underlyingDayOpen?: number;
+            farExpiry: string;
+            interval: string;
+            underlyingLtp: number;
+            underlyingDayOpen: number;
             /** Format: date-time */
-            asOf?: string;
-            items?: components["schemas"]["SpreadCandle"][];
+            asOf: string;
+            items: components["schemas"]["SpreadCandle"][];
         };
         SpreadCandle: {
             /** Format: date-time */
-            time?: string;
-            open?: number;
-            high?: number;
-            low?: number;
-            close?: number;
-            nearClose?: number;
-            farClose?: number;
+            time: string;
+            open: number;
+            high: number;
+            low: number;
+            close: number;
+            nearClose: number;
+            farClose: number;
             /** Format: int64 */
-            volume?: number;
+            volume: number;
         };
         BigOi: {
-            items?: components["schemas"]["BigOiRow"][];
+            items: components["schemas"]["BigOiRow"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         BigOiRow: {
-            strike?: number;
-            optionType?: string;
+            strike: number;
+            optionType: string;
             /** Format: int64 */
-            oi?: number;
+            oi: number;
             /** Format: int64 */
-            oiChange?: number;
-            ltp?: number;
+            oiChange: number;
+            ltp: number;
         };
         BigOiLog: {
-            items?: components["schemas"]["LogEvent"][];
+            items: components["schemas"]["LogEvent"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         LogEvent: {
-            time?: string;
-            spot?: number;
-            strike?: number;
-            optionType?: string;
-            ltp?: number;
-            ltpChange?: number;
+            time: string;
+            spot: number;
+            strike: number;
+            optionType: string;
+            ltp: number;
+            ltpChange: number;
             /** Format: int64 */
-            oi?: number;
+            oi: number;
             /** Format: int64 */
-            oiChange?: number;
+            oiChange: number;
             /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         ActiveStrikeIvPoint: {
             /** Format: date-time */
-            bucket?: string;
-            ceIv?: number;
-            peIv?: number;
-            price?: number;
+            bucket: string;
+            ceIv: number;
+            peIv: number;
+            price: number;
         };
         ActiveStrikeOiPoint: {
             /** Format: date-time */
-            bucket?: string;
+            bucket: string;
             /** Format: int64 */
-            ceOi?: number;
+            ceOi: number;
             /** Format: int64 */
-            peOi?: number;
+            peOi: number;
         };
         ActiveStrikesResponse: {
-            sentimentPct?: number;
+            sentimentPct: number;
             sentimentLevelPct?: number;
-            items?: components["schemas"]["StrikeView"][];
+            items: components["schemas"]["StrikeView"][];
             sentimentSeries?: components["schemas"]["SentimentPoint"][];
             activeStrikeOiSeries?: components["schemas"]["ActiveStrikeOiPoint"][];
             activeStrikeIvSeries?: components["schemas"]["ActiveStrikeIvPoint"][];
             activeStrikeSideIvSeries?: components["schemas"]["ActiveStrikeIvPoint"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
             freshness?: components["schemas"]["DataFreshness"];
         };
         SentimentPoint: {
             /** Format: date-time */
-            bucket?: string;
-            sentimentPct?: number;
-            levelPct?: number;
+            bucket: string;
+            sentimentPct: number;
+            levelPct: number;
         };
         StrikeView: {
-            strike?: number;
+            strike: number;
             /** Format: int64 */
-            ceOi?: number;
+            ceOi: number;
             /** Format: int64 */
-            peOi?: number;
+            peOi: number;
         };
         CrossSourceReport: {
-            status?: string;
+            status: string;
             /** Format: date-time */
-            asOf?: string;
-            underlyings?: components["schemas"]["UnderlyingDivergence"][];
+            asOf: string;
+            underlyings: components["schemas"]["UnderlyingDivergence"][];
         };
         UnderlyingDivergence: {
-            underlying?: string;
+            underlying: string;
             /** Format: date */
-            expiry?: string;
-            status?: string;
-            detail?: string;
+            expiry: string;
+            status: string;
+            detail: string;
             /** Format: int32 */
-            bucketsCompared?: number;
-            meanDivergencePct?: number;
-            maxDivergencePct?: number;
+            bucketsCompared: number;
+            meanDivergencePct: number;
+            maxDivergencePct: number;
         };
         BoardReport: {
             /** Format: date-time */
-            generatedAt?: string;
+            generatedAt: string;
             /** Format: date */
-            fromDay?: string;
+            fromDay: string;
             /** Format: date */
-            toDay?: string;
+            toDay: string;
             /** Format: int32 */
-            tradingDays?: number;
-            sources?: components["schemas"]["SourceHealth"][];
+            tradingDays: number;
+            sources: components["schemas"]["SourceHealth"][];
         };
         DayVerdict: {
             /** Format: date */
-            day?: string;
-            status?: string;
+            day: string;
+            status: string;
         };
         LastRun: {
-            status?: string;
+            status: string;
             /** Format: int64 */
-            rowsWritten?: number;
+            rowsWritten: number;
             /** Format: date-time */
-            startedAt?: string;
+            startedAt: string;
             /** Format: date-time */
-            finishedAt?: string;
-            error?: string;
-            stale?: boolean;
+            finishedAt: string;
+            error: string;
+            stale: boolean;
         };
         SourceHealth: {
-            source?: string;
-            policy?: string;
-            status?: string;
-            detail?: string;
+            source: string;
+            policy: string;
+            status: string;
+            detail: string;
             /** Format: int32 */
-            missingDays?: number;
-            days?: components["schemas"]["DayVerdict"][];
-            lastRun?: components["schemas"]["LastRun"];
+            missingDays: number;
+            days: components["schemas"]["DayVerdict"][];
+            lastRun: components["schemas"]["LastRun"];
         };
         CanaryReport: {
-            status?: string;
-            marketOpen?: boolean;
-            asOf?: string;
+            status: string;
+            marketOpen: boolean;
+            asOf: string;
             /** Format: int32 */
-            tickedTokens?: number;
-            problems?: components["schemas"]["CheckResult"][];
+            tickedTokens: number;
+            problems: components["schemas"]["CheckResult"][];
         };
         CheckResult: {
-            check?: string;
-            key?: string;
-            status?: string;
-            detail?: string;
-            since?: string;
+            check: string;
+            key: string;
+            status: string;
+            detail: string;
+            since: string;
         };
         CompletenessReport: {
             /** Format: date */
-            date?: string;
-            items?: components["schemas"]["CompletenessRow"][];
+            date: string;
+            items: components["schemas"]["CompletenessRow"][];
         };
         CompletenessRow: {
-            scope?: string;
-            symbol?: string;
+            scope: string;
+            symbol: string;
             /** Format: int64 */
-            expected?: number;
+            expected: number;
             /** Format: int64 */
-            present?: number;
-            coveragePct?: number;
-            ok?: boolean;
-            detail?: string;
+            present: number;
+            coveragePct: number;
+            ok: boolean;
+            detail: string;
             /** Format: date-time */
-            computedAt?: string;
+            computedAt: string;
         };
         BhavcopyCloseReport: {
             /** Format: date */
-            tradeDate?: string;
-            status?: string;
+            tradeDate: string;
+            status: string;
             /** Format: int32 */
-            compared?: number;
+            compared: number;
             /** Format: int32 */
-            divergent?: number;
-            thresholdPct?: number;
-            offenders?: components["schemas"]["CloseMismatch"][];
+            divergent: number;
+            thresholdPct: number;
+            offenders: components["schemas"]["CloseMismatch"][];
         };
         CloseMismatch: {
-            symbol?: string;
-            bhavClose?: number;
-            kiteClose?: number;
-            relDiffPct?: number;
+            symbol: string;
+            bhavClose: number;
+            kiteClose: number;
+            relDiffPct: number;
         };
         DowQuote: {
-            ltp?: number;
-            prevClose?: number;
-            change?: number;
+            ltp: number;
+            prevClose: number;
+            change: number;
             /** Format: int32 */
-            direction?: number;
+            direction: number;
         };
         ContractLeg: {
-            tradingsymbol?: string;
+            tradingsymbol: string;
             /** Format: date */
-            expiry?: string;
+            expiry: string;
             /** Format: int64 */
-            daysToExpiry?: number;
-            ltp?: number;
+            daysToExpiry: number;
+            ltp: number;
             /** Format: int64 */
-            oi?: number;
+            oi: number;
             /** Format: int64 */
-            volume?: number;
-            basisAbsolute?: number;
-            basisAnnualized?: number;
+            volume: number;
+            basisAbsolute: number;
+            basisAnnualized: number;
         };
         TermStructure: {
-            underlying?: string;
-            spot?: number;
-            state?: string;
-            calendarSpread?: number;
-            stale?: boolean;
+            underlying: string;
+            spot: number;
+            state: string;
+            calendarSpread: number;
+            stale: boolean;
             /** Format: date-time */
-            asOf?: string;
-            contracts?: components["schemas"]["ContractLeg"][];
+            asOf: string;
+            contracts: components["schemas"]["ContractLeg"][];
             freshness?: components["schemas"]["DataFreshness"];
         };
         FutSpurt: {
-            tradingsymbol?: string;
-            ltp?: number;
-            prevClose?: number;
-            pricePct?: number;
+            tradingsymbol: string;
+            ltp: number;
+            prevClose: number;
+            pricePct: number;
             /** Format: int64 */
-            oi?: number;
+            oi: number;
             /** Format: int64 */
-            oiChange?: number;
-            spurtPct?: number;
+            oiChange: number;
+            spurtPct: number;
             /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         FutSpurtChain: {
-            items?: components["schemas"]["FutSpurt"][];
+            items: components["schemas"]["FutSpurt"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
             freshness?: components["schemas"]["DataFreshness"];
         };
         MoverRow: {
-            tradingsymbol?: string;
-            ltp?: number;
-            pricePct?: number;
-            oiPct?: number;
-            dayOpen?: number;
-            dayHigh?: number;
-            dayLow?: number;
+            tradingsymbol: string;
+            ltp: number;
+            pricePct: number;
+            oiPct: number;
+            dayOpen: number;
+            dayHigh: number;
+            dayLow: number;
             /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         Movers: {
-            gainers?: components["schemas"]["MoverRow"][];
-            losers?: components["schemas"]["MoverRow"][];
+            gainers: components["schemas"]["MoverRow"][];
+            losers: components["schemas"]["MoverRow"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
             freshness?: components["schemas"]["DataFreshness"];
         };
         BuzzMatrix: {
-            contracts?: string[];
-            buckets?: string[];
-            cells?: ("LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING")[][];
+            contracts: string[];
+            buckets: string[];
+            cells: ("LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING")[][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         BankRow: {
-            tradingsymbol?: string;
+            tradingsymbol: string;
             /** Format: date */
-            expiry?: string;
-            ltp?: number;
+            expiry: string;
+            ltp: number;
             /** Format: int64 */
-            oi?: number;
+            oi: number;
             /** Format: int64 */
-            oiChange?: number;
-            basis?: number;
+            oiChange: number;
+            basis: number;
             /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         Banks: {
-            items?: components["schemas"]["BankRow"][];
+            items: components["schemas"]["BankRow"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
             freshness?: components["schemas"]["DataFreshness"];
         };
         BankGrid: {
-            items?: components["schemas"]["BankGridRow"][];
+            items: components["schemas"]["BankGridRow"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         BankGridRow: {
-            underlying?: string;
-            tradingsymbol?: string;
+            underlying: string;
+            tradingsymbol: string;
             /** Format: date */
-            expiry?: string;
-            ltp?: number;
-            pricePct?: number;
+            expiry: string;
+            ltp: number;
+            pricePct: number;
             /** Format: int64 */
-            oi?: number;
+            oi: number;
             /** Format: int64 */
-            oiChange?: number;
-            oiPct?: number;
+            oiChange: number;
+            oiPct: number;
             /** @enum {string} */
-            interpretation?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         EquityFundamentals: {
-            symbol?: string;
-            isin?: string;
-            marketCapCr?: number;
-            freeFloatMcapCr?: number;
-            freeFloatPct?: number;
-            promoterPct?: number;
-            pe?: number;
-            roe?: number;
-            netProfitCr?: number;
-            revenueCr?: number;
-            revenuePrevCr?: number;
+            symbol: string;
+            isin: string;
+            marketCapCr: number;
+            freeFloatMcapCr: number;
+            freeFloatPct: number;
+            promoterPct: number;
+            pe: number;
+            roe: number;
+            netProfitCr: number;
+            revenueCr: number;
+            revenuePrevCr: number;
             /** Format: date */
-            asOf?: string;
+            asOf: string;
         };
         Bias: {
             /** Format: date */
-            tradeDate?: string;
-            fiiClassification?: string;
-            bias?: string;
-            fiiLongPct?: number;
+            tradeDate: string;
+            fiiClassification: string;
+            bias: string;
+            fiiLongPct: number;
             /** Format: int64 */
-            callNet?: number;
+            callNet: number;
             /** Format: int64 */
-            putNet?: number;
-            legBias?: string;
+            putNet: number;
+            legBias: string;
             /** Format: int32 */
-            biasSign?: number;
+            biasSign: number;
             freshness?: components["schemas"]["DataFreshness"];
         };
         SectorAgg: {
-            sector?: string;
-            avgChangePct?: number;
+            sector: string;
+            avgChangePct: number;
             /** Format: int32 */
-            positive?: number;
+            positive: number;
             /** Format: int32 */
-            negative?: number;
+            negative: number;
             /** Format: int32 */
-            total?: number;
+            total: number;
         };
         SectorIndexCard: {
-            name?: string;
-            last?: string;
-            changePct?: string;
-            open?: string;
-            high?: string;
-            low?: string;
-            prevClose?: string;
-            asOf?: string;
+            name: string;
+            last: string;
+            changePct: string;
+            open: string;
+            high: string;
+            low: string;
+            prevClose: string;
+            asOf: string;
         };
         SectorStats: {
             /** Format: date */
-            asOf?: string;
-            sectorIndices?: components["schemas"]["SectorIndexCard"][];
-            sectors?: components["schemas"]["SectorAgg"][];
-            stocks?: components["schemas"]["StockChange"][];
+            asOf: string;
+            sectorIndices: components["schemas"]["SectorIndexCard"][];
+            sectors: components["schemas"]["SectorAgg"][];
+            stocks: components["schemas"]["StockChange"][];
             freshness?: components["schemas"]["DataFreshness"];
         };
         StockChange: {
-            symbol?: string;
-            sector?: string;
-            changePct?: number;
-            close?: number;
-            prevClose?: number;
+            symbol: string;
+            sector: string;
+            changePct: number;
+            close: number;
+            prevClose: number;
         };
         SectorHeatmap: {
-            index?: string;
-            tiles?: components["schemas"]["StockChange"][];
+            index: string;
+            tiles: components["schemas"]["StockChange"][];
             /** Format: date */
-            asOf?: string;
+            asOf: string;
             freshness?: components["schemas"]["DataFreshness"];
         };
         Returns: {
             /** Format: date */
-            asOf?: string;
-            items?: components["schemas"]["ReturnsRow"][];
+            asOf: string;
+            items: components["schemas"]["ReturnsRow"][];
             freshness?: components["schemas"]["DataFreshness"];
         };
         ReturnsRow: {
-            symbol?: string;
-            industry?: string;
-            ltp?: number;
-            r1d?: number;
-            r1w?: number;
-            r1m?: number;
-            r6m?: number;
-            r1y?: number;
+            symbol: string;
+            industry: string;
+            ltp: number;
+            r1d: number;
+            r1w: number;
+            r1m: number;
+            r6m: number;
+            r1y: number;
         };
         PreOpenScanView: {
             /** Format: date */
-            date?: string;
-            items?: components["schemas"]["ScanRow"][];
-            dates?: string[];
+            date: string;
+            items: components["schemas"]["ScanRow"][];
+            dates: string[];
         };
         ScanRow: {
-            symbol?: string;
-            preOpenPrice?: number;
-            prevClose?: number;
-            change?: number;
-            changePct?: number;
-            prevDayBreak?: string;
+            symbol: string;
+            preOpenPrice: number;
+            prevClose: number;
+            change: number;
+            changePct: number;
+            prevDayBreak: string;
         };
         OpenHigh: {
-            index?: string;
-            openHigh?: components["schemas"]["Setup"][];
-            openLow?: components["schemas"]["Setup"][];
+            index: string;
+            openHigh: components["schemas"]["Setup"][];
+            openLow: components["schemas"]["Setup"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         Setup: {
-            symbol?: string;
-            dayOpen?: number;
-            dayHigh?: number;
-            dayLow?: number;
-            ltp?: number;
-            farPct?: number;
+            symbol: string;
+            dayOpen: number;
+            dayHigh: number;
+            dayLow: number;
+            ltp: number;
+            farPct: number;
         };
         News: {
-            symbol?: string;
-            available?: boolean;
-            items?: components["schemas"]["NewsItem"][];
+            symbol: string;
+            available: boolean;
+            items: components["schemas"]["NewsItem"][];
         };
         NewsItem: {
-            heading?: string;
-            summary?: string;
-            thumbnail?: string;
-            articleLink?: string;
+            heading: string;
+            summary: string;
+            thumbnail: string;
+            articleLink: string;
             /** Format: int64 */
-            publishedTime?: number;
+            publishedTime: number;
         };
         ContribRow: {
             /** Format: int32 */
-            rank?: number;
-            symbol?: string;
-            contribution?: number;
-            changePct?: number;
-            close?: number;
-            points?: number;
+            rank: number;
+            symbol: string;
+            contribution: number;
+            changePct: number;
+            close: number;
+            points: number;
         };
         IndexContribution: {
-            index?: string;
-            indexChangePct?: number;
-            advanceTotal?: number;
-            declineTotal?: number;
-            indexLevel?: number;
-            advancePoints?: number;
-            declinePoints?: number;
-            advances?: components["schemas"]["ContribRow"][];
-            declines?: components["schemas"]["ContribRow"][];
+            index: string;
+            indexChangePct: number;
+            advanceTotal: number;
+            declineTotal: number;
+            indexLevel: number;
+            advancePoints: number;
+            declinePoints: number;
+            advances: components["schemas"]["ContribRow"][];
+            declines: components["schemas"]["ContribRow"][];
             /** Format: date */
-            asOf?: string;
-            live?: boolean;
+            asOf: string;
+            live: boolean;
         };
         Delivery: {
-            symbol?: string;
+            symbol: string;
             /** Format: int32 */
-            days?: number;
-            items?: components["schemas"]["DeliveryDay"][];
+            days: number;
+            items: components["schemas"]["DeliveryDay"][];
         };
         DeliveryDay: {
             /** Format: date */
-            date?: string;
-            open?: number;
-            high?: number;
-            low?: number;
-            close?: number;
-            ltpChangePct?: number;
-            deliveryPct?: number;
-            dayRange?: number;
-            dayRangePct?: number;
+            date: string;
+            open: number;
+            high: number;
+            low: number;
+            close: number;
+            ltpChangePct: number;
+            deliveryPct: number;
+            dayRange: number;
+            dayRangePct: number;
             /** Format: int64 */
-            deliveryQty?: number;
+            deliveryQty: number;
             /** Format: int64 */
-            totalTradedQty?: number;
+            totalTradedQty: number;
         };
         Status: {
-            jobId?: string;
-            state?: string;
+            jobId: string;
+            state: string;
             /** Format: date-time */
-            lastRun?: string;
+            lastRun: string;
             /** Format: int64 */
-            durationMs?: number;
+            durationMs: number;
             nse?: components["schemas"]["ExchangeResult"];
             bse?: components["schemas"]["ExchangeResult"];
             /** Format: int32 */
             ratiosDetected?: number;
-            error?: string;
+            error: string;
         };
         ActiveStrikeMigration: {
-            nowTop?: string[];
-            openTop?: string[];
-            entered?: string[];
-            exited?: string[];
+            nowTop: string[];
+            openTop: string[];
+            entered: string[];
+            exited: string[];
             /** Format: int32 */
-            changedCount?: number;
+            changedCount: number;
         };
         AtmIv: {
-            iv?: number;
-            rank?: number;
+            iv: number;
+            rank: number;
             /** Format: int32 */
-            percentile?: number;
+            percentile: number;
             /** Format: int32 */
-            windowSessions?: number;
-            insufficientHistory?: boolean;
+            windowSessions: number;
+            insufficientHistory: boolean;
         };
         MaxPain: {
-            now?: number;
-            atOpen?: number;
-            drift?: number;
+            now: number;
+            atOpen: number;
+            drift: number;
         };
         OiStructure: {
             /** @enum {string} */
-            verdict?: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
-            spotDelta?: number;
+            verdict: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            spotDelta: number;
             /** Format: int64 */
-            oiChange?: number;
+            oiChange: number;
         };
         OptionsDigest: {
-            underlying?: string;
+            underlying: string;
             /** Format: date */
-            expiry?: string;
-            pcr?: components["schemas"]["Pcr"];
-            maxPain?: components["schemas"]["MaxPain"];
-            oiGainers?: components["schemas"]["StrikeMove"][];
-            oiLosers?: components["schemas"]["StrikeMove"][];
-            activeStrikes?: components["schemas"]["ActiveStrikeMigration"];
-            atmStraddle?: components["schemas"]["Straddle"];
-            atmIv?: components["schemas"]["AtmIv"];
-            oiStructure?: components["schemas"]["OiStructure"];
+            expiry: string;
+            pcr: components["schemas"]["Pcr"];
+            maxPain: components["schemas"]["MaxPain"];
+            oiGainers: components["schemas"]["StrikeMove"][];
+            oiLosers: components["schemas"]["StrikeMove"][];
+            activeStrikes: components["schemas"]["ActiveStrikeMigration"];
+            atmStraddle: components["schemas"]["Straddle"];
+            atmIv: components["schemas"]["AtmIv"];
+            oiStructure: components["schemas"]["OiStructure"];
             /** Format: date-time */
-            asOf?: string;
-            dataTrust?: string;
-            trustReasons?: string[];
+            asOf: string;
+            dataTrust: string;
+            trustReasons: string[];
         };
         Pcr: {
-            now?: number;
-            atOpen?: number;
-            priorEod?: number;
-            deltaVsOpen?: number;
-            deltaVsPriorEod?: number;
+            now: number;
+            atOpen: number;
+            priorEod: number;
+            deltaVsOpen: number;
+            deltaVsPriorEod: number;
         };
         Straddle: {
-            atmStrike?: number;
-            now?: number;
-            atOpen?: number;
-            deltaPct?: number;
+            atmStrike: number;
+            now: number;
+            atOpen: number;
+            deltaPct: number;
         };
         BanksSummary: {
             /** Format: int32 */
-            total?: number;
+            total: number;
             /** Format: int32 */
-            longBuildup?: number;
+            longBuildup: number;
             /** Format: int32 */
-            shortBuildup?: number;
+            shortBuildup: number;
             /** Format: int32 */
-            shortCovering?: number;
+            shortCovering: number;
             /** Format: int32 */
-            longUnwinding?: number;
+            longUnwinding: number;
             /** Format: int64 */
-            netOiChange?: number;
+            netOiChange: number;
         };
         FuturesDigest: {
-            underlyings?: components["schemas"]["UnderlyingQuadrant"][];
-            banks?: components["schemas"]["BanksSummary"];
-            termStructure?: components["schemas"]["TermStructureState"];
+            underlyings: components["schemas"]["UnderlyingQuadrant"][];
+            banks: components["schemas"]["BanksSummary"];
+            termStructure: components["schemas"]["TermStructureState"];
             /** Format: date-time */
-            asOf?: string;
-            dataTrust?: string;
-            trustReasons?: string[];
+            asOf: string;
+            dataTrust: string;
+            trustReasons: string[];
         };
         TermStructureState: {
-            underlying?: string;
-            spot?: number;
-            state?: string;
-            calendarSpread?: number;
-            nearBasis?: number;
-            stale?: boolean;
+            underlying: string;
+            spot: number;
+            state: string;
+            calendarSpread: number;
+            nearBasis: number;
+            stale: boolean;
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         UnderlyingQuadrant: {
-            underlying?: string;
-            tradingsymbol?: string;
+            underlying: string;
+            tradingsymbol: string;
             /** Format: date */
-            expiry?: string;
-            ltp?: number;
-            pricePct?: number;
+            expiry: string;
+            ltp: number;
+            pricePct: number;
             /** Format: int64 */
-            oi?: number;
+            oi: number;
             /** Format: int64 */
-            oiChange?: number;
-            oiPct?: number;
-            interpretation?: string;
+            oiChange: number;
+            oiPct: number;
+            interpretation: string;
         };
         DiiDivergence: {
-            fiiNet?: number;
-            diiNet?: number;
-            divergent?: boolean;
+            fiiNet: number;
+            diiNet: number;
+            divergent: boolean;
         };
         FiiCash: {
             /** Format: date */
-            tradeDate?: string;
-            net?: number;
+            tradeDate: string;
+            net: number;
             /** Format: int32 */
-            streakDays?: number;
-            streakSide?: string;
-            flip?: boolean;
+            streakDays: number;
+            streakSide: string;
+            flip: boolean;
         };
         FiiDerivativeAvailability: {
-            available?: boolean;
+            available: boolean;
             /** Format: date */
-            tradeDate?: string;
-            indexFuturesNet?: number;
-            reason?: string;
+            tradeDate: string;
+            indexFuturesNet: number;
+            reason: string;
         };
         FiiDigest: {
-            cash?: components["schemas"]["FiiCash"];
-            dii?: components["schemas"]["DiiDivergence"];
-            futuresLongShort?: components["schemas"]["FiiFuturesLongShort"];
-            participant?: components["schemas"]["ParticipantPositioning"];
-            derivative?: components["schemas"]["FiiDerivativeAvailability"];
+            cash: components["schemas"]["FiiCash"];
+            dii: components["schemas"]["DiiDivergence"];
+            futuresLongShort: components["schemas"]["FiiFuturesLongShort"];
+            participant: components["schemas"]["ParticipantPositioning"];
+            derivative: components["schemas"]["FiiDerivativeAvailability"];
             /** Format: date-time */
-            asOf?: string;
-            dataTrust?: string;
-            trustReasons?: string[];
+            asOf: string;
+            dataTrust: string;
+            trustReasons: string[];
         };
         FiiFuturesLongShort: {
             /** Format: date */
-            tradeDate?: string;
+            tradeDate: string;
             /** Format: int64 */
-            indexLong?: number;
+            indexLong: number;
             /** Format: int64 */
-            indexShort?: number;
-            ratio?: number;
-            ratioDelta?: number;
+            indexShort: number;
+            ratio: number;
+            ratioDelta: number;
             /** Format: int32 */
-            percentile?: number;
+            percentile: number;
             /** Format: int32 */
-            windowSessions?: number;
-            lowConfidence?: boolean;
+            windowSessions: number;
+            lowConfidence: boolean;
         };
         ParticipantPositioning: {
             /** Format: date */
-            tradeDate?: string;
+            tradeDate: string;
             /** Format: int64 */
-            netContracts?: number;
+            netContracts: number;
             /** Format: int64 */
-            netContractsPrior?: number;
+            netContractsPrior: number;
             /** Format: int64 */
-            netChange?: number;
+            netChange: number;
         };
         AlignedPoint: {
             /** Format: date-time */
-            bucket?: string;
+            bucket: string;
             /** Format: int64 */
-            aTotalOi?: number;
+            aTotalOi: number;
             /** Format: int64 */
-            bTotalOi?: number;
-            aPcr?: number;
-            bPcr?: number;
-            aSpot?: number;
-            bSpot?: number;
+            bTotalOi: number;
+            aPcr: number;
+            bPcr: number;
+            aSpot: number;
+            bSpot: number;
         };
         ExpiryCompare: {
-            underlying?: string;
-            a?: components["schemas"]["ExpirySide"];
-            b?: components["schemas"]["ExpirySide"];
-            aligned?: components["schemas"]["AlignedPoint"][];
+            underlying: string;
+            a: components["schemas"]["ExpirySide"];
+            b: components["schemas"]["ExpirySide"];
+            aligned: components["schemas"]["AlignedPoint"][];
             /** Format: date-time */
-            asOf?: string;
-            dataTrust?: string;
-            trustReasons?: string[];
+            asOf: string;
+            dataTrust: string;
+            trustReasons: string[];
         };
         ExpirySide: {
             /** Format: date */
-            expiry?: string;
-            series?: components["schemas"]["TrendPoint"][];
+            expiry: string;
+            series: components["schemas"]["TrendPoint"][];
             /** Format: date-time */
-            asOf?: string;
-            dataTrust?: string;
-            trustReasons?: string[];
+            asOf: string;
+            dataTrust: string;
+            trustReasons: string[];
         };
         AboveMa: {
             /** Format: int32 */
-            universe20?: number;
+            universe20: number;
             /** Format: int32 */
-            above20?: number;
-            pctAbove20?: number;
+            above20: number;
+            pctAbove20: number;
             /** Format: int32 */
-            universe50?: number;
+            universe50: number;
             /** Format: int32 */
-            above50?: number;
-            pctAbove50?: number;
+            above50: number;
+            pctAbove50: number;
         };
         AdvanceDecline: {
             /** Format: date */
-            tradeDate?: string;
+            tradeDate: string;
             /** Format: int32 */
-            advances?: number;
+            advances: number;
             /** Format: int32 */
-            declines?: number;
+            declines: number;
             /** Format: int32 */
-            unchanged?: number;
+            unchanged: number;
             /** Format: int32 */
-            total?: number;
-            adRatio?: number;
-            adRatioPrior?: number;
-            adRatioDelta?: number;
+            total: number;
+            adRatio: number;
+            adRatioPrior: number;
+            adRatioDelta: number;
         };
         BreadthThrust: {
             /** Format: int32 */
-            windowSessions?: number;
-            advRatioMa?: number;
-            threshold?: number;
-            thrust?: boolean;
+            windowSessions: number;
+            advRatioMa: number;
+            threshold: number;
+            thrust: boolean;
         };
         DeliveryOutlier: {
-            symbol?: string;
-            deliveryPct?: number;
-            mean20?: number;
-            z?: number;
+            symbol: string;
+            deliveryPct: number;
+            mean20: number;
+            z: number;
         };
         EquityDigest: {
             /** Format: date */
-            tradeDate?: string;
-            advanceDecline?: components["schemas"]["AdvanceDecline"];
-            aboveMa?: components["schemas"]["AboveMa"];
-            breadthThrust?: components["schemas"]["BreadthThrust"];
-            topSectors?: components["schemas"]["SectorRotation"][];
-            bottomSectors?: components["schemas"]["SectorRotation"][];
-            deliveryOutliers?: components["schemas"]["DeliveryOutlier"][];
-            returnsWindow?: string;
-            returnWinners?: components["schemas"]["ReturnLeader"][];
-            returnLosers?: components["schemas"]["ReturnLeader"][];
-            indexConcentration?: components["schemas"]["IndexConcentration"];
+            tradeDate: string;
+            advanceDecline: components["schemas"]["AdvanceDecline"];
+            aboveMa: components["schemas"]["AboveMa"];
+            breadthThrust: components["schemas"]["BreadthThrust"];
+            topSectors: components["schemas"]["SectorRotation"][];
+            bottomSectors: components["schemas"]["SectorRotation"][];
+            deliveryOutliers: components["schemas"]["DeliveryOutlier"][];
+            returnsWindow: string;
+            returnWinners: components["schemas"]["ReturnLeader"][];
+            returnLosers: components["schemas"]["ReturnLeader"][];
+            indexConcentration: components["schemas"]["IndexConcentration"];
             /** Format: date-time */
-            asOf?: string;
-            dataTrust?: string;
-            trustReasons?: string[];
+            asOf: string;
+            dataTrust: string;
+            trustReasons: string[];
         };
         IndexConcentration: {
-            index?: string;
-            indexChangePct?: number;
+            index: string;
+            indexChangePct: number;
             /** Format: int32 */
-            topN?: number;
-            topShare?: number;
+            topN: number;
+            topShare: number;
         };
         ReturnLeader: {
-            symbol?: string;
-            sector?: string;
-            returnPct?: number;
+            symbol: string;
+            sector: string;
+            returnPct: number;
         };
         SectorRotation: {
-            sector?: string;
-            avgChangePct?: number;
+            sector: string;
+            avgChangePct: number;
             /** Format: int32 */
-            stocks?: number;
+            stocks: number;
             /** Format: int32 */
-            rankToday?: number;
+            rankToday: number;
             /** Format: int32 */
-            rankPrior?: number;
+            rankPrior: number;
             /** Format: int32 */
-            rankDelta?: number;
+            rankDelta: number;
         };
         DayContext: {
             /** Format: date */
-            tradeDate?: string;
-            sessionPhase?: string;
-            holiday?: components["schemas"]["HolidayProximity"];
-            options?: components["schemas"]["OptionsDigest"];
-            vix?: components["schemas"]["Vix"];
-            overnightCues?: components["schemas"]["GlobalCue"][];
-            indexPriceAction?: components["schemas"]["IndexPriceAction"];
-            ingestTrust?: components["schemas"]["IngestTrust"];
+            tradeDate: string;
+            sessionPhase: string;
+            holiday: components["schemas"]["HolidayProximity"];
+            options: components["schemas"]["OptionsDigest"];
+            vix: components["schemas"]["Vix"];
+            overnightCues: components["schemas"]["GlobalCue"][];
+            indexPriceAction: components["schemas"]["IndexPriceAction"];
+            ingestTrust: components["schemas"]["IngestTrust"];
             /** Format: date-time */
-            asOf?: string;
-            notes?: string[];
+            asOf: string;
+            notes: string[];
         };
         GlobalCue: {
-            name?: string;
-            ltp?: number;
-            changePct?: number;
+            name: string;
+            ltp: number;
+            changePct: number;
         };
         HolidayProximity: {
-            holidayToday?: boolean;
+            holidayToday: boolean;
             /** Format: date */
-            nextHoliday?: string;
-            nextHolidayName?: string;
+            nextHoliday: string;
+            nextHolidayName: string;
             /** Format: int32 */
-            daysToNextHoliday?: number;
+            daysToNextHoliday: number;
         };
         IndexPriceAction: {
-            symbol?: string;
-            gapOpenPct?: number;
-            dayRange?: number;
-            avgRange20?: number;
-            rangeVsAvg?: number;
-            direction?: string;
-            rangeState?: string;
+            symbol: string;
+            gapOpenPct: number;
+            dayRange: number;
+            avgRange20: number;
+            rangeVsAvg: number;
+            direction: string;
+            rangeState: string;
             /** Format: date */
-            asOfDate?: string;
+            asOfDate: string;
         };
         IngestTrust: {
-            overall?: string;
-            sources?: components["schemas"]["SourceTrust"][];
+            overall: string;
+            sources: components["schemas"]["SourceTrust"][];
         };
         SourceTrust: {
-            source?: string;
-            status?: string;
-            lastRunStatus?: string;
+            source: string;
+            status: string;
+            lastRunStatus: string;
             /** Format: date-time */
-            lastRunAt?: string;
-            stale?: boolean;
+            lastRunAt: string;
+            stale: boolean;
         };
         Vix: {
-            level?: number;
-            change?: number;
-            changePct?: number;
-            band?: string;
+            level: number;
+            change: number;
+            changePct: number;
+            band: string;
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         ConnectingDots: {
-            underlying?: string;
-            interval?: string;
+            underlying: string;
+            interval: string;
             /** Format: date-time */
-            asOf?: string;
-            derived?: boolean;
-            rows?: components["schemas"]["ConnectingDotsRow"][];
+            asOf: string;
+            derived: boolean;
+            rows: components["schemas"]["ConnectingDotsRow"][];
         };
         ConnectingDotsRow: {
-            timeInterval?: string;
+            timeInterval: string;
             /** Format: int32 */
-            trend?: number;
+            trend: number;
             /** Format: int32 */
-            dow?: number;
+            dow: number;
             /** Format: int32 */
-            vix?: number;
+            vix: number;
             /** Format: int32 */
-            volume?: number;
+            volume: number;
             /** Format: int32 */
-            activeStrikeIv?: number;
+            activeStrikeIv: number;
             /** Format: int32 */
-            activeStrikeOi?: number;
+            activeStrikeOi: number;
             /** Format: int32 */
-            futOi?: number;
+            futOi: number;
             /** Format: int32 */
-            vwap?: number;
+            vwap: number;
             /** Format: int32 */
-            supertrend?: number;
+            supertrend: number;
             /** Format: int32 */
-            rsi?: number;
+            rsi: number;
             /** Format: int32 */
-            futPrice?: number;
+            futPrice: number;
             /** Format: int32 */
-            dailyTrend?: number;
+            dailyTrend: number;
         };
         Candle: {
-            exchange?: string;
-            tradingsymbol?: string;
-            interval?: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
             /** Format: date-time */
-            bucket?: string;
-            open?: number;
-            high?: number;
-            low?: number;
-            close?: number;
+            bucket: string;
+            open: number;
+            high: number;
+            low: number;
+            close: number;
             /** Format: int64 */
-            volume?: number;
+            volume: number;
             /** Format: int64 */
-            oi?: number;
-            source?: string;
+            oi: number;
+            source: string;
         };
         CandlesResponse: {
-            items?: components["schemas"]["Candle"][];
-            stale?: boolean;
+            items: components["schemas"]["Candle"][];
+            stale: boolean;
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
             /** Format: int32 */
-            limit?: number;
+            limit: number;
             /** Format: int32 */
-            offset?: number;
+            offset: number;
             /** Format: int32 */
-            total?: number;
+            total: number;
         };
         Breadth: {
-            summary?: components["schemas"]["BreadthSummary"];
-            topDelivery?: components["schemas"]["DeliveryRow"][];
+            summary: components["schemas"]["BreadthSummary"];
+            topDelivery: components["schemas"]["DeliveryRow"][];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
             freshness?: components["schemas"]["DataFreshness"];
         };
         BreadthSummary: {
             /** Format: date */
-            tradeDate?: string;
+            tradeDate: string;
             /** Format: int32 */
-            advances?: number;
+            advances: number;
             /** Format: int32 */
-            declines?: number;
+            declines: number;
             /** Format: int32 */
-            unchanged?: number;
+            unchanged: number;
             /** Format: int32 */
-            total?: number;
-            avgDeliveryPct?: number;
+            total: number;
+            avgDeliveryPct: number;
         };
         DeliveryRow: {
-            symbol?: string;
-            deliveryPct?: number;
-            close?: number;
-            pctChange?: number;
+            symbol: string;
+            deliveryPct: number;
+            close: number;
+            pctChange: number;
         };
         LiveBreadth: {
-            index?: string;
-            summary?: components["schemas"]["LiveBreadthSummary"];
-            live?: boolean;
+            index: string;
+            summary: components["schemas"]["LiveBreadthSummary"];
+            live: boolean;
             /** Format: date */
-            asOf?: string;
+            asOf: string;
         };
         LiveBreadthSummary: {
             /** Format: int32 */
-            advances?: number;
+            advances: number;
             /** Format: int32 */
-            declines?: number;
+            declines: number;
             /** Format: int32 */
-            unchanged?: number;
+            unchanged: number;
             /** Format: int32 */
-            total?: number;
+            total: number;
         };
         BreadthDay: {
             /** Format: date */
-            tradeDate?: string;
+            tradeDate: string;
             /** Format: int32 */
-            advances?: number;
+            advances: number;
             /** Format: int32 */
-            declines?: number;
+            declines: number;
             /** Format: int32 */
-            unchanged?: number;
+            unchanged: number;
             /** Format: int32 */
-            total?: number;
-            avgDeliveryPct?: number;
+            total: number;
+            avgDeliveryPct: number;
             /** Format: int32 */
-            aboveSma50?: number;
+            aboveSma50: number;
             /** Format: int32 */
-            sma50Universe?: number;
+            sma50Universe: number;
             /** Format: int32 */
-            aboveSma200?: number;
+            aboveSma200: number;
             /** Format: int32 */
-            sma200Universe?: number;
+            sma200Universe: number;
         };
         BreadthHistoryResponse: {
-            items?: components["schemas"]["BreadthDay"][];
+            items: components["schemas"]["BreadthDay"][];
             /** Format: date */
-            from?: string;
+            from: string;
             /** Format: date */
-            to?: string;
+            to: string;
         };
         QuotaStatus: {
-            configured?: boolean;
-            windows?: components["schemas"]["WindowStat"][];
+            configured: boolean;
+            windows: components["schemas"]["WindowStat"][];
         };
         WindowStat: {
-            window?: string;
+            window: string;
             /** Format: int32 */
-            used?: number;
+            used: number;
             /** Format: int32 */
-            max?: number;
+            max: number;
             /** Format: int32 */
-            remaining?: number;
+            remaining: number;
         };
         ExpiriesResponse: {
-            items?: string[];
+            items: string[];
         };
         ContractsResponse: {
-            items?: components["schemas"]["ExportContract"][];
+            items: components["schemas"]["ExportContract"][];
         };
         ExportContract: {
-            exchange?: string;
-            tradingsymbol?: string;
-            strike?: number;
-            instrumentType?: string;
+            exchange: string;
+            tradingsymbol: string;
+            strike: number;
+            instrumentType: string;
         };
         CoverageRow: {
-            underlying?: string;
-            exchange?: string;
+            underlying: string;
+            exchange: string;
             /** Format: int64 */
-            contracts?: number;
+            contracts: number;
             /** Format: int64 */
-            complete?: number;
+            complete: number;
             /** Format: int64 */
-            partial?: number;
+            partial: number;
             /** Format: date */
-            minExpiry?: string;
+            minExpiry: string;
             /** Format: date */
-            maxExpiry?: string;
+            maxExpiry: string;
             /** Format: int64 */
-            candleRows?: number;
+            candleRows: number;
         };
         CoverageSummary: {
-            items?: components["schemas"]["CoverageRow"][];
+            items: components["schemas"]["CoverageRow"][];
         };
         BackfillJobRow: {
             /** Format: int64 */
-            id?: number;
-            kind?: string;
-            params?: string;
-            status?: string;
+            id: number;
+            kind: string;
+            params: string;
+            status: string;
             /** Format: int64 */
-            rowsWritten?: number;
-            error?: string;
+            rowsWritten: number;
+            error: string;
             /** Format: date-time */
-            startedAt?: string;
+            startedAt: string;
             /** Format: date-time */
-            finishedAt?: string;
+            finishedAt: string;
         };
         BackfillJobsResponse: {
-            items?: components["schemas"]["BackfillJobRow"][];
+            items: components["schemas"]["BackfillJobRow"][];
         };
         Instrument: {
-            exchange?: string;
-            tradingsymbol?: string;
+            exchange: string;
+            tradingsymbol: string;
             /** Format: int64 */
-            instrumentToken?: number;
-            name?: string;
-            segment?: string;
-            instrumentType?: string;
-            underlyingExchange?: string;
-            underlyingTradingsymbol?: string;
+            instrumentToken: number;
+            name: string;
+            segment: string;
+            instrumentType: string;
+            underlyingExchange: string;
+            underlyingTradingsymbol: string;
             /** Format: date */
-            expiry?: string;
-            strike?: number;
-            tickSize?: number;
+            expiry: string;
+            strike: number;
+            tickSize: number;
             /** Format: int32 */
-            lotSize?: number;
-            active?: boolean;
+            lotSize: number;
+            active: boolean;
         };
         PageInstrument: {
-            items?: components["schemas"]["Instrument"][];
+            items: components["schemas"]["Instrument"][];
             /** Format: int64 */
-            total?: number;
+            total: number;
             /** Format: int32 */
-            limit?: number;
+            limit: number;
             /** Format: int32 */
-            offset?: number;
+            offset: number;
         };
         Underlying: {
-            exchange?: string;
-            tradingsymbol?: string;
+            exchange: string;
+            tradingsymbol: string;
         };
         SyncStatus: {
-            jobId?: string;
-            state?: string;
+            jobId: string;
+            state: string;
             /** Format: date-time */
-            lastRun?: string;
-            perExchangeRows?: {
+            lastRun: string;
+            perExchangeRows: {
                 [key: string]: number;
             };
             /** Format: int64 */
-            durationMs?: number;
-            error?: string;
+            durationMs: number;
+            error: string;
         };
         Constituent: {
-            exchange?: string;
-            tradingsymbol?: string;
+            exchange: string;
+            tradingsymbol: string;
         };
         ConstituentsResponse: {
-            index?: string;
+            index: string;
             /** Format: date */
-            asOf?: string;
-            checksum?: string;
-            items?: components["schemas"]["Constituent"][];
+            asOf: string;
+            checksum: string;
+            items: components["schemas"]["Constituent"][];
         };
         KiteStatus: {
-            connected?: boolean;
-            profile?: string;
-            state?: string;
-            kiteUserId?: string;
+            connected: boolean;
+            profile: string;
+            state: string;
+            kiteUserId: string;
             /** Format: date-time */
-            tokenValidUntil?: string;
+            tokenValidUntil: string;
             /** Format: date-time */
-            lastValidatedAt?: string;
-            tickerState?: string;
-            circuitState?: string;
+            lastValidatedAt: string;
+            tickerState: string;
+            circuitState: string;
             /** Format: date-time */
-            lastContractCheck?: string;
-            contractDrift?: string[];
+            lastContractCheck: string;
+            contractDrift: string[];
         };
         ErrorResponse: {
             code?: string;

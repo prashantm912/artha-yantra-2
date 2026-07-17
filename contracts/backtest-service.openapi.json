@@ -1524,7 +1524,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "createdAt", "filter", "id", "kind", "name" ]
       },
       "BacktestRunRequest" : {
         "type" : "object",
@@ -1619,7 +1620,8 @@
           "status" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "jobId", "status" ]
       },
       "DatasetEpochRequest" : {
         "type" : "object",
@@ -1693,7 +1695,8 @@
           "createdAt" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "createdAt", "exchange", "id", "interval", "jobLink", "note", "reason", "source", "symbols", "windowEnd", "windowStart" ]
       },
       "CounterfactualRunRequest" : {
         "type" : "object",
@@ -1783,7 +1786,8 @@
           "status" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "jobId", "status" ]
       },
       "JobAnnotationRequest" : {
         "type" : "object",
@@ -1814,7 +1818,8 @@
           "note" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "jobId", "note", "tags" ]
       },
       "SwingReportCard" : {
         "type" : "object",
@@ -1855,7 +1860,8 @@
           "grade" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "avgBarsHeld", "avgLossPct", "avgWinPct", "battingAvgPct", "expectancyPct", "grade", "losses", "meetsReliabilityBar", "payoffRatio", "trades", "wins" ]
       },
       "DecisionTraceResponse" : {
         "type" : "object",
@@ -1866,7 +1872,8 @@
               "$ref" : "#/components/schemas/Trace"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
       "Trace" : {
         "type" : "object",
@@ -1892,7 +1899,8 @@
           "sampleBreakdown" : {
             "$ref" : "#/components/schemas/JsonNode"
           }
-        }
+        },
+        "required" : [ "bars", "maxComposite", "reason", "sampleBreakdown", "sampleBucket", "sessionDate" ]
       },
       "SavedViewsResponse" : {
         "type" : "object",
@@ -1903,7 +1911,8 @@
               "$ref" : "#/components/schemas/SavedView"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
       "ProvenanceBlock" : {
         "type" : "object",
@@ -1948,7 +1957,8 @@
           "premiumContentUnverified" : {
             "type" : "boolean"
           }
-        }
+        },
+        "required" : [ "configHash", "contentHash", "costClass", "dataHash", "datasetEpoch", "engineImage", "engineSha", "evidencePolicy", "premiumContentUnverified", "premiumSource", "profile", "universeChecksum", "warmStatus" ]
       },
       "RunComparability" : {
         "type" : "object",
@@ -1982,7 +1992,8 @@
               "$ref" : "#/components/schemas/DatasetEpoch"
             }
           }
-        }
+        },
+        "required" : [ "contentHash", "currentEpoch", "datasetEpochAtRun", "engineSha", "evidencePolicy", "runId", "stale", "staleEpochs" ]
       },
       "ExperimentListResponse" : {
         "type" : "object",
@@ -2001,7 +2012,8 @@
             "type" : "integer",
             "format" : "int32"
           }
-        }
+        },
+        "required" : [ "items", "limit", "offset" ]
       },
       "ExperimentSummary" : {
         "type" : "object",
@@ -2076,7 +2088,8 @@
           "completedAt" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "completedAt", "createdBy", "dataHash", "endTs", "engineSha", "exchange", "interval", "jobId", "kind", "maxDrawdown", "parentJobId", "premiumSource", "purpose", "runId", "sharpe", "startTs", "strategyId", "strategyVersion", "strategyVersionId", "totalReturn", "tradeCount", "tradingsymbol", "universeChecksum" ]
       },
       "CompareMetrics" : {
         "type" : "object",
@@ -2115,7 +2128,8 @@
             "type" : "integer",
             "format" : "int32"
           }
-        }
+        },
+        "required" : [ "alpha", "beta", "cagr", "informationRatio", "maxDrawdown", "profitFactor", "sharpe", "sortino", "totalReturn", "tradeCount", "winRate" ]
       },
       "ExperimentCompareResponse" : {
         "type" : "object",
@@ -2129,7 +2143,8 @@
           "likeForLike" : {
             "$ref" : "#/components/schemas/LikeForLike"
           }
-        }
+        },
+        "required" : [ "likeForLike", "runs" ]
       },
       "ExperimentCompareRun" : {
         "type" : "object",
@@ -2179,7 +2194,8 @@
           "metrics" : {
             "$ref" : "#/components/schemas/CompareMetrics"
           }
-        }
+        },
+        "required" : [ "completedAt", "contentHash", "createdBy", "dataHash", "datasetEpoch", "engineSha", "evidencePolicy", "metrics", "premiumContentUnverified", "premiumSource", "runId", "strategyId", "strategyVersion", "strategyVersionId", "universeChecksum" ]
       },
       "LikeForLike" : {
         "type" : "object",
@@ -2205,7 +2221,8 @@
           "premiumContentUnverified" : {
             "type" : "boolean"
           }
-        }
+        },
+        "required" : [ "contentHashMatch", "dataHashMatch", "datasetEpochMatch", "engineShaMatch", "premiumContentUnverified", "premiumSourceMatch", "universeMatch" ]
       },
       "DatasetEpochListResponse" : {
         "type" : "object",
@@ -2220,7 +2237,8 @@
             "type" : "integer",
             "format" : "int64"
           }
-        }
+        },
+        "required" : [ "epochs", "head" ]
       },
       "CounterfactualResult" : {
         "type" : "object",
@@ -2254,7 +2272,8 @@
           "ranAt" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "entryCount", "jobId", "ranAt", "runId", "variantCount", "variants", "windowFrom", "windowTo" ]
       },
       "VariantResult" : {
         "type" : "object",
@@ -2288,7 +2307,8 @@
               "format" : "int32"
             }
           }
-        }
+        },
+        "required" : [ "exitReasonCounts", "expectancyInr", "grossPremiumPoints", "maxDrawdownInr", "name", "netPnlInr", "tradeCount", "winRate" ]
       },
       "ErrorResponse" : {
         "type" : "object",

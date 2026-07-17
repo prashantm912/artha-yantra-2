@@ -3603,7 +3603,8 @@
               "type" : "number"
             }
           }
-        }
+        },
+        "required" : [ "capitalUsed", "cash", "dayPnl", "equity", "marginPercents", "openPositions", "realized", "startingCapital", "unrealized", "usageByClass" ]
       },
       "JournalBody" : {
         "type" : "object",
@@ -3691,7 +3692,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "backtestRunId", "backtestTradeId", "createdAt", "disciplineRating", "emotionRating", "id", "note", "paperPositionId", "signalId", "tags", "updatedAt" ]
       },
       "CreateRequest" : {
         "type" : "object",
@@ -3748,7 +3750,8 @@
           "enabled" : {
             "type" : "boolean"
           }
-        }
+        },
+        "required" : [ "enabled", "id" ]
       },
       "CloneRequest" : {
         "type" : "object",
@@ -3777,7 +3780,8 @@
           "status" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "id", "slug", "status", "version" ]
       },
       "ValidateRequest" : {
         "type" : "object",
@@ -3874,7 +3878,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "acknowledgedAt", "book", "currentPrice", "entryPrice", "evaluatedAt", "exchange", "footprint", "id", "runDate", "sellReason", "sellingNow", "setup", "setupType", "signalId", "stage", "stillBuyable", "stopLevel", "symbol", "trailLevel", "unrealizedPct", "verdict" ]
       },
       "AdmissionProbe" : {
         "type" : "object",
@@ -3904,7 +3909,8 @@
               "$ref" : "#/components/schemas/DroppedCandidate"
             }
           }
-        }
+        },
+        "required" : [ "admitted", "capBound", "capExceedance", "droppedByCap", "openAtStart", "wouldEnter" ]
       },
       "DroppedCandidate" : {
         "type" : "object",
@@ -3916,7 +3922,8 @@
             "type" : "integer",
             "format" : "int32"
           }
-        }
+        },
+        "required" : [ "admissionRank", "symbol" ]
       },
       "SwingRun" : {
         "type" : "object",
@@ -3944,7 +3951,8 @@
           "admission" : {
             "$ref" : "#/components/schemas/AdmissionProbe"
           }
-        }
+        },
+        "required" : [ "admission", "candidates", "entries", "exitSkipped", "exits", "strategies" ]
       },
       "RegisterRequest" : {
         "type" : "object",
@@ -3979,7 +3987,8 @@
           "passWhen" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "disable", "passWhen", "rail", "threshold" ]
       },
       "ShadowVariantView" : {
         "type" : "object",
@@ -4012,7 +4021,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "campaignId", "createdAt", "createdBy", "disabledAt", "enabled", "id", "name", "spec" ]
       },
       "VariantSpecView" : {
         "type" : "object",
@@ -4026,7 +4036,8 @@
           "compositeThreshold" : {
             "type" : "number"
           }
-        }
+        },
+        "required" : [ "compositeThreshold", "rails" ]
       },
       "ResetBody" : {
         "type" : "object",
@@ -4081,7 +4092,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "avgEntryPrice", "closedAt", "exchange", "id", "openedAt", "qty", "realizedPnl", "side", "tradingsymbol" ]
       },
       "OrderBody" : {
         "type" : "object",
@@ -4168,7 +4180,8 @@
           "buyingPowerWarning" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "avgEntryPrice", "buyingPowerWarning", "exchange", "id", "markPrice", "openedAt", "qty", "realizedPnl", "side", "status", "stopLoss", "takeProfit", "tradingsymbol", "unrealizedPnl" ]
       },
       "FeedbackRequest" : {
         "type" : "object",
@@ -4191,7 +4204,8 @@
           "status" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "id", "status" ]
       },
       "ActRequest" : {
         "type" : "object",
@@ -4290,7 +4304,8 @@
           "target" : {
             "type" : "number"
           }
-        }
+        },
+        "required" : [ "exchange", "qty", "side", "signalId", "stopLoss", "target", "tradingsymbol" ]
       },
       "NotificationRequest" : {
         "type" : "object",
@@ -4338,7 +4353,8 @@
           "total" : {
             "type" : "number"
           }
-        }
+        },
+        "required" : [ "brokerage", "exchangeTxn", "gst", "sebi", "stamp", "stt", "total" ]
       },
       "OpeningSignal" : {
         "type" : "object",
@@ -4378,7 +4394,8 @@
           "manasAroraDetail" : {
             "$ref" : "#/components/schemas/JsonNode"
           }
-        }
+        },
+        "required" : [ "compositeScore", "entryPrice", "generatedAt", "manasAroraDetail", "minerviniDetail", "scalperDetail", "side", "signalId", "status", "stopLoss", "target" ]
       },
       "OrderLeg" : {
         "type" : "object",
@@ -4421,7 +4438,8 @@
           "fees" : {
             "$ref" : "#/components/schemas/FeeBreakdown"
           }
-        }
+        },
+        "required" : [ "fees", "fillPrice", "fillSimulator", "filledAt", "orderId", "placedAt", "qty", "side", "signalId", "slippageApplied", "status" ]
       },
       "PositionDetail" : {
         "type" : "object",
@@ -4505,7 +4523,8 @@
               "$ref" : "#/components/schemas/OrderLeg"
             }
           }
-        }
+        },
+        "required" : [ "advisedLots", "avgEntryPrice", "book", "closeReason", "closedAt", "exchange", "id", "marginPct", "marginSnapshot", "markPrice", "openedAt", "openingSignal", "openingSignalId", "orders", "qty", "realizedPnl", "side", "status", "stopLoss", "subaccountIdx", "takeProfit", "tradingsymbol", "unrealizedPnl" ]
       },
       "AuditLogResponse" : {
         "type" : "object",
@@ -4516,7 +4535,8 @@
               "$ref" : "#/components/schemas/AuditRow"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
       "AuditRow" : {
         "type" : "object",
@@ -4544,7 +4564,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "action", "actor", "createdAt", "diffSummary", "fromVersion", "id", "toVersion" ]
       },
       "Criterion" : {
         "type" : "object",
@@ -4561,7 +4582,8 @@
           "pass" : {
             "type" : "boolean"
           }
-        }
+        },
+        "required" : [ "actual", "name", "pass", "required" ]
       },
       "GraduationBoard" : {
         "type" : "object",
@@ -4579,7 +4601,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "asOf", "strategies", "thresholds" ]
       },
       "StrategyGraduation" : {
         "type" : "object",
@@ -4622,7 +4645,8 @@
               "$ref" : "#/components/schemas/Criterion"
             }
           }
-        }
+        },
+        "required" : [ "criteria", "expectancy", "maxDrawdownPct", "name", "netRealized", "profitFactor", "slug", "stage", "strategyId", "trades", "winRate" ]
       },
       "Thresholds" : {
         "type" : "object",
@@ -4640,7 +4664,8 @@
           "maxDrawdownPct" : {
             "type" : "number"
           }
-        }
+        },
+        "required" : [ "maxDrawdownPct", "minExpectancy", "minProfitFactor", "minTrades" ]
       },
       "Promotion" : {
         "type" : "object",
@@ -4666,7 +4691,8 @@
           "maxDrawdownPct" : {
             "type" : "number"
           }
-        }
+        },
+        "required" : [ "expectancy", "graduatedAt", "maxDrawdownPct", "sharpe", "strategyId", "trades" ]
       },
       "SellDecisions" : {
         "type" : "object",
@@ -4677,7 +4703,8 @@
               "$ref" : "#/components/schemas/SellDecisionRow"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
       "SwingSellDecision" : {
         "type" : "object",
@@ -4729,7 +4756,8 @@
           "verdict" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "currentPrice", "entryPrice", "footprint", "sellReason", "sellingNow", "setup", "setupType", "signalId", "stage", "stillBuyable", "stopLevel", "symbol", "trailLevel", "unrealizedPct", "verdict" ]
       },
       "SwingSellReport" : {
         "type" : "object",
@@ -4744,7 +4772,8 @@
               "$ref" : "#/components/schemas/SwingSellDecision"
             }
           }
-        }
+        },
+        "required" : [ "asOf", "items" ]
       },
       "AdmissionProbes" : {
         "type" : "object",
@@ -4755,7 +4784,8 @@
               "$ref" : "#/components/schemas/ProbeRow"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
       "ProbeRow" : {
         "type" : "object",
@@ -4804,7 +4834,8 @@
               "$ref" : "#/components/schemas/DroppedCandidate"
             }
           }
-        }
+        },
+        "required" : [ "admitted", "batch", "candidates", "capBound", "capExceedance", "droppedByCap", "entries", "openAtStart", "ranAt", "runDate", "wouldEnter" ]
       },
       "ShadowSummaryResponse" : {
         "type" : "object",
@@ -4815,7 +4846,8 @@
               "$ref" : "#/components/schemas/VariantSummary"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
       "VariantSummary" : {
         "type" : "object",
@@ -4849,7 +4881,8 @@
             "type" : "integer",
             "format" : "int64"
           }
-        }
+        },
+        "required" : [ "closed", "losses", "open", "pnlNet", "pnlPoints", "unpriced", "variant", "wins" ]
       },
       "DotHealth" : {
         "type" : "object",
@@ -4870,7 +4903,8 @@
               "$ref" : "#/components/schemas/DotState"
             }
           }
-        }
+        },
+        "required" : [ "asOf", "dots", "rowsInspected", "session" ]
       },
       "DotState" : {
         "type" : "object",
@@ -4887,7 +4921,8 @@
           "detail" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "alive", "detail", "dot", "required" ]
       },
       "ShadowVariantListResponse" : {
         "type" : "object",
@@ -4898,7 +4933,8 @@
               "$ref" : "#/components/schemas/ShadowVariantView"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
       "MarginHeat" : {
         "type" : "object",
@@ -4936,7 +4972,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "asOf", "exposureMargin", "finalMargin", "openPositions", "priced", "pricedLegs", "requiredMargin", "spanMargin", "totalMargin", "unpricedReason" ]
       },
       "PaperEventDto" : {
         "type" : "object",
@@ -4978,7 +5015,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "book", "createdAt", "exchange", "id", "kind", "positionId", "qty", "realizedPnl", "reason", "side", "tradingsymbol" ]
       },
       "PaperEventsResponse" : {
         "type" : "object",
@@ -4989,7 +5027,8 @@
               "$ref" : "#/components/schemas/PaperEventDto"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
       "Funds" : {
         "type" : "object",
@@ -5012,7 +5051,8 @@
           "utilisedDebits" : {
             "type" : "number"
           }
-        }
+        },
+        "required" : [ "availableCash", "collateral", "m2mRealized", "m2mUnrealized", "status", "utilisedDebits" ]
       },
       "Insight" : {
         "type" : "object",
@@ -5081,7 +5121,8 @@
           "configHash" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "configHash", "cooldownUntil", "dataTrust", "dedupeKey", "engineVersion", "evidence", "expiresAt", "explanation", "generatedAt", "id", "priority", "priorityDetail", "scope", "severity", "status", "suppressed", "title", "trustReasons", "type" ]
       },
       "InsightListResponse" : {
         "type" : "object",
@@ -5100,7 +5141,8 @@
             "type" : "integer",
             "format" : "int32"
           }
-        }
+        },
+        "required" : [ "items", "limit", "offset" ]
       },
       "FamilyTrust" : {
         "type" : "object",
@@ -5121,7 +5163,8 @@
           "asOf" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "asOf", "family", "reasons", "state" ]
       },
       "TrustSummaryResponse" : {
         "type" : "object",
@@ -5135,7 +5178,8 @@
               "$ref" : "#/components/schemas/FamilyTrust"
             }
           }
-        }
+        },
+        "required" : [ "asOf", "families" ]
       },
       "Count" : {
         "type" : "object",
@@ -5147,7 +5191,8 @@
             "type" : "integer",
             "format" : "int64"
           }
-        }
+        },
+        "required" : [ "count", "key" ]
       },
       "InsightSummaryResponse" : {
         "type" : "object",
@@ -5168,7 +5213,8 @@
             "type" : "integer",
             "format" : "int64"
           }
-        }
+        },
+        "required" : [ "bySeverity", "byStatus", "suppressed" ]
       },
       "CrossingEntry" : {
         "type" : "object",
@@ -5183,7 +5229,8 @@
           "title" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "at", "severity", "title" ]
       },
       "Dossier" : {
         "type" : "object",
@@ -5241,7 +5288,8 @@
               "type" : "string"
             }
           }
-        }
+        },
+        "required" : [ "asOf", "criteria", "crossingTimeline", "enabled", "graduatedAt", "name", "notes", "openSellDecisions", "rejectionProfile", "slug", "stage", "strategyId" ]
       },
       "OpenSell" : {
         "type" : "object",
@@ -5266,7 +5314,8 @@
           "acknowledged" : {
             "type" : "boolean"
           }
-        }
+        },
+        "required" : [ "acknowledged", "runDate", "sellDecisionId", "symbol", "unrealizedPct", "verdict" ]
       },
       "RailCount" : {
         "type" : "object",
@@ -5278,7 +5327,8 @@
             "type" : "integer",
             "format" : "int64"
           }
-        }
+        },
+        "required" : [ "count", "rail" ]
       },
       "NotificationEventRow" : {
         "type" : "object",
@@ -5316,7 +5366,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "attempts", "channel", "createdAt", "detail", "id", "insightId", "signalId", "status", "strategyId" ]
       },
       "NotificationEventsResponse" : {
         "type" : "object",
@@ -5327,7 +5378,8 @@
               "$ref" : "#/components/schemas/NotificationEventRow"
             }
           }
-        }
+        },
+        "required" : [ "items" ]
       },
       "FocusResponse" : {
         "type" : "object",
@@ -5348,7 +5400,8 @@
             "type" : "integer",
             "format" : "int64"
           }
-        }
+        },
+        "required" : [ "attentionQueue", "signalQueue", "suppressed" ]
       },
       "Contrast" : {
         "type" : "object",
@@ -5373,7 +5426,8 @@
           "meanSupportRatioRejected" : {
             "type" : "number"
           }
-        }
+        },
+        "required" : [ "firedCount", "meanCompositeFired", "meanCompositeRejected", "meanSupportRatioFired", "meanSupportRatioRejected", "rejectedCount" ]
       },
       "FiredRow" : {
         "type" : "object",
@@ -5403,7 +5457,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "composite", "dotSupports", "dotTotal", "generatedAt", "side", "signalId", "tradingsymbol" ]
       },
       "FiredVsRejectedResponse" : {
         "type" : "object",
@@ -5431,7 +5486,8 @@
           "contrast" : {
             "$ref" : "#/components/schemas/Contrast"
           }
-        }
+        },
+        "required" : [ "contrast", "day", "fired", "rejected", "strategyVersionId" ]
       },
       "RejectedRow" : {
         "type" : "object",
@@ -5467,7 +5523,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "blockingRail", "composite", "dotSupports", "dotTotal", "generatedAt", "rejectionId", "side", "threshold", "tradingsymbol" ]
       },
       "CompareColumn" : {
         "type" : "object",
@@ -5530,7 +5587,8 @@
           "scored" : {
             "type" : "string"
           }
-        }
+        },
+        "required" : [ "band", "book", "components", "dataTrust", "entryPrice", "family", "marginEstimate", "optionLegCost", "priority", "riskReward", "scored", "side", "signalId", "stopLoss", "target", "tradingsymbol", "trustReasons" ]
       },
       "CompareResult" : {
         "type" : "object",
@@ -5557,7 +5615,8 @@
               "type" : "string"
             }
           }
-        }
+        },
+        "required" : [ "booksDiffer", "columns", "differsMost", "notes", "session" ]
       },
       "ComponentPoint" : {
         "type" : "object",
@@ -5571,7 +5630,8 @@
           "c" : {
             "type" : "number"
           }
-        }
+        },
+        "required" : [ "c", "key", "points" ]
       },
       "ErrorResponse" : {
         "type" : "object",

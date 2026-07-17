@@ -495,12 +495,12 @@ export interface components {
             filter?: components["schemas"]["JsonNode"];
         };
         SavedView: {
-            id?: string;
-            kind?: string;
-            name?: string;
-            filter?: components["schemas"]["JsonNode"];
+            id: string;
+            kind: string;
+            name: string;
+            filter: components["schemas"]["JsonNode"];
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
         };
         BacktestRunRequest: {
             strategyId?: string;
@@ -532,8 +532,8 @@ export interface components {
             variant?: string;
         };
         DeepSwingSubmitResponse: {
-            jobId?: string;
-            status?: string;
+            jobId: string;
+            status: string;
         };
         DatasetEpochRequest: {
             reason?: string;
@@ -547,17 +547,17 @@ export interface components {
         };
         DatasetEpoch: {
             /** Format: int64 */
-            id?: number;
-            reason?: string;
-            symbols?: string[];
-            exchange?: string;
-            windowStart?: string;
-            windowEnd?: string;
-            interval?: string;
-            jobLink?: string;
-            source?: string;
-            note?: string;
-            createdAt?: string;
+            id: number;
+            reason: string;
+            symbols: string[];
+            exchange: string;
+            windowStart: string;
+            windowEnd: string;
+            interval: string;
+            jobLink: string;
+            source: string;
+            note: string;
+            createdAt: string;
         };
         CounterfactualRunRequest: {
             from?: string;
@@ -587,183 +587,183 @@ export interface components {
             exitKnobs?: components["schemas"]["ExitKnobs"];
         };
         CounterfactualSubmitResponse: {
-            jobId?: string;
-            status?: string;
+            jobId: string;
+            status: string;
         };
         JobAnnotationRequest: {
             tags?: string[];
             note?: string;
         };
         JobAnnotationResponse: {
-            jobId?: string;
-            tags?: string[];
-            note?: string;
+            jobId: string;
+            tags: string[];
+            note: string;
         };
         SwingReportCard: {
             /** Format: int32 */
-            trades?: number;
+            trades: number;
             /** Format: int32 */
-            wins?: number;
+            wins: number;
             /** Format: int32 */
-            losses?: number;
-            battingAvgPct?: number;
-            avgWinPct?: number;
-            avgLossPct?: number;
-            payoffRatio?: number;
-            expectancyPct?: number;
-            avgBarsHeld?: number;
-            meetsReliabilityBar?: boolean;
-            grade?: string;
+            losses: number;
+            battingAvgPct: number;
+            avgWinPct: number;
+            avgLossPct: number;
+            payoffRatio: number;
+            expectancyPct: number;
+            avgBarsHeld: number;
+            meetsReliabilityBar: boolean;
+            grade: string;
         };
         DecisionTraceResponse: {
-            items?: components["schemas"]["Trace"][];
+            items: components["schemas"]["Trace"][];
         };
         Trace: {
             /** Format: date */
-            sessionDate?: string;
-            reason?: string;
+            sessionDate: string;
+            reason: string;
             /** Format: int32 */
-            bars?: number;
-            maxComposite?: number;
+            bars: number;
+            maxComposite: number;
             /** Format: date-time */
-            sampleBucket?: string;
-            sampleBreakdown?: components["schemas"]["JsonNode"];
+            sampleBucket: string;
+            sampleBreakdown: components["schemas"]["JsonNode"];
         };
         SavedViewsResponse: {
-            items?: components["schemas"]["SavedView"][];
+            items: components["schemas"]["SavedView"][];
         };
         ProvenanceBlock: {
-            engineSha?: string;
-            engineImage?: string;
-            configHash?: string;
-            dataHash?: string;
-            contentHash?: string;
+            engineSha: string;
+            engineImage: string;
+            configHash: string;
+            dataHash: string;
+            contentHash: string;
             /** Format: int64 */
-            datasetEpoch?: number;
-            evidencePolicy?: string;
-            universeChecksum?: string;
-            premiumSource?: string;
-            costClass?: string;
-            profile?: string;
-            warmStatus?: string;
-            premiumContentUnverified?: boolean;
+            datasetEpoch: number;
+            evidencePolicy: string;
+            universeChecksum: string;
+            premiumSource: string;
+            costClass: string;
+            profile: string;
+            warmStatus: string;
+            premiumContentUnverified: boolean;
         };
         RunComparability: {
-            runId?: string;
+            runId: string;
             /** Format: int64 */
-            datasetEpochAtRun?: number;
+            datasetEpochAtRun: number;
             /** Format: int64 */
-            currentEpoch?: number;
-            stale?: boolean;
-            contentHash?: string;
-            engineSha?: string;
-            evidencePolicy?: string;
-            staleEpochs?: components["schemas"]["DatasetEpoch"][];
+            currentEpoch: number;
+            stale: boolean;
+            contentHash: string;
+            engineSha: string;
+            evidencePolicy: string;
+            staleEpochs: components["schemas"]["DatasetEpoch"][];
         };
         ExperimentListResponse: {
-            items?: components["schemas"]["ExperimentSummary"][];
+            items: components["schemas"]["ExperimentSummary"][];
             /** Format: int32 */
-            limit?: number;
+            limit: number;
             /** Format: int32 */
-            offset?: number;
+            offset: number;
         };
         ExperimentSummary: {
-            runId?: string;
-            jobId?: string;
-            kind?: string;
-            parentJobId?: string;
-            strategyVersionId?: string;
-            strategyId?: string;
-            strategyVersion?: string;
-            purpose?: string;
-            exchange?: string;
-            tradingsymbol?: string;
-            interval?: string;
-            startTs?: string;
-            endTs?: string;
-            totalReturn?: string;
-            sharpe?: string;
-            maxDrawdown?: string;
+            runId: string;
+            jobId: string;
+            kind: string;
+            parentJobId: string;
+            strategyVersionId: string;
+            strategyId: string;
+            strategyVersion: string;
+            purpose: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
+            startTs: string;
+            endTs: string;
+            totalReturn: string;
+            sharpe: string;
+            maxDrawdown: string;
             /** Format: int32 */
-            tradeCount?: number;
-            dataHash?: string;
-            universeChecksum?: string;
-            engineSha?: string;
-            premiumSource?: string;
-            createdBy?: string;
-            completedAt?: string;
+            tradeCount: number;
+            dataHash: string;
+            universeChecksum: string;
+            engineSha: string;
+            premiumSource: string;
+            createdBy: string;
+            completedAt: string;
         };
         CompareMetrics: {
-            totalReturn?: string;
-            cagr?: string;
-            sharpe?: string;
-            sortino?: string;
-            maxDrawdown?: string;
-            winRate?: string;
-            profitFactor?: string;
-            alpha?: string;
-            beta?: string;
-            informationRatio?: string;
+            totalReturn: string;
+            cagr: string;
+            sharpe: string;
+            sortino: string;
+            maxDrawdown: string;
+            winRate: string;
+            profitFactor: string;
+            alpha: string;
+            beta: string;
+            informationRatio: string;
             /** Format: int32 */
-            tradeCount?: number;
+            tradeCount: number;
         };
         ExperimentCompareResponse: {
-            runs?: components["schemas"]["ExperimentCompareRun"][];
-            likeForLike?: components["schemas"]["LikeForLike"];
+            runs: components["schemas"]["ExperimentCompareRun"][];
+            likeForLike: components["schemas"]["LikeForLike"];
         };
         ExperimentCompareRun: {
-            runId?: string;
-            strategyVersionId?: string;
-            strategyId?: string;
-            strategyVersion?: string;
-            dataHash?: string;
-            universeChecksum?: string;
-            engineSha?: string;
-            premiumSource?: string;
-            contentHash?: string;
-            datasetEpoch?: string;
-            evidencePolicy?: string;
-            premiumContentUnverified?: boolean;
-            createdBy?: string;
-            completedAt?: string;
-            metrics?: components["schemas"]["CompareMetrics"];
+            runId: string;
+            strategyVersionId: string;
+            strategyId: string;
+            strategyVersion: string;
+            dataHash: string;
+            universeChecksum: string;
+            engineSha: string;
+            premiumSource: string;
+            contentHash: string;
+            datasetEpoch: string;
+            evidencePolicy: string;
+            premiumContentUnverified: boolean;
+            createdBy: string;
+            completedAt: string;
+            metrics: components["schemas"]["CompareMetrics"];
         };
         LikeForLike: {
-            dataHashMatch?: boolean;
-            universeMatch?: boolean;
-            engineShaMatch?: boolean;
-            premiumSourceMatch?: boolean;
-            contentHashMatch?: boolean;
-            datasetEpochMatch?: boolean;
-            premiumContentUnverified?: boolean;
+            dataHashMatch: boolean;
+            universeMatch: boolean;
+            engineShaMatch: boolean;
+            premiumSourceMatch: boolean;
+            contentHashMatch: boolean;
+            datasetEpochMatch: boolean;
+            premiumContentUnverified: boolean;
         };
         DatasetEpochListResponse: {
-            epochs?: components["schemas"]["DatasetEpoch"][];
+            epochs: components["schemas"]["DatasetEpoch"][];
             /** Format: int64 */
-            head?: number;
+            head: number;
         };
         CounterfactualResult: {
-            runId?: string;
-            jobId?: string;
-            windowFrom?: string;
-            windowTo?: string;
+            runId: string;
+            jobId: string;
+            windowFrom: string;
+            windowTo: string;
             /** Format: int32 */
-            entryCount?: number;
+            entryCount: number;
             /** Format: int32 */
-            variantCount?: number;
-            variants?: components["schemas"]["VariantResult"][];
-            ranAt?: string;
+            variantCount: number;
+            variants: components["schemas"]["VariantResult"][];
+            ranAt: string;
         };
         VariantResult: {
-            name?: string;
+            name: string;
             /** Format: int32 */
-            tradeCount?: number;
-            netPnlInr?: number;
-            grossPremiumPoints?: number;
-            winRate?: number;
-            expectancyInr?: number;
-            maxDrawdownInr?: number;
-            exitReasonCounts?: {
+            tradeCount: number;
+            netPnlInr: number;
+            grossPremiumPoints: number;
+            winRate: number;
+            expectancyInr: number;
+            maxDrawdownInr: number;
+            exitReasonCounts: {
                 [key: string]: number;
             };
         };

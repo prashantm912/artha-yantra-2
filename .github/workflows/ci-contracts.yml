@@ -19,21 +19,30 @@
 # exchange / tradingsymbol out of market-data's constituents response via JsonNode.path().
 # A renamed key silently breaks live universe resolution and no compiler catches it.
 #
-# HONEST LIMITATION - this gate CANNOT yet catch that renamed key. Measured 2026-07-17
-# against the real specs with the real image (openapi-diff 2.1.7); two independent defects:
-#   1. Our specs say openapi: 3.1.0, and openapi-diff 2.1.7 does not diff 3.1 schemas.
-#      A response property retyped string->integer reports "No differences. Specifications
-#      are equivalent". Relabelling the SAME bytes to 3.0.1 reports "broke backward
-#      compatibility" (exit 1). All four specs contain zero 3.1-only constructs.
-#   2. springdoc emits no `required` array for record-backed response schemas, so every
-#      property is optional - and openapi-diff has no "response property removed" rule at
-#      all (its enum has only incompatible.response.required.decreased). Removing or
-#      renaming an OPTIONAL response property is "backward compatible" by construction.
-# So what it DOES catch today: a removed endpoint, a removed/renamed response code, and a
-# newly-required request param - against main, which it never did before. What it does NOT
-# catch: any schema-shape change. Closing that needs an owner decision (upgrade
-# openapi-diff / emit 3.0 / emit `required`) and touches service code, not this file.
-# Do not re-broaden this comment into a promise the tooling does not keep.
+# task_ade97df8 - THE GATE CAN NOW SEE A RENAMED RESPONSE KEY. It could not before, for two
+# independent reasons, and NEITHER fix alone was enough (all measured against the real specs
+# with the real image, openapi-diff 2.1.7):
+#   1. openapi-diff does not diff `openapi: 3.1.0` schemas. At 3.1.0 a RENAMED response
+#      property reports "No differences. Specifications are equivalent" - the property-set
+#      change is not even recorded - and a retype reports the nonsense "Changed property type:
+#      checksum (object -> object)", because the parser never resolves `type: string` at 3.1.
+#      So the gate now relabels BOTH sides to 3.0.1 for the DIFF STEP ONLY (the committed specs
+#      stay 3.1.0). openapi_relabel_30.py REFUSES to relabel a spec using a 3.1-only construct
+#      rather than mangle it silently; all four specs contain zero such constructs today.
+#   2. springdoc emitted no `required` array for record-backed schemas, so every property was
+#      optional - and openapi-diff has no "response property removed" rule at all (its enum has
+#      only incompatible.response.required.decreased). A renamed OPTIONAL response property was
+#      "backward compatible" by construction. common-web-core's RecordRequiredModelConverter +
+#      ResponseRequiredCustomizer now emit `required` for the record components Jackson always
+#      writes. RESPONSE-ONLY schemas: on a request body `required` would claim the client MUST
+#      send a key the server actually accepts as absent.
+# With both, a renamed response key reports "Missing property: items[n].tradingsymbol (string)"
+# and exits 1. Adding a response field stays green (required INCREASED on a response = the
+# server promising more).
+# STILL NOT CAUGHT, deliberately: a rename inside a RECORD reachable from BOTH a request and a
+# response (no such record exists today — ItemRequest is request-only, and JsonNode, which does
+# appear in both, is not a record so it never carries `required` anyway), and any request-body
+# property rename. Do not broaden this comment past what is measured.
 name: ci-contracts
 
 on:
@@ -43,6 +52,7 @@ on:
       - "libs/**"
       - "contracts/**"
       - ".github/workflows/ci-contracts.yml"
+      - ".github/scripts/openapi_relabel_30.py"
   push:
     branches: [main]
 
@@ -112,22 +122,39 @@ jobs:
               ;;
           esac
 
-          mkdir -p /tmp/basespec
+          # openapi_relabel_30.py validates each relabeled spec against the OpenAPI 3.0 schema and
+          # refuses (exit 2) on any 3.1-only construct - the allow-list backstop that makes the
+          # relabel sound (a deny-list cannot). --break-system-packages: the ubuntu-latest system
+          # python is PEP-668 externally-managed. If this install fails the script's own import
+          # guard fails the gate CLOSED (a loud exit 2), never a silent skip.
+          python3 -m pip install --quiet --break-system-packages openapi-spec-validator
+
+          mkdir -p /tmp/basespec /tmp/freshspec
           broke=""
           for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do
             echo "=== $svc ==="
             # A spec absent from the merge base = a NEW service. Nothing on main consumes it
             # yet, so there is no compatibility question to answer.
-            if ! git show "$BASE_SHA:contracts/$svc.openapi.json" > "/tmp/basespec/$svc.openapi.json" 2>/dev/null; then
+            if ! git show "$BASE_SHA:contracts/$svc.openapi.json" > "/tmp/basespec/raw-$svc.json" 2>/dev/null; then
               echo "::notice::$svc has no spec at the merge base (new service) - nothing to break."
               continue
             fi
+            # task_ade97df8 - RELABEL BOTH SIDES TO 3.0.1 FOR THE DIFF STEP ONLY. openapi-diff
+            # 2.1.7 does not diff 3.1 schemas: at 3.1.0 a RENAMED response property reports "No
+            # differences. Specifications are equivalent". The same bytes at 3.0.1 report
+            # "Missing property: items[n].tradingsymbol (string)" and exit 1. The COMMITTED specs
+            # stay 3.1.0; these are throwaway copies. The script REFUSES to relabel a spec that
+            # uses a 3.1-only construct (exit 2) rather than silently mangle it.
+            python3 .github/scripts/openapi_relabel_30.py \
+              "/tmp/basespec/raw-$svc.json" "/tmp/basespec/$svc.openapi.json" 3.0.1
+            python3 .github/scripts/openapi_relabel_30.py \
+              "services/$svc/target/contracts/$svc.openapi.json" "/tmp/freshspec/$svc.openapi.json" 3.0.1
             # No pipe, no `||`: the exit code must survive. `set +e`/`set -e` around the call so we
             # can read the STATUS rather than only "nonzero", which `if !` would flatten.
             set +e
             docker run --rm \
               -v "/tmp/basespec:/base:ro" \
-              -v "$PWD/services/$svc/target/contracts:/fresh:ro" \
+              -v "/tmp/freshspec:/fresh:ro" \
               openapitools/openapi-diff:latest \
               --fail-on-incompatible \
               "/base/$svc.openapi.json" "/fresh/$svc.openapi.json"

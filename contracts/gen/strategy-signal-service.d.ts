@@ -1177,19 +1177,19 @@ export interface components {
             book?: string;
         };
         AccountDto: {
-            startingCapital?: number;
-            cash?: number;
-            equity?: number;
-            realized?: number;
-            unrealized?: number;
-            dayPnl?: number;
+            startingCapital: number;
+            cash: number;
+            equity: number;
+            realized: number;
+            unrealized: number;
+            dayPnl: number;
             /** Format: int32 */
-            openPositions?: number;
-            capitalUsed?: number;
-            usageByClass?: {
+            openPositions: number;
+            capitalUsed: number;
+            usageByClass: {
                 [key: string]: number;
             };
-            marginPercents?: {
+            marginPercents: {
                 [key: string]: number;
             };
         };
@@ -1211,25 +1211,25 @@ export interface components {
         };
         Entry: {
             /** Format: int64 */
-            id?: number;
+            id: number;
             /** Format: int64 */
-            signalId?: number;
+            signalId: number;
             /** Format: int64 */
-            paperPositionId?: number;
+            paperPositionId: number;
             /** Format: uuid */
-            backtestRunId?: string;
+            backtestRunId: string;
             /** Format: int64 */
-            backtestTradeId?: number;
-            note?: string;
-            tags?: string[];
+            backtestTradeId: number;
+            note: string;
+            tags: string[];
             /** Format: int32 */
-            disciplineRating?: number;
+            disciplineRating: number;
             /** Format: int32 */
-            emotionRating?: number;
+            emotionRating: number;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
             /** Format: date-time */
-            updatedAt?: string;
+            updatedAt: string;
         };
         CreateRequest: {
             name?: string;
@@ -1248,8 +1248,8 @@ export interface components {
         };
         ToggleResult: {
             /** Format: uuid */
-            id?: string;
-            enabled?: boolean;
+            id: string;
+            enabled: boolean;
         };
         CloneRequest: {
             name?: string;
@@ -1257,10 +1257,10 @@ export interface components {
         };
         CloneResult: {
             /** Format: uuid */
-            id?: string;
-            slug?: string;
-            version?: string;
-            status?: string;
+            id: string;
+            slug: string;
+            version: string;
+            status: string;
         };
         ValidateRequest: {
             config?: string;
@@ -1273,62 +1273,62 @@ export interface components {
         };
         SellDecisionRow: {
             /** Format: int64 */
-            id?: number;
-            book?: string;
+            id: number;
+            book: string;
             /** Format: date */
-            runDate?: string;
+            runDate: string;
             /** Format: date-time */
-            evaluatedAt?: string;
+            evaluatedAt: string;
             /** Format: int64 */
-            signalId?: number;
-            exchange?: string;
-            symbol?: string;
-            setup?: string;
+            signalId: number;
+            exchange: string;
+            symbol: string;
+            setup: string;
             /** Format: int32 */
-            stage?: number;
-            setupType?: string;
-            footprint?: string;
-            entryPrice?: number;
-            currentPrice?: number;
-            unrealizedPct?: number;
-            stopLevel?: number;
-            trailLevel?: number;
-            stillBuyable?: boolean;
-            sellingNow?: boolean;
-            sellReason?: string;
-            verdict?: string;
+            stage: number;
+            setupType: string;
+            footprint: string;
+            entryPrice: number;
+            currentPrice: number;
+            unrealizedPct: number;
+            stopLevel: number;
+            trailLevel: number;
+            stillBuyable: boolean;
+            sellingNow: boolean;
+            sellReason: string;
+            verdict: string;
             /** Format: date-time */
-            acknowledgedAt?: string;
+            acknowledgedAt: string;
         };
         AdmissionProbe: {
             /** Format: int32 */
-            openAtStart?: number;
+            openAtStart: number;
             /** Format: int32 */
-            wouldEnter?: number;
+            wouldEnter: number;
             /** Format: int32 */
-            admitted?: number;
+            admitted: number;
             /** Format: int32 */
-            capExceedance?: number;
-            capBound?: boolean;
-            droppedByCap?: components["schemas"]["DroppedCandidate"][];
+            capExceedance: number;
+            capBound: boolean;
+            droppedByCap: components["schemas"]["DroppedCandidate"][];
         };
         DroppedCandidate: {
-            symbol?: string;
+            symbol: string;
             /** Format: int32 */
-            admissionRank?: number;
+            admissionRank: number;
         };
         SwingRun: {
             /** Format: int32 */
-            strategies?: number;
+            strategies: number;
             /** Format: int32 */
-            candidates?: number;
+            candidates: number;
             /** Format: int32 */
-            entries?: number;
+            entries: number;
             /** Format: int32 */
-            exits?: number;
+            exits: number;
             /** Format: int32 */
-            exitSkipped?: number;
-            admission?: components["schemas"]["AdmissionProbe"];
+            exitSkipped: number;
+            admission: components["schemas"]["AdmissionProbe"];
         };
         RegisterRequest: {
             name?: string;
@@ -1338,28 +1338,28 @@ export interface components {
             createdBy?: string;
         };
         RailOverrideView: {
-            rail?: string;
-            disable?: boolean;
-            threshold?: number;
-            passWhen?: string;
+            rail: string;
+            disable: boolean;
+            threshold: number;
+            passWhen: string;
         };
         ShadowVariantView: {
             /** Format: uuid */
-            id?: string;
-            name?: string;
+            id: string;
+            name: string;
             /** Format: uuid */
-            campaignId?: string;
-            spec?: components["schemas"]["VariantSpecView"];
-            enabled?: boolean;
-            createdBy?: string;
+            campaignId: string;
+            spec: components["schemas"]["VariantSpecView"];
+            enabled: boolean;
+            createdBy: string;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
             /** Format: date-time */
-            disabledAt?: string;
+            disabledAt: string;
         };
         VariantSpecView: {
-            rails?: components["schemas"]["RailOverrideView"][];
-            compositeThreshold?: number;
+            rails: components["schemas"]["RailOverrideView"][];
+            compositeThreshold: number;
         };
         ResetBody: {
             confirm?: boolean;
@@ -1370,18 +1370,18 @@ export interface components {
         };
         TradeDto: {
             /** Format: int64 */
-            id?: number;
-            exchange?: string;
-            tradingsymbol?: string;
-            side?: string;
+            id: number;
+            exchange: string;
+            tradingsymbol: string;
+            side: string;
             /** Format: int64 */
-            qty?: number;
-            avgEntryPrice?: number;
-            realizedPnl?: number;
+            qty: number;
+            avgEntryPrice: number;
+            realizedPnl: number;
             /** Format: date-time */
-            openedAt?: string;
+            openedAt: string;
             /** Format: date-time */
-            closedAt?: string;
+            closedAt: string;
         };
         OrderBody: {
             /** Format: int64 */
@@ -1399,22 +1399,22 @@ export interface components {
         };
         PositionDto: {
             /** Format: int64 */
-            id?: number;
-            exchange?: string;
-            tradingsymbol?: string;
-            side?: string;
+            id: number;
+            exchange: string;
+            tradingsymbol: string;
+            side: string;
             /** Format: int64 */
-            qty?: number;
-            avgEntryPrice?: number;
-            markPrice?: number;
-            unrealizedPnl?: number;
-            realizedPnl?: number;
-            status?: string;
+            qty: number;
+            avgEntryPrice: number;
+            markPrice: number;
+            unrealizedPnl: number;
+            realizedPnl: number;
+            status: string;
             /** Format: date-time */
-            openedAt?: string;
-            stopLoss?: number;
-            takeProfit?: number;
-            buyingPowerWarning?: string;
+            openedAt: string;
+            stopLoss: number;
+            takeProfit: number;
+            buyingPowerWarning: string;
         };
         FeedbackRequest: {
             verdict?: string;
@@ -1422,8 +1422,8 @@ export interface components {
         };
         TriageResponse: {
             /** Format: uuid */
-            id?: string;
-            status?: string;
+            id: string;
+            status: string;
         };
         ActRequest: {
             action?: string;
@@ -1454,14 +1454,14 @@ export interface components {
         };
         TicketPrefill: {
             /** Format: int64 */
-            signalId?: number;
-            exchange?: string;
-            tradingsymbol?: string;
-            side?: string;
+            signalId: number;
+            exchange: string;
+            tradingsymbol: string;
+            side: string;
             /** Format: int64 */
-            qty?: number;
-            stopLoss?: number;
-            target?: number;
+            qty: number;
+            stopLoss: number;
+            target: number;
         };
         NotificationRequest: {
             enabled?: boolean;
@@ -1472,462 +1472,462 @@ export interface components {
             takeProfit?: number;
         };
         FeeBreakdown: {
-            brokerage?: number;
-            stt?: number;
-            exchangeTxn?: number;
-            gst?: number;
-            stamp?: number;
-            sebi?: number;
-            total?: number;
+            brokerage: number;
+            stt: number;
+            exchangeTxn: number;
+            gst: number;
+            stamp: number;
+            sebi: number;
+            total: number;
         };
         OpeningSignal: {
             /** Format: int64 */
-            signalId?: number;
-            status?: string;
-            side?: string;
-            entryPrice?: number;
-            stopLoss?: number;
-            target?: number;
-            compositeScore?: number;
+            signalId: number;
+            status: string;
+            side: string;
+            entryPrice: number;
+            stopLoss: number;
+            target: number;
+            compositeScore: number;
             /** Format: date-time */
-            generatedAt?: string;
-            scalperDetail?: components["schemas"]["JsonNode"];
-            minerviniDetail?: components["schemas"]["JsonNode"];
-            manasAroraDetail?: components["schemas"]["JsonNode"];
+            generatedAt: string;
+            scalperDetail: components["schemas"]["JsonNode"];
+            minerviniDetail: components["schemas"]["JsonNode"];
+            manasAroraDetail: components["schemas"]["JsonNode"];
         };
         OrderLeg: {
             /** Format: int64 */
-            orderId?: number;
+            orderId: number;
             /** Format: int64 */
-            signalId?: number;
-            side?: string;
+            signalId: number;
+            side: string;
             /** Format: int64 */
-            qty?: number;
-            status?: string;
+            qty: number;
+            status: string;
             /** Format: date-time */
-            placedAt?: string;
+            placedAt: string;
             /** Format: date-time */
-            filledAt?: string;
-            fillPrice?: number;
-            fillSimulator?: string;
-            slippageApplied?: number;
-            fees?: components["schemas"]["FeeBreakdown"];
+            filledAt: string;
+            fillPrice: number;
+            fillSimulator: string;
+            slippageApplied: number;
+            fees: components["schemas"]["FeeBreakdown"];
         };
         PositionDetail: {
             /** Format: int64 */
-            id?: number;
-            book?: string;
-            exchange?: string;
-            tradingsymbol?: string;
-            side?: string;
+            id: number;
+            book: string;
+            exchange: string;
+            tradingsymbol: string;
+            side: string;
             /** Format: int64 */
-            qty?: number;
-            avgEntryPrice?: number;
-            markPrice?: number;
-            unrealizedPnl?: number;
-            realizedPnl?: number;
-            status?: string;
+            qty: number;
+            avgEntryPrice: number;
+            markPrice: number;
+            unrealizedPnl: number;
+            realizedPnl: number;
+            status: string;
             /** Format: date-time */
-            openedAt?: string;
+            openedAt: string;
             /** Format: date-time */
-            closedAt?: string;
-            closeReason?: string;
-            stopLoss?: number;
-            takeProfit?: number;
+            closedAt: string;
+            closeReason: string;
+            stopLoss: number;
+            takeProfit: number;
             /** Format: int64 */
-            advisedLots?: number;
-            marginSnapshot?: number;
-            marginPct?: number;
+            advisedLots: number;
+            marginSnapshot: number;
+            marginPct: number;
             /** Format: int32 */
-            subaccountIdx?: number;
+            subaccountIdx: number;
             /** Format: int64 */
-            openingSignalId?: number;
-            openingSignal?: components["schemas"]["OpeningSignal"];
-            orders?: components["schemas"]["OrderLeg"][];
+            openingSignalId: number;
+            openingSignal: components["schemas"]["OpeningSignal"];
+            orders: components["schemas"]["OrderLeg"][];
         };
         AuditLogResponse: {
-            items?: components["schemas"]["AuditRow"][];
+            items: components["schemas"]["AuditRow"][];
         };
         AuditRow: {
             /** Format: int64 */
-            id?: number;
-            action?: string;
-            fromVersion?: string;
-            toVersion?: string;
-            diffSummary?: string;
-            actor?: string;
+            id: number;
+            action: string;
+            fromVersion: string;
+            toVersion: string;
+            diffSummary: string;
+            actor: string;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
         };
         Criterion: {
-            name?: string;
-            required?: string;
-            actual?: string;
-            pass?: boolean;
+            name: string;
+            required: string;
+            actual: string;
+            pass: boolean;
         };
         GraduationBoard: {
-            strategies?: components["schemas"]["StrategyGraduation"][];
-            thresholds?: components["schemas"]["Thresholds"];
+            strategies: components["schemas"]["StrategyGraduation"][];
+            thresholds: components["schemas"]["Thresholds"];
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         StrategyGraduation: {
             /** Format: uuid */
-            strategyId?: string;
-            slug?: string;
-            name?: string;
-            stage?: string;
+            strategyId: string;
+            slug: string;
+            name: string;
+            stage: string;
             /** Format: int32 */
-            trades?: number;
-            netRealized?: number;
-            winRate?: number;
-            profitFactor?: number;
-            expectancy?: number;
-            maxDrawdownPct?: number;
-            criteria?: components["schemas"]["Criterion"][];
+            trades: number;
+            netRealized: number;
+            winRate: number;
+            profitFactor: number;
+            expectancy: number;
+            maxDrawdownPct: number;
+            criteria: components["schemas"]["Criterion"][];
         };
         Thresholds: {
             /** Format: int32 */
-            minTrades?: number;
-            minProfitFactor?: number;
-            minExpectancy?: number;
-            maxDrawdownPct?: number;
+            minTrades: number;
+            minProfitFactor: number;
+            minExpectancy: number;
+            maxDrawdownPct: number;
         };
         Promotion: {
             /** Format: uuid */
-            strategyId?: string;
+            strategyId: string;
             /** Format: date-time */
-            graduatedAt?: string;
+            graduatedAt: string;
             /** Format: int32 */
-            trades?: number;
-            expectancy?: number;
-            sharpe?: number;
-            maxDrawdownPct?: number;
+            trades: number;
+            expectancy: number;
+            sharpe: number;
+            maxDrawdownPct: number;
         };
         SellDecisions: {
-            items?: components["schemas"]["SellDecisionRow"][];
+            items: components["schemas"]["SellDecisionRow"][];
         };
         SwingSellDecision: {
             /** Format: int64 */
-            signalId?: number;
-            symbol?: string;
-            setup?: string;
+            signalId: number;
+            symbol: string;
+            setup: string;
             /** Format: int32 */
-            stage?: number;
-            setupType?: string;
-            footprint?: string;
-            entryPrice?: number;
-            currentPrice?: number;
-            unrealizedPct?: number;
-            stopLevel?: number;
-            trailLevel?: number;
-            stillBuyable?: boolean;
-            sellingNow?: boolean;
-            sellReason?: string;
-            verdict?: string;
+            stage: number;
+            setupType: string;
+            footprint: string;
+            entryPrice: number;
+            currentPrice: number;
+            unrealizedPct: number;
+            stopLevel: number;
+            trailLevel: number;
+            stillBuyable: boolean;
+            sellingNow: boolean;
+            sellReason: string;
+            verdict: string;
         };
         SwingSellReport: {
             /** Format: date-time */
-            asOf?: string;
-            items?: components["schemas"]["SwingSellDecision"][];
+            asOf: string;
+            items: components["schemas"]["SwingSellDecision"][];
         };
         AdmissionProbes: {
-            items?: components["schemas"]["ProbeRow"][];
+            items: components["schemas"]["ProbeRow"][];
         };
         ProbeRow: {
-            batch?: string;
+            batch: string;
             /** Format: date */
-            runDate?: string;
+            runDate: string;
             /** Format: date-time */
-            ranAt?: string;
+            ranAt: string;
             /** Format: int32 */
-            candidates?: number;
+            candidates: number;
             /** Format: int32 */
-            entries?: number;
+            entries: number;
             /** Format: int32 */
-            openAtStart?: number;
+            openAtStart: number;
             /** Format: int32 */
-            wouldEnter?: number;
+            wouldEnter: number;
             /** Format: int32 */
-            admitted?: number;
+            admitted: number;
             /** Format: int32 */
-            capExceedance?: number;
-            capBound?: boolean;
-            droppedByCap?: components["schemas"]["DroppedCandidate"][];
+            capExceedance: number;
+            capBound: boolean;
+            droppedByCap: components["schemas"]["DroppedCandidate"][];
         };
         ShadowSummaryResponse: {
-            items?: components["schemas"]["VariantSummary"][];
+            items: components["schemas"]["VariantSummary"][];
         };
         VariantSummary: {
-            variant?: string;
+            variant: string;
             /** Format: int64 */
-            open?: number;
+            open: number;
             /** Format: int64 */
-            closed?: number;
+            closed: number;
             /** Format: int64 */
-            wins?: number;
+            wins: number;
             /** Format: int64 */
-            losses?: number;
-            pnlPoints?: number;
-            pnlNet?: number;
+            losses: number;
+            pnlPoints: number;
+            pnlNet: number;
             /** Format: int64 */
-            unpriced?: number;
+            unpriced: number;
         };
         DotHealth: {
-            asOf?: string;
-            session?: boolean;
+            asOf: string;
+            session: boolean;
             /** Format: int32 */
-            rowsInspected?: number;
-            dots?: components["schemas"]["DotState"][];
+            rowsInspected: number;
+            dots: components["schemas"]["DotState"][];
         };
         DotState: {
-            dot?: string;
-            alive?: boolean;
-            required?: boolean;
-            detail?: string;
+            dot: string;
+            alive: boolean;
+            required: boolean;
+            detail: string;
         };
         ShadowVariantListResponse: {
-            items?: components["schemas"]["ShadowVariantView"][];
+            items: components["schemas"]["ShadowVariantView"][];
         };
         MarginHeat: {
-            priced?: boolean;
-            unpricedReason?: string;
-            spanMargin?: number;
-            exposureMargin?: number;
-            totalMargin?: number;
-            requiredMargin?: number;
-            finalMargin?: number;
+            priced: boolean;
+            unpricedReason: string;
+            spanMargin: number;
+            exposureMargin: number;
+            totalMargin: number;
+            requiredMargin: number;
+            finalMargin: number;
             /** Format: int32 */
-            openPositions?: number;
+            openPositions: number;
             /** Format: int32 */
-            pricedLegs?: number;
+            pricedLegs: number;
             /** Format: date-time */
-            asOf?: string;
+            asOf: string;
         };
         PaperEventDto: {
             /** Format: int64 */
-            id?: number;
+            id: number;
             /** Format: int64 */
-            positionId?: number;
-            kind?: string;
-            book?: string;
-            exchange?: string;
-            tradingsymbol?: string;
-            side?: string;
+            positionId: number;
+            kind: string;
+            book: string;
+            exchange: string;
+            tradingsymbol: string;
+            side: string;
             /** Format: int64 */
-            qty?: number;
-            reason?: string;
-            realizedPnl?: string;
+            qty: number;
+            reason: string;
+            realizedPnl: string;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
         };
         PaperEventsResponse: {
-            items?: components["schemas"]["PaperEventDto"][];
+            items: components["schemas"]["PaperEventDto"][];
         };
         Funds: {
-            status?: string;
-            availableCash?: number;
-            collateral?: number;
-            m2mRealized?: number;
-            m2mUnrealized?: number;
-            utilisedDebits?: number;
+            status: string;
+            availableCash: number;
+            collateral: number;
+            m2mRealized: number;
+            m2mUnrealized: number;
+            utilisedDebits: number;
         };
         Insight: {
             /** Format: uuid */
-            id?: string;
+            id: string;
             /** Format: date-time */
-            generatedAt?: string;
-            type?: string;
-            severity?: string;
-            scope?: string;
-            title?: string;
-            explanation?: string;
-            evidence?: components["schemas"]["JsonNode"];
-            priority?: number;
-            priorityDetail?: components["schemas"]["JsonNode"];
-            dataTrust?: string;
-            trustReasons?: string[];
-            dedupeKey?: string;
+            generatedAt: string;
+            type: string;
+            severity: string;
+            scope: string;
+            title: string;
+            explanation: string;
+            evidence: components["schemas"]["JsonNode"];
+            priority: number;
+            priorityDetail: components["schemas"]["JsonNode"];
+            dataTrust: string;
+            trustReasons: string[];
+            dedupeKey: string;
             /** Format: date-time */
-            cooldownUntil?: string;
-            suppressed?: boolean;
-            status?: string;
+            cooldownUntil: string;
+            suppressed: boolean;
+            status: string;
             /** Format: date-time */
-            expiresAt?: string;
-            engineVersion?: string;
-            configHash?: string;
+            expiresAt: string;
+            engineVersion: string;
+            configHash: string;
         };
         InsightListResponse: {
-            items?: components["schemas"]["Insight"][];
+            items: components["schemas"]["Insight"][];
             /** Format: int32 */
-            limit?: number;
+            limit: number;
             /** Format: int32 */
-            offset?: number;
+            offset: number;
         };
         FamilyTrust: {
-            family?: string;
+            family: string;
             /** @enum {string} */
-            state?: "OK" | "DEGRADED" | "BLOCKED";
-            reasons?: string[];
-            asOf?: string;
+            state: "OK" | "DEGRADED" | "BLOCKED";
+            reasons: string[];
+            asOf: string;
         };
         TrustSummaryResponse: {
-            asOf?: string;
-            families?: components["schemas"]["FamilyTrust"][];
+            asOf: string;
+            families: components["schemas"]["FamilyTrust"][];
         };
         Count: {
-            key?: string;
+            key: string;
             /** Format: int64 */
-            count?: number;
+            count: number;
         };
         InsightSummaryResponse: {
-            bySeverity?: components["schemas"]["Count"][];
-            byStatus?: components["schemas"]["Count"][];
+            bySeverity: components["schemas"]["Count"][];
+            byStatus: components["schemas"]["Count"][];
             /** Format: int64 */
-            suppressed?: number;
+            suppressed: number;
         };
         CrossingEntry: {
             /** Format: date-time */
-            at?: string;
-            severity?: string;
-            title?: string;
+            at: string;
+            severity: string;
+            title: string;
         };
         Dossier: {
             /** Format: uuid */
-            strategyId?: string;
-            slug?: string;
-            name?: string;
-            enabled?: boolean;
-            stage?: string;
-            criteria?: components["schemas"]["Criterion"][];
+            strategyId: string;
+            slug: string;
+            name: string;
+            enabled: boolean;
+            stage: string;
+            criteria: components["schemas"]["Criterion"][];
             /** Format: date-time */
-            graduatedAt?: string;
-            crossingTimeline?: components["schemas"]["CrossingEntry"][];
-            rejectionProfile?: components["schemas"]["RailCount"][];
-            openSellDecisions?: components["schemas"]["OpenSell"][];
-            asOf?: string;
-            notes?: string[];
+            graduatedAt: string;
+            crossingTimeline: components["schemas"]["CrossingEntry"][];
+            rejectionProfile: components["schemas"]["RailCount"][];
+            openSellDecisions: components["schemas"]["OpenSell"][];
+            asOf: string;
+            notes: string[];
         };
         OpenSell: {
             /** Format: int64 */
-            sellDecisionId?: number;
+            sellDecisionId: number;
             /** Format: date */
-            runDate?: string;
-            symbol?: string;
-            verdict?: string;
-            unrealizedPct?: number;
-            acknowledged?: boolean;
+            runDate: string;
+            symbol: string;
+            verdict: string;
+            unrealizedPct: number;
+            acknowledged: boolean;
         };
         RailCount: {
-            rail?: string;
+            rail: string;
             /** Format: int64 */
-            count?: number;
+            count: number;
         };
         NotificationEventRow: {
             /** Format: int64 */
-            id?: number;
+            id: number;
             /** Format: int64 */
-            signalId?: number;
+            signalId: number;
             /** Format: uuid */
-            strategyId?: string;
+            strategyId: string;
             /** Format: uuid */
-            insightId?: string;
-            channel?: string;
-            status?: string;
+            insightId: string;
+            channel: string;
+            status: string;
             /** Format: int32 */
-            attempts?: number;
-            detail?: string;
+            attempts: number;
+            detail: string;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
         };
         NotificationEventsResponse: {
-            items?: components["schemas"]["NotificationEventRow"][];
+            items: components["schemas"]["NotificationEventRow"][];
         };
         FocusResponse: {
-            signalQueue?: components["schemas"]["Insight"][];
-            attentionQueue?: components["schemas"]["Insight"][];
+            signalQueue: components["schemas"]["Insight"][];
+            attentionQueue: components["schemas"]["Insight"][];
             /** Format: int64 */
-            suppressed?: number;
+            suppressed: number;
         };
         Contrast: {
             /** Format: int32 */
-            firedCount?: number;
+            firedCount: number;
             /** Format: int32 */
-            rejectedCount?: number;
-            meanCompositeFired?: number;
-            meanCompositeRejected?: number;
-            meanSupportRatioFired?: number;
-            meanSupportRatioRejected?: number;
+            rejectedCount: number;
+            meanCompositeFired: number;
+            meanCompositeRejected: number;
+            meanSupportRatioFired: number;
+            meanSupportRatioRejected: number;
         };
         FiredRow: {
             /** Format: int64 */
-            signalId?: number;
-            tradingsymbol?: string;
-            side?: string;
-            composite?: number;
+            signalId: number;
+            tradingsymbol: string;
+            side: string;
+            composite: number;
             /** Format: int32 */
-            dotSupports?: number;
+            dotSupports: number;
             /** Format: int32 */
-            dotTotal?: number;
+            dotTotal: number;
             /** Format: date-time */
-            generatedAt?: string;
+            generatedAt: string;
         };
         FiredVsRejectedResponse: {
             /** Format: uuid */
-            strategyVersionId?: string;
+            strategyVersionId: string;
             /** Format: date */
-            day?: string;
-            fired?: components["schemas"]["FiredRow"][];
-            rejected?: components["schemas"]["RejectedRow"][];
-            contrast?: components["schemas"]["Contrast"];
+            day: string;
+            fired: components["schemas"]["FiredRow"][];
+            rejected: components["schemas"]["RejectedRow"][];
+            contrast: components["schemas"]["Contrast"];
         };
         RejectedRow: {
             /** Format: int64 */
-            rejectionId?: number;
-            tradingsymbol?: string;
-            side?: string;
-            composite?: number;
-            threshold?: number;
-            blockingRail?: string;
+            rejectionId: number;
+            tradingsymbol: string;
+            side: string;
+            composite: number;
+            threshold: number;
+            blockingRail: string;
             /** Format: int32 */
-            dotSupports?: number;
+            dotSupports: number;
             /** Format: int32 */
-            dotTotal?: number;
+            dotTotal: number;
             /** Format: date-time */
-            generatedAt?: string;
+            generatedAt: string;
         };
         CompareColumn: {
             /** Format: int64 */
-            signalId?: number;
-            tradingsymbol?: string;
-            side?: string;
-            family?: string;
-            book?: string;
-            priority?: number;
-            band?: string;
-            components?: components["schemas"]["ComponentPoint"][];
-            optionLegCost?: number;
-            marginEstimate?: string;
-            riskReward?: number;
-            entryPrice?: number;
-            stopLoss?: number;
-            target?: number;
-            dataTrust?: string;
-            trustReasons?: string[];
-            scored?: string;
+            signalId: number;
+            tradingsymbol: string;
+            side: string;
+            family: string;
+            book: string;
+            priority: number;
+            band: string;
+            components: components["schemas"]["ComponentPoint"][];
+            optionLegCost: number;
+            marginEstimate: string;
+            riskReward: number;
+            entryPrice: number;
+            stopLoss: number;
+            target: number;
+            dataTrust: string;
+            trustReasons: string[];
+            scored: string;
         };
         CompareResult: {
             /** Format: date */
-            session?: string;
-            booksDiffer?: boolean;
-            differsMost?: string;
-            columns?: components["schemas"]["CompareColumn"][];
-            notes?: string[];
+            session: string;
+            booksDiffer: boolean;
+            differsMost: string;
+            columns: components["schemas"]["CompareColumn"][];
+            notes: string[];
         };
         ComponentPoint: {
-            key?: string;
-            points?: number;
-            c?: number;
+            key: string;
+            points: number;
+            c: number;
         };
         ErrorResponse: {
             code?: string;

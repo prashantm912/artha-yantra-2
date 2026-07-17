@@ -67,6 +67,8 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   private static final String COLD_START_PARTIAL_A_UNDERLYING = "ENGINE-COLDSTART-PARTIAL-A";
   private static final String COLD_START_PARTIAL_B_UNDERLYING = "ENGINE-COLDSTART-PARTIAL-B";
   private static final String COLD_START_BOOT_KEY_UNDERLYING = "ENGINE-COLDSTART-BOOT-KEY";
+  private static final String KEEP_BEST_A_UNDERLYING = "ENGINE-KEEPBEST-A";
+  private static final String KEEP_BEST_B_UNDERLYING = "ENGINE-KEEPBEST-B";
   private static final AtomicBoolean FUTURES_UNIVERSE_AVAILABLE = new AtomicBoolean();
 
   // intentional load-time capture: one fixed warm-up anchor shared by the stub and the bars
@@ -242,6 +244,18 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
           .replace("id: engine-it-coldstart", "id: engine-it-coldstart-boot-key")
           .replace("name: \"Engine IT Coldstart\"", "name: \"Engine IT Coldstart Boot Key\"")
           .replace(COLD_START_UNDERLYING, COLD_START_BOOT_KEY_UNDERLYING);
+
+  private static final String KEEP_BEST_A_YAML =
+      COLD_START_YAML
+          .replace("id: engine-it-coldstart", "id: engine-it-keepbest-a")
+          .replace("name: \"Engine IT Coldstart\"", "name: \"Engine IT Keepbest A\"")
+          .replace(COLD_START_UNDERLYING, KEEP_BEST_A_UNDERLYING);
+
+  private static final String KEEP_BEST_B_YAML =
+      COLD_START_YAML
+          .replace("id: engine-it-coldstart", "id: engine-it-keepbest-b")
+          .replace("name: \"Engine IT Coldstart\"", "name: \"Engine IT Keepbest B\"")
+          .replace(COLD_START_UNDERLYING, KEEP_BEST_B_UNDERLYING);
 
   @Autowired private RegistryService registryService;
   @Autowired private StrategyRepository repository;
@@ -596,15 +610,14 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
             () -> assertThat(engine.loadedSlugs()).contains("engine-it-coldstart"));
 
     // The first CONNECTED rebuilt the listener container; a later CONNECTED must reach its
-    // replacement as well, even when the universe is empty again.
+    // replacement as well, even when the universe is empty again — evidenced by the retry chain
+    // ARMING. The strategy being DROPPED can no longer be that evidence: keep-best now refuses to
+    // install a reload that leaves the engine worse off, and a transient market-data failure
+    // disarming a working engine is precisely the regression the guard exists to prevent.
     redis.convertAndSend("kite.status", "CONNECTED");
-    await()
-        .atMost(Duration.ofSeconds(20))
-        .until(() -> !engine.loadedSlugs().contains("engine-it-coldstart"));
-    await()
-        .during(Duration.ofSeconds(1))
-        .untilAsserted(
-            () -> assertThat(engine.loadedSlugs()).doesNotContain("engine-it-coldstart"));
+    await().atMost(Duration.ofSeconds(20)).until(() -> engine.kiteConnectedReloadInFlight());
+    await().atMost(Duration.ofSeconds(30)).until(() -> !engine.kiteConnectedReloadInFlight());
+    assertThat(engine.loadedSlugs()).contains("engine-it-coldstart");
   }
 
   /**
@@ -777,6 +790,419 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       assertThat(ReflectionTestUtils.getField(isolatedEngine, "lastReloadUnresolvedDrops"))
           .isEqualTo(0);
       assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * The retry BOUND must outlive a real cold-start fault, not merely the kite-rest breaker's 30s.
+   * Two live drills (2026-07-16 ~73s, 2026-07-17 ~81s for market-data to serve term-structure) both
+   * recovered only on the last of 3 attempts, and the TRUE fault (an expired token — market-data
+   * cannot warm its lastGood cache at all until the owner logs in) is slower still. Fails against
+   * the old 3-attempt bound: this universe only comes back on the 5th chain attempt, so the chain
+   * exhausts and the strategy stays dead for the session.
+   */
+  @Test
+  @Order(13)
+  void kiteConnectedRetriesOutliveAFaultLongerThanTheOldThreeAttemptBound() {
+    StrategyRepository.StrategyRow row =
+        uniquePublishedRow(COLD_START_YAML, "engine-it-long-fault", "Long Fault");
+    AtomicInteger resolutions = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation ->
+                // boot is resolution 1, so chain attempt N is resolution N+1: the old 3-attempt
+                // chain gives up at resolution 4, the widened one reaches 6 on chain attempt 5.
+                resolutions.incrementAndGet() >= 6
+                    ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                    : Optional.empty());
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(row), isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      await().atMost(Duration.ofSeconds(30)).until(() -> isolatedEngine.loadedSlugs().size() == 1);
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * The chain must never end WORSE than not retrying at all. The terminal state used to be
+   * unconditionally the LAST attempt's result, so a Kite/market-data regression across the retry
+   * window could take a live engine down to 0 for the session where NOT retrying would have kept
+   * its boot set (observed in vitro during the 2026-07-16 drill: boot 32 loaded, CONNECTED attempt
+   * 1 = 0). Here A is loaded at boot and then regresses for the whole chain; keep-best must retain
+   * it. Fails against the unguarded install: `loaded` goes empty on attempt 1 and never comes back.
+   */
+  @Test
+  @Order(14)
+  void kiteConnectedRetryNeverInstallsAReloadThatLeavesTheEngineWorseOff() {
+    StrategyRepository.StrategyRow rowA =
+        uniquePublishedRow(KEEP_BEST_A_YAML, "engine-it-keepbest-a", "Keepbest A");
+    StrategyRepository.StrategyRow rowB =
+        uniquePublishedRow(KEEP_BEST_B_YAML, "engine-it-keepbest-b", "Keepbest B");
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(rowA, rowB));
+    when(isolatedRegistry.findVersionById(rowA.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowA.publishedVersionId()));
+    when(isolatedRegistry.findVersionById(rowB.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowB.publishedVersionId()));
+
+    // A resolves at boot then regresses; B never resolves, which keeps the chain armed throughout.
+    AtomicBoolean aResolvable = new AtomicBoolean(true);
+    AtomicInteger aResolutions = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              if (!KEEP_BEST_A_UNDERLYING.equals(invocation.<String>getArgument(1))) {
+                return Optional.empty();
+              }
+              aResolutions.incrementAndGet();
+              return aResolvable.get()
+                  ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                  : Optional.empty();
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      // The pre-retry state the engine must never fall below: A up, B dropped (degraded, not dead).
+      assertThat(isolatedEngine.loadedSlugs()).hasSize(1);
+      int aAtBoot = aResolutions.get();
+
+      // Everything regresses BEFORE the chain runs, so every attempt computes a strictly worse set.
+      aResolvable.set(false);
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      await().atMost(Duration.ofSeconds(30)).until(() -> aResolutions.get() > aAtBoot);
+      await().atMost(Duration.ofSeconds(30)).until(() -> !isolatedEngine.kiteConnectedReloadInFlight());
+
+      // The chain exhausted having only ever computed WORSE results — A must still be loaded.
+      assertThat(isolatedEngine.loadedSlugs()).hasSize(1);
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * The chain must NEVER report success while every strategy is failing to load. A drop is counted
+   * only for a resolution FAILURE, so a reload where every strategy THROWS reports "0 loaded, 0
+   * unresolved" — and an `unresolvedDrops == 0` success predicate reads that as "resolved every
+   * universe — retry complete" over a completely dead engine. That is the 2026-07-15/16 outage's
+   * exact signature, and the shape a previous fix on this path silently re-issued while logging
+   * success. Fails against that predicate: the chain stops after ONE attempt, so the strategy
+   * becoming loadable later is never picked up.
+   */
+  @Test
+  @Order(15)
+  void kiteConnectedRetryNeverReportsSuccessWhileEveryStrategyFailsToLoad() {
+    StrategyRepository.StrategyRow row =
+        uniquePublishedRow(COLD_START_EMPTY_YAML, "engine-it-zero-success", "Zero Success");
+    AtomicBoolean loadFails = new AtomicBoolean(true);
+    AtomicInteger resolutions = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              resolutions.incrementAndGet();
+              if (loadFails.get()) {
+                // A load failure: counted by NEITHER loadedCount NOR unresolvedDrops.
+                throw new IllegalStateException("simulated load failure");
+              }
+              return Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(row), isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      // The trap's exact state: nothing loaded, yet nothing counted as a drop either.
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+      assertThat(ReflectionTestUtils.getField(isolatedEngine, "lastReloadUnresolvedDrops"))
+          .isEqualTo(0);
+
+      int atBoot = resolutions.get();
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      // Despite 0 drops, the chain must NOT declare success — every strategy is failing.
+      await().atMost(Duration.ofSeconds(30)).until(() -> resolutions.get() >= atBoot + 2);
+
+      loadFails.set(false);
+      await().atMost(Duration.ofSeconds(30)).until(() -> isolatedEngine.loadedSlugs().size() == 1);
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * CRITICAL-1 regression: keep-best must judge IDENTITY, not counts. A reload that swaps which
+   * strategy loaded is "1 loaded / 1 unresolved" either way, so a count-based guard installs it —
+   * removing A from `loaded`, which is the only thing exit evaluation walks, so A's open position
+   * loses its exits for the session.
+   *
+   * <p>Both halves matter, and per-strategy reconciliation is the only thing that gets both: A
+   * FAILED, so it keeps its last-good entry; B SUCCEEDED, so its load installs on its own merit.
+   * Fails against a count comparison (A is silently replaced by B) and equally against
+   * whole-reload suppression (A survives, but B's legitimate load is vetoed by A's fault).
+   *
+   * <p>Asserts exact ORDER, not membership: `loaded` order is evaluation order (onClosedBar
+   * iterates it) and strategies sharing a book compete for one RiskService MAX_OPEN slot, so
+   * whichever evaluates first takes it. The reconciled order must therefore be indistinguishable
+   * from a clean reload of the same registry — registry order, A before B. Appending retained
+   * entries after the successes yields B,A and changes which strategy trades.
+   */
+  @Test
+  @Order(16)
+  void keepBestRetainsAFailedStrategyWhileAnotherStrategySucceeds() {
+    StrategyRepository.StrategyRow rowA =
+        uniquePublishedRow(KEEP_BEST_A_YAML, "engine-it-swap-a", "Swap A");
+    StrategyRepository.StrategyRow rowB =
+        uniquePublishedRow(KEEP_BEST_B_YAML, "engine-it-swap-b", "Swap B");
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(rowA, rowB));
+    when(isolatedRegistry.findVersionById(rowA.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowA.publishedVersionId()));
+    when(isolatedRegistry.findVersionById(rowB.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowB.publishedVersionId()));
+
+    // Phase 1 (boot): A resolves, B fails. Phase 2: exactly inverted — same counts, swapped identity.
+    AtomicBoolean swapped = new AtomicBoolean(false);
+    AtomicInteger resolutions = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              resolutions.incrementAndGet();
+              boolean isA = KEEP_BEST_A_UNDERLYING.equals(invocation.<String>getArgument(1));
+              return isA != swapped.get()
+                  ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                  : Optional.empty();
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(rowA.slug());
+
+      swapped.set(true);
+      int atBoot = resolutions.get();
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      await().atMost(Duration.ofSeconds(30)).until(() -> resolutions.get() > atBoot);
+      await()
+          .atMost(Duration.ofSeconds(30))
+          .until(() -> !isolatedEngine.kiteConnectedReloadInFlight());
+
+      // Same count, different identity: A must NOT have been swapped out for B (its own load
+      // failed ⇒ last-good retained), and B must NOT have been vetoed by A's fault (it succeeded).
+      // Exact order — registry order, as a clean reload would produce. A retained entry appended
+      // after the successes would give [B, A] and hand B the shared per-book MAX_OPEN slot.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(rowA.slug(), rowB.slug());
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * CRITICAL-2 regression: a universe that RESOLVES to empty is a legitimate stand-aside (a
+   * futures_screener whose movers screen picked nobody), NOT a fault. It must INSTALL — loading
+   * nothing is the correct outcome. Treating it as unhealthy makes keep-best suppress it, and the
+   * engine then keeps trading YESTERDAY's universe, which is worse than the bug keep-best fixes.
+   * Fails against a `liveCandidates > 0 && loaded == 0 ⇒ unhealthy` predicate: the stale set stays.
+   */
+  @Test
+  @Order(17)
+  void aResolvedEmptyUniverseInstallsAsAStandAsideAndIsNeverSuppressed() {
+    StrategyRepository.StrategyRow row =
+        uniquePublishedRow(COLD_START_EMPTY_YAML, "engine-it-stand-aside", "Stand Aside");
+    AtomicBoolean standAside = new AtomicBoolean(false);
+    AtomicInteger resolutions = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              resolutions.incrementAndGet();
+              // Present-but-empty = "resolved, nothing to trade today" (resolveScreener's contract).
+              return standAside.get()
+                  ? Optional.of(List.of())
+                  : Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(row), isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      // The engine is holding a universe that must be RELINQUISHED when the screen empties.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(row.slug());
+
+      standAside.set(true);
+      int atBoot = resolutions.get();
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      await().atMost(Duration.ofSeconds(30)).until(() -> resolutions.get() > atBoot);
+      // Standing aside is HEALTHY, so the chain installs it and completes rather than retrying.
+      await()
+          .atMost(Duration.ofSeconds(30))
+          .until(() -> !isolatedEngine.kiteConnectedReloadInFlight());
+
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * The MIXED case: keep-best must reconcile PER STRATEGY, because a fault is per strategy.
+   *
+   * <p>A screener resolving to empty is a legitimate stand-aside and must install even while an
+   * UNRELATED strategy has a genuine fault. Suppressing the whole reload (the round-2 shape) let
+   * one broken strategy veto every other strategy's update: the aggregate outcome read unhealthy,
+   * the reload was dropped entirely, and the standing-aside screener kept its stale universe in
+   * {@code loaded} — where {@code onClosedBar} would go on trading yesterday's movers until the
+   * unrelated fault cleared.
+   *
+   * <p>Asserts BOTH halves. A alone would pass under a plain "install everything" that reintroduces
+   * the original chip-2 bug; B alone would pass under whole-reload suppression. Only per-strategy
+   * reconciliation satisfies both at once.
+   */
+  @Test
+  @Order(20)
+  void keepBestReconcilesPerStrategySoAStandAsideLandsDespiteAnUnrelatedFault() {
+    StrategyRepository.StrategyRow rowA =
+        uniquePublishedRow(KEEP_BEST_A_YAML, "engine-it-mixed-a", "Mixed A");
+    StrategyRepository.StrategyRow rowB =
+        uniquePublishedRow(KEEP_BEST_B_YAML, "engine-it-mixed-b", "Mixed B");
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(rowA, rowB));
+    when(isolatedRegistry.findVersionById(rowA.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowA.publishedVersionId()));
+    when(isolatedRegistry.findVersionById(rowB.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowB.publishedVersionId()));
+
+    // Boot: both load. Then A stands aside (RESOLVED_EMPTY, legitimate) while B genuinely FAILS.
+    AtomicBoolean mixedPhase = new AtomicBoolean(false);
+    AtomicInteger resolutions = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              resolutions.incrementAndGet();
+              boolean isA = KEEP_BEST_A_UNDERLYING.equals(invocation.<String>getArgument(1));
+              if (!mixedPhase.get()) {
+                return Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
+              }
+              return isA ? Optional.of(List.of()) : Optional.empty();
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactlyInAnyOrder(rowA.slug(), rowB.slug());
+
+      mixedPhase.set(true);
+      int atBoot = resolutions.get();
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      await().atMost(Duration.ofSeconds(30)).until(() -> resolutions.get() > atBoot);
+      await()
+          .atMost(Duration.ofSeconds(30))
+          .until(() -> !isolatedEngine.kiteConnectedReloadInFlight());
+
+      // A stood aside on its OWN merit — its stale universe must be GONE, not vetoed by B's fault.
+      // B genuinely failed — its last-good entry must be RETAINED, or this is the chip-2 bug again.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(rowB.slug());
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * CRITICAL-3 regression: the boot gate must arm from the load's retryable-failure state, not from
+   * `drops > 0`. A boot where every strategy THROWS yields 0 loaded / 0 unresolved, so a drops-only
+   * gate never arms the chain, the reconcile sees no registry drift, and the engine stays dead all
+   * session — the 2026-07-16 shape. Deliberately drives the boot-KEY path ONLY: the session is
+   * already CONNECTED before the engine exists and no channel edge is ever published, because the
+   * boot-KEY path is the one that broke. Fails against the `drops > 0` gate: nothing ever arms.
+   */
+  @Test
+  @Order(18)
+  void bootArmsTheRetryFromTheKiteStatusKeyWhenEveryStrategyFailsToLoad() {
+    StrategyRepository.StrategyRow row =
+        uniquePublishedRow(COLD_START_BOOT_KEY_YAML, "engine-it-boot-loaderr", "Boot Load Error");
+    AtomicBoolean loadFails = new AtomicBoolean(true);
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              if (loadFails.get()) {
+                throw new IllegalStateException("simulated boot load failure");
+              }
+              return Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
+            });
+
+    // Already CONNECTED before this engine exists — the channel edge is long gone.
+    redis.opsForValue().set("kite:session:status", "CONNECTED");
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(row), isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      // 0 loaded AND 0 unresolved — the state a drops-only gate reads as "nothing to retry".
+      assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+      assertThat(ReflectionTestUtils.getField(isolatedEngine, "lastReloadUnresolvedDrops"))
+          .isEqualTo(0);
+
+      loadFails.set(false);
+
+      // No CONNECTED is ever published on the channel: only a chain armed from the KEY can load it.
+      await().atMost(Duration.ofSeconds(30)).until(() -> isolatedEngine.loadedSlugs().size() == 1);
+    } finally {
+      isolatedEngine.stop();
+      redis.delete("kite:session:status");
+    }
+  }
+
+  /**
+   * MAJOR-4: a structurally identical reload must not cold-start every indicator bank. Equal
+   * unhealthy outcomes still install, and installing clears bankCache — recomputing recursive ta4j
+   * indicators from bar 0 in BigDecimal math on the single eval thread. Widening the chain to 8
+   * attempts would drive that up to 8 times per CONNECTED on a persistently degraded engine.
+   */
+  @Test
+  @Order(19)
+  @SuppressWarnings("unchecked")
+  void anIdenticalReloadRetainsTheWarmIndicatorBanks() {
+    StrategyRepository.StrategyRow row =
+        uniquePublishedRow(COLD_START_YAML, "engine-it-bank-retain", "Bank Retain");
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation ->
+                Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"))));
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry(row), isolatedResolver);
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(row.slug());
+
+      Map<String, Object> banks =
+          (Map<String, Object>) ReflectionTestUtils.getField(isolatedEngine, "bankCache");
+      banks.put("warm-sentinel", mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+
+      // Nothing changed in the registry or the universe — the banks must survive.
+      isolatedEngine.reload();
+
+      assertThat(banks).containsKey("warm-sentinel");
     } finally {
       isolatedEngine.stop();
     }

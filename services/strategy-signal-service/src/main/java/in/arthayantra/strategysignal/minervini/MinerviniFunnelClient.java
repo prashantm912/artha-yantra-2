@@ -23,7 +23,10 @@ public class MinerviniFunnelClient {
 
   private static final Logger log = LoggerFactory.getLogger(MinerviniFunnelClient.class);
 
-  /** One funnel candidate + its seeded geometry. */
+  /**
+   * One funnel candidate + its seeded geometry. {@code onDeck} is which funnel bucket the row came
+   * from — the engine admits it only for a strategy whose {@code universe.bucket} includes on-deck.
+   */
   public record Candidate(
       String symbol,
       BigDecimal close,
@@ -31,7 +34,8 @@ public class MinerviniFunnelClient {
       BigDecimal cheatPivot,
       boolean thrust,
       Integer stage,
-      String footprint) {}
+      String footprint,
+      boolean onDeck) {}
 
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
@@ -56,8 +60,8 @@ public class MinerviniFunnelClient {
               .body(String.class);
       JsonNode root = objectMapper.readTree(body);
       List<Candidate> out = new ArrayList<>();
-      collect(root.path("immediatelyBuyable"), out);
-      collect(root.path("onDeck"), out);
+      collect(root.path("immediatelyBuyable"), out, false);
+      collect(root.path("onDeck"), out, true);
       return out;
     } catch (java.io.IOException | RuntimeException e) {
       log.warn("minervini funnel fetch failed — no swing candidates this run: {}", e.getMessage());
@@ -65,7 +69,7 @@ public class MinerviniFunnelClient {
     }
   }
 
-  private static void collect(JsonNode rows, List<Candidate> out) {
+  private static void collect(JsonNode rows, List<Candidate> out, boolean onDeck) {
     for (JsonNode row : rows) {
       String symbol = row.path("symbol").asText("");
       if (symbol.isBlank()) {
@@ -79,7 +83,8 @@ public class MinerviniFunnelClient {
               decimal(row, "cheatPivot"),
               row.path("thrust").asBoolean(false),
               row.hasNonNull("stage") ? row.path("stage").asInt() : null,
-              row.path("footprint").asText(null)));
+              row.path("footprint").asText(null),
+              onDeck));
     }
   }
 

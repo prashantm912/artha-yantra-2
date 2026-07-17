@@ -25,10 +25,15 @@ import java.util.Set;
  *       {@code setup} (the emitting strategy's slug, which only the engine knows at emit) and MINUS
  *       any {@code pyramidLot} (engine-owned). The engine writes {@code {setup, ...detailBase,
  *       pyramidLot?}} so the persisted JSON is byte-identical to the old per-family writer.
+ *   <li>{@code onDeck} — which funnel bucket the candidate came from ({@code false} =
+ *       immediately-buyable, {@code true} = on-deck). The engine admits an on-deck candidate only for
+ *       a strategy whose {@code universe.bucket} includes on-deck, which is what makes the leaf mean
+ *       the same thing live as it does in the submission pin.
  * </ul>
  */
 public record SwingCandidate(
     String symbol,
     Map<String, BigDecimal> contextSeeds,
     Set<String> eligibleSetups,
-    ObjectNode detailBase) {}
+    ObjectNode detailBase,
+    boolean onDeck) {}

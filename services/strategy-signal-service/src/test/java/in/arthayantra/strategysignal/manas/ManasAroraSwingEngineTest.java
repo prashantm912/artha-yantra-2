@@ -97,7 +97,7 @@ class ManasAroraSwingEngineTest {
     ExitHarness h = new ExitHarness();
     when(h.funnel.buyableAndOnDeck())
         .thenReturn(
-            List.of(new ManasFunnelClient.Candidate("TESTCO", bd(200), bd(150), "breakout", null, bd(150), null)));
+            List.of(new ManasFunnelClient.Candidate("TESTCO", bd(200), bd(150), "breakout", null, bd(150), null, false)));
 
     h.engine().runDaily(h.doctrine(false));
 
@@ -147,7 +147,7 @@ class ManasAroraSwingEngineTest {
     ManasFunnelClient funnel = mock(ManasFunnelClient.class);
     when(funnel.buyableAndOnDeck())
         .thenReturn(
-            List.of(new ManasFunnelClient.Candidate("TESTCO", new BigDecimal("152"), new BigDecimal("150"), "breakout", null, new BigDecimal("150"), null)));
+            List.of(new ManasFunnelClient.Candidate("TESTCO", new BigDecimal("152"), new BigDecimal("150"), "breakout", null, new BigDecimal("150"), null, false)));
     MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
     when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
 

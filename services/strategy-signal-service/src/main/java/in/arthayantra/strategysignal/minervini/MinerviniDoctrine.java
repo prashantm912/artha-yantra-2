@@ -126,7 +126,7 @@ public class MinerviniDoctrine implements SwingDoctrine {
       detail.put("cheatPivot", c.cheatPivot().toPlainString());
     }
     detail.put("thrust", c.thrust());
-    return new SwingCandidate(c.symbol(), seeds, null, detail);
+    return new SwingCandidate(c.symbol(), seeds, null, detail, c.onDeck());
   }
 
   @Override

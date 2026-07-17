@@ -133,7 +133,7 @@ class ManasPyramidAveragingIntegrationTest extends StrategySignalIntegrationTest
             List.of(
                 new ManasFunnelClient.Candidate(
                     sym, new BigDecimal("152"), new BigDecimal("150"), "breakout", null,
-                    new BigDecimal("150"), null)));
+                    new BigDecimal("150"), null, false)));
     // Guard: entry allowed, a deterministic qty of 10, and the book well within the §3.4.3 risk cap.
     when(guard.entryAllowed(Books.MANAS_ARORA)).thenReturn(true);
     when(guard.bookEquity(Books.MANAS_ARORA)).thenReturn(new BigDecimal("1000000"));

@@ -149,4 +149,32 @@ class UniverseResolverTest {
     assertThat(u.items()).isEmpty();
     server.verify();
   }
+
+  /**
+   * The ONE definition of {@code universe.bucket}, pinned input-by-input. The submission pin and the
+   * live swing batch both call this method, so agreement between them is structural — what this table
+   * pins is the RESOLUTION each input gets, which is what a future edit could silently change.
+   *
+   * <p>Only the exact literal {@code "buyable"} narrows to the buyable bucket. The schema enums the
+   * leaf to {@code buyable | buyable_on_deck}, so the unknown/case/null rows below are unreachable
+   * through a validating publish — they are pinned because {@code asText(default)} is defensive and a
+   * pre-enum version row could still carry one; every such row must resolve PERMISSIVELY (both
+   * buckets), never silently narrow a live strategy's universe.
+   */
+  @Test
+  void bucketResolvesPermissivelyForEveryInputExceptTheExactBuyableLiteral() throws Exception {
+    assertThat(includesOnDeckFor("{}")).as("absent → schema default buyable_on_deck").isTrue();
+    assertThat(includesOnDeckFor("{\"bucket\":null}")).as("JSON null → default").isTrue();
+    assertThat(includesOnDeckFor("{\"bucket\":\"buyable\"}")).as("the ONE narrowing value").isFalse();
+    assertThat(includesOnDeckFor("{\"bucket\":\"buyable_on_deck\"}")).isTrue();
+    assertThat(includesOnDeckFor("{\"bucket\":\"BUYABLE\"}")).as("case variant → NOT narrowing").isTrue();
+    assertThat(includesOnDeckFor("{\"bucket\":\"Buyable\"}")).as("case variant → NOT narrowing").isTrue();
+    assertThat(includesOnDeckFor("{\"bucket\":\" buyable \"}")).as("padded → NOT narrowing").isTrue();
+    assertThat(includesOnDeckFor("{\"bucket\":\"nonsense\"}")).as("unknown string → default").isTrue();
+    assertThat(includesOnDeckFor("{\"bucket\":7}")).as("non-string → default").isTrue();
+  }
+
+  private boolean includesOnDeckFor(String universeJson) throws Exception {
+    return UniverseResolver.includesOnDeck(mapper.readTree(universeJson));
+  }
 }

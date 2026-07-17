@@ -178,7 +178,7 @@ class MinerviniSwingEngineTest {
     MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
     when(funnel.buyableAndOnDeck())
         .thenReturn(
-            List.of(new MinerviniFunnelClient.Candidate("TESTCO", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T")));
+            List.of(new MinerviniFunnelClient.Candidate("TESTCO", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T", false)));
     MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
     when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
 
@@ -227,8 +227,8 @@ class MinerviniSwingEngineTest {
     when(funnel.buyableAndOnDeck())
         .thenReturn(
             List.of(
-                new MinerviniFunnelClient.Candidate("AAA", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T"),
-                new MinerviniFunnelClient.Candidate("BBB", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T")));
+                new MinerviniFunnelClient.Candidate("AAA", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T", false),
+                new MinerviniFunnelClient.Candidate("BBB", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T", false)));
     MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
     when(candles.fetch(eq("NSE"), any(), eq("1d"), any(), any())).thenReturn(series);
     SignalRepository signals = mock(SignalRepository.class);
@@ -322,7 +322,7 @@ class MinerviniSwingEngineTest {
 
   private static MinerviniFunnelClient.Candidate candidate(String symbol) {
     return new MinerviniFunnelClient.Candidate(
-        symbol, new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T");
+        symbol, new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T", false);
   }
 
   private static SignalRepository.SignalRow anchorFor(

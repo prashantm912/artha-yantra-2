@@ -159,7 +159,7 @@ public class ManasDoctrine implements SwingDoctrine {
     if (c.pivot() != null) {
       detail.put("pivot", c.pivot().toPlainString());
     }
-    return new SwingCandidate(c.symbol(), seeds, eligible, detail);
+    return new SwingCandidate(c.symbol(), seeds, eligible, detail, c.onDeck());
   }
 
   @Override

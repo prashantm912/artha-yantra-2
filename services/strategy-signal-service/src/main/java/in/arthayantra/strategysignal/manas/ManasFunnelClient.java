@@ -29,7 +29,8 @@ public class ManasFunnelClient {
    * One funnel candidate + its seeded base geometry (the manas funnel has no cheat/thrust/stage).
    * {@code pivot} is the BEST setup's pivot (kept for the detail); {@code breakoutPivot}/{@code
    * vcpPivot} are the per-setup §3.2/§3.3 pivots (null when that setup is invalid) the engine routes
-   * to the matching strategy.
+   * to the matching strategy. {@code onDeck} is which funnel bucket the row came from — the engine
+   * admits it only for a strategy whose {@code universe.bucket} includes on-deck.
    */
   public record Candidate(
       String symbol,
@@ -38,7 +39,8 @@ public class ManasFunnelClient {
       String setupType,
       String footprint,
       BigDecimal breakoutPivot,
-      BigDecimal vcpPivot) {}
+      BigDecimal vcpPivot,
+      boolean onDeck) {}
 
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
@@ -63,8 +65,8 @@ public class ManasFunnelClient {
               .body(String.class);
       JsonNode root = objectMapper.readTree(body);
       List<Candidate> out = new ArrayList<>();
-      collect(root.path("immediatelyBuyable"), out);
-      collect(root.path("onDeck"), out);
+      collect(root.path("immediatelyBuyable"), out, false);
+      collect(root.path("onDeck"), out, true);
       return out;
     } catch (java.io.IOException | RuntimeException e) {
       log.warn("manas funnel fetch failed — no swing candidates this run: {}", e.getMessage());
@@ -72,7 +74,7 @@ public class ManasFunnelClient {
     }
   }
 
-  private static void collect(JsonNode rows, List<Candidate> out) {
+  private static void collect(JsonNode rows, List<Candidate> out, boolean onDeck) {
     for (JsonNode row : rows) {
       String symbol = row.path("symbol").asText("");
       if (symbol.isBlank()) {
@@ -86,7 +88,8 @@ public class ManasFunnelClient {
               row.path("setupType").asText(null),
               row.path("footprint").asText(null),
               decimal(row, "breakoutPivot"),
-              decimal(row, "vcpPivot")));
+              decimal(row, "vcpPivot"),
+              onDeck));
     }
   }
 

@@ -14,6 +14,7 @@ import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
+import in.arthayantra.strategysignal.registry.UniverseResolver;
 import in.arthayantra.strategysignal.signals.DroppedCandidate;
 import in.arthayantra.strategysignal.signals.EmissionGuard;
 import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
@@ -65,10 +66,15 @@ public class SwingBatchEngine {
   private static final String EX = "NSE";
   private static final String IV = "1d";
 
-  /** A loaded published swing strategy (identity + compiled definition + neutral setup token). */
+  /**
+   * A loaded published swing strategy (identity + compiled definition + neutral setup token). {@code
+   * includesOnDeck} is its {@code universe.bucket} leaf resolved through {@link
+   * UniverseResolver#includesOnDeck} — the SAME predicate the submission pin uses, so the leaf cannot
+   * mean one thing in the pinned universe and another live.
+   */
   public record SwingStrategy(
       UUID versionId, String slug, String name, String version, String checksum, String setupToken,
-      StrategyDefinition definition) {}
+      boolean includesOnDeck, StrategyDefinition definition) {}
 
   /**
    * Summary of one batch run (for logging / the manual-trigger endpoint). {@code exitSkipped} counts
@@ -236,10 +242,14 @@ public class SwingBatchEngine {
           "{} swing: adopting anchors of superseded version {} of {} — exit-managed with the"
               + " version's own frozen config",
           doctrine.batchName(), versionRow.get().version(), strategy.slug());
+      // includesOnDeck is entry-pass state: an adopted version is only ever exit-managed (a held
+      // position must reach its stop whichever bucket admitted it), so it is resolved for uniformity
+      // and never read on this path.
       return Optional.of(
           new SwingStrategy(
               versionId, strategy.slug(), strategy.name(), versionRow.get().version(),
-              versionRow.get().checksum(), doctrine.setupToken(config, strategy.slug()), definition));
+              versionRow.get().checksum(), doctrine.setupToken(config, strategy.slug()),
+              UniverseResolver.includesOnDeck(config.path("universe")), definition));
     } catch (RuntimeException e) {
       log.error(
           "{} swing: anchor version {} failed to compile — OPEN POSITION UNMANAGED: {}",
@@ -289,6 +299,12 @@ public class SwingBatchEngine {
         // Setup routing (as data): a candidate valid only for some setups fires only the matching
         // strategy; eligibleSetups == null means no routing (all strategies eligible).
         if (c.eligibleSetups() != null && !c.eligibleSetups().contains(strat.setupToken())) {
+          continue;
+        }
+        // universe.bucket routing: a bucket=buyable strategy never enters an on-deck name — the same
+        // reading the submission pin gives the leaf. Per-strategy (not per-funnel) so one family's
+        // strategies may declare different buckets while still sharing the single funnel fetch.
+        if (c.onDeck() && !strat.includesOnDeck()) {
           continue;
         }
         IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());
@@ -409,13 +425,17 @@ public class SwingBatchEngine {
   /**
    * True iff at least one setup-eligible strategy's frozen {@link EntryEvaluator} fires a fresh entry on
    * {@code series}' last bar — the cap-free "would this name have opened" predicate the F3 probe counts.
-   * Mirrors the entry pass's per-candidate eval exactly (eligible-setup routing + {@link #buildBank}).
+   * Mirrors the entry pass's per-candidate eval exactly (eligible-setup + universe.bucket routing +
+   * {@link #buildBank}) — a candidate the entry pass could never admit must not be counted here.
    */
   private boolean firesEntry(
       List<SwingStrategy> swings, SwingCandidate c, List<EngineCandle> series) {
     int index = series.size() - 1;
     for (SwingStrategy strat : swings) {
       if (c.eligibleSetups() != null && !c.eligibleSetups().contains(strat.setupToken())) {
+        continue;
+      }
+      if (c.onDeck() && !strat.includesOnDeck()) {
         continue;
       }
       IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());
@@ -696,7 +716,9 @@ public class SwingBatchEngine {
             new SwingStrategy(
                 strategy.publishedVersionId(), strategy.slug(), strategy.name(),
                 versionRow.get().version(), versionRow.get().checksum(),
-                doctrine.setupToken(versionRow.get().config(), strategy.slug()), definition));
+                doctrine.setupToken(versionRow.get().config(), strategy.slug()),
+                UniverseResolver.includesOnDeck(versionRow.get().config().path("universe")),
+                definition));
       } catch (RuntimeException e) {
         log.warn(
             "{} swing strategy {} failed to compile — skipped: {}",

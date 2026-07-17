@@ -195,7 +195,7 @@
             "bucket": {
               "enum": ["buyable", "buyable_on_deck"],
               "default": "buyable_on_deck",
-              "description": "Which SEPA-funnel candidates the Phase-9 daily swing batch evaluates: immediately-buyable only, or buyable + on-deck (the VCP names about to cross their pivot). The batch drives the universe from the live funnel each session; this marker documents it and resolves to the current funnel for display."
+              "description": "Which SEPA-funnel candidates the Phase-9 daily swing batch evaluates: immediately-buyable only, or buyable + on-deck (the VCP names about to cross their pivot). The batch drives the universe from the live funnel each session and applies this leaf per strategy at admission; the submission pin resolves the same leaf against the current funnel for display."
             }
           }
         },
@@ -208,7 +208,7 @@
             "bucket": {
               "enum": ["buyable", "buyable_on_deck"],
               "default": "buyable_on_deck",
-              "description": "Which Manas-Arora selection-funnel candidates the daily swing batch evaluates: immediately-buyable only, or buyable + on-deck (the base names about to cross their pivot). The batch drives the universe from the live funnel each session; this marker documents it and resolves to the current funnel for display. Sibling of minervini_funnel."
+              "description": "Which Manas-Arora selection-funnel candidates the daily swing batch evaluates: immediately-buyable only, or buyable + on-deck (the base names about to cross their pivot). The batch drives the universe from the live funnel each session and applies this leaf per strategy at admission; the submission pin resolves the same leaf against the current funnel for display. Sibling of minervini_funnel."
             }
           }
         }

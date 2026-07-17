@@ -46,6 +46,22 @@ public class UniverseResolver {
     this.marketData = builder.baseUrl(baseUrl).build();
   }
 
+  /**
+   * Whether a funnel universe admits the ON-DECK bucket as well as the immediately-buyable one — the
+   * ONE definition of the {@code universe.bucket} leaf, read by BOTH the submission pin below AND the
+   * live swing batch ({@code SwingBatchEngine}). It lived only here once, so {@code bucket: "buyable"}
+   * narrowed the pinned universe while the live batch silently traded on-deck names anyway; keep the
+   * two call sites on this method so the leaf can never again mean two different things.
+   *
+   * <p>The schema ({@code strategy-schema-v1.json}) enums the leaf to {@code buyable |
+   * buyable_on_deck} and defaults it to {@code buyable_on_deck}, so only the literal {@code "buyable"}
+   * narrows: an absent leaf (and any value a non-validating path could smuggle through) admits both,
+   * which is the permissive, backwards-compatible reading every live strategy relies on.
+   */
+  public static boolean includesOnDeck(JsonNode universe) {
+    return !"buyable".equals(universe.path("bucket").asText("buyable_on_deck"));
+  }
+
   /** Resolves the universe of a strategy config into a pinned, checksummed copy. */
   public ResolvedUniverse resolve(JsonNode config) {
     JsonNode universe = config.path("universe");
@@ -68,7 +84,7 @@ public class UniverseResolver {
    * a display/validation snapshot, never the authoritative evaluation universe.
    */
   private ResolvedUniverse resolveMinerviniFunnel(JsonNode universe) {
-    boolean onDeck = !"buyable".equals(universe.path("bucket").asText("buyable_on_deck"));
+    boolean onDeck = includesOnDeck(universe);
     List<Constituent> items = new ArrayList<>();
     String asOf = null;
     try {
@@ -92,7 +108,7 @@ public class UniverseResolver {
    * display/validation snapshot, never the authoritative evaluation universe).
    */
   private ResolvedUniverse resolveManasAroraFunnel(JsonNode universe) {
-    boolean onDeck = !"buyable".equals(universe.path("bucket").asText("buyable_on_deck"));
+    boolean onDeck = includesOnDeck(universe);
     List<Constituent> items = new ArrayList<>();
     String asOf = null;
     try {

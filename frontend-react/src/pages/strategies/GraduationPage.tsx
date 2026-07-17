@@ -21,17 +21,32 @@ import {
 // derived stage (PAPER while any criterion fails, TAKE_ELIGIBLE once all pass). MEASUREMENT ONLY —
 // nothing here promotes or arms a strategy; graduating a strategy to live stays an owner action.
 
-/** A green (pass) / red (fail) dot for one criterion, its detail in the title tooltip. */
+/**
+ * A green ✓ (pass) / red ✗ (fail) dot for one criterion, its detail in the title tooltip. The GLYPH,
+ * not the fill, is what carries pass/fail to a colour-blind sighted user (WCAG 1.4.1) — the fill was
+ * once the only channel. It rides in `text-surface-0`, the opposite end of the palette from the
+ * saturated fill, so it stays ≥AA-contrast in every theme (measured 5.06:1–12.58:1 across the 5).
+ *
+ * `role="img"` is load-bearing, not decoration: ARIA PROHIBITS `aria-label` on the generic role, so
+ * on a bare <span> the accessible name is not guaranteed and the glyph can leak into it ("trades
+ * pass ✓"). The img role makes descendants presentational — the glyph is sealed out of the name and
+ * the label becomes legal. (`DayStrip` in IngestHealthPage.tsx solves the same prohibition the other
+ * way — aria-hidden squares + an sr-only sibling — because it needs TEXT inside the a11y tree; here
+ * the child is a decorative duplicate of the label, so stripping descendants is exactly what we want.)
+ */
 function CriterionDot({ c }: { c: Criterion }) {
   return (
     <span
+      role="img"
       title={`${c.name}: ${c.actual} (needs ${c.required}) — ${c.pass ? 'pass' : 'fail'}`}
       className={cn(
-        'inline-block size-2.5 rounded-full',
+        'inline-flex size-4 items-center justify-center rounded-full text-[10px] font-bold leading-none text-surface-0',
         c.pass ? 'bg-bull' : 'bg-bear',
       )}
       aria-label={`${c.name} ${c.pass ? 'pass' : 'fail'}`}
-    />
+    >
+      {c.pass ? '✓' : '✗'}
+    </span>
   );
 }
 

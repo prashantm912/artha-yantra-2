@@ -18,8 +18,10 @@ trade*.
 
 ## Non-goals & safety rails (hard)
 
-- **No product-code change, no commit, no deploy.** The run writes exactly two files under
-  `docs/audits/` (the audit doc + the perf-baselines update). Nothing else on disk.
+- **No product-code change, no commit, no deploy.** The run writes exactly two files in the repo
+  working tree, both under `docs/audits/` (the audit doc + the perf-baselines file). Gitignored
+  `state/` artifacts (shard threads, the context pack) and scratchpad screenshots are the only
+  other writes.
 - **Runtime access is read-only.** Read the DB, logs, and metrics; drive the UI/API to observe.
   **Never** place a trade, move money, mutate a live position / paper book, run a migration, or
   write to any live store.
@@ -47,14 +49,15 @@ trade*.
 Tiering sets the *starting* depth, never the ceiling — **promotion rule: any Light or Standard
 shard that surfaces a validated Critical or Major is promoted to Deep and runs the full loop.**
 
-| Tier | Rounds | Shards |
+| Tier | Sol turns (incl. the first pass) | Shards |
 |---|---|---|
 | **Deep** (unknown-unknowns) | up to 5 | `strategy-logic` (parity+money) · `security` · `data-quality` · `purpose-fit` |
 | **Standard** | up to 2 | `architecture` · `ops-resilience` · `meta` (docs↔code drift + test-suite quality) |
 | **Light** (prior audits swept these) | 1 pass + validate | `frontend` · `backend-java` · `optimizer-python` · `database` · `external-integrations` · `features-gaps` (+oipulse matrix) |
 
-The two axes matter: the Light/Standard layer shards *tile the code*; the Deep `security` /
-`data-quality` / `purpose-fit` / `meta` shards ask the cross-cutting questions **no single layer
+The two axes matter: the layer shards *tile the code*; the cross-cutting `security` /
+`data-quality` / `purpose-fit` (Deep) + `meta` (Standard — promotion bumps it the moment doc-drift
+proves Major) shards ask the questions **no single layer
 owns** — is it secure, is the data correct (≠ schema correct), is it achieving its purpose, are
 the docs even true. `purpose-fit` = is the platform doing what it exists for (options scalping +
 oipulse replication; does the edge survive forward testing). `meta` exists because we have direct
@@ -65,8 +68,10 @@ premise *after* owner approval.
 
 ## Phase A — recon + queue reconciliation → context pack
 
-Read-only, light, runnable anytime. Produce a **context pack** (a scratchpad markdown) that every
-shard's `{{EXTRA_PROMPT}}` draws from.
+Read-only, light, runnable anytime. Produce a **context pack** at
+`.claude/skills/comprehensive-audit/state/context-pack.md` — gitignored, in-repo (so Sol reads it
+in-sandbox by path), and it survives across sessions (a scratchpad copy dies with the session; the
+audit spans several). Every shard's `{{EXTRA_PROMPT}}` references it by path.
 
 1. **Load context:** `CLAUDE.md`, `README.md`, `PHASE_GATES.md` (parking list), `docs/design/`
    (frozen authority), the nine `docs/superpowers/plans/*.md` (master-plan §17/§18 first), and
@@ -102,19 +107,33 @@ shard's `{{EXTRA_PROMPT}}` draws from.
 ## Phase B — sharded Codex-Sol analysis (`start.sh`)
 
 Read-only, `gpt-5.6-sol` @ `xhigh` (the `codex-ask`-class default in `_common.sh` — **do not
-override `CODEX_MODEL`**). One thread per shard; state keys per label so shards converge
-independently.
+override `CODEX_MODEL`**). One thread per shard; labels are **date-stamped**
+(`audit-<YYYY-MM>-<shard>`) so the next audit never collides with — or silently resumes — this
+one's months-old threads.
 
 ```bash
-export STATE_DIR=".claude/skills/comprehensive-audit/state"
-# per shard (run the heavy ones in background — a >5-min xhigh run blows the Bash foreground cap):
+# STATE_DIR is a PER-COMMAND prefix on EVERY harness call in EVERY phase — never a one-time
+# export. Bash-tool env does not persist across calls; an unprefixed call silently falls back to
+# .claude/skills/codex/state and orphans the shard threads.
+STATE_DIR=.claude/skills/comprehensive-audit/state \
 bash .claude/skills/codex/scripts/start.sh \
     --prompt-file .claude/skills/comprehensive-audit/prompts/shard-brief.tpl \
-    audit-<shard> "<shard scope + the relevant slice of the Phase-A context pack + the runtime evidence you gathered for this shard>"
+    audit-<YYYY-MM>-<shard> "<shard scope + context-pack path + this shard's runtime evidence>"
 ```
 
+- **Every shard runs via `run_in_background`** — each is sol@`xhigh` over platform scope; any can
+  blow the Bash 5-min foreground cap. Cap concurrency at **2–3 shards** (mass-parallel xhigh
+  invites the at-capacity fallback chain). Existing thread → `start.sh` exits 2 → resume, don't
+  re-start.
+- **Killed-wrapper salvage** (wrapper died after codex ran — review + events usually survived):
+  `jq -r 'select(.type=="thread.started").thread_id' state/<key>.events.ndjson | head -1 > state/<key>.thread`,
+  then resume normally.
+- **Arg-length budget:** the whole prompt passes as ONE argv (Windows ~32K cap; the template is
+  ~4K). Keep the inline `EXTRA_PROMPT` slice ≤ ~24K chars — big content (context pack, EXPLAIN
+  dumps) goes into `state/` files referenced by path, never inline.
+
 `shard-brief.tpl` bakes the invariants, the claim/evidence contract, and the root-cause rule into
-every shard identically; `{{EXTRA_PROMPT}}` carries the per-shard scope + reconciled closures +
+every shard identically; `{{EXTRA_PROMPT}}` carries the per-shard scope + the context-pack path +
 runtime evidence. Feed Sol the **runtime evidence up front** (Phase C numbers, or the read-only
 DB/metric reads) so it reasons over real data, not source guesses.
 
@@ -139,13 +158,18 @@ if [ "$dow" -le 5 ] && [ "$ist" -ge 540 ] && [ "$ist" -le 945 ] && [ "${AUDIT_FO
 fi
 ```
 
+Even off-guard, pick the window: the live box also runs the 20:05 swing batch, 21:15 paper
+reconcilers, and 08:30–08:45 canaries + ~08:40 roll re-resolve (all IST) — prefer **22:00–07:00
+IST or a weekend** so the heavy build never contends with them. The hard guard stays market-hours
+only.
+
 Then: login; exercise every top-level route; verify the `{items:[...]}` list-envelope contracts;
 run a **mock backtest end-to-end**; run the **e2e suite** + each service's tests; **axe + a 480px
 mobile viewport** a11y sweep. Capture every bug with exact repro + screenshot.
 
 **Perf baselines (required numbers, not adjectives)** — measure and **persist to
-`docs/audits/baselines.md`** as a new dated column so future audits trend it (regression is a
-finding class): tick→signal latency, query p95 (`EXPLAIN ANALYZE` the heavy candle/OI/signal
+`docs/audits/baselines.md`** as a new dated ROW per audit (metrics as columns; the FIRST run
+creates the file) so future audits trend it (regression is a finding class): tick→signal latency, query p95 (`EXPLAIN ANALYZE` the heavy candle/OI/signal
 queries + chunk/compression/index-hit stats), page load + bundle/chunk sizes + web-vitals, backtest
 throughput, and container memory headroom (`docker stats`; Timescale OOM'd at 1 GB — headroom is
 real). Read-only runtime taps: `/actuator/health` + `/actuator/prometheus`, the health endpoints
@@ -168,10 +192,11 @@ a stall.
    right is a success.** Unresolvable points keep BOTH positions and go to the owner-decision list.
 
 ```bash
+STATE_DIR=.claude/skills/comprehensive-audit/state \
 bash .claude/skills/codex/scripts/resume.sh \
     --prompt-file .claude/skills/comprehensive-audit/prompts/converge.tpl \
     --notes "<your CONFIRMED/REFUTED/STALE evidence>" \
-    audit-<shard> "<point-by-point verdicts + counter-proposals>"
+    audit-<YYYY-MM>-<shard> "<point-by-point verdicts + counter-proposals>"
 ```
 
 3. **Cross-domain merge pass (before Phase E).** The 13 shards ran on separate threads, so a
@@ -187,15 +212,17 @@ bash .claude/skills/codex/scripts/resume.sh \
    code) — the only defence against consensus-by-fatigue a round-cap can't catch. Downgrade / pull /
    re-evidence whatever it lands.
    ```bash
+   STATE_DIR=.claude/skills/comprehensive-audit/state \
    bash .claude/skills/codex/scripts/start.sh \
        --prompt-file .claude/skills/comprehensive-audit/prompts/redteam.tpl \
-       audit-redteam "path: docs/audits/<date>-comprehensive-audit.md — attack the conclusions"
+       audit-<YYYY-MM>-redteam "path: docs/audits/<date>-comprehensive-audit.md — attack the conclusions"
    ```
    For any **Deep money/parity Critical**, additionally run `adversarial-review` (Opus, lens-diverse,
    REFUTE-framed) on that finding before it reaches the owner-decision list — our proven routine,
    and a true cross-vendor attack on a Sol-co-authored claim.
 2. **Consistency stamp.** `codex-plan-review` on the finished doc for a formal `APPROVED` (confirms
-   the written doc matches what you converged on).
+   the written doc matches what you converged on). That skill sets its OWN `STATE_DIR`; its plan
+   template is deliberately repurposed here as a consistency stamp on a non-plan doc.
 
 ---
 
@@ -208,7 +235,11 @@ priority order) so the owner can act without reading the ledger. **Discipline:**
 Each finding row: **id · shard · category · severity** (P0–P3, ties broken by the owner priority
 order) · **evidence** (no evidence, no row) · **proposed change + effort (S/M/L) + horizon** ·
 **status** (novel / already-planned `[doc]` / parked `[PHASE_GATES]` / owner-gated / regressed-from-
-audit `[audit]`) · **dual-sign** `Fable ✓ + Sol ✓` (a row without both is not converged).
+audit `[audit]`) · **dual-sign** `Fable ✓ + <model> ✓` (a row without both is not converged). Sign
+with the model that ACTUALLY served the round — the harness echoes it; a capacity-fallback round
+signs `luna ✓`, not `Sol ✓`. Light-tier rows carry Sol's sign as-authored **only if unmodified**;
+a Fable-edited surviving row gets one ratify-resume on the shard thread, else ships marked
+`Fable-only`.
 
 Then: a **prioritised roadmap** (P0→P3, grouped by theme, each P0/P1 self-contained enough to become
 a builder brief or chip); the **oipulse gap-matrix** + live-check shortlist; an **"already covered —
@@ -217,12 +248,16 @@ do not re-propose"** appendix; the updated **perf baselines** pointer; an **owne
 missing evidence); and **unresolved disagreements** (both positions). Report back to the owner with
 the path, counts by severity + status, top P0/P1 in priority order, and the owner-decision list.
 
-## Harness / cost notes
+## Harness / cost / shipping notes
 
-- Model & sandbox inherited from `_common.sh` (sol/xhigh/read-only) — the skill overrides nothing.
-- Killed-wrapper salvage + at-capacity / codex-down fallback: `.claude/skills/codex/ROUTING.md`
-  (codex fully down → an Opus subagent is the second voice; record the lost cross-vendor property).
-- State (`state/*.thread|review.txt|events.ndjson`) is gitignored and per-shard-label keyed —
-  concurrent shards never collide. Reset a shard with `.claude/skills/codex/scripts/reset.sh`.
+- Model from `_common.sh` (sol/xhigh), read-only sandbox from `start.sh`'s default — the skill
+  overrides neither. At-capacity / codex-down fallback: `.claude/skills/codex/ROUTING.md` (codex
+  fully down → an Opus subagent is the second voice; record the lost cross-vendor property).
+  Killed-wrapper salvage: the jq one-liner in Phase B.
+- State (`state/*.thread|review.txt|events.ndjson` + the context pack) is gitignored and
+  per-shard-label keyed — concurrent shards never collide. Reset a shard with
+  `STATE_DIR=.claude/skills/comprehensive-audit/state bash .claude/skills/codex/scripts/reset.sh <label>`.
 - Rough cost: ~32 Sol runs tiered vs 60+ flat-deep, savings taken entirely from re-audited ground.
   Phases A/B/D/E are light and runnable anytime; Phase C is the heavy, clock-guarded one.
+- **Shipping:** the RUN never commits. After owner sign-off, the audit doc + `baselines.md` go out
+  via a normal docs PR (usual trunk flow) — that PR sits outside the run's no-commit rail.

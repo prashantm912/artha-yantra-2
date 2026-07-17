@@ -114,9 +114,16 @@ performant, responsive, and easy to use.
   `optimizer-service`; shared `libs/`): service & Modulith boundaries, API design (typed
   records not `Map`), correctness, concurrency/thread-safety, error handling, resource use
   (memory/OOM history — read the logs), observability, dead code.
+- **External integrations & API contracts**: the broker/data adapters (Kite live WS + REST,
+  Upstox analytics/expired-history, OpenAlgo, healthchecks.io heartbeat), cross-source symbol
+  normalization, the shared rate-limiter contention, token-expiry handling, the contract
+  canaries + the ci-contracts drift blind spots, and **each integration's failure mode**
+  (down / at-capacity / schema-drift / stale token) — does the feed degrade safely or break?
 - **Database** (Flyway + TimescaleDB): schema design, migration hygiene, hypertables &
   continuous aggregates, **index usage + `EXPLAIN ANALYZE` on the heavy queries**, retention/
-  compression + chunk stats, IST/UTC correctness, single-writer (D10) discipline, N+1 patterns.
+  compression + chunk stats, IST/UTC correctness, single-writer (D10) discipline, N+1 patterns,
+  and **data-growth headroom** (OI is ~1.1B-row scale — chunk/hypertable growth, compression,
+  backtest/replay concurrency).
 - **Domain logic & strategy**: SignalEngine, parity firewall, scalpers/swing strategies,
   backtest & optimizer, the OI suite, exit doctrine, risk/margin. Assess **strategy efficacy +
   gaps** on the forward-paper metric above.
@@ -169,13 +176,18 @@ overflows; a small review may share one. Exact commands in §6.
   (Explore agents / grep / read the cited code; reproduce bugs; re-run the query/metric). Tag
   each: `CONFIRMED` (file:line / repro / query+result) · `REFUTED` (counter-evidence) ·
   `STALE / ALREADY-DONE` (cite PR/commit) · `DUPLICATE-OF-PLANNED` (cite plan doc) ·
-  `NEEDS-MORE-EVIDENCE`. Add what Sol missed. Re-rank severity. Never accept a Sol claim on its
-  word — stale/hallucinated file:line is the #1 failure mode.
+  `NEEDS-MORE-EVIDENCE` (state EXACTLY what evidence would confirm or kill it). Add what Sol
+  missed. Re-rank severity. Never accept a Sol claim on its word — stale/hallucinated file:line
+  is the #1 failure mode.
 - **Round 3 — You push back.** Resume the SAME thread with your validation ledger + change
   recommendations, **point by point**; ask Sol to concede or defend each with fresh evidence.
 - **Round 4+ — Iterate** until **every point carries a shared verdict** — both agree it's real
   and worth doing (agreed severity + fix), or both agree to drop it. No point left in
   disagreement.
+- **Cross-domain merge pass** (before the stamp): the domains ran on separate threads, so
+  reconcile the union — dedup findings that surfaced in two domains, resolve any contradictory
+  verdicts, and make severities consistent across the whole doc (a single-thread review gets this
+  for free; per-domain threads do not).
 - **Convergence stamp.** When a domain's ledger is all-agreed, run `codex-plan-review` on the
   written doc for a formal `APPROVED` verdict (confirms the doc matches what you converged on).
 - **If a point can't converge**, record BOTH positions verbatim → owner-decision list. Never
@@ -185,7 +197,13 @@ overflows; a small review may share one. Exact commands in §6.
 
 ## 5. The deliverable doc
 
-Write to `docs/superpowers/plans/2026-07-18-comprehensive-app-review.md`. Every finding row:
+Write to `docs/superpowers/plans/2026-07-18-comprehensive-app-review.md`. **Discipline:** every
+row names the **root cause**, not just the symptom; **no generic best-practice advice** untied to a
+concrete file:line / repro / query+result. Open the doc with an **executive summary** (≤1 page — the
+handful of changes that matter most, in the §0 priority order) so the owner can act without reading
+the full ledger.
+
+Every finding row:
 - **ID** · **layer** · **category** (bug / architecture / feature-gap / performance / a11y /
   UX / security / strategy / data-quality / resilience / tech-debt) · **severity** (P0–P3,
   broken by the §0 priority order on ties)
@@ -195,10 +213,12 @@ Write to `docs/superpowers/plans/2026-07-18-comprehensive-app-review.md`. Every 
   owner-gated (money/arming/HOLD) · regressed-from-audit `[audit]`
 - **Dual-sign**: `Fable ✓` + `Sol ✓` (a row without both is not converged)
 
-Then: a **prioritized roadmap** (P0→P3, grouped by theme, ordered by the §0 priorities); the
-**oipulse feature gap-matrix** + its live-check shortlist; an **"already covered — do not
-re-propose"** appendix (reconciliation output); an **owner-decision list** (money / arming /
-HOLD / any invariant change); and **unresolved disagreements** with both positions.
+Then: a **prioritized roadmap** (P0→P3, grouped by theme, ordered by the §0 priorities — each P0/P1
+item self-contained enough to become a builder brief or chip directly); the **oipulse feature
+gap-matrix** + its live-check shortlist; an **"already covered — do not re-propose"** appendix
+(reconciliation output); an **owner-decision list** (money / arming / HOLD / any invariant change);
+a **needs-verification** section listing every item left unconfirmed, each with the exact missing
+evidence; and **unresolved disagreements** with both positions.
 
 ---
 

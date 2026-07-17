@@ -403,11 +403,12 @@ public class SignalEngine {
   /**
    * (Re)loads published+enabled strategies and rebuilds subscriptions, reporting what it computed.
    *
-   * @param keepBest true ⇒ refuse to install a result that leaves the engine worse off than what it
-   *     already holds (see {@link #wouldRegressTheEngine}). ONLY the bounded CONNECTED retry chain
-   *     sets this: its attempts all read the SAME registry state, so a regression across them is
-   *     upstream damage, never a registry edit. Every other path (hot-swap, the 08:40 cron, the 20s
-   *     reconcile) installs unconditionally.
+   * @param keepBest true ⇒ carry the last-good entry forward for each strategy whose OWN load
+   *     failed retryably, instead of dropping it (see {@link #retainLastGood}). ONLY the bounded
+   *     CONNECTED retry chain sets this: its attempts all read the SAME registry state, so a
+   *     per-strategy failure across them is upstream damage, never a registry edit. Every other
+   *     path (hot-swap, the 08:40 roll cron, the 20s reconcile) installs unconditionally, so a
+   *     stale contract can never survive a roll.
    * @return what this reload COMPUTED (installed or not), or null when the engine is stopped
    */
   private synchronized ReloadOutcome reload(boolean keepBest) {
@@ -418,6 +419,11 @@ public class SignalEngine {
     List<Loaded> fresh = new ArrayList<>();
     int unresolvedDrops = 0;
     int loadErrors = 0;
+    // The strategies whose OWN resolution/load failed retryably THIS reload — recorded as it
+    // happens, never derived afterwards by differencing sets. That distinction is the whole point:
+    // a strategy ABSENT from the registry read did not fail, it is gone, and it must be DROPPED.
+    // Inferring state from a gap is the single mistake that produced every defect in round 1.
+    Set<UUID> retryablyFailed = new java.util.HashSet<>();
     List<StrategyRepository.StrategyRow> all = registry.listAll();
     for (StrategyRepository.StrategyRow strategy : all) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
@@ -472,6 +478,7 @@ public class SignalEngine {
         UniverseResolution resolution = resolveUniverse(config);
         if (resolution.status() == UniverseResolutionStatus.UNRESOLVED) {
           unresolvedDrops++;
+          retryablyFailed.add(strategy.id());
           log.warn("strategy {} has an unresolved universe — not loaded", strategy.slug());
           continue;
         }
@@ -537,8 +544,17 @@ public class SignalEngine {
         // error also lands here and will burn the chain to a bounded DEGRADED; that is the correct
         // trade, because the alternative is a silently dead engine.
         loadErrors++;
+        retryablyFailed.add(strategy.id());
         log.error("strategy {} failed to load — skipped: {}", strategy.slug(), e.getMessage());
       }
+    }
+    int retained = keepBest ? retainLastGood(fresh, retryablyFailed) : 0;
+    if (retained > 0) {
+      log.warn(
+          "KEEP_BEST_RETAINED_LAST_GOOD: {} strategies failed this retry ({} unresolved, {} load "
+              + "errors) and kept their last-good entry instead of being dropped — a retry must "
+              + "never leave the engine holding less than it already did",
+          retained, unresolvedDrops, loadErrors);
     }
     ReloadOutcome outcome = new ReloadOutcome(fresh.size(), unresolvedDrops, loadErrors);
     Set<LoadedIdentity> freshIdentities = identitiesOf(fresh);
@@ -561,15 +577,6 @@ public class SignalEngine {
           "signal engine reload unchanged ({} loaded, {} unresolved, {} load errors) — indicator "
               + "banks and subscriptions retained",
           fresh.size(), unresolvedDrops, loadErrors);
-      return outcome;
-    }
-    if (keepBest && wouldRegressTheEngine(outcome, freshIdentities)) {
-      log.error(
-          "KEEP_BEST_SUPPRESSED_REGRESSION: reload computed {} loaded / {} unresolved / {} load "
-              + "errors and would have DROPPED {} of the {} strategies currently loaded; keeping "
-              + "the installed set (the retry would have HARMED the engine)",
-          outcome.loadedCount(), outcome.unresolvedDrops(), outcome.loadErrors(),
-          droppedCount(installedIdentities, freshIdentities), loaded.size());
       return outcome;
     }
     bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
@@ -595,39 +602,44 @@ public class SignalEngine {
     return out;
   }
 
-  private static int droppedCount(Set<LoadedIdentity> installed, Set<LoadedIdentity> fresh) {
-    int dropped = 0;
-    for (LoadedIdentity identity : installed) {
-      if (!fresh.contains(identity)) {
-        dropped++;
+  /**
+   * Carries the last-good entry forward for each strategy whose OWN resolution/load failed this
+   * retry, and returns how many were retained. The retry chain's "ends worse than no retry at all"
+   * hazard: the terminal state used to be unconditionally the last attempt's result, so a
+   * market-data regression across the retry window could take a live 19-of-39 engine to 0 for the
+   * session — where simply not retrying would have kept 19.
+   *
+   * <p>Reconciled PER STRATEGY, because a fault is per strategy. Suppressing the whole reload
+   * instead (the previous shape) meant one broken strategy could veto every OTHER strategy's
+   * update: a screener that legitimately resolved to NOTHING would keep its stale universe loaded
+   * — and {@code onClosedBar} walks {@code loaded}, so it would go on trading yesterday's movers
+   * until an unrelated fault cleared. Another strategy's fault is not evidence about this one.
+   *
+   * <p>Three outcomes, and the distinction between the last two is the entire safety argument:
+   *
+   * <ul>
+   *   <li>Loaded ⇒ its new state installs.
+   *   <li>Own resolution/load FAILED ⇒ retain its last-good entry (nothing is lost to a fault).
+   *   <li>Anything else — genuinely absent from the registry, disabled, unpublished, swing,
+   *       not-live-resolvable, or a {@code RESOLVED_EMPTY} STAND-ASIDE ⇒ DROPPED. None of these
+   *       failed; they are the registry's truth and must land immediately. This is why per-strategy
+   *       reconciliation never degenerates into a permanent union: only a genuine FAILURE retains,
+   *       and failure is recorded when it happens rather than inferred from a set difference.
+   * </ul>
+   *
+   * <p>Chain-only ({@code keepBest}). Every other path — hot-swap, the 08:40 roll cron, the 20s
+   * reconcile — installs unconditionally, so a stale contract can never survive a roll.
+   */
+  private int retainLastGood(List<Loaded> fresh, Set<UUID> retryablyFailed) {
+    int retained = 0;
+    for (Loaded previous : loaded) {
+      // A strategy that failed took a `continue` before reaching fresh, so it cannot be duplicated.
+      if (retryablyFailed.contains(previous.strategyId())) {
+        fresh.add(previous);
+        retained++;
       }
     }
-    return dropped;
-  }
-
-  /**
-   * True when a FAILING reload would drop a strategy the engine currently holds. This is the retry
-   * chain's "ends worse than no retry at all" hazard: the terminal state used to be unconditionally
-   * the LAST attempt's result, so a market-data regression across the retry window could take a
-   * live 19-of-39 engine down to 0 for the session — where simply not retrying would have kept 19.
-   *
-   * <p>Judged on IDENTITY, never on counts: {@code {A}} → {@code {B}} is "1 loaded" either way, but
-   * installing it removes A from {@link #loaded}, and exit evaluation only walks {@code loaded} —
-   * so A's open position would silently lose its exits for the session. The rule is therefore
-   * SUPERSET-or-suppress: an unhealthy result may only install if it keeps everything already
-   * loaded. Deliberately NOT a union of additions across attempts — that would keep a genuinely
-   * removed strategy alive forever.
-   *
-   * <p>This is sound only because every attempt in a chain reads the SAME registry state, so a
-   * non-superset unhealthy result is upstream damage rather than a registry edit. Two properties
-   * keep it from freezing the engine: a HEALTHY reload is the registry's truth and always installs
-   * (so a screener standing aside, or a genuine unpublish, lands immediately); and a suppressed
-   * reload leaves {@link #lastReloadedPublishedSet} untouched, so a real registry change is still
-   * seen as drift by {@link #reconcilePublishedStrategies()} within 20s and installed by an
-   * UNGUARDED reload. Every non-chain path (hot-swap, the 08:40 cron, the reconcile) is unguarded.
-   */
-  private boolean wouldRegressTheEngine(ReloadOutcome outcome, Set<LoadedIdentity> freshIdentities) {
-    return !outcome.healthy() && !freshIdentities.containsAll(identitiesOf(loaded));
+    return retained;
   }
 
   private UniverseResolution resolveUniverse(JsonNode config) {

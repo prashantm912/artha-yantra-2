@@ -947,11 +947,16 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
    * CRITICAL-1 regression: keep-best must judge IDENTITY, not counts. A reload that swaps which
    * strategy loaded is "1 loaded / 1 unresolved" either way, so a count-based guard installs it —
    * removing A from `loaded`, which is the only thing exit evaluation walks, so A's open position
-   * loses its exits for the session. Fails against a count comparison: A is silently replaced by B.
+   * loses its exits for the session.
+   *
+   * <p>Both halves matter, and per-strategy reconciliation is the only thing that gets both: A
+   * FAILED, so it keeps its last-good entry; B SUCCEEDED, so its load installs on its own merit.
+   * Fails against a count comparison (A is silently replaced by B) and equally against
+   * whole-reload suppression (A survives, but B's legitimate load is vetoed by A's fault).
    */
   @Test
   @Order(16)
-  void keepBestSuppressesAnEqualCountReloadThatSwapsStrategyIdentity() {
+  void keepBestRetainsAFailedStrategyWhileAnotherStrategySucceeds() {
     StrategyRepository.StrategyRow rowA =
         uniquePublishedRow(KEEP_BEST_A_YAML, "engine-it-swap-a", "Swap A");
     StrategyRepository.StrategyRow rowB =
@@ -992,8 +997,10 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
           .atMost(Duration.ofSeconds(30))
           .until(() -> !isolatedEngine.kiteConnectedReloadInFlight());
 
-      // Same count, different identity — A must NOT have been swapped out for B.
-      assertThat(isolatedEngine.loadedSlugs()).containsExactly(rowA.slug());
+      // Same count, different identity: A must NOT have been swapped out for B (its own load
+      // failed ⇒ last-good retained), and B must NOT have been vetoed by A's fault (it succeeded).
+      assertThat(isolatedEngine.loadedSlugs())
+          .containsExactlyInAnyOrder(rowA.slug(), rowB.slug());
     } finally {
       isolatedEngine.stop();
     }
@@ -1042,6 +1049,72 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
           .until(() -> !isolatedEngine.kiteConnectedReloadInFlight());
 
       assertThat(isolatedEngine.loadedSlugs()).isEmpty();
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * The MIXED case: keep-best must reconcile PER STRATEGY, because a fault is per strategy.
+   *
+   * <p>A screener resolving to empty is a legitimate stand-aside and must install even while an
+   * UNRELATED strategy has a genuine fault. Suppressing the whole reload (the round-2 shape) let
+   * one broken strategy veto every other strategy's update: the aggregate outcome read unhealthy,
+   * the reload was dropped entirely, and the standing-aside screener kept its stale universe in
+   * {@code loaded} — where {@code onClosedBar} would go on trading yesterday's movers until the
+   * unrelated fault cleared.
+   *
+   * <p>Asserts BOTH halves. A alone would pass under a plain "install everything" that reintroduces
+   * the original chip-2 bug; B alone would pass under whole-reload suppression. Only per-strategy
+   * reconciliation satisfies both at once.
+   */
+  @Test
+  @Order(20)
+  void keepBestReconcilesPerStrategySoAStandAsideLandsDespiteAnUnrelatedFault() {
+    StrategyRepository.StrategyRow rowA =
+        uniquePublishedRow(KEEP_BEST_A_YAML, "engine-it-mixed-a", "Mixed A");
+    StrategyRepository.StrategyRow rowB =
+        uniquePublishedRow(KEEP_BEST_B_YAML, "engine-it-mixed-b", "Mixed B");
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(rowA, rowB));
+    when(isolatedRegistry.findVersionById(rowA.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowA.publishedVersionId()));
+    when(isolatedRegistry.findVersionById(rowB.publishedVersionId()))
+        .thenReturn(repository.findVersionById(rowB.publishedVersionId()));
+
+    // Boot: both load. Then A stands aside (RESOLVED_EMPTY, legitimate) while B genuinely FAILS.
+    AtomicBoolean mixedPhase = new AtomicBoolean(false);
+    AtomicInteger resolutions = new AtomicInteger();
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              resolutions.incrementAndGet();
+              boolean isA = KEEP_BEST_A_UNDERLYING.equals(invocation.<String>getArgument(1));
+              if (!mixedPhase.get()) {
+                return Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")));
+              }
+              return isA ? Optional.of(List.of()) : Optional.empty();
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    isolatedEngine.kiteConnectedReloadDelayMillis = 200L;
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactlyInAnyOrder(rowA.slug(), rowB.slug());
+
+      mixedPhase.set(true);
+      int atBoot = resolutions.get();
+      redis.convertAndSend("kite.status", "CONNECTED");
+
+      await().atMost(Duration.ofSeconds(30)).until(() -> resolutions.get() > atBoot);
+      await()
+          .atMost(Duration.ofSeconds(30))
+          .until(() -> !isolatedEngine.kiteConnectedReloadInFlight());
+
+      // A stood aside on its OWN merit — its stale universe must be GONE, not vetoed by B's fault.
+      // B genuinely failed — its last-good entry must be RETAINED, or this is the chip-2 bug again.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(rowB.slug());
     } finally {
       isolatedEngine.stop();
     }

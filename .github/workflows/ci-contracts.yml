@@ -1,9 +1,39 @@
 # Phase 24 (CD-8): the committed OpenAPI 3.1 specs are the contract. Every PR
 # regenerates them from code (mock profile, the ContractCaptureTest path that
-# also lints /api/v1 prefixes + the error envelope) and diffs against the
-# committed files with openapi-diff - BREAKING changes fail; pure drift
-# (additive, uncommitted) is surfaced as a warning so the spec gets refreshed
-# in the same PR. The generated TS client must compile under tsc --strict.
+# also lints /api/v1 prefixes + the error envelope). The generated TS client must
+# compile under tsc --strict.
+#
+# task_b3b59719 - WHAT THE BREAKING GATE COMPARES, AND WHAT IT CANNOT SEE.
+#
+# This header used to claim "BREAKING changes fail". That was false, and the workflow
+# itself was why: the gate mounted the BRANCH's committed spec against the BRANCH's
+# freshly-captured code spec. Both sides were the branch, so it never compared against
+# main - and the very next step tells you to re-capture the spec (as do CLAUDE.md and
+# ship-a-change), which makes both sides identical again. It had teeth only on a PR that
+# forgot to re-capture, i.e. never on the PRs it exists for. Now: the breaking gate diffs
+# the MERGE BASE's committed spec against this branch's code spec - "does this PR break a
+# consumer sitting on main today?", which is the only question worth asking.
+#
+# It matters because consumers read these keys OVER THE WIRE with no compile-time link -
+# e.g. strategy-signal's registry/UniverseResolver.java:142-148 reads asOf / items /
+# exchange / tradingsymbol out of market-data's constituents response via JsonNode.path().
+# A renamed key silently breaks live universe resolution and no compiler catches it.
+#
+# HONEST LIMITATION - this gate CANNOT yet catch that renamed key. Measured 2026-07-17
+# against the real specs with the real image (openapi-diff 2.1.7); two independent defects:
+#   1. Our specs say openapi: 3.1.0, and openapi-diff 2.1.7 does not diff 3.1 schemas.
+#      A response property retyped string->integer reports "No differences. Specifications
+#      are equivalent". Relabelling the SAME bytes to 3.0.1 reports "broke backward
+#      compatibility" (exit 1). All four specs contain zero 3.1-only constructs.
+#   2. springdoc emits no `required` array for record-backed response schemas, so every
+#      property is optional - and openapi-diff has no "response property removed" rule at
+#      all (its enum has only incompatible.response.required.decreased). Removing or
+#      renaming an OPTIONAL response property is "backward compatible" by construction.
+# So what it DOES catch today: a removed endpoint, a removed/renamed response code, and a
+# newly-required request param - against main, which it never did before. What it does NOT
+# catch: any schema-shape change. Closing that needs an owner decision (upgrade
+# openapi-diff / emit 3.0 / emit `required`) and touches service code, not this file.
+# Do not re-broaden this comment into a promise the tooling does not keep.
 name: ci-contracts
 
 on:
@@ -16,11 +46,38 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   contracts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The breaking gate diffs against the merge base; the default shallow
+          # fetch does not contain it.
+          fetch-depth: 0
+
+      - name: Resolve the merge base (fail loudly if it does not)
+        if: github.event_name == 'pull_request'
+        id: mergebase
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          # fetch-depth:0 already has it in practice; this makes the dependency explicit
+          # and survives a fork PR, where origin is the BASE repo.
+          git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          BASE_SHA="$(git merge-base HEAD "origin/$BASE_REF")"
+          if [ -z "$BASE_SHA" ]; then
+            echo "::error::merge base against origin/$BASE_REF did not resolve - the breaking gate must not run blind."
+            exit 1
+          fi
+          echo "merge base: $BASE_SHA"
+          git log -1 --oneline "$BASE_SHA"
+          echo "sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
         with:
@@ -36,29 +93,114 @@ jobs:
           ./mvnw -ntp -pl services/edge-gateway,services/market-data-service,services/strategy-signal-service,services/backtest-service -am test \
             -Dtest=ContractCaptureTest -Dsurefire.failIfNoSpecifiedTests=false
 
-      - name: Diff committed vs regenerated (fail on BREAKING)
+      - name: Breaking-change gate (merge base vs this branch's code)
+        # Skipped on push:main - the PR already merged; there is nothing left to gate.
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ steps.mergebase.outputs.sha }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
+          set -euo pipefail
+
+          case "$PR_BRANCH" in
+            hotfix/*)
+              echo "::notice::hotfix branch - breaking-contract gate exempt by design (a live incident must not wait on a contract gate)."
+              exit 0
+              ;;
+          esac
+
+          mkdir -p /tmp/basespec
+          broke=""
           for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do
             echo "=== $svc ==="
+            # A spec absent from the merge base = a NEW service. Nothing on main consumes it
+            # yet, so there is no compatibility question to answer.
+            if ! git show "$BASE_SHA:contracts/$svc.openapi.json" > "/tmp/basespec/$svc.openapi.json" 2>/dev/null; then
+              echo "::notice::$svc has no spec at the merge base (new service) - nothing to break."
+              continue
+            fi
+            # No pipe, no `||`: the exit code must survive. `set +e`/`set -e` around the call so we
+            # can read the STATUS rather than only "nonzero", which `if !` would flatten.
+            set +e
             docker run --rm \
-              -v "$PWD/contracts:/committed:ro" \
+              -v "/tmp/basespec:/base:ro" \
               -v "$PWD/services/$svc/target/contracts:/fresh:ro" \
               openapitools/openapi-diff:latest \
               --fail-on-incompatible \
-              "/committed/$svc.openapi.json" "/fresh/$svc.openapi.json"
-          done
-
-      - name: Warn on non-breaking drift (spec needs a refresh commit)
-        run: |
-          drift=0
-          for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do
-            if ! diff -q "contracts/$svc.openapi.json" "services/$svc/target/contracts/$svc.openapi.json" > /dev/null; then
-              echo "::warning::contracts/$svc.openapi.json drifts from code (non-breaking) - refresh it with -Dcontracts.capture=true"
-              drift=1
+              "/base/$svc.openapi.json" "/fresh/$svc.openapi.json"
+            rc=$?
+            set -e
+            # Exit 1 is the ONLY "incompatible" answer. Any other nonzero means the TOOL failed
+            # (parse error, bad mount, image pull, OOM) — it is NOT a verdict, and it must never
+            # reach the escape hatch below: an approval token would then wave through a run that
+            # checked NOTHING, which is this workflow's original sin in a new costume. Fail here.
+            if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+              echo "::error::openapi-diff exited $rc for $svc — that is a TOOL failure, not a compatibility verdict. The gate cannot answer its question, so it fails. This is NOT waivable by the PR-body token."
+              exit 1
+            fi
+            if [ "$rc" -eq 1 ]; then
+              broke="$broke $svc"
             fi
           done
-          exit 0
+
+          if [ -z "$broke" ]; then
+            echo "No breaking change against the merge base."
+            exit 0
+          fi
+
+          # ---- Escape hatch ------------------------------------------------------------
+          # An INTENTIONAL break must be expressible, or this gate gets deleted the first
+          # time it is inconvenient - which is worse than the status quo. Mirrors
+          # ci-review-verdict's SKIPPED (<reason>): a parenthesised, NON-EMPTY reason.
+          # Read live from the API, NOT github.event.pull_request.body: a re-run replays the
+          # ORIGINAL event payload, so a body edited to add the token would never be seen.
+          # `|| true`: a gh hiccup must not abort the step with a stack trace instead of the
+          # guidance below. An empty BODY simply finds no token, so this still fails CLOSED.
+          BODY="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.body // ""' 2>/dev/null || true)"
+          REASON='\([^)]*[^)[:space:]][^)]*\)'
+          PATTERN="Contract break:[[:space:]]*APPROVED[[:space:]]*$REASON"
+
+          if printf '%s' "$BODY" | grep -qE "$PATTERN"; then
+            echo "::warning::BREAKING contract change against main in:$broke - allowed by an explicit PR-body approval."
+            printf '%s' "$BODY" | grep -oE "$PATTERN" | head -1
+            exit 0
+          fi
+
+          cat >&2 <<MSG
+          BREAKING contract change vs the merge base ($BASE_SHA) in:$broke
+
+          A consumer sitting on main today would break. Several consumers read these keys
+          over the wire with no compile-time link (e.g. strategy-signal's UniverseResolver
+          reads asOf / items / exchange / tradingsymbol from market-data's constituents
+          response), so nothing else catches this.
+
+          If the break is UNINTENTIONAL: fix the code. Re-capturing the spec will NOT
+          silence this gate - the comparison is against the merge base, not your branch.
+
+          If the break is INTENTIONAL and the consumers are being updated with it, add ONE
+          line to the PR body, then re-run this job:
+
+            Contract break: APPROVED (SENSEX chain rename; UniverseResolver updated in this PR)
+
+          The reason is mandatory and must be non-empty - "why" is the whole point.
+          Exempt: hotfix/* branches. Bypass: an --admin merge (deliberately possible).
+          MSG
+          exit 1
+
+      - name: Warn - committed spec vs code (did you forget to re-capture?)
+        # A DIFFERENT question from the gate above: that one asks "does this PR break a
+        # consumer on main?", this one asks "is contracts/*.json stale vs the code in this
+        # PR?". Warn-only by design - the answer is a missing chore, not a broken consumer.
+        run: |
+          set -euo pipefail
+          for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do
+            if ! diff -q "contracts/$svc.openapi.json" "services/$svc/target/contracts/$svc.openapi.json" > /dev/null 2>&1; then
+              echo "::warning::contracts/$svc.openapi.json drifts from code - refresh it with -Dcontracts.capture=true"
+            fi
+          done
 
       - uses: actions/setup-node@v4
         with:

@@ -11,8 +11,8 @@ import org.springframework.stereotype.Repository;
  * JDBC for the nightly paper-ledger reconciliation (audit §8, V5 + V16). All reads are READ-ONLY over
  * the strategy-schema paper/signal tables ({@code paper_positions}, {@code paper_orders},
  * {@code signals}, {@code risk_settings}); the only write is the append-only run row on
- * {@code paper_reconciliation_runs}. Stranded carry is global state and is deliberately not bounded
- * by the V5/V16 window. Every window bound is an EXPLICIT instant (timestamptz), never a
+ * {@code paper_reconciliation_runs}. Stranded carry and dead-anchor orphans are global state and are
+ * deliberately not bounded by the V5/V16 window. Every window bound is an EXPLICIT instant (timestamptz), never a
  * {@code ::date = CURRENT_DATE} predicate (in-container {@code now()} is UTC — off-by-one across IST
  * midnight).
  *
@@ -208,12 +208,105 @@ public class PaperReconciliationRepository {
         (rs, rowNum) -> rs.getLong("id"));
   }
 
+  /**
+   * Global dead-anchor-orphan state: an OPEN position that NO exit evaluator will ever anchor, so no
+   * EXIT is ever emitted for it. This is the structural blind spot of {@link #strandedCarryPositions()}
+   * — that predicate tests {@code EXISTS(… signal_type='EXIT' …)}, i.e. it needs an EXIT row to have been
+   * persisted. Both exit drivers gate on an ENTRY anchor being live — {@code SignalRepository.activeEntry
+   * :166-178} (version-scoped; {@code SignalEngine:745-747} only enters the exit branch when it is
+   * present) and {@code SignalRepository.activeEntries:149-152} (the swing batch's driver) BOTH require
+   * {@code signal_type='ENTRY' AND status IN ('ACTIVE','TAKEN')}. With no live anchor the engine takes the
+   * ENTRY branch instead, no EXIT row is ever written, and the EXISTS predicate can never fire. Not
+   * windowed: the state stays actionable until a human repairs it.
+   *
+   * <p><b>Two classes, unioned (both are unexitable OPEN positions):</b>
+   *
+   * <ul>
+   *   <li><b>Dead anchor</b> — the position's anchor resolves, but NO live ENTRY anchor exists for that
+   *       anchor's {@code (strategy_version_id, exchange, tradingsymbol)}. Testing the ANCHOR ROW alone
+   *       ({@code s.status NOT IN ('ACTIVE','TAKEN')}) would be wrong twice over: it misses an anchor that
+   *       is ACTIVE but not an ENTRY (live {@code paper_positions} id=28 is anchored to signals id=46, an
+   *       ACTIVE <b>EXIT</b> — {@code activeEntry} can never return it, so the position is genuinely
+   *       unexitable), and it false-positives on a position whose own anchor expired but whose symbol has
+   *       since re-anchored (a later ACTIVE ENTRY re-arms the exit branch, and the settle reaches the
+   *       position through the shared §F.6 open key). Mirroring {@code activeEntry}'s own predicate — a
+   *       NOT EXISTS over the live ENTRY set — is right on both counts.
+   *   <li><b>Unanchored</b> — no signal linkage AT ALL on an auto-paper book: {@code opening_signal_id} is
+   *       NULL and no {@code paper_orders.signal_id} ties the §F.6 open key to a signal. Nothing can close
+   *       it — the engine reaches a position only through a signal, and {@code
+   *       PaperPositionRepository.intradayOpen:339-353} (the 15:45 mark-to-close) joins {@code
+   *       o.signal_id IS NOT NULL}, so an unlinked position is outside the sweep set too. The auto-book
+   *       join is V16's ({@link #autoPaperPositionsWithoutSignal}): a {@code manual}/{@code other} book's
+   *       hand position is closed BY HAND, which is exactly the "other mechanism" this class tests for.
+   *       V16 sees this shape only INSIDE its activity window, so a stale one is invisible to it forever.
+   * </ul>
+   *
+   * <p><b>Version-scoped on purpose, and it is the safety-net-consistent choice.</b> The narrower
+   * version-LESS reading (any live ENTRY on the symbol, under any version) would be a FALSE NEGATIVE for
+   * every live-engine position: {@code activeEntry} is keyed by version, so a sibling version's anchor
+   * never re-arms this position's exit branch. A settle cannot cross books either ({@code
+   * PaperPositionRepository.openForSignal:357-370} joins {@code o.book = p.book}). The residual exposure
+   * is a false POSITIVE where one book holds two versions of one symbol and the swing batch's version-less
+   * {@code openLotsBySymbol:338-346} grouping exits them together — the same "one version per (symbol,
+   * family)" assumption {@link #strandedCarryPositions()} already documents, and for a safety net a false
+   * positive (one alert, newly-seen-gated) beats a false negative (silence forever).
+   */
+  public List<Long> deadAnchorOrphanPositions() {
+    return jdbc.query(
+        """
+        SELECT p.id
+        FROM paper_positions p
+        JOIN signals s ON s.id = p.opening_signal_id
+        WHERE p.status = 'OPEN'
+          AND NOT EXISTS (
+                SELECT 1 FROM signals a
+                WHERE a.strategy_version_id = s.strategy_version_id
+                  AND a.exchange            = s.exchange
+                  AND a.tradingsymbol       = s.tradingsymbol
+                  AND a.signal_type         = 'ENTRY'
+                  AND a.status IN ('ACTIVE', 'TAKEN')
+              )
+        UNION
+        SELECT p.id
+        FROM paper_positions p
+        JOIN risk_settings rs
+          ON rs.book = p.book AND rs.key = 'auto_paper_trade'
+          AND COALESCE((rs.value->>'enabled')::boolean, false) = true
+        WHERE p.status = 'OPEN'
+          AND p.opening_signal_id IS NULL
+          AND NOT EXISTS (
+                SELECT 1 FROM paper_orders o
+                WHERE o.book          = p.book
+                  AND o.exchange      = p.exchange
+                  AND o.tradingsymbol = p.tradingsymbol
+                  AND o.side          = p.side
+                  AND o.signal_id IS NOT NULL
+              )
+        ORDER BY 1;
+        """,
+        (rs, rowNum) -> rs.getLong("id"));
+  }
+
   /** Reads the stranded-carry ids stored by the most recent prior run, treating missing keys as empty. */
   public List<Long> previousStrandedCarryIds() {
+    return previousRunIds("strandedCarry");
+  }
+
+  /**
+   * Reads the dead-anchor-orphan ids stored by the most recent prior run. Runs written before this check
+   * existed carry no such key — COALESCE treats them as empty, so the first pass after deploy reports every
+   * standing orphan exactly once and is silent thereafter.
+   */
+  public List<Long> previousDeadAnchorOrphanIds() {
+    return previousRunIds("deadAnchorOrphans");
+  }
+
+  /** The position ids the most recent prior run stored under {@code detail-><key>->'positions'}. */
+  private List<Long> previousRunIds(String detailKey) {
     return jdbc.query(
             """
             SELECT COALESCE((SELECT array_agg(v::bigint)
-                             FROM jsonb_array_elements_text(detail->'strandedCarry'->'positions') v), '{}')
+                             FROM jsonb_array_elements_text(detail->?::text->'positions') v), '{}')
             FROM paper_reconciliation_runs ORDER BY ran_at DESC, id DESC LIMIT 1
             """,
             (rs, rowNum) -> {
@@ -228,7 +321,8 @@ public class PaperReconciliationRepository {
               return Arrays.stream(values)
                   .map(value -> value instanceof Number n ? n.longValue() : Long.parseLong(value.toString()))
                   .toList();
-            })
+            },
+            detailKey)
         .stream()
         .findFirst()
         .orElseGet(List::of);

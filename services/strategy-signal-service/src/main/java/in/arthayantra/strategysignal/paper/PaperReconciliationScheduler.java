@@ -40,9 +40,10 @@ public class PaperReconciliationScheduler {
       ReconciliationResult r = reconciliation.reconcile();
       log.info(
           "paper reconciliation done: {} positions + {} taken signals checked, {} discrepancies"
-              + " (V5 {}, V16 {}, stranded carry {})",
+              + " (V5 {}, V16 {}, stranded carry {}, dead-anchor orphans {})",
           r.positionsChecked(), r.takenSignalsChecked(), r.totalDiscrepancies(),
-          r.v5Discrepancies(), r.v16Discrepancies(), r.strandedCarryDiscrepancies());
+          r.v5Discrepancies(), r.v16Discrepancies(), r.strandedCarryDiscrepancies(),
+          r.deadAnchorOrphanDiscrepancies());
     } catch (RuntimeException e) {
       // A lone log line is invisible ops (audit P0-4/H10): the reconciler failing must reach the owner —
       // an unrun integrity check hides exactly the drift it exists to surface. Uses the same ops-alert

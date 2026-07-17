@@ -157,6 +157,15 @@ login, no restart. Fallback if it does not: login first, then restart strategy-s
 
 ---
 
+**UPDATE 2026-07-17 (weekend-safe batch, session cont.).** Four weekend-safe items landed + one
+red-main regression found:
+- **DataTable adoption wave 2** ([#897](https://github.com/prashantm912/artha-yantra-2/pull/897)) — 4 screener/dossier/versions pages; e2e = the two known 2-core flakes only, admin-merged.
+- **CriterionDot WCAG 1.4.1** ([#899](https://github.com/prashantm912/artha-yantra-2/pull/899)) — graduation dots now carry a ✓/✗ glyph (non-colour channel), `role="img"` makes the `aria-label` legal + the glyph presentational; Codex APPROVED (no findings).
+- **ci-contracts sees a renamed/retyped RESPONSE key** ([#900](https://github.com/prashantm912/artha-yantra-2/pull/900), task_ade97df8) — **CLOSES the CLAUDE.md "renamed response key reaches live un-caught / UniverseResolver wire-read" blind spot.** Relabels specs to 3.0.1 for the diff step + validates the relabel against the 3.0 schema (openapi-spec-validator, fail-closed) + `RecordRequiredModelConverter`/`ResponseRequiredCustomizer` emit `required` on response-only record schemas. Codex converged over 3 rounds (deny-list → 3.0-schema-validate backstop → explicit `$ref`-sibling reject). Committed specs stay 3.1.0; regen byte-identical.
+- **docs** ([#898](https://github.com/prashantm912/artha-yantra-2/pull/898)) — DataTable-jsdom/header/refactor traps + the `AT TIME ZONE '+05:30'` display-INVERSION correction.
+- ⚠️ **RED ON MAIN since #895 merged (`17a69ea2`, yesterday):** `SignalEngineIntegrationTest.everyEvaluationIsCountedExactlyOnceSoTheOutcomeSumIsTheEvaluationCount` (task_37ee83e0) fails **deterministically on the 2-core strategy-gateway shard** — the cold `SIGSUM<rand>` series "never warmed (REST back-fill empty at load)" → Σ(outcomes) short of 43. NOT caused by #900 (proven: same test red on the #895 merge commit with no #900 in it; #900's shard shows only this one pre-existing error). **Fix in flight** (`fix/signal-eval-count-it-green`) — diagnosing real-uncounted-branch vs test-harness-warmup. **A red main baseline normalises admin-merges + hides real regressions — treat as the next priority.**
+- **PENDING:** one batched `frontend-react` rebuild+redeploy for #897+#899 (market closed → low urgency; #900 is CI/spec-gen only, no deploy).
+
 **UPDATE 2026-07-17 (chip-wave, Codex builder lane; PRs #877/#878/#879 merged, main = `ea6211a4`,
 strategy-signal DEPLOYED + drill-proven live).** First full run of the `codex-build` pipeline
 (luna draft → sol refine → Opus `claude-review` → Architect audit) across 5 parallel worktrees.

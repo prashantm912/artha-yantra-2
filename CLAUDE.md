@@ -277,6 +277,18 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   live old-vs-new screenshot catches it).
 - **lightweight-charts** paints blank unless `createChart(el,{autoSize:true})`; **monaco** workers
   don't register → the repo uses a `<textarea>` editor + a plain LCS diff instead.
+- **The shared `DataTable` paints TWICE in jsdom** — the desktop `<table>` AND an `md:hidden` card list — so every
+  cell's text exists twice and a bare `getByText` on a converted page fails with "multiple elements". **Scope specs to
+  the desktop table** (`GraduationPage.spec.tsx:82-86` is the convention). Bit two builders on the #890/wave-2 slices.
+  Its `header` is typed **`string`** (`DataTable.tsx:43`): a JSX header (`<Link>`, a chip, a select-all checkbox) cannot
+  convert — but a *hidden text* header can and must (`header: 'Actions'` + `headerClassName: 'ay-sr-only'`, the shipped
+  pattern at `JobsPage.tsx:707-712`; a builder wrongly called that a blocker and skipped 2 pages over it). `max-h-[68vh]`
+  is **hardcoded** (`:289`) with no override prop and no adopter bounding it — a bounded panel is a genuine SKIP (don't
+  nest scroll containers: two scrollbars + a sticky header stranded against the inner one). **Adoption is a REFACTOR:**
+  prove it by dumping every header + cell `textContent` before/after and diffing (empty or it didn't happen) — "the spec
+  passes before and after" proves nothing, since an unconverted table has no accessible name and `within(table)` throws
+  for unrelated reasons. Honest claim is *same content/order/formatting*, **not pixel-identical** (adoption intentionally
+  normalizes density, drops UPPERCASE headers, adds zebra + sticky, and switches mobile to cards).
 - **List endpoints return an `{items:[...]}` envelope** (signals/paper/journal/screener/
   watchlists); only `instruments/search` + `instruments/underlyings` return bare arrays.
 - **Section nav** (`MegaMenu.tsx`): each oipulse section is its own top-level menu-bar trigger (the

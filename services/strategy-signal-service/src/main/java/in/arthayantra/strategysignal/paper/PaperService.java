@@ -349,6 +349,26 @@ public class PaperService {
                 }
               });
     }
+    // task_6f1372da dead-anchor gate: a hand ticket whose anchor can no longer reach TAKEN (EXPIRED by
+    // the 15:45 sweep, DISMISSED) would open a position the live engine can NEVER exit — activeEntry
+    // resolves an exit anchor only in ACTIVE/TAKEN, so no exit pass would ever run for it. Refusing is
+    // the #694 doctrine applied to the signal axis: a manual ticket is an ENTRY, and "entries need fresh
+    // truth (you can always NOT enter)" — the cost of refusing is one missed trade; the cost of filling
+    // is an un-exitable position. It is NOT merely logged, because nothing downstream can see the shape:
+    // PaperReconciliationRepository.strandedCarryPositions:176 needs a persisted opposite-side EXIT to
+    // EXISTS against, and a dead anchor means the engine never evaluates an exit, so no EXIT row is ever
+    // written. Already-TAKEN is deliberately NOT refused (auto-paper or a prior take anchored it — the
+    // anchor is live, which is all the exit passes need).
+    //
+    // Placement: BEFORE the fill, matching the freshness gate + the governor — a refusal must leave zero
+    // trace (contrast openOrder's DATA_STALE, which fills-then-throws and deliberately records the
+    // attempt via REQUIRES_NEW). Before the governor too, so a dead-anchor ticket cannot burn a governor
+    // trip (its ntfy push + risk_audit row) on an order that was never going to fill. Ordered AFTER the
+    // freshness gate so every case SIGNAL_STALE already catches keeps its exact code, unchanged.
+    if (request.signalId() != null) {
+      long signalId = request.signalId();
+      signals.find(signalId).ifPresent(signal -> requireTakeableAnchor(signalId, signal.status()));
+    }
     risk.entryVeto(book)
         .ifPresent(
             rail -> {
@@ -403,16 +423,12 @@ public class PaperService {
    * fires → the anchor suppresses re-entry forever). The §7.2.1 status frame is published AFTER_COMMIT
    * ({@code SignalStatusListener}), so a rolled-back CAS never emits a phantom frame.
    *
-   * <p><b>Losing the CAS is not always benign.</b> Already TAKEN (auto-paper or a prior take won the
-   * race) is a correct no-op — the anchor is live either way, which is all the exit passes need. Any
-   * other state (EXPIRED by the sweep, DISMISSED) means this fill just opened a position against a dead
-   * anchor that no engine pass can exit; that is NOT silently accepted — this log is the ONLY trail it
-   * leaves, because {@code PaperReconciliationRepository.strandedCarryPositions:176} cannot see this
-   * shape: its predicate requires an EXISTS on a persisted opposite-side EXIT signal, and a dead anchor
-   * means the engine never evaluated an exit, so no EXIT row was ever written. It is deliberately NOT
-   * refused here: whether a dead anchor should REJECT the ticket is a separate policy call (a btst
-   * signal fires at the 15:20 pre-close and the sweep expires it at 15:45, so the window is real and
-   * narrow), and the 60-minute {@code SIGNAL_STALE} gate above does not cover it.
+   * <p><b>Losing the CAS.</b> Already TAKEN (auto-paper or a prior take won the race) is a correct
+   * no-op — the anchor is live either way, which is all the exit passes need. Any other state means the
+   * dead-anchor gate's read raced the 15:45 sweep (or a dismiss) landing between the gate and this CAS;
+   * that re-throws the gate's own 422 from INSIDE the fill transaction, so the fill rolls back and the
+   * refusal still leaves zero trace. Without this the narrow TOCTOU window would leak exactly the orphan
+   * the gate exists to block.
    */
   private void anchorTaken(Long signalId) {
     if (signalId == null) {
@@ -423,12 +439,31 @@ public class PaperService {
     }
     String status = signals.find(signalId).map(SignalRepository.SignalRow::status).orElse(null);
     if (!"TAKEN".equals(status)) {
-      log.warn(
-          "manual ticket filled against signal {} in status {} (not ACTIVE/TAKEN) — the position has no"
-              + " live anchor, so the engine cannot exit it; manual close or reconciliation required",
-          signalId,
-          status);
+      requireTakeableAnchor(signalId, status);
     }
+  }
+
+  /**
+   * Refuses a hand ticket whose anchor signal cannot open exposure: only ACTIVE (this ticket takes it)
+   * and TAKEN (something already took it) leave an anchor the engine's exit passes can resolve. Shared
+   * by the pre-fill gate and the CAS race-loser so both refusals render the identical D8 envelope.
+   * {@code VALIDATION_FAILED} + a {@code Map} of the signal id and its blocking state mirrors the
+   * sibling EXIT-signal guard — two adjacent guards in one method must not disagree about the shape of
+   * "this signal cannot open a paper position". Not {@code SIGNAL_STALE}: that code's contract is the
+   * signal's AGE (its details carry the age + the per-book limit), and this is a STATE refusal — a btst
+   * signal fires at the 15:20 pre-close and is swept at 15:45, well inside the 60-minute age limit.
+   */
+  private static void requireTakeableAnchor(long signalId, String status) {
+    if ("ACTIVE".equals(status) || "TAKEN".equals(status)) {
+      return;
+    }
+    throw new ApiException(
+        422,
+        ErrorCodes.VALIDATION_FAILED,
+        "signal #" + signalId + " is " + status + " and can no longer anchor a paper position — the"
+            + " engine resolves exits only through an ACTIVE/TAKEN entry, so this fill would open a"
+            + " position it could never exit",
+        Map.of("signalId", signalId, "signalStatus", String.valueOf(status)));
   }
 
   /**

@@ -1,7 +1,10 @@
 package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.registry.RegistryService;
@@ -37,6 +40,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * <p>The first test asserts the CONSEQUENCE, not the mechanism: after BOTH 15:45 sweeps run, the
  * position is still OPEN and the engine's own anchor lookup still resolves it. That is exactly what
  * fails pre-fix (activeEntry empty while the position is open = the orphan).
+ *
+ * <p>The same defect has a second door: a ticket placed against an ALREADY-dead anchor (the btst
+ * signal fires at the 15:20 pre-close and the sweep expires it at 15:45 — 25 minutes, so the
+ * 60-minute SIGNAL_STALE gate never sees it). The CAS cannot help there, so {@code openManualOrder}
+ * refuses it 422 before the fill and leaves zero trace.
  */
 @SpringBootTest(properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
 class PaperManualTicketAnchorIntegrationTest extends StrategySignalIntegrationTestBase {
@@ -146,8 +154,52 @@ class PaperManualTicketAnchorIntegrationTest extends StrategySignalIntegrationTe
     assertThat(positions.findOpen(BOOK, "NSE", sym, "BUY")).isPresent();
   }
 
+  @Test
+  void manualTicketAgainstAnExpiredAnchorIsRefused422AndCreatesNoPosition() {
+    // The reachable click: a btst signal fires at the 15:20 pre-close and expireAllActive sweeps it at
+    // 15:45 — 25 minutes, so the 60-minute SIGNAL_STALE gate never sees it. Filling here would open a
+    // position with a dead anchor that no engine exit pass can ever resolve, and #883's stranded-carry
+    // reconciler cannot see the shape either (its EXISTS needs an EXIT signal that is never written).
+    Fixture f = newBtstSignal("BTSTEXPIRED");
+    signalRepo.expireAllActive();
+    assertThat(signalRepo.find(f.signalId).orElseThrow().status()).isEqualTo("EXPIRED");
+
+    ApiException refused =
+        catchThrowableOfType(ApiException.class, () -> placeTicketFor(f));
+
+    assertThat(refused).isNotNull();
+    assertThat(refused.httpStatus()).isEqualTo(422);
+    assertThat(refused.code()).isEqualTo(ErrorCodes.VALIDATION_FAILED);
+    assertThat(refused.details())
+        .containsEntry("signalId", f.signalId)
+        .containsEntry("signalStatus", "EXPIRED");
+
+    // THE assertion that would have caught the original bug: the refusal left ZERO trace. Asserting the
+    // absence of the position, not just the status code — a 422 that still filled would be the orphan.
+    assertThat(positions.findOpen(BOOK, "NFO", f.symbol, "BUY")).isEmpty();
+    Integer orders =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM paper_orders WHERE tradingsymbol = ?", Integer.class, f.symbol);
+    assertThat(orders).isZero();
+  }
+
   /** A published btst strategy + a fresh ACTIVE ENTRY signal + one filled manual ticket against it. */
   private Fixture openBtstTicketFor(String prefix) {
+    Fixture f = newBtstSignal(prefix);
+    placeTicketFor(f);
+    assertThat(positions.findOpen(BOOK, "NFO", f.symbol, "BUY")).isPresent();
+    return f;
+  }
+
+  /** The cockpit ticket against a fixture's anchor: explicit price (no live tick needed) + explicit book. */
+  private void placeTicketFor(Fixture f) {
+    paper.openManualOrder(
+        new PaperService.OrderRequest(
+            f.signalId, "NFO", f.symbol, "BUY", 1, new BigDecimal("80.00"), null, null, null, BOOK));
+  }
+
+  /** A published btst strategy + a fresh ACTIVE ENTRY signal, with no ticket placed against it yet. */
+  private Fixture newBtstSignal(String prefix) {
     // Shared singleton IT DB, no per-method cleanup: unique slug + name + symbol per method.
     String slug = "btst-anchor-it-" + UUID.randomUUID().toString().substring(0, 8);
     UUID strategyId =
@@ -170,13 +222,6 @@ class PaperManualTicketAnchorIntegrationTest extends StrategySignalIntegrationTe
             new BigDecimal("80.00"), new BigDecimal("40.00"), new BigDecimal("120.00"),
             new BigDecimal("0.80"), "{}", now, now.plusHours(1));
     assertThat(signalRepo.find(signalId).orElseThrow().status()).isEqualTo("ACTIVE");
-
-    // The cockpit ticket: an explicit price so the fill never depends on a live tick, and an explicit
-    // book so the governor + the fill resolve the seeded 'manual' ledger.
-    paper.openManualOrder(
-        new PaperService.OrderRequest(
-            signalId, "NFO", symbol, "BUY", 1, new BigDecimal("80.00"), null, null, null, BOOK));
-    assertThat(positions.findOpen(BOOK, "NFO", symbol, "BUY")).isPresent();
 
     // Pin the premise the whole orphan rests on: this strategy's style is swept by expireAllActive
     // (not swing) but NOT closed by intradayOpen (not intraday) — the gap between the two filters.

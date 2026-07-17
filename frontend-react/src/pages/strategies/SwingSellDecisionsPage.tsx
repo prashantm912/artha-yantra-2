@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { m } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
@@ -29,11 +30,204 @@ const FAMILIES: { key: SwingFamily; label: string }[] = [
 
 type Setupish = { setup: string | null; stage?: number | null; setupType?: string | null };
 
+/** The Setup cell — the emitting setup plus the optional footprint qualifier. */
+function SetupCell({ d }: { d: Setupish & { footprint?: string | null } }) {
+  return (
+    <>
+      {setupLabel(d)}
+      {d.footprint && <span className="ml-1 text-[11px] text-ay-muted/70">{d.footprint}</span>}
+    </>
+  );
+}
+
+/** The HOLD / SELL verdict pill. */
+function VerdictCell({ d }: { d: { sellingNow: boolean; verdict: string } }) {
+  return d.sellingNow ? (
+    <span className="rounded bg-bear/20 px-1.5 py-0.5 text-[11px] font-semibold text-bear">
+      {d.verdict}
+    </span>
+  ) : (
+    <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ay-muted">
+      HOLD
+    </span>
+  );
+}
+
+/** The trail level, muted, with the not-armed-yet hint kept on hover. The hint fires exactly when
+ *  trailLevel is null — i.e. when the text is just '—' — so the span spans the full cell width
+ *  (`block`), keeping the padded hover target the original <td> had. */
+function TrailCell({ trailLevel }: { trailLevel: string | null }) {
+  return (
+    <span className="block" title={trailLevel == null ? 'Trail not armed yet' : undefined}>
+      {money(trailLevel)}
+    </span>
+  );
+}
+
+/** The acknowledge affordance on a recorded decision — a per-row mutation. */
+function AckCell({ d, family }: { d: RecordedSellDecision; family: SwingFamily }) {
+  const ack = useAckSellDecision(family);
+  return d.acknowledgedAt != null ? (
+    <span
+      className="rounded bg-bull/15 px-1.5 py-0.5 text-[11px] font-medium text-bull"
+      title={`Acknowledged ${fmtAsOf(d.acknowledgedAt ?? '')}`}
+    >
+      ✓ Acknowledged
+    </span>
+  ) : (
+    <button
+      type="button"
+      onClick={() => ack.mutate(d.id)}
+      disabled={ack.isPending}
+      title="Mark this decision as seen/acted on."
+      className="rounded-md border border-ay-border px-2 py-0.5 text-[11px] font-medium text-ay-text hover:border-accent disabled:opacity-50"
+    >
+      {ack.isPending ? '…' : 'Acknowledge'}
+    </button>
+  );
+}
+
 export function SwingSellDecisionsPage() {
   const [family, setFamily] = useState<SwingFamily>('minervini');
   const [view, setView] = useState<'live' | 'recorded'>('live');
   const live = useSwingSellDecisions(family, view === 'live');
   const recorded = useRecordedSellDecisions(family, view === 'recorded');
+
+  const liveColumns: DataColumn<SwingSellDecision>[] = useMemo(
+    () => [
+      {
+        id: 'symbol',
+        header: 'Symbol',
+        align: 'left',
+        mobileLabel: 'Symbol',
+        cellClassName: () => 'font-medium text-ay-text',
+        render: (d) => d.symbol,
+      },
+      {
+        id: 'setup',
+        header: 'Setup',
+        align: 'left',
+        mobileLabel: 'Setup',
+        cellClassName: () => 'text-ay-muted',
+        render: (d) => <SetupCell d={d} />,
+      },
+      { id: 'entry', header: 'Entry', mobileLabel: 'Entry', render: (d) => money(d.entryPrice) },
+      {
+        id: 'current',
+        header: 'Current',
+        mobileLabel: 'Current',
+        render: (d) => money(d.currentPrice),
+      },
+      {
+        id: 'unrealized',
+        header: 'Unrealized',
+        mobileLabel: 'Unrealized',
+        cellClassName: (d) => pnlTone(d.unrealizedPct),
+        render: (d) => signedPct(d.unrealizedPct),
+      },
+      { id: 'stop', header: 'Stop', mobileLabel: 'Stop', render: (d) => money(d.stopLevel) },
+      {
+        id: 'trail',
+        header: 'Trail',
+        mobileLabel: 'Trail',
+        cellClassName: () => 'text-ay-muted',
+        render: (d) => <TrailCell trailLevel={d.trailLevel} />,
+      },
+      {
+        id: 'buyable',
+        header: 'Buy now?',
+        align: 'left',
+        mobileLabel: 'Buy now?',
+        render: (d) =>
+          d.stillBuyable ? (
+            <span
+              className="rounded bg-bull/20 px-1.5 py-0.5 text-[11px] font-medium text-bull"
+              title="The entry gate still passes on today's bar"
+            >
+              Buyable
+            </span>
+          ) : (
+            <span className="text-ay-muted/60">—</span>
+          ),
+      },
+      {
+        id: 'verdict',
+        header: 'Verdict',
+        align: 'left',
+        mobileLabel: 'Verdict',
+        render: (d) => <VerdictCell d={d} />,
+      },
+    ],
+    [],
+  );
+
+  const recordedColumns: DataColumn<RecordedSellDecision>[] = useMemo(
+    () => [
+      {
+        id: 'date',
+        header: 'Date',
+        align: 'left',
+        mono: true,
+        mobileLabel: 'Date',
+        cellClassName: () => 'text-ay-muted',
+        render: (d) => d.runDate,
+      },
+      {
+        id: 'symbol',
+        header: 'Symbol',
+        align: 'left',
+        mobileLabel: 'Symbol',
+        cellClassName: () => 'font-medium',
+        render: (d) => (
+          <Link
+            to={`/paper/${d.book}`}
+            className="text-ay-text hover:text-accent hover:underline"
+            title={`Open the ${family} paper book (position from signal #${d.signalId})`}
+          >
+            {d.symbol}
+          </Link>
+        ),
+      },
+      {
+        id: 'setup',
+        header: 'Setup',
+        align: 'left',
+        mobileLabel: 'Setup',
+        cellClassName: () => 'text-ay-muted',
+        render: (d) => <SetupCell d={d} />,
+      },
+      {
+        id: 'unrealized',
+        header: 'Unrealized',
+        mobileLabel: 'Unrealized',
+        cellClassName: (d) => pnlTone(d.unrealizedPct),
+        render: (d) => signedPct(d.unrealizedPct),
+      },
+      { id: 'stop', header: 'Stop', mobileLabel: 'Stop', render: (d) => money(d.stopLevel) },
+      {
+        id: 'trail',
+        header: 'Trail',
+        mobileLabel: 'Trail',
+        cellClassName: () => 'text-ay-muted',
+        render: (d) => <TrailCell trailLevel={d.trailLevel} />,
+      },
+      {
+        id: 'verdict',
+        header: 'Verdict',
+        align: 'left',
+        mobileLabel: 'Verdict',
+        render: (d) => <VerdictCell d={d} />,
+      },
+      {
+        id: 'ack',
+        header: 'Acknowledge',
+        align: 'left',
+        mobileLabel: 'Acknowledge',
+        render: (d) => <AckCell d={d} family={family} />,
+      },
+    ],
+    [family],
+  );
   const sellingNow = live.data?.items.filter((d) => d.sellingNow).length ?? 0;
   const unacked = recorded.data?.items.filter((d) => d.acknowledgedAt == null).length ?? 0;
 
@@ -131,27 +325,13 @@ export function SwingSellDecisionsPage() {
             skeleton={<Skeleton variant="table-rows" rows={8} cols={9} />}
           >
             {(report) => (
-              <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-                <table className="w-full border-collapse text-sm">
-                  <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                    <tr>
-                      <th className="px-2 py-2 font-medium">Symbol</th>
-                      <th className="px-2 py-2 font-medium">Setup</th>
-                      <th className="px-2 py-2 text-right font-medium">Entry</th>
-                      <th className="px-2 py-2 text-right font-medium">Current</th>
-                      <th className="px-2 py-2 text-right font-medium">Unrealized</th>
-                      <th className="px-2 py-2 text-right font-medium">Stop</th>
-                      <th className="px-2 py-2 text-right font-medium">Trail</th>
-                      <th className="px-2 py-2 font-medium">Buy now?</th>
-                      <th className="px-2 py-2 font-medium">Verdict</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.items.map((d) => (
-                      <SellRow key={d.signalId} d={d} />
-                    ))}
-                  </tbody>
-                </table>
+              <BeatBlock>
+                <DataTable
+                  columns={liveColumns}
+                  rows={report.items}
+                  rowKey={(d) => String(d.signalId)}
+                  ariaLabel="Live swing sell decisions"
+                />
               </BeatBlock>
             )}
           </QueryState>
@@ -164,143 +344,19 @@ export function SwingSellDecisionsPage() {
             skeleton={<Skeleton variant="table-rows" rows={8} cols={8} />}
           >
             {(report) => (
-              <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-                <table className="w-full border-collapse text-sm">
-                  <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                    <tr>
-                      <th className="px-2 py-2 font-medium">Date</th>
-                      <th className="px-2 py-2 font-medium">Symbol</th>
-                      <th className="px-2 py-2 font-medium">Setup</th>
-                      <th className="px-2 py-2 text-right font-medium">Unrealized</th>
-                      <th className="px-2 py-2 text-right font-medium">Stop</th>
-                      <th className="px-2 py-2 text-right font-medium">Trail</th>
-                      <th className="px-2 py-2 font-medium">Verdict</th>
-                      <th className="px-2 py-2 font-medium">Acknowledge</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.items.map((d) => (
-                      <RecordedRow key={d.id} d={d} family={family} />
-                    ))}
-                  </tbody>
-                </table>
+              <BeatBlock>
+                <DataTable
+                  columns={recordedColumns}
+                  rows={report.items}
+                  rowKey={(d) => String(d.id)}
+                  ariaLabel="Recorded swing sell decisions"
+                />
               </BeatBlock>
             )}
           </QueryState>
         )}
       </m.div>
     </LoadBeat>
-  );
-}
-
-function SellRow({ d }: { d: SwingSellDecision }) {
-  return (
-    <tr className="border-t border-ay-border">
-      <td className="px-2 py-2 font-medium text-ay-text">{d.symbol}</td>
-      <td className="px-2 py-2 text-ay-muted">
-        {setupLabel(d)}
-        {d.footprint && <span className="ml-1 text-[11px] text-ay-muted/70">{d.footprint}</span>}
-      </td>
-      <td className="px-2 py-2 text-right tabular-nums">{money(d.entryPrice)}</td>
-      <td className="px-2 py-2 text-right tabular-nums">{money(d.currentPrice)}</td>
-      <td className={cn('px-2 py-2 text-right tabular-nums', pnlTone(d.unrealizedPct))}>
-        {signedPct(d.unrealizedPct)}
-      </td>
-      <td className="px-2 py-2 text-right tabular-nums">{money(d.stopLevel)}</td>
-      <td
-        className="px-2 py-2 text-right tabular-nums text-ay-muted"
-        title={d.trailLevel == null ? 'Trail not armed yet' : undefined}
-      >
-        {money(d.trailLevel)}
-      </td>
-      <td className="px-2 py-2">
-        {d.stillBuyable ? (
-          <span
-            className="rounded bg-bull/20 px-1.5 py-0.5 text-[11px] font-medium text-bull"
-            title="The entry gate still passes on today's bar"
-          >
-            Buyable
-          </span>
-        ) : (
-          <span className="text-ay-muted/60">—</span>
-        )}
-      </td>
-      <td className="px-2 py-2">
-        {d.sellingNow ? (
-          <span className="rounded bg-bear/20 px-1.5 py-0.5 text-[11px] font-semibold text-bear">
-            {d.verdict}
-          </span>
-        ) : (
-          <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ay-muted">
-            HOLD
-          </span>
-        )}
-      </td>
-    </tr>
-  );
-}
-
-function RecordedRow({ d, family }: { d: RecordedSellDecision; family: SwingFamily }) {
-  const ack = useAckSellDecision(family);
-  const acked = d.acknowledgedAt != null;
-  return (
-    <tr className="border-t border-ay-border">
-      <td className="px-2 py-2 tabular-nums text-ay-muted">{d.runDate}</td>
-      <td className="px-2 py-2 font-medium">
-        <Link
-          to={`/paper/${d.book}`}
-          className="text-ay-text hover:text-accent hover:underline"
-          title={`Open the ${family} paper book (position from signal #${d.signalId})`}
-        >
-          {d.symbol}
-        </Link>
-      </td>
-      <td className="px-2 py-2 text-ay-muted">
-        {setupLabel(d)}
-        {d.footprint && <span className="ml-1 text-[11px] text-ay-muted/70">{d.footprint}</span>}
-      </td>
-      <td className={cn('px-2 py-2 text-right tabular-nums', pnlTone(d.unrealizedPct))}>
-        {signedPct(d.unrealizedPct)}
-      </td>
-      <td className="px-2 py-2 text-right tabular-nums">{money(d.stopLevel)}</td>
-      <td
-        className="px-2 py-2 text-right tabular-nums text-ay-muted"
-        title={d.trailLevel == null ? 'Trail not armed yet' : undefined}
-      >
-        {money(d.trailLevel)}
-      </td>
-      <td className="px-2 py-2">
-        {d.sellingNow ? (
-          <span className="rounded bg-bear/20 px-1.5 py-0.5 text-[11px] font-semibold text-bear">
-            {d.verdict}
-          </span>
-        ) : (
-          <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ay-muted">
-            HOLD
-          </span>
-        )}
-      </td>
-      <td className="px-2 py-2">
-        {acked ? (
-          <span
-            className="rounded bg-bull/15 px-1.5 py-0.5 text-[11px] font-medium text-bull"
-            title={`Acknowledged ${fmtAsOf(d.acknowledgedAt ?? '')}`}
-          >
-            ✓ Acknowledged
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => ack.mutate(d.id)}
-            disabled={ack.isPending}
-            title="Mark this decision as seen/acted on."
-            className="rounded-md border border-ay-border px-2 py-0.5 text-[11px] font-medium text-ay-text hover:border-accent disabled:opacity-50"
-          >
-            {ack.isPending ? '…' : 'Acknowledge'}
-          </button>
-        )}
-      </td>
-    </tr>
   );
 }
 

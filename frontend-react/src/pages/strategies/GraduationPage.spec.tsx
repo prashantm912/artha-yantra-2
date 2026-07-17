@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -79,26 +79,63 @@ function renderPage() {
   );
 }
 
+// The board + promotions tables render through the shared DataTable, which paints a desktop
+// <table> AND a md:hidden mobile card list — so every cell text exists twice in jsdom (CSS
+// doesn't apply). Scope each assertion to the desktop table so getByText stays exactly-one.
+const board = () => within(screen.getByRole('table', { name: 'Graduation board' }));
+const graduated = () => within(screen.getByRole('table', { name: 'Graduated strategies' }));
+
 describe('GraduationPage', () => {
   it('renders each strategy with its stage badge, metrics and per-criterion dots', () => {
     renderPage();
     expect(screen.getByText('Graduation')).toBeInTheDocument();
     // both strategies + their stage badges
-    expect(screen.getByText('EMA Cross')).toBeInTheDocument();
-    expect(screen.getByText('RSI Dip')).toBeInTheDocument();
-    expect(screen.getByText('Take-eligible')).toBeInTheDocument();
-    expect(screen.getByText('Paper')).toBeInTheDocument();
+    expect(board().getByText('EMA Cross')).toBeInTheDocument();
+    expect(board().getByText('RSI Dip')).toBeInTheDocument();
+    expect(board().getByText('Take-eligible')).toBeInTheDocument();
+    expect(board().getByText('Paper')).toBeInTheDocument();
     // the threshold summary strip
     expect(screen.getByText(/PF ≥ 1.30/)).toBeInTheDocument();
     // one dot per criterion, per strategy (4 + 4 = 8)
-    expect(screen.getAllByLabelText(/pass|fail/).length).toBe(8);
+    expect(board().getAllByLabelText(/pass|fail/).length).toBe(8);
+  });
+
+  it('renders the board columns in their declared order', () => {
+    renderPage();
+    expect(board().getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
+      'Strategy',
+      'Stage',
+      'Trades',
+      'Net',
+      'Win%',
+      'PF',
+      'Expectancy',
+      'Max DD',
+      'Criteria',
+    ]);
+  });
+
+  it('renders a board row cell-for-cell in order', () => {
+    renderPage();
+    const row = board().getAllByRole('row')[1]; // [0] = the header row
+    expect(within(row).getAllByRole('cell').map((c) => c.textContent)).toEqual([
+      'EMA Crossema-crossDossier →',
+      'Take-eligible',
+      '24',
+      '+₹1200.00',
+      '62.5%',
+      '1.80',
+      '50.00',
+      '8.50%',
+      '',
+    ]);
   });
 
   it('surfaces the GRADUATED promotions section', () => {
     renderPage();
     expect(screen.getByText('Graduated')).toBeInTheDocument();
     // the promotion row for a strategy off the current board renders via its id fallback + snapshot
-    expect(screen.getByText('s3')).toBeInTheDocument();
-    expect(screen.getByText('2026-07-01')).toBeInTheDocument();
+    expect(graduated().getByText('s3')).toBeInTheDocument();
+    expect(graduated().getByText('2026-07-01')).toBeInTheDocument();
   });
 });

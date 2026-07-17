@@ -52,6 +52,38 @@ class SignalBookIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   @Test
+  void activeFeedReturnsOnlyActiveEntriesForASymbol() {
+    Seed entry = seedTaggedSignal("minervini");
+    Seed exit = seedTaggedSignal("minervini");
+    String symbol = "ACTIVEPAIR-" + UUID.randomUUID();
+    jdbc.update("UPDATE signals SET tradingsymbol=? WHERE id IN (?, ?)", symbol, entry.signalId, exit.signalId);
+    jdbc.update("UPDATE signals SET signal_type='EXIT', side='SELL' WHERE id=?", exit.signalId);
+
+    assertThat(
+            signals.active().stream()
+                .filter(row -> symbol.equals(row.tradingsymbol()))
+                .map(SignalRepository.SignalRow::id)
+                .toList())
+        .containsExactly(entry.signalId);
+  }
+
+  @Test
+  void activeEntriesStillReturnsOnlyTheEntryAnchor() {
+    Seed entry = seedTaggedSignal("minervini");
+    Seed exit = seedTaggedSignal("minervini");
+    String symbol = "ACTIVEENTRIES-" + UUID.randomUUID();
+    jdbc.update("UPDATE signals SET tradingsymbol=? WHERE id IN (?, ?)", symbol, entry.signalId, exit.signalId);
+    jdbc.update("UPDATE signals SET signal_type='EXIT', side='SELL' WHERE id=?", exit.signalId);
+
+    assertThat(
+            signals.activeEntries().stream()
+                .filter(row -> symbol.equals(row.tradingsymbol()))
+                .map(SignalRepository.SignalRow::id)
+                .toList())
+        .containsExactly(entry.signalId);
+  }
+
+  @Test
   void anUnrecognisedFamilyStampsOther() {
     Seed seed = seedTaggedSignal("momentum");
     assertThat(jdbc.queryForObject("SELECT book FROM signals WHERE id=?", String.class, seed.signalId))

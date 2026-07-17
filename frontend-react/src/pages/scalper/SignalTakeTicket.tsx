@@ -158,6 +158,16 @@ export function SignalTakeTicket({
         <ManualVerifyChecklist detail={scalperDetail} onConfirmedChange={onConfirmedChange} />
       )}
 
+      {/* Without this the ticket rendered ONLY isPending: a server refusal (422 stale-signal,
+          lot-multiple, risk veto, or a non-ENTRY signal) left the button silently doing nothing —
+          indistinguishable, to the owner, from a take that succeeded. Mirrors OrderPrefillTicket. */}
+      {place.isError && (
+        <p className="text-xs text-bear" role="alert">
+          Couldn&apos;t place the paper order — it was refused. Check the quantity is a whole lot
+          multiple and the signal is still fresh, then retry.
+        </p>
+      )}
+
       <div className="flex items-center gap-2">
         <button
           type="button"

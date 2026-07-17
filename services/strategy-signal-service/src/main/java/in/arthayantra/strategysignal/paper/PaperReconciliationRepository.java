@@ -209,78 +209,76 @@ public class PaperReconciliationRepository {
   }
 
   /**
-   * Global dead-anchor-orphan state: an OPEN position that NO exit evaluator will ever anchor, so no
-   * EXIT is ever emitted for it. This is the structural blind spot of {@link #strandedCarryPositions()}
-   * — that predicate tests {@code EXISTS(… signal_type='EXIT' …)}, i.e. it needs an EXIT row to have been
-   * persisted. Both exit drivers gate on an ENTRY anchor being live — {@code SignalRepository.activeEntry
-   * :166-178} (version-scoped; {@code SignalEngine:745-747} only enters the exit branch when it is
-   * present) and {@code SignalRepository.activeEntries:149-152} (the swing batch's driver) BOTH require
-   * {@code signal_type='ENTRY' AND status IN ('ACTIVE','TAKEN')}. With no live anchor the engine takes the
-   * ENTRY branch instead, no EXIT row is ever written, and the EXISTS predicate can never fire. Not
-   * windowed: the state stays actionable until a human repairs it.
+   * Global dead-anchor-orphan state: an OPEN position with NO <b>healthy anchor</b>, i.e. one that no exit
+   * driver will ever settle. This is the structural blind spot of {@link #strandedCarryPositions()} —
+   * that predicate tests {@code EXISTS(… signal_type='EXIT' …)}, so it needs an EXIT row to have been
+   * persisted; here no exit is ever EVALUATED, no EXIT row is ever written, and its EXISTS can never fire.
+   * Not windowed: the state stays actionable until a human repairs it.
    *
-   * <p><b>Two classes, unioned (both are unexitable OPEN positions):</b>
+   * <p><b>A healthy anchor is defined by the settle path, not by "a live ENTRY row exists somewhere".</b>
+   * The exit chain is: {@code SignalEngine:1508} publishes {@code SignalExited(anchor.id(), …)} — the
+   * chosen ANCHOR's exact id — {@code PaperService.closeForSignal:885-887} then calls {@code
+   * PaperPositionRepository.openForSignal:357-370}, which reaches a position ONLY through {@code
+   * paper_orders o … WHERE o.signal_id = <that anchor id>} joined on the §F.6 open key ({@code book},
+   * {@code exchange}, {@code tradingsymbol}, {@code side}). So an ENTRY that is ACTIVE but is NOT linked
+   * to THIS position by an order can never close it: it looks alive and cannot rescue. Three conditions,
+   * all necessary:
    *
-   * <ul>
-   *   <li><b>Dead anchor</b> — the position's anchor resolves, but NO live ENTRY anchor exists for that
-   *       anchor's {@code (strategy_version_id, exchange, tradingsymbol)}. Testing the ANCHOR ROW alone
-   *       ({@code s.status NOT IN ('ACTIVE','TAKEN')}) would be wrong twice over: it misses an anchor that
-   *       is ACTIVE but not an ENTRY (live {@code paper_positions} id=28 is anchored to signals id=46, an
-   *       ACTIVE <b>EXIT</b> — {@code activeEntry} can never return it, so the position is genuinely
-   *       unexitable), and it false-positives on a position whose own anchor expired but whose symbol has
-   *       since re-anchored (a later ACTIVE ENTRY re-arms the exit branch, and the settle reaches the
-   *       position through the shared §F.6 open key). Mirroring {@code activeEntry}'s own predicate — a
-   *       NOT EXISTS over the live ENTRY set — is right on both counts.
-   *   <li><b>Unanchored</b> — no signal linkage AT ALL on an auto-paper book: {@code opening_signal_id} is
-   *       NULL and no {@code paper_orders.signal_id} ties the §F.6 open key to a signal. Nothing can close
-   *       it — the engine reaches a position only through a signal, and {@code
-   *       PaperPositionRepository.intradayOpen:339-353} (the 15:45 mark-to-close) joins {@code
-   *       o.signal_id IS NOT NULL}, so an unlinked position is outside the sweep set too. The auto-book
-   *       join is V16's ({@link #autoPaperPositionsWithoutSignal}): a {@code manual}/{@code other} book's
-   *       hand position is closed BY HAND, which is exactly the "other mechanism" this class tests for.
-   *       V16 sees this shape only INSIDE its activity window, so a stale one is invisible to it forever.
-   * </ul>
+   * <ol>
+   *   <li><b>Live ENTRY</b> — {@code signal_type='ENTRY' AND status IN ('ACTIVE','TAKEN')}: both drivers
+   *       gate on it ({@code SignalRepository.activeEntry:166-178}, which {@code SignalEngine:745-747}
+   *       requires to enter the exit branch at all, and {@code activeEntries:149-152} for the swing batch).
+   *       Live {@code paper_positions} id=28 fails here: its only linked signal (id=46) is an ACTIVE
+   *       <b>EXIT</b>, which {@code activeEntry} can never return — so a status-only test reads it healthy.
+   *   <li><b>Linked to this position</b> — through {@code paper_orders.signal_id} on the open key, the
+   *       exact join {@code openForSignal} uses. Deliberately NOT lifetime-bounded: {@code openForSignal}
+   *       has no lifetime bound either (it filters only {@code p.status='OPEN'}), so a stale same-key link
+   *       DOES settle the current position in production. Adding a bound here would make the detector
+   *       stricter than the code it models and flag a position that production would actually close.
+   *   <li><b>On a version its own driver evaluates</b> — and <b>the two drivers disagree, so this is
+   *       per-style, not global</b>. The swing batch adopts ANY version of its own family for exit
+   *       management ({@code SwingBatchEngine.adoptVersion:209-235}: superseded/unpublished are resolved,
+   *       and {@code enabled} is deliberately NOT checked — "a disabled strategy no longer ENTERS but its
+   *       open positions must still be exit-managed"), so {@code style='swing'} alone suffices. The live
+   *       engine does NOT: {@code SignalEngine.reload():331} skips a strategy unless {@code enabled} and
+   *       loads ONLY {@code publishedVersionId}, so a non-swing anchor is evaluated only while its version
+   *       IS the strategy's current published one AND the strategy is enabled. Requiring current-published
+   *       GLOBALLY would be a mass false positive: 5 of the 19 live OPEN positions (ids 10/21/22/26/27)
+   *       are swing lots held by SUPERSEDED versions that the batch is correctly still exit-managing.
+   * </ol>
    *
-   * <p><b>Version-scoped on purpose, and it is the safety-net-consistent choice.</b> The narrower
-   * version-LESS reading (any live ENTRY on the symbol, under any version) would be a FALSE NEGATIVE for
-   * every live-engine position: {@code activeEntry} is keyed by version, so a sibling version's anchor
-   * never re-arms this position's exit branch. A settle cannot cross books either ({@code
-   * PaperPositionRepository.openForSignal:357-370} joins {@code o.book = p.book}). The residual exposure
-   * is a false POSITIVE where one book holds two versions of one symbol and the swing batch's version-less
-   * {@code openLotsBySymbol:338-346} grouping exits them together — the same "one version per (symbol,
-   * family)" assumption {@link #strandedCarryPositions()} already documents, and for a safety net a false
-   * positive (one alert, newly-seen-gated) beats a false negative (silence forever).
+   * <p>The auto-paper-book join is V16's ({@link #autoPaperPositionsWithoutSignal}) and answers the "no
+   * other mechanism can close it" question: a {@code manual}/{@code other} book's position is closed BY
+   * HAND, and the engine reaches a position only through a signal — {@code
+   * PaperPositionRepository.intradayOpen:339-353} (the 15:45 mark-to-close) also joins {@code o.signal_id
+   * IS NOT NULL}, so an unlinked position is outside the sweep set too. V16 sees the no-linkage shape only
+   * INSIDE its activity window, so a stale one is invisible to it forever; this check is the state half.
    */
   public List<Long> deadAnchorOrphanPositions() {
     return jdbc.query(
         """
         SELECT p.id
         FROM paper_positions p
-        JOIN signals s ON s.id = p.opening_signal_id
-        WHERE p.status = 'OPEN'
-          AND NOT EXISTS (
-                SELECT 1 FROM signals a
-                WHERE a.strategy_version_id = s.strategy_version_id
-                  AND a.exchange            = s.exchange
-                  AND a.tradingsymbol       = s.tradingsymbol
-                  AND a.signal_type         = 'ENTRY'
-                  AND a.status IN ('ACTIVE', 'TAKEN')
-              )
-        UNION
-        SELECT p.id
-        FROM paper_positions p
         JOIN risk_settings rs
           ON rs.book = p.book AND rs.key = 'auto_paper_trade'
           AND COALESCE((rs.value->>'enabled')::boolean, false) = true
         WHERE p.status = 'OPEN'
-          AND p.opening_signal_id IS NULL
           AND NOT EXISTS (
-                SELECT 1 FROM paper_orders o
+                SELECT 1
+                FROM paper_orders o
+                JOIN signals a            ON a.id  = o.signal_id
+                JOIN strategy_versions sv ON sv.id = a.strategy_version_id
+                JOIN strategies st        ON st.id = sv.strategy_id
                 WHERE o.book          = p.book
                   AND o.exchange      = p.exchange
                   AND o.tradingsymbol = p.tradingsymbol
                   AND o.side          = p.side
-                  AND o.signal_id IS NOT NULL
+                  AND a.signal_type   = 'ENTRY'
+                  AND a.status IN ('ACTIVE', 'TAKEN')
+                  AND (
+                        sv.config->'risk'->'session'->>'style' = 'swing'
+                        OR (st.published_version_id = sv.id AND st.enabled)
+                      )
               )
         ORDER BY 1;
         """,

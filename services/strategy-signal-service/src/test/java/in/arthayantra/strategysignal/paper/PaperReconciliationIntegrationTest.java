@@ -62,8 +62,11 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
     jdbc.update("DELETE FROM paper_positions WHERE tradingsymbol LIKE ?", PREFIX + "%");
     jdbc.update("DELETE FROM signals WHERE tradingsymbol LIKE ?", PREFIX + "%");
     jdbc.update("DELETE FROM risk_settings WHERE book IN (?, ?)", AUTO_BOOK, MANUAL_BOOK);
-    // AFTER the signals delete — they carry the FK onto it.
+    // AFTER the signals delete — they carry the FK onto it. published_version_id is nulled first: it is a
+    // circular FK (strategies → strategy_versions → strategies) that would otherwise block the delete.
+    jdbc.update("UPDATE strategies SET published_version_id = NULL WHERE slug LIKE ?", PREFIX + "%");
     jdbc.update("DELETE FROM strategy_versions WHERE version LIKE ?", PREFIX + "%");
+    jdbc.update("DELETE FROM strategies WHERE slug LIKE ?", PREFIX + "%");
   }
 
   @BeforeEach
@@ -255,23 +258,27 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   // ── dead-anchor orphans (the class strandedCarry is structurally blind to) ──────────────────────
 
   /**
-   * The core class: an OPEN position whose symbol has NO live ENTRY anchor. Both exit drivers gate on
-   * {@code signal_type='ENTRY' AND status IN ('ACTIVE','TAKEN')} (activeEntry:166-178 /
-   * activeEntries:149-152), so nothing ever evaluates an exit and no EXIT row is ever written — which is
-   * precisely why {@code strandedCarryPositions}' EXISTS-an-EXIT predicate can never see it. The TAKEN
-   * control is the same shape with a live anchor and must NOT be flagged (without it the assertion would
-   * pass against a predicate that flags every OPEN position).
+   * The core class: an OPEN position whose only linked anchor is dead. Both drivers gate the exit branch
+   * on {@code signal_type='ENTRY' AND status IN ('ACTIVE','TAKEN')} (activeEntry:166-178, required by
+   * SignalEngine:745-747 / activeEntries:149-152), so nothing ever evaluates an exit and no EXIT row is
+   * ever written — precisely why {@code strandedCarryPositions}' EXISTS-an-EXIT predicate cannot see it.
+   * The healthy control is the same shape with a live, ORDER-LINKED anchor and must NOT be flagged.
    */
   @Test
-  void deadAnchorOpenPositionIsFlaggedWhileALiveTakenAnchorIsNot() {
+  void deadAnchorOpenPositionIsFlaggedWhileALiveLinkedAnchorIsNot() {
+    seedAutoPaperToggle(AUTO_BOOK, true);
+    UUID swing = seedSiblingVersion("swing");
     OffsetDateTime now = OffsetDateTime.now();
+
     String deadSym = sym("DEADANCHOR");
-    long deadAnchor = seedSignal(deadSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(3));
-    long deadPosition = seedPosition(deadSym, "BUY", 50, "OPEN", now.minusHours(3), null, deadAnchor, "book1");
+    long deadAnchor = seedSignal(swing, deadSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(3));
+    long deadPosition = seedPosition(deadSym, "BUY", 50, "OPEN", now.minusHours(3), null, deadAnchor, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, deadAnchor, deadSym, "BUY", 50, now.minusHours(3));
 
     String liveSym = sym("LIVEANCHOR");
-    long liveAnchor = seedSignal(liveSym, "TAKEN", 50, "ENTRY", "BUY", now.minusHours(3));
-    long livePosition = seedPosition(liveSym, "BUY", 50, "OPEN", now.minusHours(3), null, liveAnchor, "book1");
+    long liveAnchor = seedSignal(swing, liveSym, "TAKEN", 50, "ENTRY", "BUY", now.minusHours(3));
+    long livePosition = seedPosition(liveSym, "BUY", 50, "OPEN", now.minusHours(3), null, liveAnchor, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, liveAnchor, liveSym, "BUY", 50, now.minusHours(3));
 
     run();
 
@@ -279,98 +286,155 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   /**
-   * Pins the ENTRY-TYPE half of the predicate — the reason it is a NOT EXISTS over the live ENTRY set and
-   * NOT a test of the anchor row's own status.
-   *
-   * <p><b>This is live {@code paper_positions} id=28's exact shape</b> (an OPEN SELL in {@code
-   * manas-arora} anchored to signals id=46, an <b>ACTIVE EXIT</b>, whose symbol's only ENTRY is EXPIRED).
-   * The anchor's status IS 'ACTIVE', so a status-only predicate ({@code s.status NOT IN
-   * ('ACTIVE','TAKEN')}) reads it as healthy and is blind to the ONE real live instance of this bug.
-   * {@code activeEntry} filters {@code signal_type='ENTRY'}, so an ACTIVE EXIT can never be returned as an
-   * anchor and the position is genuinely unexitable. The ACTIVE-ENTRY control keeps the assertion honest.
+   * Pins the ENTRY-TYPE condition — <b>live {@code paper_positions} id=28's exact shape</b> (an OPEN SELL
+   * in {@code manas-arora} linked to signals id=46, an <b>ACTIVE EXIT</b>, whose symbol's only ENTRY is
+   * EXPIRED). The anchor's status IS 'ACTIVE', so a status-only predicate reads it healthy and is blind to
+   * the ONE real live instance of this bug; {@code activeEntry} filters {@code signal_type='ENTRY'}, so an
+   * ACTIVE EXIT can never be returned as an anchor. The ACTIVE-ENTRY control keeps the assertion honest.
    */
   @Test
   void activeExitAnchorIsFlaggedBecauseActiveEntryOnlyAnchorsEntries() {
+    seedAutoPaperToggle(AUTO_BOOK, true);
+    UUID swing = seedSiblingVersion("swing");
     OffsetDateTime now = OffsetDateTime.now();
+
     String sym = sym("EXITANCHORLIVE");
-    seedSignal(sym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(4)); // the only ENTRY — dead
-    long activeExit = seedSignal(sym, "ACTIVE", null, "EXIT", "SELL", now.minusHours(2));
-    long exitAnchoredPosition = seedPosition(sym, "SELL", 50, "OPEN", now.minusHours(2), null, activeExit, "book1");
+    seedSignal(swing, sym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(4)); // the only ENTRY — dead
+    long activeExit = seedSignal(swing, sym, "ACTIVE", null, "EXIT", "SELL", now.minusHours(2));
+    long exitAnchored = seedPosition(sym, "SELL", 50, "OPEN", now.minusHours(2), null, activeExit, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, activeExit, sym, "SELL", 50, now.minusHours(2));
 
     String controlSym = sym("ENTRYANCHORLIVE");
-    long activeEntry = seedSignal(controlSym, "ACTIVE", 50, "ENTRY", "BUY", now.minusHours(2));
-    long entryAnchoredPosition =
-        seedPosition(controlSym, "BUY", 50, "OPEN", now.minusHours(2), null, activeEntry, "book1");
+    long activeEntry = seedSignal(swing, controlSym, "ACTIVE", 50, "ENTRY", "BUY", now.minusHours(2));
+    long entryAnchored =
+        seedPosition(controlSym, "BUY", 50, "OPEN", now.minusHours(2), null, activeEntry, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, activeEntry, controlSym, "BUY", 50, now.minusHours(2));
 
     run();
 
-    assertThat(deadAnchorOrphanIds(latestRunId()))
-        .contains(exitAnchoredPosition)
-        .doesNotContain(entryAnchoredPosition);
+    assertThat(deadAnchorOrphanIds(latestRunId())).contains(exitAnchored).doesNotContain(entryAnchored);
   }
 
   /**
-   * Pins the SCOPE of the NOT EXISTS: a live ENTRY re-arms the exit branch only for its OWN
-   * {@code (version, exchange, tradingsymbol)}, because that is exactly {@code activeEntry}'s key.
+   * Pins the LINK condition: "a live ENTRY row exists" is NOT "this position can be exited". The settle
+   * chain reaches a position ONLY through the chosen anchor's own order — SignalEngine:1508 publishes
+   * {@code SignalExited(anchor.id(), …)}, PaperService.closeForSignal:885-887 calls openForSignal:357-370,
+   * which filters {@code o.signal_id = <that anchor id>} on the §F.6 open key.
    *
-   * <p>Same-version case — the position's own anchor expired but the symbol re-anchored under a later
-   * ACTIVE ENTRY: the engine's exit branch is live again and the settle reaches the position through the
-   * shared §F.6 open key, so it must NOT be flagged (an anchor-row-only predicate would false-positive
-   * here). Sibling-version case — the live anchor belongs to a DIFFERENT version of the same symbol:
-   * {@code activeEntry(versionId, …)} still returns empty for this position's version, so it stays
-   * unexitable and MUST be flagged (a version-less predicate would false-negative here).
+   * <p><b>The rescuer here is REAL</b> — an ACTIVE ENTRY with its OWN order row on the position's open key
+   * (the averaged-add shape: {@code signalIdsFor}'s "usually one; averaged adds share it"). It genuinely
+   * would close the position, so it must NOT be flagged. The unlinked case is the same ACTIVE ENTRY with
+   * NO order: it looks alive and cannot rescue, so it MUST be flagged. Strip the rescuer's order link and
+   * this test goes RED — that is the mutation the first version of this test could not survive, because
+   * its "rescuer" had no order and was inert.
    */
   @Test
-  void liveAnchorRescuesOnlyItsOwnVersionsPosition() {
+  void onlyAnOrderLinkedLiveEntryRescuesAPosition() {
+    seedAutoPaperToggle(AUTO_BOOK, true);
+    UUID swing = seedSiblingVersion("swing");
     OffsetDateTime now = OffsetDateTime.now();
-    String rescuedSym = sym("REANCHORED");
-    long expiredAnchor = seedSignal(rescuedSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(4));
-    long rescuedPosition =
-        seedPosition(rescuedSym, "BUY", 50, "OPEN", now.minusHours(4), null, expiredAnchor, "book1");
-    seedSignal(rescuedSym, "ACTIVE", 50, "ENTRY", "BUY", now.minusHours(1)); // same version → re-anchors
 
-    UUID siblingVersion = seedSiblingVersion();
-    String siblingSym = sym("SIBLINGVER");
-    long ownAnchor = seedSignal(versionId, siblingSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(4));
-    long strandedPosition =
-        seedPosition(siblingSym, "BUY", 50, "OPEN", now.minusHours(4), null, ownAnchor, "book1");
-    // Live ACTIVE ENTRY on the SAME symbol but a DIFFERENT version — cannot re-arm this position's exit.
-    seedSignal(siblingVersion, siblingSym, "ACTIVE", 50, "ENTRY", "BUY", now.minusHours(1));
+    String rescuedSym = sym("REALRESCUE");
+    long deadAnchor = seedSignal(swing, rescuedSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(4));
+    long rescuedPosition =
+        seedPosition(rescuedSym, "BUY", 50, "OPEN", now.minusHours(4), null, deadAnchor, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, deadAnchor, rescuedSym, "BUY", 50, now.minusHours(4));
+    // The rescuer: ACTIVE ENTRY *with its own order* on this position's open key → really can settle it.
+    long linkedRescuer = seedSignal(swing, rescuedSym, "ACTIVE", 50, "ENTRY", "BUY", now.minusHours(1));
+    seedOrder(AUTO_BOOK, linkedRescuer, rescuedSym, "BUY", 50, now.minusHours(1));
+
+    String unlinkedSym = sym("INERTRESCUE");
+    long ownAnchor = seedSignal(swing, unlinkedSym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(4));
+    long unrescuedPosition =
+        seedPosition(unlinkedSym, "BUY", 50, "OPEN", now.minusHours(4), null, ownAnchor, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, ownAnchor, unlinkedSym, "BUY", 50, now.minusHours(4));
+    // Same ACTIVE ENTRY shape but NO order row — openForSignal can never reach this position through it.
+    seedSignal(swing, unlinkedSym, "ACTIVE", 50, "ENTRY", "BUY", now.minusHours(1));
 
     run();
 
     assertThat(deadAnchorOrphanIds(latestRunId()))
-        .contains(strandedPosition)
+        .contains(unrescuedPosition)
         .doesNotContain(rescuedPosition);
   }
 
   /**
-   * The unanchored class: no signal linkage AT ALL on an auto-paper book — nothing can close it (the
-   * engine reaches a position only through a signal, and intradayOpen:339-353 joins {@code o.signal_id IS
-   * NOT NULL}, so the 15:45 sweep cannot see it either). Both controls are load-bearing: a MANUAL book's
-   * hand position is closed by hand (V16's own auto-book join), and an order-linked position is reachable
-   * through its signal even with a NULL {@code opening_signal_id}.
+   * Pins the DRIVER-BY-STYLE condition — the two exit drivers genuinely disagree about superseded
+   * versions, so this cannot be a global "must be current published" rule.
+   *
+   * <p>SWING: {@code SwingBatchEngine.adoptVersion:209-235} resolves a superseded/unpublished version for
+   * exit management and deliberately does NOT check {@code enabled} ("a disabled strategy no longer ENTERS
+   * but its open positions must still be exit-managed"), so a superseded swing lot is healthy and must NOT
+   * be flagged. This is not hypothetical: 5 of the 19 live OPEN positions (ids 10/21/22/26/27) are exactly
+   * this shape, so a global current-published rule would false-alarm on all five.
+   *
+   * <p>NON-SWING: {@code SignalEngine.reload():331} skips unless {@code enabled} and loads ONLY {@code
+   * publishedVersionId}, so a SUPERSEDED non-swing anchor is never evaluated — genuinely unexitable, and it
+   * MUST be flagged; the same anchor on the strategy's CURRENT published version IS evaluated and must NOT
+   * be. That last control is load-bearing and was MISSING on the first pass: without it, dropping the
+   * {@code published_version_id = sv.id AND st.enabled} branch entirely left the whole suite GREEN (the
+   * superseded-intraday row is flagged by the failing swing check either way), i.e. the branch was
+   * vacuously unpinned.
    */
   @Test
-  void unanchoredAutoBookPositionIsFlaggedButManualAndOrderLinkedAreNot() {
+  void versionEvaluabilityFollowsTheOwningDriver() {
+    seedAutoPaperToggle(AUTO_BOOK, true);
+    // Drafts off the sample strategy → never its published_version_id → SUPERSEDED by construction.
+    UUID supersededSwing = seedSiblingVersion("swing");
+    UUID supersededIntraday = seedSiblingVersion("intraday");
+    UUID publishedIntraday = seedPublishedStrategyVersion("intraday");
+    OffsetDateTime now = OffsetDateTime.now();
+
+    String swingSym = sym("SUPERSWING");
+    long swingAnchor = seedSignal(supersededSwing, swingSym, "TAKEN", 50, "ENTRY", "BUY", now.minusHours(3));
+    long swingPosition =
+        seedPosition(swingSym, "BUY", 50, "OPEN", now.minusHours(3), null, swingAnchor, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, swingAnchor, swingSym, "BUY", 50, now.minusHours(3));
+
+    String staleSym = sym("SUPERINTRA");
+    long staleAnchor = seedSignal(supersededIntraday, staleSym, "TAKEN", 50, "ENTRY", "BUY", now.minusHours(3));
+    long stalePosition =
+        seedPosition(staleSym, "BUY", 50, "OPEN", now.minusHours(3), null, staleAnchor, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, staleAnchor, staleSym, "BUY", 50, now.minusHours(3));
+
+    String liveSym = sym("PUBINTRA");
+    long liveAnchor = seedSignal(publishedIntraday, liveSym, "TAKEN", 50, "ENTRY", "BUY", now.minusHours(3));
+    long livePosition =
+        seedPosition(liveSym, "BUY", 50, "OPEN", now.minusHours(3), null, liveAnchor, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, liveAnchor, liveSym, "BUY", 50, now.minusHours(3));
+
+    run();
+
+    assertThat(deadAnchorOrphanIds(latestRunId()))
+        .contains(stalePosition)
+        .doesNotContain(swingPosition, livePosition);
+  }
+
+  /**
+   * The no-linkage shape on an auto-paper book: nothing can close it (the engine reaches a position only
+   * through a signal, and intradayOpen:339-353 joins {@code o.signal_id IS NOT NULL}, so the 15:45 sweep
+   * cannot see it either). Both controls are load-bearing: a MANUAL book's hand position is closed BY HAND
+   * (V16's own auto-book join), and a position whose order links a LIVE ENTRY is reachable through it even
+   * with a NULL {@code opening_signal_id}.
+   */
+  @Test
+  void unanchoredAutoBookPositionIsFlaggedButManualAndLiveLinkedAreNot() {
     seedAutoPaperToggle(AUTO_BOOK, true);
     seedAutoPaperToggle(MANUAL_BOOK, false);
+    UUID swing = seedSiblingVersion("swing");
     OffsetDateTime opened = OffsetDateTime.now().minusHours(2);
-    String orphanSym = sym("UNANCHORED");
-    long orphanId = seedPosition(orphanSym, "BUY", 50, "OPEN", opened, null, null, AUTO_BOOK);
 
+    long orphanId = seedPosition(sym("UNANCHORED"), "BUY", 50, "OPEN", opened, null, null, AUTO_BOOK);
     long handId = seedPosition(sym("BYHAND"), "BUY", 50, "OPEN", opened, null, null, MANUAL_BOOK);
 
     String linkedSym = sym("ORDERLINKED");
-    long linkedSignal = seedSignal(linkedSym, "TAKEN", 50, "ENTRY", "BUY", opened);
+    long linkedSignal = seedSignal(swing, linkedSym, "TAKEN", 50, "ENTRY", "BUY", opened);
     long linkedId = seedPosition(linkedSym, "BUY", 50, "OPEN", opened, null, null, AUTO_BOOK);
     seedOrder(AUTO_BOOK, linkedSignal, linkedSym, "BUY", 50, opened);
 
     run();
 
-    assertThat(deadAnchorOrphanIds(latestRunId()))
-        .contains(orphanId)
-        .doesNotContain(handId, linkedId);
+    assertThat(deadAnchorOrphanIds(latestRunId())).contains(orphanId).doesNotContain(handId, linkedId);
   }
 
   /**
@@ -383,10 +447,13 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
    */
   @Test
   void deadAnchorOrphansStayOutOfTheActivityTotalAndAlertOnlyOnNewIds() {
+    seedAutoPaperToggle(AUTO_BOOK, true);
+    UUID swing = seedSiblingVersion("swing");
     OffsetDateTime now = OffsetDateTime.now();
     String sym = sym("ORPHANALERT");
-    long anchorId = seedSignal(sym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(2));
-    long positionId = seedPosition(sym, "BUY", 50, "OPEN", now.minusHours(2), null, anchorId, "book1");
+    long anchorId = seedSignal(swing, sym, "EXPIRED", 50, "ENTRY", "BUY", now.minusHours(2));
+    long positionId = seedPosition(sym, "BUY", 50, "OPEN", now.minusHours(2), null, anchorId, AUTO_BOOK);
+    seedOrder(AUTO_BOOK, anchorId, sym, "BUY", 50, now.minusHours(2));
     when(notifier.configured("NTFY")).thenReturn(true);
 
     ReconciliationResult first = run();
@@ -506,6 +573,38 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
     assertThat(r.v16PositionWithoutSignal()).doesNotContain(manualId);
   }
 
+  /**
+   * A NEW enabled strategy whose CURRENT {@code published_version_id} is the returned version — the only
+   * shape {@code SignalEngine.reload():331} loads, and the positive control for the published branch.
+   * Needs its own strategy row (the sample strategy's published pointer must not be disturbed), with a
+   * unique slug AND name: the singleton IT DB has no per-method cleanup.
+   */
+  private UUID seedPublishedStrategyVersion(String style) {
+    String unique = PREFIX + "-" + UUID.randomUUID().toString().substring(0, 8);
+    String strategyId =
+        jdbc.queryForObject(
+            "INSERT INTO strategies (slug, name, enabled) VALUES (?, ?, true) RETURNING id::text",
+            String.class,
+            unique,
+            unique);
+    String versionRow =
+        jdbc.queryForObject(
+            """
+            INSERT INTO strategy_versions
+              (strategy_id, version, config_yaml, config, schema_version, checksum, status, published_at)
+            VALUES (?::uuid, ?, '', ?::jsonb, '1', ?, 'published', now())
+            RETURNING id::text
+            """,
+            String.class,
+            strategyId,
+            unique,
+            "{\"risk\":{\"session\":{\"style\":\"" + style + "\"}}}",
+            unique);
+    jdbc.update(
+        "UPDATE strategies SET published_version_id = ?::uuid WHERE id = ?::uuid", versionRow, strategyId);
+    return UUID.fromString(versionRow);
+  }
+
   private void seedAutoPaperToggle(String book, boolean enabled) {
     jdbc.update(
         "INSERT INTO risk_settings (book, key, value) VALUES (?, 'auto_paper_trade', ?::jsonb)",
@@ -571,23 +670,29 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   /**
-   * A second strategy_versions row cloned off {@link #versionId}'s own strategy — the sibling-version
-   * anchor's home. Reusing the strategy_id keeps the strategies FK satisfied; the unique constraint is
-   * (strategy_id, version), so only the version string must be fresh. PREFIX-tagged so {@link #clean()}
-   * can delete it without touching the seeded sample strategy.
+   * A strategy_versions row of a given {@code session.style}, cloned off {@link #versionId}'s own strategy.
+   * Reusing the strategy_id keeps the strategies FK satisfied; the unique constraint is (strategy_id,
+   * version), so only the version string must be fresh. It is inserted as a {@code draft} and never
+   * published, so it is ALWAYS a SUPERSEDED version — which is what the driver-by-style test needs, and is
+   * harmless for the swing tests (the swing batch adopts superseded versions by design). The config is
+   * built fresh rather than cloned: the detector reads exactly one path from it
+   * ({@code config->'risk'->'session'->>'style'}), so pinning that path makes the style explicit instead of
+   * inheriting whatever the flyway seed happens to carry. PREFIX-tagged so {@link #clean()} can delete it
+   * without touching the seeded sample strategy.
    */
-  private UUID seedSiblingVersion() {
+  private UUID seedSiblingVersion(String style) {
     String id =
         jdbc.queryForObject(
             """
             INSERT INTO strategy_versions
               (strategy_id, version, config_yaml, config, schema_version, checksum, status)
-            SELECT strategy_id, ?, config_yaml, config, schema_version, ?, 'draft'
+            SELECT strategy_id, ?, config_yaml, ?::jsonb, schema_version, ?, 'draft'
             FROM strategy_versions WHERE id = ?
             RETURNING id::text
             """,
             String.class,
             PREFIX + "-" + UUID.randomUUID().toString().substring(0, 8),
+            "{\"risk\":{\"session\":{\"style\":\"" + style + "\"}}}",
             PREFIX + UUID.randomUUID().toString().substring(0, 8),
             versionId);
     return UUID.fromString(id);

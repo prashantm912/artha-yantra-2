@@ -101,18 +101,29 @@ describe('GraduationPage', () => {
   });
 
   // a11y — WCAG 1.4.1 (Use of Color): the criterion dots must not encode pass/fail in COLOUR ALONE,
-  // so each carries a glyph (✓/✗) a colour-blind sighted user can read. Our axe + role/name gates
-  // can't catch this class: the accessible tree was already correct via aria-label, and the failure
-  // was visual-only. Pin the glyph per state, and keep the aria-label/title SR path intact.
+  // so each carries a glyph (✓/✗) a colour-blind sighted user can read.
+  //
+  // Assert against the ACCESSIBILITY TREE (getAllByRole + name), never the aria-label ATTRIBUTE: the
+  // dot is a <span>, and ARIA PROHIBITS aria-label on the generic role, so on a bare span the name is
+  // not guaranteed and the glyph can leak into it ("trades pass ✓"). role="img" is what makes the
+  // label legal and the glyph presentational. An attribute assertion is green either way — it cannot
+  // see the difference, which is the same blind-gate failure this dot's colour-only bug was.
   it('distinguishes a passing from a failing criterion by a glyph, not colour alone', () => {
     renderPage();
-    const dots = board().getAllByLabelText(/pass|fail/);
-    expect(dots.length).toBe(8);
-    for (const dot of dots) {
-      const passed = dot.getAttribute('aria-label')?.endsWith('pass');
-      expect(dot.textContent).toBe(passed ? '✓' : '✗');
-      // the SR path stays the detail-bearing one (aria-label overrides the glyph as the name)
-      expect(dot).toHaveAttribute('title', expect.stringContaining(passed ? 'pass' : 'fail'));
+    const passing = board().getAllByRole('img', { name: /pass$/ });
+    const failing = board().getAllByRole('img', { name: /fail$/ });
+    expect(passing).toHaveLength(4);
+    expect(failing).toHaveLength(4);
+    // the glyph is the VISIBLE non-colour channel...
+    expect(passing.map((d) => d.textContent)).toEqual(['✓', '✓', '✓', '✓']);
+    expect(failing.map((d) => d.textContent)).toEqual(['✗', '✗', '✗', '✗']);
+    // ...and it must NOT leak into the accessible name (role="img" makes descendants presentational),
+    // nor may a passing dot read as failing.
+    expect(board().queryAllByRole('img', { name: /✓|✗/ })).toHaveLength(0);
+    expect(board().queryAllByRole('img', { name: /pass.*fail|fail.*pass/ })).toHaveLength(0);
+    // the SR path keeps the detail-bearing tooltip alongside the name
+    for (const dot of [...passing, ...failing]) {
+      expect(dot).toHaveAttribute('title', expect.stringContaining('needs'));
     }
   });
 

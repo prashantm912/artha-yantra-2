@@ -14,6 +14,7 @@ import in.arthayantra.strategysignal.registry.MarketDataInstrumentClient;
 import in.arthayantra.strategysignal.registry.RegistryService;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -169,6 +170,35 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   /** A SWING strategy the tick engine deliberately SKIPS at load (session.style=swing) — used to
    *  regression-guard the reconcile: published (incl. this) must equal the reload snapshot even though
    *  it is not in the LOADED set, so the 20s reconcile must NOT see drift (else it loops — #579). */
+  /** chip task_37ee83e0 Σ-invariant fixture: (id, name, tradingsymbol, gate rule). */
+  private static final String SUM_YAML =
+      """
+      schema: strategy-schema/v1
+      id: %s
+      name: "%s"
+      version: 1.0.0
+      universe:
+        mode: explicit
+        instruments:
+          - { exchange: NSE, tradingsymbol: %s }
+      timeframes: { primary: 1m }
+      indicators:
+        - { name: RSI, alias: rsi_1m, timeframe: 1m, params: { period: 14 }, weight: 1.0,
+            normalize: { type: rsi_momentum } }
+      entry_rules:
+        direction: long
+        gate:
+          all:
+            - "%s"
+        scoring: { threshold: 0.2 }
+      exit_rules:
+        - { type: stop_loss, params: { basis: premium_pct, value: 20 } }
+      risk:
+        position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+        max_positions: 1
+        session: { style: intraday }
+      """;
+
   private static final String SWING_YAML =
       """
       schema: strategy-schema/v1
@@ -349,6 +379,20 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
           .isNotNull()
           .extracting(timer -> timer.count())
           .isEqualTo(1L);
+
+      // chip task_37ee83e0: the per-outcome counters are wired on the LIVE eval path (not just the
+      // classifier), and EVERY tag is pre-registered at boot — a not-yet-happened outcome must
+      // scrape as 0, because a MISSING "fired" series would again be indistinguishable from an
+      // engine that never evaluated (the four-states-one-signature ambiguity this chip closes).
+      assertThat(meterRegistry.find("ay_signal_eval_outcome_total").counters())
+          .as("every outcome tag exists from boot, even at zero")
+          .hasSize(SignalEngine.Outcome.values().length);
+      Counter fired =
+          meterRegistry.find("ay_signal_eval_outcome_total").tag("outcome", "fired").counter();
+      assertThat(fired).isNotNull();
+      assertThat(fired.count())
+          .as("the bar that emitted the signal above counted as an outcome")
+          .isGreaterThanOrEqualTo(1.0);
 
       // renderer invariant on the persisted breakdown
       BigDecimal contributions = BigDecimal.ZERO;
@@ -1212,6 +1256,99 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     UUID id = (UUID) registryService.create("Engine IT Coldstart " + name, null, null, yaml).get("id");
     registryService.publish(id, null, null);
     return repository.findById(id).orElseThrow();
+  }
+
+  /**
+   * chip task_37ee83e0 — THE INVARIANT: Σ(outcome counters) == entry evaluations. If the sum could
+   * undercount, "the engine performed no evaluations" would again be indistinguishable from "the
+   * engine evaluated and fell through an uncounted path" — the exact ambiguity this chip closes,
+   * one level up. A double-count is equally fatal, so the sum is asserted EXACT, not >=.
+   *
+   * <p>The instrument is unique per run: the IT DB has no cleanup and published strategies persist
+   * across surefire reruns, so a fixed symbol would accumulate watchers and drift the expected sum
+   * on every rerun. The stub candle client warms only SIGTEST, so this symbol starts COLD — which
+   * is what walks the bars through the warming path first and then the scoreable ones.
+   */
+  @Test
+  @Order(21)
+  void everyEvaluationIsCountedExactlyOnceSoTheOutcomeSumIsTheEvaluationCount() throws Exception {
+    String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    String symbol = "SIGSUM" + suffix.toUpperCase(java.util.Locale.ROOT);
+    String slugA = "engine-it-sum-a-" + suffix;
+    String slugB = "engine-it-sum-b-" + suffix;
+    // A: gate wide open, strictly declining bars ⇒ RSI→0 ⇒ composite 0 < 0.2 ⇒ never fires.
+    // B: gate can never pass ⇒ chart-gate-failed. Neither fires, so no signal ever becomes active
+    // and EVERY bar keeps taking the entry branch — that is what makes evaluations == bars×2.
+    String yamlA = SUM_YAML.formatted(slugA, "Engine IT Sum A " + suffix, symbol, "close > 1");
+    String yamlB = SUM_YAML.formatted(slugB, "Engine IT Sum B " + suffix, symbol, "close > 100000");
+    UUID idA = (UUID) registryService.create("Engine IT Sum A " + suffix, null, null, yamlA).get("id");
+    registryService.publish(idA, null, null);
+    UUID idB = (UUID) registryService.create("Engine IT Sum B " + suffix, null, null, yamlB).get("id");
+    registryService.publish(idB, null, null);
+
+    await()
+        .atMost(Duration.ofSeconds(20))
+        .until(() -> engine.loadedSlugs().containsAll(List.of(slugA, slugB)));
+
+    double sumBefore = outcomeSum();
+    double unscoreableBefore = outcomeCount("unscoreable-indicators-warming");
+    double belowBefore = outcomeCount("composite-below-threshold");
+    double gateFailedBefore = outcomeCount("chart-gate-failed");
+    double firedBefore = outcomeCount("fired");
+
+    int bars = 20;
+    OffsetDateTime base = WARM_BASE.plusMinutes(30);
+    BigDecimal price = new BigDecimal("120.00");
+    for (int i = 0; i < bars; i++) {
+      price = price.subtract(new BigDecimal("0.25"));
+      publishBar(symbol, base.plusMinutes(i), price);
+    }
+    double expected = sumBefore + 2.0 * bars;
+
+    // Reach the expected sum, then let any EXTRA (double-counted) increment land before asserting
+    // equality — a >= assertion would go green mid-flight on an engine that counts twice.
+    await()
+        .atMost(Duration.ofSeconds(20))
+        .untilAsserted(
+            () ->
+                assertThat(outcomeSum())
+                    .as("Σ(outcomes) must reach %s (%d bars × 2 strategies) — a silent, uncounted"
+                        + " branch shows up here as an undercount", expected, bars)
+                    .isGreaterThanOrEqualTo(expected));
+    await()
+        .pollDelay(Duration.ofMillis(500))
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () ->
+                assertThat(outcomeSum())
+                    .as("Σ(outcomes) == evaluations: %d bars × 2 strategies, counted exactly once", bars)
+                    .isEqualTo(expected));
+
+    // The test's own premise: nothing fired, so no active entry ever diverted a bar to the exit
+    // branch and every one of the 40 evaluations really did go through the entry path.
+    assertThat(outcomeCount("fired") - firedBefore).isZero();
+    // ...and the run spanned several paths rather than trivially counting one.
+    assertThat(outcomeCount("unscoreable-indicators-warming") - unscoreableBefore)
+        .as("the cold series warms first")
+        .isPositive();
+    assertThat(outcomeCount("composite-below-threshold") - belowBefore)
+        .as("A: gate open, composite under threshold")
+        .isPositive();
+    assertThat(outcomeCount("chart-gate-failed") - gateFailedBefore)
+        .as("B: gate shut")
+        .isPositive();
+  }
+
+  private double outcomeSum() {
+    return meterRegistry.find("ay_signal_eval_outcome_total").counters().stream()
+        .mapToDouble(Counter::count)
+        .sum();
+  }
+
+  private double outcomeCount(String tag) {
+    Counter counter =
+        meterRegistry.find("ay_signal_eval_outcome_total").tag("outcome", tag).counter();
+    return counter == null ? 0.0 : counter.count();
   }
 
   private StrategyRepository.StrategyRow uniquePublishedRow(

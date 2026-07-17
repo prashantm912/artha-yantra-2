@@ -210,6 +210,93 @@ public class SignalEngine {
   // Shadow book: opens an eligible rejection as a virtual 1-lot position (signal-analysis §7.1/7.2).
   private final ShadowBookService shadowBook;
 
+  /**
+   * The verdict of ONE entry evaluation at a primary bar close (chip task_37ee83e0).
+   *
+   * <p>The engine used to record a no-entry ONLY when the §12.3 scalper confluence gate blocked a
+   * chart-entry — i.e. only on bars whose CHART stage had already said yes. A chart-stage "no" left
+   * NOTHING behind: no row, no log, no distinct metric. Four states therefore shared one DB
+   * signature (zero rows in {@code strategy.signal_rejections}): the engine being dead, the chart
+   * gate being closed, indicators warming, and the composite landing under threshold. That
+   * ambiguity cost a false starvation alarm on 2026-07-17 — an 84-minute silence that was simply a
+   * SuperTrend-DOWN leg (every published+enabled scalper — 63 of the 69 enabled strategies as of
+   * 2026-07-17 — shares ONE composite: {@code rsi14} rsi_momentum w1 + {@code supertrend} direction
+   * w1 at threshold 0.2 on one 3m NIFTY-future series, so ST DOWN + RSI &lt; 58 ⇒ composite &lt; 0.2
+   * ⇒ every scalper goes silent together).
+   *
+   * <p>These ride a per-tag COUNTER, not a rejection row: a row per no-entry per strategy per 3m
+   * bar would be ~63 writes every bar all session on the live eval thread — far too much write
+   * volume for a boring "no". Counters are cheap and always-on.
+   *
+   * <p><b>THE INVARIANT: Σ(outcomes) == entry evaluations.</b> Every path out of {@link
+   * #decideEntry} returns exactly one of these and the caller increments exactly once, so the sum
+   * IS the evaluation count. This is load-bearing, not bookkeeping: if the sum could undercount,
+   * "the engine performed no evaluations" would again be indistinguishable from "the engine
+   * evaluated and fell through an uncounted path" — the very ambiguity this chip exists to close,
+   * reproduced one level up. That is why {@code decideEntry} RETURNS an Outcome rather than
+   * incrementing inline: a new silent {@code return;} is then a compile error, not a blind spot.
+   */
+  enum Outcome {
+    /**
+     * Gates passed AND composite &gt;= threshold. PROVISIONAL for a scalper — the confluence stage
+     * runs next and can still downgrade the bar to {@link #CONFLUENCE_BLOCKED}.
+     */
+    FIRED("fired"),
+    /**
+     * The chart stage said yes and the confluence gate then blocked it. This is the ONLY outcome
+     * the engine has ever recorded — it is the one that writes a {@code signal_rejections} row.
+     */
+    CONFLUENCE_BLOCKED("confluence-blocked"),
+    /**
+     * A scalper strategy is loaded but the §12.3 confluence seam is absent, so it can never fire
+     * (fail-closed). A misconfiguration, not a market "no" — it also logs at WARN.
+     */
+    CONFLUENCE_GATE_ABSENT("confluence-gate-absent"),
+    /**
+     * The §12.7 five-account discipline (5 losses freeze / 5 wins bank the day) is holding scalper
+     * entries for the rest of the session. A deliberate freeze — the chart said yes and the
+     * confluence was never consulted.
+     */
+    DISCIPLINE_PAUSED("discipline-paused"),
+    /** Every chart gate passed; the A1 composite came in under entry_rules.scoring.threshold. */
+    COMPOSITE_BELOW_THRESHOLD("composite-below-threshold"),
+    /** A chart gate rule said no. The composite is not consulted once a gate fails. */
+    CHART_GATE_FAILED("chart-gate-failed"),
+    /**
+     * A REQUIRED scoring participant was null, so the bar could not be scored at all
+     * ({@code CompositeScorer} returns empty rather than scoring a silent zero). The one outcome
+     * that indicates a FAULT rather than a normal market "no" — see {@link #WARMUP_GRACE_UNTIL}.
+     */
+    UNSCOREABLE_INDICATORS_WARMING("unscoreable-indicators-warming");
+
+    private final String tag;
+
+    Outcome(String tag) {
+      this.tag = tag;
+    }
+  }
+
+  /**
+   * 10:00 IST — 45 minutes past the 09:15 open, after which {@link
+   * Outcome#UNSCOREABLE_INDICATORS_WARMING} is logged at WARN. {@link LiveSeriesStore#ensureWarm}
+   * back-fills every series from REST at load (4 days of 1m/3m bars, 10 of 5m/15m), so a required
+   * indicator is normally ready at the session's FIRST live bar; the only way to still be
+   * unscoreable is a series that started COLD because that warm fetch returned nothing — which is
+   * itself the fault worth reporting. The cutoff merely keeps a legitimately cold-started series
+   * quiet while it fills. Every OTHER no-entry outcome is a normal "no" and stays counter-only.
+   */
+  private static final LocalTime WARMUP_GRACE_UNTIL = LocalTime.of(10, 0);
+
+  /**
+   * Session date of the last unscoreable WARN per SERIES ({@code exchange:tradingsymbol:interval}).
+   * The fault is per-series, not per-strategy: all 63 published+enabled SCALPERS resolve to ONE 3m
+   * NIFTY-future series, so an unwarmed series would emit ~63 identical WARNs every bar (~1,260/h)
+   * that say nothing the first one does not. Keyed by series and stamped with the session date, so
+   * it self-expires each day and stays bounded by the number of live series.
+   */
+  private final java.util.Map<String, LocalDate> unscoreableWarnedFor =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
   // candles.1m.* are NEVER conflated (A.7.2 bus contract — every closed bar matters). A FIFO
   // queue preserves each distinct bar in arrival order; the single-threaded evalExecutor drains it
   // in order. (A latest-value-wins map would drop a bar under a burst, leaving a permanent series
@@ -296,6 +383,10 @@ public class SignalEngine {
   private final Timer barToEmitTimer;
   private final Counter emitted;
   private final Counter evalFailures;
+  // One counter per Outcome — see the enum. evalTimer wraps onClosedBar INCLUDING its early
+  // returns, so ay_signal_eval_duration_seconds_count can never tell these outcomes apart; that is
+  // part of why the chart-stage blind spot hid for so long.
+  private final java.util.Map<Outcome, Counter> outcomeCounters = new java.util.EnumMap<>(Outcome.class);
   // Audit emit-entry-not-transactional: each emit path's dependent writes commit atomically —
   // a mid-sequence failure must never leave an ENTRY without its option leg / suggested qty,
   // or an EXIT inserted with the entry anchor still ACTIVE (duplicate EXIT next bar).
@@ -342,6 +433,17 @@ public class SignalEngine {
             .register(meterRegistry);
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
     this.evalFailures = meterRegistry.counter("ay_signal_eval_failures_total");
+    // Pre-register EVERY tag at boot so an outcome that has not happened yet still scrapes as 0.
+    // Lazily created series would reintroduce exactly the ambiguity this closes: a MISSING
+    // outcome="fired" series would again be indistinguishable from an engine that never evaluated.
+    for (Outcome outcome : Outcome.values()) {
+      outcomeCounters.put(
+          outcome,
+          Counter.builder("ay_signal_eval_outcome_total")
+              .description("Entry evaluations at a primary bar close, by outcome")
+              .tag("outcome", outcome.tag)
+              .register(meterRegistry));
+    }
     this.tx = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
   }
 
@@ -1001,36 +1103,118 @@ public class SignalEngine {
         return;
       }
     } else {
-      Optional<EntryEvaluator.Evaluation> evaluation =
-          EntryEvaluator.evaluate(strategy.definition(), bank, index);
-      if (evaluation.isPresent() && evaluation.get().entry()) {
-        if (strategy.scalper() != null) {
-          scalperEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), bank, primary, index);
-        } else {
-          emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), null, null);
-        }
-      }
+      // Record the outcome of EVERY evaluation (chip task_37ee83e0). THE ONLY increment site —
+      // decideEntry returns exactly one Outcome on every path, so Σ(outcomes) == evaluations by
+      // construction. Counter-only: this decides nothing and must never alter what is traded.
+      Outcome outcome =
+          decideEntry(strategy, exchange, tradingsymbol, interval, bar, bank, primary, index);
+      outcomeCounters.get(outcome).increment();
+      warnIfUnscoreablePastWarmup(outcome, strategy, exchange, tradingsymbol, interval, bar);
     }
+  }
+
+  /**
+   * The entry decision for one bar: performs the emit / rejection side effects and RETURNS what
+   * happened. The return type is the guard — every path must yield an {@link Outcome}, so a future
+   * branch cannot silently skip counting the way the pre-chip chart-stage "no" did.
+   */
+  private Outcome decideEntry(
+      Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
+      IndicatorBank bank, EngineSeries primary, int index) {
+    // EntryEvaluator ALREADY builds the full breakdown on the no-entry path and returns it; the
+    // engine used to compute it and throw it away. This uses what is already in hand.
+    Optional<EntryEvaluator.Evaluation> evaluation =
+        EntryEvaluator.evaluate(strategy.definition(), bank, index);
+    Outcome chart = classifyEntryOutcome(evaluation);
+    if (chart != Outcome.FIRED) {
+      return chart;
+    }
+    if (strategy.scalper() != null) {
+      return scalperEntry(
+          strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), bank, primary, index);
+    }
+    emitEntry(strategy, exchange, tradingsymbol, interval, bar, evaluation.get(), null, null);
+    return Outcome.FIRED;
+  }
+
+  /**
+   * The chart-stage verdict for one evaluated bar — a pure function of what {@link EntryEvaluator}
+   * already returns. Gate before composite: that is the order {@code EntryEvaluator} itself applies
+   * ({@code entry = gate.passed() && thresholdMet}), so when BOTH fail the gate is the reported
+   * cause. {@link Outcome#FIRED} means only that the CHART stage said yes — for a scalper the
+   * confluence stage runs next and may still block.
+   */
+  static Outcome classifyEntryOutcome(Optional<EntryEvaluator.Evaluation> evaluation) {
+    if (evaluation.isEmpty()) {
+      return Outcome.UNSCOREABLE_INDICATORS_WARMING; // a required participant scored null
+    }
+    if (evaluation.get().entry()) {
+      return Outcome.FIRED;
+    }
+    return evaluation.get().breakdown().gate().passed()
+        ? Outcome.COMPOSITE_BELOW_THRESHOLD
+        : Outcome.CHART_GATE_FAILED;
+  }
+
+  /** True once the bar is past {@link #WARMUP_GRACE_UNTIL} in IST — i.e. mid-session. */
+  static boolean pastWarmupGrace(OffsetDateTime barStart) {
+    return !barStart.withOffsetSameInstant(Ist.OFFSET).toLocalTime().isBefore(WARMUP_GRACE_UNTIL);
+  }
+
+  /**
+   * True the FIRST time a series is seen unscoreable in a session, false for every repeat within
+   * it. {@code put} returns the previous stamp, so this claims-and-tests in one step and a new
+   * session date re-arms the WARN.
+   */
+  static boolean firstUnscoreableForSeries(
+      java.util.Map<String, LocalDate> seen, String seriesKey, LocalDate session) {
+    return !session.equals(seen.put(seriesKey, session));
+  }
+
+  /**
+   * The one no-entry outcome that is a FAULT, not a market "no": a required indicator still
+   * unscoreable mid-session means the series never warmed. Everything else stays counter-only.
+   * Logged ONCE per series per session — see {@link #unscoreableWarnedFor}.
+   */
+  private void warnIfUnscoreablePastWarmup(
+      Outcome outcome, Loaded strategy, String exchange, String tradingsymbol, String interval,
+      EngineCandle bar) {
+    if (outcome != Outcome.UNSCOREABLE_INDICATORS_WARMING || !pastWarmupGrace(bar.bucketStart())) {
+      return;
+    }
+    OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
+    String seriesKey = exchange + ":" + tradingsymbol + ":" + interval;
+    if (!firstUnscoreableForSeries(unscoreableWarnedFor, seriesKey, istBar.toLocalDate())) {
+      return;
+    }
+    log.warn(
+        "required indicator STILL unscoreable mid-session on {} at {} — {} (and every strategy"
+            + " sharing this series) cannot be evaluated; the series likely never warmed (REST"
+            + " back-fill empty at load). Logged ONCE per series per session. Every other no-entry"
+            + " outcome is a normal market 'no'; this one is not.",
+        seriesKey,
+        istBar,
+        strategy.slug());
   }
 
   /**
    * Track-2 entry: the chart gate passed; now the §12.3 confluence seam must also confirm and pick
    * the option, or the entry is blocked. Fail-closed — a scalper strategy without the gate never
    * fires. The signal is keyed on the index FUTURE (this {@code exchange}/{@code tradingsymbol}); the
-   * picked option rides the side-channel.
+   * picked option rides the side-channel. RETURNS the outcome; the single caller counts it once.
    */
-  private void scalperEntry(
+  private Outcome scalperEntry(
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
       EntryEvaluator.Evaluation evaluation, BarValues bank, EngineSeries future, int index) {
     if (scalperGate.isEmpty()) {
       log.warn("scalper strategy {} loaded but confluence gate absent — entry suppressed", strategy.slug());
-      return;
+      return Outcome.CONFLUENCE_GATE_ABSENT;
     }
     // §12.7 scalper 5-account discipline: 5 losses freeze all sub-accounts / 5 wins bank the day.
     // Consulted IN ADDITION to the global risk gate (checked later in emitEntry); scalper entries only.
     if (emissionGuard.isPresent() && !emissionGuard.get().scalperEntryAllowed()) {
       log.info("scalper ENTRY paused by the 5-account discipline: {} {}:{}", strategy.slug(), exchange, tradingsymbol);
-      return;
+      return Outcome.DISCIPLINE_PAUSED;
     }
     OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     ScalperConfluenceGate.Result result =
@@ -1039,11 +1223,12 @@ public class SignalEngine {
             istBar.toLocalTime(), istBar.toLocalDate());
     if (result.blocked()) {
       recordRejection(strategy, exchange, tradingsymbol, interval, istBar, result.rejection());
-      return;
+      return Outcome.CONFLUENCE_BLOCKED;
     }
     emitEntry(
         strategy, exchange, tradingsymbol, interval, bar, evaluation, result.decision().get(),
         result.fired());
+    return Outcome.FIRED;
   }
 
   private void evaluateCoarsePrimary(

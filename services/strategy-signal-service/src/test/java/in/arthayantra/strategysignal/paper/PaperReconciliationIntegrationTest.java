@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
@@ -9,6 +10,9 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.strategyengine.config.StrategyCompiler;
+import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategysignal.notifier.NotifierClient;
 import in.arthayantra.strategysignal.paper.PaperReconciliationService.ReconciliationResult;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
@@ -46,11 +50,15 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   // (singleton IT DB — tolerate what other ITs leave).
   private static final String AUTO_BOOK = "a12recon-auto";
   private static final String MANUAL_BOOK = "a12recon-manual";
+  // A REAL family funnel (MinerviniDoctrine.universeMode:65-67) — adoptVersion:225 matches the anchor's
+  // universe.mode against it, so a swing control carrying anything else could never be adopted.
+  private static final String FAMILY_UNIVERSE_MODE = "minervini_funnel";
 
   @Autowired private PaperReconciliationService reconciliation;
   @Autowired private PaperReconciliationScheduler scheduler; // present ⇒ bean loaded in engine-disabled ctx
   @Autowired private JdbcTemplate jdbc;
   @Autowired private MeterRegistry meters;
+  @Autowired private ObjectMapper mapper;
   @MockitoBean private NotifierClient notifier;
 
   private UUID versionId;
@@ -587,22 +595,30 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
             String.class,
             unique,
             unique);
+    // Config CLONED from the seed's real document (see seedSiblingVersion): a hand-built style-only stub
+    // cannot compile, so reload() would skip it and the control would represent nothing.
     String versionRow =
         jdbc.queryForObject(
             """
             INSERT INTO strategy_versions
               (strategy_id, version, config_yaml, config, schema_version, checksum, status, published_at)
-            VALUES (?::uuid, ?, '', ?::jsonb, '1', ?, 'published', now())
+            SELECT ?::uuid, ?, config_yaml,
+                   jsonb_set(config, '{risk,session,style}', to_jsonb(?::text)),
+                   schema_version, ?, 'published', now()
+            FROM strategy_versions WHERE id = ?
             RETURNING id::text
             """,
             String.class,
             strategyId,
             unique,
-            "{\"risk\":{\"session\":{\"style\":\"" + style + "\"}}}",
-            unique);
+            style,
+            unique,
+            versionId);
     jdbc.update(
         "UPDATE strategies SET published_version_id = ?::uuid WHERE id = ?::uuid", versionRow, strategyId);
-    return UUID.fromString(versionRow);
+    UUID published = UUID.fromString(versionRow);
+    assertDriverAdoptable(published, style);
+    return published;
   }
 
   private void seedAutoPaperToggle(String book, boolean enabled) {
@@ -670,15 +686,21 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   /**
-   * A strategy_versions row of a given {@code session.style}, cloned off {@link #versionId}'s own strategy.
-   * Reusing the strategy_id keeps the strategies FK satisfied; the unique constraint is (strategy_id,
-   * version), so only the version string must be fresh. It is inserted as a {@code draft} and never
-   * published, so it is ALWAYS a SUPERSEDED version — which is what the driver-by-style test needs, and is
-   * harmless for the swing tests (the swing batch adopts superseded versions by design). The config is
-   * built fresh rather than cloned: the detector reads exactly one path from it
-   * ({@code config->'risk'->'session'->>'style'}), so pinning that path makes the style explicit instead of
-   * inheriting whatever the flyway seed happens to carry. PREFIX-tagged so {@link #clean()} can delete it
-   * without touching the seeded sample strategy.
+   * A SUPERSEDED strategy_versions row of a given {@code session.style}, cloned off {@link #versionId}'s
+   * own strategy. Reusing the strategy_id keeps the strategies FK satisfied; the unique constraint is
+   * (strategy_id, version), so only the version string must be fresh. Inserted as a {@code draft} and
+   * never published ⇒ ALWAYS superseded, which is what the driver-by-style test needs and is harmless
+   * elsewhere (the swing batch adopts superseded versions by design).
+   *
+   * <p><b>The config is CLONED from the flyway seed's real EMA-crossover document, not hand-built.</b> A
+   * hand-built {@code {"risk":{"session":{"style":…}}}} stub is NOT a control: {@code
+   * StrategyCompiler.compile:42-46} does {@code Direction.valueOf(entry_rules.direction)}, which throws on
+   * a missing direction, so the real driver could never load it — {@code SignalEngine:436-438} would
+   * catch and skip, and {@code SwingBatchEngine.adoptVersion:228-231} would return empty. Cloning the seed
+   * (a document the engine genuinely loads) and overriding only the two paths the drivers key on
+   * ({@code risk.session.style}; {@code universe.mode} → a REAL family funnel for the swing arm, which
+   * adoptVersion:225 matches against the doctrine) yields a version a driver could actually adopt.
+   * {@link #assertDriverAdoptable} proves it rather than assuming it.
    */
   private UUID seedSiblingVersion(String style) {
     String id =
@@ -686,16 +708,40 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
             """
             INSERT INTO strategy_versions
               (strategy_id, version, config_yaml, config, schema_version, checksum, status)
-            SELECT strategy_id, ?, config_yaml, ?::jsonb, schema_version, ?, 'draft'
+            SELECT strategy_id, ?, config_yaml,
+                   jsonb_set(jsonb_set(config, '{risk,session,style}', to_jsonb(?::text)),
+                             '{universe,mode}', to_jsonb(?::text)),
+                   schema_version, ?, 'draft'
             FROM strategy_versions WHERE id = ?
             RETURNING id::text
             """,
             String.class,
             PREFIX + "-" + UUID.randomUUID().toString().substring(0, 8),
-            "{\"risk\":{\"session\":{\"style\":\"" + style + "\"}}}",
+            style,
+            "swing".equals(style) ? FAMILY_UNIVERSE_MODE : "explicit",
             PREFIX + UUID.randomUUID().toString().substring(0, 8),
             versionId);
-    return UUID.fromString(id);
+    UUID versionRow = UUID.fromString(id);
+    assertDriverAdoptable(versionRow, style);
+    return versionRow;
+  }
+
+  /**
+   * Proves a seeded control is a version its driver could ACTUALLY load, by running the REAL {@link
+   * StrategyCompiler} over the row exactly as {@code SignalEngine.reload():340} and {@code
+   * SwingBatchEngine.adoptVersion:229} do, and checking the compiled {@code session.style} the swing arm
+   * gates on. Without this the controls are fiction: a version the driver would reject cannot represent a
+   * version the driver evaluates, and a mutation matrix run against it proves only that a SQL branch
+   * exists — not that it means anything.
+   */
+  private void assertDriverAdoptable(UUID version, String expectedStyle) {
+    String json =
+        jdbc.queryForObject("SELECT config::text FROM strategy_versions WHERE id = ?", String.class, version);
+    StrategyDefinition definition =
+        assertDoesNotThrow(
+            () -> StrategyCompiler.compile(mapper.readTree(json)),
+            "control version must compile — the real driver loads it through this exact call");
+    assertThat(definition.session().style()).isEqualTo(expectedStyle);
   }
 
   private long seedPosition(

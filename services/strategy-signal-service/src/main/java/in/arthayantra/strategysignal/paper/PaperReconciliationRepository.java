@@ -235,17 +235,42 @@ public class PaperReconciliationRepository {
    *       has no lifetime bound either (it filters only {@code p.status='OPEN'}), so a stale same-key link
    *       DOES settle the current position in production. Adding a bound here would make the detector
    *       stricter than the code it models and flag a position that production would actually close.
-   *   <li><b>On a version its own driver evaluates</b> — and <b>the two drivers disagree, so this is
-   *       per-style, not global</b>. The swing batch adopts ANY version of its own family for exit
-   *       management ({@code SwingBatchEngine.adoptVersion:209-235}: superseded/unpublished are resolved,
-   *       and {@code enabled} is deliberately NOT checked — "a disabled strategy no longer ENTERS but its
-   *       open positions must still be exit-managed"), so {@code style='swing'} alone suffices. The live
-   *       engine does NOT: {@code SignalEngine.reload():331} skips a strategy unless {@code enabled} and
-   *       loads ONLY {@code publishedVersionId}, so a non-swing anchor is evaluated only while its version
-   *       IS the strategy's current published one AND the strategy is enabled. Requiring current-published
-   *       GLOBALLY would be a mass false positive: 5 of the 19 live OPEN positions (ids 10/21/22/26/27)
-   *       are swing lots held by SUPERSEDED versions that the batch is correctly still exit-managing.
+   *   <li><b>On a version that is PLAUSIBLY driver-owned</b> — a deliberately weaker test than "a driver
+   *       will load it" (see the scope note below), and necessarily <b>per-style, because the two drivers
+   *       disagree</b>. The swing batch adopts SUPERSEDED/unpublished versions of its own family for exit
+   *       management ({@code SwingBatchEngine.adoptVersion:218-247}; {@code enabled} is deliberately NOT
+   *       checked — "a disabled strategy no longer ENTERS but its open positions must still be
+   *       exit-managed"), so {@code style='swing'} is the closest DB-answerable proxy. The live engine
+   *       does NOT adopt: {@code SignalEngine.reload():331} skips a strategy unless {@code enabled} and
+   *       loads ONLY {@code publishedVersionId}. Requiring current-published GLOBALLY would be a mass
+   *       false positive — 5 of the 19 live OPEN positions (ids 10/21/22/26/27) are swing lots on
+   *       SUPERSEDED versions the batch is correctly still exit-managing — and dropping either arm
+   *       re-opens the inverse false negative. Both arms are kept for exactly that reason.
    * </ol>
+   *
+   * <p><b>SCOPE — what this check does NOT prove, stated plainly.</b> Both version arms are NECESSARY but
+   * NOT SUFFICIENT: they establish that a version is plausibly driver-owned, never that a driver will
+   * actually load it. These positions are therefore FALSE NEGATIVES here — an anchor exists and looks
+   * healthy, yet nothing exits it:
+   *
+   * <ul>
+   *   <li>a swing anchor whose family doctrine is DISABLED — {@code SwingBatchEngine.runDaily:147-151}
+   *       no-ops before adoption is ever reached;
+   *   <li>a swing anchor {@code adoptVersion:218-247} rejects — {@code universe.mode} not matching the
+   *       doctrine, a config that fails to compile, or a compiled {@code session.style} that is not swing;
+   *   <li>a current-published + enabled version {@code reload()} skips anyway — compile failure, missing
+   *       bounding exits, unsupported timeframe, an unresolved / non-live / empty universe, or any
+   *       RuntimeException ({@code SignalEngine:339-398}, {@code :436-438}).
+   * </ul>
+   *
+   * <p>This is a scope boundary, not an oversight. Compilation and universe resolution are not
+   * SQL-expressible facts, and reading the engine's loaded-version state would couple this nightly DB
+   * reconciler to engine RUNTIME state — the exact coupling the F10 work removed. <b>The whole
+   * "an anchor exists but its strategy will not load" class is owned by a different signal and is loud
+   * there</b>: the engine's own {@code unresolvedDrops} + {@code loadErrors} counters drive its DEGRADED
+   * health path and retry chain. Two signals, two owners, no overlap — a detector with a documented scope
+   * is honest, whereas implying coverage it lacks would be the {@link #strandedCarryPositions()} hole
+   * again.
    *
    * <p>The auto-paper-book join is V16's ({@link #autoPaperPositionsWithoutSignal}) and answers the "no
    * other mechanism can close it" question: a {@code manual}/{@code other} book's position is closed BY

@@ -359,7 +359,12 @@ public class PaperService {
                   Map.of("book", book, "rail", rail));
             });
     try {
-      return txTemplate.execute(status -> openOrder(request));
+      return txTemplate.execute(
+          status -> {
+            PositionDto opened = openOrder(request);
+            anchorTaken(request.signalId());
+            return opened;
+          });
     } catch (org.springframework.dao.DuplicateKeyException race) {
       // Concurrent duplicate: two submits with the same (book, clientOrderId) both passed the pre-check;
       // the uq_paper_orders_client_order_id partial-unique index let exactly one INSERT win and rolled
@@ -371,6 +376,58 @@ public class PaperService {
       }
       PositionDto winner = replayFor(book, request.clientOrderId()).orElseThrow(() -> race);
       throw new DuplicateOrderException(winner);
+    }
+  }
+
+  /**
+   * Anchors a hand ticket's signal: CAS ACTIVE→TAKEN, exactly what the two other open paths already do
+   * ({@code SignalsController.taken:130} for the explicit take, {@code AutoPaperListener:57} for the
+   * auto path) — the manual ticket IS the owner taking the signal, so it must leave the same state.
+   *
+   * <p><b>Why this matters (the orphan it fixes):</b> the manual path left the anchor ACTIVE, and the
+   * two 15:45 sweeps filter style INCONSISTENTLY — {@code SignalRepository.expireAllActive:256}
+   * expires every ACTIVE row whose style is NOT swing, while {@code
+   * PaperPositionRepository.intradayOpen:351} closes only style = {@code intraday}. A btst /
+   * expiry_day / positional ticket therefore had its anchor swept to EXPIRED while its position stayed
+   * OPEN, and {@code SignalRepository.activeEntry:166-178} anchors only ACTIVE/TAKEN — so the engine
+   * could never emit that position's exit, ever. At TAKEN the sweep's {@code status='ACTIVE'} predicate
+   * no longer matches, the anchor survives, and the exit passes keep running until {@link
+   * TakenSignalResolver} resolves it TAKEN→EXPIRED on close. {@code intraday} was accidentally safe
+   * (both sweeps fire) and {@code swing} is excluded from the signal sweep; the gap was the carry
+   * styles — and btst + expiry_day are both live-enabled.
+   *
+   * <p><b>Placement is load-bearing.</b> This runs INSIDE the fill transaction and AFTER the fill, so
+   * the anchor flips if and ONLY if the position actually opened: a DATA_STALE / no-price / lot-size
+   * throw rolls the CAS back with the fill, and a CAS-first ordering would have stranded the anchor at
+   * TAKEN with no position to resolve it (nothing ever closes → {@link TakenSignalResolver} never
+   * fires → the anchor suppresses re-entry forever). The §7.2.1 status frame is published AFTER_COMMIT
+   * ({@code SignalStatusListener}), so a rolled-back CAS never emits a phantom frame.
+   *
+   * <p><b>Losing the CAS is not always benign.</b> Already TAKEN (auto-paper or a prior take won the
+   * race) is a correct no-op — the anchor is live either way, which is all the exit passes need. Any
+   * other state (EXPIRED by the sweep, DISMISSED) means this fill just opened a position against a dead
+   * anchor that no engine pass can exit; that is NOT silently accepted — this log is the ONLY trail it
+   * leaves, because {@code PaperReconciliationRepository.strandedCarryPositions:176} cannot see this
+   * shape: its predicate requires an EXISTS on a persisted opposite-side EXIT signal, and a dead anchor
+   * means the engine never evaluated an exit, so no EXIT row was ever written. It is deliberately NOT
+   * refused here: whether a dead anchor should REJECT the ticket is a separate policy call (a btst
+   * signal fires at the 15:20 pre-close and the sweep expires it at 15:45, so the window is real and
+   * narrow), and the 60-minute {@code SIGNAL_STALE} gate above does not cover it.
+   */
+  private void anchorTaken(Long signalId) {
+    if (signalId == null) {
+      return; // an ad-hoc ticket (book MANUAL) has no anchor to take — nothing to transition.
+    }
+    if (signals.transitionIf(signalId, "ACTIVE", "TAKEN")) {
+      return;
+    }
+    String status = signals.find(signalId).map(SignalRepository.SignalRow::status).orElse(null);
+    if (!"TAKEN".equals(status)) {
+      log.warn(
+          "manual ticket filled against signal {} in status {} (not ACTIVE/TAKEN) — the position has no"
+              + " live anchor, so the engine cannot exit it; manual close or reconciliation required",
+          signalId,
+          status);
     }
   }
 

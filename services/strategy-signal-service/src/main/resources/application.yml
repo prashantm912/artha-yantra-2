@@ -56,6 +56,14 @@ artha:
     strategy: ${ARTHA_OPENALGO_STRATEGY:ArthaYantra}
   signals:
     engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
+    # Subscriber-side watchdog knobs were previously pinned to @Value defaults (#653) — no yml key
+    # and no compose passthrough meant .env did NOTHING and they could not be tuned or disabled
+    # without an image rebuild. Names MUST match the compose passthroughs exactly (the #653 trap: a
+    # mismatch resolves to the default and swallows the override with no error).
+    subscriber-watchdog:
+      enabled: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_ENABLED:true}
+      bar-gap-ms: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_BAR_GAP_MS:180000}
+      feed-fresh-ms: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_FEED_FRESH_MS:90000}
     # Live signal-output watchdog (the 2026-07-14 zero-signals starvation signature). Default OFF —
     # DORMANT until the owner arms it (flip ARTHA_SIGNALS_STARVATION_WATCHDOG_ENABLED=true in .env,
     # no image rebuild). Arming prerequisites: (1) validate window-ms against the live p99 inter-

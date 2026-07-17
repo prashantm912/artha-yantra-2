@@ -49,12 +49,17 @@ test.describe('WS connect — the app shell socket comes up and stays up', () =>
     // still connected after a short settle window (catches an immediate flap).
     await expect(page.getByText(/WS connected/)).toBeVisible({ timeout: 5_000 });
 
-    // The live-subscribing page rendered its table (rows OR the empty state), proving the WS
-    // subscription path did not throw on mount.
-    const tableOrEmpty = page
+    // The live-subscribing page reached a healthy render state, proving the WS subscription path did
+    // not throw on mount. Empty card OR a real <tbody> row (SignalsPage rows are plain <tr> in <tbody>
+    // since the M23 audit removed the role="button" the old locator keyed off). The global-setup
+    // readiness gate warms the signals endpoint before tests, so a cold query resolves inside 30s; the
+    // still-loading skeleton is NOT accepted (a hung endpoint would sit in it forever and silently
+    // pass) — a hung or failed endpoint must still fail. The WS-connected pill + no-page-errors above
+    // carry this test's real intent.
+    const tableSettled = page
       .getByText('No signals yet', { exact: false })
-      .or(page.locator('tr[role="button"]').first());
-    await expect(tableOrEmpty).toBeVisible({ timeout: 20_000 });
+      .or(page.locator('table tbody tr').first());
+    await expect(tableSettled).toBeVisible({ timeout: 30_000 });
 
     expect(pageErrors, `client page errors: ${pageErrors.join(' | ')}`).toEqual([]);
   });

@@ -9,7 +9,7 @@ export default defineConfig({
   testDir: './tests',
   timeout: 240_000,
   expect: { timeout: 15_000 },
-  retries: process.env['CI'] ? 1 : 0,
+  retries: process.env['CI'] ? 2 : 0, // 2 in CI (matches frontend-react's config) — a net UNDER the real fixes below
   workers: 1, // journeys share one stack and one owner session world
   globalSetup: './global-setup.ts',
   use: {

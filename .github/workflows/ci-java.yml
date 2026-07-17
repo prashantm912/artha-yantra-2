@@ -121,6 +121,12 @@ jobs:
 
   build-images:
     needs: build-test
+    # PR wall-clock: on a pull_request this job only VALIDATES that the Dockerfiles build (the
+    # login/push steps below are already gated main+push-only), yet `needs: build-test` makes it
+    # wait out the ~8m market-data shard first — ~2.5m of pure serial tail on every PR. Skip it on
+    # PRs; the Dockerfile build is still validated on the main-push run, before any deploy. On push
+    # (main only, per the trigger) the job is UNCHANGED: needs build-test, then build + push.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read

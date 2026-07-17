@@ -5,8 +5,15 @@ import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { LoadBeat, BeatBlock } from '../../components/LoadBeat.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { SeverityBadge } from '../../components/insights/InsightBits.tsx';
-import { useDossier, type Criterion, type Dossier, type InsightSeverity } from '../../api/insights.ts';
+import {
+  useDossier,
+  type Criterion,
+  type Dossier,
+  type InsightSeverity,
+  type OpenSell,
+} from '../../api/insights.ts';
 
 // /insights/strategy-dossier/:strategyId (INT design §5.1) — the qualification dossier: the join the
 // owner does by hand across the graduation, signals, sell-decision and STRATEGY_EVIDENCE pages,
@@ -56,6 +63,35 @@ function CriterionRow({ c }: { c: Criterion }) {
     </li>
   );
 }
+
+/** The open sell-decisions grid — same columns/order/formatting as the hand-rolled table it replaced. */
+const SELL_COLUMNS: DataColumn<OpenSell>[] = [
+  {
+    id: 'date',
+    header: 'Date',
+    align: 'left',
+    mobileLabel: 'Date',
+    mono: true,
+    render: (s) => <span className="text-ay-muted">{s.runDate ?? '—'}</span>,
+  },
+  { id: 'symbol', header: 'Symbol', align: 'left', mobileLabel: 'Symbol', render: (s) => s.symbol ?? '—' },
+  { id: 'verdict', header: 'Verdict', align: 'left', mobileLabel: 'Verdict', render: (s) => s.verdict ?? '—' },
+  {
+    id: 'unrealized',
+    header: 'Unrealized',
+    mobileLabel: 'Unrealized',
+    cellClassName: (s) => (s.unrealizedPct != null && s.unrealizedPct < 0 ? 'text-bear' : 'text-bull'),
+    render: (s) => (s.unrealizedPct == null ? '—' : `${s.unrealizedPct.toFixed(2)}%`),
+  },
+  {
+    id: 'acked',
+    header: 'Acked',
+    align: 'left',
+    mobileLabel: 'Acked',
+    mono: false,
+    render: (s) => <span className="text-caption text-ay-muted">{s.acknowledged ? 'yes' : 'no'}</span>,
+  },
+];
 
 function DossierBody({ d }: { d: Dossier }) {
   const criteria = d.criteria ?? [];
@@ -162,37 +198,12 @@ function DossierBody({ d }: { d: Dossier }) {
             Sell-decisions
           </h2>
           {sells.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs text-ay-muted">
-                  <tr>
-                    <th className="py-1 pr-2 font-medium">Date</th>
-                    <th className="py-1 pr-2 font-medium">Symbol</th>
-                    <th className="py-1 pr-2 font-medium">Verdict</th>
-                    <th className="py-1 pr-2 text-right font-medium">Unrealized</th>
-                    <th className="py-1 font-medium">Acked</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sells.map((s) => (
-                    <tr key={s.sellDecisionId} className="border-t border-ay-border/40">
-                      <td className="py-1 pr-2 tabular-nums text-ay-muted">{s.runDate ?? '—'}</td>
-                      <td className="py-1 pr-2 text-ay-text">{s.symbol ?? '—'}</td>
-                      <td className="py-1 pr-2 text-ay-text">{s.verdict ?? '—'}</td>
-                      <td
-                        className={cn(
-                          'py-1 pr-2 text-right tabular-nums',
-                          s.unrealizedPct != null && s.unrealizedPct < 0 ? 'text-bear' : 'text-bull',
-                        )}
-                      >
-                        {s.unrealizedPct == null ? '—' : `${s.unrealizedPct.toFixed(2)}%`}
-                      </td>
-                      <td className="py-1 text-caption text-ay-muted">{s.acknowledged ? 'yes' : 'no'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={SELL_COLUMNS}
+              rows={sells}
+              rowKey={(s) => String(s.sellDecisionId)}
+              ariaLabel="Open sell-decisions"
+            />
           ) : (
             <p className="text-body-sm text-ay-muted">No open sell-decisions (swing strategies only).</p>
           )}

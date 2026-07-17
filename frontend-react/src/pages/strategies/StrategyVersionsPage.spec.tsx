@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -71,12 +71,17 @@ function renderPage() {
   );
 }
 
+// The version timeline renders through the shared DataTable, which paints a desktop <table> AND a
+// md:hidden mobile card list — so every cell text exists twice in jsdom (CSS doesn't apply). Scope
+// each assertion to the desktop table so getByText stays exactly-one.
+const timeline = () => within(screen.getByRole('table', { name: 'Strategy versions' }));
+
 describe('StrategyVersionsPage', () => {
   it('shows the version timeline, the structured diff, and opens the publish dialog', () => {
     renderPage();
     expect(screen.getByText('EMA Cross — versions')).toBeInTheDocument();
     expect(screen.getAllByText('1.3.0').length).toBeGreaterThan(0); // timeline row + compare options
-    expect(screen.getByText('draft')).toBeInTheDocument();
+    expect(timeline().getByText('draft')).toBeInTheDocument();
     expect(screen.getByText(/risk.max_positions/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Publish…'));

@@ -8,6 +8,7 @@ import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import {
   useManasScreen,
   useManasFunnel,
@@ -34,6 +35,65 @@ const GATE_TITLES = [
   '4. Price > 200-day MA',
   '5. Price ≥ 100% above 52-week low',
   '6. New 52-week high made recently',
+];
+
+/** The 6-gate pass/fail strip — same markup the hand-rolled screen table rendered. */
+function Gates({ r }: { r: ManasRow }) {
+  return (
+    <span className="flex gap-0.5" title={`${r.gatesPassed}/6 gates`}>
+      {r.gates.map((g, i) => (
+        <span
+          key={i}
+          title={GATE_TITLES[i]}
+          className={cn(
+            'inline-flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold',
+            g ? 'bg-bull/20 text-bull' : 'bg-bear/20 text-bear',
+          )}
+        >
+          {i + 1}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** The daily screen grid — same columns/order/formatting as the hand-rolled table it replaced. */
+const SCREEN_COLUMNS: DataColumn<ManasRow>[] = [
+  {
+    id: 'symbol',
+    header: 'Symbol',
+    align: 'left',
+    mobileLabel: 'Symbol',
+    mono: false,
+    render: (r) => (
+      <Link to={`/equity/manas-arora/${r.symbol}`} className="font-medium text-accent hover:underline">
+        {r.symbol}
+      </Link>
+    ),
+  },
+  { id: 'close', header: 'Close', mobileLabel: 'Close', render: (r) => formatDecimal(r.close, 2) },
+  { id: 'withinHighPct', header: '% from high', mobileLabel: '% from high', render: (r) => pct(r.withinHighPct) },
+  { id: 'aboveLowPct', header: '% above low', mobileLabel: '% above low', render: (r) => pct(r.aboveLowPct) },
+  { id: 'gates', header: 'Gates', align: 'left', mobileLabel: 'Gates', mono: false, render: (r) => <Gates r={r} /> },
+  { id: 'flags', header: 'Flags', align: 'left', mobileLabel: 'Flags', mono: false, render: (r) => <Flags r={r} /> },
+  {
+    id: 'turnover50',
+    header: 'Turnover 50d',
+    mobileLabel: 'Turnover 50d',
+    render: (r) => (r.turnover50 ? formatDecimal(r.turnover50, 0) : '—'),
+  },
+  {
+    id: 'ffMcap',
+    header: 'FF mcap (cr)',
+    mobileLabel: 'FF mcap (cr)',
+    render: (r) => (r.freeFloatMcapCr ? formatDecimal(r.freeFloatMcapCr, 0) : '—'),
+  },
+  {
+    id: 'ffPct',
+    header: 'FF %',
+    mobileLabel: 'FF %',
+    render: (r) => (r.freeFloatPct ? formatDecimal(r.freeFloatPct, 1) : '—'),
+  },
 ];
 
 type View = 'screen' | 'funnel' | 'history';
@@ -158,76 +218,14 @@ export function ManasAroraScreenerPage() {
             skeleton={<Skeleton variant="table-rows" rows={10} cols={8} />}
           >
             {() => (
-              <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-                <table className="w-full border-collapse text-sm">
-                  <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                    <tr>
-                      <th className="px-2 py-2 font-medium">Symbol</th>
-                      <th className="px-2 py-2 text-right font-medium">Close</th>
-                      <th className="px-2 py-2 text-right font-medium">% from high</th>
-                      <th className="px-2 py-2 text-right font-medium">% above low</th>
-                      <th className="px-2 py-2 font-medium">Gates</th>
-                      <th className="px-2 py-2 font-medium">Flags</th>
-                      <th className="px-2 py-2 text-right font-medium">Turnover 50d</th>
-                      <th className="px-2 py-2 text-right font-medium">FF mcap (cr)</th>
-                      <th className="px-2 py-2 text-right font-medium">FF %</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data?.items ?? []).map((r) => (
-                      <tr key={r.symbol} className="border-t border-ay-border">
-                        <td className="px-2 py-2 font-medium">
-                          <Link
-                            to={`/equity/manas-arora/${r.symbol}`}
-                            className="text-accent hover:underline"
-                          >
-                            {r.symbol}
-                          </Link>
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums">
-                          {formatDecimal(r.close, 2)}
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums">{pct(r.withinHighPct)}</td>
-                        <td className="px-2 py-2 text-right tabular-nums">{pct(r.aboveLowPct)}</td>
-                        <td className="px-2 py-2">
-                          <span className="flex gap-0.5" title={`${r.gatesPassed}/6 gates`}>
-                            {r.gates.map((g, i) => (
-                              <span
-                                key={i}
-                                title={GATE_TITLES[i]}
-                                className={cn(
-                                  'inline-flex h-4 w-4 items-center justify-center rounded text-[10px] font-bold',
-                                  g ? 'bg-bull/20 text-bull' : 'bg-bear/20 text-bear',
-                                )}
-                              >
-                                {i + 1}
-                              </span>
-                            ))}
-                          </span>
-                        </td>
-                        <td className="px-2 py-2">
-                          <Flags r={r} />
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums">
-                          {r.turnover50 ? formatDecimal(r.turnover50, 0) : '—'}
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums">
-                          {r.freeFloatMcapCr ? formatDecimal(r.freeFloatMcapCr, 0) : '—'}
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums">
-                          {r.freeFloatPct ? formatDecimal(r.freeFloatPct, 1) : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                    {(data?.items ?? []).length === 0 && (
-                      <tr>
-                        <td colSpan={9} className="px-2 py-6 text-center text-ay-muted">
-                          No candidates for this screen.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+              <BeatBlock>
+                <DataTable
+                  columns={SCREEN_COLUMNS}
+                  rows={data?.items ?? []}
+                  rowKey={(r) => r.symbol}
+                  ariaLabel="Manas Arora screen"
+                  emptyMessage="No candidates for this screen."
+                />
               </BeatBlock>
             )}
           </QueryState>

@@ -254,10 +254,18 @@ per bar, so only the shared composite can silence both. **A thread dump taken DU
 parked on `LinkedBlockingQueue.take()` — its own executor queue, `cpu=1724ms / elapsed=6574s` — an IDLE worker, not
 a stall.** So §1's "zero/truncated rejections on 9 of 9 trading days" is plausibly **measuring market direction, not
 engine health** (that figure was never re-derived — it is `recalled`). What survives: **every existing detector is
-still blind** (§2), and the silent no-entry path is a REAL observability defect — 4 states (engine dead / chart-gate
-closed / indicators warming / composite below threshold) share ONE DB signature. Fix is nearly free: `EntryEvaluator`
-**already builds the full `ScoreBreakdown` on the no-entry path and returns it**, and the engine throws it away —
-chip **task_37ee83e0**. Also found: **the PE variants score a LONG-BIASED composite** (`direction` = bullish→1) so
+still blind** (§2), and the silent no-entry path was a REAL observability defect — 4 states (engine dead / chart-gate
+closed / indicators warming / composite below threshold) shared ONE DB signature. **FIXED + DEPLOYED LIVE:
+[#895](https://github.com/prashantm912/artha-yantra-2/pull/895) @ 17a69ea2** — `ay_signal_eval_outcome_total{outcome}`,
+7 tags, **verified live pre-registered at 0.0 on a fresh boot** (a lazily-created counter would leave a MISSING `fired`
+series indistinguishable from a dead engine — the same ambiguity, one level up). Built **structurally**: `decideEntry`
+now RETURNS an `Outcome` and `evaluateAtBarClose` holds the ONLY increment site, so **a future silent `return;` is a
+COMPILE ERROR, not a blind spot**. The `Σ(outcomes) == evaluations` invariant is mutation-proven BOTH ways (undercount
+34 RED, double-count 80 RED, real 40 GREEN) — **`>= 40` would have gone green at 80**, hence an exact assertion.
+**So a future F10 Part B revival now HAS a sound liveness primitive it lacked**: `ay_signal_eval_outcome_total` sums to
+the evaluation count by construction, so "the engine evaluated nothing" is finally distinguishable from "every strategy
+correctly declined" — which is exactly what "bars present + rejections absent" could never do. **Re-read §3.1 before
+building anything on it regardless: REST and JDBC both remain blind.** Also found: **the PE variants score a LONG-BIASED composite** (`direction` = bullish→1) so
 they can essentially only fire when their own thesis is wrong — owner-gated, chip **task_79092520**. Chip
 task_87a94cb2 was filed then WITHDRAWN — its premise (a 3m partial-bucket mismatch) was refuted: `PartialBucketCanary`
 is *purely observational* and its 0.7% skew is the benign tick-agg-vs-persisted noise its own javadoc anticipates,
@@ -293,7 +301,13 @@ running HALF the ladder** (`GoldenDeterminismTest` lives in `libs/strategy-engin
 
 ---
 
-**STATE 2026-07-17 (afternoon session — 6 PRs merged, ALL DEPLOYED LIVE; main = `27bd41fb`, deployed = `27bd41f`, in sync).**
+**STATE 2026-07-17 (FINAL — 9 PRs merged, ALL DEPLOYED LIVE + commit-probed; main = `17a69ea2`, deployed = `17a69ea`, in sync).**
+Later additions to the session, after the note below was first written:
+[#894](https://github.com/prashantm912/artha-yantra-2/pull/894) @ a716d851 **dead-anchor orphan DETECTION** (the class #883's `EXISTS(EXIT row)` is structurally blind to — a dead anchor means no EXIT is ever written; Gauge OUTSIDE `totalDiscrepancies()`; live SQL returns 0 rows because id=28 was remediated, and a read-only COUNTERFACTUAL projecting it back to OPEN still flags, so the quiet is a clean population not a blind detector) ·
+[#895](https://github.com/prashantm912/artha-yantra-2/pull/895) @ 17a69ea2 **every eval outcome recorded** (`ay_signal_eval_outcome_total{outcome}`, 7 tags, verified live pre-registered at 0.0 on a fresh boot).
+**⚠️ OWNER-DIRECTED PUBLISH — the live book DOUBLED: 39 → 63 loaded.** All **24 SENSEX non-PE drafts** were published (created 2026-06-26, `enabled` but NEVER published ⇒ the engine never loaded them, since it requires `enabled && publishedVersionId != null`). **SENSEX was puts-only**: 18 SENSEX-PE live, 0 SENSEX-CE. Root cause = a publish gap, not a bug — the 2026-07-05 task was deliberately scoped to `%sensex%-pe` (see [[owner-gated-f9-f7-sensexpe]]) and the CE side was never asked for. Published via the internal registry endpoint (`docker exec ay-strategy-signal-service wget --post-data='{}' http://localhost:8082/api/v1/strategies/{id}/publish` — port 8082 is not password-gated). Engine settled at **63 loaded / 0 unresolved / 0 load errors**; reconcile CONVERGED (5 reloads, all inside the publish window) — **#579's fix held under the exact trigger that originally exposed it.** **Registry truth: 73 strategies total, 69 enabled+published, 63 loaded (the 6 swing funnels are batch-driven, not tick-loaded).** Watch tomorrow: 24 unvalidated strategies with NO forward-paper record, +62% eval cost/bar, and the 60% heat cap ARMED — `risk_audit` TRIP rows are the governor working, not a fault.
+**PE finding (chip task_71a017e6, owner-parked):** the PE variants' scoring composite clears iff `SuperTrend UP OR RSI ≥ 58` (1644/1644 bars, 0 violations) while their OWN confluence rail wants **RSI 20–40** (`ScalperGates:229`) — **only 14 of 750 PE-gate bars satisfy both; a bearish mirror gives 228, 94% with ST DOWN.** So the composite hand-feeds the gate only wrong-way setups, which it then correctly kills (PE clears confluence 3/380 = 0.8% vs CE 1132/2330 = 48.6%). **Three framings were refuted before this one stuck** — "structurally unable to fire" (FALSE: 613 gate-reaches across 24 strategies), "publish timing" (DEAD: PE published EARLIER), "bullish tape" (DEAD: tape near-symmetric, gate frequency explains only 1.19x of ~9-12x). Honest limit: predicted 4.04x vs observed ~9-12x — **a 2-3x residual is unexplained**. Fix is PURE CONFIG (both normalizers exist + compile today; `linear{from:50,to:30}` + `step` bands) — **owner parked it**: the book just doubled; let 63 run before adding 27 more contenders, since the danger is synchronised firing racing the 20-position/80% caps, not firing frequency.
+**Original note follows (6 PRs; main was `27bd41fb`):**
 Delegated-ship lane, Opus builders + cross-vendor Codex review. **SHIPPED:** [#888](https://github.com/prashantm912/artha-yantra-2/pull/888) ci-contracts merge-base gate (task_b3b59719) ·
 [#881](https://github.com/prashantm912/artha-yantra-2/pull/881) EXIT-not-takeable (MONEY) · [#889](https://github.com/prashantm912/artha-yantra-2/pull/889) `universe.bucket` live/sim ·
 [#890](https://github.com/prashantm912/artha-yantra-2/pull/890) DataTable ×3 pages · [#891](https://github.com/prashantm912/artha-yantra-2/pull/891) manual-ticket orphan, 3 doors (MONEY, task_6f1372da) ·

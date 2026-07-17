@@ -63,7 +63,9 @@ test.describe('signals cockpit — published strategy emits a live signal with i
       // FULL FLOW: refresh so the UI snapshot includes the emitted row, then click through.
       await page.getByRole('button', { name: '↻ Reload' }).click();
 
-      const row = page.locator('tr[role="button"]', { hasText: 'NSE:RELIANCE' }).first();
+      // SignalsPage rows are plain <tr> in <tbody> (the M23 audit removed role="button" from the row
+      // to keep table semantics), so key off the row's cell text, not a stale role.
+      const row = page.locator('table tbody tr', { hasText: 'NSE:RELIANCE' }).first();
       await expect(row).toBeVisible({ timeout: 20_000 });
       await expect(row).toContainText('ENTRY');
       await row.click();
@@ -82,11 +84,14 @@ test.describe('signals cockpit — published strategy emits a live signal with i
       await expect(row).toContainText('TAKEN', { timeout: 20_000 });
     } else {
       // DEGRADED: no signal emitted in time (non-deterministic mock engine). Assert the page is
-      // healthy — empty state OR rows, the filter works, and nothing threw on the client.
-      const tableOrEmpty = page
+      // healthy — empty card OR a real <tbody> row. The global-setup readiness gate warms the signals
+      // endpoint before any test, so a cold query resolves well inside 30s; the still-loading skeleton
+      // is deliberately NOT accepted (the client fetch has no timeout, so a hung endpoint would sit in
+      // qs-loading forever and silently pass) — a hung or failed endpoint must still FAIL here.
+      const tableSettled = page
         .getByText('No signals yet', { exact: false })
-        .or(page.locator('tr[role="button"]').first());
-      await expect(tableOrEmpty).toBeVisible({ timeout: 20_000 });
+        .or(page.locator('table tbody tr').first());
+      await expect(tableSettled).toBeVisible({ timeout: 30_000 });
 
       // Drive the Status filter to confirm it is wired (selects a known status, then clears).
       await statusFilter.selectOption('ACTIVE');

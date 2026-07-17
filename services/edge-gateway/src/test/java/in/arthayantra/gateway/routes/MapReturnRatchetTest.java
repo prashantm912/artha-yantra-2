@@ -27,7 +27,7 @@ class MapReturnRatchetTest {
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 2,
-          "market-data-service", 31,
+          "market-data-service", 30,
           "strategy-signal-service", 28,
           "backtest-service", 10);
 

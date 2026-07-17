@@ -7075,8 +7075,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ConstituentsResponse"
                 }
               }
             }
@@ -12377,6 +12376,38 @@
           },
           "error" : {
             "type" : "string"
+          }
+        }
+      },
+      "Constituent" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ConstituentsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "index" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "checksum" : {
+            "type" : "string"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Constituent"
+            }
           }
         }
       },

@@ -3,9 +3,7 @@ package in.arthayantra.marketdata.constituents;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import java.time.LocalDate;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,6 +20,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class IndexConstituentsController {
 
+  /** Ordered list, resolved as-of date, and checksum for a membership snapshot. */
+  public record ConstituentsResponse(
+      String index,
+      LocalDate asOf,
+      String checksum,
+      List<IndexConstituentsFetcher.Constituent> items) {}
+
   private final IndexConstituentsRepository repository;
 
   /** Wires the repository. */
@@ -31,7 +36,7 @@ public class IndexConstituentsController {
 
   /** Ordered list + resolved as-of date + checksum. */
   @GetMapping("/api/v1/instruments/indices/{index}/constituents")
-  public Map<String, Object> constituents(
+  public ConstituentsResponse constituents(
       @PathVariable("index") String index,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
           LocalDate asOf) {
@@ -51,11 +56,7 @@ public class IndexConstituentsController {
           ErrorCodes.NOT_FOUND_RESOURCE,
           "no snapshot of '" + index + "' as of " + resolved);
     }
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("index", index);
-    response.put("asOf", resolved);
-    response.put("checksum", IndexConstituentsRepository.checksum(items));
-    response.put("items", items);
-    return response;
+    return new ConstituentsResponse(
+        index, resolved, IndexConstituentsRepository.checksum(items), items);
   }
 }

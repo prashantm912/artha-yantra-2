@@ -16,8 +16,8 @@ import org.springframework.stereotype.Component;
 /**
  * Mock fetcher: the bundled {@code ind_nifty100list.csv} in NSE's published format
  * ({@code Company Name,Industry,Symbol,Series,ISIN Code}) — every symbol resolves in the CD-14
- * mock instrument master, so the credential-free path exercises the same shape the live NSE
- * fetcher will produce once source verification (decisions-log §4.2) passes.
+ * mock instrument master, so the credential-free path exercises the same shape as the live NSE
+ * fetcher.
  */
 @Component
 @Profile("!live")

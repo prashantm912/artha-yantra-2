@@ -108,6 +108,23 @@ def _effective_fold_metric(
     return ((optimize_block or {}).get("objective") or {}).get("metric")
 
 
+def _effective_fold_direction(
+    request_objective: dict[str, Any], optimize_block: dict[str, Any], fold_metric: str | None
+) -> str:
+    """The direction the fold objective — and thus the ``oos_fold_mean`` sweep objective — is
+    optimized in (AY-OPT-02). A mean-of-a-minimize-metric (e.g. maxDrawdown) must be MINIMIZED, so
+    the optimizer selects the BEST (smallest) trials, not the worst. Resolution: the request's
+    ``direction`` > the YAML objective's ``direction`` > the catalog's canonical direction for the
+    fold metric. Only the LAST leans on the catalog, so an explicit direction always wins."""
+    request_direction = (request_objective or {}).get("direction")
+    if request_direction:
+        return request_direction
+    yaml_direction = ((optimize_block or {}).get("objective") or {}).get("direction")
+    if yaml_direction:
+        return yaml_direction
+    return metrics_catalog.canonical_direction(fold_metric)
+
+
 def _coerce_int(value: Any, field: str) -> int:
     """Coerce a request field to int, raising a 400 (not an opaque int()/KeyError 500) on a
     non-numeric value (register §9-8)."""
@@ -220,6 +237,16 @@ class SweepService:
         # request so the fold aggregation (oos_fold_mean) + per-fold pruner telemetry key off the
         # metric the REQUEST declared, not whatever the YAML names.
         fold_objective_metric = _effective_fold_metric(raw_objective, optimize_block)
+        # ...and the oos_fold_mean sweep objective the fold guard emits must be optimized in that
+        # metric's DIRECTION (AY-OPT-02): a mean-of-a-minimize-metric (maxDrawdown) is MINIMIZED, so
+        # the optimizer picks the BEST trials — the guard's hardcoded 'maximize' picks the WORST.
+        if objective.get("metric") == _OOS_METRIC:
+            objective = {
+                **objective,
+                "direction": _effective_fold_direction(
+                    raw_objective, optimize_block, fold_objective_metric
+                ),
+            }
 
         jobs = self._jobs_factory()
         try:

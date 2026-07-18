@@ -52,3 +52,12 @@ def direction(key: str) -> str | None:
         if row["key"] == key:
             return row.get("direction")
     return None
+
+
+def canonical_direction(key: str | None) -> str:
+    """The optimizer ranking direction (``maximize`` / ``minimize``) for a metric, derived from the
+    catalog's ``lower_is_better`` / ``higher_is_better`` metadata — one source of truth, not a
+    hand-maintained list. An unknown / ``neutral`` metric → ``maximize`` (run_sweep's default). The
+    LAST fallback when neither the request nor the YAML gives the fold objective a direction
+    (AY-OPT-02: a mean-of-a-minimize-metric like maxDrawdown must be MINIMIZED, not maximized)."""
+    return "minimize" if direction(key) == "lower_is_better" else "maximize"

@@ -2,7 +2,12 @@
 oos_fold_mean (+ warning), so the silent in-sample overfit trap can't recur. Foldless sweeps and
 sweeps already on oos_fold_mean are untouched."""
 
-from app.service import _effective_fold_metric, _fold_objective_guard
+from app import metrics_catalog
+from app.service import (
+    _effective_fold_direction,
+    _effective_fold_metric,
+    _fold_objective_guard,
+)
 
 _WF = {"train_days": 30, "test_days": 30, "step_days": 20}
 _SHARPE = {"metric": "sharpe", "direction": "maximize"}
@@ -57,3 +62,29 @@ def test_effective_fold_metric_oos_fold_mean_is_the_aggregate_not_a_fold_metric(
 def test_effective_fold_metric_none_when_neither_names_one():
     # Neither the request nor the YAML names a metric → None (the worker defaults to sharpe).
     assert _effective_fold_metric({}, {}) is None
+
+
+# --- AY-OPT-02: the fold objective DIRECTION follows the metric (minimize metrics pick best) ---
+
+def test_canonical_direction_reuses_the_metric_catalog():
+    # Reuse the catalog's per-metric direction (no hand-maintained list): lower-is-better=minimize.
+    assert metrics_catalog.canonical_direction("maxDrawdown") == "minimize"
+    assert metrics_catalog.canonical_direction("expectancy") == "maximize"
+    assert metrics_catalog.canonical_direction("tradeCount") == "maximize"  # neutral → maximize
+    assert metrics_catalog.canonical_direction(None) == "maximize"  # unknown → maximize
+
+
+def test_effective_fold_direction_request_wins():
+    req = {"metric": "maxDrawdown", "direction": "minimize"}
+    yaml = {"objective": {"direction": "maximize"}}
+    assert _effective_fold_direction(req, yaml, "maxDrawdown") == "minimize"
+
+
+def test_effective_fold_direction_falls_back_to_yaml_then_catalog():
+    # Request omits direction → the YAML objective's direction wins over the catalog.
+    assert _effective_fold_direction({}, {"objective": {"direction": "minimize"}}, "cagr") == (
+        "minimize"
+    )
+    # Neither request nor YAML gives a direction → the catalog's canonical direction for the metric.
+    assert _effective_fold_direction({}, {}, "maxDrawdown") == "minimize"
+    assert _effective_fold_direction({}, {}, "expectancy") == "maximize"

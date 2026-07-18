@@ -1,6 +1,8 @@
 """§D.7 ask/tell loop: a grid sweep dispatches trials, collects results, tells the
 study, persists trial rows, and converges on the synthetic optimum (period=15)."""
 
+import optuna
+
 from app import sweep
 from tests.fakes import FakeDispatcher, FakeJobs, FakeTrials
 
@@ -98,3 +100,29 @@ def test_trial_request_carries_the_request_owned_fold_metric():
     trial_requests = [r["request"] for r in jobs.rows.values() if r.get("kind") == "TRIAL"]
     assert trial_requests
     assert all(req["foldObjectiveMetric"] == "expectancy" for req in trial_requests)
+
+
+def test_run_sweep_minimize_direction_selects_the_smallest_objective():
+    # AY-OPT-02 direction: a minimize objective must select the SMALLEST value (the BEST for a
+    # lower-is-better metric), never the largest. FakeDispatcher emits sharpe = 1.0 - |period-15|/10
+    # (peak 1.0 at period 15); as a MINIMIZE objective the best is the extreme period, not the peak.
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = jobs.insert_sweep(None, {"echo": True})
+    study = sweep.run_sweep(
+        sweep_id=sweep_id,
+        strategy_version_id=None,
+        parameters=PARAMS,
+        method="grid",
+        max_trials=21,
+        objective={"metric": "sharpe", "direction": "minimize"},
+        seed=1,
+        walk_forward=None,
+        request_base=REQUEST_BASE,
+        jobs=jobs,
+        trials=trials,
+        dispatcher=FakeDispatcher(jobs),
+        parallelism=4,
+    )
+    assert study.direction == optuna.study.StudyDirection.MINIMIZE
+    assert study.best_value == min(1.0 - abs(p - 15) / 10.0 for p in range(5, 26))
+    assert study.best_params["indicators[0].params.period"] in {5, 25}

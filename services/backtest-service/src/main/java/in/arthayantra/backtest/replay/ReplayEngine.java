@@ -110,6 +110,42 @@ public class ReplayEngine {
       boolean oneMinuteCovered,
       IntConsumer replayProgress,
       DecisionListener decisionListener) {
+    return replay(
+        definition,
+        exchange,
+        tradingsymbol,
+        primaryOneMinute,
+        contextCandles,
+        initialEquity,
+        costs,
+        oneMinuteCovered,
+        replayProgress,
+        decisionListener,
+        null);
+  }
+
+  /**
+   * As above, with a {@code warmupPrefix} of PAST-ONLY primary bars (before {@code primaryOneMinute})
+   * fed to the signal runner ahead of the window (AY-SL-03 walk-forward fold warmup). The runner warms
+   * indicator state over {@code warmupPrefix + primaryOneMinute} but SUPPRESSES every emission before
+   * the first in-window bar, so a long-lookback gate (e.g. Minervini's 252-bar WEEK52_HIGH) can
+   * evaluate inside a short fold that could never self-warm — while the trade/equity loop, metrics and
+   * {@code totalBars} run over {@code primaryOneMinute} ONLY (zero pre-window contamination; no warmup
+   * position leaks in). {@code contextCandles} must already carry the matching warmup depth. A {@code
+   * null}/empty prefix (the whole-run + golden/parity path) is byte-identical to the un-warmed replay.
+   */
+  public ReplayResult replay(
+      StrategyDefinition definition,
+      String exchange,
+      String tradingsymbol,
+      List<EngineCandle> primaryOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      BigDecimal initialEquity,
+      CostConfig costs,
+      boolean oneMinuteCovered,
+      IntConsumer replayProgress,
+      DecisionListener decisionListener,
+      List<EngineCandle> warmupPrefix) {
 
     int barCount = primaryOneMinute.size();
     int sigStep = Math.max(1, barCount / 20);
@@ -122,9 +158,26 @@ public class ReplayEngine {
                 }
               };
 
+    // AY-SL-03: prepend the warmup prefix for signal generation only, with a suppression boundary at
+    // the first in-window bar. The prefix warms indicators; nothing before the boundary is emitted, so
+    // the returned signals — and every trade/equity/metric derived from them below — are in-window.
+    boolean warmed =
+        warmupPrefix != null && !warmupPrefix.isEmpty() && !primaryOneMinute.isEmpty();
+    List<EngineCandle> signalBars;
+    java.time.OffsetDateTime warmupUntil;
+    if (warmed) {
+      signalBars = new ArrayList<>(warmupPrefix.size() + primaryOneMinute.size());
+      signalBars.addAll(warmupPrefix);
+      signalBars.addAll(primaryOneMinute);
+      warmupUntil = primaryOneMinute.get(0).bucketStart();
+    } else {
+      signalBars = primaryOneMinute;
+      warmupUntil = null;
+    }
+
     List<SignalEvent> signals =
         new TickwiseGoldenRunner(definition, exchange, tradingsymbol)
-            .run(primaryOneMinute, contextCandles, signalProgress, false, decisionListener);
+            .run(signalBars, contextCandles, signalProgress, false, decisionListener, warmupUntil);
 
     FillTiming timing =
         ReferencePriceSelector.defaultFor(

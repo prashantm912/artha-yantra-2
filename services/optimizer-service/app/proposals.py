@@ -1312,6 +1312,27 @@ class ProposalService:
                 f"time (fail-closed re-validation) — blocked by {blocked}; promotion refused",
             )
 
+    @staticmethod
+    def _guard_champion_unchanged(
+        proposal: dict[str, Any], campaign: dict[str, Any]
+    ) -> None:
+        """Audit PF-01 finding #6 (stale-champion CAS): the PROMOTE proposal captured the champion
+        it was assessed against (``evidence.championVersionId``). If the campaign's CURRENT champion
+        differs — a sibling candidate promoted since — this proposal is stale: publishing it would
+        overlay its params onto a DIFFERENT champion config than the one it was validated against —
+        an untested hybrid. 409 ``CHAMPION_CHANGED``; the owner must reassess/regenerate it against
+        the current champion first. (The FIRST-CHAMPION case is captured==current==None.)"""
+        captured = (proposal.get("evidence") or {}).get("championVersionId")
+        current = campaign.get("championVersionId")
+        if captured != current:
+            raise ApiError(
+                409, "CHAMPION_CHANGED",
+                f"proposal {proposal['id']} was assessed against champion {captured!r} but the "
+                f"current champion is {current!r} — the base moved since (a sibling promoted). "
+                "Reassess/regenerate this proposal against the current champion before promoting "
+                "(a stale proposal must not overlay its params onto a changed champion).",
+            )
+
     def _execute_promote(self, ctx: dict[str, Any], actor: str | None) -> PromotionResult:
         """§8.2 PROMOTE: publish the candidate's config onto the BASE strategy (champion pointer
         moves), register the demoted-champion counterfactual so its P&L accrues live, and archive
@@ -1322,9 +1343,14 @@ class ProposalService:
         self._guard_not_executed(ctx["proposal"], "promotion")
         candidate = ctx["candidate"]
         campaign = ctx["campaign"]
-        # audit PF-01 finding #6: re-validate the TAKE_ELIGIBLE readiness on FRESH live evidence
-        # IMMEDIATELY before any registry mutation — a proposal minted when the bar was met but
-        # whose evidence has since degraded (or a candidate admitted BEFORE PF-01) must NOT publish.
+        # audit PF-01 finding #6: BEFORE any registry mutation, guard the two ways a stale proposal
+        # could publish an untested config —
+        #   (a) CAS the champion: the proposal was assessed against a captured champion; if the
+        #       current champion has since moved (a sibling C1 promoted first), executing C2 would
+        #       overlay C2's params onto C1's now-changed config → an UNTESTED HYBRID. Refuse.
+        #   (b) re-validate the TAKE_ELIGIBLE readiness on FRESH live evidence — a proposal minted
+        #       when the bar was met but whose evidence has since degraded must NOT publish.
+        self._guard_champion_unchanged(ctx["proposal"], campaign)
         self._revalidate_take_eligible(candidate, campaign)
         base_id = self._resolve_base_strategy_id(ctx)
         # The candidate's own evo PAPER clone (to archive after the champion move) — its strategy

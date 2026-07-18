@@ -551,6 +551,11 @@ class StressService:
             cohort.parameters,
             direction=cohort.direction,
             n_trials=cohort.n_trials,
+            # audit PF-01 #5: the re-scored card is PERSISTED, so it MUST carry the campaign's
+            # evidencePolicy — else a LIVE_FIRST sim-smoke would be re-stamped SIM_FIRST and become
+            # selectable via the stress path (the descriptive rankable that stress selects on stays
+            # permissive; only the persisted stageReadiness verdict must match the policy).
+            policy=context.policy or "SIM_FIRST",
         )
         if context.policy == "LIVE_FIRST":  # sim evidence never ranks a LIVE_FIRST family (§1.2)
             for card in cards:

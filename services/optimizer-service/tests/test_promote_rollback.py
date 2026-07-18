@@ -545,6 +545,22 @@ def test_promote_execute_is_not_double_executable():
     assert strategy.drafts == []
 
 
+def test_promote_execute_blocks_stale_champion_hybrid():
+    # audit PF-01 #6 (stale-champion CAS): a PROMOTE proposal assessed against champion V0 must NOT
+    # publish once a sibling has moved the champion to V1 — overlaying its params onto V1's config
+    # would be an UNTESTED HYBRID. 409 CHAMPION_CHANGED before any registry mutation.
+    repo, strategy = FakeEvoRepo(), FakeStrategy(_CONFIG)
+    pid = _promote_seed(repo, policy="SIM_FIRST")
+    prop = next(p for p in repo.proposals if p["id"] == pid)
+    prop["evidence"]["championVersionId"] = "champ-v0"   # captured at assessment time
+    repo.campaigns[0]["championVersionId"] = "champ-v1"   # a sibling promoted since → moved
+    client = _exec_app(repo, strategy)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "CHAMPION_CHANGED"
+    assert strategy.drafts == []                          # nothing published — no untested hybrid
+
+
 def test_promote_execute_revalidates_and_blocks_degraded_candidate():
     # audit PF-01 finding #6: readiness is re-checked on FRESH live evidence IMMEDIATELY before any
     # registry mutation. A PROMOTE proposal whose candidate's paper book no longer clears the

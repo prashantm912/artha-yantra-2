@@ -166,6 +166,33 @@ def test_sim_first_survivor_requires_regime_and_comparability():
     assert "comparability:UNKNOWN" in card["stageReadiness"]["blockedBy"]
 
 
+def test_comparability_fails_on_mismatched_sha_or_epoch():
+    # audit PF-01 #4: comparability now CHECKS equality against the cohort comparator, not mere
+    # presence (§1.3 refuses a cross-SHA / cross-data-epoch comparison). A differing SHA → FAIL
+    # (blocks + drops the descriptive rankable too, since a FAIL is a real negative).
+    cohort = [_healthy(i) for i in range(5)]        # comparator SHA = the first non-null, "abc123"
+    cohort[1]["engineSha"] = "deadbeef"             # candidate 1 ran under a DIFFERENT engine
+    card = next(c for c in scoring.score_cohort(cohort, []) if c["trialNumber"] == 1)
+    gate = next(g for g in card["gates"] if g["id"] == "comparability")
+    assert gate["status"] == "FAIL"
+    assert card["rankable"] is False
+    assert card["stageReadiness"]["ready"] is False
+    assert "comparability:FAIL" in card["stageReadiness"]["blockedBy"]
+    # a differing DATA EPOCH also FAILs (comparator epoch = the first non-null dataHash).
+    cohort2 = [_healthy(i) | {"dataHash": "epoch-A"} for i in range(5)]
+    cohort2[2]["dataHash"] = "epoch-B"
+    card2 = next(c for c in scoring.score_cohort(cohort2, []) if c["trialNumber"] == 2)
+    assert next(g for g in card2["gates"] if g["id"] == "comparability")["status"] == "FAIL"
+
+
+def test_comparability_passes_when_cohort_shares_sha_and_epoch():
+    # The healthy path: all trials of one sweep share the engine SHA + data epoch → comparability
+    # PASSes for every candidate (the common, correct case).
+    cohort = [_healthy(i) | {"dataHash": "epoch-1"} for i in range(5)]
+    for card in scoring.score_cohort(cohort, []):
+        assert next(g for g in card["gates"] if g["id"] == "comparability")["status"] == "PASS"
+
+
 def test_live_first_sim_cohort_is_never_stage_ready():
     # audit PF-01 finding #5: a LIVE_FIRST campaign's sim cohort is functional-smoke only (§1.2) and
     # must NEVER become selectable. Even an all-gates-PASS healthy cohort is not stage-ready under

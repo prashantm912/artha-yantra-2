@@ -182,6 +182,11 @@ def score_cohort(
     # candidate flips live_alignment from the retro z=0 stub to a live z-column (E3, §12 item 10);
     # candidates without a countable row then carry a per-candidate note (below), mirroring stress.
     cohort_has_live = any(_counts_toward_live(c.get("reconciliation")) for c in candidates)
+    # §1.3 comparability comparator: the cohort's representative engine SHA + data epoch (first
+    # non-null of each — the same source the recorder lifts, evolution.py). Every candidate's SHA +
+    # epoch must MATCH it (audit PF-01 #4) — a differing side is not comparable and is refused.
+    comparator_sha = next((c.get("engineSha") for c in candidates if c.get("engineSha")), None)
+    comparator_epoch = next((c.get("dataHash") for c in candidates if c.get("dataHash")), None)
     stab = _stability_inputs(candidates, _plateau(candidates, parameters), direction)
 
     # Per-component z's (cohort-normalized) + the raw constituents + any structural caveat.
@@ -205,7 +210,7 @@ def score_cohort(
         weighted = sum(weights[comp] * comp_zs[comp][i] for comp in weights)
         penalties = _penalties(cand, n_params)
         robust = _round(weighted - penalties["dof"] - penalties["caveats"])
-        gates = _gates(cand, stab[i], n)
+        gates = _gates(cand, stab[i], n, comparator_sha, comparator_epoch)
         # DESCRIPTIVE rankability (unchanged, permissive): no hard-gate FAIL. Drives display /
         # ranking / stress top-K — NOT promotion admission.
         rankable = all(g["status"] != FAIL for g in gates)
@@ -439,11 +444,16 @@ def _zscores(values: list[float | None]) -> list[float | None]:
 
 # --- Hard gates (§6.1, SIM_FIRST column) ------------------------------------------------------
 
-def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[dict[str, Any]]:
+def _gates(
+    cand: dict[str, Any], stab: dict[str, Any], n_trials: int,
+    comparator_sha: str | None = None, comparator_epoch: str | None = None,
+) -> list[dict[str, Any]]:
     """The §6.1 SIM_FIRST hard gates as {id, status, value[, note]}. Retro degradations: no holdout
     run → holdout SKIPPED; NULL engine SHA → comparability UNKNOWN; no reconciliation / INSUFFICIENT
     / whitelisted-scalper → live_gap SKIPPED (§7.2, item 10); no sharpe / trade count → the
-    deflated-Sharpe multiplicity gate SKIPPED."""
+    deflated-Sharpe multiplicity gate SKIPPED. ``comparator_sha``/``comparator_epoch`` are the
+    cohort's representative engine SHA + data epoch — comparability FAILs a candidate whose own
+    differs (§1.3)."""
     oos_return = cand.get("oosReturn")
     fold_returns = cand.get("foldReturns")
     trades = cand.get("oosTradeCount")
@@ -466,7 +476,9 @@ def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[di
         _stability_floor_gate(stab),
         {"id": "holdout", "status": SKIPPED, "value": None,
          "note": "no holdout run linked to a historical sweep trial (retro)"},
-        _comparability_gate(cand.get("engineSha")),
+        _comparability_gate(
+            cand.get("engineSha"), cand.get("dataHash"), comparator_sha, comparator_epoch
+        ),
         _live_gap_gate(cand.get("reconciliation")),
     ]
 
@@ -513,13 +525,31 @@ def _deflated_sharpe_gate(
                     f"(deflatedSharpe=(S-S0)/se, gate >0)"}
 
 
-def _comparability_gate(engine_sha: str | None) -> dict[str, Any]:
-    """Same engine SHA + data epoch as the comparator (§6.1). A run predating #703 SHA-stamping has
-    a NULL SHA → UNKNOWN (can't be established, didn't fail); a stamped run PASSes (the sweep's own
-    trials share the SHA — a fuller cross-comparator check is E3's reconciliation)."""
+def _comparability_gate(
+    engine_sha: str | None, data_hash: str | None,
+    comparator_sha: str | None, comparator_epoch: str | None,
+) -> dict[str, Any]:
+    """§6.1 / §1.3 "refuse to compare across differing engine SHA / data epoch" (audit PF-01 #4 —
+    was "any non-null SHA PASSes", which never actually compared). The comparator = the cohort's
+    representative (engine SHA, data epoch) — the first non-null of each, the same source the
+    recorder lifts for the generation. The candidate PASSes ONLY when its SHA AND its data epoch
+    MATCH the comparator:
+      * NULL engine SHA (run predates #703 stamping) → UNKNOWN (not establishable — blocks a
+        REQUIRED gate, never fabricates a match);
+      * engine SHA ≠ comparator SHA                 → FAIL (cross-SHA comparison refused);
+      * a comparator data epoch exists and the candidate's differs / is absent → FAIL (cross-epoch);
+      * SHA present + matches, and the epoch matches (or no comparator epoch to check) → PASS."""
     if engine_sha is None:
         return {"id": "comparability", "status": UNKNOWN, "value": None,
                 "note": "NULL engine SHA (run predates #703 stamping) — not establishable"}
+    if comparator_sha is not None and engine_sha != comparator_sha:
+        return {"id": "comparability", "status": FAIL, "value": engine_sha,
+                "note": f"engine SHA {engine_sha} ≠ comparator {comparator_sha} — §1.3 refuses a "
+                        "cross-SHA comparison (the stale side is re-queued, never ranked together)"}
+    if comparator_epoch is not None and data_hash != comparator_epoch:
+        return {"id": "comparability", "status": FAIL, "value": data_hash,
+                "note": f"data epoch {data_hash} ≠ comparator {comparator_epoch} — §1.3 refuses a "
+                        "cross-data-epoch comparison"}
     return {"id": "comparability", "status": PASS, "value": engine_sha}
 
 

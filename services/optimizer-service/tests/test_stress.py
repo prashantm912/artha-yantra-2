@@ -590,6 +590,37 @@ def test_rescore_unstressed_candidate_gates_pinned_byte_equal():
     assert cr0["raw"].get("costResilience") is not None
 
 
+def test_live_first_candidate_not_stage_ready_after_stress_rescore():
+    # audit PF-01 #5 (regression guard): the stress rescore PERSISTS the card, so it MUST carry the
+    # campaign's evidencePolicy. A LIVE_FIRST candidate must stay NOT stage-ready (never selectable)
+    # after a stress rescore — else a sim-smoke would be re-stamped SIM_FIRST and leak into SURVIVOR
+    # selection through the stress path.
+    repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, 2)
+    metrics = {"sharpe": 1.0, "tradeCount": 60, "totalReturn": 12.0, "maxDrawdown": 12.0}
+    backtest = FakeStressBacktest(
+        run_metrics={"run-0": dict(metrics), "run-1": dict(metrics)}, jobs=jobs
+    )
+    scorer = RetroScoreService(lambda: jobs, lambda: trials, backtest)
+    stored_cards = scorer.score_sweep(sweep_id, policy="LIVE_FIRST").cards
+    cands = [
+        {"id": f"cand-{i}", "generationId": _GEN_ID, "params": card["params"],
+         "sweepJobId": sweep_id, "state": "SCORED", "scorecard": card}
+        for i, card in enumerate(stored_cards)
+    ]
+    _seed_generation(repo, sweep_id, cands, policy="LIVE_FIRST")
+    svc = _service(repo, jobs, trials, backtest)
+
+    svc.stress(_GEN_ID, top_k=1, multipliers=[2, 4])   # descriptive rankable selects; policy=LF
+    _wait(lambda: repo.get_generation(_GEN_ID)["stressTouches"] == 1)
+
+    persisted = [c["scorecard"] for c in repo.list_candidates_for_generation(_GEN_ID)]
+    assert persisted  # sanity
+    for card in persisted:
+        assert card["stageReadiness"]["evidencePolicy"] == "LIVE_FIRST"
+        assert card["stageReadiness"]["ready"] is False   # never selectable, even after stress
+
+
 # ================================================================================================
 # lifecycle: the durable STRESSING→DONE round marker + boot reaper
 # ================================================================================================

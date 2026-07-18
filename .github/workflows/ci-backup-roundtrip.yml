@@ -141,11 +141,24 @@ jobs:
           docker exec tsdb pg_dumpall -U postgres --globals-only -f /tmp/globals.sql
           docker exec tsdb pg_dump -U postgres -Fc -d src -f /tmp/src-full.dump
           docker exec tsdb ls -l /tmp/globals.sql /tmp/src-full.dump
+          # OPS-R01 (review R3): make the roles/globals validation NON-vacuous. The three
+          # ay_* roles were created in this SAME cluster as dst, so without dropping them
+          # the post-restore roles=3/3 check would pass even if the globals.sql restore
+          # did nothing. Drop the src DB first (its grants depend on ay_backtest), then
+          # the roles — the globals restore below MUST recreate them for the check to pass.
+          docker exec tsdb dropdb -U postgres src
+          docker exec tsdb psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c "DROP ROLE ay_marketdata; DROP ROLE ay_strategy; DROP ROLE ay_backtest"
+          leftover=$(docker exec tsdb psql -U postgres -t -A -d postgres -c "SELECT count(*) FROM pg_roles WHERE rolname IN ('ay_marketdata','ay_strategy','ay_backtest')")
+          [ "$leftover" = "0" ] || { echo "::error::ay_* roles still present after drop — the post-restore roles check would be vacuous"; exit 1; }
+          echo "src DB + ay_* roles dropped; only the dumps carry them now"
 
       - name: Restore into 'dst' exactly as `ay restore` does (ay.ps1)
         run: |
+          # -T template0 mirrors ay restore (review R1c): the target must be genuinely
+          # empty so the anchored benign-error patterns can only match the pre-created
+          # extension + template0's public schema
           docker exec tsdb dropdb -U postgres --if-exists dst
-          docker exec tsdb createdb -U postgres dst
+          docker exec tsdb createdb -U postgres -T template0 dst
           # globals into 'postgres'; a CREATE ROLE that already exists is a
           # tolerated no-op (ay restore uses Invoke-ComposeAllowFail here)
           docker exec tsdb psql -U postgres -d postgres -v ON_ERROR_STOP=0 -f /tmp/globals.sql || true
@@ -153,10 +166,32 @@ jobs:
           # pre_restore disables chunk routing + background jobs so pg_restore can
           # write the _timescaledb_internal chunk data directly; post_restore re-enables
           docker exec tsdb psql -U postgres -d dst -c "SELECT timescaledb_pre_restore()"
-          # pg_restore returns non-zero if ANY statement errored (duplicate
-          # extension, grants to a missing role) — tolerated exactly as in ay
-          # restore; correctness is asserted by the row counts below
-          docker exec tsdb pg_restore -U postgres -d dst --no-owner /tmp/src-full.dump || echo "pg_restore exited non-zero (tolerated, as in ay restore)"
+          # OPS-R01 (review R3): mirror ay restore's STRICT error-classification gate —
+          # capture output, tolerate ONLY the anchored benign patterns (the exact objects
+          # that pre-exist in a template0 clone), fail on anything else AND on an
+          # unclassified non-zero exit. No blanket `|| echo` tolerance.
+          restore_rc=0
+          restore_out=$(docker exec tsdb pg_restore -U postgres -d dst --no-owner /tmp/src-full.dump 2>&1) || restore_rc=$?
+          printf '%s\n' "$restore_out"
+          benign_re='extension "timescaledb" already exists|schema "public" already exists|must be owner of extension timescaledb'
+          err_lines=$(printf '%s\n' "$restore_out" | grep -iE 'pg_restore: *error:|^ *ERROR:' || true)
+          benign_count=0; fatal_lines=""
+          if [ -n "$err_lines" ]; then
+            benign_count=$(printf '%s\n' "$err_lines" | grep -ciE "$benign_re" || true)
+            fatal_lines=$(printf '%s\n' "$err_lines" | grep -viE "$benign_re" || true)
+          fi
+          if [ -n "$fatal_lines" ]; then
+            echo "::error::pg_restore reported non-benign error(s) (exit=$restore_rc):"
+            printf '%s\n' "$fatal_lines"
+            exit 1
+          fi
+          if [ "$restore_rc" -ne 0 ] && [ "$benign_count" -eq 0 ]; then
+            echo "::error::pg_restore exit=$restore_rc with NO classifiable error line (unclassified failure)"
+            exit 1
+          fi
+          if [ "$restore_rc" -ne 0 ]; then
+            echo "pg_restore exit=$restore_rc tolerated: all $benign_count error line(s) matched the anchored benign allowlist"
+          fi
           docker exec tsdb psql -U postgres -d dst -c "SELECT timescaledb_post_restore()"
           docker exec tsdb psql -U postgres -d dst -c "ANALYZE"
 

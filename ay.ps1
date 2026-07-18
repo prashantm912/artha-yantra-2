@@ -100,13 +100,16 @@ function Get-SecretAclViolations {
     # (matched by resolved name AND well-known SID, in case the name won't resolve).
     $forbiddenNames = @('NT AUTHORITY\Authenticated Users', 'BUILTIN\Users', 'Everyone')
     $forbiddenSids  = @('S-1-5-11', 'S-1-5-32-545', 'S-1-1-0')
-    # Write, Modify and FullControl are composite flags whose bits subsume the
-    # granular write rights (WriteData/AppendData/CreateFiles/...), so a -band
-    # against this mask also catches a rule granting only a sub-right. Ownership +
-    # permission changes are dangerous even without a data-write bit.
+    # ATOMIC dangerous rights ONLY (review R2): OR-ing in FullControl made the mask
+    # equal ALL filesystem rights, so a read-only ACE (ReadAndExecute, bare
+    # Synchronize) was flagged and a fresh clone hard-stopped live startup. Write is
+    # itself a small composite of the data-write bits (WriteData/AppendData/
+    # WriteAttributes/WriteExtendedAttributes); Delete/TakeOwnership/ChangePermissions
+    # are atomic. Composite grants (Modify, FullControl) still intersect these bits,
+    # so they are still caught — while pure-read ACEs share no bit with the mask.
     $writeMask = [System.Security.AccessControl.FileSystemRights]::Write `
-        -bor [System.Security.AccessControl.FileSystemRights]::Modify `
-        -bor [System.Security.AccessControl.FileSystemRights]::FullControl `
+        -bor [System.Security.AccessControl.FileSystemRights]::Delete `
+        -bor [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles `
         -bor [System.Security.AccessControl.FileSystemRights]::TakeOwnership `
         -bor [System.Security.AccessControl.FileSystemRights]::ChangePermissions
     foreach ($p in $Paths) {
@@ -281,9 +284,12 @@ switch ($Verb) {
         # 1) stop the stack, bring up ONLY the DB server (no app connections to drop)
         Invoke-Compose @('--profile', 'dev-tools', '--profile', 'openalgo', 'down')
         Invoke-Compose @('up', '-d', '--wait', 'timescaledb')
-        # 2) recreate the target database empty
+        # 2) recreate the target database GENUINELY empty: -T template0 (review R1c —
+        #    createdb defaults to template1, which can carry site-local objects; the
+        #    benign-error anchors below assume nothing pre-exists but the extension +
+        #    template0's public schema).
         Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'dropdb', '-U', 'artha', '--if-exists', "$db")
-        Invoke-Compose         @('exec', '-T', 'timescaledb', 'createdb', '-U', 'artha', "$db")
+        Invoke-Compose         @('exec', '-T', 'timescaledb', 'createdb', '-U', 'artha', '-T', 'template0', "$db")
         # 3) cluster globals (roles + grants) — restored into 'postgres'; a CREATE ROLE that
         #    already exists (e.g. the bootstrap 'artha' superuser) is a tolerated no-op.
         if (Test-Path $globals) {
@@ -297,36 +303,44 @@ switch ($Verb) {
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'CREATE EXTENSION IF NOT EXISTS timescaledb')
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'SELECT timescaledb_pre_restore()')
         # OPS-R01: pg_restore failure is FATAL (scanned, not blindly tolerated). It exits
-        # non-zero if ANY statement errored, and a Timescale dump restored after
-        # timescaledb_pre_restore() legitimately emits a NARROW benign class (the extension
-        # we pre-created "already exists"). We capture output, strip ONLY that documented
-        # class, and treat anything left as fatal (with the manifest below as the backstop).
+        # non-zero if ANY statement errored; the ONLY tolerated errors are the anchored
+        # benign patterns below, and a non-zero exit that produced NO benign-classified
+        # error line is fatal too (review R1a: a crash / connection loss / unknown error
+        # shape must never pass). PostgreSQL keeps restoring data after a failed CREATE,
+        # so a partial restore can look complete — this classification gate is the real
+        # defense; the manifest below is the backstop.
         $restoreOut  = Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'pg_restore', '-U', 'artha', '-d', "$db", '--no-owner', '/tmp/ay-restore.dump')
         $restoreExit = $LASTEXITCODE
-        # Benign-error allowlist (documented). Keep NARROW. In a FRESH createdb'd DB the only
-        # pre-existing objects are the timescaledb extension + template public schema, so an
-        # "already exists" here can only refer to those — a valid pg_dump never defines a user
-        # relation twice, and a genuinely missing relation is caught by the manifest anyway.
+        # Benign-error allowlist — ANCHORED to the exact objects that pre-exist in the
+        # template0-cloned target (review R1b: a bare 'already exists' could suppress a
+        # collision on a USER object). Only the timescaledb extension (pre-created above)
+        # and template0's public schema exist before pg_restore runs; 'must be owner of
+        # extension timescaledb' is the --no-owner COMMENT ON EXTENSION artifact.
         $benignPatterns = @(
-            'already exists',              # extension/schema/objects pre-created by CREATE EXTENSION IF NOT EXISTS + template public
-            'must be owner of extension',  # --no-owner ACL on the timescaledb extension
-            'multiple primary keys for table'  # timescaledb internal-catalog restore quirk (harmless)
+            'extension "timescaledb" already exists',
+            'schema "public" already exists',
+            'must be owner of extension timescaledb'
         )
+        $benignHits = 0
         $fatalLines = @()
         foreach ($line in @($restoreOut)) {
             $t = "$line"
             if ($t -notmatch '(?i)pg_restore:\s*error:' -and $t -notmatch '(?i)^\s*error:') { continue }
             $isBenign = $false
             foreach ($b in $benignPatterns) { if ($t -match [regex]::Escape($b)) { $isBenign = $true } }
-            if (-not $isBenign) { $fatalLines += $t }
+            if ($isBenign) { $benignHits++ } else { $fatalLines += $t }
         }
         if ($fatalLines.Count -gt 0) {
             Write-Host "[ay] RESTORE FAILED: pg_restore reported $($fatalLines.Count) non-benign error(s) (exit=$restoreExit). Stack NOT restarted:"
             foreach ($fl in $fatalLines) { Write-Host "[ay]   $fl" }
             exit 1
         }
+        if ($restoreExit -ne 0 -and $benignHits -eq 0) {
+            Write-Host "[ay] RESTORE FAILED: pg_restore exit=$restoreExit with NO classifiable error line (unclassified failure - crash, connection loss, or an unrecognized error shape). Stack NOT restarted."
+            exit 1
+        }
         if ($restoreExit -ne 0) {
-            Write-Host "[ay] note: pg_restore exit=$restoreExit but every reported error matched the documented benign allowlist."
+            Write-Host "[ay] note: pg_restore exit=$restoreExit; all $benignHits reported error(s) matched the anchored benign allowlist."
         }
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'SELECT timescaledb_post_restore()')
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'ANALYZE')

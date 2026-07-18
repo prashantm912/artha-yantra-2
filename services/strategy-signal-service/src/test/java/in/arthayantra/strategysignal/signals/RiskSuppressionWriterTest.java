@@ -7,6 +7,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -15,6 +16,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 
@@ -88,6 +90,69 @@ class RiskSuppressionWriterTest {
           .isZero();
     } finally {
       writer.shutdown();
+    }
+  }
+
+  @Test
+  void shutdownDrainsQueuedRecordsRatherThanDroppingThem() {
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    RiskSuppressionRepository repo = mock(RiskSuppressionRepository.class);
+    // A slow but SUCCEEDING insert: a graceful drain must WAIT for these, not discard them on redeploy.
+    doAnswer(
+            inv -> {
+              Thread.sleep(30);
+              return 1L;
+            })
+        .when(repo)
+        .insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    RiskSuppressionWriter writer = new RiskSuppressionWriter(repo, meters);
+    for (int i = 0; i < 5; i++) {
+      record(writer);
+    }
+    writer.shutdown(); // graceful: awaits SHUTDOWN_DRAIN_MILLIS; 5 x 30ms << 5s so all drain
+
+    verify(repo, times(5))
+        .insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    assertThat(meters.counter("ay_risk_suppression_shutdown_dropped_total").count())
+        .as("a graceful drain persists every accepted record — nothing lost")
+        .isZero();
+  }
+
+  @Test
+  void aDrainExceedingTheTimeoutCountsTheLeftoverInsteadOfLosingItSilently()
+      throws InterruptedException {
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    RiskSuppressionRepository repo = mock(RiskSuppressionRepository.class);
+    CountDownLatch started = new CountDownLatch(1);
+    CountDownLatch block = new CountDownLatch(1);
+    doAnswer(
+            inv -> {
+              started.countDown();
+              try {
+                block.await();
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+              }
+              return 1L;
+            })
+        .when(repo)
+        .insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    RiskSuppressionWriter writer = new RiskSuppressionWriter(repo, meters);
+    try {
+      for (int i = 0; i < 4; i++) {
+        record(writer);
+      }
+      assertThat(started.await(2, TimeUnit.SECONDS))
+          .as("the writer thread is confirmed stuck on the first insert")
+          .isTrue();
+      // Task 1 is running (blocked); tasks 2-4 sit in the queue — the drain times out and abandons
+      // them. They must be COUNTED, never silently lost (the whole point of a durable audit trail).
+      writer.drainAndShutdown(200);
+      assertThat(meters.counter("ay_risk_suppression_shutdown_dropped_total").count())
+          .as("the 3 undrained queued records are counted, not silently dropped")
+          .isEqualTo(3.0);
+    } finally {
+      block.countDown();
     }
   }
 }

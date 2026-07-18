@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -19,7 +20,9 @@ import org.springframework.stereotype.Component;
  * ENQUEUED (O(1), never blocks the caller) onto a bounded queue drained by one background thread;
  * when the DB stalls the queue fills and further records are DROPPED and counted
  * ({@code ay_risk_suppression_dropped_total}), never back-pressuring the eval thread. Fail-soft end
- * to end: a persistence failure is logged by the writer thread, never thrown into the caller.
+ * to end: a persistence failure is logged by the writer thread, never thrown into the caller. On
+ * shutdown the queue is DRAINED (bounded) before the executor stops, so an ordinary redeploy does
+ * not silently lose already-accepted records (any residue is counted + logged, never dropped quietly).
  *
  * <p>This is strictly safer than the existing synchronous {@code signal_rejections} writer
  * ({@code SignalEngine.recordRejection}) — that one still runs on the eval thread (pre-existing; left
@@ -33,14 +36,19 @@ public class RiskSuppressionWriter {
   /** Bounded backlog: at the paper 3m cadence a burst is small; a stalled DB drops past this. */
   static final int QUEUE_CAPACITY = 256;
 
+  /** On shutdown, let the queued inserts DRAIN up to this long before abandoning them. */
+  static final long SHUTDOWN_DRAIN_MILLIS = 5_000L;
+
   private final RiskSuppressionRepository repository;
   private final Counter dropped;
+  private final Counter shutdownDropped;
   private final ThreadPoolExecutor executor;
 
-  /** Wires the JDBC repository + the dropped-record counter. */
+  /** Wires the JDBC repository + the dropped-record counters (runtime saturation + shutdown loss). */
   public RiskSuppressionWriter(RiskSuppressionRepository repository, MeterRegistry meterRegistry) {
     this.repository = repository;
     this.dropped = meterRegistry.counter("ay_risk_suppression_dropped_total");
+    this.shutdownDropped = meterRegistry.counter("ay_risk_suppression_shutdown_dropped_total");
     this.executor =
         new ThreadPoolExecutor(
             1,
@@ -89,6 +97,35 @@ public class RiskSuppressionWriter {
 
   @PreDestroy
   void shutdown() {
-    executor.shutdownNow();
+    drainAndShutdown(SHUTDOWN_DRAIN_MILLIS);
+  }
+
+  /**
+   * Graceful shutdown (package-private so a test can use a short drain window). Stops accepting new
+   * records, lets the queued inserts DRAIN for up to {@code drainMillis}, then abandons whatever is
+   * left. A silent {@code shutdownNow()} would DROP already-accepted audit records on an ordinary
+   * redeploy — for a "the veto left a queryable record" trail that defeats the purpose. So any
+   * leftover is COUNTED ({@code ay_risk_suppression_shutdown_dropped_total}) and LOGGED, never
+   * silently lost. Fail-soft: never throws out of shutdown.
+   */
+  void drainAndShutdown(long drainMillis) {
+    executor.shutdown();
+    boolean drained = false;
+    try {
+      drained = executor.awaitTermination(drainMillis, TimeUnit.MILLISECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt(); // restore the flag; abandon the rest below
+    }
+    if (drained) {
+      return;
+    }
+    List<Runnable> abandoned = executor.shutdownNow();
+    if (!abandoned.isEmpty()) {
+      shutdownDropped.increment(abandoned.size());
+      log.warn(
+          "risk-suppression writer shutdown drain exceeded {}ms — {} queued veto record(s) abandoned"
+              + " (counted in ay_risk_suppression_shutdown_dropped_total)",
+          drainMillis, abandoned.size());
+    }
   }
 }

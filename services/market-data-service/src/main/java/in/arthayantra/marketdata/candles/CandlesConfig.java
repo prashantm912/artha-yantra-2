@@ -62,13 +62,17 @@ public class CandlesConfig {
     private final CandleBuilder builder;
     private final CandleRepository repository;
     private final AtomicLong hypertableBytes = new AtomicLong();
+    private final AtomicLong databaseBytes = new AtomicLong();
 
-    /** Registers the gauge. */
+    /** Registers the size gauges. */
     public CandleHousekeeping(
         CandleBuilder builder, CandleRepository repository, MeterRegistry meterRegistry) {
       this.builder = builder;
       this.repository = repository;
+      // ay_hypertable_bytes is candles-ONLY; ay_database_size_bytes is the whole-DB total the
+      // 50 GB retention review trigger actually measures (audit AYDB-03 — candles is ~half the DB).
       meterRegistry.gauge("ay_hypertable_bytes", hypertableBytes);
+      meterRegistry.gauge("ay_database_size_bytes", databaseBytes);
     }
 
     /** 1 s sweep: close bars past minute+grace. */
@@ -77,13 +81,14 @@ public class CandlesConfig {
       builder.flush();
     }
 
-    /** 15-min hypertable size sample (B-7 disk-budget visibility, live from Phase 10). */
+    /** 15-min storage-size sample (B-7 disk-budget visibility, live from Phase 10). */
     @Scheduled(fixedDelay = 900_000, initialDelay = 15_000)
-    public void sampleHypertableSize() {
+    public void sampleStorageSizes() {
       try {
         hypertableBytes.set(repository.hypertableBytes());
+        databaseBytes.set(repository.databaseSizeBytes());
       } catch (Exception e) {
-        log.warn("hypertable size sample failed: {}", e.getMessage());
+        log.warn("storage size sample failed: {}", e.getMessage());
       }
     }
   }

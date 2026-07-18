@@ -23,10 +23,22 @@ chains, ~200 active equities, pinned FUT/VIX):
 | 1m candles (~250 instruments × 375 bars/day, compressed) | ~2–4 MB/day | ~0.7–1.5 GB |
 | Everything else | noise | < 0.5 GB |
 
-**Review trigger: 50 GB total volume.** At that point review compression
-ratios and snapshot scope (`ay status` + the `ay_hypertable_bytes` gauge are
-the inputs) — the answer is widening disk or narrowing scope, never silent
-retention.
+**Review trigger: 50 GB total volume.** This is a **whole-database** volume
+(`pg_database_size`), not any single hypertable, and a **live-`artha` budget**.
+`ay status` is the input: on the live profile it prints the DB total vs the 50 GB
+trigger (`DB 'artha' = 46.1 GB / 50 GB review trigger (92%)`) and warns at ≥ 80 %;
+on a mock profile it reports the `artha_mock` DB size only (the trigger is not
+evaluated). Either way it lists the largest hypertables, continuous aggregates and
+tables (`hypertable_size` / `pg_total_relation_size`). At the trigger, review
+compression ratios and snapshot scope — the answer is widening disk or
+narrowing scope, never silent retention.
+
+> Metric caveat (audit AYDB-03): the `ay_hypertable_bytes` Micrometer gauge
+> samples **only `marketdata.candles`** (~half the DB), so it under-reports the
+> whole-DB trigger by ~2×. The companion `ay_database_size_bytes` gauge (added
+> alongside it) samples the same `pg_database_size` total `ay status` shows, so
+> the CLI and the metric agree. Neither is scraped yet — the `obs` profile
+> (Prometheus/Grafana) never shipped — so **`ay status` is the operative input.**
 
 ## Backups & restore (whole-database)
 

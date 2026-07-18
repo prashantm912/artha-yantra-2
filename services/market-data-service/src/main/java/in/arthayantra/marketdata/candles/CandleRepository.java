@@ -433,11 +433,23 @@ public class CandleRepository {
     return deleted;
   }
 
-  /** Hypertable size in bytes (the ay_hypertable_bytes gauge). */
+  /** {@code candles} hypertable size in bytes (the {@code ay_hypertable_bytes} gauge). */
   public long hypertableBytes() {
     Long candlesBytes =
         jdbc.queryForObject("SELECT public.hypertable_size('candles')", Long.class);
     return candlesBytes == null ? 0 : candlesBytes;
+  }
+
+  /**
+   * Whole-database size in bytes (the {@code ay_database_size_bytes} gauge). The 50 GB retention
+   * review trigger (docs/retention.md, Q4/A2) is a WHOLE-DB volume, but {@link #hypertableBytes()}
+   * measures only {@code candles} (~half the DB), so a candles-only read under-reports the trigger
+   * by ~2x (audit AYDB-03). This is the DB total {@code ay status} surfaces — caggs, other
+   * hypertables, plain tables, indexes and catalogs all roll in via {@code pg_database_size}.
+   */
+  public long databaseSizeBytes() {
+    Long dbBytes = jdbc.queryForObject("SELECT pg_database_size(current_database())", Long.class);
+    return dbBytes == null ? 0 : dbBytes;
   }
 
   /** Total row count for an interval (tests/ops). */

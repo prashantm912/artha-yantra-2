@@ -8,7 +8,6 @@ import { OptionsChainPage } from './pages/options/OptionsChainPage.tsx';
 import { OptionsSpurtPage } from './pages/options/OptionsSpurtPage.tsx';
 import { OiAnalysisPage } from './pages/options/OiAnalysisPage.tsx';
 import { ConnectingDotsPage } from './pages/options/ConnectingDotsPage.tsx';
-import { TrendingOiPage } from './pages/options/TrendingOiPage.tsx';
 import { TrendingOiPaPage } from './pages/options/TrendingOiPaPage.tsx';
 import { BigOiMovementPage } from './pages/options/BigOiMovementPage.tsx';
 import { FuturesOiSpurtPage } from './pages/futures/FuturesOiSpurtPage.tsx';
@@ -57,6 +56,10 @@ const CalendarSpreadPage = lazy(() =>
 );
 const OptionsPremiumPage = lazy(() =>
   import('./pages/options/OptionsPremiumPage.tsx').then((m) => ({ default: m.OptionsPremiumPage })),
+);
+// Its Graph view uses the EChart atom, so route-lazy keeps vendor-echarts out of the main chunk (FE-01).
+const TrendingOiPage = lazy(() =>
+  import('./pages/options/TrendingOiPage.tsx').then((m) => ({ default: m.TrendingOiPage })),
 );
 const FiiDiiCapitalMarketPage = lazy(() =>
   import('./pages/fiidii/FiiDiiCapitalMarketPage.tsx').then((m) => ({ default: m.FiiDiiCapitalMarketPage })),
@@ -255,7 +258,7 @@ export function App() {
           <Route path="/options/options-chain" element={<OptionsChainPage />} />
           <Route path="/options/oi-spurt" element={<OptionsSpurtPage />} />
           <Route path="/options/oi-analysis" element={<OiAnalysisPage />} />
-          <Route path="/options/trending-oi" element={<TrendingOiPage />} />
+          <Route path="/options/trending-oi" element={<Lazy><TrendingOiPage /></Lazy>} />
           <Route path="/options/trending-oi-pa" element={<TrendingOiPaPage />} />
           <Route path="/options/big-oi-movement" element={<BigOiMovementPage />} />
           <Route path="/options/options-premium" element={<Lazy><OptionsPremiumPage /></Lazy>} />

@@ -165,8 +165,9 @@ services:
   # "debug, live" (spaces, no literal ,live, token) is correctly treated as live —
   # the two classifiers can never diverge. Mock still needs ZERO secrets (empty ->
   # the default, applied inside the script). The password reaches ALTER ROLE via
-  # psql's :'var' binding (psql does the SQL literal quoting), so quotes/semicolons
-  # in the value cannot break out. `set -eu` + an explicit status check on the final
+  # psql's :'var' binding fed on STDIN (psql interpolates :var only from a
+  # script/stdin/-f, NEVER a -c string; psql does the SQL literal quoting), so
+  # quotes/semicolons in the value cannot break out. `set -eu` + an explicit status check on the final
   # ALTER mean a failed password-set can NEVER report success (compose would
   # otherwise treat the exit-0 echo as a healthy init and leave a stale password).
   #
@@ -204,8 +205,15 @@ services:
             exit 1
           fi
         fi
-        if psql -h timescaledb -U artha -d postgres -v ON_ERROR_STOP=1 \
-             -v pw="$$pw" -c "ALTER ROLE ay_console LOGIN PASSWORD :'pw'"; then
+        # psql interpolates :'pw' ONLY from a script/stdin/-f, NEVER from a -c
+        # command string — a -c "... :'pw'" sends the literal :'pw' to the server
+        # and dies with `syntax error at or near ":"` (the SEC-02 live-deploy
+        # failure 2026-07-18: role created by V002 but password-set failed, so
+        # ay_console stayed fail-closed). Feed the ALTER on STDIN so the
+        # injection-safe :'pw' binding actually expands. A pipeline's exit status
+        # is its RIGHT-hand command's (psql), so the if-guard still reflects psql.
+        if printf '%s\n' "ALTER ROLE ay_console LOGIN PASSWORD :'pw'" \
+             | psql -h timescaledb -U artha -d postgres -v ON_ERROR_STOP=1 -v pw="$$pw"; then
           echo "[console-role-init] ay_console password set"
         else
           echo "[console-role-init] FATAL: could not set ay_console password"

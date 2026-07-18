@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.backfill;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.marketdata.config.ConsoleDataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
@@ -11,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -30,10 +32,15 @@ import org.springframework.stereotype.Service;
  *       data-modifying CTE).
  *   <li><b>statement_timeout</b> + a hard <b>row cap</b> — a runaway scan can't hang the pool or OOM.
  *   <li><b>search_path = marketdata</b> — unqualified names resolve to the marketdata schema.
+ *   <li><b>least-privilege login (SEC-02)</b> — the query runs on the {@link ConsoleDataSource} pool,
+ *       authenticated as the {@code ay_console} role (NOSUPERUSER, SELECT-only on marketdata), NOT the
+ *       artha superuser. So a statement the verb blocklist misses ({@code SELECT pg_read_file(...)}) is
+ *       refused by Postgres itself — it can no longer read container secrets.
  * </ol>
  *
- * The connection is the service's normal datasource; the READ ONLY transaction is the authoritative
- * write guard. The whole surface sits behind the gateway auth filter on a loopback-only deploy.
+ * The connection comes from the dedicated least-privilege console pool; the READ ONLY transaction is
+ * still the authoritative write guard, and the least-privilege role is the authoritative secret-read
+ * guard. The whole surface sits behind the gateway auth filter on a loopback-only deploy.
  */
 @Service
 public class AdminQueryService {
@@ -45,13 +52,24 @@ public class AdminQueryService {
   private static final int STATEMENT_TIMEOUT_MS = 15_000;
   private static final int MAX_SQL_LEN = 20_000;
 
-  /** Whole-word tokens that must never appear — write/DDL/session/transaction verbs. */
+  /**
+   * Whole-word tokens that must never appear — write/DDL/session/transaction verbs, plus the advisory
+   * lock functions (SEC-02 fix round): a pure SELECT may call {@code pg_advisory_lock}, and SESSION
+   * advisory locks survive the rollback AND the pooled connection's reuse — a generate_series
+   * aggregate acquires thousands while returning one row (shared lock-memory exhaustion). No console
+   * use is legitimate, so every session/xact/try/unlock variant is blocked; {@link
+   * #releaseAdvisoryLocks} is the engine-level backstop for anything a future variant slips past.
+   */
   private static final Set<String> BLOCKED =
       Set.of(
           "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE",
           "COPY", "CALL", "DO", "MERGE", "VACUUM", "REINDEX", "REFRESH", "COMMENT", "LOCK", "SET",
           "RESET", "BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "CLUSTER", "PREPARE", "EXECUTE",
-          "DEALLOCATE", "NOTIFY", "LISTEN", "DISCARD");
+          "DEALLOCATE", "NOTIFY", "LISTEN", "DISCARD", "PG_ADVISORY_LOCK", "PG_ADVISORY_LOCK_SHARED",
+          "PG_ADVISORY_XACT_LOCK", "PG_ADVISORY_XACT_LOCK_SHARED", "PG_TRY_ADVISORY_LOCK",
+          "PG_TRY_ADVISORY_LOCK_SHARED", "PG_TRY_ADVISORY_XACT_LOCK",
+          "PG_TRY_ADVISORY_XACT_LOCK_SHARED", "PG_ADVISORY_UNLOCK", "PG_ADVISORY_UNLOCK_SHARED",
+          "PG_ADVISORY_UNLOCK_ALL");
 
   private static final Pattern WORD = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
@@ -59,11 +77,13 @@ public class AdminQueryService {
   public record QueryResult(
       List<String> columns, List<List<String>> rows, int rowCount, boolean truncated) {}
 
-  private final JdbcTemplate jdbc;
+  /** Least-privilege console pool (ay_console) — NEVER the artha superuser datasource (SEC-02). */
+  private final JdbcTemplate consoleJdbc;
+
   private final AdminAuditLedger audit;
 
-  public AdminQueryService(JdbcTemplate jdbc, AdminAuditLedger audit) {
-    this.jdbc = jdbc;
+  public AdminQueryService(ConsoleDataSource console, AdminAuditLedger audit) {
+    this.consoleJdbc = console.jdbcTemplate();
     this.audit = audit;
   }
 
@@ -93,6 +113,15 @@ public class AdminQueryService {
       long durationMs = (System.nanoTime() - start) / 1_000_000L;
       audit.recordQuery(action, cleaned, limit, result.rowCount(), result.truncated(), durationMs, null);
       return result;
+    } catch (CannotGetJdbcConnectionException e) {
+      // FAIL-CLOSED (SEC-02): the console's ONLY datasource is the least-privilege pool. If it can't
+      // connect/authenticate, the query does not run and we NEVER retry on the artha superuser.
+      long durationMs = (System.nanoTime() - start) / 1_000_000L;
+      audit.recordQuery(action, cleaned, limit, 0, false, durationMs, e.getMessage());
+      throw new ApiException(
+          500,
+          ErrorCodes.INTERNAL_ERROR,
+          "read-only console datasource unavailable — the query was not run (fail-closed)");
     } catch (RuntimeException e) {
       long durationMs = (System.nanoTime() - start) / 1_000_000L;
       audit.recordQuery(action, cleaned, limit, 0, false, durationMs, e.getMessage());
@@ -101,7 +130,7 @@ public class AdminQueryService {
   }
 
   private QueryResult execute(String cleaned, int limit) {
-    return jdbc.execute(
+    return consoleJdbc.execute(
         (ConnectionCallback<QueryResult>)
             con -> {
               boolean prevAuto = con.getAutoCommit();
@@ -119,8 +148,24 @@ public class AdminQueryService {
               } finally {
                 safeRollback(con);
                 con.setAutoCommit(prevAuto);
+                releaseAdvisoryLocks(con);
               }
             });
+  }
+
+  /**
+   * Belt-and-suspenders for the advisory-lock blocklist (SEC-02 fix round): SESSION advisory locks
+   * survive rollback and ride the pooled connection back into reuse, so before the connection returns
+   * to the pool every one it might hold is released. Best-effort — the blocklist is the primary guard,
+   * and a cleanup hiccup must not turn a successful query into an error. Runs after autocommit is
+   * restored so the call is a standalone statement, not a dangling transaction.
+   */
+  private static void releaseAdvisoryLocks(Connection con) {
+    try (Statement st = con.createStatement()) {
+      st.execute("SELECT pg_advisory_unlock_all()");
+    } catch (SQLException ignored) {
+      // best-effort backstop; the validator blocklist is the primary guard
+    }
   }
 
   private static QueryResult read(ResultSet rs, int limit) throws SQLException {

@@ -57,10 +57,18 @@ public class PaperMarginAnnotator {
                       event.side(),
                       "D")));
       if (!quote.priced() || quote.spanMargin() == null) {
+        // Unpriced re-quote: CLEAR any prior snapshot rather than preserve it (EXT-03 finding 2). An
+        // averaged add re-fires this event with the grown qty (PaperService: "an averaged add still
+        // re-prices"); if the re-quote is now unpriced, keeping the earlier priced value would leave a
+        // STALE, wrong-qty margin_snapshot/margin_pct on the row — which BookHeatReader sums into the
+        // risk-heat insight, understating heat. Clearing to null makes an unpriced state visibly
+        // unpriced everywhere (BookHeatReader filters NULL margin_pct out of its sum). A never-priced
+        // position is already null, so the clear is a harmless no-op there.
         log.debug(
-            "position {} margin unpriced ({}) — advisory columns left null",
+            "position {} margin unpriced ({}) — clearing any prior snapshot",
             event.positionId(),
             quote.unpricedReason());
+        positions.updateMarginSnapshot(event.positionId(), null, null);
         return;
       }
       BigDecimal margin = quote.spanMargin();

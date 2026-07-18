@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.upstox.canary;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
@@ -11,12 +12,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Base64;
+import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,7 +47,11 @@ import org.springframework.test.context.DynamicPropertySource;
       "artha.feed.autostart=false",
       "artha.instruments.bootstrap-sync=false",
       "artha.ntfy.topic=ay-test-topic",
-      "artha.upstox.canary-enabled=true"
+      "artha.upstox.canary-enabled=true",
+      // binds UpstoxFnoMasterClient (the margin probe resolves the NIFTY key off it) + the margin beans
+      "artha.upstox.analytics.enabled=true",
+      // ...but keep the (now-bound) expired-backfill from firing its boot auto-resume at WireMock
+      "artha.marketdata.expired-backfill.auto-resume=false"
     })
 class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase {
 
@@ -77,6 +88,8 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     registry.add(
         "artha.openalgo.api-key-file", () -> SECRETS_DIR.resolve("openalgo_api_key").toString());
     registry.add("artha.upstox.analytics.base-url", WIREMOCK::baseUrl);
+    // the margin probe resolves its NIFTY key off the F&O master (the auth-free assets CDN)
+    registry.add("artha.upstox.analytics.instruments-base-url", WIREMOCK::baseUrl);
     registry.add(
         "artha.upstox.analytics.token-file",
         () -> SECRETS_DIR.resolve("upstox_analytics_token").toString());
@@ -127,6 +140,40 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
       "{\"status\":\"success\",\"data\":{\"authorized_redirect_uri\":"
           + "\"wss://wsfeeder-api.upstox.com/?requestId=abc123\"}}";
 
+  // Margin probe (EXT-03 residual). The canary resolves a near-ATM front-weekly NIFTY CE key off the
+  // F&O master, then POSTs a 1-lot short basket. The master fixture carries a 24000 CE row at the
+  // NEXT weekly index expiry (Tuesday) so keyFor resolves the same expiry the canary computes at runtime.
+  private static final String MARGIN_MASTER_PATH =
+      "/market-quote/instruments/exchange/complete.json.gz";
+  private static final String MARGIN_PATH = "/v2/charges/margin";
+  // A faithful priced basket — span_margin/total_margin per leg + basket required/final margins.
+  private static final String MARGIN_OK =
+      "{\"status\":\"success\",\"data\":{\"margins\":[{\"span_margin\":337004.85,"
+          + "\"exposure_margin\":50000.0,\"equity_margin\":0.0,\"net_buy_premium\":0.0,"
+          + "\"additional_margin\":0.0,\"total_margin\":387004.85,\"tender_margin\":0.0}],"
+          + "\"required_margin\":387004.85,\"final_margin\":188604.45}}";
+
+  /** The gzipped F&O master with one NIFTY 24000 CE at the next weekly index expiry (Tuesday). */
+  private static byte[] marginMaster() {
+    LocalDate expiry =
+        MarketCalendar.nse().nextWeeklyIndexExpiry(LocalDate.now(ZoneId.of("Asia/Kolkata")));
+    long expiryMillis =
+        expiry.atTime(15, 30).atZone(ZoneId.of("Asia/Kolkata")).toInstant().toEpochMilli();
+    String json =
+        "[{\"segment\":\"NSE_FO\",\"name\":\"NIFTY\",\"asset_symbol\":\"NIFTY\","
+            + "\"underlying_symbol\":\"NIFTY\",\"instrument_key\":\"NSE_FO|MARGINPROBE\","
+            + "\"instrument_type\":\"CE\",\"trading_symbol\":\"NIFTY 24000 CE\",\"expiry\":"
+            + expiryMillis
+            + ",\"strike_price\":24000.0}]";
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    try (GZIPOutputStream gz = new GZIPOutputStream(out)) {
+      gz.write(json.getBytes(StandardCharsets.UTF_8));
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+    return out.toByteArray();
+  }
+
   @Autowired private UpstoxContractCanary canary;
   @Autowired private StringRedisTemplate redis;
 
@@ -153,6 +200,12 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
         get(urlPathEqualTo("/v2/market-quote/quotes")).willReturn(json(MARKET_QUOTE)));
     WIREMOCK.stubFor(
         get(urlPathEqualTo("/v3/feed/market-data-feed/authorize")).willReturn(json(WS_AUTHORIZE)));
+    // Margin probe: the F&O master (gunzips to a NIFTY 24000 CE) + the priced basket.
+    WIREMOCK.stubFor(
+        get(urlPathEqualTo(MARGIN_MASTER_PATH))
+            .willReturn(
+                aResponse().withHeader("Content-Type", "application/gzip").withBody(marginMaster())));
+    WIREMOCK.stubFor(post(urlPathEqualTo(MARGIN_PATH)).willReturn(json(MARGIN_OK)));
     WIREMOCK.stubFor(post(urlPathEqualTo("/ay-test-topic")).willReturn(aResponse().withStatus(200)));
   }
 
@@ -167,6 +220,11 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     assertThat(result.drift()).isEmpty();
     assertThat(result.lastContractCheck()).isNotNull();
     WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+    // The margin probe MUST post a lot-multiple qty (NIFTY 2026 lot = 65); a wrong qty 400s UDAPI1104
+    // → silent skip → a blind canary, so pin it (EXT-03 residual review finding).
+    WIREMOCK.verify(
+        postRequestedFor(urlPathEqualTo(MARGIN_PATH))
+            .withRequestBody(matchingJsonPath("$.instruments[0].quantity", equalTo("65"))));
     assertThat(redis.opsForValue().get(UpstoxContractCanary.RESULT_KEY)).contains("\"drift\":[]");
   }
 
@@ -254,6 +312,52 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
 
     assertThat(result.drift()).contains("MISSING:ws_authorize.data.authorized_redirect_uri");
     WIREMOCK.verify(1, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+  }
+
+  @Test
+  void removedConsumedSpanMarginIsCriticalDriftWithNtfyAlert() {
+    // The margin basket loses the per-leg span_margin — the field RiskService.currentHeatPct sums —
+    // while total_margin/required_margin/final_margin stay valid+positive (the client's
+    // wholesale-empty guard #929 never trips, and aggregate() sums span to a FALSE 0). Only this
+    // raw-shape probe catches the span-only rename; it must surface critical drift + ntfy.
+    WIREMOCK.stubFor(
+        post(urlPathEqualTo(MARGIN_PATH))
+            .willReturn(
+                json(
+                    "{\"status\":\"success\",\"data\":{\"margins\":[{\"total_margin\":387004.85,"
+                        + "\"tender_margin\":0.0}],\"required_margin\":387004.85,"
+                        + "\"final_margin\":188604.45}}")));
+
+    UpstoxContractCanary.CanaryResult result = canary.runNow();
+
+    assertThat(result.drift()).contains("MISSING:margin.data.margins.*.span_margin");
+    WIREMOCK.verify(1, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+  }
+
+  @Test
+  void emptyMarginBasketFromOffHoursIsSkippedNotDrift() {
+    // An empty margins array (off-hours / a stale probe contract) is tolerated like an empty option
+    // chain — the shape is checked only when Upstox prices a basket, so never a false alarm.
+    WIREMOCK.stubFor(
+        post(urlPathEqualTo(MARGIN_PATH))
+            .willReturn(json("{\"status\":\"success\",\"data\":{\"margins\":[]}}")));
+
+    UpstoxContractCanary.CanaryResult result = canary.runNow();
+
+    assertThat(result.drift()).noneMatch(d -> d.contains("margin"));
+    WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+  }
+
+  @Test
+  void marginEndpoint5xxIsAProbeFailureNotASilentSkip() {
+    // A 4xx (UDAPI1104 / stale contract) is benign drift-tolerance; a 5xx is an Upstox server fault —
+    // it must reach PROBE_FAILED + alert, never be swallowed like a 4xx (EXT-03 residual review finding).
+    WIREMOCK.stubFor(
+        post(urlPathEqualTo(MARGIN_PATH)).willReturn(aResponse().withStatus(500)));
+
+    UpstoxContractCanary.CanaryResult result = canary.runNow();
+
+    assertThat(result.drift()).anyMatch(d -> d.startsWith("PROBE_FAILED:"));
   }
 
   @Test

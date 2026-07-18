@@ -1,6 +1,7 @@
 {
   "comment": "Upstox Market-Information expected-field sentinels (ADR-0002 U7), the twin of openalgo-contract-manifest.json. CONSUMED fields ONLY (the wire DTO UpstoxMarketActivity is the full mirror, not this). Probes get-fii cash (NSE_EQ|CASH) + get-fii F&O (NSE_FO|INDEX_OPTIONS) + get-dii cash. `*` resolves the first array element. Missing/type-changed consumed field -> ntfy critical; a new top-level block -> warning.",
   "comment_live_capture": "W-U4 cutover-prep: the option_chain / market_quote / ws_authorize probes guard the LIVE-CAPTURE shapes the cutover flips onto (source.optionchain / source.quotes / source.ticker = upstox). Sentinels are the fields UpstoxOptionChainClient / UpstoxQuoteClient / UpstoxMarketFeedClient actually consume. The WS market-data FEED itself is a binary protobuf (MarketDataFeedV3.FeedResponse), NOT JSON — its field-number drift is guarded off-band by the .proto reference + FeedFrameDecoderTest, so only the JSON authorize-GET is canaried here.",
+  "comment_margin": "EXT-03 residual: the margin block guards POST /v2/charges/margin, the shape the ARMED F9 heat cap consumes (UpstoxMarginClient + RiskService.currentHeatPct). span_margin is the load-bearing one — aggregate() SUMS it across legs, so a rename to a field it does not read sums to a FALSE 0 SPAN (a false 0% heat) while total_margin/required_margin/final_margin stay valid, which the client alone cannot catch. Sentinels are the CONSUMED fields only. The probe resolves a near-ATM front-weekly NIFTY key off the F&O master and is tolerant: an unresolved key / empty margins body / any Upstox 4xx is skipped, never an alarm.",
   "fii_cash": {
     "status": "string",
     "data.NSE_EQ|CASH": "array",
@@ -69,6 +70,14 @@
   "ws_authorize": {
     "status": "string",
     "data.authorized_redirect_uri": "string"
+  },
+  "margin": {
+    "status": "string",
+    "data.margins": "array",
+    "data.margins.*.span_margin": "number",
+    "data.margins.*.total_margin": "number",
+    "data.required_margin": "number",
+    "data.final_margin": "number"
   },
   "knownTopLevel": [
     "status", "data",

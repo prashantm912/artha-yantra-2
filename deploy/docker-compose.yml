@@ -160,9 +160,15 @@ services:
   # profile an empty/default ARTHA_CONSOLE_DB_PASSWORD is FATAL: the one-shot
   # DISABLES ay_console login (the role is cluster-global — a prior mock boot may
   # have left the public default on it) and exits 1, failing `ay up --wait` loudly.
-  # Mock still needs ZERO secrets (empty -> the default, applied here in the script).
-  # The password reaches ALTER ROLE via psql's :'var' binding (psql does the SQL
-  # literal quoting), so quotes/semicolons in the value cannot break out.
+  # The profile is classified EXACTLY like ay.ps1 (split on comma, TRIM each token,
+  # then: any list containing 'mock' => mock, EVERY other list => live/strict), so
+  # "debug, live" (spaces, no literal ,live, token) is correctly treated as live —
+  # the two classifiers can never diverge. Mock still needs ZERO secrets (empty ->
+  # the default, applied inside the script). The password reaches ALTER ROLE via
+  # psql's :'var' binding (psql does the SQL literal quoting), so quotes/semicolons
+  # in the value cannot break out. `set -eu` + an explicit status check on the final
+  # ALTER mean a failed password-set can NEVER report success (compose would
+  # otherwise treat the exit-0 echo as a healthy init and leave a stale password).
   #
   # market-data-service does NOT depend on this (feed independence: a console-cred
   # problem must never block the feed — the console datasource is lazy+fail-closed),
@@ -179,24 +185,32 @@ services:
       - /bin/sh
       - -c
       - |
+        set -eu
         export PGPASSWORD="$$(cat /run/secrets/postgres_password)"
         pw="$${ARTHA_CONSOLE_DB_PASSWORD}"
-        case ",$${SPRING_PROFILES_ACTIVE}," in
-          *,live,*)
-            if [ -z "$$pw" ] || [ "$$pw" = "console-readonly-local" ]; then
-              psql -h timescaledb -U artha -d postgres -v ON_ERROR_STOP=1 \
-                -c "ALTER ROLE ay_console NOLOGIN"
-              echo "[console-role-init] FATAL: live requires a strong ARTHA_CONSOLE_DB_PASSWORD in .env (not empty, not the mock default). ay_console login DISABLED (fail-closed)."
-              exit 1
-            fi
-            ;;
-          *)
-            if [ -z "$$pw" ]; then pw="console-readonly-local"; fi
-            ;;
-        esac
-        psql -h timescaledb -U artha -d postgres -v ON_ERROR_STOP=1 \
-          -v pw="$$pw" -c "ALTER ROLE ay_console LOGIN PASSWORD :'pw'"
-        echo "[console-role-init] ay_console password set"
+        # classify like ay.ps1: split on comma, trim each token (word-splitting on
+        # the unquoted command substitution trims + drops empties), membership test.
+        is_mock=0
+        for tok in $$(printf '%s' "$${SPRING_PROFILES_ACTIVE}" | tr ',' ' '); do
+          if [ "$$tok" = "mock" ]; then is_mock=1; fi
+        done
+        if [ "$$is_mock" = 1 ]; then
+          if [ -z "$$pw" ]; then pw="console-readonly-local"; fi
+        else
+          if [ -z "$$pw" ] || [ "$$pw" = "console-readonly-local" ]; then
+            psql -h timescaledb -U artha -d postgres -v ON_ERROR_STOP=1 \
+              -c "ALTER ROLE ay_console NOLOGIN"
+            echo "[console-role-init] FATAL: live requires a strong ARTHA_CONSOLE_DB_PASSWORD in .env (not empty, not the mock default). ay_console login DISABLED (fail-closed)."
+            exit 1
+          fi
+        fi
+        if psql -h timescaledb -U artha -d postgres -v ON_ERROR_STOP=1 \
+             -v pw="$$pw" -c "ALTER ROLE ay_console LOGIN PASSWORD :'pw'"; then
+          echo "[console-role-init] ay_console password set"
+        else
+          echo "[console-role-init] FATAL: could not set ay_console password"
+          exit 1
+        fi
     depends_on:
       timescaledb:
         condition: service_healthy

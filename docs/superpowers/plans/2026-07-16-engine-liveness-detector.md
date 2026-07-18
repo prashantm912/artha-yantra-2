@@ -24,10 +24,23 @@
 > the 4–10 min gap band is **not** empty — 07-06 had a 267.1s and a 331.8s gap; and the "82 bars" figure
 > is 81 bars plus a boundary bucket.
 >
-> **What survives: §1 and §2 remain AUTHORITATIVE** — the 9-of-9 measurement (the engine produced zero or
-> truncated rejection output on 9 of the last 9 trading days, all canary-green) and the analysis of why
-> every existing detector is blind. The problem statement is real and unaddressed. Only the §3 *mechanism*
-> is dead.
+> **⚠️ UPDATE 2026-07-17/18 — §1 IS NOW INVALIDATED TOO (second axis). Only §2 survives.** "Bars present +
+> rejections absent ⇒ engine broken" is FALSE: it false-positives on every bearish leg. `signal_rejections`
+> records ONLY confluence-gate blocks on bars whose CHART gate already passed (`SignalEngine.evaluateAtBarClose`
+> has no else-branch), and every published scalper shares one rsi14+supertrend composite on one 3m series —
+> so SuperTrend-DOWN ⇒ composite < threshold ⇒ EVERY scalper silent simultaneously. A live thread dump during
+> a "blackout" showed `signal-eval` idle-parked on its own queue (not stalled). So the **9-of-9 figure plausibly
+> measured market DIRECTION, not engine health** (it was never re-derived). Two independent investigations
+> (Opus + Fable) + the thread dump refuted it. **What survives: only §2** (every existing detector is blind) —
+> and the real observability defect it named was FIXED structurally by #895 (`ay_signal_eval_outcome_total`,
+> but that is an ATTRIBUTION panel — NEVER arm liveness on it; see the ledger). The ONLY signals safe to key
+> liveness on are `lastBarReceivedAtMs` / `lastBarEvaluatedAtMs` (direction/window/position-independent).
+> **F10 Part B is effectively ALREADY SHIPPED as #886** (cold-start receive-gap detection) — the owner fork
+> below is moot on both prongs (the engine already holds a strictly-better oracle). Full record: the ledger
+> `docs/superpowers/plans/2026-07-02-remaining-items.md` F10 Part B block + `docs/audits/2026-07-18-comprehensive-audit.md`.
+>
+> **What survives from the original block: §2 remains AUTHORITATIVE** — the analysis of why every existing
+> detector is blind. Only the §3 *mechanism* was dead per the original invalidation; §1's premise is dead too.
 >
 > **Partial progress since:** [#886](https://github.com/prashantm912/artha-yantra-2/pull/886) fixed the two
 > blind gates §2 identified (vacuous-truth disarm at `loaded == 0`; `Long.MAX_VALUE` read as "fresh"), so

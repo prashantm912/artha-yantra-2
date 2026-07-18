@@ -189,7 +189,12 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   structured leg fields, never the Kite symbol** (`OpenAlgoSymbols`, its `DDMMMYY` token differs). Load-bearing
   reconcilers: `normalizeStrike()` (strip trailing zeros so `18000`≡`18000.00`), per-source expiry conversion
   (Kite `DDMMMYY` / Upstox epoch-millis / canonical `LocalDate`), `UnderlyingRef` (`NIFTY`→`NIFTY 50`). **Kite
-  is the always-on fallback** (Upstox/OpenAlgo mapping is additive, must never break the feed). Drift caught by
+  is the always-on fallback** (Upstox/OpenAlgo mapping is additive, must never break the feed). ⚠️ **But this
+  is DEFAULT-only, NOT a runtime composite (audit EXT-04, 2026-07-18):** the alternate-source flags select
+  MUTUALLY-EXCLUSIVE beans (`LiveKiteConfig:241`) — flipping the quote/ticker source to Upstox/OpenAlgo REMOVES
+  the Kite bean entirely (`UpstoxQuoteGateway:75` drops unmapped keys with no Kite delegate), so a live miss
+  does NOT fall through to Kite. Kite-as-fallback holds only while the source flag stays Kite (the current
+  default, W-U4 declined). Composite primary+fallback is unbuilt. Drift caught by
   3 contract canaries (Kite/Upstox/OpenAlgo, CONSUMED-field sentinels). Full map: `docs/symbol-normalization.md`.
 - **Run the Playwright e2e vs a running mock stack:** `cd e2e &&
   E2E_OWNER_PASSWORD=<your .env owner pw> npx playwright test` — global-setup reuses a

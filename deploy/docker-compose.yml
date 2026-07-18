@@ -147,6 +147,79 @@ services:
     restart: "no"
     logging: *default-logging
 
+  # ---- one-shot: set the read-only console role password (SEC-02) ---------
+  # The admin lineage (V002) creates ay_console with PASSWORD NULL — no credential
+  # ever lives in a migration (A.9). This sets its password from
+  # ARTHA_CONSOLE_DB_PASSWORD every boot (idempotent ALTER ROLE) so the market-data
+  # SQL console can authenticate as the least-privilege role (NOSUPERUSER,
+  # SELECT-only on marketdata) instead of the artha superuser — closing the
+  # `SELECT pg_read_file('/run/secrets/...')` secret-read.
+  #
+  # PROFILE GATE (fix round): the mock/CI default 'console-readonly-local' is PUBLIC
+  # (this file is committed) and Postgres is published on loopback, so on the LIVE
+  # profile an empty/default ARTHA_CONSOLE_DB_PASSWORD is FATAL: the one-shot
+  # DISABLES ay_console login (the role is cluster-global — a prior mock boot may
+  # have left the public default on it) and exits 1, failing `ay up --wait` loudly.
+  # The profile is classified EXACTLY like ay.ps1 (split on comma, TRIM each token,
+  # then: any list containing 'mock' => mock, EVERY other list => live/strict), so
+  # "debug, live" (spaces, no literal ,live, token) is correctly treated as live —
+  # the two classifiers can never diverge. Mock still needs ZERO secrets (empty ->
+  # the default, applied inside the script). The password reaches ALTER ROLE via
+  # psql's :'var' binding (psql does the SQL literal quoting), so quotes/semicolons
+  # in the value cannot break out. `set -eu` + an explicit status check on the final
+  # ALTER mean a failed password-set can NEVER report success (compose would
+  # otherwise treat the exit-0 echo as a healthy init and leave a stale password).
+  #
+  # market-data-service does NOT depend on this (feed independence: a console-cred
+  # problem must never block the feed — the console datasource is lazy+fail-closed),
+  # so a deploy that recreates market-data must ALSO recreate this one-shot:
+  #   up -d --force-recreate flyway-init console-role-init
+  console-role-init:
+    image: postgres:17-alpine
+    container_name: ay-console-role-init
+    secrets: [postgres_password]
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-mock}
+      ARTHA_CONSOLE_DB_PASSWORD: ${ARTHA_CONSOLE_DB_PASSWORD:-}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        export PGPASSWORD="$$(cat /run/secrets/postgres_password)"
+        pw="$${ARTHA_CONSOLE_DB_PASSWORD}"
+        # classify like ay.ps1: split on comma, trim each token (word-splitting on
+        # the unquoted command substitution trims + drops empties), membership test.
+        is_mock=0
+        for tok in $$(printf '%s' "$${SPRING_PROFILES_ACTIVE}" | tr ',' ' '); do
+          if [ "$$tok" = "mock" ]; then is_mock=1; fi
+        done
+        if [ "$$is_mock" = 1 ]; then
+          if [ -z "$$pw" ]; then pw="console-readonly-local"; fi
+        else
+          if [ -z "$$pw" ] || [ "$$pw" = "console-readonly-local" ]; then
+            psql -h timescaledb -U artha -d postgres -v ON_ERROR_STOP=1 \
+              -c "ALTER ROLE ay_console NOLOGIN"
+            echo "[console-role-init] FATAL: live requires a strong ARTHA_CONSOLE_DB_PASSWORD in .env (not empty, not the mock default). ay_console login DISABLED (fail-closed)."
+            exit 1
+          fi
+        fi
+        if psql -h timescaledb -U artha -d postgres -v ON_ERROR_STOP=1 \
+             -v pw="$$pw" -c "ALTER ROLE ay_console LOGIN PASSWORD :'pw'"; then
+          echo "[console-role-init] ay_console password set"
+        else
+          echo "[console-role-init] FATAL: could not set ay_console password"
+          exit 1
+        fi
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      flyway-init:
+        condition: service_completed_successfully
+    mem_limit: 64m
+    restart: "no"
+    logging: *default-logging
+
   # ---- always-on nightly backup sidecar (A.11 / D16) ----------------------
   # 00:30 IST WHOLE-DATABASE pg_dump -Fc + cluster globals (post-#395) into
   # the bind-mounted ./backups on the WINDOWS filesystem - outside the WSL2 VM
@@ -235,6 +308,14 @@ services:
       MOCK_SCENARIO: ${MOCK_SCENARIO:-trend-up}
       # Stage B: marketdata schema access — password via secret file, never env
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
+      # SEC-02: the read-only SQL console authenticates as the least-privilege ay_console role via its
+      # OWN datasource (NOT the artha superuser). The console-role-init one-shot sets this SAME password
+      # on the role, so the app and the role agree. Shared .env => one value across mock+live (the role
+      # is cluster-global). Name MUST byte-match the application.yml placeholder (#653). The fallback
+      # here is the MOCK/CI credential only: on LIVE an empty var makes console-role-init DISABLE
+      # ay_console login and fail the boot (fix round), so this app-side fallback can never
+      # authenticate on live — it is a dead credential, and the console fails closed.
+      ARTHA_CONSOLE_DB_PASSWORD: ${ARTHA_CONSOLE_DB_PASSWORD:-console-readonly-local}
       # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
       SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:?unset - run via the ay CLI (derives mock->artha_mock, live->artha); raw compose must export it}?currentSchema=marketdata
       SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:?unset - run via the ay CLI (derives mock->1, live->0); raw compose must export it}

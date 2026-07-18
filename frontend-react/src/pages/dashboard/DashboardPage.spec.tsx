@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -40,9 +40,15 @@ vi.mock('../../api/signals.ts', () => ({
     },
   }),
 }));
+// usePaperPnl result is per-test overridable (FE-04): default success, or an isError result for the
+// error test that proves the paper book surfaces the failure instead of a false-empty.
+const paperMock = vi.hoisted(() => {
+  const pnlSuccess = () => ({ data: { summary: { realizedTotal: '12500.00', trades: 4, winRate: '0.75' } } });
+  return { pnlSuccess, pnl: pnlSuccess() as ReturnType<typeof pnlSuccess> | { isError: true; refetch: () => void } };
+});
 vi.mock('../../api/paper.ts', () => ({
   usePaperAccount: () => ({ data: { dayPnl: '2500.00' } }),
-  usePaperPnl: () => ({ data: { summary: { realizedTotal: '12500.00', trades: 4, winRate: '0.75' } } }),
+  usePaperPnl: () => paperMock.pnl,
   usePaperPositions: () => ({ data: { items: [{ id: 1 }] } }),
 }));
 vi.mock('../../api/health.ts', () => ({
@@ -71,6 +77,10 @@ function renderPage() {
 }
 
 describe('DashboardPage', () => {
+  beforeEach(() => {
+    paperMock.pnl = paperMock.pnlSuccess();
+  });
+
   it('renders the status strip, active signals, paper P&L and in-flight jobs', () => {
     renderPage();
     expect(screen.getByText('OPEN')).toBeInTheDocument(); // market phase
@@ -79,5 +89,17 @@ describe('DashboardPage', () => {
     expect(screen.getByText('RELIANCE')).toBeInTheDocument(); // active signal
     expect(screen.getByText('12500.00')).toBeInTheDocument(); // realized P&L
     expect(screen.getByText('backtest')).toBeInTheDocument(); // job tile
+  });
+
+  it('surfaces a paper-P&L fetch error instead of a false-empty book (FE-04)', () => {
+    // A paper-P&L 500 used to leave the KPI strip stuck as a skeleton and the Paper P&L card reading
+    // "No paper activity yet." — a real fault masquerading as an idle book. Both now show the error.
+    paperMock.pnl = { isError: true, refetch: vi.fn() };
+    renderPage();
+    expect(screen.getAllByTestId('qs-error').length).toBeGreaterThan(0);
+    expect(screen.queryByText('No paper activity yet.')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-kpis')).not.toBeInTheDocument();
+    // The rest of the cockpit is unaffected — its own queries still resolved.
+    expect(screen.getByText('RELIANCE')).toBeInTheDocument();
   });
 });

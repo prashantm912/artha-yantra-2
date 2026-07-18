@@ -9,6 +9,20 @@ const exportMocks = vi.hoisted(() => ({
   folds: vi.fn(),
   equity: vi.fn(),
 }));
+// Folds hook result is per-test overridable (FE-03): the default is a one-fold success; the error
+// test flips it to an isError result to prove the tab surfaces the failure instead of hiding it.
+const foldsMock = vi.hoisted(() => {
+  const success = () => ({
+    data: [
+      {
+        fold: { index: 1, trainFrom: '2026-01-01', trainTo: '2026-03-01', testFrom: '2026-03-01', testTo: '2026-04-01' },
+        trainMetrics: {},
+        oosMetrics: { sharpe: '1.2' },
+      },
+    ],
+  });
+  return { success, result: success() as ReturnType<typeof success> | { isError: true; refetch: () => void } };
+});
 vi.mock('../../api/backtestExport.ts', () => ({
   exportTrades: exportMocks.trades,
   exportFolds: exportMocks.folds,
@@ -27,7 +41,7 @@ vi.mock('../../api/backtests.ts', () => ({
     isLoading: false,
   }),
   useBacktestTrades: () => ({ data: { items: [{ seq: 1, side: 'LONG', entryTs: '2026-06-01T09:30', entryPrice: '100.00', exitPrice: '110.00', pnl: '10.00', pnlPct: '10.00', exitReason: 'TARGET', barsHeld: 5, qty: 1 }] } }),
-  useBacktestFolds: () => ({ data: [{ fold: { index: 1, trainFrom: '2026-01-01', trainTo: '2026-03-01', testFrom: '2026-03-01', testTo: '2026-04-01' }, trainMetrics: {}, oosMetrics: { sharpe: '1.2' } }] }),
+  useBacktestFolds: () => foldsMock.result,
   useBacktestMonteCarlo: () => ({
     data: { n: 1000, trades: 42, insufficientSample: false, equityBands: { step: [0, 1], p5: ['100', '95'], p50: ['100', '105'], p95: ['100', '115'] }, drawdownDistribution: { p5: '-2', p50: '-5', p95: '-10', mean: '-6' }, riskOfRuin: '0.02' },
   }),
@@ -100,6 +114,7 @@ function renderPage() {
 describe('BacktestResultsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    foldsMock.result = foldsMock.success();
   });
 
   it('shows metrics, trades, folds and the Monte Carlo tab', () => {
@@ -125,6 +140,16 @@ describe('BacktestResultsPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Monte Carlo' }));
     expect(screen.getByText(/risk of ruin 0.02/)).toBeInTheDocument();
+  });
+
+  it('surfaces a folds fetch error instead of a false-empty "no folds" (FE-03)', () => {
+    // A fold-fetch 500 used to be swallowed to [] → the Folds tab silently vanished, reading as a
+    // genuine no-walk-forward run. It must now show the tab AND the shared error state.
+    foldsMock.result = { isError: true, refetch: vi.fn() };
+    renderPage();
+    fireEvent.click(screen.getByRole('tab', { name: 'Folds' }));
+    expect(screen.getByTestId('qs-error')).toBeInTheDocument();
+    expect(screen.getByText("Couldn't load walk-forward folds")).toBeInTheDocument();
   });
 
   it('OI Attribution tab buckets trades by entry confluence and shows coverage', () => {

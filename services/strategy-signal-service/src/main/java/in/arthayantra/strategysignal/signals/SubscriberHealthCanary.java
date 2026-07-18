@@ -115,7 +115,7 @@ public class SubscriberHealthCanary {
   }
 
   /** The per-minute in-session receive-gap + eval-gap check. */
-  @Scheduled(fixedDelay = 60_000, initialDelay = 120_000)
+  @Scheduled(fixedDelay = 60_000, initialDelay = 120_000, scheduler = "monitorTaskScheduler")
   public void sweep() {
     try {
       if (!enabled) {

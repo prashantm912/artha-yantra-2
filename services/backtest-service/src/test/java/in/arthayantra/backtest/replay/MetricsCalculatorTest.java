@@ -38,14 +38,14 @@ class MetricsCalculatorTest {
             closedTrade(5, "200", "190", "-50"));
 
     MetricsCalculator.Metrics m =
-        calc.compute(trades, equity, INITIAL, new BigDecimal("120000"), "1d", "1d", 4L, 2L);
+        calc.compute(trades, equity, INITIAL, new BigDecimal("120000"), "1d", 4L, 2L);
     ObjectNode full = m.full();
 
     assertThat(full.get("totalReturn").asText()).isEqualTo("20.000000");
     assertThat(full.get("maxDrawdown").asText()).isEqualTo("10.000000");
     // recoveryFactor = 20 / 10 = 2 (both are percentages, so the ratio is dimensionless).
     assertThat(full.get("recoveryFactor").asText()).isEqualTo("2.000000");
-    // 1d => barsPerSession 1, sessions = 4 bars / 1 = 4; tradeFrequency = 2 trades / 4 = 0.5.
+    // 1d curve => barsPerSession 1, sessions = 4 bars / 1 = 4; tradeFrequency = 2 trades / 4 = 0.5.
     assertThat(full.get("tradeFrequency").asText()).isEqualTo("0.500000");
     // turnover = 4150 / 100000 (a multiple of the starting account, NOT a percentage).
     assertThat(full.get("turnover").asText()).isEqualTo("0.041500");
@@ -67,7 +67,6 @@ class MetricsCalculatorTest {
             INITIAL,
             new BigDecimal("120000"),
             "1d",
-            "1d",
             3L,
             1L);
     ObjectNode full = m.full();
@@ -80,7 +79,7 @@ class MetricsCalculatorTest {
   @Test
   void emptyRunEmitsAllThreeKeysWithZeroOrNull() {
     MetricsCalculator.Metrics m =
-        calc.compute(List.of(), List.of(), INITIAL, INITIAL, "1d", "1d", 0L, 0L);
+        calc.compute(List.of(), List.of(), INITIAL, INITIAL, "1d", 0L, 0L);
     ObjectNode full = m.full();
 
     // All three keys must be present unconditionally (the metrics catalog pins the emit key set).
@@ -93,7 +92,7 @@ class MetricsCalculatorTest {
 
   @Test
   void tradeFrequencyIsTradesPerSessionOnAnIntradayRun() {
-    // 1m => barsPerSession 375; 750 bars = 2 sessions; 3 trades / 2 = 1.5 trades per session.
+    // 1m curve => barsPerSession 375; 750 bars = 2 sessions; 3 trades / 2 = 1.5 trades per session.
     List<EquityPoint> equity =
         List.of(
             new EquityPoint(T0, new BigDecimal("100000")),
@@ -104,17 +103,19 @@ class MetricsCalculatorTest {
             closedTrade(1, "100", "101", "1"),
             closedTrade(1, "100", "101", "1"));
     MetricsCalculator.Metrics m =
-        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "1m", "1m", 750L, 100L);
+        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "1m", 750L, 100L);
 
     assertThat(m.full().get("tradeFrequency").asText()).isEqualTo("1.500000");
   }
 
   @Test
-  void tradeFrequencyOnA3mPrimaryUsesA125BarSession() {
-    // #721 regression (chip task_547656bf): 3m was absent from the interval table and fell through to
-    // barsPerSession == 1, so tradeFrequency read trades-per-BAR (~125x the true rate). 125 3m bars ==
-    // one session (375 trading minutes / 3), so 3 trades over 125 bars == 3.0 trades per session
-    // (pre-fix this read 3 / 125 == 0.024000).
+  void tradeFrequencyKeysOffTheCurveCadenceNotThePrimaryTimeframe() {
+    // chip task_8fb59761: a 3m-PRIMARY run's equity curve is still 1m-spaced (the primary rolls up
+    // signals only), so the runner passes a 1m-cadence totalBars + curveInterval "1m". tradeFrequency
+    // divides by barsPerSession(curveInterval): "1m" => 375, so 750 1m bars == 2 sessions and 3 trades
+    // == 1.5/day (trades per trading DAY, independent of the primary timeframe). The pre-fix code keyed
+    // the divisor off the 3m PRIMARY (barsPerSession("3m") == 125 => 750/125 == 6 sessions => 0.5), so
+    // this pins that the divisor follows the CURVE cadence, discriminating 1.5 (correct) from 0.5 (old).
     List<EquityPoint> equity =
         List.of(
             new EquityPoint(T0, new BigDecimal("100000")),
@@ -124,16 +125,28 @@ class MetricsCalculatorTest {
             closedTrade(1, "100", "101", "1"),
             closedTrade(1, "100", "101", "1"),
             closedTrade(1, "100", "101", "1"));
-    MetricsCalculator.Metrics m =
-        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "3m", "3m", 125L, 50L);
-
-    assertThat(m.full().get("tradeFrequency").asText()).isEqualTo("3.000000");
+    // curveInterval "1m" — exactly what the runner passes for a 3m-primary run (750 1m bars).
+    assertThat(
+            calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "1m", 750L, 100L)
+                .full()
+                .get("tradeFrequency")
+                .asText())
+        .isEqualTo("1.500000");
+    // the coarse-cadence divisor the buggy code used (barsPerSession("3m") == 125) reads a DIFFERENT,
+    // wrong number over the same 1m bar count — proving the fix moved the cadence to the curve.
+    assertThat(
+            calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "3m", 750L, 100L)
+                .full()
+                .get("tradeFrequency")
+                .asText())
+        .isEqualTo("0.500000");
   }
 
   @Test
-  void tradeFrequencyPreservesTheEnumeratedIntervalDivisors() {
-    // The 3m addition must not perturb the intervals periodsPerYear already enumerates: 5m == 75
-    // bars/session and 1h == 6.25 bars/session (375/60), byte-identical to the prior derivation.
+  void tradeFrequencyPinsTheEnumeratedCurveCadenceDivisors() {
+    // The session divisor keys the CURVE cadence (curveInterval): pin 5m == 75 bars/session and
+    // 1h == 6.25 bars/session (375/60), byte-identical to periodsPerYear/252. A non-1m curveInterval is
+    // off the replay path (the engines always mark per 1m bar), but the divisor table must stay sound.
     List<EquityPoint> equity =
         List.of(
             new EquityPoint(T0, new BigDecimal("100000")),
@@ -143,21 +156,20 @@ class MetricsCalculatorTest {
             closedTrade(1, "100", "101", "1"),
             closedTrade(1, "100", "101", "1"),
             closedTrade(1, "100", "101", "1"));
-    // 5m: 150 bars / 75 == 2 sessions; 3 trades / 2 == 1.5.
+    // 5m curve: 150 bars / 75 == 2 sessions; 3 trades / 2 == 1.5.
     assertThat(
-            calc.compute(three, equity, INITIAL, new BigDecimal("101000"), "5m", "5m", 150L, 50L)
+            calc.compute(three, equity, INITIAL, new BigDecimal("101000"), "5m", 150L, 50L)
                 .full()
                 .get("tradeFrequency")
                 .asText())
         .isEqualTo("1.500000");
-    // 1h: 25 bars / 6.25 == 4 sessions; 1 trade / 4 == 0.25 (pins 6.25, NOT 7).
+    // 1h curve: 25 bars / 6.25 == 4 sessions; 1 trade / 4 == 0.25 (pins 6.25, NOT 7).
     assertThat(
             calc.compute(
                     List.of(closedTrade(1, "100", "101", "1")),
                     equity,
                     INITIAL,
                     new BigDecimal("101000"),
-                    "1h",
                     "1h",
                     25L,
                     10L)
@@ -180,7 +192,7 @@ class MetricsCalculatorTest {
             new EquityPoint(T0, new BigDecimal("100000")),
             new EquityPoint(T1, new BigDecimal("101000")));
     MetricsCalculator.Metrics m =
-        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "1d", "1d", 4L, 2L);
+        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "1d", 4L, 2L);
     ObjectNode full = m.full();
 
     assertThat(full.get("turnover").asText()).isEqualTo("0.032000");

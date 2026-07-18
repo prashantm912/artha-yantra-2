@@ -53,7 +53,7 @@ public class FeedWatchdog {
   }
 
   /** The 60 s liveness check; initial delay covers the morning login/boot window. */
-  @Scheduled(fixedDelay = 60_000, initialDelay = 180_000)
+  @Scheduled(fixedDelay = 60_000, initialDelay = 180_000, scheduler = "monitorTaskScheduler")
   public void check() {
     try {
       if (!calendar.isOpen(clock.instant())) {

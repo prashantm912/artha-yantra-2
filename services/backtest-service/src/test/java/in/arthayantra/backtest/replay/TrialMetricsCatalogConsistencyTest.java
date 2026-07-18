@@ -58,7 +58,6 @@ class TrialMetricsCatalogConsistencyTest {
                 new BigDecimal("100000"),
                 new BigDecimal("100000"),
                 "1d",
-                "1d",
                 0L,
                 0L);
     Set<String> keys = new TreeSet<>();

@@ -71,7 +71,7 @@ public class PartialBucketCanary {
   }
 
   /** Sweeps every warmed 3m series, comparing its last completed bar to the 1m sum. */
-  @Scheduled(fixedDelay = 60_000, initialDelay = 90_000)
+  @Scheduled(fixedDelay = 60_000, initialDelay = 90_000, scheduler = "monitorTaskScheduler")
   public void sweep() {
     Instant now = clock.instant();
     for (SeriesKey key : store.keys()) {

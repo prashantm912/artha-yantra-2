@@ -90,7 +90,7 @@ public class FoldEvaluator {
               warmupContexts(contexts, fold.trainTo()),
               before(primary1m, fold.trainFrom()),
               initialEquity, costs, oneMinuteCovered);
-      Metrics train = metricsFor(trainResult, definition);
+      Metrics train = metricsFor(trainResult);
       ReplayResult oosResult =
           replay(
               options, config, definition, exchange, tradingsymbol,
@@ -99,7 +99,7 @@ public class FoldEvaluator {
               warmupContexts(contexts, fold.testTo()),
               before(primary1m, fold.testFrom()),
               initialEquity, costs, oneMinuteCovered);
-      Metrics oos = metricsFor(oosResult, definition);
+      Metrics oos = metricsFor(oosResult);
       int oosTradeCount = closedTrades(oosResult);
       results.add(
           new FoldResult(
@@ -134,16 +134,15 @@ public class FoldEvaluator {
             oneMinuteCovered, null, null, warmupPrefix);
   }
 
-  private Metrics metricsFor(ReplayResult result, StrategyDefinition definition) {
+  private Metrics metricsFor(ReplayResult result) {
     return metrics.compute(
         result.trades(),
         result.equityCurve(),
         result.initialEquity(),
         result.finalEquity(),
-        definition.primaryTimeframe(),
         // AY-SL-01 cadence: fold slices replay through the same engines, whose equity curves are
-        // 1m-spaced regardless of primary timeframe — annualize at the curve cadence (see
-        // BacktestRunner's matching call).
+        // 1m-spaced regardless of primary timeframe — Sharpe/Sortino AND the tradeFrequency session
+        // divisor both key this curve cadence (see BacktestRunner's matching call).
         "1m",
         result.totalBars(),
         result.barsInPosition());

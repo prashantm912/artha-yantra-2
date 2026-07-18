@@ -43,20 +43,30 @@ public final class MetricsCalculator {
   /**
    * Computes the catalog from closed trades + the mark-to-market equity curve.
    *
-   * <p>AY-SL-01 cadence split: {@code interval} is the strategy's PRIMARY timeframe and keys the
-   * session-denominated metrics (tradeFrequency, #785); {@code curveInterval} is the cadence of the
-   * SERIES THE EQUITY CURVE IS BUILT ON and keys the ratio-metric annualization (Sharpe/Sortino) —
-   * periodic returns are computed between consecutive curve points, so annualizing them at any other
-   * cadence mis-scales by ≈√(ratio). The intraday replay engines mark to market per 1m bar regardless
-   * of primary timeframe, so their callers pass {@code "1m"}; a caller with a daily-spaced curve must
-   * pass {@code "1d"}. maxDrawdown/CAGR/totalReturn are cadence-independent.
+   * <p>Cadence: {@code curveInterval} is the cadence of the SERIES THE EQUITY CURVE IS BUILT ON, and
+   * {@code totalBars} is that curve's bar count. It keys BOTH cadence-dependent metrics, which must
+   * therefore share ONE cadence with {@code totalBars}:
+   *
+   * <ul>
+   *   <li>the ratio-metric annualization (Sharpe/Sortino, AY-SL-01 #913) — periodic returns are
+   *       computed between consecutive curve points, so annualizing them at any other cadence
+   *       mis-scales by ≈√(ratio); and
+   *   <li>the {@code tradeFrequency} session divisor (chip task_8fb59761) — {@code sessions =
+   *       totalBars / barsPerSession(curveInterval)} is unit-consistent ONLY when the divisor shares
+   *       the bar count's cadence.
+   * </ul>
+   *
+   * <p>The intraday replay engines mark to market per 1m bar regardless of the strategy's PRIMARY
+   * timeframe (the primary rolls up SIGNALS only), so their callers pass {@code "1m"} and BOTH metrics
+   * read at the true 1m cadence — {@code tradeFrequency} is trades-per-trading-DAY, independent of the
+   * primary timeframe; a caller with a daily-spaced curve passes {@code "1d"}. maxDrawdown/CAGR/
+   * totalReturn are cadence-independent.
    */
   public Metrics compute(
       List<Trade> trades,
       List<EquityPoint> equity,
       BigDecimal initialEquity,
       BigDecimal finalEquity,
-      String interval,
       String curveInterval,
       long totalBars,
       long barsInPosition) {
@@ -91,7 +101,7 @@ public final class MetricsCalculator {
     // sentinel number), and the key is still always present so the metrics catalog stays consistent.
     BigDecimal recoveryFactor =
         maxDd.signum() == 0 ? null : totalReturn.divide(maxDd, SCALE, RoundingMode.HALF_UP);
-    BigDecimal tradeFrequency = tradeFrequency(tradeCount, totalBars, interval);
+    BigDecimal tradeFrequency = tradeFrequency(tradeCount, totalBars, curveInterval);
     BigDecimal turnover = turnover(trades, initialEquity);
 
     ObjectNode full = objectMapper.createObjectNode();
@@ -244,16 +254,20 @@ public final class MetricsCalculator {
 
   /**
    * Trade frequency in trades per trading SESSION: {@code tradeCount / sessions}, where {@code
-   * sessions = totalBars / barsPerSession(interval)}. A {@code 1d} run reads trades/day
-   * (barsPerSession == 1); a {@code 1m} run reads trades/session (375 1m bars == one session); a
-   * {@code 3m} run reads trades over 125 bars/session (375 trading minutes / 3). Deterministic (pure
-   * function of tradeCount, totalBars, interval); {@code 0} on an empty window (no bars).
+   * sessions = totalBars / barsPerSession(curveInterval)}. {@code totalBars} and the divisor share the
+   * equity curve's cadence, so the ratio is unit-consistent (chip task_8fb59761 — before this the
+   * runner passed a 1m-cadence {@code totalBars} but the divisor keyed the coarser PRIMARY timeframe,
+   * so a 3m-primary run divided a 1m count by 125 instead of 375 and understated the frequency ≈3×).
+   * The replay curve is 1m-spaced ({@code barsPerSession("1m") == 375}), so this is trades-per-trading-
+   * DAY, independent of the primary timeframe: a {@code 1d} curve reads trades/day (barsPerSession ==
+   * 1); a {@code 1m} curve reads trades/day (375 1m bars == one session). Deterministic (pure function
+   * of tradeCount, totalBars, curveInterval); {@code 0} on an empty window (no bars).
    */
-  private static BigDecimal tradeFrequency(int tradeCount, long totalBars, String interval) {
+  private static BigDecimal tradeFrequency(int tradeCount, long totalBars, String curveInterval) {
     if (totalBars == 0) {
       return BigDecimal.ZERO.setScale(SCALE);
     }
-    double sessions = totalBars / barsPerSession(interval);
+    double sessions = totalBars / barsPerSession(curveInterval);
     if (sessions <= 0) {
       return BigDecimal.ZERO.setScale(SCALE);
     }
@@ -261,12 +275,13 @@ public final class MetricsCalculator {
   }
 
   /**
-   * Primary bars per trading session (375 IST minutes). Derived from {@link #periodsPerYear} for
-   * every interval it enumerates (1m→375, 5m→75, 15m→25, 1h→6.25, 1d→1, 1w→52/252) — byte-identical
-   * to the prior inline {@code periodsPerYear(interval) / 252.0}. {@code 3m} was absent from {@code
-   * periodsPerYear} until chip task_c7132464: it silently fell to the {@code default 252}, collapsing
-   * barsPerSession to 1 ({@code tradeFrequency} read trades-per-BAR, ~125× the true per-session rate,
-   * #721 / chip task_547656bf) and annualizing 3m Sharpe/Sortino as if 3m bars were daily bars.
+   * Bars per trading session (375 IST minutes) at a given cadence. Derived from {@link
+   * #periodsPerYear} for every interval it enumerates (1m→375, 5m→75, 15m→25, 1h→6.25, 1d→1, 1w→52/252)
+   * — byte-identical to the prior inline {@code periodsPerYear(interval) / 252.0}. {@code 3m} was
+   * absent from {@code periodsPerYear} until chip task_c7132464: it silently fell to the {@code default
+   * 252}, collapsing barsPerSession to 1 and annualizing 3m Sharpe/Sortino as if 3m bars were daily
+   * bars. {@code tradeFrequency} calls this with the CURVE cadence (chip task_8fb59761), so in the
+   * replay engines it is always {@code barsPerSession("1m") == 375}.
    */
   private static double barsPerSession(String interval) {
     return periodsPerYear(interval) / 252.0;

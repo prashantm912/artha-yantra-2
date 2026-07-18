@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     ay — ArthaYantra 2.0 operator CLI (A.1.1). Project-scoped compose only;
@@ -11,7 +11,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('up', 'down', 'logs', 'status', 'backup', 'restore', 'reset-db', 'tag-images', 'help')]
+    [ValidateSet('up', 'down', 'logs', 'status', 'backup', 'restore', 'reset-db', 'tag-images', 'verify-deploy', 'help')]
     [string]$Verb = 'help',
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -28,15 +28,22 @@ $EnvFile     = Join-Path $RepoRoot '.env'
 # pollute live): derive the names from SPRING_PROFILES_ACTIVE and export them so
 # compose interpolates ${ARTHA_DB_NAME}/${ARTHA_REDIS_DB} consistently across
 # every service + the db-create/flyway-init/backup containers.
-function Set-ProfileEnv {
+# Read SPRING_PROFILES_ACTIVE from .env and return it as a normalized token list.
+# Spring treats it as a comma-separated LIST ('mock,debug' still activates mock
+# beans), so callers classify by list membership, not exact match. Defaults to
+# ['mock'] when .env is absent (fresh checkout = mock, no secrets).
+function Get-ActiveProfileList {
     $activeProfile = 'mock'
     if (Test-Path $EnvFile) {
         $m = Select-String -Path $EnvFile -Pattern '^SPRING_PROFILES_ACTIVE=(.*)$'
         if ($m) { $activeProfile = $m.Matches[0].Groups[1].Value.Trim() }
     }
-    # Spring treats SPRING_PROFILES_ACTIVE as a comma-separated LIST ('mock,debug'
-    # still activates mock beans), so classify by list membership, not exact match.
-    $profileList = @($activeProfile -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    return @($activeProfile -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+function Set-ProfileEnv {
+    $profileList = Get-ActiveProfileList
+    $activeProfile = ($profileList -join ',')
     if (($profileList -contains 'mock') -and ($profileList -contains 'live')) {
         Write-Host "[ay] ERROR: SPRING_PROFILES_ACTIVE='$activeProfile' mixes mock and live - refusing"
         exit 1
@@ -78,6 +85,65 @@ function Invoke-ComposeAllowFail {
     $ErrorActionPreference = 'Continue'
     & docker compose -f $ComposeFile --env-file $EnvFile @ComposeArgs 2>&1 | ForEach-Object { "$_" }
     $ErrorActionPreference = $previousEap
+}
+
+# SEC-01: host-ACL regression guard. The owner tightened .env, deploy\secrets and
+# backups to owner+SYSTEM+Administrators only (2026-07-18). If a later change (a
+# fresh clone, an inheritance flip, a *CodexSandboxUsers grant) re-widens any of
+# them to a broad principal WITH write access, a low-privilege account could read
+# or tamper with the Kite token key / owner-password hash. Returns a list of
+# human-readable violation strings (empty = clean). Pure function -> unit-testable.
+function Get-SecretAclViolations {
+    param([string[]]$Paths)
+    $violations = @()
+    # Broad principals that must NEVER hold write/modify/full on a secret path
+    # (matched by resolved name AND well-known SID, in case the name won't resolve).
+    $forbiddenNames = @('NT AUTHORITY\Authenticated Users', 'BUILTIN\Users', 'Everyone')
+    $forbiddenSids  = @('S-1-5-11', 'S-1-5-32-545', 'S-1-1-0')
+    # ATOMIC dangerous rights ONLY (review R2): OR-ing in FullControl made the mask
+    # equal ALL filesystem rights, so a read-only ACE (ReadAndExecute, bare
+    # Synchronize) was flagged and a fresh clone hard-stopped live startup. Write is
+    # itself a small composite of the data-write bits (WriteData/AppendData/
+    # WriteAttributes/WriteExtendedAttributes); Delete/TakeOwnership/ChangePermissions
+    # are atomic. Composite grants (Modify, FullControl) still intersect these bits,
+    # so they are still caught — while pure-read ACEs share no bit with the mask.
+    $writeMask = [System.Security.AccessControl.FileSystemRights]::Write `
+        -bor [System.Security.AccessControl.FileSystemRights]::Delete `
+        -bor [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles `
+        -bor [System.Security.AccessControl.FileSystemRights]::TakeOwnership `
+        -bor [System.Security.AccessControl.FileSystemRights]::ChangePermissions
+    foreach ($p in $Paths) {
+        if (-not (Test-Path $p)) { continue }   # an absent path can hold no ACE
+        $acl = $null
+        try { $acl = Get-Acl -Path $p -ErrorAction Stop }
+        catch { $violations += "$p : could not read ACL ($($_.Exception.Message))"; continue }
+        foreach ($ace in $acl.Access) {
+            if ($ace.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+            $id = "$($ace.IdentityReference)"
+            $isForbidden = $false
+            foreach ($f in $forbiddenNames) { if ($id -ieq $f) { $isForbidden = $true } }
+            foreach ($s in $forbiddenSids)  { if ($id -ieq $s) { $isForbidden = $true } }
+            if ($id -match '(?i)CodexSandboxUsers') { $isForbidden = $true }
+            if (-not $isForbidden) { continue }
+            if (($ace.FileSystemRights -band $writeMask) -ne 0) {
+                $violations += "$p grants '$($ace.FileSystemRights)' to '$id' (inherited=$($ace.IsInherited))"
+            }
+        }
+    }
+    return $violations
+}
+
+# Run one SQL statement against the restored DB and return the first non-empty
+# data line, trimmed (psql -t -A). Empty string when the query yields NULL/nothing
+# or psql errored; the 4-lineage restore validation decides whether empty = failure.
+function Get-RestoreScalar {
+    param([string]$Db, [string]$Sql)
+    $out = Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$Db", '-t', '-A', '-c', "$Sql")
+    foreach ($line in @($out)) {
+        $s = "$line".Trim()
+        if ($s -ne '') { return $s }
+    }
+    return ''
 }
 
 function Initialize-LocalConfig {
@@ -147,9 +213,30 @@ function Initialize-LocalConfig {
     }
 }
 
+# Dot-sourcing (`. .\ay.ps1`) loads the functions above for unit tests WITHOUT
+# running a verb; a normal `-File` / `& .\ay.ps1 <verb>` invocation executes it.
+if ($MyInvocation.InvocationName -ne '.') {
 switch ($Verb) {
     'up' {
         Initialize-LocalConfig
+        # SEC-01: fail-closed secret-ACL regression guard. Broad-principal write access
+        # to .env / deploy\secrets / backups is a hard stop on live, a warning on mock
+        # (mock holds no real secrets). Runs AFTER Initialize-LocalConfig so .env +
+        # deploy\secrets exist; absent paths (e.g. a not-yet-created backups/) are skipped.
+        $profileList = Get-ActiveProfileList
+        $isMockProfile = ($profileList -contains 'mock')
+        $secretPaths = @($EnvFile, (Join-Path $RepoRoot 'deploy\secrets'), (Join-Path $RepoRoot 'backups'))
+        $aclViolations = Get-SecretAclViolations -Paths $secretPaths
+        if ($aclViolations.Count -gt 0) {
+            Write-Host '[ay] SEC-01: secret-path ACL(s) grant WRITE access to a broad principal:'
+            foreach ($v in $aclViolations) { Write-Host "[ay]   - $v" }
+            if ($isMockProfile) {
+                Write-Host '[ay] SEC-01: WARN (mock profile) - tighten these to owner+SYSTEM+Administrators; continuing.'
+            } else {
+                Write-Host '[ay] SEC-01: FAIL (live profile) - refusing to start. Remove the broad grant (or re-disable inheritance) then retry.'
+                exit 1
+            }
+        }
         $composeArgs = @()
         foreach ($p in $Rest) {
             if ($p -eq 'dev-tools' -or $p -eq 'openalgo') { $composeArgs += @('--profile', $p) }
@@ -197,9 +284,12 @@ switch ($Verb) {
         # 1) stop the stack, bring up ONLY the DB server (no app connections to drop)
         Invoke-Compose @('--profile', 'dev-tools', '--profile', 'openalgo', 'down')
         Invoke-Compose @('up', '-d', '--wait', 'timescaledb')
-        # 2) recreate the target database empty
+        # 2) recreate the target database GENUINELY empty: -T template0 (review R1c —
+        #    createdb defaults to template1, which can carry site-local objects; the
+        #    benign-error anchors below assume nothing pre-exists but the extension +
+        #    template0's public schema).
         Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'dropdb', '-U', 'artha', '--if-exists', "$db")
-        Invoke-Compose         @('exec', '-T', 'timescaledb', 'createdb', '-U', 'artha', "$db")
+        Invoke-Compose         @('exec', '-T', 'timescaledb', 'createdb', '-U', 'artha', '-T', 'template0', "$db")
         # 3) cluster globals (roles + grants) — restored into 'postgres'; a CREATE ROLE that
         #    already exists (e.g. the bootstrap 'artha' superuser) is a tolerated no-op.
         if (Test-Path $globals) {
@@ -212,27 +302,107 @@ switch ($Verb) {
         Invoke-Compose         @('cp', "$dump", 'timescaledb:/tmp/ay-restore.dump')
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'CREATE EXTENSION IF NOT EXISTS timescaledb')
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'SELECT timescaledb_pre_restore()')
-        # pg_restore returns non-zero if ANY statement errored (benign grants to a missing role,
-        # etc.) — tolerated here; correctness is asserted by the row count printed below.
-        Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'pg_restore', '-U', 'artha', '-d', "$db", '--no-owner', '/tmp/ay-restore.dump')
+        # OPS-R01: pg_restore failure is FATAL (scanned, not blindly tolerated). It exits
+        # non-zero if ANY statement errored; the ONLY tolerated errors are the anchored
+        # benign patterns below, and a non-zero exit that produced NO benign-classified
+        # error line is fatal too (review R1a: a crash / connection loss / unknown error
+        # shape must never pass). PostgreSQL keeps restoring data after a failed CREATE,
+        # so a partial restore can look complete — this classification gate is the real
+        # defense; the manifest below is the backstop.
+        $restoreOut  = Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'pg_restore', '-U', 'artha', '-d', "$db", '--no-owner', '/tmp/ay-restore.dump')
+        $restoreExit = $LASTEXITCODE
+        # Benign-error allowlist — ANCHORED to the exact objects that pre-exist in the
+        # template0-cloned target (review R1b: a bare 'already exists' could suppress a
+        # collision on a USER object). Only the timescaledb extension (pre-created above)
+        # and template0's public schema exist before pg_restore runs; 'must be owner of
+        # extension timescaledb' is the --no-owner COMMENT ON EXTENSION artifact.
+        $benignPatterns = @(
+            'extension "timescaledb" already exists',
+            'schema "public" already exists',
+            'must be owner of extension timescaledb'
+        )
+        $benignHits = 0
+        $summaryN = -1   # pg_restore's terminal 'errors ignored on restore: N' count (-1 = summary absent)
+        $fatalLines = @()
+        foreach ($line in @($restoreOut)) {
+            $t = "$line"
+            if ($t -match '(?i)warning:\s*errors ignored on restore:\s*(\d+)') { $summaryN = [int]$Matches[1]; continue }
+            if ($t -notmatch '(?i)pg_restore:\s*error:' -and $t -notmatch '(?i)^\s*error:') { continue }
+            $isBenign = $false
+            foreach ($b in $benignPatterns) { if ($t -match [regex]::Escape($b)) { $isBenign = $true } }
+            if ($isBenign) { $benignHits++ } else { $fatalLines += $t }
+        }
+        if ($fatalLines.Count -gt 0) {
+            Write-Host "[ay] RESTORE FAILED: pg_restore reported $($fatalLines.Count) non-benign error(s) (exit=$restoreExit). Stack NOT restarted:"
+            foreach ($fl in $fatalLines) { Write-Host "[ay]   $fl" }
+            exit 1
+        }
+        # Review round 3: tolerate a non-zero exit ONLY when pg_restore terminated
+        # NORMALLY and self-accounts for every error. PG17 pg_restore.c prints
+        # 'pg_restore: warning: errors ignored on restore: N' iff n_errors>0, then
+        # exits 1 — so a run killed AFTER a benign error line (SIGKILL 137, docker
+        # disconnect) has NO summary and must never pass as tolerated, and a summary
+        # count above our benign-classified count means unaccounted errors.
+        if ($restoreExit -ne 0) {
+            if ($summaryN -lt 0) {
+                Write-Host "[ay] RESTORE FAILED: pg_restore exit=$restoreExit WITHOUT its terminal 'errors ignored on restore' summary - abnormal termination (killed, connection lost, partial run). Stack NOT restarted."
+                exit 1
+            }
+            if ($summaryN -ne $benignHits) {
+                Write-Host "[ay] RESTORE FAILED: pg_restore summary reports $summaryN ignored error(s) but only $benignHits classified benign - unaccounted error(s). Stack NOT restarted."
+                exit 1
+            }
+            Write-Host "[ay] note: pg_restore exit=$restoreExit; all $benignHits error(s) matched the anchored benign allowlist and the terminal summary is consistent."
+        }
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'SELECT timescaledb_post_restore()')
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'ANALYZE')
         Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'rm', '-f', '/tmp/ay-restore.dump', '/tmp/ay-globals.sql')
         Write-Host "[ay] restored row counts (sanity):"
         Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c',
             "SELECT 'candles' t, count(*) FROM marketdata.candles UNION ALL SELECT 'oi_snapshots', count(*) FROM marketdata.options_chain_snapshots UNION ALL SELECT 'signals', count(*) FROM strategy.signals")
-        # Hard gate, not an eyeball check: Timescale hypertable rows live in _timescaledb_internal,
-        # so a bad dump pg_restores "successfully" with 0 rows (the #395 class).
-        $candleCountRaw = Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-t', '-A', '-c', 'SELECT count(*) FROM marketdata.candles')
-        $candleCount = 0; $parsed = ($candleCountRaw | Where-Object { $_ -match '^\s*\d+\s*$' } | Select-Object -First 1)
-        if ($parsed) { $candleCount = [long]$parsed.Trim() }
-        if ($candleCount -le 0) {
-            Write-Host "[ay] RESTORE FAILED: marketdata.candles is EMPTY after restore (the #395 silent-hypertable-loss class). Stack NOT restarted."
+        # OPS-R01: 4-lineage post-restore validation manifest. The old gate was
+        # marketdata.candles>0 ALONE, so a dump missing strategy/backtest/roles/grants
+        # restored "successfully". Probe a key relation in EACH Flyway lineage
+        # (admin/marketdata/strategy/backtest), the three service roles, and the ONE
+        # cross-schema grant. Any miss = hard fail, stack left DOWN.
+        $problems = @()
+        # (a) a key relation exists in each lineage (to_regclass -> NULL/empty when absent).
+        #     Each lineage's flyway_schema_history is the universal per-lineage witness.
+        $regclassProbes = @(
+            'admin.flyway_schema_history',
+            'marketdata.flyway_schema_history', 'marketdata.candles', 'marketdata.instruments', 'marketdata.options_chain_snapshots',
+            'strategy.flyway_schema_history', 'strategy.signals',
+            'backtest.flyway_schema_history', 'backtest.backtest_runs', 'backtest.jobs'
+        )
+        foreach ($obj in $regclassProbes) {
+            $r = Get-RestoreScalar -Db $db -Sql "SELECT to_regclass('$obj')"
+            if ($r -eq '') { $problems += "missing relation: $obj" }
+        }
+        # (b) hypertable row-count sanity (#395 silent-hypertable-loss class): candle rows
+        #     live in _timescaledb_internal, so a bad dump restores the empty shell cleanly.
+        $candleCount = 0
+        $ccRaw = Get-RestoreScalar -Db $db -Sql 'SELECT count(*) FROM marketdata.candles'
+        if ($ccRaw -match '^\d+$') { $candleCount = [long]$ccRaw }
+        if ($candleCount -le 0) { $problems += 'marketdata.candles is EMPTY (the #395 silent-hypertable-loss class)' }
+        # (c) the three service roles (cluster globals) restored.
+        $roleCount = Get-RestoreScalar -Db $db -Sql "SELECT count(*) FROM pg_roles WHERE rolname IN ('ay_marketdata','ay_strategy','ay_backtest')"
+        if ($roleCount -ne '3') { $problems += "service roles incomplete: expected 3 of ay_marketdata/ay_strategy/ay_backtest, found '$roleCount'" }
+        # (d) the ONE cross-schema grant (CD-1: ay_backtest SELECTs marketdata). Per-object
+        #     ACLs ride the whole-db dump (NOT globals), so a SELECT AS ay_backtest proves the
+        #     dump's grants restored; a permission-denied means the grant was lost.
+        $grantOut  = Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', 'SET ROLE ay_backtest; SELECT count(*) FROM marketdata.instruments; RESET ROLE')
+        $grantText = (@($grantOut) -join "`n")
+        if ($grantText -match '(?i)permission denied' -or $grantText -match '(?i)ERROR:') {
+            $problems += "cross-schema grant lost: ay_backtest cannot SELECT marketdata.instruments -> $grantText"
+        }
+        if ($problems.Count -gt 0) {
+            Write-Host "[ay] RESTORE FAILED: post-restore validation found $($problems.Count) problem(s). Stack NOT restarted:"
+            foreach ($pb in $problems) { Write-Host "[ay]   - $pb" }
             exit 1
         }
         # 5) bring the full stack back; flyway-init validates the restored history head -> no-op
         Invoke-Compose @('up', '-d', '--wait')
-        Write-Host "[ay] restore complete -> '$db' (marketdata.candles=$candleCount rows)"
+        Write-Host "[ay] restore complete -> '$db' (4 lineages + roles + cross-schema grant validated; marketdata.candles=$candleCount rows)"
     }
     'reset-db' {
         # down, drop volumes, re-up -> flyway-init rebuilds all schemas (D17)
@@ -309,4 +479,5 @@ ay - ArthaYantra operator CLI (project-scoped docker compose)
   ay verify-deploy          compare each running service's baked git sha to source HEAD (stale-jar guard)
 '@
     }
+}
 }

@@ -187,10 +187,15 @@ public class RegistryService {
     return response;
   }
 
-  /** POST /{id}/publish — one published version per strategy; full re-validation. */
+  /**
+   * POST /{id}/publish — one published version per strategy; full re-validation. Unconditional
+   * publish (all in-process callers + a plain owner publish) — byte-for-byte the pre-CAS behaviour.
+   * PF-01 round-6 #2: this method itself is {@code @Transactional} (the round-5 self-invocation of
+   * the annotated overload silently dropped the transaction — a self-call bypasses Spring's proxy).
+   * The inner call to the shared body runs within THIS transaction.
+   */
+  @Transactional
   public Map<String, Object> publish(UUID id, String targetVersion, String notes) {
-    // Unconditional publish (all in-process callers + a plain owner publish) — byte-for-byte the
-    // pre-CAS behaviour. The concurrency-safe compare-and-set path is the overload below.
     return publish(id, targetVersion, notes, false, null);
   }
 
@@ -258,6 +263,10 @@ public class RegistryService {
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("id", id);
     response.put("version", target.version());
+    // PF-01 round-6 #1: the EXACT version UUID that was published — the caller records THIS as the
+    // champion, never a subsequent unversioned `detail` read (which returns latestVersion and could
+    // be a concurrent promoter's draft).
+    response.put("versionId", target.id());
     response.put("status", "published");
     return response;
   }

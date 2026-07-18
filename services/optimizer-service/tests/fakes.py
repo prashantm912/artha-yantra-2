@@ -304,19 +304,27 @@ class FakeStrategy:
         cas: bool = False, expected_published_version_id: str | None = None,
     ) -> dict[str, Any]:
         self.publish_calls.append(
-            {"strategyId": strategy_id, "cas": cas, "expected": expected_published_version_id}
+            {"strategyId": strategy_id, "cas": cas, "expected": expected_published_version_id,
+             "targetVersion": target_version}
         )
         if self._publish_conflict:  # round-5 #1: a concurrent promoter won the registry CAS
             request = httpx.Request("POST", f"http://x/api/v1/strategies/{strategy_id}/publish")
+            body = {"code": "CONFLICT_PUBLISHED_VERSION_CHANGED"}
             raise httpx.HTTPStatusError(
                 "409 conflict", request=request,
-                response=httpx.Response(409, request=request),
+                response=httpx.Response(409, json=body, request=request),
             )
         row = self._row(strategy_id)
         row["status"] = "published"
-        row["versionId"] = f"ver-{strategy_id}"
+        # round-6 #1: the published version UUID is SPECIFIC to the exact version published (mirrors
+        # RegistryService returning target.id()) — a version-specific `ver-{strategy}-{semver}`.
+        version_id = (
+            f"ver-{strategy_id}-{target_version}" if target_version else f"ver-{strategy_id}"
+        )
+        row["versionId"] = version_id
         self.published.append(strategy_id)
-        return {"id": strategy_id, "version": row["version"], "status": "published"}
+        return {"id": strategy_id, "version": row["version"], "status": "published",
+                "versionId": version_id}
 
     def detail(self, strategy_id: str) -> dict[str, Any]:
         row = self._row(strategy_id)

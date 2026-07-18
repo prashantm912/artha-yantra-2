@@ -88,6 +88,8 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
     Map<String, Object> won = service.publish(id, "1.0.1", null, true, v0.toString());
     assertThat(won.get("status")).isEqualTo("published");
     UUID v1 = versionId(id, "1.0.1");
+    // round-6 #1: the publish response carries the EXACT published version UUID (not latestVersion).
+    assertThat(won.get("versionId")).isEqualTo(v1);
     assertThat(repository.findVersionById(v1).orElseThrow().status()).isEqualTo("published");
     assertThat(repository.findVersionById(v0).orElseThrow().status()).isEqualTo("archived");
 
@@ -108,6 +110,29 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
     Map<String, Object> won2 = service.publish(id, "1.0.2", null, true, v1.toString());
     assertThat(won2.get("status")).isEqualTo("published");
     assertThat(repository.findVersion(id, "1.0.2").orElseThrow().status()).isEqualTo("published");
+  }
+
+  @Test
+  void casPublishTargetsTheNamedVersionNotTheNewestDraft() {
+    // round-6 #1: two concurrent promoters each mint a DISTINCT draft (update always inserts a new
+    // version). A CAS-publishes ITS OWN version by name — the registry publishes THAT version, NOT
+    // the newest draft — so A can never publish B's draft nor record B's UUID as its champion.
+    // a distinct slug (the shared-DB IT harness needs a unique slug+name); use it CONSISTENTLY
+    // across create + both updates (the config id must stay the strategy's slug).
+    String base =
+        YAML.replace("id: pf01-cas-walk", "id: pf01-cas-named").replace("PF01 CAS Walk", "PF01 CAS Named");
+    UUID id = (UUID) service.create("PF01 CAS Named", "named IT", List.of("test"), base).get("id");
+    service.publish(id, null, null); // champion V0 = 1.0.0
+    UUID v0 = versionId(id, "1.0.0");
+    service.update(id, base.replace("period: 9", "period: 21"), null, "A"); // A → draft 1.0.1
+    service.update(id, base.replace("period: 9", "period: 22"), null, "B"); // B → draft 1.0.2 (newest)
+
+    // A CAS-publishes ITS version 1.0.1 (NOT the newest 1.0.2).
+    Map<String, Object> won = service.publish(id, "1.0.1", null, true, v0.toString());
+    assertThat(won.get("version")).isEqualTo("1.0.1");
+    assertThat(won.get("versionId")).isEqualTo(versionId(id, "1.0.1")); // A's exact version, not B's
+    assertThat(repository.findVersion(id, "1.0.1").orElseThrow().status()).isEqualTo("published");
+    assertThat(repository.findVersion(id, "1.0.2").orElseThrow().status()).isEqualTo("draft"); // B untouched
   }
 
   @Test

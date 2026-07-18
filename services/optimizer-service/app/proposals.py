@@ -1456,25 +1456,44 @@ class ProposalService:
         follow-up). Any other registry fault surfaces as 502."""
         notes = f"evo PROMOTE — candidate {candidate['id']} (§8.2 champion move)"
         try:
-            self._strategy.create_draft(base_id, config, notes, created_by=created_by)
-            self._strategy.publish(
-                base_id, notes=notes, cas=True,
+            # round-6 #1: version-specific end-to-end. Capture the EXACT semver we just created and
+            # CAS-publish THAT version (never "publish the newest draft", which under a concurrent
+            # promote could be a sibling's draft); the champion is the EXACT published version UUID
+            # from the publish response, never a subsequent unversioned detail read (latestVersion).
+            created = self._strategy.create_draft(base_id, config, notes, created_by=created_by)
+            created_version = created.get("version")
+            published = self._strategy.publish(
+                base_id, target_version=created_version, notes=notes, cas=True,
                 expected_published_version_id=expected_published_version_id,
             )
-            detail = self._strategy.detail(base_id)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 409:
-                raise ApiError(
-                    409, "CHAMPION_CHANGED",
-                    "the base strategy's published version moved since this promote was validated "
-                    "(a concurrent promoter won the registry compare-and-set) — rejected before "
-                    "overwriting live state; reassess/regenerate against the current champion",
-                ) from exc
-            raise ApiError(
-                502, "REGISTRY_PROMOTE_FAILED",
-                f"registry rejected the champion move ({exc.response.status_code})",
-            ) from exc
-        return detail.get("versionId")
+            raise self._promote_registry_error(exc) from exc
+        return published.get("versionId")
+
+    @staticmethod
+    def _promote_registry_error(exc: httpx.HTTPStatusError) -> ApiError:
+        """Translate a registry HTTP fault on the promote publish. round-6 #4: ONLY a
+        CONFLICT_PUBLISHED_VERSION_CHANGED (the CAS lost — a concurrent promoter won) maps to
+        CHAMPION_CHANGED; every OTHER conflict (e.g. CONFLICT_NO_CONTENT_CHANGE on create_draft,
+        CONFLICT_NOT_A_DRAFT) surfaces AS ITSELF, never relabelled a champion race."""
+        code = None
+        try:
+            code = (exc.response.json() or {}).get("code")
+        except (ValueError, AttributeError):
+            pass
+        if exc.response.status_code == 409 and code == "CONFLICT_PUBLISHED_VERSION_CHANGED":
+            return ApiError(
+                409, "CHAMPION_CHANGED",
+                "the base strategy's published version moved since this promote was validated "
+                "(a concurrent promoter won the registry compare-and-set) — rejected before "
+                "overwriting live state; reassess/regenerate against the current champion",
+            )
+        if exc.response.status_code == 409 and code:
+            return ApiError(409, code, f"registry rejected the champion move: {code}")
+        return ApiError(
+            502, "REGISTRY_PROMOTE_FAILED",
+            f"registry rejected the champion move ({exc.response.status_code})",
+        )
 
     def _register_counterfactual(
         self,

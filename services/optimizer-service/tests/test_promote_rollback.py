@@ -481,11 +481,11 @@ def test_promote_execute_swing_moves_champion_and_retains_paper_counterfactual()
     assert body["counterfactual"]["mode"] == "retained-paper-clone"
     # the base got a new draft (the champion move) + a published counterfactual clone
     assert any(d["strategyId"] == _STRATEGY_ID for d in strategy.drafts)
-    assert body["championVersionId"] == f"ver-{_STRATEGY_ID}"
+    assert body["championVersionId"] == f"ver-{_STRATEGY_ID}-1.1.0"
     assert body["demotedChampionVersion"] == "1.0.0"
     # candidate PROMOTED + campaign champion moved
     assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "PROMOTED"
-    assert repo.campaigns[0]["championVersionId"] == f"ver-{_STRATEGY_ID}"
+    assert repo.campaigns[0]["championVersionId"] == f"ver-{_STRATEGY_ID}-1.1.0"
     # the candidate's now-redundant evo PAPER clone was archived (§8.2 archive semantics)
     assert strategy.archived == ["clone-old"]
     assert body["cloneArchive"] == {"archived": True, "clonedStrategyId": "clone-old"}
@@ -638,6 +638,44 @@ def test_promote_execute_registry_cas_conflict_rejects_before_side_effects():
     assert not any("evo-cf" in c["config"].get("id", "") for c in strategy.created)
     assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "TAKE_ELIGIBLE"
     assert repo.campaigns[0]["championVersionId"] is None
+
+
+def test_promote_registry_error_only_cas_maps_to_champion_changed():
+    # round-6 #4: only a CONFLICT_PUBLISHED_VERSION_CHANGED (the CAS lost) maps to CHAMPION_CHANGED;
+    # every OTHER registry 409 (NO_CONTENT_CHANGE on create_draft, NOT_A_DRAFT) surfaces AS ITSELF.
+    import httpx as _httpx
+
+    from app.proposals import ProposalService
+
+    def err(status, code):
+        req = _httpx.Request("POST", "http://x")
+        resp = _httpx.Response(status, json={"code": code} if code else {}, request=req)
+        return _httpx.HTTPStatusError("e", request=req, response=resp)
+
+    cas = ProposalService._promote_registry_error(err(409, "CONFLICT_PUBLISHED_VERSION_CHANGED"))
+    assert cas.status == 409 and cas.code == "CHAMPION_CHANGED"
+    ncc = ProposalService._promote_registry_error(err(409, "CONFLICT_NO_CONTENT_CHANGE"))
+    assert ncc.status == 409 and ncc.code == "CONFLICT_NO_CONTENT_CHANGE"  # not relabelled
+    nad = ProposalService._promote_registry_error(err(409, "CONFLICT_NOT_A_DRAFT"))
+    assert nad.code == "CONFLICT_NOT_A_DRAFT"
+    other = ProposalService._promote_registry_error(err(502, None))
+    assert other.status == 502 and other.code == "REGISTRY_PROMOTE_FAILED"
+
+
+def test_promote_execute_publishes_the_version_it_created_not_newest_draft():
+    # round-6 #1: the promote publishes the EXACT version it created (target_version = the created
+    # semver) and records the EXACT published UUID from the publish response — never "newest draft"
+    # a subsequent unversioned detail read.
+    repo, strategy = FakeEvoRepo(), FakeStrategy(_CONFIG)
+    pid = _promote_seed(repo, policy="SIM_FIRST")
+    client = _exec_app(repo, strategy)
+    body = client.post(f"/api/v1/evolution/proposals/{pid}/execute").json()
+    # publish was version-specific (target_version = the created draft semver "1.1.0") + a CAS
+    pub = strategy.publish_calls[0]
+    assert pub["cas"] is True and pub["targetVersion"] == "1.1.0"
+    # the champion is the EXACT published version UUID (version-specific), from the publish response
+    assert body["championVersionId"] == f"ver-{_STRATEGY_ID}-1.1.0"
+    assert repo.campaigns[0]["championVersionId"] == f"ver-{_STRATEGY_ID}-1.1.0"
 
 
 def test_promote_execute_revalidates_and_blocks_degraded_candidate():

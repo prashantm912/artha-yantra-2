@@ -891,14 +891,18 @@ def _decide_selection(
                     f"dominated: RobustScore rank {rank}/{rankable_count} beyond top-{top_k}"
                 )
         elif readiness.get("staleSignature"):
-            # §1.3: the stale-signature side is RE-QUEUED, never retired — keep its state (typically
-            # SCORED) so it is re-evaluated under the current epoch; retiring it would discard
-            # otherwise-comparable evidence for a data-epoch artifact.
-            state = cand.get("state")
+            # §1.3: the stale-signature side is RE-QUEUED, never retired. round-6 #3: park it in the
+            # durable REQUEUED state (NOT a cosmetic SCORED label) — REQUEUED is EXCLUDED from
+            # re-selection as-is (_SELECTABLE_STATES), so repeating selection never re-processes the
+            # same stale evidence. An external scheduler resubmits a REQUEUED candidate's run under
+            # the authoritative epoch and flips it back to SCORED with fresh evidence (the actual
+            # re-run is that separate orchestration mechanism, not selection).
+            state = "REQUEUED"
             decision = "REQUEUED"
             reason = (
                 "re-queued: stale signature (a different engine SHA / data epoch than the cohort's "
-                "dominant one) — not comparable this generation; re-run under the epoch (§1.3)"
+                "dominant one) — not comparable this generation; parked in REQUEUED (excluded from "
+                "re-selection) pending an external re-run under the current epoch (§1.3)"
             )
         else:
             state = "RETIRED"

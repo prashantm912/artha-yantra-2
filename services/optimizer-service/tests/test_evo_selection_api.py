@@ -127,10 +127,31 @@ def test_stale_signature_candidate_is_requeued_not_retired():
     assert body["survivors"] == 1 and body["retired"] == 0   # the stale one is NOT retired
     cands = _cands_by_id(client)
     assert cands["c-ok"]["state"] == "SURVIVOR"
-    assert cands["c-stale"]["state"] == "SCORED"             # kept for re-queue under current epoch
+    assert cands["c-stale"]["state"] == "REQUEUED"           # durable state, not a cosmetic label
     stale_sel = cands["c-stale"]["scorecard"]["selection"]
     assert stale_sel["decision"] == "REQUEUED"
     assert "re-queued" in stale_sel["reason"] and "stale signature" in stale_sel["reason"]
+
+
+def test_requeued_candidate_is_excluded_from_re_selection():
+    # round-6 #3: a REQUEUED candidate is a DURABLE status EXCLUDED from re-selection — a second
+    # select does NOT re-process it (it stays parked until an external re-run flips it to SCORED).
+    repo = FakeEvoRepo(
+        campaigns=[_campaign()],
+        generations={_CAMPAIGN_ID: [_gen()]},
+        candidates={_CAMPAIGN_ID: [
+            _cand("c-ok", robust=2.0, trial=0),
+            _cand("c-stale", robust=9.9, ready=False, stale=True, trial=1),
+        ]},
+    )
+    client = _client(repo)
+    _select(client, top_k=1).json()
+    # the second select sees c-stale as REQUEUED → it is NOT in the selectable set (no re-process)
+    body2 = _select(client, top_k=1).json()
+    cands = _cands_by_id(client)
+    assert cands["c-stale"]["state"] == "REQUEUED"   # still parked, never retired/re-scored as-is
+    # c-stale is not counted among the second pass's selectable decisions (survivors/retired)
+    assert body2["retired"] == 0
 
 
 def test_gate_fail_candidate_retires_and_is_out_of_the_ranking_cohort():

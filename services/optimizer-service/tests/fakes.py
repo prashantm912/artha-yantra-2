@@ -231,6 +231,10 @@ class FakeStrategy:
         # registry compare-and-set). Records the CAS args on ``publish_calls`` for assertions.
         self._publish_conflict = publish_conflict
         self.publish_calls: list[dict[str, Any]] = []
+        # round-7 #1: the LIVE published-version pointer per strategy — models the registry
+        # compare-and-set. A base strategy's pointer is its ``champ-`` version; a created draft has
+        # none until published. ``publish(cas=True)`` fails when the expected != current.
+        self._published_version: dict[str, str | None] = {}
         self.created: list[dict[str, Any]] = []
         self.published: list[str] = []
         # slice-3 PROMOTE / ROLLBACK surface: counterfactuals + rollbacks + archived clone ids.
@@ -253,6 +257,8 @@ class FakeStrategy:
                 "config": self._config,
             }
             self._registry[strategy_id] = row
+            # a lazily-materialized BASE strategy is already published on its champion.
+            self._published_version.setdefault(strategy_id, f"champ-{strategy_id}")
         return row
 
     def version_config(self, strategy_id: str, version: str) -> dict[str, Any]:
@@ -307,14 +313,13 @@ class FakeStrategy:
             {"strategyId": strategy_id, "cas": cas, "expected": expected_published_version_id,
              "targetVersion": target_version}
         )
-        if self._publish_conflict:  # round-5 #1: a concurrent promoter won the registry CAS
-            request = httpx.Request("POST", f"http://x/api/v1/strategies/{strategy_id}/publish")
-            body = {"code": "CONFLICT_PUBLISHED_VERSION_CHANGED"}
-            raise httpx.HTTPStatusError(
-                "409 conflict", request=request,
-                response=httpx.Response(409, json=body, request=request),
-            )
-        row = self._row(strategy_id)
+        row = self._row(strategy_id)   # materializes a base + its published pointer
+        if self._publish_conflict:  # blanket: simulate a concurrent promoter winning the CAS
+            raise self._publish_409(strategy_id)
+        # round-7 #1: model the registry published-version compare-and-set — the publish fails when
+        # the caller's expected pointer no longer matches the current LIVE published version.
+        if cas and expected_published_version_id != self._published_version.get(strategy_id):
+            raise self._publish_409(strategy_id)
         row["status"] = "published"
         # round-6 #1: the published version UUID is SPECIFIC to the exact version published (mirrors
         # RegistryService returning target.id()) — a version-specific `ver-{strategy}-{semver}`.
@@ -322,9 +327,19 @@ class FakeStrategy:
             f"ver-{strategy_id}-{target_version}" if target_version else f"ver-{strategy_id}"
         )
         row["versionId"] = version_id
+        self._published_version[strategy_id] = version_id   # the LIVE pointer moves
         self.published.append(strategy_id)
         return {"id": strategy_id, "version": row["version"], "status": "published",
                 "versionId": version_id}
+
+    @staticmethod
+    def _publish_409(strategy_id: str) -> httpx.HTTPStatusError:
+        request = httpx.Request("POST", f"http://x/api/v1/strategies/{strategy_id}/publish")
+        body = {"code": "CONFLICT_PUBLISHED_VERSION_CHANGED"}
+        return httpx.HTTPStatusError(
+            "409 conflict", request=request,
+            response=httpx.Response(409, json=body, request=request),
+        )
 
     def detail(self, strategy_id: str) -> dict[str, Any]:
         row = self._row(strategy_id)
@@ -332,6 +347,7 @@ class FakeStrategy:
             "id": strategy_id, "versionId": row["versionId"], "version": row["version"],
             "status": row["status"], "slug": row["slug"], "name": row["name"],
             "tags": row["tags"], "config": row.get("config"),
+            "publishedVersionId": self._published_version.get(strategy_id),
         }
 
     def list_strategies(

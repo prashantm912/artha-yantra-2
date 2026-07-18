@@ -640,6 +640,76 @@ def test_promote_execute_registry_cas_conflict_rejects_before_side_effects():
     assert repo.campaigns[0]["championVersionId"] is None
 
 
+def test_registry_cas_catches_promote_after_sibling_published_pre_stamp():
+    # round-7 #1 (THE critical race, closed): a sibling promoter already moved the LIVE registry
+    # pointer but hasn't yet stamped optimizer state — so THIS promote's OPTIMIZER guard passes
+    # (campaign champion still None). The fix makes the registry CAS compare against the champion
+    # captured at DECISION time (not a fresh re-read that would "catch up" to the sibling's new
+    # pointer), so the loser FAILS the registry CAS → 409 CHAMPION_CHANGED BEFORE any
+    # counterfactual/archive side effect. Exactly one promoter owns the live pointer.
+    repo, strategy = FakeEvoRepo(), FakeStrategy(_CONFIG)
+    u0 = f"champ-{_STRATEGY_ID}"                            # the live champion at decision time
+    pid = _promote_seed(repo, policy="SIM_FIRST")
+    prop = next(p for p in repo.proposals if p["id"] == pid)
+    prop["evidence"]["expectedBaseChampionVersionId"] = u0  # captured at assessment (immutable)
+    # a SIBLING already registry-published (pointer → V-sibling) but has NOT stamped the campaign
+    # (championVersionId still None → this promote's optimizer guard still passes).
+    strategy.publish(
+        _STRATEGY_ID, target_version="9.9.9", cas=True, expected_published_version_id=u0)
+    sibling_pointer = strategy.detail(_STRATEGY_ID)["publishedVersionId"]
+    assert sibling_pointer == f"ver-{_STRATEGY_ID}-9.9.9" and repo.campaigns[0][
+        "championVersionId"] is None  # sibling published but campaign not stamped (the race window)
+    client = _exec_app(repo, strategy)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 409 and resp.json()["code"] == "CHAMPION_CHANGED"
+    # the loser's registry CAS carried the DECISION-time champion U0 (not a fresh re-read)
+    assert strategy.publish_calls[-1]["expected"] == u0
+    # the loser overwrote NOTHING: live pointer still the sibling's; no counterfactual/archive;
+    # candidate not PROMOTED (stays TAKE_ELIGIBLE → re-assessed against the new champion later).
+    assert strategy.detail(_STRATEGY_ID)["publishedVersionId"] == sibling_pointer
+    assert strategy.shadow_variants == [] and strategy.archived == []
+    assert not any("evo-cf" in c["config"].get("id", "") for c in strategy.created)
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "TAKE_ELIGIBLE"
+    assert repo.campaigns[0]["championVersionId"] is None   # loser never stamped
+
+
+def test_second_promoter_rejected_after_champion_moved_pointer_equals_champion():
+    # round-7 #1 (the exactly-one-wins invariant): after a first promoter WON (the live pointer +
+    # the recorded campaign champion are BOTH V-A), a second promoter whose proposal was assessed
+    # against the OLD champion is rejected with NO side effects. The live pointer == the recorded
+    # champion (they never disagree — the losing config is never left live).
+    repo, strategy = FakeEvoRepo(), FakeStrategy(_CONFIG)
+    pid = _promote_seed(repo, policy="SIM_FIRST")
+    prop = next(p for p in repo.proposals if p["id"] == pid)
+    prop["evidence"]["championVersionId"] = "champ-old"        # B assessed against the old champion
+    prop["evidence"]["expectedBaseChampionVersionId"] = "champ-old"
+    # a first promoter A already WON: campaign champion + live registry pointer are both V-A.
+    repo.campaigns[0]["championVersionId"] = "ver-A"
+    strategy._published_version[_STRATEGY_ID] = "ver-A"
+    client = _exec_app(repo, strategy)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 409 and resp.json()["code"] == "CHAMPION_CHANGED"
+    # exactly one winner: live pointer == recorded campaign champion == V-A; loser did nothing
+    assert strategy.detail(_STRATEGY_ID)["publishedVersionId"] == "ver-A"
+    assert repo.campaigns[0]["championVersionId"] == "ver-A"
+    assert strategy.shadow_variants == [] and strategy.archived == []
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "TAKE_ELIGIBLE"
+
+
+def test_assess_take_eligible_captures_immutable_base_champion():
+    # round-7 #1: the PROMOTE proposal captures the base's LIVE published version at assessment (the
+    # immutable champion the execute CAS-publishes against) — so the CAS never uses a fresh re-read.
+    repo = FakeEvoRepo(campaigns=[_campaign()],
+                       candidates={_CAMPAIGN_ID: [_paper_candidate()]})
+    live = FakeLiveRepo(versions={"ver-clone": {"config": _CLONE_CONFIG}},
+                        trades={"ver-clone": _paper_book()})
+    client = _te_app(repo, live, _aligned_recon(FakeReconRepo()))
+    body = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/take-eligible").json()
+    assert body["eligible"] == 1
+    # the base strategy's live published version is stamped on the PROMOTE proposal evidence
+    assert body["items"][0]["evidence"]["expectedBaseChampionVersionId"] == f"champ-{_STRATEGY_ID}"
+
+
 def test_promote_registry_error_only_cas_maps_to_champion_changed():
     # round-6 #4: only a CONFLICT_PUBLISHED_VERSION_CHANGED (the CAS lost) maps to CHAMPION_CHANGED;
     # every OTHER registry 409 (NO_CONTENT_CHANGE on create_draft, NOT_A_DRAFT) surfaces AS ITSELF.

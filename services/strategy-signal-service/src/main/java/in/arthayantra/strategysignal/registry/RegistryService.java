@@ -493,6 +493,11 @@ public class RegistryService {
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("id", strategy.id());
     response.put("versionId", row.id());
+    // PF-01 round-7 #1: the LIVE published-version pointer (distinct from ``versionId``, which is the
+    // requested/latest version). The optimizer captures THIS as the immutable champion a promote is
+    // decided against, so its registry-CAS publish expects an unchanging value (never a fresh
+    // re-read that could catch up to a concurrent promoter's just-moved pointer).
+    response.put("publishedVersionId", strategy.publishedVersionId());
     response.put("slug", strategy.slug());
     response.put("name", strategy.name());
     response.put("description", strategy.description());

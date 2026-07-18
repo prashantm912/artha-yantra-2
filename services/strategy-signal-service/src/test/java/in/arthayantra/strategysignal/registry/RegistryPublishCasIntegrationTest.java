@@ -82,6 +82,9 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
     service.publish(id, null, null);
     UUID v0 = versionId(id, "1.0.0");
     assertThat(repository.findVersionById(v0).orElseThrow().status()).isEqualTo("published");
+    // round-7 #1: detail exposes the LIVE published pointer (the optimizer captures it as the
+    // immutable champion its promote CAS-publishes against).
+    assertThat(service.detail(id, null).get("publishedVersionId")).isEqualTo(v0);
 
     // a CAS publish of 1.0.1 against the CURRENT champion V0 WINS — the pointer moves to V1.
     service.update(id, withPeriod(11), null, "tune");

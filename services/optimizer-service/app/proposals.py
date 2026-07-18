@@ -415,6 +415,7 @@ def _take_eligible_assessment(
     config: dict[str, Any] | None,
     campaign: dict[str, Any],
     champion_score: float | None,
+    expected_base_champion: str | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Apply the §8.2 TAKE_ELIGIBLE bar over the evo clone's paper book, PER evidencePolicy (audit
     PF-01 findings #1/#3). The F7 quant gates (≥20 closed trades + PF ≥ 1.3 + expectancy > 0 + maxDD
@@ -540,6 +541,11 @@ def _take_eligible_assessment(
         "gates": gates,
         "robustScore": sim_robust,
         "championVersionId": campaign.get("championVersionId"),
+        # round-7 #1: the base strategy's LIVE published version at DECISION time — the IMMUTABLE
+        # champion this promote is validated against. Execute CAS-publishes against THIS exact UUID
+        # (never a fresh re-read), so a sibling that promoted since makes the registry CAS fail and
+        # this promote is refused BEFORE any counterfactual/archive/stamp side effect.
+        "expectedBaseChampionVersionId": expected_base_champion,
         "championRobustScore": champion_score,
         "liveGap": (
             {"verdict": recon.get("verdict"), "gapZ": recon.get("gapZ")} if recon else None
@@ -792,6 +798,19 @@ class ProposalService:
 
     # --- E4 slice 3: TAKE_ELIGIBLE / ROLLBACK assessment (§8.1-8.2 / §12 item 13) ---------------
 
+    def _base_published_version(self, campaign: dict[str, Any]) -> str | None:
+        """round-7 #1: the campaign's base strategy's CURRENT live published version (its registry
+        ``published_version_id``) — the immutable champion a PROMOTE decided now is validated
+        against. None when the base is unresolvable, the registry client is not wired, or the read
+        faults (execute then falls back to a fresh read — the pre-round-7 behaviour)."""
+        base_id = campaign.get("strategyId")
+        if not base_id or self._strategy is None:
+            return None
+        try:
+            return self._strategy.detail(str(base_id)).get("publishedVersionId")
+        except httpx.HTTPError:
+            return None
+
     def assess_take_eligible(self, campaign_id: str) -> AssessmentResponse:
         """Assess the campaign's PAPER (and already-TAKE_ELIGIBLE) candidates against the §8.2
         TAKE_ELIGIBLE bar over each evo clone's live paper book, advancing the eligible ones to
@@ -814,6 +833,9 @@ class ProposalService:
             repo.close()
 
         champion_score = _champion_score(candidates, campaign.get("championVersionId"))
+        # round-7 #1: capture the base strategy's LIVE published version NOW (decision time) — the
+        # immutable champion each PROMOTE proposal is validated against + will CAS-publish against.
+        expected_base_champion = self._base_published_version(campaign)
         assessable = [c for c in candidates if c.get("state") in ("PAPER", "TAKE_ELIGIBLE")]
         evidence_by_id = self._read_paper_evidence(assessable)
 
@@ -822,7 +844,7 @@ class ProposalService:
             ev = evidence_by_id.get(cand["id"]) or {}
             ok, card = _take_eligible_assessment(
                 cand, ev.get("trades") or [], ev.get("recon"), ev.get("config"),
-                campaign, champion_score,
+                campaign, champion_score, expected_base_champion,
             )
             if ok:
                 eligible.append((cand, card))
@@ -1383,12 +1405,22 @@ class ProposalService:
             ) from exc
 
         created_by = f"evo:{campaign.get('family')}"
-        # PF-01 round-5 #1: the registry publish is a compare-and-set on the demoted champion — the
-        # LIVE pointer moves ONLY if it is still ``demoted_version_id`` (what this promote validated
-        # against). A concurrent promoter that moved it first makes this 409 CHAMPION_CHANGED BEFORE
-        # the counterfactual / clone side effects below.
+        # PF-01 round-7 #1: the registry publish is a compare-and-set on the champion captured at
+        # DECISION time (``expectedBaseChampionVersionId`` on the proposal), NOT the fresh re-read
+        # ``demoted_version_id`` above. A fresh read lets a LOSING promoter "catch up" to a
+        # just-published pointer and stack V2 on top of V1 (the sibling published but hadn't yet
+        # stamped optimizer state, so this call's V0 optimizer guard still passed). Using the
+        # immutable decision-time champion makes the registry CAS FAIL for the loser → 409
+        # CHAMPION_CHANGED BEFORE any counterfactual/archive/stamp side effect → the loser requeues.
+        # Pre-round-7 proposals (no captured field) fall back to the fresh read.
+        evidence = ctx["proposal"].get("evidence") or {}
+        expected_champion = (
+            evidence["expectedBaseChampionVersionId"]
+            if "expectedBaseChampionVersionId" in evidence
+            else demoted_version_id
+        )
         new_champion_version_id = self._publish_onto_base(
-            base_id, promoted_config, candidate, created_by, demoted_version_id
+            base_id, promoted_config, candidate, created_by, expected_champion
         )
         # Champion has moved; register the demoted-champion counterfactual (fail-loud: a failure
         # surfaces 502 so the owner knows the counterfactual did NOT register — see open-doubts on

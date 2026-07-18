@@ -125,7 +125,7 @@ public class DotHealthCanary {
   }
 
   /** The 5-min alerting sweep; only REQUIRED dots page, once per day per transition. */
-  @Scheduled(fixedDelay = 300_000, initialDelay = 180_000)
+  @Scheduled(fixedDelay = 300_000, initialDelay = 180_000, scheduler = "monitorTaskScheduler")
   public void sweep() {
     try {
       ZonedDateTime now = clock.instant().atZone(Ist.ZONE);

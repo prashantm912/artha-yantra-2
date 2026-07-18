@@ -40,6 +40,17 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
   private volatile boolean running;
   private Thread normalizerThread;
 
+  // Serializes ALL feed-lifecycle transitions (start / startFeed / restartFeed / stop). Since the
+  // BEJ-01 scheduler split, FeedWatchdog.restartFeed() runs on the monitor thread while the morning
+  // start (TickerSchedule) and SmartLifecycle start/stop run on the default thread — pre-split they
+  // shared one scheduler thread and could never interleave. Without this lock a restart's
+  // stop()+startFeed() can interleave a concurrent start, overwriting normalizerThread and leaking a
+  // second, un-interruptible tick-normalizer thread — a silent violation of the single-writer
+  // guarantee. A dedicated ReentrantLock (NOT synchronized(this)) is used because restartFeed re-enters
+  // via stop()+startFeed(); no async/hot path (fanOut, the connection-state callback) ever takes it.
+  private final java.util.concurrent.locks.ReentrantLock lifecycleLock =
+      new java.util.concurrent.locks.ReentrantLock();
+
   public FeedPipeline(
       MarketFeed marketFeed,
       SessionGateway sessionGateway,
@@ -71,22 +82,27 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
 
   /** Explicit start (the Phase-16 09:10 ticker schedule) — bypasses the autostart gate. */
   public void startFeed() {
-    if (running) {
-      return;
+    lifecycleLock.lock();
+    try {
+      if (running) {
+        return;
+      }
+      running = true;
+      redis.opsForValue().set(SESSION_STATUS_KEY, sessionGateway.statusLabel());
+      // Seeded CONNECTING; the feed's connect/disconnect callbacks own the CONNECTED/DISCONNECTED
+      // transitions (an eager CONNECTED write here asserted a socket that a stale-token 403 never
+      // opened — the status surface lied all day exactly when it mattered).
+      redis.opsForValue().set(TICKER_STATUS_KEY, "CONNECTING");
+      marketFeed.onConnectionState(
+          connected -> writeTickerStatus(connected ? "CONNECTED" : "DISCONNECTED"));
+      normalizerThread = new Thread(this::normalizerLoop, "tick-normalizer");
+      normalizerThread.setDaemon(true);
+      normalizerThread.start();
+      marketFeed.start(ingressQueue);
+      log.info("feed pipeline started (status={})", sessionGateway.statusLabel());
+    } finally {
+      lifecycleLock.unlock();
     }
-    running = true;
-    redis.opsForValue().set(SESSION_STATUS_KEY, sessionGateway.statusLabel());
-    // Seeded CONNECTING; the feed's connect/disconnect callbacks own the CONNECTED/DISCONNECTED
-    // transitions (an eager CONNECTED write here asserted a socket that a stale-token 403 never
-    // opened — the status surface lied all day exactly when it mattered).
-    redis.opsForValue().set(TICKER_STATUS_KEY, "CONNECTING");
-    marketFeed.onConnectionState(
-        connected -> writeTickerStatus(connected ? "CONNECTED" : "DISCONNECTED"));
-    normalizerThread = new Thread(this::normalizerLoop, "tick-normalizer");
-    normalizerThread.setDaemon(true);
-    normalizerThread.start();
-    marketFeed.start(ingressQueue);
-    log.info("feed pipeline started (status={})", sessionGateway.statusLabel());
   }
 
   /** Explicit stop (the Phase-16 15:35 ticker schedule). */
@@ -101,12 +117,17 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
    */
   @Override
   public void restartFeed() {
-    if (!running) {
-      return;
+    lifecycleLock.lock();
+    try {
+      if (!running) {
+        return;
+      }
+      log.info("re-arming feed after session change");
+      stop();
+      startFeed();
+    } finally {
+      lifecycleLock.unlock();
     }
-    log.info("re-arming feed after session change");
-    stop();
-    startFeed();
   }
 
   private void normalizerLoop() {
@@ -160,15 +181,20 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
 
   @Override
   public void stop() {
-    running = false;
-    marketFeed.stop();
+    lifecycleLock.lock();
     try {
-      redis.opsForValue().set(TICKER_STATUS_KEY, "DISCONNECTED");
-    } catch (RuntimeException redisGone) {
-      log.debug("ticker status write skipped on shutdown: {}", redisGone.getMessage());
-    }
-    if (normalizerThread != null) {
-      normalizerThread.interrupt();
+      running = false;
+      marketFeed.stop();
+      try {
+        redis.opsForValue().set(TICKER_STATUS_KEY, "DISCONNECTED");
+      } catch (RuntimeException redisGone) {
+        log.debug("ticker status write skipped on shutdown: {}", redisGone.getMessage());
+      }
+      if (normalizerThread != null) {
+        normalizerThread.interrupt();
+      }
+    } finally {
+      lifecycleLock.unlock();
     }
   }
 

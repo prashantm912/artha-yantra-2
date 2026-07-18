@@ -206,12 +206,12 @@ public class SignalEngine {
   // scalper strategies cannot emit (fail-closed — a scalper without its confluence must not fire).
   private final java.util.Optional<ScalperConfluenceGate> scalperGate;
   // Live-only diagnostics: every scalper chart-entry the confluence gate blocked (why + margin).
-  private final SignalRejectionRepository rejections;
+  // Bounded ASYNC writer (+ the id-coupled shadow-book open) so a DB stall can never park the sole
+  // signal-eval thread (task_084d4d01, same #866 class as the risk-suppression writer below).
+  private final RejectionWriter rejectionWriter;
   // PF-03 live-only: every ENTRY the per-book risk governor vetoed (which rail + would-be leg).
   // Bounded ASYNC writer so a DB stall can never park the sole signal-eval thread (#866 class).
   private final RiskSuppressionWriter riskSuppressions;
-  // Shadow book: opens an eligible rejection as a virtual 1-lot position (signal-analysis §7.1/7.2).
-  private final ShadowBookService shadowBook;
 
   /**
    * The verdict of ONE entry evaluation at a primary bar close (chip task_37ee83e0).
@@ -409,16 +409,14 @@ public class SignalEngine {
       MeterRegistry meterRegistry,
       java.util.Optional<EmissionGuard> emissionGuard,
       java.util.Optional<ScalperConfluenceGate> scalperGate,
-      SignalRejectionRepository rejections,
+      RejectionWriter rejectionWriter,
       RiskSuppressionWriter riskSuppressions,
-      ShadowBookService shadowBook,
       org.springframework.transaction.PlatformTransactionManager transactionManager,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
     this.registry = registry;
     this.signals = signals;
-    this.rejections = rejections;
+    this.rejectionWriter = rejectionWriter;
     this.riskSuppressions = riskSuppressions;
-    this.shadowBook = shadowBook;
     this.publisher = publisher;
     this.events = events;
     this.seriesStore = seriesStore;
@@ -1744,10 +1742,13 @@ public class SignalEngine {
   }
 
   /**
-   * Persists the live-only rejection diagnostic (WHY the confluence gate blocked this scalper
+   * Records the live-only rejection diagnostic (WHY the confluence gate blocked this scalper
    * chart-entry) and logs the structured reason. LIVE path only — the deterministic replay never
-   * reaches the gate, so this is never invoked on backtest (no rows there → parity-safe). Diagnostics
-   * must never break the live signal path, so a persistence failure is swallowed with a warning.
+   * reaches the gate, so this is never invoked on backtest (no rows there → parity-safe). The persist
+   * (INSERT + the id-coupled shadow-book open) is ENQUEUED to the bounded async {@link RejectionWriter}
+   * so a DB stall can never park the sole {@code signal-eval} thread (task_084d4d01, #866 class): the
+   * enqueue is O(1) here and fail-soft inside the writer. The diagnostic JSON is built HERE (in-memory,
+   * off the DB round trip) but that is cheap CPU on already-loaded objects, not the stall exposure.
    */
   private void recordRejection(
       Loaded strategy, String exchange, String tradingsymbol, String interval, OffsetDateTime barTime,
@@ -1757,22 +1758,11 @@ public class SignalEngine {
       log.info("scalper confluence blocked entry: {} {}:{} (no diagnostic)", strategy.slug(), exchange, tradingsymbol);
       return;
     }
-    try {
-      long rejectionId =
-          rejections.insert(
-              strategy.versionId(), strategy.slug(), exchange, tradingsymbol, interval,
-              d.side() == null ? null : d.side().name(), d.blockingRail(), d.operand(), d.threshold(),
-              d.margin(), d.reason(), d.compositeScore(), d.compositeThreshold(),
-              rejectionDiagnosticJson(d), barTime);
-      // Shadow book (default-OFF): an eligible rejection opens as a virtual 1-lot position so the
-      // exit sweep labels it with a real PnL. maybeOpen never throws (diagnostics never break live).
-      shadowBook.maybeOpen(
-          rejectionId, strategy.versionId(), strategy.slug(), exchange, tradingsymbol, barTime, d);
-    } catch (RuntimeException e) {
-      log.warn(
-          "failed to persist scalper rejection {} {}:{}: {}",
-          strategy.slug(), exchange, tradingsymbol, e.toString());
-    }
+    rejectionWriter.record(
+        strategy.versionId(), strategy.slug(), exchange, tradingsymbol, interval,
+        d.side() == null ? null : d.side().name(), d.blockingRail(), d.operand(), d.threshold(),
+        d.margin(), d.reason(), d.compositeScore(), d.compositeThreshold(),
+        rejectionDiagnosticJson(d), barTime, d);
     log.info(
         "scalper confluence blocked entry: {} {}:{} rail={} operand={} threshold={} margin={} composite={}/{} ({})",
         strategy.slug(), exchange, tradingsymbol, d.blockingRail(), d.operand(), d.threshold(),

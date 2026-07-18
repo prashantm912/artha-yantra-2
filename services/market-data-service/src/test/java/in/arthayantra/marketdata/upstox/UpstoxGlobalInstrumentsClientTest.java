@@ -89,7 +89,8 @@ class UpstoxGlobalInstrumentsClientTest {
     return new UpstoxGlobalInstrumentsClient(
         RestClient.builder(),
         new ObjectMapper(),
-        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token", wireMock.baseUrl()));
+        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token", wireMock.baseUrl()),
+        new UpstoxRateLimiter());
   }
 
   @Test

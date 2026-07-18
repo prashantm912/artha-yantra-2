@@ -67,10 +67,12 @@ public final class UpstoxMarketStatusClient {
 
   private final RestClient restClient;
   private final UpstoxAnalyticsProperties properties;
-  private final UpstoxRateLimiter limiter = new UpstoxRateLimiter();
+  /** The token-scoped budget shared across every analytics-token client (EXT-02); live path (full cap). */
+  private final UpstoxRateLimiter limiter;
 
   /** Binds the wire client to the configured API base URL (real Upstox, or WireMock in tests). */
-  public UpstoxMarketStatusClient(RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
+  public UpstoxMarketStatusClient(
+      RestClient.Builder builder, UpstoxAnalyticsProperties properties, UpstoxRateLimiter limiter) {
     // Bounded timeouts so a throttled/dead Upstox call fails fast (the seam logs + degrades) rather
     // than parking the page.
     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -78,6 +80,7 @@ public final class UpstoxMarketStatusClient {
     factory.setReadTimeout(45_000);
     this.restClient = builder.baseUrl(properties.baseUrl()).requestFactory(factory).build();
     this.properties = properties;
+    this.limiter = limiter;
   }
 
   /**

@@ -11,6 +11,7 @@ import in.arthayantra.marketdata.upstox.canary.UpstoxContractCanary;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -30,6 +31,24 @@ import org.springframework.web.client.RestClient;
 @Profile("live")
 @EnableConfigurationProperties(UpstoxAnalyticsProperties.class)
 public class UpstoxAnalyticsConfig {
+
+  /**
+   * The ONE token-scoped Upstox rate budget (EXT-02) — a single bean shared by EVERY client on the
+   * analytics token (the expired-backfill walker AND the live option-chain / quote / margin / page
+   * clients), so the whole token draws from the ONE 2000/30min budget instead of each client
+   * fragmenting it with its own instance (or, for the live clients, running unmetered). Bound whenever
+   * ANY of those clients can bind — analytics enabled, OR the option-chain / quote source flipped to
+   * Upstox — so the injected dependency always exists; absent on the mock stack (non-live profile) and
+   * on a live stack with no Upstox consumer, so the B4 quota widget reports {@code configured=false}.
+   */
+  @Bean
+  @ConditionalOnExpression(
+      "'${artha.upstox.analytics.enabled:false}' == 'true' "
+          + "or '${artha.marketdata.source.optionchain:kite}' == 'upstox' "
+          + "or '${artha.marketdata.source.quotes:kite}' == 'upstox'")
+  public UpstoxRateLimiter upstoxRateLimiter() {
+    return new UpstoxRateLimiter();
+  }
 
   /** The hand-rolled Upstox analytics REST client (entitlement probe in U1; feeds U2+). */
   @Bean
@@ -59,8 +78,10 @@ public class UpstoxAnalyticsConfig {
   @Bean
   @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
   public UpstoxExpiredInstrumentsClient upstoxExpiredInstrumentsClient(
-      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
-    return new UpstoxExpiredInstrumentsClient(restClientBuilder, properties);
+      RestClient.Builder restClientBuilder,
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter upstoxRateLimiter) {
+    return new UpstoxExpiredInstrumentsClient(restClientBuilder, properties, upstoxRateLimiter);
   }
 
 
@@ -107,8 +128,10 @@ public class UpstoxAnalyticsConfig {
   public UpstoxGlobalInstrumentsClient upstoxGlobalInstrumentsClient(
       RestClient.Builder restClientBuilder,
       ObjectMapper objectMapper,
-      UpstoxAnalyticsProperties properties) {
-    return new UpstoxGlobalInstrumentsClient(restClientBuilder, objectMapper, properties);
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter upstoxRateLimiter) {
+    return new UpstoxGlobalInstrumentsClient(
+        restClientBuilder, objectMapper, properties, upstoxRateLimiter);
   }
 
   /**
@@ -122,8 +145,10 @@ public class UpstoxAnalyticsConfig {
   @Bean
   @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
   public UpstoxMarketStatusClient upstoxMarketStatusClient(
-      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
-    return new UpstoxMarketStatusClient(restClientBuilder, properties);
+      RestClient.Builder restClientBuilder,
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter upstoxRateLimiter) {
+    return new UpstoxMarketStatusClient(restClientBuilder, properties, upstoxRateLimiter);
   }
 
   /**
@@ -136,8 +161,10 @@ public class UpstoxAnalyticsConfig {
   @Bean
   @ConditionalOnProperty(name = "artha.marketdata.source.optionchain", havingValue = "upstox")
   public UpstoxOptionChainClient upstoxOptionChainClient(
-      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
-    return new UpstoxOptionChainClient(restClientBuilder, properties);
+      RestClient.Builder restClientBuilder,
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter upstoxRateLimiter) {
+    return new UpstoxOptionChainClient(restClientBuilder, properties, upstoxRateLimiter);
   }
 
   /**
@@ -176,8 +203,10 @@ public class UpstoxAnalyticsConfig {
   @Bean
   @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
   public UpstoxMarginClient upstoxMarginClient(
-      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
-    return new UpstoxMarginClient(restClientBuilder, properties);
+      RestClient.Builder restClientBuilder,
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter upstoxRateLimiter) {
+    return new UpstoxMarginClient(restClientBuilder, properties, upstoxRateLimiter);
   }
 
   /**

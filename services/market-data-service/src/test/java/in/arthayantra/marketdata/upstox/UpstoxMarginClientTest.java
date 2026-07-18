@@ -112,7 +112,8 @@ class UpstoxMarginClientTest {
   private static UpstoxMarginClient client() {
     return new UpstoxMarginClient(
         RestClient.builder(),
-        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"));
+        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"),
+        new UpstoxRateLimiter());
   }
 
   @Test

@@ -48,7 +48,8 @@ class UpstoxExpiredInstrumentsClientTest {
   private static UpstoxExpiredInstrumentsClient client() {
     return new UpstoxExpiredInstrumentsClient(
         RestClient.builder(),
-        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"));
+        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"),
+        new UpstoxRateLimiter());
   }
 
   @Test

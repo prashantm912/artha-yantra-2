@@ -65,7 +65,8 @@ public final class UpstoxGlobalInstrumentsClient {
   private final RestClient quoteClient;
   private final ObjectMapper mapper;
   private final UpstoxAnalyticsProperties properties;
-  private final UpstoxRateLimiter limiter = new UpstoxRateLimiter();
+  /** The token-scoped budget shared across every analytics-token client (EXT-02); live path (full cap). */
+  private final UpstoxRateLimiter limiter;
   private final String masterPath = "/market-quote/instruments/exchange/global.json.gz";
 
   private volatile List<UpstoxGlobalInstrument> master = List.of();
@@ -73,7 +74,10 @@ public final class UpstoxGlobalInstrumentsClient {
 
   /** Binds the master client to the assets CDN and the quote client to the API host (both configurable). */
   public UpstoxGlobalInstrumentsClient(
-      RestClient.Builder builder, ObjectMapper mapper, UpstoxAnalyticsProperties properties) {
+      RestClient.Builder builder,
+      ObjectMapper mapper,
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter limiter) {
     // Generous read timeout for the gzip master download, fail-fast connect — so a dead host never
     // parks the page (the service then returns an empty list / null prices, never a 500).
     SimpleClientHttpRequestFactory masterFactory = new SimpleClientHttpRequestFactory();
@@ -90,6 +94,7 @@ public final class UpstoxGlobalInstrumentsClient {
 
     this.mapper = mapper;
     this.properties = properties;
+    this.limiter = limiter;
   }
 
   /**

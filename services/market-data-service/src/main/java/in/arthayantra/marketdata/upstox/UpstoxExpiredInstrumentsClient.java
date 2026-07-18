@@ -37,12 +37,16 @@ public final class UpstoxExpiredInstrumentsClient {
 
   private final RestClient restClient;
   private final UpstoxAnalyticsProperties properties;
-  /** Pre-emptive sliding-window pacing (50/s, 500/min, 2000/30min) — the 30-min cap is the binding one. */
-  private final UpstoxRateLimiter limiter = new UpstoxRateLimiter();
+  /**
+   * The token-scoped budget shared across EVERY Upstox analytics-token client (EXT-02). This is the
+   * heavy backfill walker, so it draws from the BATCH ceiling ({@link UpstoxRateLimiter#acquireForBatch()})
+   * — it can never consume the headroom the live capture / quote / margin path reserves.
+   */
+  private final UpstoxRateLimiter limiter;
 
   /** Binds the wire client to the configured base URL (real Upstox, or WireMock in tests). */
   public UpstoxExpiredInstrumentsClient(
-      RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
+      RestClient.Builder builder, UpstoxAnalyticsProperties properties, UpstoxRateLimiter limiter) {
     // Bounded timeouts so a throttled/dead Upstox call fails fast (caught per-leg) rather than
     // parking a backfill worker forever at the run's barrier.
     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -50,9 +54,10 @@ public final class UpstoxExpiredInstrumentsClient {
     factory.setReadTimeout(45_000);
     this.restClient = builder.baseUrl(properties.baseUrl()).requestFactory(factory).build();
     this.properties = properties;
+    this.limiter = limiter;
   }
 
-  /** The shared sliding-window rate limiter — exposed read-only for the B4 quota widget. */
+  /** The shared token-scoped rate budget — exposed read-only for the B4 quota widget. */
   public UpstoxRateLimiter rateLimiter() {
     return limiter;
   }
@@ -245,7 +250,7 @@ public final class UpstoxExpiredInstrumentsClient {
   private <T> T withRetry(Supplier<T> call) {
     int attempt = 0;
     while (true) {
-      limiter.acquire(); // pre-emptive pacing so we never burst past the 2000/30min cap
+      limiter.acquireForBatch(); // batch pacing — leaves the token's live-reserved headroom untouched
       try {
         return call.get();
       } catch (HttpClientErrorException.TooManyRequests e) {

@@ -111,6 +111,11 @@ public final class UpstoxMarginClient {
   }
 
   private static MarginQuote aggregate(UpstoxMargin.Data data) {
+    // No per-leg breakdown at all (empty margins[]) for a non-empty basket request → we cannot assess
+    // SPAN, so pricing with span=0 would understate heat (finding-1 invariant). Treat as unpriced.
+    if (data.margins().isEmpty()) {
+      return MarginQuote.unpriced("Upstox returned no per-leg margins");
+    }
     BigDecimal span = BigDecimal.ZERO;
     BigDecimal exposure = BigDecimal.ZERO;
     BigDecimal equity = BigDecimal.ZERO;
@@ -118,26 +123,32 @@ public final class UpstoxMarginClient {
     BigDecimal additional = BigDecimal.ZERO;
     BigDecimal total = BigDecimal.ZERO;
     for (UpstoxMargin.Margin m : data.margins()) {
-      span = span.add(nz(m.spanMargin()));
+      // EXT-03 finding 1 — the RUNTIME guard for the ARMED F9 heat cap, which consumes span_margin.
+      // A LEGITIMATE long-only leg reports span_margin PRESENT = 0.0 (margin = premium only); a
+      // drift/rename of the field leaves it ABSENT → Jackson maps it to null. nz() would erase that
+      // distinction (both → 0), so a span-only rename would still price the basket with span=0 and
+      // silently defeat the cap (heat 0% < cap → never trips). So require span_margin PRESENT on
+      // EVERY returned leg: any null (absent/renamed) → UNPRICED; a present 0.0 stays valid. Do NOT
+      // compare span vs total — span=0 with total>0 is a legitimate long-only book, not a drift.
+      if (m.spanMargin() == null) {
+        return MarginQuote.unpriced("Upstox returned a leg with no span_margin — margin response drifted");
+      }
+      span = span.add(m.spanMargin());
       exposure = exposure.add(nz(m.exposureMargin()));
       equity = equity.add(nz(m.equityMargin()));
       premium = premium.add(nz(m.netBuyPremium()));
       additional = additional.add(nz(m.additionalMargin()));
       total = total.add(nz(m.totalMargin()));
     }
-    // EXT-03 fail-soft-but-HONEST: a real F&O basket ALWAYS costs a positive margin — a short leg
-    // needs SPAN+exposure, a long leg needs its premium. If Upstox drifts or returns empty/all-zero
-    // margin fields (present-but-0, OR absent → null → summed as 0 by nz()), every summed component
-    // is 0 AND both authoritative basket totals are null/0. Certifying THAT as priced=true,
-    // spanMargin=0 would silently defeat the ARMED F9 heat cap: RiskService.currentHeatPct reads a
-    // present-but-zero span as a genuine tiny margin → heat 0% < cap → the gate never trips. So the
-    // client must NOT certify a no-margin basket as a real quote — with no positive margin anywhere
-    // authoritative (summed per-leg total, OR either Upstox basket total) it returns UNPRICED, just
-    // like the UDAPI1104 path, and the F9 governor routes to its VISIBLE fail-soft branch (audits
-    // UNPRICED, never a phantom "under cap"). A LEGITIMATE zero — a long-only options book — keeps
-    // span==0 but carries its premium in total/required/final, so it stays priced (heat then reads a
-    // true 0%). A single-field span_margin RENAME while the other totals stay valid is a
-    // CONSUMED-field drift that belongs to the daily UpstoxContractCanary layer, not this guard.
+    // EXT-03 wholesale-empty guard (defense-in-depth alongside the per-leg span check above): a real
+    // F&O basket ALWAYS costs a positive margin — a short leg needs SPAN+exposure, a long leg its
+    // premium. If Upstox returns present-but-all-zero fields (span_margin 0.0 passes the null check
+    // above, but every component and both basket totals are 0), certifying priced=true, spanMargin=0
+    // would still silently defeat the heat cap. So with NO positive margin anywhere authoritative
+    // (summed per-leg total, OR either Upstox basket total) → UNPRICED, like the UDAPI1104 path; the
+    // F9 governor then routes to its VISIBLE fail-soft branch (audits UNPRICED, never a phantom
+    // "under cap"). A long-only book keeps span==0 but carries its premium in total/required/final,
+    // so it stays priced (heat then reads a true 0%).
     if (!isPositive(total) && !isPositive(data.requiredMargin()) && !isPositive(data.finalMargin())) {
       return MarginQuote.unpriced("Upstox returned a zero/empty margin basket");
     }

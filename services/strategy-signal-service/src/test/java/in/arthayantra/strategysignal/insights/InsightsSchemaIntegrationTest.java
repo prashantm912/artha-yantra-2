@@ -43,6 +43,7 @@ class InsightsSchemaIntegrationTest extends StrategySignalIntegrationTestBase {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ObjectMapper objectMapper;
   @Autowired private ApplicationEventPublisher publisher;
+  @Autowired private BookHeatReader bookHeatReader;
 
   /** Unique signal ids so shared-DB reruns never collide on the SIGNAL_PRIORITY dedupe scope. */
   private static final AtomicLong SIGNAL_SEQ = new AtomicLong(900_000);
@@ -376,6 +377,34 @@ class InsightsSchemaIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(sellAck.status()).isEqualTo("PROPOSED");
     assertThat(sellAck.targetEndpoint()).isEqualTo("/api/v1/signals/sell-decisions/5099/ack");
     assertThat(sellAck.sellDecisionId()).isEqualTo(5099L);
+  }
+
+  @Test
+  void bookHeatReaderExcludesUnpricedPositionsFromTheSummedHeat() {
+    // EXT-03 finding 2: when a re-quote comes back UNPRICED, PaperMarginAnnotator clears margin_pct to
+    // NULL. BookHeatReader must then EXCLUDE that position from the summed risk-heat (never sum a stale
+    // value). A priced leg (margin_pct 15.00) + an unpriced/cleared leg (margin_pct NULL) → heat 15.00.
+    String uid = UUID.randomUUID().toString().substring(0, 8);
+    String book = "heat-" + uid;
+    jdbc.update(
+        "INSERT INTO paper_positions (book, exchange, tradingsymbol, side, qty, avg_entry_price, status,"
+            + " opened_at, margin_snapshot, margin_pct)"
+            + " VALUES (?, 'NFO', ?, 'BUY', 50, 100, 'OPEN', now(), 22500, 15.00)",
+        book, "HEAT" + uid + "CE");
+    jdbc.update(
+        "INSERT INTO paper_positions (book, exchange, tradingsymbol, side, qty, avg_entry_price, status,"
+            + " opened_at, margin_snapshot, margin_pct)"
+            + " VALUES (?, 'NFO', ?, 'BUY', 50, 100, 'OPEN', now(), NULL, NULL)",
+        book, "HEAT" + uid + "PE");
+
+    BookHeat heat =
+        bookHeatReader.read().stream()
+            .filter(h -> book.equals(h.book()))
+            .findFirst()
+            .orElseThrow();
+
+    assertThat(heat.openPositions()).isEqualTo(2); // both legs counted as open
+    assertThat(heat.heatPct()).isEqualByComparingTo("15.00"); // only the PRICED leg summed (NULL excluded)
   }
 
   @Test

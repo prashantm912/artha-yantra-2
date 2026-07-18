@@ -55,16 +55,36 @@ class UpstoxMarginClientTest {
        "required_margin":0.0,"final_margin":0.0}}
       """;
 
-  // EXT-03 drift shape B: Upstox renames/removes the margin fields — each maps to null, the basket
-  // totals are absent. Structurally distinct from all-zero (null vs 0.0), same silent-defeat vector.
+  // EXT-03 drift shape B: Upstox renames/removes the margin fields — span_margin ABSENT → Jackson
+  // maps it to null, distinct from a PRESENT 0.0. Trips the per-leg span-null guard (finding 1).
   private static final String ABSENT_FIELDS_BODY =
       """
       {"status":"success","data":{"margins":[{"tender_margin":0.0}]}}
       """;
 
+  // EXT-03 finding 1 — the span-only drift that the wholesale guard alone would MISS: leg 1 prices
+  // normally (span present), leg 2 is missing span_margin (renamed/absent → null) but still carries a
+  // positive total, and the basket totals are positive. Certifying this as priced would sum span from
+  // leg 1 only and under-count the heat. An absent span_margin on ANY leg → unpriced.
+  private static final String MIXED_LEG_MISSING_SPAN_BODY =
+      """
+      {"status":"success","data":{"margins":[
+        {"span_margin":100000.0,"exposure_margin":10000.0,"total_margin":110000.0},
+        {"exposure_margin":10000.0,"total_margin":110000.0}],
+       "required_margin":220000.0,"final_margin":150000.0}}
+      """;
+
+  // EXT-03 finding 1 (degenerate): a positive basket total but NO per-leg breakdown (empty margins[]).
+  // We cannot assess per-leg SPAN, so pricing with span=0 would understate heat → must be unpriced.
+  private static final String EMPTY_MARGINS_BODY =
+      """
+      {"status":"success","data":{"margins":[],"required_margin":220000.0,"final_margin":150000.0}}
+      """;
+
   // A LEGITIMATE zero-SPAN basket: a long-only options leg costs only its premium, so span/exposure
   // are 0 but net_buy_premium + total_margin + the basket totals are positive. Must stay PRICED (the
-  // guard keys on "no positive margin ANYWHERE", not on span alone) — heat then reads a true 0%.
+  // span-null guard accepts a PRESENT 0.0; the wholesale guard passes because a total is positive) —
+  // heat then reads a true 0%.
   private static final String LONG_ONLY_BODY =
       """
       {"status":"success","data":{"margins":[
@@ -169,9 +189,9 @@ class UpstoxMarginClientTest {
   }
 
   @Test
-  void absentMarginFieldsAreUnpricedNotPricedZero() {
-    // A drift that RENAMES/REMOVES the margin fields (each → null, no basket totals) is the same
-    // silent-defeat vector as all-zero and must also fail honest.
+  void absentSpanMarginFieldIsUnpricedNotPricedZero() {
+    // A drift that RENAMES/REMOVES span_margin (→ null, distinct from a present 0.0) trips the
+    // per-leg span-null guard — the same silent-defeat vector as all-zero, caught earlier + louder.
     wireMock.stubFor(
         post(urlPathEqualTo("/v2/charges/margin"))
             .willReturn(
@@ -182,7 +202,48 @@ class UpstoxMarginClientTest {
     MarginQuote q = client().quote(List.of(new Leg("NSE_FO|44454", 65, "SELL", "D")));
 
     assertThat(q.priced()).isFalse();
-    assertThat(q.unpricedReason()).isEqualTo("Upstox returned a zero/empty margin basket");
+    assertThat(q.unpricedReason()).contains("no span_margin");
+    assertThat(q.spanMargin()).isNull();
+  }
+
+  @Test
+  void aPositiveTotalBasketWithOneLegMissingSpanMarginIsUnpriced() {
+    // EXT-03 finding 1: the span-only drift the wholesale guard would MISS — leg 2 has no span_margin
+    // but positive totals exist, so it would price with an under-counted span. The per-leg null guard
+    // catches it so the armed heat cap can never read a partial (understated) SPAN.
+    wireMock.stubFor(
+        post(urlPathEqualTo("/v2/charges/margin"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(MIXED_LEG_MISSING_SPAN_BODY)));
+
+    MarginQuote q =
+        client()
+            .quote(
+                List.of(
+                    new Leg("NSE_FO|44454", 65, "SELL", "D"),
+                    new Leg("NSE_FO|44455", 65, "SELL", "D")));
+
+    assertThat(q.priced()).isFalse();
+    assertThat(q.unpricedReason()).contains("no span_margin");
+    assertThat(q.spanMargin()).isNull();
+  }
+
+  @Test
+  void aBasketWithNoPerLegMarginsIsUnpriced() {
+    // Empty margins[] with positive basket totals → cannot assess per-leg SPAN → unpriced, not span=0.
+    wireMock.stubFor(
+        post(urlPathEqualTo("/v2/charges/margin"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(EMPTY_MARGINS_BODY)));
+
+    MarginQuote q = client().quote(List.of(new Leg("NSE_FO|44454", 65, "SELL", "D")));
+
+    assertThat(q.priced()).isFalse();
+    assertThat(q.unpricedReason()).contains("no per-leg margins");
     assertThat(q.spanMargin()).isNull();
   }
 

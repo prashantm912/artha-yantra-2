@@ -10,6 +10,10 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -19,6 +23,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 /**
  * PF-03: the risk-suppression writer must never let a DB stall or a persistence failure reach the
@@ -153,6 +158,59 @@ class RiskSuppressionWriterTest {
           .isEqualTo(3.0);
     } finally {
       block.countDown();
+    }
+  }
+
+  @Test
+  void aStuckInFlightInsertThatIsTheSoleTaskIsCountedAndWarnedNeverSilentlyLost()
+      throws InterruptedException {
+    RiskSuppressionRepository repo = mock(RiskSuppressionRepository.class);
+    CountDownLatch started = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    // The sole insert blocks AND ignores interruption (models a stuck native JDBC call). It is the
+    // RUNNING task, never a queued one, so shutdownNow() returns an EMPTY list — without in-flight
+    // accounting it would vanish at JVM exit uncounted, and with an empty queue no WARN would fire.
+    doAnswer(
+            inv -> {
+              started.countDown();
+              while (release.getCount() > 0) {
+                try {
+                  release.await();
+                } catch (InterruptedException e) {
+                  // Swallow: a stuck native call does NOT honour the interrupt from shutdownNow().
+                }
+              }
+              return 1L;
+            })
+        .when(repo)
+        .insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+
+    Logger writerLog = (Logger) LoggerFactory.getLogger(RiskSuppressionWriter.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    writerLog.addAppender(logs);
+
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    RiskSuppressionWriter writer = new RiskSuppressionWriter(repo, meters);
+    try {
+      record(writer); // the ONLY task — it becomes the in-flight insert, nothing sits in the queue
+      assertThat(started.await(2, TimeUnit.SECONDS))
+          .as("the writer thread is confirmed stuck inside the sole insert")
+          .isTrue();
+      // Drain times out, shutdownNow() abandons an empty queue, the grace await times out on the
+      // stuck insert — the loss must be COUNTED and a WARN must fire (not silent).
+      writer.drainAndShutdown(200);
+
+      assertThat(meters.counter("ay_risk_suppression_shutdown_dropped_total").count())
+          .as("the stuck in-flight insert is counted, not silently lost")
+          .isEqualTo(1.0);
+      assertThat(logs.list)
+          .as("a drain-timeout WARN fires even though the abandoned queue is empty")
+          .anyMatch(
+              e -> e.getLevel() == Level.WARN && e.getFormattedMessage().contains("in-flight"));
+    } finally {
+      writerLog.detachAppender(logs);
+      release.countDown();
     }
   }
 }

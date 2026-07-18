@@ -289,6 +289,11 @@ public class BacktestRunner {
             result.initialEquity(),
             result.finalEquity(),
             definition.primaryTimeframe(),
+            // AY-SL-01 cadence: BOTH replay engines mark to market per 1m bar (ReplayEngine iterates
+            // primaryOneMinute; OptionsPremiumReplay iterates the same primary1m) — the primary
+            // timeframe rolls up SIGNALS only. Sharpe/Sortino must annualize at the curve's own 1m
+            // cadence, else a 3m-primary run is understated ≈√3 (1h ≈√60).
+            "1m",
             result.totalBars(),
             result.barsInPosition());
     m.full().put("strategyChecksum", resolved.checksum());

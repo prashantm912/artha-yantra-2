@@ -82,7 +82,7 @@ class FoldEvaluatorRoutingTest {
     when(premium.replay(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(empty());
-    when(metrics.compute(any(), any(), any(), any(), any(), anyLong(), anyLong()))
+    when(metrics.compute(any(), any(), any(), any(), any(), any(), anyLong(), anyLong()))
         .thenReturn(FoldTestFixtures.metricsWithSharpe(1.0));
 
     evaluator.evaluate(
@@ -108,7 +108,7 @@ class FoldEvaluatorRoutingTest {
   void nonOptionsStrategyFoldUsesPlainEngine() {
     when(plain.replay(any(), any(), any(), any(), any(), any(), any(), anyBoolean()))
         .thenReturn(empty());
-    when(metrics.compute(any(), any(), any(), any(), any(), anyLong(), anyLong()))
+    when(metrics.compute(any(), any(), any(), any(), any(), any(), anyLong(), anyLong()))
         .thenReturn(FoldTestFixtures.metricsWithSharpe(1.0));
 
     evaluator.evaluate(

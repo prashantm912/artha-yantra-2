@@ -2,6 +2,8 @@
 (not an opaque int()/KeyError 500), maxTrials can't run away, and an objective naming a metric the
 backtest never emits is rejected up front instead of "completing" as an empty leaderboard."""
 
+import threading
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -176,3 +178,72 @@ def test_bad_input_is_400_before_resolve_never_500():
     )
     assert resp.status_code == 400
     assert resp.json()["code"] == "VALIDATION_FAILED"
+
+
+def test_submit_threads_request_fold_metric_over_yaml_end_to_end():
+    # AY-OPT-02 regression: request objective (expectancy) differs from the YAML objective.metric
+    # (sharpe). The fold telemetry/aggregation must key off the REQUEST's metric, proven by the
+    # resolved `fold_objective_metric` threaded to the runner. (The sweep objective itself is still
+    # guarded to oos_fold_mean for a walk-forward sweep; the FOLD metric is the request's.)
+    captured: dict = {}
+    done = threading.Event()
+
+    def fake_runner(**kwargs):
+        captured.update(kwargs)
+        done.set()
+
+    config = {
+        "backtest": {
+            "optimize": {
+                "parameters": [{"path": "indicators[0].params.period", "range": [5, 9], "step": 1}],
+                "objective": {"metric": "sharpe"},  # the YAML names sharpe
+            }
+        }
+    }
+    jobs, trials = FakeJobs(), FakeTrials()
+    service = SweepService(
+        strategy_client=FakeStrategy(config),
+        jobs_factory=lambda: jobs,
+        trials_factory=lambda: trials,
+        dispatcher=FakeDispatcher(jobs),
+        runner=fake_runner,
+    )
+    service.submit({
+        **RUN_BODY,
+        "method": "tpe",
+        "walkForward": {"train_days": 30, "test_days": 30},
+        "objective": {"metric": "expectancy", "direction": "maximize"},  # request names expectancy
+    })
+    assert done.wait(timeout=5)
+    assert captured["fold_objective_metric"] == "expectancy"       # the REQUEST wins over the YAML
+    assert captured["objective"]["metric"] == "oos_fold_mean"      # sweep objective still guarded
+
+
+def test_submit_walk_forward_minimize_metric_inherits_direction():
+    # AY-OPT-02 (round-4 critical): a walk-forward sweep on a lower-is-better metric must MINIMIZE.
+    # request {maxDrawdown, minimize} → the guard emits oos_fold_mean, whose direction must INHERIT
+    # 'minimize' (not the hardcoded 'maximize') so the optimizer selects the SMALLEST mean drawdown.
+    captured: dict = {}
+    done = threading.Event()
+
+    def fake_runner(**kwargs):
+        captured.update(kwargs)
+        done.set()
+
+    jobs, trials = FakeJobs(), FakeTrials()
+    service = SweepService(
+        strategy_client=FakeStrategy(GOOD_CONFIG),  # YAML names no objective → catalog is the floor
+        jobs_factory=lambda: jobs,
+        trials_factory=lambda: trials,
+        dispatcher=FakeDispatcher(jobs),
+        runner=fake_runner,
+    )
+    service.submit({
+        **RUN_BODY,
+        "method": "tpe",
+        "walkForward": {"train_days": 30, "test_days": 30},
+        "objective": {"metric": "maxDrawdown", "direction": "minimize"},
+    })
+    assert done.wait(timeout=5)
+    assert captured["objective"] == {"metric": "oos_fold_mean", "direction": "minimize"}
+    assert captured["fold_objective_metric"] == "maxDrawdown"

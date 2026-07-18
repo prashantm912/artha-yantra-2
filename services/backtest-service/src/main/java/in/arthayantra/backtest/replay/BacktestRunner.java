@@ -335,10 +335,28 @@ public class BacktestRunner {
     // run-level headline Metrics/equity curve stay full-window (a meaningful /results payload); the
     // OOS objective the optimizer ranks on lands in oos_fold_mean/oos_fold_std + sharpe_degradation.
     boolean foldContext = request.path("foldContext").asBoolean(false);
+    // AY-OPT-02: the fold objective metric is REQUEST-owned — the optimizer resolves it (request
+    // objective, YAML objective.metric fallback) and threads it as `foldObjectiveMetric`. A plain
+    // /backtests/run carries no such field, so fall back to the YAML objective.metric (the prior
+    // behaviour). This ONE metric drives BOTH the fold aggregation (oosFoldMean) and the per-fold
+    // pruner telemetry (oosFoldObjectives), so they can never key off different metrics.
+    String foldObjectiveMetric =
+        request
+            .path("foldObjectiveMetric")
+            .asText(
+                config == null
+                    ? "sharpe"
+                    : config
+                        .path("backtest")
+                        .path("optimize")
+                        .path("objective")
+                        .path("metric")
+                        .asText("sharpe"));
     FoldPersistence folds =
         foldContext
             ? walkForward.run(
                 config,
+                foldObjectiveMetric,
                 definition,
                 signal.exchange(),
                 signal.tradingsymbol(),
@@ -450,7 +468,7 @@ public class BacktestRunner {
           runId,
           m.full(),
           folds == null ? null : folds.oosFoldMean(),
-          oosFoldObjectives(folds));
+          oosFoldObjectives(foldObjectiveMetric, folds));
     }
 
     progress.accept(100);
@@ -565,15 +583,28 @@ public class BacktestRunner {
     return series;
   }
 
-  /** The per-fold OOS objective (OOS sharpe) array for the pruner; empty for a full-window trial. */
-  private ArrayNode oosFoldObjectives(FoldPersistence folds) {
+  /**
+   * The per-fold OOS objective array for the sweep's fold-fed pruner (AY-OPT-02). Emits each fold's
+   * OOS value of the REQUEST-owned objective metric ({@code objectiveMetric} — the SAME metric
+   * {@link WalkForwardRunner}/{@link in.arthayantra.backtest.replay.folds.ObjectiveAggregator} average
+   * into {@code oosFoldMean}), NOT a hardcoded Sharpe. The pre-fix array was always per-fold Sharpe,
+   * so a sweep optimizing (say) expectancy pruned on a metric it was not ranking — the pruner now
+   * keys off the metric the sweep actually optimizes. Empty for a full-window trial or a fold missing
+   * the metric.
+   *
+   * <p>This is an optimizer-side telemetry stream (published only for a {@code JobKind.TRIAL} onto
+   * {@code optimizations.results}); it is NOT part of a run's persisted metrics/trades, so a normal
+   * (non-fold) run's golden-vector output is byte-identical regardless of this value.
+   */
+  private ArrayNode oosFoldObjectives(String objectiveMetric, FoldPersistence folds) {
     ArrayNode out = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
-    if (folds != null && folds.foldMetrics() != null) {
-      for (JsonNode fold : folds.foldMetrics()) {
-        JsonNode oosSharpe = fold.path("oosMetrics").path("sharpe");
-        if (oosSharpe.isValueNode() && !oosSharpe.isNull()) {
-          out.add(oosSharpe.asText());
-        }
+    if (folds == null || folds.foldMetrics() == null) {
+      return out;
+    }
+    for (JsonNode fold : folds.foldMetrics()) {
+      JsonNode oosValue = fold.path("oosMetrics").path(objectiveMetric);
+      if (oosValue.isValueNode() && !oosValue.isNull()) {
+        out.add(oosValue.asText());
       }
     }
     return out;

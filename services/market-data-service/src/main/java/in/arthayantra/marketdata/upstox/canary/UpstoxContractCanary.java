@@ -1,14 +1,17 @@
 package in.arthayantra.marketdata.upstox.canary;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.upstox.UpstoxAnalyticsProperties;
+import in.arthayantra.marketdata.upstox.UpstoxFnoMasterClient;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -22,9 +25,12 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.HttpClientErrorException;
 
 /**
  * The daily Upstox Market-Information contract canary (ADR-0002 U7) — the twin of {@link
@@ -47,6 +53,18 @@ import org.springframework.web.client.RestClient;
  * guarded off-band by the {@code .proto} reference + {@code FeedFrameDecoderTest}; only the JSON
  * authorize-GET is canaried. These probes use known-good index fixtures so a stale weekly expiry is
  * never a false alarm.
+ *
+ * <p><b>Margin probe (EXT-03 residual):</b> the canary also POSTs a 1-lot NIFTY short-CE basket to
+ * {@code POST /v2/charges/margin} — the endpoint the ARMED F9 heat cap consumes ({@code
+ * UpstoxMarginClient}). This is the ONE shape the client itself cannot guard: {@code
+ * UpstoxMarginClient.aggregate} SUMS {@code span_margin} across legs, so a rename of just that
+ * per-leg field (with {@code total_margin}/{@code required_margin}/{@code final_margin} still valid
+ * and positive — the wholesale-empty guard never trips) silently sums to a FALSE ₹0 SPAN → a false
+ * 0% heat that defeats the cap. The probe resolves a near-ATM front-weekly NIFTY key off the {@link
+ * UpstoxFnoMasterClient} (the expiry re-resolves each run off the calendar, so it never goes stale)
+ * and diffs the RAW response; it is fully tolerant like the option-chain probe — an unresolved key,
+ * an empty/off-hours margins body, or any Upstox 4xx (stale probe contract, a lot-size change →
+ * {@code UDAPI1104}) is skipped, never an alarm.
  */
 public class UpstoxContractCanary {
 
@@ -71,6 +89,23 @@ public class UpstoxContractCanary {
   private static final String CHAIN_PROBE_EXPIRY = "2026-06-30";
   private static final String QUOTE_PROBE_KEYS = "NSE_INDEX|Nifty 50";
 
+  // Margin probe (EXT-03 residual). The weekly expiry is resolved FRESH each run off the calendar
+  // (never a stale hardcode); a small round-strike ladder spans the plausible NIFTY band so one
+  // near-ATM strike stays listed even as spot drifts (all unlisted -> the probe skips, never alarms).
+  // qty MUST be a lot multiple or Upstox 400s UDAPI1104 (tolerated as a skip). NIFTY's F&O market lot
+  // is 65 for 2026 contracts (NSE FAOP/70616; was 75). A stale lot silently UDAPI1104s → the probe is
+  // blind, so it is asserted in the WireMock matcher. Robustness follow-up: resolve the lot from the
+  // F&O master alongside the key (survives the next lot change) — chip task_1071ba0b.
+  private static final String MARGIN_PROBE_UNDERLYING = "NIFTY";
+  private static final List<BigDecimal> MARGIN_PROBE_STRIKES =
+      List.of(
+          new BigDecimal("24000"),
+          new BigDecimal("25000"),
+          new BigDecimal("23000"),
+          new BigDecimal("26000"),
+          new BigDecimal("22000"));
+  private static final int MARGIN_PROBE_QTY = 65;
+
   private static final Logger log = LoggerFactory.getLogger(UpstoxContractCanary.class);
 
   private final RestClient restClient;
@@ -80,6 +115,7 @@ public class UpstoxContractCanary {
   private final MarketCalendar calendar;
   private final Clock clock;
   private final ObjectMapper objectMapper;
+  private final ObjectProvider<UpstoxFnoMasterClient> fnoMaster;
   private final Counter driftCounter;
   private final JsonNode manifest;
   private final AtomicReference<CanaryResult> lastResult = new AtomicReference<>();
@@ -93,6 +129,7 @@ public class UpstoxContractCanary {
       MarketCalendar calendar,
       Clock clock,
       ObjectMapper objectMapper,
+      ObjectProvider<UpstoxFnoMasterClient> fnoMaster,
       MeterRegistry meterRegistry) {
     this.restClient = builder.baseUrl(properties.baseUrl()).build();
     this.properties = properties;
@@ -101,6 +138,7 @@ public class UpstoxContractCanary {
     this.calendar = calendar;
     this.clock = clock;
     this.objectMapper = objectMapper;
+    this.fnoMaster = fnoMaster;
     this.driftCounter = meterRegistry.counter("ay_upstox_contract_drift_total");
     try (InputStream in = getClass().getResourceAsStream("/upstox-contract-manifest.json")) {
       this.manifest = objectMapper.readTree(in);
@@ -136,6 +174,8 @@ public class UpstoxContractCanary {
       diffTolerant("option_chain", getOptionChain(), drift);
       diffJson("market_quote", getMarketQuote(), drift);
       diffJson("ws_authorize", getWsAuthorize(), drift);
+      // The ARMED F9 SPAN-margin shape (EXT-03 residual) — tolerant, self-fresh expiry.
+      diffMargin("margin", drift);
     } catch (Exception probeFailure) {
       drift.add("PROBE_FAILED:" + probeFailure.getMessage());
     }
@@ -227,6 +267,75 @@ public class UpstoxContractCanary {
         .retrieve()
         .body(String.class);
   }
+
+  /**
+   * The live SPAN-margin shape — {@code POST /v2/charges/margin} the ARMED F9 heat cap consumes.
+   * Resolves a near-ATM front-weekly NIFTY option to its Upstox key off the F&amp;O master, prices a
+   * 1-lot short-CE basket, and diffs the RAW response so a {@code span_margin} rename (which {@code
+   * UpstoxMarginClient.aggregate} would silently sum to a false ₹0) is caught off the live path.
+   * Fully tolerant, like {@link #diffTolerant}: an unresolved key (master off / strike unlisted), an
+   * empty/off-hours margins body, or any Upstox 4xx (stale probe contract, a lot-size change →
+   * {@code UDAPI1104}) is skipped, never an alarm — the shape is checked only when Upstox prices it.
+   */
+  private void diffMargin(String probe, List<String> drift) throws Exception {
+    UpstoxFnoMasterClient master = fnoMaster.getIfAvailable();
+    if (master == null) {
+      log.info("upstox canary: {} probe skipped (F&O master unavailable)", probe);
+      return;
+    }
+    LocalDate expiry = calendar.nextWeeklyIndexExpiry(LocalDate.now(clock.withZone(Ist.ZONE)));
+    String key = null;
+    for (BigDecimal strike : MARGIN_PROBE_STRIKES) {
+      key = master.keyFor("NFO", MARGIN_PROBE_UNDERLYING, "CE", expiry, strike);
+      if (key != null) {
+        break;
+      }
+    }
+    if (key == null) {
+      log.info("upstox canary: {} probe skipped (no listed NIFTY strike for weekly expiry {})", probe, expiry);
+      return;
+    }
+    String body;
+    try {
+      body = postMargin(key);
+    } catch (HttpClientErrorException http) {
+      // A stale probe contract / lot-size change 4xx (UDAPI1104) — skip like an empty chain, never alarm.
+      // A 5xx is NOT caught here: it propagates to the outer probe handler → PROBE_FAILED alert (an
+      // Upstox server fault is a real signal, not benign drift-tolerance).
+      log.info("upstox canary: {} probe skipped (Upstox {})", probe, http.getStatusCode());
+      return;
+    }
+    JsonNode margins = objectMapper.readTree(body).path("data").path("margins");
+    if (!margins.isArray() || margins.isEmpty()) {
+      log.info("upstox canary: {} probe has no margins (skipped, not drift)", probe);
+      return;
+    }
+    diffJson(probe, body, drift);
+  }
+
+  /** POSTs the 1-lot NIFTY short-CE basket to {@code /v2/charges/margin} and returns the raw JSON. */
+  private String postMargin(String instrumentKey) {
+    return restClient
+        .post()
+        .uri("/v2/charges/margin")
+        .header("Authorization", "Bearer " + properties.resolveToken())
+        .header("Accept", "application/json")
+        .contentType(MediaType.APPLICATION_JSON)
+        .body(
+            new MarginProbeRequest(
+                List.of(new MarginProbeLeg(instrumentKey, MARGIN_PROBE_QTY, "SELL", "D"))))
+        .retrieve()
+        .body(String.class);
+  }
+
+  /** The {@code /v2/charges/margin} request body — one instrument per basket leg. */
+  private record MarginProbeRequest(List<MarginProbeLeg> instruments) {}
+
+  private record MarginProbeLeg(
+      @JsonProperty("instrument_key") String instrumentKey,
+      int quantity,
+      @JsonProperty("transaction_type") String transactionType,
+      String product) {}
 
   /** Like {@link #diffJson} but tolerant of {@code data:null}/empty (a purged sample or stale expiry) — skip, never alarm. */
   private void diffTolerant(String probe, String body, List<String> drift) throws Exception {

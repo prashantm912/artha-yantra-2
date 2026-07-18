@@ -384,11 +384,14 @@ Reuses the existing `WalkForwardRunner` (rolling/anchored, trading-day arithmeti
   labels covered for swing. A candidate that only wins in UP_QUIET is labeled
   REGIME_DEPENDENT — rankable but penalized, and its card says so.
 - **Multiplicity correction**: the campaign records total trials-to-date N; finalists'
-  OOS Sharpe is deflated (DSR-style: expected-max-of-N adjustment using the standard
-  E[max of N normal draws] ≈ √(2·ln N) term) before gating. Concretely:
-  `deflatedSharpe = (S_oos − S₀(N)) / se(S_oos)`, gate `> 0`. This is the formal
-  answer to "detect data snooping" — the engine literally charges itself for every
-  trial it ran.
+  OOS Sharpe is charged a heuristic multiplicity haircut (expected-max-of-N adjustment
+  using the standard E[max of N normal draws] ≈ √(2·ln N) term) before gating. Concretely:
+  `multiplicityTStat = (S_oos − S₀(N)) / se(S_oos)`, gate `> 0`. This is a *bespoke,
+  naive multiplicity-adjusted Sharpe t-statistic* — the engine charges itself for every
+  trial it ran — **NOT** the formal Deflated Sharpe Ratio of Bailey & López de Prado
+  (which needs the exact order-statistic percentile, the cross-trial Sharpe variance, and
+  a skew/kurtosis correction). Implemented as `_multiplicity_tstat_gate`
+  (`optimizer-service/app/scoring.py`); a real DSR is a deferred owner decision (AY-SL-07).
 - **Monte Carlo** (exists): bootstrap DD distribution → `p95(maxDD)` must fit the
   family risk cap; risk-of-ruin < 1 %.
 - Curve-fit tripwires: plateau ratio (§3.2.3), DOF penalty (§6), IS-only-lift

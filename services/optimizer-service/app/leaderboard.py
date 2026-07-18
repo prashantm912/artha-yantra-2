@@ -53,6 +53,47 @@ def best(
     return scored[:top]
 
 
+def pareto_front(
+    trials: list[dict[str, Any]], objectives: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The non-dominated (Pareto-optimal) subset of ``trials`` over a MULTI-objective ``objectives``
+    list — used INSTEAD OF a scalar ranking for an ``nsga2`` sweep (AY-OPT-03: never collapse a
+    multi-objective front to one number). Each objective is ``{metric, direction}``; a trial carries
+    ``objectiveValues`` (``{metric: value}``). Trial ``a`` DOMINATES ``b`` when it is at least as
+    good on every objective and strictly better on at least one (per each objective's direction);
+    the front is every trial no other trial dominates. Trials missing any objective metric are
+    excluded (cannot be compared). Returned in ``trialNumber`` order (deterministic response)."""
+    metrics = [o["metric"] for o in objectives]
+    candidates = [
+        t for t in trials
+        if all(m in (t.get("objectiveValues") or {}) for m in metrics)
+    ]
+    front = [
+        t for t in candidates
+        if not any(_dominates(other, t, objectives) for other in candidates if other is not t)
+    ]
+    front.sort(key=lambda t: t.get("trialNumber") if t.get("trialNumber") is not None else 0)
+    return front
+
+
+def _dominates(a: dict[str, Any], b: dict[str, Any], objectives: list[dict[str, Any]]) -> bool:
+    """True when trial ``a`` Pareto-dominates ``b`` across ``objectives`` (≥ on all, > on ≥1),
+    respecting each objective's direction (``minimize`` → smaller is better)."""
+    a_values = a.get("objectiveValues") or {}
+    b_values = b.get("objectiveValues") or {}
+    strictly_better = False
+    for objective in objectives:
+        maximize = objective.get("direction", "maximize") != "minimize"
+        av = float(a_values[objective["metric"]])
+        bv = float(b_values[objective["metric"]])
+        if av == bv:
+            continue
+        if (av > bv) != maximize:
+            return False  # a is worse on this objective → cannot dominate b
+        strictly_better = True
+    return strictly_better
+
+
 def axis_neighbors(
     params: dict[str, Any], parameters: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:

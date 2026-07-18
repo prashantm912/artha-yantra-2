@@ -552,7 +552,7 @@ def test_rescore_drifted_candidate_keeps_stored_card_with_skip_caveat():
 
 def test_rescore_unstressed_candidate_gates_pinned_byte_equal():
     # The reviewer's regression: after a stress round, an UNSTRESSED candidate's persisted card may
-    # move only in cohort-relative values/caveats — its GATES (incl. the real deflated-Sharpe
+    # move only in cohort-relative values/caveats — its GATES (incl. the multiplicity-t-stat
     # value) are byte-equal to the recorded card (same evidence, same campaign-cumulative N).
     repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
     sweep_id = _seed_sweep(jobs, trials, 2)
@@ -580,7 +580,7 @@ def test_rescore_unstressed_candidate_gates_pinned_byte_equal():
                  for c in repo.list_candidates_for_generation(_GEN_ID)}
     stored_1 = next(c for c in stored_cards if c["trialNumber"] == 1)
     unstressed = persisted[1]
-    assert unstressed["gates"] == stored_1["gates"]               # byte-equal, incl. deflated value
+    assert unstressed["gates"] == stored_1["gates"]        # byte-equal, incl. multiplicity value
     assert unstressed["params"] == stored_1["params"]
     assert unstressed["evidence"] == stored_1["evidence"]         # no stressRuns on the unstressed
     assert any("not stress-tested this round" in c for c in unstressed["caveats"])

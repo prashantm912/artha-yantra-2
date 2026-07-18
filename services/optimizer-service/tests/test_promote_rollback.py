@@ -39,7 +39,7 @@ _CONFIG = {
 }
 
 # Positive multi-regime OOS folds so the recorder scores rankable candidates. A per-fold OOS Sharpe
-# is carried so the REQUIRED deflated_sharpe gate is affirmatively evaluated (audit PF-01) — an
+# is carried so the REQUIRED multiplicity_tstat gate is affirmatively evaluated (audit PF-01) — an
 # absent Sharpe would leave it SKIPPED, which no longer reads as a pass.
 _FOLDS = [
     {"fold": 0, "regimeOos": {"UP_QUIET": {"sharpe": "1.0"}},

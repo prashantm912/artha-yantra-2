@@ -592,7 +592,7 @@ class StressService:
     def _prior_trials(self, campaign_id: str, generation_n: int) -> int:
         """The campaign's trials-to-date from generations recorded BEFORE this one (n < gen_n) —
         reproduces the recorder's §4 campaign-cumulative multiplicity N so the re-scored card's
-        deflated-Sharpe gate is byte-identical to the recorded one and ONLY cost_resilience moves.
+        multiplicity-t-stat gate is byte-identical to the recorded one, ONLY cost_resilience moves.
         Append-only, monotonic ``n`` makes this set stable (later generations never count)."""
         repo = self._repo_factory()
         try:

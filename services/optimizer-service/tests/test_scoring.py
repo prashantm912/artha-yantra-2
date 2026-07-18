@@ -102,7 +102,7 @@ def test_gate_degradations_on_a_bare_candidate():
     assert gates["holdout"] == "SKIPPED"  # no holdout run linked in retro
     assert gates["comparability"] == "UNKNOWN"  # NULL engine SHA (pre-#703)
     assert gates["live_gap"] == "SKIPPED"  # no live evidence
-    assert gates["deflated_sharpe"] == "SKIPPED"  # no sharpe/trade count on a bare candidate
+    assert gates["multiplicity_tstat"] == "SKIPPED"  # no sharpe/trade count on a bare candidate
     # DESCRIPTIVE rankable (permissive, unchanged): no hard-gate FAIL among the statuses → True.
     assert card["rankable"] is True
     # PROMOTION-ADMISSION stageReadiness (audit PF-01, fail-CLOSED): a bare candidate whose REQUIRED
@@ -114,7 +114,7 @@ def test_gate_degradations_on_a_bare_candidate():
     # REQUIRED — #703/#705 closed); holdout + live_gap are the only excluded gates (post-select /
     # no-live), so they never appear.
     assert set(sr["blockedBy"]) == {
-        "comparability:UNKNOWN", "deflated_sharpe:SKIPPED", "drawdown_cap:UNKNOWN",
+        "comparability:UNKNOWN", "multiplicity_tstat:SKIPPED", "drawdown_cap:UNKNOWN",
         "evidence_floor:UNKNOWN", "fold_consistency:UNKNOWN", "regime_floor:UNKNOWN",
         "stability_floor:SKIPPED",
     }
@@ -149,7 +149,7 @@ def test_all_gates_pass_on_a_healthy_cohort():
     assert sr["ready"] is True and sr["blockedBy"] == []
     assert sr["evidencePolicy"] == "SIM_FIRST"
     assert set(sr["requiredGates"]) == {
-        "evidence_floor", "oos_sign", "deflated_sharpe", "fold_consistency", "drawdown_cap",
+        "evidence_floor", "oos_sign", "multiplicity_tstat", "fold_consistency", "drawdown_cap",
         "regime_floor", "stability_floor", "comparability",
     }
 
@@ -303,13 +303,14 @@ def test_risk_adjusted_reads_sortino_only_never_sharpe():
     assert risk[2]["z"] == 1.0
 
 
-# --- deflated-Sharpe multiplicity gate (§4, E2) -----------------------------------------------
-# deflatedSharpe = (S − S₀(N)) / se, gate > 0; se = √((1+0.5·S²)/(T−1)) (Lo/Bailey-LdP, IID-normal);
+# --- multiplicity-t-stat gate (§4, E2; naive multiplicity-adjusted Sharpe t-stat, NOT a real DSR) -
+# multiplicityTStat = (S − S₀(N)) / se, gate > 0; se = √((1+0.5·S²)/(T−1)) (Lo, IID-normal);
 # S₀(N) = se·√(2·ln N), so the value reduces to S/se − √(2·ln N). Every number below is computed by
-# hand from those two closed forms (T = OOS trade count, N = cohort/trial count).
+# hand from those two closed forms (T = OOS trade count, N = cohort/trial count). The rename
+# (AY-SL-07) is honesty-only: the numeric value is byte-identical to the old "deflated_sharpe" gate.
 
 def _dsr_cand(n: int, **over) -> dict:
-    # A candidate that PASSES every OTHER hard gate, so rankability flips solely on deflated_sharpe.
+    # PASSES every OTHER hard gate, so rankability flips on multiplicity_tstat only.
     return {"trialNumber": n, "rawObjective": 1.0, "oosReturn": 12.0, "sharpe": 0.4,
             "oosTradeCount": 60, "maxDrawdown": 20.0, "regimeOosMin": 0.4, "regimeOosMean": 0.8,
             "regimesCovered": ["UP_QUIET", "DOWN_QUIET", "UP_TURBULENT"], "engineSha": "sha",
@@ -318,19 +319,36 @@ def _dsr_cand(n: int, **over) -> dict:
 
 def _dsr_gate(cards, trial_number=1):
     card = next(c for c in cards if c["trialNumber"] == trial_number)
-    return next(g for g in card["gates"] if g["id"] == "deflated_sharpe")
+    return next(g for g in card["gates"] if g["id"] == "multiplicity_tstat")
+
+
+def test_multiplicity_tstat_gate_id_and_note_are_honest_not_deflated_sharpe():
+    # AY-SL-07: the gate is renamed to reflect what it IS — a naive multiplicity-adjusted Sharpe
+    # t-stat. The id + metric label drop the misleading "deflatedSharpe" name and the note carries
+    # the explicit disclaimer that this is NOT a real Deflated Sharpe Ratio.
+    gate = _dsr_gate(scoring.score_cohort([_dsr_cand(1)], [], n_trials=2))
+    assert gate["id"] == "multiplicity_tstat"
+    assert "deflatedSharpe" not in gate["note"]  # the old misnomer metric label is gone
+    assert "multiplicityTStat" in gate["note"]
+    assert "NOT a Deflated Sharpe Ratio" in gate["note"]  # honest disclaimer present
+
+
+def test_multiplicity_tstat_value_unchanged_by_the_rename():
+    # The rename is honesty-only: the computed statistic is byte-identical to the pre-rename value.
+    # S=0.4, T=60, N=1000: se=√(1.08/59)=0.135296, S/se=2.9565, √(2·ln1000)=3.716898 ⇒ −0.7604.
+    assert _dsr_gate(scoring.score_cohort([_dsr_cand(1)], [], n_trials=1000))["value"] == -0.7604
 
 
 def test_deflated_sharpe_skipped_without_sharpe_or_trades():
     # No sharpe → SKIPPED (never fabricated). DESCRIPTIVE rankable stays True (no hard FAIL), but
-    # deflated_sharpe is a REQUIRED SURVIVOR gate (the overfitting guard), so a SKIPPED one BLOCKS
+    # multiplicity_tstat is a REQUIRED SURVIVOR gate (the overfitting guard), so a SKIPPED one BLOCKS
     # promotion — stageReadiness.ready is False (was fail-open "SKIPPED never blocks", the marquee
     # defect this closes).
     no_sharpe = scoring.score_cohort([_dsr_cand(1, sharpe=None)], [], n_trials=1000)[0]
     assert _dsr_gate([no_sharpe])["status"] == "SKIPPED"
     assert no_sharpe["rankable"] is True
     assert no_sharpe["stageReadiness"]["ready"] is False
-    assert "deflated_sharpe:SKIPPED" in no_sharpe["stageReadiness"]["blockedBy"]
+    assert "multiplicity_tstat:SKIPPED" in no_sharpe["stageReadiness"]["blockedBy"]
     # A Sharpe SE needs T ≥ 2; a single-observation trade count is unassessable → SKIPPED.
     one_trade = scoring.score_cohort([_dsr_cand(1, oosTradeCount=1)], [], n_trials=1000)[0]
     assert _dsr_gate([one_trade])["status"] == "SKIPPED"

@@ -256,7 +256,7 @@ _RETRO_CAVEAT = (
     "evidence-policy routing lands with campaigns"
 )
 
-# The standalone retro read has no campaign context, so its deflated-Sharpe multiplicity N is the
+# The standalone retro read has no campaign context, so its multiplicity-t-stat N is the
 # sweep's own trial count only — design §4 charges "total trials-to-date", which the RECORDER
 # computes (campaign-cumulative). Stamped on standalone retro cards only, never recorder cards.
 _RETRO_N_CAVEAT = (
@@ -271,7 +271,7 @@ class AssembledCohort:
     ``costResilience`` slope to the evidence bags BEFORE ``scoring.score_cohort`` runs (the retro
     read + recorder score straight through). ``n_trials`` is the §4 multiplicity N
     (this sweep's full trial count + any ``prior_trials``) the score MUST be computed with — carried
-    here so a re-score reproduces the recorded card's deflated-Sharpe gate exactly."""
+    here so a re-score reproduces the recorded card's multiplicity-t-stat gate exactly."""
 
     job: dict[str, Any]
     objective: dict[str, Any]
@@ -371,7 +371,7 @@ class RetroScoreService:
         stress orchestrator (which attaches ``costResilience`` before scoring). Reads the sweep job
         + its trials + each trial's backtest evidence. ``prior_trials`` is the campaign's
         trials-to-date from PRIOR generations, added to this sweep's own full trial count to form
-        the deflated-Sharpe multiplicity N (§4). Raises 404 for an unknown/non-OPTIMIZATION job."""
+        the multiplicity-t-stat N (§4). Raises 404 for an unknown/non-OPTIMIZATION job."""
         jobs = self._jobs_factory()
         trials = self._trials_factory()
         try:
@@ -383,7 +383,7 @@ class RetroScoreService:
             objective = request.get("objective", {})
             metric, direction = _primary_objective(objective)
             rows = trials.list_for_sweep(sweep_id, _PROMOTABLE, _COHORT_CAP, 0)
-            # Multiplicity N for the §4 deflated-Sharpe gate = the sweep's FULL trial count (every
+            # Multiplicity N for the multiplicity-t-stat gate (§4) = the sweep's FULL count (every
             # state — failed/pruned trials are still "looks" the search took at the data), NOT just
             # the COMPLETE cohort scored below, PLUS the campaign's prior-generation trials when the
             # recorder supplies them. A dedicated count keeps the complete-cohort read (and its
@@ -427,14 +427,14 @@ class RetroScoreService:
         by the retro-score read AND the campaign recorder (do NOT duplicate this assembly). Reads
         the sweep job + its trials + each trial's backtest evidence, then scores the whole cohort
         via ``scoring.score_cohort``. ``prior_trials`` is the campaign's trials-to-date from PRIOR
-        generations, added to this sweep's own full trial count to form the deflated-Sharpe
-        multiplicity N (§4) — the recorder passes it; the standalone retro read has no campaign
-        context so it stays 0 (per-sweep N, flagged by ``_RETRO_N_CAVEAT``). ``policy`` is the
-        campaign's evidencePolicy (design §1.2) — it drives the fail-closed STAGE-READINESS verdict
-        (a LIVE_FIRST sim cohort is functional-smoke only → never stage-ready); the recorder passes
-        the campaign's policy, the standalone retro read stays SIM_FIRST (descriptive). Returns the
-        raw cards (no retro caveat appended — the caller stamps it) plus the frozen
-        job/objective/parameters context. Raises 404 for an unknown / non-OPTIMIZATION job."""
+        generations, added to this sweep's own full trial count to form the multiplicity-t-stat
+        N (§4) — the recorder passes it; the standalone retro read has no campaign context so it
+        stays 0 (per-sweep N, flagged by ``_RETRO_N_CAVEAT``). ``policy`` is the campaign's
+        evidencePolicy (design §1.2) — it drives the fail-closed STAGE-READINESS verdict (a
+        LIVE_FIRST sim cohort is functional-smoke only → never stage-ready); the recorder passes the
+        campaign's policy, the standalone retro read stays SIM_FIRST (descriptive). Returns the raw
+        cards (no retro caveat appended — the caller stamps it) plus the frozen job/objective/
+        parameters context. Raises 404 for an unknown / non-OPTIMIZATION job (the shared idiom)."""
         cohort = self.assemble_cohort(sweep_id, prior_trials)
         cards = scoring.score_cohort(
             cohort.candidates, cohort.parameters,
@@ -692,7 +692,7 @@ class EvoRecorderService:
             repo.close()
 
         # §4: "the campaign records total trials-to-date N" — the multiplicity charged to this
-        # generation's deflated-Sharpe gate is campaign-CUMULATIVE: every prior generation's sweep
+        # generation's multiplicity-t-stat gate is campaign-CUMULATIVE: every prior generation's
         # trials (all states, each generation's proposal carries its sweepJobId) + the current
         # sweep's own count (added inside score_sweep). The standalone retro read stays per-sweep.
         prior_trials = sum(self._scorer.count_trials(sid) for sid in prior_sweep_ids)

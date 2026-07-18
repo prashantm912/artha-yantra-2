@@ -33,7 +33,7 @@ _CONFIG = {
 
 # Positive, multi-regime OOS folds so the recorder scores rankable candidates (mirrors the recorder
 # suite's fixture — both trials pass the SIM_FIRST hard gates). A per-fold OOS Sharpe is carried so
-# the REQUIRED deflated_sharpe gate is affirmatively evaluated (audit PF-01).
+# the REQUIRED multiplicity_tstat gate is affirmatively evaluated (audit PF-01).
 _FOLDS = [
     {"fold": 0, "regimeOos": {"UP_QUIET": {"sharpe": "1.0"}},
      "oosMetrics": {"totalReturn": "5.0", "sortino": "1.2", "sharpe": "1.2", "maxDrawdown": "10.0",

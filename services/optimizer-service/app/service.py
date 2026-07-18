@@ -92,6 +92,39 @@ def _fold_objective_guard(
     return overridden, warning
 
 
+def _effective_fold_metric(
+    request_objective: dict[str, Any], optimize_block: dict[str, Any]
+) -> str | None:
+    """The metric each OOS fold is measured in — what ``oos_fold_mean`` aggregates and what the
+    fold-fed pruner keys off (AY-OPT-02). The objective is REQUEST-owned (the documented split:
+    objective/walkForward/maxTrials come from the request, only parameters from the YAML), so the
+    request's concrete objective metric wins; the YAML ``optimize.objective.metric`` is the fallback
+    ONLY when the request names none. ``oos_fold_mean`` is the AGGREGATE (the mean of the
+    fold metric), not a per-fold metric, so it too falls back to the YAML. ``None`` when neither
+    names one (the backtest worker then defaults to ``sharpe``)."""
+    request_metric = (request_objective or {}).get("metric")
+    if request_metric and request_metric != _OOS_METRIC:
+        return request_metric
+    return ((optimize_block or {}).get("objective") or {}).get("metric")
+
+
+def _effective_fold_direction(
+    request_objective: dict[str, Any], optimize_block: dict[str, Any], fold_metric: str | None
+) -> str:
+    """The direction the fold objective — and thus the ``oos_fold_mean`` sweep objective — is
+    optimized in (AY-OPT-02). A mean-of-a-minimize-metric (e.g. maxDrawdown) must be MINIMIZED, so
+    the optimizer selects the BEST (smallest) trials, not the worst. Resolution: the request's
+    ``direction`` > the YAML objective's ``direction`` > the catalog's canonical direction for the
+    fold metric. Only the LAST leans on the catalog, so an explicit direction always wins."""
+    request_direction = (request_objective or {}).get("direction")
+    if request_direction:
+        return request_direction
+    yaml_direction = ((optimize_block or {}).get("objective") or {}).get("direction")
+    if yaml_direction:
+        return yaml_direction
+    return metrics_catalog.canonical_direction(fold_metric)
+
+
 def _coerce_int(value: Any, field: str) -> int:
     """Coerce a request field to int, raising a 400 (not an opaque int()/KeyError 500) on a
     non-numeric value (register §9-8)."""
@@ -162,6 +195,7 @@ class SweepService:
         # Fold-sweep objective guard: a walk-forward sweep on an in-sample metric overfits — steer
         # it to oos_fold_mean (+ warn). Run before the echo so the job records the EFFECTIVE
         # objective, not the as-submitted one.
+        raw_objective = request.get("objective") or {}  # pre-guard: the request's own metric
         objective = request.get("objective", {"metric": "sharpe", "direction": "maximize"})
         objective, fold_warning = _fold_objective_guard(objective, walk_forward)
         if fold_warning:
@@ -199,6 +233,21 @@ class SweepService:
         for warning in _yaml_precedence_warnings(optimize_block, request):
             _LOG.warning(warning)
 
+        # The REQUEST-owned fold objective metric (AY-OPT-02) — threaded into each trial's backtest
+        # request so the fold aggregation (oos_fold_mean) + per-fold pruner telemetry key off the
+        # metric the REQUEST declared, not whatever the YAML names.
+        fold_objective_metric = _effective_fold_metric(raw_objective, optimize_block)
+        # ...and the oos_fold_mean sweep objective the fold guard emits must be optimized in that
+        # metric's DIRECTION (AY-OPT-02): a mean-of-a-minimize-metric (maxDrawdown) is MINIMIZED, so
+        # the optimizer picks the BEST trials — the guard's hardcoded 'maximize' picks the WORST.
+        if objective.get("metric") == _OOS_METRIC:
+            objective = {
+                **objective,
+                "direction": _effective_fold_direction(
+                    raw_objective, optimize_block, fold_objective_metric
+                ),
+            }
+
         jobs = self._jobs_factory()
         try:
             sweep_id = jobs.insert_sweep(None, _sweep_echo(request, parameters, objective))
@@ -227,6 +276,7 @@ class SweepService:
                 "walk_forward": walk_forward,
                 "request_base": request_base,
                 "early_stopping": early_stopping,
+                "fold_objective_metric": fold_objective_metric,
             },
             daemon=True,
             name=f"sweep-{sweep_id[:8]}",
@@ -314,7 +364,14 @@ class SweepService:
         return {"items": items, "limit": limit, "offset": offset}
 
     def best(self, sweep_id: str, top: int, sort: str) -> dict[str, Any]:
-        """The plateau-adjusted leaderboard (§D.9); COMPLETE trials only (pruned/failed dropped)."""
+        """The plateau-adjusted leaderboard (§D.9); COMPLETE trials only (pruned/failed dropped).
+
+        A MULTI-objective (``nsga2``) sweep keeps the SAME scalar leaderboard shape the FE contract
+        requires (``metric`` + per-row ``objective``, ranked on the first objective as a
+        representative view, capped at ``top``) and ADDITIVELY exposes its full Pareto front under
+        ``paretoFront`` — so the non-dominated set is surfaced, never SILENTLY collapsed to the
+        scalar ranking (AY-OPT-03). The front carries core objective values only, with NO per-row
+        guard enrichment (that stays bounded to the scalar top-N) — a large front never fans out."""
         jobs = self._jobs_factory()
         trials = self._trials_factory()
         try:
@@ -323,7 +380,9 @@ class SweepService:
                 raise ApiError(404, "NOT_FOUND_JOB", f"no such job: {sweep_id}")
             request = job.get("request") or {}
             parameters = request.get("parameters", [])
-            metric, direction = _primary_objective(request.get("objective", {}))
+            objective = request.get("objective", {})
+            multi = request.get("method") == "nsga2"
+            metric, direction = _primary_objective(objective)
             rows = trials.list_for_sweep(sweep_id, _PROMOTABLE, 1000, 0)
         finally:
             jobs.close()
@@ -343,8 +402,39 @@ class SweepService:
                 }
             )
         ranked = leaderboard.best(items, parameters, top, direction, sort)
-        self._attach_guard_metrics(ranked)
-        return {"metric": metric, "sort": "raw" if sort == "raw" else "plateau", "items": ranked}
+        self._attach_guard_metrics(ranked)  # bounded to the top-N view — never the whole front
+        response = {
+            "metric": metric,
+            "sort": "raw" if sort == "raw" else "plateau",
+            "items": ranked,
+        }
+        if multi:
+            self._expose_pareto_front(response, objective, rows)
+        return response
+
+    def _expose_pareto_front(
+        self, response: dict[str, Any], objective: dict[str, Any], rows: list[dict[str, Any]]
+    ) -> None:
+        """AY-OPT-03: additively expose a multi-objective (``nsga2``) sweep's Pareto front on the
+        leaderboard response, WITHOUT touching the scalar ``metric``/``items``/per-row ``objective``
+        fields the FE contract requires. The non-dominated set is surfaced under ``paretoFront``
+        (no longer silently collapsed to the scalar ranking), each row carrying its identity + full
+        ``objectiveValues`` only — NO per-row guard enrichment (that stays bounded to the scalar
+        top-N ``items``), so a large front never fans out on every poll. Picking ONE point off the
+        front is an explicit owner choice downstream (``promote``)."""
+        objectives = sweep.multi_objectives(objective)
+        front = leaderboard.pareto_front(rows, objectives)
+        response["multiObjective"] = True
+        response["objectives"] = objectives
+        response["paretoFront"] = [
+            {
+                "trialNumber": row["trialNumber"],
+                "params": row["params"],
+                "objectiveValues": row.get("objectiveValues") or {},
+                "backtestRunId": row.get("backtestRunId"),
+            }
+            for row in front
+        ]
 
     def _attach_guard_metrics(self, ranked: list[dict[str, Any]]) -> None:
         """Surfaces the §D.4 guard outputs (already persisted — never recomputed) as a compact
@@ -561,8 +651,11 @@ def _sweep_summary(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _primary_objective(objective: dict[str, Any]) -> tuple[str, str]:
-    """The scalar metric + direction the leaderboard ranks on (the first of an nsga2 ``objectives``
-    list, else the single-objective ``metric``)."""
+    """The single scalar metric + direction for the surfaces that need one: the ``/best`` scalar
+    leaderboard view (a representative ranking), the retro scorecard's ``rawObjective``, and the
+    neighbour-probe geometry. For a multi-objective (``nsga2``) sweep this is the FIRST objective —
+    a DOCUMENTED, deliberate representative pick, NOT a silent collapse: ``/best`` ALSO exposes the
+    full non-dominated set under ``paretoFront`` (AY-OPT-03) — surfaced, never hidden."""
     objectives = objective.get("objectives")
     if objectives:
         first = objectives[0]

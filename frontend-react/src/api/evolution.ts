@@ -385,7 +385,7 @@ export const GATE_LABELS: Record<string, string> = {
   holdout: 'Holdout',
   comparability: 'Comparability',
   live_gap: 'Live-gap',
-  deflated_sharpe: 'Deflated Sharpe',
+  multiplicity_tstat: 'Multiplicity t-stat',
 };
 
 /** The main §8.1 lifecycle order for the pipeline strip (terminal RETIRED/ROLLED_BACK excluded). */

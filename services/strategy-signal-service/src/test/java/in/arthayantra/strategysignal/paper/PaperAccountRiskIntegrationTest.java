@@ -170,6 +170,27 @@ class PaperAccountRiskIntegrationTest extends StrategySignalIntegrationTestBase 
   }
 
   @Test
+  void entryVetoSurfacesTheExactRailAndStaysParityWithEntryAllowed() {
+    // PF-03: the guard SPI surfaces WHICH governor rail vetoed (so SignalEngine can record it),
+    // and entryAllowed(book) == entryVeto(book).isEmpty() holds — the byte-identical decision the
+    // observability change relies on. Clear book → empty veto, entry allowed.
+    assertThat(guard.entryVeto("scalper")).isEmpty();
+    assertThat(risk.entryAllowed("scalper")).isEqualTo(guard.entryVeto("scalper").isEmpty());
+
+    // kill switch → the kill_switch rail.
+    risk.update("scalper", "kill_switch", "{\"enabled\":true}");
+    assertThat(guard.entryVeto("scalper")).contains(RiskService.KILL_SWITCH);
+    assertThat(risk.entryAllowed("scalper")).isEqualTo(guard.entryVeto("scalper").isEmpty());
+    risk.update("scalper", "kill_switch", "{\"enabled\":false}");
+
+    // MAX_OPEN concurrency cap at 1 with one open position → the max_open_paper_positions rail.
+    insertOpen("VETOTEST", "BUY", 50, "100.0000");
+    risk.update("scalper", "max_open_paper_positions", "{\"enabled\":true,\"value\":1}");
+    assertThat(guard.entryVeto("scalper")).contains(RiskService.MAX_OPEN);
+    assertThat(risk.entryAllowed("scalper")).isFalse();
+  }
+
+  @Test
   void aRiskFlipMintsNoStrategyVersion() {
     Integer before = jdbc.queryForObject("SELECT count(*) FROM strategy_versions", Integer.class);
     risk.update("scalper", "kill_switch", "{\"enabled\":true}");

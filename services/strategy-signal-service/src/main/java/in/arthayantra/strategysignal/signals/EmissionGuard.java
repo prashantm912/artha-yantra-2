@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.signals;
 
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import java.math.BigDecimal;
+import java.util.Optional;
 
 /**
  * SPI the engine consults at ENTRY emission (A12). DEFINED here in the signals module and
@@ -13,6 +14,20 @@ public interface EmissionGuard {
 
   /** False when the book's risk pauses ENTRY emission (daily-loss trip, kill switch, max open). */
   boolean entryAllowed(String book);
+
+  /**
+   * PF-03: the governor RAIL (an opaque label, e.g. {@code max_open_paper_positions} /
+   * {@code kill_switch} / {@code heat_cap_pct}) pausing a new ENTRY on this book right now, or
+   * {@link Optional#empty()} when entry is allowed. Behaviourally identical to {@link #entryAllowed}
+   * — {@code entryAllowed(book) == entryVeto(book).isEmpty()} — but surfaces WHICH rail vetoed so the
+   * engine can write a durable {@code risk_suppressions} record. The default derives from
+   * {@link #entryAllowed} with an opaque {@code "unknown"} rail (the paper adapter overrides it with
+   * the real rail from the risk governor). The label is opaque to the signals module — no coupling to
+   * the paper risk-key constants.
+   */
+  default Optional<String> entryVeto(String book) {
+    return entryAllowed(book) ? Optional.empty() : Optional.of("unknown");
+  }
 
   /**
    * False when the scalper 5-sub-account discipline pauses a fresh scalper ENTRY for the IST day

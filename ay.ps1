@@ -531,7 +531,8 @@ ay - ArthaYantra operator CLI (project-scoped docker compose)
   ay down                   stop project containers (volumes kept)
   ay logs <svc>             follow logs for one service
   ay status                 healthcheck summary of all containers + whole-DB storage
-                            total vs the 50 GB review trigger and largest hypertables
+                            total; live 'artha' is evaluated vs the 50 GB review trigger
+                            (% + warning), mock reports DB size only (trigger not evaluated)
   ay backup [keep]          manual whole-db pg_dump (+ globals) into ./backups
                             (`keep` = a rotation-EXEMPT pre-migration dump into backups/pinned/)
   ay restore <dir|file>     restore a whole-db backup (dir or *-full.dump) — DROPS+recreates the DB

@@ -24,10 +24,12 @@ chains, ~200 active equities, pinned FUT/VIX):
 | Everything else | noise | < 0.5 GB |
 
 **Review trigger: 50 GB total volume.** This is a **whole-database** volume
-(`pg_database_size`), not any single hypertable. `ay status` is the input: it
-prints the DB total vs the 50 GB trigger (`DB '<db>' = 46.1 GB / 50 GB review
-trigger (92%)`) plus the largest hypertables, continuous aggregates and tables
-(`hypertable_size` / `pg_total_relation_size`), and warns at ≥ 80 %. At the trigger, review
+(`pg_database_size`), not any single hypertable, and a **live-`artha` budget**.
+`ay status` is the input: on the live profile it prints the DB total vs the 50 GB
+trigger (`DB 'artha' = 46.1 GB / 50 GB review trigger (92%)`) and warns at ≥ 80 %;
+on a mock profile it reports the `artha_mock` DB size only (the trigger is not
+evaluated). Either way it lists the largest hypertables, continuous aggregates and
+tables (`hypertable_size` / `pg_total_relation_size`). At the trigger, review
 compression ratios and snapshot scope — the answer is widening disk or
 narrowing scope, never silent retention.
 

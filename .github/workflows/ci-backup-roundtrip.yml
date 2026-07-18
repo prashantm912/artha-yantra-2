@@ -90,6 +90,33 @@ jobs:
           # compress exactly the first (2026-01-01) chunk
           $PSQL -d src -c "SELECT compress_chunk(c) FROM show_chunks('marketdata.candles', older_than => '2026-01-02T00:00:00Z'::timestamptz) c"
 
+          # --- OPS-R01: seed the OTHER three lineages (admin/strategy/backtest) + the
+          #     service roles + the CD-1 cross-schema grant, so the round-trip proves
+          #     ay.ps1's 4-lineage post-restore manifest (roles + grants included), not
+          #     just the marketdata hypertable. Roles are cluster-global; a fresh
+          #     container has none, and || true keeps a container-reuse rerun clean.
+          docker exec tsdb psql -U postgres -d src -c "CREATE ROLE ay_marketdata NOLOGIN" || true
+          docker exec tsdb psql -U postgres -d src -c "CREATE ROLE ay_strategy NOLOGIN" || true
+          docker exec tsdb psql -U postgres -d src -c "CREATE ROLE ay_backtest NOLOGIN" || true
+          $PSQL -d src -c "CREATE SCHEMA IF NOT EXISTS admin"
+          $PSQL -d src -c "CREATE SCHEMA IF NOT EXISTS strategy"
+          $PSQL -d src -c "CREATE SCHEMA IF NOT EXISTS backtest"
+          # each lineage's flyway_schema_history is the universal per-lineage witness ay.ps1 probes
+          for s in admin marketdata strategy backtest; do
+            $PSQL -d src -c "CREATE TABLE ${s}.flyway_schema_history (installed_rank int PRIMARY KEY, success boolean)"
+            $PSQL -d src -c "INSERT INTO ${s}.flyway_schema_history VALUES (1, true)"
+          done
+          $PSQL -d src -c "CREATE TABLE marketdata.instruments (token int PRIMARY KEY, tradingsymbol text)"
+          $PSQL -d src -c "INSERT INTO marketdata.instruments VALUES (1, 'NIFTY')"
+          $PSQL -d src -c "CREATE TABLE marketdata.options_chain_snapshots (id bigint PRIMARY KEY)"
+          $PSQL -d src -c "CREATE TABLE strategy.signals (id bigint PRIMARY KEY)"
+          $PSQL -d src -c "CREATE TABLE backtest.backtest_runs (id bigint PRIMARY KEY)"
+          $PSQL -d src -c "CREATE TABLE backtest.jobs (id bigint PRIMARY KEY)"
+          # the ONE cross-schema grant (CD-1): ay_backtest reads marketdata (per-object ACL,
+          # rides the whole-db dump, NOT globals — so the restore genuinely re-applies it)
+          $PSQL -d src -c "GRANT USAGE ON SCHEMA marketdata TO ay_backtest"
+          $PSQL -d src -c "GRANT SELECT ON ALL TABLES IN SCHEMA marketdata TO ay_backtest"
+
           src_base=$($PSQL -t -A -d src -c "SELECT count(*) FROM marketdata.candles")
           src_compressed_range=$($PSQL -t -A -d src -c "SELECT count(*) FROM marketdata.candles WHERE bucket < '2026-01-02T00:00:00Z'")
           src_cagg=$($PSQL -t -A -d src -c "SELECT count(*) FROM marketdata.candles_1h")
@@ -148,8 +175,27 @@ jobs:
           { [ "$dst_cagg" = "$SRC_CAGG" ] && [ "$dst_cagg" -gt 0 ]; } || { echo "::error::cagg materialized rows diverged: $dst_cagg != $SRC_CAGG"; fail=1; }
           # the candle-style zero-row gate `ay restore` itself applies since #501
           [ "$dst_base" -gt 0 ] || { echo "::error::marketdata.candles EMPTY after restore"; fail=1; }
+          # OPS-R01: the SAME 4-lineage post-restore manifest ay.ps1 runs — a key relation
+          # in each lineage (admin/marketdata/strategy/backtest), the three service roles,
+          # and the CD-1 cross-schema grant. A dump missing any of these used to restore
+          # "successfully" on the marketdata-candles-only gate.
+          for obj in admin.flyway_schema_history \
+                     marketdata.flyway_schema_history marketdata.candles marketdata.instruments marketdata.options_chain_snapshots \
+                     strategy.flyway_schema_history strategy.signals \
+                     backtest.flyway_schema_history backtest.backtest_runs backtest.jobs; do
+            present=$($PSQL -t -A -d dst -c "SELECT to_regclass('$obj') IS NOT NULL")
+            [ "$present" = "t" ] || { echo "::error::lineage relation missing after restore: $obj"; fail=1; }
+          done
+          dst_roles=$($PSQL -t -A -d dst -c "SELECT count(*) FROM pg_roles WHERE rolname IN ('ay_marketdata','ay_strategy','ay_backtest')")
+          [ "$dst_roles" = "3" ] || { echo "::error::service roles incomplete after restore: found $dst_roles/3"; fail=1; }
+          # SELECT AS ay_backtest proves the dump's per-object grant restored (permission
+          # denied => the cross-schema grant was lost). ON_ERROR_STOP=1 + 2>&1 || true so a
+          # denial is captured as text, not an aborted step.
+          grant_probe=$(docker exec tsdb psql -U postgres -t -A -v ON_ERROR_STOP=1 -d dst -c "SET ROLE ay_backtest; SELECT count(*) FROM marketdata.instruments; RESET ROLE" 2>&1 || true)
+          if echo "$grant_probe" | grep -qiE 'permission denied|ERROR:'; then echo "::error::cross-schema grant lost after restore: $grant_probe"; fail=1; fi
+          echo "lineage manifest: roles=$dst_roles/3, grant_probe=$grant_probe"
           [ "$fail" -eq 0 ] || exit 1
-          echo "round-trip OK: $dst_base base rows, $dst_cagg cagg rows, compressed chunk intact"
+          echo "round-trip OK: $dst_base base rows, $dst_cagg cagg rows, compressed chunk intact, 4 lineages + roles + grant validated"
 
       - name: Container logs (diagnosis)
         if: failure()

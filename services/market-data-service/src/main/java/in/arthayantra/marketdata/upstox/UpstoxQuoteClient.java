@@ -72,7 +72,11 @@ public final class UpstoxQuoteClient {
       return Map.of();
     }
     String csv = String.join(",", instrumentKeys);
-    limiter.acquire(); // live-critical quote — draws from the token's live-reserved headroom
+    // Live-critical quote: BOUNDED wait for the shared token budget; on a saturated budget return an
+    // empty map (fail-soft, same as a transport miss) rather than parking the caller's thread.
+    if (!limiter.tryAcquire()) {
+      return Map.of();
+    }
     UpstoxMarketQuote response =
         restClient
             .get()

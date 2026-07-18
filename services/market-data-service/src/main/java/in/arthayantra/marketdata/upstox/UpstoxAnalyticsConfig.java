@@ -34,28 +34,44 @@ public class UpstoxAnalyticsConfig {
 
   /**
    * The ONE token-scoped Upstox rate budget (EXT-02) — a single bean shared by EVERY client on the
-   * analytics token (the expired-backfill walker AND the live option-chain / quote / margin / page
-   * clients), so the whole token draws from the ONE 2000/30min budget instead of each client
-   * fragmenting it with its own instance (or, for the live clients, running unmetered). Bound whenever
-   * ANY of those clients can bind — analytics enabled, OR the option-chain / quote source flipped to
-   * Upstox — so the injected dependency always exists; absent on the mock stack (non-live profile) and
-   * on a live stack with no Upstox consumer, so the B4 quota widget reports {@code configured=false}.
+   * analytics token (the expired-backfill walker + the fundamentals bulk walk + the daily contract
+   * canary + the live option-chain / quote / margin / ws-authorize / page clients), so the whole token
+   * draws from the ONE 2000/30min budget instead of each client fragmenting it (or running unmetered).
+   * The batch path pauses while the market is open, so the live capture path owns the token during the
+   * session; the gate mirrors {@code OptionsSnapshotService.isOpenSafe} (an uncovered calendar year →
+   * treated as closed, i.e. batch runs, which is safe because live capture is also halted then). Bound
+   * whenever ANY analytics-token client can bind — analytics enabled, OR the quote / chain / ticker
+   * source flipped to Upstox, OR the canary enabled — so the injected dependency always exists; absent
+   * on the mock stack (non-live profile) so the B4 quota widget reports {@code configured=false}.
    */
   @Bean
   @ConditionalOnExpression(
       "'${artha.upstox.analytics.enabled:false}' == 'true' "
           + "or '${artha.marketdata.source.optionchain:kite}' == 'upstox' "
-          + "or '${artha.marketdata.source.quotes:kite}' == 'upstox'")
-  public UpstoxRateLimiter upstoxRateLimiter() {
-    return new UpstoxRateLimiter();
+          + "or '${artha.marketdata.source.quotes:kite}' == 'upstox' "
+          + "or '${artha.marketdata.source.ticker:kite}' == 'upstox' "
+          + "or '${artha.upstox.canary-enabled:false}' == 'true'")
+  public UpstoxRateLimiter upstoxRateLimiter(MarketCalendar calendar, Clock clock) {
+    return new UpstoxRateLimiter(() -> isOpenSafe(calendar, clock));
+  }
+
+  /** Market-open, tolerant of an uncovered calendar year (→ closed) — mirrors the capture gate. */
+  private static boolean isOpenSafe(MarketCalendar calendar, Clock clock) {
+    try {
+      return calendar.isOpen(clock.instant());
+    } catch (IllegalArgumentException uncoveredYear) {
+      return false;
+    }
   }
 
   /** The hand-rolled Upstox analytics REST client (entitlement probe in U1; feeds U2+). */
   @Bean
   @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
   public UpstoxAnalyticsClient upstoxAnalyticsClient(
-      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
-    return new UpstoxAnalyticsClient(restClientBuilder, properties);
+      RestClient.Builder restClientBuilder,
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter upstoxRateLimiter) {
+    return new UpstoxAnalyticsClient(restClientBuilder, properties, upstoxRateLimiter);
   }
 
   /**
@@ -111,8 +127,10 @@ public class UpstoxAnalyticsConfig {
   @Bean
   @ConditionalOnProperty(name = "artha.upstox.analytics.enabled", havingValue = "true")
   public UpstoxFundamentalsClient upstoxFundamentalsClient(
-      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
-    return new UpstoxFundamentalsClient(restClientBuilder, properties);
+      RestClient.Builder restClientBuilder,
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter upstoxRateLimiter) {
+    return new UpstoxFundamentalsClient(restClientBuilder, properties, upstoxRateLimiter);
   }
 
   /**
@@ -227,9 +245,10 @@ public class UpstoxAnalyticsConfig {
       Clock clock,
       ObjectMapper objectMapper,
       ObjectProvider<UpstoxFnoMasterClient> fnoMaster,
-      MeterRegistry meterRegistry) {
+      MeterRegistry meterRegistry,
+      UpstoxRateLimiter upstoxRateLimiter) {
     return new UpstoxContractCanary(
         restClientBuilder, properties, redis, ntfy, calendar, clock, objectMapper, fnoMaster,
-        meterRegistry);
+        meterRegistry, upstoxRateLimiter);
   }
 }

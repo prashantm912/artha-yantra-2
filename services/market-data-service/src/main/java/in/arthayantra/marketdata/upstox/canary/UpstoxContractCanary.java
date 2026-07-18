@@ -8,8 +8,10 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.upstox.UpstoxAnalyticsProperties;
 import in.arthayantra.marketdata.upstox.UpstoxFnoMasterClient;
+import in.arthayantra.marketdata.upstox.UpstoxRateLimiter;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -131,8 +133,23 @@ public class UpstoxContractCanary {
       Clock clock,
       ObjectMapper objectMapper,
       ObjectProvider<UpstoxFnoMasterClient> fnoMaster,
-      MeterRegistry meterRegistry) {
-    this.restClient = builder.baseUrl(properties.baseUrl()).build();
+      MeterRegistry meterRegistry,
+      UpstoxRateLimiter limiter) {
+    // A daily off-hours diagnostic that fires ~9 probes: every probe debits the ONE shared token budget
+    // (EXT-02) on the bounded LIVE path — NOT the batch path, so it never pauses during market hours (a
+    // manual mid-session run stays responsive) and the off-hours reserve keeps it headroom (so a
+    // saturated backfill never starves it into a false PROBE_FAILED).
+    this.restClient =
+        builder
+            .baseUrl(properties.baseUrl())
+            .requestInterceptor(
+                (request, body, execution) -> {
+                  if (!limiter.tryAcquire()) {
+                    throw new IOException("Upstox rate budget exhausted");
+                  }
+                  return execution.execute(request, body);
+                })
+            .build();
     this.properties = properties;
     this.redis = redis;
     this.ntfy = ntfy;

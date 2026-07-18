@@ -89,7 +89,12 @@ public final class UpstoxMarginClient {
         legs.stream()
             .map(l -> new Instrument(l.instrumentKey(), l.quantity(), l.side(), l.product()))
             .toList();
-    limiter.acquire(); // live-critical pre-trade margin — draws from the token's live-reserved headroom
+    // Live-critical pre-trade margin (the ARMED F9 governor path): BOUNDED wait for the shared token
+    // budget so a saturated budget returns unpriced FAST (fail-soft) — never a ~30-min parked thread
+    // while the strategy-signal caller times out at 2 s and allows the entry.
+    if (!limiter.tryAcquire()) {
+      return MarginQuote.unpriced("Upstox rate budget exhausted");
+    }
     try {
       UpstoxMargin response =
           restClient

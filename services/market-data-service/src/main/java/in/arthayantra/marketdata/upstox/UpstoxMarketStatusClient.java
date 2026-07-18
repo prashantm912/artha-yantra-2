@@ -279,7 +279,11 @@ public final class UpstoxMarketStatusClient {
   private <T> T withRetry(Supplier<T> call) {
     int attempt = 0;
     while (true) {
-      limiter.acquire();
+      // Live page read: BOUNDED wait for the shared token budget; a saturated budget throws (the
+      // callers degrade to UNKNOWN / price-less) rather than parking the request thread ~30 min.
+      if (!limiter.tryAcquire()) {
+        throw new IllegalStateException("Upstox rate budget exhausted");
+      }
       try {
         return call.get();
       } catch (HttpClientErrorException.TooManyRequests e) {

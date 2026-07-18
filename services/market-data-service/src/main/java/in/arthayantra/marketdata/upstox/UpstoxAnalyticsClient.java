@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
+import java.io.IOException;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -25,8 +26,22 @@ public final class UpstoxAnalyticsClient {
   private final UpstoxAnalyticsProperties properties;
 
   /** Binds the wire client to the configured base URL (real Upstox, or WireMock in tests). */
-  public UpstoxAnalyticsClient(RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
-    this.restClient = builder.baseUrl(properties.baseUrl()).build();
+  public UpstoxAnalyticsClient(
+      RestClient.Builder builder, UpstoxAnalyticsProperties properties, UpstoxRateLimiter limiter) {
+    // Live path (FII/DII EOD + user-facing news/pcr/max-pain pages): every call debits the ONE shared
+    // token budget (EXT-02) via a BOUNDED-wait interceptor. A saturated budget throws (surfaces as a
+    // transport error → each method's existing fail-soft) rather than parking the thread ~30 min.
+    this.restClient =
+        builder
+            .baseUrl(properties.baseUrl())
+            .requestInterceptor(
+                (request, body, execution) -> {
+                  if (!limiter.tryAcquire()) {
+                    throw new IOException("Upstox rate budget exhausted");
+                  }
+                  return execution.execute(request, body);
+                })
+            .build();
     this.properties = properties;
   }
 

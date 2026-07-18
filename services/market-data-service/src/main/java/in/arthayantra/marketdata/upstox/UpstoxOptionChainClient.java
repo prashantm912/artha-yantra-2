@@ -59,7 +59,11 @@ public final class UpstoxOptionChainClient {
    * the expiry.
    */
   public Chain optionChain(String instrumentKey, LocalDate expiry) {
-    limiter.acquire(); // live-critical OI capture — draws from the token's live-reserved headroom
+    // Live-critical OI capture: BOUNDED wait for the shared token budget; on a saturated budget skip
+    // this expiry (fail-soft, same as a transport miss) rather than parking the snapshotter thread.
+    if (!limiter.tryAcquire()) {
+      return null;
+    }
     UpstoxOptionChain response =
         restClient
             .get()

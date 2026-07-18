@@ -57,11 +57,6 @@ public final class UpstoxExpiredInstrumentsClient {
     this.limiter = limiter;
   }
 
-  /** The shared token-scoped rate budget — exposed read-only for the B4 quota widget. */
-  public UpstoxRateLimiter rateLimiter() {
-    return limiter;
-  }
-
   /** One expired contract's spec — the orchestration's unit of work (a CE/PE leg or a future). */
   public record Leg(
       String segment,
@@ -96,7 +91,8 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiry.class));
+                    .body(UpstoxExpiry.class),
+            true);
     if (response == null || response.data() == null) {
       return List.of();
     }
@@ -129,7 +125,8 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiredContract.class));
+                    .body(UpstoxExpiredContract.class),
+            true);
     if (response == null || response.data() == null) {
       return List.of();
     }
@@ -169,7 +166,8 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiredCandles.class));
+                    .body(UpstoxExpiredCandles.class),
+            true);
     return toBars(response);
   }
 
@@ -193,7 +191,8 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiredCandles.class));
+                    .body(UpstoxExpiredCandles.class),
+            false);
     return toBars(response);
   }
 
@@ -216,7 +215,8 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiredCandles.class));
+                    .body(UpstoxExpiredCandles.class),
+            false);
     return toBars(response);
   }
 
@@ -247,10 +247,18 @@ public final class UpstoxExpiredInstrumentsClient {
    * exponential) lets it succeed instead of failing the leg. After {@value #MAX_429_RETRIES} retries
    * the 429 propagates (the leg fails + is retried next run). Other errors propagate immediately.
    */
-  private <T> T withRetry(Supplier<T> call) {
+  private <T> T withRetry(Supplier<T> call, boolean batch) {
     int attempt = 0;
     while (true) {
-      limiter.acquireForBatch(); // batch pacing — leaves the token's live-reserved headroom untouched
+      // The heavy expired-contract WALK ({@code batch}) draws from the batch ceiling AND pauses while
+      // the market is open (a background job that yields the token to live capture during the session).
+      // The on-demand E1 Market-Movers reads use the bounded LIVE path so a user radar never pauses for
+      // the whole session — the off-hours reserve keeps them headroom so this effectively never throws.
+      if (batch) {
+        limiter.acquireForBatch();
+      } else if (!limiter.tryAcquire()) {
+        throw new IllegalStateException("Upstox rate budget exhausted");
+      }
       try {
         return call.get();
       } catch (HttpClientErrorException.TooManyRequests e) {

@@ -10,6 +10,7 @@ import in.arthayantra.marketdata.nse.LiveFiiDiiFetcher;
 import in.arthayantra.marketdata.upstox.canary.UpstoxContractCanary;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -196,8 +197,10 @@ public class UpstoxAnalyticsConfig {
       MarketCalendar calendar,
       Clock clock,
       ObjectMapper objectMapper,
+      ObjectProvider<UpstoxFnoMasterClient> fnoMaster,
       MeterRegistry meterRegistry) {
     return new UpstoxContractCanary(
-        restClientBuilder, properties, redis, ntfy, calendar, clock, objectMapper, meterRegistry);
+        restClientBuilder, properties, redis, ntfy, calendar, clock, objectMapper, fnoMaster,
+        meterRegistry);
   }
 }

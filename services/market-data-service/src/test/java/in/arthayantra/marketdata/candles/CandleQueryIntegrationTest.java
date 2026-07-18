@@ -202,6 +202,18 @@ class CandleQueryIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
+  void databaseSizeGaugeExceedsCandlesOnlyHypertableSize() {
+    // AYDB-03: the 50 GB review trigger is a WHOLE-DB volume. hypertableBytes() is candles-only
+    // (~half the live DB), so the DB total must be at least the candles hypertable and strictly
+    // positive — this is the size ay status now surfaces vs the trigger.
+    long candlesBytes = repository.hypertableBytes();
+    long dbBytes = repository.databaseSizeBytes();
+    assertThat(candlesBytes).isGreaterThanOrEqualTo(0);
+    assertThat(dbBytes).isGreaterThan(0);
+    assertThat(dbBytes).as("whole-DB size includes candles + caggs + catalogs").isGreaterThanOrEqualTo(candlesBytes);
+  }
+
+  @Test
   void unsupportedIntervalRejectedWith400() {
     assertThatThrownBy(() -> queryService.read("NSE", "CQBAD", "2m", FROM, TO))
         .isInstanceOfSatisfying(

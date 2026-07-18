@@ -50,6 +50,24 @@ public abstract class MarketDataIntegrationTestBase {
           .load()
           .migrate();
     }
+    setConsoleRolePassword();
+  }
+
+  /**
+   * SEC-02: admin lineage V002 creates {@code ay_console} with PASSWORD NULL; the compose
+   * {@code console-role-init} one-shot sets its password in the live/mock stack. Tests have no
+   * one-shot, so set the documented mock/CI default here — matching the ConsoleDataSource default so
+   * the console datasource (and the least-privilege ITs) can authenticate as ay_console.
+   */
+  private static void setConsoleRolePassword() {
+    try (var c =
+            java.sql.DriverManager.getConnection(
+                TIMESCALE.getJdbcUrl(), TIMESCALE.getUsername(), TIMESCALE.getPassword());
+        var st = c.createStatement()) {
+      st.execute("ALTER ROLE ay_console LOGIN PASSWORD 'console-readonly-local'");
+    } catch (java.sql.SQLException e) {
+      throw new IllegalStateException("failed setting ay_console test password", e);
+    }
   }
 
   private static Path locateFlywayRoot() {

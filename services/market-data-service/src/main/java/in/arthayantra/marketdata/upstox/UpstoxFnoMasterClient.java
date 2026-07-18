@@ -54,7 +54,7 @@ public final class UpstoxFnoMasterClient {
   private final ObjectMapper mapper;
   private final String masterPath;
 
-  private volatile Map<FnoKey, String> keysByLeg = Map.of();
+  private volatile Map<FnoKey, FnoLeg> keysByLeg = Map.of();
   private volatile Instant loadedAt = Instant.EPOCH;
 
   /** Binds the wire client to the (configurable) assets host. */
@@ -78,11 +78,25 @@ public final class UpstoxFnoMasterClient {
    */
   public String keyFor(
       String exchange, String underlying, String type, LocalDate expiry, BigDecimal strike) {
+    FnoLeg leg = resolve(exchange, underlying, type, expiry, strike);
+    return leg == null ? null : leg.instrumentKey();
+  }
+
+  /**
+   * The full resolved F&amp;O leg — its Upstox {@code instrument_key} plus the master's {@code
+   * lot_size} — or {@code null} when the master holds no matching contract (same tolerance as {@link
+   * #keyFor}). Callers needing the tradable lot alongside the key (e.g. the margin drift-probe, whose
+   * basket qty MUST be a lot multiple) use this instead of resolving the lot from a hardcode that goes
+   * stale on an NSE lot change.
+   */
+  public FnoLeg resolve(
+      String exchange, String underlying, String type, LocalDate expiry, BigDecimal strike) {
     String segment = segmentFor(exchange);
     if (segment == null || underlying == null || type == null || expiry == null) {
       return null;
     }
-    return cache().get(new FnoKey(segment, underlying.trim().toUpperCase(), type, expiry, normalizeStrike(strike)));
+    return cache()
+        .get(new FnoKey(segment, underlying.trim().toUpperCase(), type, expiry, normalizeStrike(strike)));
   }
 
   /** ArthaYantra F&amp;O exchange → Upstox segment; {@code null} (skip) for a non-F&amp;O exchange. */
@@ -95,7 +109,7 @@ public final class UpstoxFnoMasterClient {
   }
 
   /** Returns the cached map, (re)loading it on first use or after the refresh window. */
-  private Map<FnoKey, String> cache() {
+  private Map<FnoKey, FnoLeg> cache() {
     if (Duration.between(loadedAt, Instant.now()).compareTo(REFRESH) >= 0) {
       synchronized (this) {
         if (Duration.between(loadedAt, Instant.now()).compareTo(REFRESH) >= 0) {
@@ -130,9 +144,9 @@ public final class UpstoxFnoMasterClient {
     }
   }
 
-  /** Indexes the {@code *_FO} rows by the structured leg tuple → {@code instrument_key}. */
-  private static Map<FnoKey, String> index(List<UpstoxInstrumentMaster> rows) {
-    Map<FnoKey, String> map = new HashMap<>();
+  /** Indexes the {@code *_FO} rows by the structured leg tuple → the resolved leg (key + lot). */
+  private static Map<FnoKey, FnoLeg> index(List<UpstoxInstrumentMaster> rows) {
+    Map<FnoKey, FnoLeg> map = new HashMap<>();
     for (UpstoxInstrumentMaster r : rows) {
       if (!isFno(r) || r.instrumentKey() == null) {
         continue;
@@ -149,7 +163,7 @@ public final class UpstoxFnoMasterClient {
               r.instrumentType(),
               expiry,
               normalizeStrike(r.strikePrice())),
-          r.instrumentKey());
+          new FnoLeg(r.instrumentKey(), r.lotSize()));
     }
     return map;
   }
@@ -180,4 +194,11 @@ public final class UpstoxFnoMasterClient {
    */
   record FnoKey(
       String segment, String underlying, String type, LocalDate expiry, BigDecimal strike) {}
+
+  /**
+   * A resolved F&amp;O leg: the Upstox {@code instrumentKey} plus the master's {@code lotSize} (the
+   * tradable market lot, e.g. NIFTY 65). {@code lotSize} is {@code null} when the master row omits
+   * {@code lot_size} (never seen for a listed F&amp;O contract) — the caller then falls back.
+   */
+  public record FnoLeg(String instrumentKey, Integer lotSize) {}
 }

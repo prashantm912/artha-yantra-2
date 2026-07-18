@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -153,18 +154,27 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
           + "\"additional_margin\":0.0,\"total_margin\":387004.85,\"tender_margin\":0.0}],"
           + "\"required_margin\":387004.85,\"final_margin\":188604.45}}";
 
-  /** The gzipped F&O master with one NIFTY 24000 CE at the next weekly index expiry (Tuesday). */
-  private static byte[] marginMaster() {
+  /**
+   * The gzipped F&O master with one NIFTY 24000 CE at the next weekly index expiry (Tuesday). When
+   * {@code lotSize} is non-null the row carries {@code lot_size}; when null the row OMITS it (drives
+   * the fallback path). The default fixture uses {@code 50} — a value distinct from the canary's 65
+   * hardcoded fallback, so the probe qty asserted below can ONLY have come from the master (proves the
+   * lot is master-resolved, not a hardcode).
+   */
+  private static byte[] marginMaster(Integer lotSize) {
     LocalDate expiry =
         MarketCalendar.nse().nextWeeklyIndexExpiry(LocalDate.now(ZoneId.of("Asia/Kolkata")));
     long expiryMillis =
         expiry.atTime(15, 30).atZone(ZoneId.of("Asia/Kolkata")).toInstant().toEpochMilli();
+    String lotField = lotSize == null ? "" : ",\"lot_size\":" + lotSize;
     String json =
         "[{\"segment\":\"NSE_FO\",\"name\":\"NIFTY\",\"asset_symbol\":\"NIFTY\","
             + "\"underlying_symbol\":\"NIFTY\",\"instrument_key\":\"NSE_FO|MARGINPROBE\","
             + "\"instrument_type\":\"CE\",\"trading_symbol\":\"NIFTY 24000 CE\",\"expiry\":"
             + expiryMillis
-            + ",\"strike_price\":24000.0}]";
+            + ",\"strike_price\":24000.0"
+            + lotField
+            + "}]";
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     try (GZIPOutputStream gz = new GZIPOutputStream(out)) {
       gz.write(json.getBytes(StandardCharsets.UTF_8));
@@ -200,11 +210,13 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
         get(urlPathEqualTo("/v2/market-quote/quotes")).willReturn(json(MARKET_QUOTE)));
     WIREMOCK.stubFor(
         get(urlPathEqualTo("/v3/feed/market-data-feed/authorize")).willReturn(json(WS_AUTHORIZE)));
-    // Margin probe: the F&O master (gunzips to a NIFTY 24000 CE) + the priced basket.
+    // Margin probe: the F&O master (gunzips to a NIFTY 24000 CE, lot_size 50) + the priced basket.
     WIREMOCK.stubFor(
         get(urlPathEqualTo(MARGIN_MASTER_PATH))
             .willReturn(
-                aResponse().withHeader("Content-Type", "application/gzip").withBody(marginMaster())));
+                aResponse()
+                    .withHeader("Content-Type", "application/gzip")
+                    .withBody(marginMaster(50))));
     WIREMOCK.stubFor(post(urlPathEqualTo(MARGIN_PATH)).willReturn(json(MARGIN_OK)));
     WIREMOCK.stubFor(post(urlPathEqualTo("/ay-test-topic")).willReturn(aResponse().withStatus(200)));
   }
@@ -213,19 +225,49 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     return aResponse().withHeader("Content-Type", "application/json").withBody(body);
   }
 
+  // BEFORE_METHOD gives the singleton F&O-master client a COLD cache so it loads THIS test's lot=50
+  // master (its 12h cache would otherwise serve the no-lot master the fallback test below warms).
   @Test
+  @DirtiesContext(methodMode = DirtiesContext.MethodMode.BEFORE_METHOD)
   void fixtureFaithfulResponsesProduceZeroDrift() {
     UpstoxContractCanary.CanaryResult result = canary.runNow();
 
     assertThat(result.drift()).isEmpty();
     assertThat(result.lastContractCheck()).isNotNull();
     WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
-    // The margin probe MUST post a lot-multiple qty (NIFTY 2026 lot = 65); a wrong qty 400s UDAPI1104
-    // → silent skip → a blind canary, so pin it (EXT-03 residual review finding).
+    // The margin probe MUST post a lot-multiple qty (a wrong qty 400s UDAPI1104 → silent skip → a
+    // blind canary). The qty is resolved FROM the master's lot_size (fixture: 50) — a value distinct
+    // from the 65 hardcoded fallback, so asserting 50 proves the lot flows from the master (an NSE
+    // lot change is reflected automatically), not a stale hardcode (task_309ea822).
+    WIREMOCK.verify(
+        postRequestedFor(urlPathEqualTo(MARGIN_PATH))
+            .withRequestBody(matchingJsonPath("$.instruments[0].quantity", equalTo("50"))));
+    assertThat(redis.opsForValue().get(UpstoxContractCanary.RESULT_KEY)).contains("\"drift\":[]");
+  }
+
+  @Test
+  @DirtiesContext(methodMode = DirtiesContext.MethodMode.BEFORE_METHOD)
+  void marginProbeFallsBackToDefaultLotWhenMasterOmitsLotSize() {
+    // Defensive path: if the master row OMITS lot_size (never seen for a listed F&O contract), the
+    // probe must still post a valid lot multiple — it falls back to the documented NIFTY lot (65).
+    // Re-stub the master WITHOUT lot_size; BEFORE_METHOD gives the singleton F&O-master client a COLD
+    // cache so this no-lot master is the one it loads (the 12h cache would otherwise serve an earlier
+    // test's lot=50 master). Costs one Spring-context rebuild.
+    WIREMOCK.stubFor(
+        get(urlPathEqualTo(MARGIN_MASTER_PATH))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/gzip")
+                    .withBody(marginMaster(null))));
+
+    UpstoxContractCanary.CanaryResult result = canary.runNow();
+
+    // Faithful margins response → zero drift; the POST carries the fallback lot 65 (master had none).
+    assertThat(result.drift()).isEmpty();
     WIREMOCK.verify(
         postRequestedFor(urlPathEqualTo(MARGIN_PATH))
             .withRequestBody(matchingJsonPath("$.instruments[0].quantity", equalTo("65"))));
-    assertThat(redis.opsForValue().get(UpstoxContractCanary.RESULT_KEY)).contains("\"drift\":[]");
+    WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
   }
 
   @Test

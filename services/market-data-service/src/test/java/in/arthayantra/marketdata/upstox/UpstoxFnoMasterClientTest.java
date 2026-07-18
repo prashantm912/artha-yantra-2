@@ -48,7 +48,7 @@ class UpstoxFnoMasterClientTest {
          "expiry":1785263399000,"strike_price":0.0},
         {"segment":"NSE_FO","name":"NIFTY","asset_symbol":"NIFTY","underlying_symbol":"NIFTY",
          "instrument_key":"NSE_FO|50973","instrument_type":"CE","trading_symbol":"NIFTY 27000 CE 30 JUN 26",
-         "expiry":1782844199000,"strike_price":27000.0},
+         "expiry":1782844199000,"strike_price":27000.0,"lot_size":50},
         {"segment":"BSE_FO","name":"SENSEX","asset_symbol":"SENSEX","underlying_symbol":"SENSEX",
          "instrument_key":"BSE_FO|1174631","instrument_type":"PE","trading_symbol":"SENSEX 67900 PE 30 JUN 26",
          "expiry":1782844199000,"strike_price":67900.0},
@@ -113,6 +113,35 @@ class UpstoxFnoMasterClientTest {
             .keyFor("BFO", "SENSEX", "PE", LocalDate.of(2026, 6, 30), new BigDecimal("67900.00"));
 
     assertThat(key).as("decimal-scaled strike matches the master row").isEqualTo("BSE_FO|1174631");
+  }
+
+  @Test
+  void resolveExposesTheMasterLotSizeAlongsideTheKey() {
+    // resolve() returns the tradable lot from the master row (lot_size:50) so callers (the margin
+    // drift-probe) size the basket off the master, not a hardcode that goes stale on an NSE lot change.
+    UpstoxFnoMasterClient.FnoLeg leg =
+        client().resolve("NFO", "NIFTY", "CE", LocalDate.of(2026, 6, 30), new BigDecimal("27000"));
+
+    assertThat(leg).isNotNull();
+    assertThat(leg.instrumentKey()).isEqualTo("NSE_FO|50973");
+    assertThat(leg.lotSize()).isEqualTo(50);
+  }
+
+  @Test
+  void resolveLotIsNullWhenTheMasterRowOmitsLotSize() {
+    // The FUT row carries no lot_size — resolve() still returns the key, with a null lot (the caller
+    // then falls back to its documented default). keyFor stays unaffected.
+    UpstoxFnoMasterClient client = client();
+
+    UpstoxFnoMasterClient.FnoLeg leg =
+        client.resolve("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null);
+
+    assertThat(leg).isNotNull();
+    assertThat(leg.instrumentKey()).isEqualTo("NSE_FO|61093");
+    assertThat(leg.lotSize()).isNull();
+    // keyFor still returns the same key (signature + behaviour unchanged for its live callers).
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null))
+        .isEqualTo("NSE_FO|61093");
   }
 
   @Test

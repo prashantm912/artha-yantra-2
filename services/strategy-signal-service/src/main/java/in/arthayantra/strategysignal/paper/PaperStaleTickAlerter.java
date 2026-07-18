@@ -120,13 +120,26 @@ public class PaperStaleTickAlerter {
    * A settle attempt had no price AT ALL — no explicit price and no {@code ticks:last} entry has ever
    * existed for the symbol — so the caller refused to fabricate a breakeven exit and left the position
    * OPEN. Counts it and alerts once per (position, IST day). log.error (not warn): a position that
-   * cannot be marked is a real operational hole.
+   * cannot be marked is a real operational hole. The un-ticked instrument IS the position's own symbol
+   * on this close path ({@code doSettle} marks off the position's own tick).
    */
   public void settleRefused(PositionRow pos, String closeReason) {
+    settleRefused(pos, closeReason, pos.exchange() + ":" + pos.tradingsymbol());
+  }
+
+  /**
+   * Same refusal as {@link #settleRefused(PositionRow, String)} but the un-ticked instrument is a
+   * DIFFERENT symbol than the position — the index SPOT an option/future cash-settles against
+   * ({@code missingKey}, e.g. {@code NSE:NIFTY 50} / {@code BSE:SENSEX}). Names that spot in the page
+   * so the operator repairs the dead feed, not the option leg (which may have ticked fine): the
+   * AY-SL-04 failure mode is precisely an unpinned spot, so the alert must finger the spot.
+   */
+  public void settleRefused(PositionRow pos, String closeReason, String missingKey) {
     settleRefusedTotal.increment();
     String detail =
         "position " + pos.id() + " (" + closeReason + ") " + pos.exchange() + ":"
-            + pos.tradingsymbol() + " has no tick at all — left OPEN, NOT settled at breakeven";
+            + pos.tradingsymbol() + " — settlement reference " + missingKey
+            + " has never ticked — left OPEN, NOT settled at a fabricated price";
     log.error("paper settle refused: {}", detail);
     alertOncePerDay(
         "settle-refuse",

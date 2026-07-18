@@ -8,8 +8,10 @@ import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.ContractInfoClient.ContractInfo;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.Optional;
@@ -80,6 +82,7 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private StringRedisTemplate redis;
   @Autowired private ObjectMapper objectMapper;
+  @Autowired private MeterRegistry meterRegistry;
 
   @BeforeEach
   void clean() {
@@ -114,12 +117,73 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
   @Test
   void stockFnoClosesWithPhysicalSettlementWarning() {
     String sym = "EXPSTK-" + UUID.randomUUID();
-    seedSpot("RELIANCE", "2550.00");
     paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("40.00"), null, null));
+    // The stock derivative physical-settles off its OWN last REAL tick (delegated to doSettle's #694
+    // fallback), never a fabricated avgEntryPrice — seed a real option tick so it flattens at it.
+    seedTick("NFO", sym, "42.00");
 
     assertThat(expiry.settleExpiries()).isEqualTo(1);
     assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isEmpty();
     assertThat(positions.listClosed(null, null, sym, 10, 0).get(0).closeReason()).isEqualTo("EXPIRY_SETTLEMENT");
+  }
+
+  /**
+   * AY-SL-04 regression: an index option whose SPOT has NEVER ticked must NOT settle at a fabricated
+   * intrinsic (the old code fell back to {@code avgEntryPrice} → a fictional 0-P&amp;L exit). The
+   * settle refuses (counter + ntfy), leaving the position durably OPEN for the next pass — the #694
+   * "exits take the last REAL truth, refuse only when none was ever seen" doctrine on the spot axis.
+   */
+  @Test
+  void indexOptionWithNoSpotEverIsLeftOpenNotSettledAtEntry() {
+    redis.opsForHash().delete("ticks:last", "NSE:NIFTY 50"); // no spot tick has EVER been seen
+    String sym = "EXPOPT-" + UUID.randomUUID();
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("80.00"), null, null));
+    double refusedBefore = counter("ay_paper_settle_refused_total");
+
+    assertThat(expiry.settleExpiries()).isEqualTo(0); // nothing settled — no fabricated close
+
+    // The position is left durably OPEN (NOT closed at avgEntryPrice), and the refusal was alerted.
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isPresent();
+    assertThat(positions.listClosed(null, null, sym, 10, 0)).isEmpty();
+    assertThat(counter("ay_paper_settle_refused_total")).isGreaterThan(refusedBefore);
+  }
+
+  /**
+   * AY-SL-04 / #694: a REAL-but-stale spot still settles (exits take the best available truth at any
+   * age, never refuse) — it is counted + alerted as a stale settle, not fabricated from avgEntryPrice.
+   */
+  @Test
+  void staleSpotStillSettlesAtIntrinsic() {
+    String staleTs = OffsetDateTime.now(IST).minusMinutes(10).toString(); // ~600s old, far past 15s
+    redis.opsForHash().put("ticks:last", "NSE:NIFTY 50", tickJsonAt("NIFTY 50", "18100.00", staleTs));
+    String sym = "EXPOPT-" + UUID.randomUUID();
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("80.00"), null, null));
+    double staleBefore = counter("ay_paper_stale_settle_total");
+
+    assertThat(expiry.settleExpiries()).isEqualTo(1); // stale spot is USED, never refused
+
+    var settled = positions.listClosed(null, null, sym, 10, 0);
+    assertThat(settled).hasSize(1);
+    assertThat(settled.get(0).closeReason()).isEqualTo("EXPIRY_SETTLEMENT");
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isEmpty();
+    assertThat(counter("ay_paper_stale_settle_total")).isGreaterThan(staleBefore);
+  }
+
+  /**
+   * AY-SL-04: the stock-F&amp;O branch is fixed the same way — a derivative that has NEVER ticked is
+   * left OPEN + alerted, not physical-settled at a fabricated avgEntryPrice (delegated to doSettle).
+   */
+  @Test
+  void stockFnoWithNoTickEverIsLeftOpenNotFabricated() {
+    String sym = "EXPSTK-" + UUID.randomUUID(); // no tick seeded for its own symbol
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("40.00"), null, null));
+    double refusedBefore = counter("ay_paper_settle_refused_total");
+
+    assertThat(expiry.settleExpiries()).isEqualTo(0);
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isPresent();
+    assertThat(positions.listClosed(null, null, sym, 10, 0)).isEmpty();
+    // Prove the REFUSE path executed (not merely skipped): doSettle refused off the position's own tick.
+    assertThat(counter("ay_paper_settle_refused_total")).isGreaterThan(refusedBefore);
   }
 
   @Test
@@ -158,7 +222,11 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   private void seedSpot(String symbol, String price) {
-    redis.opsForHash().put("ticks:last", "NSE:" + symbol, tickJson(symbol, price));
+    seedTick("NSE", symbol, price);
+  }
+
+  private void seedTick(String exchange, String symbol, String price) {
+    redis.opsForHash().put("ticks:last", exchange + ":" + symbol, tickJson(symbol, price));
   }
 
   private String tickJson(String symbol, String price) {
@@ -168,6 +236,22 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
+  }
+
+  /** A tick carrying an explicit ISO timestamp so {@link LastTickReader} can age it (stale-spot tests). */
+  private String tickJsonAt(String symbol, String price, String timestamp) {
+    try {
+      return objectMapper.writeValueAsString(
+          Map.of("exchange", "NSE", "tradingsymbol", symbol, "lastPrice", price, "timestamp", timestamp));
+    } catch (Exception e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  /** Current value of a Micrometer counter (0 when not yet registered), for before/after deltas. */
+  private double counter(String name) {
+    var c = meterRegistry.find(name).counter();
+    return c == null ? 0.0 : c.count();
   }
 
   private static BigDecimal bd(String v) {

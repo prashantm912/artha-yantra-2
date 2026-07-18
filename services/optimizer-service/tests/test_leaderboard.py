@@ -168,7 +168,7 @@ def test_pareto_front_drops_dominated_points_only():
     assert [t["trialNumber"] for t in front] == [1, 2]
 
 
-def test_best_multi_objective_returns_pareto_front_not_scalar():
+def test_best_multi_objective_keeps_scalar_contract_and_exposes_pareto_front():
     jobs, trials = FakeJobs(), FakeTrials()
     sweep_id = jobs.insert_sweep(
         None, {"method": "nsga2", "parameters": [], "objective": {"objectives": _MO_OBJECTIVES}}
@@ -176,12 +176,36 @@ def test_best_multi_objective_returns_pareto_front_not_scalar():
     trials.complete(trials.insert(sweep_id, 1, {"p": 1}), {"cagr": 0.30, "maxDrawdown": 0.20}, "r1")
     trials.complete(trials.insert(sweep_id, 2, {"p": 2}), {"cagr": 0.20, "maxDrawdown": 0.10}, "r2")
     trials.complete(trials.insert(sweep_id, 3, {"p": 3}), {"cagr": 0.25, "maxDrawdown": 0.25}, "r3")
-    out = _service(jobs, trials).best(sweep_id, top=1, sort="plateau")
-    # NOT collapsed to a single scalar winner even at top=1: the whole non-dominated front is kept.
-    assert out["sort"] == "pareto"
+    out = _service(jobs, trials).best(sweep_id, top=10, sort="plateau")
+    # FE contract preserved: a real scalar metric + a per-row scalar `objective` (ranked on cagr).
+    assert out["metric"] == "cagr"
+    assert out["sort"] == "plateau"
+    assert out["items"]
+    assert all("objective" in r for r in out["items"])  # BestRow.objective is required by the FE
+    # AND the full non-dominated front is EXPOSED additively — no silent collapse (AY-OPT-03).
     assert out["multiObjective"] is True
-    assert out["metric"] is None
     assert out["objectives"] == _MO_OBJECTIVES
-    assert sorted(r["trialNumber"] for r in out["items"]) == [1, 2]
-    # every front row keeps BOTH objective values — no scalar collapse
-    assert all(set(r["objectiveValues"]) == {"cagr", "maxDrawdown"} for r in out["items"])
+    assert sorted(r["trialNumber"] for r in out["paretoFront"]) == [1, 2]  # #3 dominated by #1
+    assert len(out["paretoFront"]) >= 2  # not collapsed to a single winner
+    assert all(set(r["objectiveValues"]) == {"cagr", "maxDrawdown"} for r in out["paretoFront"])
+
+
+def test_best_multi_objective_does_not_fan_out_enrichment_over_the_front():
+    # A large front (every trial non-dominated) must NOT drive a downstream guard call per row:
+    # enrichment stays bounded to the scalar top-N `items`; `paretoFront` carries objective values
+    # only (AY-OPT-03 major-2: no per-poll fan-out on a 1000-point front).
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = jobs.insert_sweep(
+        None, {"method": "nsga2", "parameters": [], "objective": {"objectives": _MO_OBJECTIVES}}
+    )
+    for i in range(1, 21):
+        # cagr AND maxDrawdown both rise with i → every point is non-dominated (front = all 20).
+        trials.complete(
+            trials.insert(sweep_id, i, {"p": i}),
+            {"cagr": i / 100.0, "maxDrawdown": i / 100.0}, f"r{i}",
+        )
+    backtest = FakeBacktest(folds=None, guard={"regimeOos": [], "foldsExcluded": 0})
+    out = _service(jobs, trials, backtest).best(sweep_id, top=3, sort="raw")
+    assert len(out["paretoFront"]) == 20      # the WHOLE front is exposed
+    assert len(out["items"]) == 3             # scalar view bounded by top
+    assert len(backtest.guard_calls) == 3     # enrichment bounded to top-N, NOT the 20-row front

@@ -316,9 +316,12 @@ class SweepService:
     def best(self, sweep_id: str, top: int, sort: str) -> dict[str, Any]:
         """The plateau-adjusted leaderboard (§D.9); COMPLETE trials only (pruned/failed dropped).
 
-        A MULTI-objective (``nsga2``) sweep returns its Pareto front — the non-dominated set — NOT a
-        scalar-ranked top-N (AY-OPT-03: never collapse a multi-objective front to one number). A
-        single-objective sweep is unchanged: plateau/raw scalar ranking, capped at ``top``."""
+        A MULTI-objective (``nsga2``) sweep keeps the SAME scalar leaderboard shape the FE contract
+        requires (``metric`` + per-row ``objective``, ranked on the first objective as a
+        representative view, capped at ``top``) and ADDITIVELY exposes its full Pareto front under
+        ``paretoFront`` — so the non-dominated set is surfaced, never SILENTLY collapsed to the
+        scalar ranking (AY-OPT-03). The front carries core objective values only, with NO per-row
+        guard enrichment (that stays bounded to the scalar top-N) — a large front never fans out."""
         jobs = self._jobs_factory()
         trials = self._trials_factory()
         try:
@@ -334,8 +337,6 @@ class SweepService:
         finally:
             jobs.close()
             trials.close()
-        if multi:
-            return self._best_pareto(objective, rows)
         items = []
         for row in rows:
             values = row.get("objectiveValues") or {}
@@ -351,21 +352,31 @@ class SweepService:
                 }
             )
         ranked = leaderboard.best(items, parameters, top, direction, sort)
-        self._attach_guard_metrics(ranked)
-        return {"metric": metric, "sort": "raw" if sort == "raw" else "plateau", "items": ranked}
+        self._attach_guard_metrics(ranked)  # bounded to the top-N view — never the whole front
+        response = {
+            "metric": metric,
+            "sort": "raw" if sort == "raw" else "plateau",
+            "items": ranked,
+        }
+        if multi:
+            self._expose_pareto_front(response, objective, rows)
+        return response
 
-    def _best_pareto(
-        self, objective: dict[str, Any], rows: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        """The Pareto front for a multi-objective (``nsga2``) sweep: the non-dominated COMPLETE
-        trials across ALL objectives, each carrying its full ``objectiveValues`` — the front is
-        preserved, never collapsed to a single scalar winner (AY-OPT-03). ``top`` does NOT apply:
-        truncating a Pareto front is itself an arbitrary collapse, so the whole non-dominated set is
-        returned (bounded by the 1000-trial read). Picking ONE point off the front is an explicit,
-        deliberate owner choice downstream (``promote``) — never a silent scalar collapse here."""
+    def _expose_pareto_front(
+        self, response: dict[str, Any], objective: dict[str, Any], rows: list[dict[str, Any]]
+    ) -> None:
+        """AY-OPT-03: additively expose a multi-objective (``nsga2``) sweep's Pareto front on the
+        leaderboard response, WITHOUT touching the scalar ``metric``/``items``/per-row ``objective``
+        fields the FE contract requires. The non-dominated set is surfaced under ``paretoFront``
+        (no longer silently collapsed to the scalar ranking), each row carrying its identity + full
+        ``objectiveValues`` only — NO per-row guard enrichment (that stays bounded to the scalar
+        top-N ``items``), so a large front never fans out on every poll. Picking ONE point off the
+        front is an explicit owner choice downstream (``promote``)."""
         objectives = sweep.multi_objectives(objective)
         front = leaderboard.pareto_front(rows, objectives)
-        items = [
+        response["multiObjective"] = True
+        response["objectives"] = objectives
+        response["paretoFront"] = [
             {
                 "trialNumber": row["trialNumber"],
                 "params": row["params"],
@@ -374,14 +385,6 @@ class SweepService:
             }
             for row in front
         ]
-        self._attach_guard_metrics(items)
-        return {
-            "metric": None,
-            "objectives": objectives,
-            "sort": "pareto",
-            "multiObjective": True,
-            "items": items,
-        }
 
     def _attach_guard_metrics(self, ranked: list[dict[str, Any]]) -> None:
         """Surfaces the §D.4 guard outputs (already persisted — never recomputed) as a compact
@@ -598,12 +601,11 @@ def _sweep_summary(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _primary_objective(objective: dict[str, Any]) -> tuple[str, str]:
-    """The single scalar metric + direction for the surfaces that genuinely NEED one — the retro
-    scorecard's ``rawObjective`` and the neighbour-probe geometry (both are inherently 1-D). For a
-    multi-objective (``nsga2``) sweep this is the FIRST objective: a DOCUMENTED, deliberate single
-    pick, NOT the leaderboard ranking. The ``/best`` leaderboard does NOT route through this for an
-    nsga2 sweep — it returns the whole Pareto front (``_best_pareto``), so a multi-objective front
-    is never silently collapsed to a scalar there (AY-OPT-03)."""
+    """The single scalar metric + direction for the surfaces that need one: the ``/best`` scalar
+    leaderboard view (a representative ranking), the retro scorecard's ``rawObjective``, and the
+    neighbour-probe geometry. For a multi-objective (``nsga2``) sweep this is the FIRST objective —
+    a DOCUMENTED, deliberate representative pick, NOT a silent collapse: ``/best`` ALSO exposes the
+    full non-dominated set under ``paretoFront`` (AY-OPT-03) — surfaced, never hidden."""
     objectives = objective.get("objectives")
     if objectives:
         first = objectives[0]

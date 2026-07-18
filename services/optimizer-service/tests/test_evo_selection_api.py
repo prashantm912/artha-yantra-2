@@ -36,10 +36,11 @@ def _gen(n=1, gen_id=_GEN_ID, campaign_id=_CAMPAIGN_ID):
     }
 
 
-def _cand(cid, *, state="SCORED", robust=1.0, rankable=True, ready=None, gates=None, trial=0,
-          gen_id=_GEN_ID):
+def _cand(cid, *, state="SCORED", robust=1.0, rankable=True, ready=None, stale=False, gates=None,
+          trial=0, gen_id=_GEN_ID):
     # audit PF-01: SURVIVOR selection consumes the fail-closed ``stageReadiness.ready`` (not the
-    # permissive ``rankable``). ``ready`` mirrors ``rankable`` unless overridden.
+    # permissive ``rankable``). ``ready`` mirrors ``rankable`` unless set. ``stale`` marks the
+    # stale-signature side (round-5 #3 — selection RE-QUEUES it, never retires it).
     stage_ready = rankable if ready is None else ready
     return {
         "id": cid, "generationId": gen_id, "versionId": None, "parentCandidateId": None,
@@ -48,7 +49,8 @@ def _cand(cid, *, state="SCORED", robust=1.0, rankable=True, ready=None, gates=N
         "scorecard": {
             "robustScore": robust, "rankable": rankable, "trialNumber": trial,
             "stageReadiness": {"evidencePolicy": "SIM_FIRST", "stage": "SCORED_TO_SURVIVOR",
-                               "ready": stage_ready, "requiredGates": [], "blockedBy": []},
+                               "ready": stage_ready, "requiredGates": [], "blockedBy": [],
+                               "staleSignature": stale},
             "gates": gates or [{"id": "oos_sign", "status": "PASS"}],
         },
         "state": state, "updatedAt": "2026-07-11T00:00:00+00:00",
@@ -105,6 +107,30 @@ def test_select_promotes_top_k_and_retires_the_rest():
     lo_sel = cands["c-lo"]["scorecard"]["selection"]
     assert lo_sel["decision"] == "RETIRED" and lo_sel["rank"] == 3
     assert "dominated" in lo_sel["reason"]
+
+
+def test_stale_signature_candidate_is_requeued_not_retired():
+    # round-5 #3: a stale-signature candidate (a different SHA/data epoch than the dominant cohort)
+    # is NOT comparable this generation but must be RE-QUEUED (kept SCORED), never retired (§1.3).
+    repo = FakeEvoRepo(
+        campaigns=[_campaign()],
+        generations={_CAMPAIGN_ID: [_gen()]},
+        candidates={_CAMPAIGN_ID: [
+            _cand("c-ok", robust=2.0, trial=0),
+            _cand("c-stale", robust=9.9, ready=False, stale=True, trial=1),  # high score, but stale
+        ]},
+    )
+    client = _client(repo)
+    resp = _select(client, top_k=1)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["survivors"] == 1 and body["retired"] == 0   # the stale one is NOT retired
+    cands = _cands_by_id(client)
+    assert cands["c-ok"]["state"] == "SURVIVOR"
+    assert cands["c-stale"]["state"] == "SCORED"             # kept for re-queue under current epoch
+    stale_sel = cands["c-stale"]["scorecard"]["selection"]
+    assert stale_sel["decision"] == "REQUEUED"
+    assert "re-queued" in stale_sel["reason"] and "stale signature" in stale_sel["reason"]
 
 
 def test_gate_fail_candidate_retires_and_is_out_of_the_ranking_cohort():

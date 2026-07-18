@@ -39,8 +39,14 @@ public class RegistryController {
   public record UpdateRequest(
       String config, String versionBump, String notes, String createdBy) {}
 
-  /** Publish body. */
-  public record PublishRequest(String targetVersion, String notes) {}
+  /**
+   * Publish body. {@code cas} + {@code expectedPublishedVersionId} (PF-01 round-5 #1) request a
+   * concurrency-safe compare-and-set: publish only while the strategy's current published version
+   * still equals {@code expectedPublishedVersionId} (else 409). Both null ⇒ a plain unconditional
+   * publish (the legacy behaviour).
+   */
+  public record PublishRequest(
+      String targetVersion, String notes, Boolean cas, String expectedPublishedVersionId) {}
 
   /** Rollback body. */
   public record RollbackRequest(String version, Boolean andPublish) {}
@@ -128,10 +134,13 @@ public class RegistryController {
   @PostMapping("/{id}/publish")
   public Map<String, Object> publish(
       @PathVariable UUID id, @RequestBody(required = false) PublishRequest request) {
+    boolean cas = request != null && Boolean.TRUE.equals(request.cas());
     return service.publish(
         id,
         request == null ? null : request.targetVersion(),
-        request == null ? null : request.notes());
+        request == null ? null : request.notes(),
+        cas,
+        request == null ? null : request.expectedPublishedVersionId());
   }
 
   /** Copy-forward rollback. */

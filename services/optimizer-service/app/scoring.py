@@ -246,6 +246,15 @@ def score_cohort(
         # what SURVIVOR selection consumes, so a SKIPPED/UNKNOWN required gate no longer reads as a
         # pass and a LIVE_FIRST sim-smoke is never selectable.
         stage_ready, stage_blocked, stage_required = survivor_stage_readiness(gates, policy)
+        # round-5 #3/#4: a candidate carrying a COMPLETE signature that differs from the dominant
+        # one is on the STALE side (a different SHA/epoch than the authoritative partition).
+        # It must be REQUEUED (re-run under the current epoch), NOT retired — the design's §1.3
+        # "stale side is re-queued". Selection reads this marker.
+        stale_signature = (
+            comparator_sha is not None
+            and cand.get("engineSha") is not None and cand.get("dataHash") is not None
+            and not partition[i]
+        )
         scorecards.append({
             "trialNumber": cand.get("trialNumber"),
             "runId": cand.get("runId"),
@@ -255,6 +264,10 @@ def score_cohort(
             "robustScore": robust,
             "rank": None,  # assigned below, over rankable candidates only
             "rankable": rankable,
+            # round-5 #4: PER-CANDIDATE provenance (its OWN engine SHA + data epoch), persisted so
+            # stress compares each candidate against ITS OWN recorded signature — never a
+            # cohort-synthetic one — and the recorder persists the dominant tuple, not first-nn.
+            "provenance": {"engineSha": cand.get("engineSha"), "dataHash": cand.get("dataHash")},
             # audit PF-01: the per-policy promotion-admission verdict, persisted so SURVIVOR
             # selection consumes it (not `rankable`) and the owner sees WHY a candidate did not
             # survive (which required gate FAILed or was never affirmatively evaluated).
@@ -264,6 +277,7 @@ def score_cohort(
                 "ready": stage_ready,
                 "requiredGates": stage_required,
                 "blockedBy": stage_blocked,
+                "staleSignature": stale_signature,
             },
             "weights": dict(weights),
             "gates": gates,
@@ -836,11 +850,13 @@ def _assign_ranks(scorecards: list[dict[str, Any]]) -> None:
 def _dominant_signature(
     candidates: list[dict[str, Any]],
 ) -> tuple[str | None, str | None]:
-    """The cohort's dominant comparability signature = the MOST COMMON complete ``(engineSha,
-    dataHash)`` among candidates carrying BOTH (audit PF-01 #4). Ties break by first appearance
-    (``Counter.most_common`` is insertion-stable). ``(None, None)`` when NO candidate carries both a
-    SHA and a data epoch — then every candidate FAILs/blocks comparability (no comparable partition
-    exists, fail-closed)."""
+    """The cohort's AUTHORITATIVE comparability signature = the most common complete ``(engineSha,
+    dataHash)`` among candidates carrying BOTH (audit PF-01 #4). The tie-break is DETERMINISTIC and
+    INPUT-ORDER-INDEPENDENT (round-5 #3): ties in frequency break by the lexicographically smallest
+    signature — the SAME signature wins regardless of the order the trials were assembled in (so the
+    normalization partition + readiness are reproducible). ``(None, None)`` when NO candidate has
+    both a SHA and a data epoch — then every candidate FAILs/blocks comparability (no comparable
+    partition exists, fail-closed)."""
     complete = [
         (c.get("engineSha"), c.get("dataHash"))
         for c in candidates
@@ -848,7 +864,10 @@ def _dominant_signature(
     ]
     if not complete:
         return None, None
-    return Counter(complete).most_common(1)[0][0]
+    counts = Counter(complete)
+    # highest count first, ties broken by the signature tuple ascending (deterministic, NOT
+    # insertion order) — ``min`` over ``(-count, signature)``.
+    return min(counts, key=lambda sig: (-counts[sig], sig))
 
 
 def _plateau(

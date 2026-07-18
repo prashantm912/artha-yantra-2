@@ -1383,8 +1383,12 @@ class ProposalService:
             ) from exc
 
         created_by = f"evo:{campaign.get('family')}"
+        # PF-01 round-5 #1: the registry publish is a compare-and-set on the demoted champion — the
+        # LIVE pointer moves ONLY if it is still ``demoted_version_id`` (what this promote validated
+        # against). A concurrent promoter that moved it first makes this 409 CHAMPION_CHANGED BEFORE
+        # the counterfactual / clone side effects below.
         new_champion_version_id = self._publish_onto_base(
-            base_id, promoted_config, candidate, created_by
+            base_id, promoted_config, candidate, created_by, demoted_version_id
         )
         # Champion has moved; register the demoted-champion counterfactual (fail-loud: a failure
         # surfaces 502 so the owner knows the counterfactual did NOT register — see open-doubts on
@@ -1439,17 +1443,33 @@ class ProposalService:
         return {"archived": True, "clonedStrategyId": clone_strategy_id}
 
     def _publish_onto_base(
-        self, base_id: str, config: dict[str, Any], candidate: dict[str, Any], created_by: str
+        self, base_id: str, config: dict[str, Any], candidate: dict[str, Any], created_by: str,
+        expected_published_version_id: str | None,
     ) -> str | None:
         """Create a new draft version on the BASE strategy from the promoted config, publish it (the
-        champion pointer moves), and read back the new published version UUID. A registry HTTP fault
-        surfaces as 502."""
+        champion pointer moves), and read back the new published version UUID. PF-01 round-5 #1: the
+        publish is a compare-and-set on the LIVE registry pointer — it commits ONLY while the base's
+        current published version still equals ``expected_published_version_id`` (the champion this
+        promote was validated against). If a concurrent promoter moved it first, the registry 409s
+        and this is rejected as CHAMPION_CHANGED BEFORE it can overwrite live state or run the
+        counterfactual / clone side effects (an orphan DRAFT may remain — see the flagged
+        follow-up). Any other registry fault surfaces as 502."""
         notes = f"evo PROMOTE — candidate {candidate['id']} (§8.2 champion move)"
         try:
             self._strategy.create_draft(base_id, config, notes, created_by=created_by)
-            self._strategy.publish(base_id, notes=notes)
+            self._strategy.publish(
+                base_id, notes=notes, cas=True,
+                expected_published_version_id=expected_published_version_id,
+            )
             detail = self._strategy.detail(base_id)
         except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 409:
+                raise ApiError(
+                    409, "CHAMPION_CHANGED",
+                    "the base strategy's published version moved since this promote was validated "
+                    "(a concurrent promoter won the registry compare-and-set) — rejected before "
+                    "overwriting live state; reassess/regenerate against the current champion",
+                ) from exc
             raise ApiError(
                 502, "REGISTRY_PROMOTE_FAILED",
                 f"registry rejected the champion move ({exc.response.status_code})",
@@ -1562,24 +1582,24 @@ class ProposalService:
         merged = {**(proposal.get("evidence") or {}), "promotion": promotion}
         repo = self._repo_factory()
         try:
-            # audit PF-01 #6: the champion move is a DURABLE ATOMIC compare-and-set — commits ONLY
-            # while the champion is STILL what this execute validated against (``expected``). Two
-            # concurrent sibling promotes both reach here against champion V0; exactly ONE CAS wins
-            # (the loser gets None) → the champion pointer is never double-moved to an untested
-            # hybrid. Done FIRST, so a lost race refuses before mutating the candidate / proposal.
+            # round-5 #2 (+ audit PF-01 #6): the champion compare-and-set + candidate advance +
+            # proposal stamp are ONE transaction (all-or-nothing). The CAS commits ONLY while the
+            # champion is STILL what this execute validated against — exactly one of two concurrent
+            # sibling promotes wins; the loser gets False (nothing mutated, no half-recorded
+            # promotion) → 409. So the champion pointer is never double-moved to an untested hybrid,
+            # and a winning promotion is never left with an advanced champion + unstamped proposal.
             expected_champion = campaign.get("championVersionId")
-            moved = repo.update_campaign_champion(
-                campaign["id"], new_champion_version_id, expected_champion
+            won = repo.record_promotion_atomic(
+                campaign["id"], expected_champion, new_champion_version_id,
+                candidate["id"], proposal["id"], merged,
             )
-            if moved is None:
+            if not won:
                 raise ApiError(
                     409, "CHAMPION_CHANGED",
                     f"the campaign champion moved from {expected_champion!r} under proposal "
                     f"{proposal['id']} (a concurrent sibling promote won the compare-and-set) — "
                     "this promotion is refused; reassess/regenerate against the current champion",
                 )
-            repo.update_candidate_publish(candidate["id"], new_champion_version_id, "PROMOTED")
-            repo.record_proposal_execution(proposal["id"], merged)
         finally:
             repo.close()
         if clone_archive.get("archived"):

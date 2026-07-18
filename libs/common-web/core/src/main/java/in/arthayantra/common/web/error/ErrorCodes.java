@@ -56,6 +56,9 @@ public final class ErrorCodes {
   public static final String CONFLICT_HAS_PUBLISHED_HISTORY = "CONFLICT_HAS_PUBLISHED_HISTORY";
   public static final String CONFLICT_POSITION_CLOSED = "CONFLICT_POSITION_CLOSED";
   public static final String CONFLICT_BACKFILL_RUNNING = "CONFLICT_BACKFILL_RUNNING";
+  // Publish compare-and-set lost: the strategy's published version moved since the caller read it
+  // (a concurrent promoter won). PF-01 round-5 #1 — the loser must not overwrite the live pointer.
+  public static final String CONFLICT_PUBLISHED_VERSION_CHANGED = "CONFLICT_PUBLISHED_VERSION_CHANGED";
 
   // ---- STRATEGY_* (400/422) ----
   public static final String STRATEGY_SCHEMA_INVALID = "STRATEGY_SCHEMA_INVALID";

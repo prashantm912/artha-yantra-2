@@ -590,6 +590,24 @@ def test_rescore_unstressed_candidate_gates_pinned_byte_equal():
     assert cr0["raw"].get("costResilience") is not None
 
 
+def test_evidence_drifted_uses_per_candidate_provenance():
+    # round-5 #4: drift is judged against the candidate's OWN recorded provenance, NOT the
+    # generation's cohort epoch. A candidate whose own (sha, hash) matches its re-assembled bag is
+    # NOT drifted even when the generation's recorded epoch differs (a minority/synthetic epoch) —
+    # this is what previously caused unchanged dominant candidates to be falsely flagged drifted.
+    from app.stress import _evidence_drifted
+    stored = {"provenance": {"engineSha": "sha-A", "dataHash": "epoch-A"}, "gates": []}
+    same_bag = {"engineSha": "sha-A", "dataHash": "epoch-A", "caveats": []}
+    assert _evidence_drifted(stored, same_bag, {"dataHash": "epoch-B"}) is False   # gen epoch diff
+    # a genuine per-candidate change IS drift
+    drifted_bag = {"engineSha": "sha-A", "dataHash": "epoch-Z", "caveats": []}
+    assert _evidence_drifted(stored, drifted_bag, None) is True
+    # pre-round-5 cards (no provenance) fall back to the comparability-gate value + generation epoch
+    legacy = {"gates": [{"id": "comparability", "value": "sha-A"}]}
+    assert _evidence_drifted(legacy, {"engineSha": "sha-A", "dataHash": "epoch-B", "caveats": []},
+                             {"dataHash": "epoch-B"}) is False
+
+
 def test_live_first_candidate_not_stage_ready_after_stress_rescore():
     # audit PF-01 #5 (regression guard): the stress rescore PERSISTS the card, so it MUST carry the
     # campaign's evidencePolicy. A LIVE_FIRST candidate must stay NOT stage-ready (never selectable)

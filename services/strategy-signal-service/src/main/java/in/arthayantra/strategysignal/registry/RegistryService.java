@@ -188,8 +188,24 @@ public class RegistryService {
   }
 
   /** POST /{id}/publish — one published version per strategy; full re-validation. */
-  @Transactional
   public Map<String, Object> publish(UUID id, String targetVersion, String notes) {
+    // Unconditional publish (all in-process callers + a plain owner publish) — byte-for-byte the
+    // pre-CAS behaviour. The concurrency-safe compare-and-set path is the overload below.
+    return publish(id, targetVersion, notes, false, null);
+  }
+
+  /**
+   * Publish with an optional compare-and-set on the current published pointer (PF-01 round-5 #1).
+   * When {@code cas} is true the pointer moves ONLY while the strategy's current published version
+   * still equals {@code expectedPublishedVersionId} (null = a first publish onto a never-published
+   * strategy); otherwise a concurrent promoter already moved the LIVE pointer and this call is
+   * rejected with 409 before it can overwrite live state. The whole method is {@code @Transactional},
+   * so a lost CAS rolls back the draft's status change too. {@code cas=false} is unconditional and
+   * identical to the legacy behaviour.
+   */
+  @Transactional
+  public Map<String, Object> publish(
+      UUID id, String targetVersion, String notes, boolean cas, String expectedPublishedVersionId) {
     StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
     StrategyRepository.VersionRow target =
         targetVersion != null
@@ -216,7 +232,25 @@ public class RegistryService {
       }
     }
     repository.updateVersionStatus(target.id(), "published", true);
-    repository.setPublishedVersion(id, target.id());
+    // Move the LIVE published pointer. In CAS mode this is the atomic claim: exactly one of two
+    // concurrent publishers wins the row-locked conditional UPDATE; the loser gets 0 rows and 409s
+    // (the @Transactional rolls back this call's archive + draft-status changes), so it never
+    // overwrites live state nor reaches the engine-reload publish below. cas=false is unconditional
+    // (byte-for-byte the legacy behaviour).
+    if (cas) {
+      UUID expected =
+          expectedPublishedVersionId != null ? UUID.fromString(expectedPublishedVersionId) : null;
+      int moved = repository.casPublishedVersion(id, target.id(), expected);
+      if (moved == 0) {
+        throw new ApiException(
+            409, ErrorCodes.CONFLICT_PUBLISHED_VERSION_CHANGED,
+            "the published version of strategy " + id + " changed since the caller read it "
+                + "(expected " + expectedPublishedVersionId + ") — a concurrent promoter won; "
+                + "this publish is rejected to avoid overwriting live state");
+      }
+    } else {
+      repository.setPublishedVersion(id, target.id());
+    }
     repository.audit(
         id, "PUBLISH", previousVersion, target.version(),
         notes != null ? notes : "published " + target.version(), "owner");

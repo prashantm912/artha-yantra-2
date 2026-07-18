@@ -3737,6 +3737,12 @@
           },
           "notes" : {
             "type" : "string"
+          },
+          "cas" : {
+            "type" : "boolean"
+          },
+          "expectedPublishedVersionId" : {
+            "type" : "string"
           }
         }
       },

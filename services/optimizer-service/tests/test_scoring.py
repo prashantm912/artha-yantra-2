@@ -216,6 +216,32 @@ def test_comparability_partition_isolates_normalization():
     assert next(x for x in cards[4]["components"] if x["id"] == "oos_return")["z"] == 0.0
 
 
+def test_dominant_signature_is_deterministic_regardless_of_input_order():
+    # round-5 #3: on an equal-frequency tie the SAME signature wins regardless of the order the
+    # trials were assembled in (the tie-break is the signature tuple, NOT insertion order).
+    a = {"engineSha": "aaa", "dataHash": "e1"}
+    b = {"engineSha": "bbb", "dataHash": "e1"}
+    assert scoring._dominant_signature([a, b]) == scoring._dominant_signature([b, a])
+    assert scoring._dominant_signature([a, b]) == ("aaa", "e1")  # lexicographically smallest on tie
+    # a clear majority always wins (no tie)
+    assert scoring._dominant_signature([b, a, a]) == ("aaa", "e1")
+
+
+def test_stale_signature_candidate_is_marked_for_requeue():
+    # round-5 #3: a candidate whose complete signature differs from the dominant one is marked
+    # staleSignature (→ selection re-queues it, never retires it); a dominant-partition candidate is
+    # not. 3 of the "abc" signature dominate; the lone "xyz" is the stale side.
+    cohort = [_healthy(i) for i in range(3)] + [
+        _healthy(9) | {"engineSha": "xyz-drift"},
+    ]
+    cards = {c["trialNumber"]: c for c in scoring.score_cohort(cohort, [])}
+    assert cards[0]["stageReadiness"]["staleSignature"] is False   # dominant partition
+    assert cards[9]["stageReadiness"]["staleSignature"] is True    # stale side → re-queue
+    # per-candidate provenance is persisted (round-5 #4)
+    assert cards[9]["provenance"] == {"engineSha": "xyz-drift", "dataHash": "epoch-1"}
+    assert cards[0]["provenance"] == {"engineSha": "abc123", "dataHash": "epoch-1"}
+
+
 def test_comparability_all_absent_epoch_cohort_blocks_not_passes():
     # audit PF-01 #4(a): when NO candidate carries a data epoch, comparability is UNKNOWN (not
     # establishable) for every candidate — it must NOT fall through to PASS. Descriptive rankable

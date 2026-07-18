@@ -216,6 +216,7 @@ class FakeStrategy:
         existing: list[dict[str, Any]] | None = None,
         create_conflict: bool = False,
         archive_fails: bool = False,
+        publish_conflict: bool = False,
     ) -> None:
         self._config = config
         self.drafts: list[dict[str, Any]] = []
@@ -226,6 +227,10 @@ class FakeStrategy:
         self._create_conflict = create_conflict
         # slice-3 fail-soft archive path: force the archive call to raise (a registry fault).
         self._archive_fails = archive_fails
+        # round-5 #1: force the CAS publish to 409 (simulate a concurrent promoter winning the
+        # registry compare-and-set). Records the CAS args on ``publish_calls`` for assertions.
+        self._publish_conflict = publish_conflict
+        self.publish_calls: list[dict[str, Any]] = []
         self.created: list[dict[str, Any]] = []
         self.published: list[str] = []
         # slice-3 PROMOTE / ROLLBACK surface: counterfactuals + rollbacks + archived clone ids.
@@ -295,8 +300,18 @@ class FakeStrategy:
         return {"id": strategy_id, "version": "1.0.0", "status": "draft", "checksum": "chk"}
 
     def publish(
-        self, strategy_id: str, target_version: str | None = None, notes: str | None = None
+        self, strategy_id: str, target_version: str | None = None, notes: str | None = None,
+        cas: bool = False, expected_published_version_id: str | None = None,
     ) -> dict[str, Any]:
+        self.publish_calls.append(
+            {"strategyId": strategy_id, "cas": cas, "expected": expected_published_version_id}
+        )
+        if self._publish_conflict:  # round-5 #1: a concurrent promoter won the registry CAS
+            request = httpx.Request("POST", f"http://x/api/v1/strategies/{strategy_id}/publish")
+            raise httpx.HTTPStatusError(
+                "409 conflict", request=request,
+                response=httpx.Response(409, request=request),
+            )
         row = self._row(strategy_id)
         row["status"] = "published"
         row["versionId"] = f"ver-{strategy_id}"
@@ -663,6 +678,27 @@ class FakeEvoRepo:
                 r["evidence"] = evidence
                 return _strip_seq(r)
         return None
+
+    def record_promotion_atomic(
+        self, campaign_id: str, expected_champion: str | None, new_version_id: str | None,
+        candidate_id: str, proposal_id: str, evidence: dict[str, Any] | None,
+    ) -> bool:
+        """Mirrors EvoRepo.record_promotion_atomic: champion CAS + candidate advance + proposal
+        stamp, all-or-nothing (round-5 #2). Returns False (no mutation) when the CAS misses."""
+        campaign = self.get_campaign(campaign_id)
+        if campaign is None or campaign.get("championVersionId") != expected_champion:
+            return False  # CAS miss — nothing mutated
+        campaign["championVersionId"] = new_version_id
+        campaign["updatedAt"] = "2026-07-12T00:00:00+00:00"
+        cand = self._find_candidate(candidate_id)
+        if cand is not None:
+            cand.update(versionId=new_version_id, state="PROMOTED",
+                        updatedAt="2026-07-12T00:00:00+00:00")
+        for r in self.proposals:
+            if r["id"] == proposal_id and r["status"] == "APPROVED":
+                r["evidence"] = evidence
+                break
+        return True
 
     # --- E4 slice 3: RETIRE acks + PROMOTE lineage + champion pointer ---------------------------
 

@@ -569,8 +569,8 @@ def test_promote_execute_cas_loses_the_champion_race():
     # loser may have already published a registry version before the CAS caught it — see the
     # flagged follow-up for a pre-publish durable claim.
     class _RacingRepo(FakeEvoRepo):
-        def update_campaign_champion(self, campaign_id, version_id, expected_version_id=None):
-            return None  # simulate the CAS losing to a concurrent winner
+        def record_promotion_atomic(self, *args, **kwargs):
+            return False  # the atomic champion CAS lost to a concurrent winner — nothing mutated
 
     repo, strategy = _RacingRepo(), FakeStrategy(_CONFIG)
     pid = _promote_seed(repo, policy="SIM_FIRST")   # captured champion == current (guard passes)
@@ -591,6 +591,53 @@ def test_update_campaign_champion_cas_semantics():
     assert repo.get_campaign(_CAMPAIGN_ID)["championVersionId"] == "V0"            # unchanged
     moved = repo.update_campaign_champion(_CAMPAIGN_ID, "V1", "V0")                # CAS hit
     assert moved is not None and repo.get_campaign(_CAMPAIGN_ID)["championVersionId"] == "V1"
+
+
+def test_record_promotion_atomic_all_or_nothing():
+    # round-5 #2: champion CAS + candidate advance + proposal stamp are all-or-nothing. A CAS miss
+    # (stale expected champion) mutates NOTHING — no advanced champion with an unstamped proposal.
+    repo = FakeEvoRepo(campaigns=[_campaign()],
+                       candidates={_CAMPAIGN_ID: [
+                           _paper_candidate(cid="c-te", state="TAKE_ELIGIBLE")]})
+    repo.campaigns[0]["championVersionId"] = "V0"
+    repo.proposals.append({"_seq": 1, "id": "p1", "campaignId": _CAMPAIGN_ID, "candidateId": "c-te",
+                           "kind": "PROMOTE", "status": "APPROVED", "actor": "o", "decidedAt": None,
+                           "expiresAt": None, "createdAt": "2026-07-11T00:00:00+00:00",
+                           "evidence": {}})
+    # CAS miss → nothing changes
+    assert repo.record_promotion_atomic(
+        _CAMPAIGN_ID, "WRONG", "V1", "c-te", "p1", {"x": 1}) is False
+    assert repo.get_campaign(_CAMPAIGN_ID)["championVersionId"] == "V0"
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "TAKE_ELIGIBLE"
+    assert next(p for p in repo.proposals if p["id"] == "p1")["evidence"] == {}
+    # CAS hit → all three commit together
+    assert repo.record_promotion_atomic(_CAMPAIGN_ID, "V0", "V1", "c-te", "p1", {"x": 1}) is True
+    assert repo.get_campaign(_CAMPAIGN_ID)["championVersionId"] == "V1"
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "PROMOTED"
+    assert next(p for p in repo.proposals if p["id"] == "p1")["evidence"] == {"x": 1}
+
+
+def test_promote_execute_registry_cas_conflict_rejects_before_side_effects():
+    # round-5 #1: the registry publish is a compare-and-set on the LIVE pointer. If a concurrent
+    # promoter moved it first, the registry 409s and this promote is rejected as CHAMPION_CHANGED
+    # BEFORE the counterfactual / paper-clone side effects — exactly one promoter publishes live,
+    # loser mutates NO live state.
+    repo = FakeEvoRepo()
+    strategy = FakeStrategy(_CONFIG, publish_conflict=True)   # simulate the concurrent winner
+    pid = _promote_seed(repo, policy="SIM_FIRST")
+    client = _exec_app(repo, strategy)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "CHAMPION_CHANGED"
+    # the publish was a CAS carrying the demoted champion as the expected current version
+    assert strategy.publish_calls and strategy.publish_calls[0]["cas"] is True
+    assert strategy.publish_calls[0]["expected"] == f"champ-{_STRATEGY_ID}"
+    # NO side effects after the lost CAS: no counterfactual, no clone archive, no PROMOTED, champion
+    # pointer untouched (an orphan DRAFT from create_draft may remain — the flagged follow-up).
+    assert strategy.shadow_variants == [] and strategy.archived == []
+    assert not any("evo-cf" in c["config"].get("id", "") for c in strategy.created)
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "TAKE_ELIGIBLE"
+    assert repo.campaigns[0]["championVersionId"] is None
 
 
 def test_promote_execute_revalidates_and_blocks_degraded_candidate():

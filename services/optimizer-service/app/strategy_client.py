@@ -92,15 +92,23 @@ class StrategyClient:
         return resp.json()
 
     def publish(
-        self, strategy_id: str, target_version: str | None = None, notes: str | None = None
+        self, strategy_id: str, target_version: str | None = None, notes: str | None = None,
+        cas: bool = False, expected_published_version_id: str | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/strategies/{id}/publish — publish a draft (RegistryController
-        ``PublishRequest``, body optional). Returns ``{id, version, status}``."""
+        ``PublishRequest``, body optional). Returns ``{id, version, status}``. When ``cas`` is set
+        (PF-01 round-5 #1 — the PROMOTE champion move) the publish is a compare-and-set on the LIVE
+        pointer: it commits ONLY while the strategy's current published version still equals
+        ``expected_published_version_id`` (else the registry 409s a published-version-changed
+        conflict, so a concurrent promoter never overwrites live state)."""
         body: dict[str, Any] = {}
         if target_version is not None:
             body["targetVersion"] = target_version
         if notes is not None:
             body["notes"] = notes
+        if cas:
+            body["cas"] = True
+            body["expectedPublishedVersionId"] = expected_published_version_id
         resp = self._client.post(
             f"{self._base}/api/v1/strategies/{strategy_id}/publish", json=body
         )

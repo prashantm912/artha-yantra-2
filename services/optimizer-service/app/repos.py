@@ -871,6 +871,41 @@ class EvoRepo:
         self._conn.commit()
         return _campaign_row(row) if row is not None else None
 
+    def record_promotion_atomic(
+        self, campaign_id: str, expected_champion: str | None, new_version_id: str | None,
+        candidate_id: str, proposal_id: str, evidence: dict[str, Any] | None,
+    ) -> bool:
+        """Round-5 #2: the WINNING promotion's three writes — champion compare-and-set + candidate
+        advance (→ PROMOTED, ``version_id`` = the new champion) + proposal execution stamp — in ONE
+        transaction (all-or-nothing). Returns True iff the champion CAS matched (exactly one
+        concurrent promoter wins); False (and rolls back) when the champion moved under us. No
+        partial state can survive — a failure after any leg rolls the WHOLE promotion back, so there
+        is never an advanced champion with a TAKE_ELIGIBLE candidate + unstamped proposal."""
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE evo_campaigns SET champion_version_id=%s, updated_at=now() "
+                    "WHERE id=%s AND champion_version_id IS NOT DISTINCT FROM %s",
+                    (new_version_id, campaign_id, expected_champion),
+                )
+                if cur.rowcount == 0:
+                    self._conn.rollback()
+                    return False
+                cur.execute(
+                    "UPDATE evo_candidates SET version_id=%s, state='PROMOTED', updated_at=now() "
+                    "WHERE id=%s",
+                    (new_version_id, candidate_id),
+                )
+                cur.execute(
+                    "UPDATE evo_proposals SET evidence=%s::jsonb WHERE id=%s AND status='APPROVED'",
+                    (_jsonb(evidence), proposal_id),
+                )
+            self._conn.commit()
+            return True
+        except Exception:
+            self._conn.rollback()
+            raise
+
     # --- E6 item 16: autonomy-scheduler durable state (V017) -------------------------------------
     # The scheduler's per-campaign state lives in three columns ISOLATED behind these methods (the
     # E1 _campaign_row envelope is intentionally untouched — the autonomy sub-state is a separate

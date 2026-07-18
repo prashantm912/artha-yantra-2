@@ -242,6 +242,21 @@ public class StrategyRepository {
         versionId, strategyId);
   }
 
+  /**
+   * Compare-and-set the published-version pointer: move it to {@code versionId} ONLY while the
+   * strategy's current {@code published_version_id} still equals {@code expectedVersionId}
+   * ({@code IS NOT DISTINCT FROM} so a null-expected first-publish matches). Returns the rows
+   * affected — 1 when this caller won the CAS, 0 when the pointer moved under it (a concurrent
+   * promoter won). PF-01 round-5 #1: the {@code UPDATE ... WHERE} row-locks the strategy row, so
+   * exactly one of two concurrent publishers moves the LIVE pointer; the loser sees 0.
+   */
+  public int casPublishedVersion(UUID strategyId, UUID versionId, UUID expectedVersionId) {
+    return jdbc.update(
+        "UPDATE strategies SET published_version_id = ?, updated_at = now() "
+            + "WHERE id = ? AND published_version_id IS NOT DISTINCT FROM ?",
+        versionId, strategyId, expectedVersionId);
+  }
+
   /** Touches updated_at (draft writes). */
   public void touch(UUID strategyId) {
     jdbc.update("UPDATE strategies SET updated_at = now() WHERE id = ?", strategyId);

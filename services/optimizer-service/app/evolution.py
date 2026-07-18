@@ -202,6 +202,9 @@ class StageReadiness(BaseModel):
     ready: bool
     requiredGates: list[str] = []
     blockedBy: list[str] = []
+    # round-5 #3: True when the candidate is on the STALE signature side (a complete SHA/epoch
+    # different from the cohort's dominant one) — selection REQUEUES it rather than retiring it.
+    staleSignature: bool = False
 
 
 class Scorecard(BaseModel):
@@ -218,6 +221,9 @@ class Scorecard(BaseModel):
     rank: int | None = None
     rankable: bool
     stageReadiness: StageReadiness | None = None
+    # round-5 #4: the candidate's OWN (engineSha, dataHash) provenance (not the cohort's) — stress
+    # compares each candidate against this, so a minority-signature bag never falsely reads drifted.
+    provenance: dict[str, Any] | None = None
     weights: dict[str, float]
     gates: list[GateResult]
     components: list[ComponentScore]
@@ -727,11 +733,12 @@ class EvoRecorderService:
             "direction": scored.direction,
             "parameters": scored.parameters,
         }
-        # engine_sha / data_epoch lifted from the sweep's run evidence when present (all a sweep's
-        # trials share one engine SHA / data epoch — the first assembled candidate that carries them
-        # is representative; NULL on runs predating #703 SHA-stamping — recorded, never fabricated).
-        engine_sha = next((c["engineSha"] for c in scored.candidates if c.get("engineSha")), None)
-        data_hash = next((c["dataHash"] for c in scored.candidates if c.get("dataHash")), None)
+        # engine_sha / data_epoch = the EXACT DOMINANT (engineSha, dataHash) signature scoring used
+        # to partition/normalize (round-5 #4) — NOT an independent first-non-null of each field,
+        # which could persist a minority/synthetic tuple and make stress falsely flag the unchanged
+        # dominant candidates as drifted. NULL on runs predating #703 SHA-stamping (no complete
+        # signature) — recorded, never fabricated.
+        engine_sha, data_hash = scoring._dominant_signature(scored.candidates)
         data_epoch = {"dataHash": data_hash} if data_hash else None
         candidate_rows = [
             {
@@ -855,8 +862,12 @@ def _decide_selection(
     fail-closed STAGE READINESS (audit PF-01: ``scorecard.stageReadiness.ready`` — a required gate
     that FAILed OR was never affirmatively evaluated blocks; a LIVE_FIRST sim-smoke is never ready)
     AND a RobustScore present; rank those by RobustScore desc, keep the top-K as SURVIVOR and RETIRE
-    the rest (dominated); the not-ready → RETIRED. Returns one decision per selectable candidate:
-    the new state, the scorecard with the ``selection`` rationale added, and whether it CHANGED."""
+    the rest (dominated); the not-ready → RETIRED, EXCEPT a STALE-SIGNATURE candidate (round-5 #3):
+    a candidate from a different SHA/data epoch than the cohort's dominant one is NOT comparable
+    generation but must be RE-QUEUED not retired (§1.3 "the stale side is re-queued") — it keeps its
+    state so it is re-evaluated under the current epoch. Returns one decision per selectable
+    candidate: the new state, the scorecard with the ``selection`` rationale added, and whether it
+    CHANGED."""
     selectable = [c for c in candidates if c.get("state") in _SELECTABLE_STATES]
     ranked = sorted((c for c in selectable if _is_stage_ready(c)), key=_selection_sort_key)
     rank_by_id = {c["id"]: position for position, c in enumerate(ranked, start=1)}
@@ -867,20 +878,34 @@ def _decide_selection(
         scorecard = cand.get("scorecard") or {}
         robust = _num(scorecard.get("robustScore"))
         rank = rank_by_id.get(cand["id"])
+        readiness = scorecard.get("stageReadiness") or {}
         if rank is not None:
             if rank <= top_k:
                 state = "SURVIVOR"
+                decision = "SURVIVOR"
                 reason = f"top-{top_k} by RobustScore (rank {rank}/{rankable_count})"
             else:
                 state = "RETIRED"
+                decision = "RETIRED"
                 reason = (
                     f"dominated: RobustScore rank {rank}/{rankable_count} beyond top-{top_k}"
                 )
+        elif readiness.get("staleSignature"):
+            # §1.3: the stale-signature side is RE-QUEUED, never retired — keep its state (typically
+            # SCORED) so it is re-evaluated under the current epoch; retiring it would discard
+            # otherwise-comparable evidence for a data-epoch artifact.
+            state = cand.get("state")
+            decision = "REQUEUED"
+            reason = (
+                "re-queued: stale signature (a different engine SHA / data epoch than the cohort's "
+                "dominant one) — not comparable this generation; re-run under the epoch (§1.3)"
+            )
         else:
             state = "RETIRED"
+            decision = "RETIRED"
             reason = _retire_reason(scorecard, robust)
         selection = {
-            "decision": state,
+            "decision": decision,
             "reason": reason,
             "rank": rank,
             "rankableCohort": rankable_count,

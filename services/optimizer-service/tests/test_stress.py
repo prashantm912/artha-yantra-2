@@ -556,7 +556,9 @@ def test_rescore_unstressed_candidate_gates_pinned_byte_equal():
     # value) are byte-equal to the recorded card (same evidence, same campaign-cumulative N).
     repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
     sweep_id = _seed_sweep(jobs, trials, 2)
-    metrics = {"sharpe": 1.0, "tradeCount": 60, "totalReturn": 12.0}
+    # maxDrawdown carried so the REQUIRED drawdown_cap gate is evaluated (audit PF-01) and the
+    # foldless candidate is rankable — hence stress-targetable.
+    metrics = {"sharpe": 1.0, "tradeCount": 60, "totalReturn": 12.0, "maxDrawdown": 12.0}
     backtest = FakeStressBacktest(
         run_metrics={"run-0": dict(metrics), "run-1": dict(metrics)}, jobs=jobs
     )
@@ -610,8 +612,13 @@ def test_stress_lifecycle_stressing_then_done_then_repostable():
     repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
     sweep_id = _seed_sweep(jobs, trials, 2)
     _seed_generation(repo, sweep_id, [_candidate(0), _candidate(1)])
+    # Full base-run evidence so the round's RE-SCORE (which overwrites the candidate scorecards)
+    # leaves them RANKABLE — else the re-POSTed round finds no rankable candidate to stress (audit
+    # PF-01: a re-scored card missing required-gate evidence is no longer rankable). Production
+    # reads this from real backtest results; the fixture must mirror it for the repostable round.
+    base = {_METRIC: 1.0, "tradeCount": 60, "maxDrawdown": 12.0, "totalReturn": 12.0}
     backtest = GatedStressBacktest(
-        run_metrics={"run-0": {_METRIC: 1.0}, "run-1": {_METRIC: 1.0}}, jobs=jobs
+        run_metrics={"run-0": dict(base), "run-1": dict(base)}, jobs=jobs
     )
     svc = _service(repo, jobs, trials, backtest)
 

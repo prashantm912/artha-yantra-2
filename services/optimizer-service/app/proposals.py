@@ -25,6 +25,7 @@ rides the selection/domination logic, which is a later slice — not generated h
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from typing import Any
@@ -33,11 +34,13 @@ import httpx
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from app import config_patch
+from app import config_patch, scoring
 from app.errors import ApiError
 from app.path_grammar import InvalidParameterPath
 
 router = APIRouter(prefix="/api/v1/evolution")
+
+_LOG = logging.getLogger(__name__)
 
 # §8.2 PUBLISH_PAPER: "SURVIVOR + RobustScore >= champion - ε (ε = 0.1) + holdout consumed".
 _PUBLISH_PAPER = "PUBLISH_PAPER"
@@ -61,6 +64,19 @@ _RETIRE = "RETIRE"
 _TE_MIN_CLOSED_TRADES = 20
 _TE_MIN_PF = 1.3
 _TE_MAX_DD_PCT = 0.25
+
+# PAPER→TAKE_ELIGIBLE required-gate set (audit PF-01, stage-aware fail-CLOSED readiness). Design
+# §8.2: "≥20 closed paper trades + PF ≥ 1.3 + expectancy > 0 + maxDD ≤ 25 % … plus … live-gap
+# gate". A REQUIRED gate that is SKIPPED / absent BLOCKS (a gate that could not run must not read
+# as a pass) — most notably the §7.2 live-gap gate: an absent/INSUFFICIENT reconciliation used to
+# be silently "assessed as not-DIVERGENT" and admitted, the fail-open this closes. ``max_drawdown``
+# SKIPPED (no capital base on the clone config) likewise blocks — drawdown discipline must be
+# affirmatively verified, never waved through. EXCLUDED: ``robust_vs_champion`` — the live-weighted
+# re-score is a not-yet-implemented follow-up (always SKIPPED); requiring it would block every
+# candidate, so it is excluded (informational only) until it is built.
+_TAKE_ELIGIBLE_REQUIRED_GATES = frozenset(
+    {"paper_trade_floor", "profit_factor", "expectancy", "max_drawdown", "live_gap"}
+)
 
 # §8.2 demoted-champion counterfactual: kept running for 6 weeks as the rollback comparator. The
 # routing is by evidence policy — LIVE_FIRST (scalpers) → shadow variant (#733, the shadow book
@@ -445,9 +461,17 @@ def _take_eligible_assessment(
             f"re-score is a follow-up; sim RobustScore {sim_robust} vs champion {champion_score}"
         )
 
-    eligible = all(g["status"] != "FAIL" for g in gates)
+    # PAPER→TAKE_ELIGIBLE gate readiness (audit PF-01): a REQUIRED gate that could not be
+    # affirmatively evaluated blocks (fail-closed), instead of the old fail-open "no FAIL ⇒
+    # eligible" that admitted a SKIPPED live-gap / max-drawdown gate as a pass.
+    eligible, blocked_by = scoring.gate_readiness(gates, _TAKE_ELIGIBLE_REQUIRED_GATES)
     card = {
         "kind": _PROMOTE,
+        "gateReadiness": {
+            "stage": "PAPER_TO_TAKE_ELIGIBLE",
+            "requiredGates": sorted(_TAKE_ELIGIBLE_REQUIRED_GATES),
+            "blockedBy": blocked_by,
+        },
         "candidateId": cand.get("id"),
         "campaignId": campaign["id"],
         "whatChanges": (
@@ -734,6 +758,14 @@ class ProposalService:
             )
             if ok:
                 eligible.append((cand, card))
+            else:
+                # audit PF-01 observability: say WHY a PAPER candidate did NOT graduate — the exact
+                # required gates that FAILed or could not be affirmatively evaluated (fail-closed).
+                _LOG.info(
+                    "TAKE_ELIGIBLE blocked candidate %s (campaign %s): blockedBy=%s",
+                    cand.get("id"), campaign_id,
+                    card.get("gateReadiness", {}).get("blockedBy"),
+                )
 
         generated, refreshed, new_alerts = self._persist_promote_proposals(
             campaign, eligible

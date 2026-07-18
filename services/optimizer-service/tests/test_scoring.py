@@ -72,10 +72,12 @@ def test_scorecard_is_deterministic():
 # --- ranking + rankability --------------------------------------------------------------------
 
 def test_rank_orders_by_robustscore_and_excludes_failed_gate():
+    # gate-complete candidates (audit PF-01: partial-evidence candidates are no longer rankable) so
+    # only the oos_sign FAIL, not a missing required gate, decides rankability.
     cands = [
-        {"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 30.0},
-        {"trialNumber": 2, "rawObjective": 1.0, "oosReturn": 20.0},
-        {"trialNumber": 3, "rawObjective": 1.0, "oosReturn": -5.0},  # FAILs oos_sign ⇒ unrankable
+        _healthy(1) | {"oosReturn": 30.0},
+        _healthy(2) | {"oosReturn": 20.0},
+        _healthy(3) | {"oosReturn": -5.0},  # FAILs oos_sign ⇒ unrankable
     ]
     cards = {c["trialNumber"]: c for c in scoring.score_cohort(cands, [])}
     assert cards[1]["rank"] == 1
@@ -89,8 +91,8 @@ def test_rank_orders_by_robustscore_and_excludes_failed_gate():
 # --- gate statuses: degradations + passes -----------------------------------------------------
 
 def test_gate_degradations_on_a_bare_candidate():
-    cards = scoring.score_cohort([{"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 5.0}], [])
-    gates = {g["id"]: g["status"] for g in cards[0]["gates"]}
+    card = scoring.score_cohort([{"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 5.0}], [])[0]
+    gates = {g["id"]: g["status"] for g in card["gates"]}
     assert gates["oos_sign"] == "PASS"  # 5 > 0
     assert gates["evidence_floor"] == "UNKNOWN"  # no oosTradeCount
     assert gates["fold_consistency"] == "UNKNOWN"  # no foldReturns (full-window)
@@ -101,14 +103,24 @@ def test_gate_degradations_on_a_bare_candidate():
     assert gates["comparability"] == "UNKNOWN"  # NULL engine SHA (pre-#703)
     assert gates["live_gap"] == "SKIPPED"  # no live evidence
     assert gates["deflated_sharpe"] == "SKIPPED"  # no sharpe/trade count on a bare candidate
-    assert cards[0]["rankable"] is True  # no FAIL among the statuses
+    # audit PF-01: fail-CLOSED — a bare candidate whose REQUIRED gates could not run is NOT rankable
+    # (was fail-open "no FAIL ⇒ rankable"). oos_sign PASSes, but evidence_floor / drawdown_cap
+    # (UNKNOWN) and deflated_sharpe (SKIPPED) are required and unevaluated → blocked.
+    assert card["rankable"] is False
+    assert card["gateReadiness"]["stage"] == "SCORED_TO_SURVIVOR"
+    assert set(card["gateReadiness"]["blockedBy"]) == {
+        "deflated_sharpe:SKIPPED", "drawdown_cap:UNKNOWN", "evidence_floor:UNKNOWN"
+    }
+    # fold_consistency is EXCLUDED (not-applicable on a foldless run), so its UNKNOWN never blocks
+    assert not any("fold_consistency" in b for b in card["gateReadiness"]["blockedBy"])
 
 
 def _healthy(n: int) -> dict:
     return {
         "trialNumber": n, "rawObjective": 1.0, "oosReturn": 12.0,
         "foldReturns": [0.1, 0.2, 0.3, -0.05], "oosTradeCount": 80, "maxDrawdown": 20.0,
-        "sortino": 1.5, "expectancy": 500.0, "regimeOosMin": 0.4, "regimeOosMean": 0.8,
+        "sortino": 1.5, "sharpe": 1.5, "expectancy": 500.0, "regimeOosMin": 0.4,
+        "regimeOosMean": 0.8,
         "regimesCovered": ["UP_QUIET", "DOWN_QUIET", "UP_TURBULENT"], "engineSha": "abc123",
     }
 
@@ -241,10 +253,13 @@ def _dsr_gate(cards, trial_number=1):
 
 
 def test_deflated_sharpe_skipped_without_sharpe_or_trades():
-    # No sharpe → SKIPPED (never fabricated); the candidate stays rankable (SKIPPED never blocks).
+    # No sharpe → SKIPPED (never fabricated). audit PF-01: deflated_sharpe is a REQUIRED SURVIVOR
+    # gate (the overfitting guard), so a SKIPPED one now BLOCKS — the candidate is NOT rankable
+    # (was fail-open "SKIPPED never blocks", the marquee defect this closes).
     no_sharpe = scoring.score_cohort([_dsr_cand(1, sharpe=None)], [], n_trials=1000)[0]
     assert _dsr_gate([no_sharpe])["status"] == "SKIPPED"
-    assert no_sharpe["rankable"] is True
+    assert no_sharpe["rankable"] is False
+    assert no_sharpe["gateReadiness"]["blockedBy"] == ["deflated_sharpe:SKIPPED"]
     # A Sharpe SE needs T ≥ 2; a single-observation trade count is unassessable → SKIPPED.
     one_trade = scoring.score_cohort([_dsr_cand(1, oosTradeCount=1)], [], n_trials=1000)[0]
     assert _dsr_gate([one_trade])["status"] == "SKIPPED"

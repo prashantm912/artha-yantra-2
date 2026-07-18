@@ -41,6 +41,66 @@ SKIPPED = "SKIPPED"
 UNKNOWN = "UNKNOWN"
 NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
 
+# --- Stage-aware gate-readiness policy (audit PF-01 / AY-SL-08) --------------------------------
+# A gate that could NOT run must NOT read as a pass. Fail-OPEN readiness ("no explicit FAIL ⇒
+# ready") silently admits a candidate whose REQUIRED gate was SKIPPED / UNKNOWN / INSUFFICIENT /
+# never emitted — the audit defect. The policy: per promotion stage, name the gates that must be
+# AFFIRMATIVELY evaluated (status PASS) for a candidate to be "ready" at that stage.
+#   * a REQUIRED gate that is anything other than PASS (FAIL / SKIPPED / UNKNOWN / NOT_IMPLEMENTED /
+#     absent) BLOCKS — fail-CLOSED;
+#   * a gate that is legitimately NOT-APPLICABLE at the stage is simply EXCLUDED from the required
+#     set — its non-PASS status neither counts as a pass nor blocks;
+#   * a FAIL on ANY gate (required or not) always blocks — a gate that RAN and failed is a real
+#     negative, never "excluded".
+#
+# SCORED→SURVIVOR required set — the §6.1 SIM hard gates that a well-formed candidate's OWN sim
+# evidence can ALWAYS evaluate (folded OR foldless), so a non-PASS here is a genuine evidence gap:
+#   evidence_floor  — OOS trade count (no trades ⇒ nothing was validated);
+#   oos_sign        — OOS profitability sign (the most basic bar);
+#   deflated_sharpe — the §4 data-snooping / overfitting guard — the marquee fail-open this closes
+#                     (no Sharpe ⇒ the multiplicity haircut never ran, yet the candidate sailed);
+#   drawdown_cap    — the risk bar (no drawdown info ⇒ risk discipline unverified).
+# EXCLUDED here, each for a documented reason (NOT fail-open — a SKIPPED excluded gate does not read
+# as a pass, and a FAIL on ANY of them STILL blocks via the FAIL rule; exclusion only means its
+# non-PASS/non-FAIL status does not, by itself, block):
+#   fold_consistency— assessable only on a walk-forward run; a full-window (foldless) run has no
+#                     fold STRUCTURE → not applicable (UNKNOWN). A walk-forward run with <60 %
+#                     positive folds still FAILs → blocks; only the foldless UNKNOWN is excluded.
+#   live_gap        — §6.1 "when live evidence exists"; a sim sweep has none → not applicable.
+#   holdout         — §8.2: the holdout is consumed at the PUBLISH_PAPER bar (finalists take it
+#                     AFTER selection), not at SCORED→SURVIVOR.
+#   comparability   — §6.1 "live-profile only"; a sweep's own trials share the engine SHA and a run
+#                     predating #703 SHA-stamping degrades to UNKNOWN (a provenance artifact, not a
+#                     candidate defect).
+#   stability_floor — SKIPPED under <4 neighbors is a sweep-SIZE artifact (plateau
+#                     under-determined), not a per-candidate defect; a real evo sweep (300 trials)
+#                     evaluates it, and a FAIL still blocks.
+#   regime_floor    — regimesCovered is empty PLATFORM-WIDE pending the #705 label-vocab fix (design
+#                     item 20), so it is UNKNOWN on every real fold today; requiring it would block
+#                     100 % of candidates. Promote it into the required set once #705 lands.
+_SURVIVOR_REQUIRED_GATES = frozenset(
+    {"evidence_floor", "oos_sign", "deflated_sharpe", "drawdown_cap"}
+)
+
+
+def gate_readiness(
+    gates: list[dict[str, Any]], required_ids: frozenset[str]
+) -> tuple[bool, list[str]]:
+    """Stage-aware, fail-CLOSED readiness over a scorecard's gate list. Returns ``(ready, blocked)``
+    where ``blocked`` names WHY a candidate is not ready as ``"<gateId>:<status>"`` entries — a
+    FAILed gate, or a REQUIRED gate that was not affirmatively evaluated (SKIPPED / UNKNOWN /
+    INSUFFICIENT / NOT_IMPLEMENTED / ABSENT). A gate id NOT in ``required_ids`` never blocks on a
+    non-PASS status (it is excluded), but a FAIL on ANY gate always blocks. ``ready`` iff
+    ``blocked`` is empty. Pure — the WHY is returned for the caller to surface/log, not logged."""
+    by_id = {g.get("id"): g for g in gates}
+    blocked = [f"{g.get('id')}:{FAIL}" for g in gates if g.get("status") == FAIL]
+    for req in sorted(required_ids):
+        gate = by_id.get(req)
+        status = gate.get("status") if gate else "ABSENT"
+        if status not in (PASS, FAIL):  # a required-gate FAIL is already captured above
+            blocked.append(f"{req}:{status}")
+    return not blocked, blocked
+
 # §6.2 RobustScore weights (SIM_FIRST family default; they sum to 1.00). The owner can override
 # per campaign — the weights actually used are echoed into every scorecard (reproducible ranking).
 SIM_FIRST_WEIGHTS: dict[str, float] = {
@@ -138,7 +198,10 @@ def score_cohort(
         penalties = _penalties(cand, n_params)
         robust = _round(weighted - penalties["dof"] - penalties["caveats"])
         gates = _gates(cand, stab[i], n)
-        rankable = all(g["status"] != FAIL for g in gates)
+        # SCORED→SURVIVOR gate readiness (audit PF-01): a REQUIRED gate that could not be
+        # affirmatively evaluated blocks (fail-closed), instead of the old fail-open "no FAIL ⇒
+        # rankable" that admitted a SKIPPED/UNKNOWN required gate as a pass.
+        rankable, blocked_by = gate_readiness(gates, _SURVIVOR_REQUIRED_GATES)
         scorecards.append({
             "trialNumber": cand.get("trialNumber"),
             "runId": cand.get("runId"),
@@ -148,6 +211,14 @@ def score_cohort(
             "robustScore": robust,
             "rank": None,  # assigned below, over rankable candidates only
             "rankable": rankable,
+            # audit PF-01 observability: the stage, the required-gate set, and (when not ready) the
+            # exact gates that blocked — persisted on the scorecard so the owner can see WHY a
+            # candidate did not survive (a required gate that was FAIL or never affirmatively ran).
+            "gateReadiness": {
+                "stage": "SCORED_TO_SURVIVOR",
+                "requiredGates": sorted(_SURVIVOR_REQUIRED_GATES),
+                "blockedBy": blocked_by,
+            },
             "weights": dict(weights),
             "gates": gates,
             "components": components,

@@ -38,16 +38,18 @@ _CONFIG = {
     "indicators": [{"alias": "ema", "type": "ema", "params": {"period": 20}}],
 }
 
-# Positive multi-regime OOS folds so the recorder scores rankable candidates.
+# Positive multi-regime OOS folds so the recorder scores rankable candidates. A per-fold OOS Sharpe
+# is carried so the REQUIRED deflated_sharpe gate is affirmatively evaluated (audit PF-01) — an
+# absent Sharpe would leave it SKIPPED, which no longer reads as a pass.
 _FOLDS = [
     {"fold": 0, "regimeOos": {"UP_QUIET": {"sharpe": "1.0"}},
-     "oosMetrics": {"totalReturn": "5.0", "sortino": "1.2", "maxDrawdown": "10.0",
+     "oosMetrics": {"totalReturn": "5.0", "sortino": "1.2", "sharpe": "1.2", "maxDrawdown": "10.0",
                     "maxDrawdownDurationBars": 3, "expectancy": "100.0", "tradeCount": 40}},
     {"fold": 1, "regimeOos": {"DOWN_QUIET": {"sharpe": "0.6"}},
-     "oosMetrics": {"totalReturn": "7.0", "sortino": "1.4", "maxDrawdown": "12.0",
+     "oosMetrics": {"totalReturn": "7.0", "sortino": "1.4", "sharpe": "1.0", "maxDrawdown": "12.0",
                     "maxDrawdownDurationBars": 4, "expectancy": "120.0", "tradeCount": 45}},
     {"fold": 2, "regimeOos": {"UP_TURBULENT": {"sharpe": "0.5"}},
-     "oosMetrics": {"totalReturn": "3.0", "sortino": "0.9", "maxDrawdown": "8.0",
+     "oosMetrics": {"totalReturn": "3.0", "sortino": "0.9", "sharpe": "0.8", "maxDrawdown": "8.0",
                     "maxDrawdownDurationBars": 2, "expectancy": "90.0", "tradeCount": 30}},
 ]
 _RESULTS = {"metrics": {"totalReturn": "12.0", "maxDrawdown": "12.0", "tradeCount": 115},
@@ -264,27 +266,68 @@ def _te_app(repo, live, recon):
     return TestClient(app)
 
 
+def _aligned_recon(recon, version_id="ver-clone"):
+    """Seed an affirmative not-DIVERGENT reconciliation — required for TAKE_ELIGIBLE (audit PF-01:
+    the §7.2 live-gap gate must affirmatively PASS, an absent/INSUFFICIENT one no longer reads as a
+    pass)."""
+    recon.insert(version_id=version_id, strategy_id="s", window_from="a", window_to="b",
+                 sim_job_id=None, sim_run_id=None, gap={"returnGap": 0.0}, gap_z=0.1,
+                 paired_trades=25, evidence_floor_met=True, verdict="ALIGNED", diagnosis=None)
+    return recon
+
+
 def test_take_eligible_generates_promote_and_advances_state():
     repo = FakeEvoRepo(campaigns=[_campaign()],
                        candidates={_CAMPAIGN_ID: [_paper_candidate()]})
     live = FakeLiveRepo(versions={"ver-clone": {"config": _CLONE_CONFIG}},
                         trades={"ver-clone": _paper_book()})
-    recon = FakeReconRepo()
+    recon = _aligned_recon(FakeReconRepo())
     client = _te_app(repo, live, recon)
     body = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/take-eligible").json()
     assert body["eligible"] == 1 and body["generated"] == 1
     prop = body["items"][0]
     assert prop["kind"] == "PROMOTE"
-    # honest pending caveats where evidence is missing (no champion, no recon, live-weighted score)
+    # the live-weighted RobustScore caveat remains (a follow-up); the live-gap gate is now
+    # affirmatively PASS (ALIGNED), no longer SKIPPED-and-waved-through.
     pend = prop["evidence"]["pendingInputs"]
-    assert any("live-gap gate is SKIPPED" in p for p in pend)  # no reconciliation seeded
     assert any("RobustScore(live-weighted)" in p for p in pend)
-    # the maxDD gate DID compute (capital base present) and passed
+    # the F7 quant gates + the REQUIRED maxDD and live-gap gates all affirmatively PASS
     gates = {g["id"]: g["status"] for g in prop["evidence"]["gates"]}
     assert gates["paper_trade_floor"] == "PASS" and gates["profit_factor"] == "PASS"
     assert gates["max_drawdown"] == "PASS"
+    assert gates["live_gap"] == "PASS"
+    assert prop["evidence"]["gateReadiness"]["stage"] == "PAPER_TO_TAKE_ELIGIBLE"
+    assert prop["evidence"]["gateReadiness"]["blockedBy"] == []
     cand = repo.candidates[_CAMPAIGN_ID][0]
     assert cand["state"] == "TAKE_ELIGIBLE"
+
+
+def test_take_eligible_blocked_by_unevaluated_live_gap():
+    # audit PF-01 fail-CLOSED: F7 metrics all clear + capital present, but NO reconciliation → the
+    # §7.2 live-gap gate is SKIPPED. A REQUIRED gate that could not run must not read as a pass, so
+    # the candidate is NOT eligible and stays PAPER (was silently admitted under the old fail-open).
+    repo = FakeEvoRepo(campaigns=[_campaign()],
+                       candidates={_CAMPAIGN_ID: [_paper_candidate()]})
+    live = FakeLiveRepo(versions={"ver-clone": {"config": _CLONE_CONFIG}},
+                        trades={"ver-clone": _paper_book()})
+    client = _te_app(repo, live, FakeReconRepo())  # no reconciliation seeded
+    body = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/take-eligible").json()
+    assert body["eligible"] == 0 and body["generated"] == 0
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "PAPER"  # never advanced
+
+
+def test_take_eligible_blocked_when_max_drawdown_unassessable():
+    # audit PF-01 fail-CLOSED: no capital base on the clone config → maxDD is SKIPPED. maxDD is a
+    # REQUIRED gate (drawdown discipline must be affirmatively verified), so the candidate is NOT
+    # eligible even with an ALIGNED reconciliation and a clearing F7 book.
+    repo = FakeEvoRepo(campaigns=[_campaign()],
+                       candidates={_CAMPAIGN_ID: [_paper_candidate()]})
+    live = FakeLiveRepo(versions={"ver-clone": {"config": {"id": "no-capital"}}},
+                        trades={"ver-clone": _paper_book()})
+    client = _te_app(repo, live, _aligned_recon(FakeReconRepo()))
+    body = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/take-eligible").json()
+    assert body["eligible"] == 0 and body["generated"] == 0
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "PAPER"
 
 
 def test_take_eligible_not_eligible_under_trade_floor():
@@ -318,7 +361,7 @@ def test_take_eligible_is_idempotent():
                        candidates={_CAMPAIGN_ID: [_paper_candidate()]})
     live = FakeLiveRepo(versions={"ver-clone": {"config": _CLONE_CONFIG}},
                         trades={"ver-clone": _paper_book()})
-    client = _te_app(repo, live, FakeReconRepo())
+    client = _te_app(repo, live, _aligned_recon(FakeReconRepo()))
     first = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/take-eligible").json()
     assert first["generated"] == 1 and first["refreshed"] == 0
     second = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/take-eligible").json()

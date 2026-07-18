@@ -31,15 +31,17 @@ from tests.fakes import (
 )
 
 # Three OOS folds over three regimes (mirrors the recorder suite) so gates can be assessed + scored.
+# A per-fold OOS Sharpe is carried so the REQUIRED deflated_sharpe gate is affirmatively evaluated
+# (audit PF-01) and selection can produce SURVIVORs.
 _FOLDS = [
     {"fold": 0, "regimeOos": {"UP_QUIET": {"sharpe": "1.0"}},
-     "oosMetrics": {"totalReturn": "5.0", "sortino": "1.2", "maxDrawdown": "10.0",
+     "oosMetrics": {"totalReturn": "5.0", "sortino": "1.2", "sharpe": "1.2", "maxDrawdown": "10.0",
                     "maxDrawdownDurationBars": 3, "expectancy": "100.0", "tradeCount": 40}},
     {"fold": 1, "regimeOos": {"DOWN_QUIET": {"sharpe": "0.6"}},
-     "oosMetrics": {"totalReturn": "7.0", "sortino": "1.4", "maxDrawdown": "12.0",
+     "oosMetrics": {"totalReturn": "7.0", "sortino": "1.4", "sharpe": "1.0", "maxDrawdown": "12.0",
                     "maxDrawdownDurationBars": 4, "expectancy": "120.0", "tradeCount": 45}},
     {"fold": 2, "regimeOos": {"UP_TURBULENT": {"sharpe": "0.5"}},
-     "oosMetrics": {"totalReturn": "3.0", "sortino": "0.9", "maxDrawdown": "8.0",
+     "oosMetrics": {"totalReturn": "3.0", "sortino": "0.9", "sharpe": "0.8", "maxDrawdown": "8.0",
                     "maxDrawdownDurationBars": 2, "expectancy": "90.0", "tradeCount": 30}},
 ]
 _RESULTS = {"metrics": {"totalReturn": "12.0", "maxDrawdown": "12.0", "tradeCount": 115},

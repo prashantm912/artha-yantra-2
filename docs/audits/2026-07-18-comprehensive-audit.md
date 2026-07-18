@@ -301,6 +301,33 @@ detector design INVALIDATED both axes; F10 Part B shipped as #886.
 
 ---
 
+## Fix log — 2026-07-18 build-out (owner: "start autonomously in recommended order")
+
+Nine PRs merged the same day (delegated Opus builders → cross-vendor Codex review each round → Architect
+audit → admin-merge on CI-green). Every row dual-verified; parity byte-identical on every engine-touching
+change (Golden 9/9 + Parity 9/9, re-confirmed on the combined main tree after the three backtest-service
+merges). Live deploy of the migration/secret/armed-engine batch is staged separately (owner go).
+
+| Finding | PR | Merge SHA | Notes |
+|---|---|---|---|
+| AY-SL-01 (full-curve metrics) | [#913](https://github.com/prashantm912/artha-yantra-2/pull/913) | `59fb7d63` | metrics on full curve + **curve-cadence annualization** (2nd defect the review caught: 1m-curve vs primary-tf → 3m Sharpe was under-annualized). Residuals chipped/noted. |
+| AY-SL-03 (fold warmup) | [#916](https://github.com/prashantm912/artha-yantra-2/pull/916) | `e0117439` | emissions-suppressed past-only warmup; boundary decision = continuous-run day-boundary equivalence (domain PASS). |
+| SEC-01 (host ACLs) | main-loop | — | `.env`/`deploy/secrets`/`backups` tightened to owner+SYSTEM+Admins; `ay up` broad-ACL guard shipped in #914. Secret **rotation** = owner-gated residual. |
+| SEC-02 (console least-priv) | [#917](https://github.com/prashantm912/artha-yantra-2/pull/917) | `91eed1da` | `ay_console` role (admin V002) in **market-data-service** (not edge-gateway — brief erratum); injection-safe init, advisory-lock block. Deploy-gated. |
+| OPS-R01/R04/R05 + ACL guard | [#914](https://github.com/prashantm912/artha-yantra-2/pull/914) | `dd8eb376` | restore fatal-on-error via pg_restore summary discriminator; PS5.1 BOM (live-verified 0 parse errors); verify-deploy verb; CI 4-lineage roundtrip. |
+| SEC-07 (CI supply-chain) | [#915](https://github.com/prashantm912/artha-yantra-2/pull/915) | `17806e37` | 32 action SHAs pinned (all Architect-re-resolved), gitleaks checksum, ref-guard workflow. SEC-08 parked (owner). |
+| PF-03 (RISK_SUPPRESSED) | [#918](https://github.com/prashantm912/artha-yantra-2/pull/918) | `44fc56cd` | strategy V042 table + bounded async writer (eval-thread-safe) + drain-on-shutdown. Deploy-gated. Chips: prune / async-existing-rejection-writer / in-flight-accounting. |
+| BEJ-01 (scheduler blind-spot) | [#919](https://github.com/prashantm912/artha-yantra-2/pull/919) | `4ad075b7` | **probe CONFIRMED** (pool=1, sibling 0 ticks during a block); resolves the 07-05 refutation (recovery off-pool, detection on-pool). Monitors-only isolation + FeedPipeline lifecycle lock. |
+| AYDB-03 (storage gauge) | [#921](https://github.com/prashantm912/artha-yantra-2/pull/921) | `edc71c2b` | **live DB measured 45.7 GB = 91.5% of the 50 GB trigger** (old candles-only gauge showed 44%). Now DB-total + per-hypertable, profile-aware. |
+| tradeFrequency unit (chip) | [#920](https://github.com/prashantm912/artha-yantra-2/pull/920) | `0fc9eedd` | surfaced by #913; sessions now in 1m cadence (trades/day). |
+| PF-02 (typed-scoring design) | design | — | `docs/superpowers/plans/2026-07-18-pf02-typed-scoring-bias-design.md` — 2 adversarial reviews → rev 2 (Mode A retrofit of 9 PE mirrors). Build **owner-gated** (bearish numbers). |
+
+**Owner-facing residuals:** (1) live deploy of the migration/secret/armed-engine batch (below) · (2) AY-SL-01
+campaign re-run to correct the 166 historical |sharpe|>3 rows · (3) DB at 91.5% → compression (AYDB-01) or
+scope · (4) PF-02 build approval · (5) SEC-01 secret rotation · (6) 4 follow-up chips.
+
+---
+
 ## Method note
 
 Sol's read-only sandbox lacked `rg`/docker for part of the run; the ops-resilience shard's package paths

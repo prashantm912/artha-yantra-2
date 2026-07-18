@@ -69,6 +69,21 @@ public class RiskSuppressionRepository {
     return id == null ? -1 : id;
   }
 
+  /**
+   * Bounded-retention prune (task_f168c23c): deletes rows whose {@code generated_at} is older than
+   * {@code days} days. The cutoff is computed SERVER-SIDE ({@code now() - make_interval}) on the
+   * {@code timestamptz} column, so it is timezone-correct regardless of the container's UTC display
+   * clock — no host/IST skew (the UTC-vs-IST trap only bites {@code ::date} truncation and rendering,
+   * not interval arithmetic on an absolute instant). Runs as the {@code artha} owner role, which may
+   * DELETE (the append-only SELECT+INSERT grant restricts only {@code ay_strategy}).
+   *
+   * @return the number of rows deleted
+   */
+  public int deleteOlderThanDays(int days) {
+    return jdbc.update(
+        "DELETE FROM risk_suppressions WHERE generated_at < now() - make_interval(days => ?)", days);
+  }
+
   /** Paged history with optional filters (newest first). */
   public List<RiskSuppressionRow> list(
       UUID strategyVersionId, String rail, String book, int limit, int offset) {

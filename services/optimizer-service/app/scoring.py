@@ -8,16 +8,18 @@ the campaign", §6.2 — a sweep's trials ARE the cohort). Same cohort in ⇒ by
 out.
 
 E1 scope (design §12 item 2): the SIM_FIRST hard gates + RobustScore + the recovery/turnover/
-frequency metric semantics, applied retroactively. E2 (design §12 item 6) adds the deflated-Sharpe
-multiplicity gate and the DOF penalties (both below). E3 (§12 item 10) wires the §7.2 live-gap gate
+frequency metric semantics, applied retroactively. E2 (design §12 item 6) adds the multiplicity
+t-stat gate (a naive multiplicity-adjusted Sharpe t-statistic, NOT a real Deflated Sharpe Ratio —
+see ``_multiplicity_tstat_gate``) and the DOF penalties (both below). E3 (§12 item 10) wires the
+§7.2 live-gap gate
 + the ``live_alignment`` component + the DIVERGENT diagnosis checklist off a candidate's attached
 ``reconciliation`` row (the caller resolves the latest applicable (version, window) row per §7.1.4;
 scoring stays pure — it only reads the dict). Everything still deferred is marked IN-BAND,
 never silently dropped:
   * cost-stress re-runs → ``cost_resilience`` z=0 with a "no stress runs (E2)" caveat;
   * importance/brittleness insights → out of scope.
-Missing evidence degrades, never fabricates: no sharpe or trade count ⇒ the deflated-Sharpe gate is
-SKIPPED (never fabricated); no live evidence ⇒ ``live_alignment`` z=0 (§6.2 comment); NULL engine
+Missing evidence degrades, never fabricates: no sharpe or trade count ⇒ the multiplicity t-stat gate
+is SKIPPED (never fabricated); no live evidence ⇒ ``live_alignment`` z=0 (§6.2 comment); NULL engine
 SHA (runs predating #703) ⇒ comparability gate UNKNOWN (not FAIL); no holdout run linked ⇒ holdout
 gate SKIPPED. A candidate is "rankable" iff no gate is FAIL — SKIPPED / UNKNOWN / NOT_IMPLEMENTED
 never block ranking.
@@ -97,7 +99,7 @@ def score_cohort(
     signal via ``leaderboard.plateau_scores`` AND are the ONE source of the tuned-param count for
     both the DOF penalty and the explainability activeDOF term). ``direction`` is echoed for
     provenance AND drives the single maximize-space normalization of the plateau math
-    (``_stability_inputs``). ``n_trials`` is the multiplicity N for the §4 deflated-Sharpe gate —
+    (``_stability_inputs``). ``n_trials`` is the multiplicity N for the multiplicity-t-stat gate —
     the total trials the search ran (retro: the sweep's full trial count, all states) — defaulting
     to the scored cohort size when the caller does not pass a fuller count. z-scoring is within THIS
     cohort, so a single-candidate cohort yields all-zero z's (nothing to normalize against) —
@@ -359,7 +361,7 @@ def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[di
     """The §6.1 SIM_FIRST hard gates as {id, status, value[, note]}. Retro degradations: no holdout
     run → holdout SKIPPED; NULL engine SHA → comparability UNKNOWN; no reconciliation / INSUFFICIENT
     / whitelisted-scalper → live_gap SKIPPED (§7.2, item 10); no sharpe / trade count → the
-    deflated-Sharpe multiplicity gate SKIPPED."""
+    multiplicity t-stat gate SKIPPED."""
     oos_return = cand.get("oosReturn")
     fold_returns = cand.get("foldReturns")
     trades = cand.get("oosTradeCount")
@@ -373,7 +375,7 @@ def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[di
               trades, unknown=trades is None),
         _gate("oos_sign", None if oos_return is None else oos_return > 0, oos_return,
               unknown=oos_return is None),
-        _deflated_sharpe_gate(cand.get("sharpe"), trades, n_trials),
+        _multiplicity_tstat_gate(cand.get("sharpe"), trades, n_trials),
         _fold_consistency_gate(fold_returns),
         _gate("drawdown_cap", None if max_dd is None else max_dd <= _DRAWDOWN_CAP_PCT, max_dd,
               unknown=max_dd is None,
@@ -387,26 +389,33 @@ def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[di
     ]
 
 
-def _deflated_sharpe_gate(
+def _multiplicity_tstat_gate(
     sharpe: Any, trades: Any, n_trials: int
 ) -> dict[str, Any]:
-    """§4 deflated-Sharpe multiplicity gate — the formal data-snooping correction: the engine
-    charges itself for every trial it ran. ``deflatedSharpe = (S_oos − S₀(N)) / se(S_oos)``, gate
-    ``> 0``, where:
+    """§4 multiplicity-adjusted Sharpe t-statistic gate — a heuristic data-snooping penalty that
+    charges the candidate for every trial the search ran. ``multiplicityTStat = (S_oos − S₀(N)) /
+    se(S_oos)``, gate ``> 0``, where:
 
       * S₀(N) = se(S_oos) · √(2·ln N) — the multiplicity haircut. √(2·ln N) is the leading term of
         E[max of N i.i.d. standard-normal draws] (the expected best-of-N under pure noise); scaling
         it by the Sharpe standard error puts the haircut into Sharpe units (design §4: "expected-max
-        -of-N adjustment … scaled appropriately"). This is the DSR of Bailey & López de Prado (2014)
-        with the standard-normal expected-max in place of their exact percentile form.
+        -of-N adjustment … scaled appropriately").
       * se(S_oos) = √((1 + 0.5·S²) / (T − 1)) — the Sharpe-ratio standard error under IID-normal
-        returns (Lo 2002; the Bailey-LdP DSR form with skew=0, excess-kurtosis=0). T = the OOS trade
-        count (each trade is one return observation — the only observation count the retro metric
-        bag carries). Higher-moment terms (skew/kurtosis) are unavailable retroactively → omitted;
-        self-flagged in the receipt. On folded runs S is the MEAN of per-fold OOS Sharpes while T
-        pools trades ACROSS folds — a conscious, slightly lenient approximation (the pooled T
-        overstates the observations behind the averaged S, shrinking se), accepted until per-fold
-        return series are carried.
+        returns (Lo 2002, skew=0, excess-kurtosis=0). T = the OOS trade count (each trade is one
+        return observation — the only observation count the retro metric bag carries). Higher-moment
+        terms (skew/kurtosis) are unavailable retroactively → omitted. On folded runs S is the MEAN
+        of per-fold OOS Sharpes while T pools trades ACROSS folds — a conscious, slightly lenient
+        approximation (the pooled T overstates the observations behind the averaged S, shrinking
+        se), accepted until per-fold return series are carried.
+
+    **This is NOT the Deflated Sharpe Ratio (DSR) of Bailey & López de Prado (2014)** — hence the
+    honest name (AY-OPT / audit AY-SL-07). It is a *bespoke, naive multiplicity-adjusted Sharpe
+    t-statistic*: it substitutes the standard-normal expected-max √(2·ln N) for the DSR's exact
+    order-statistic percentile (which also needs the cross-trial variance of the trial Sharpes),
+    drops the DSR's skew/kurtosis correction to the reference distribution, and mixes an IID-normal
+    Sharpe SE with a leading-term extreme-value approximation. A real DSR would change the gate math
+    (a HOLD-tier behaviour change) and is a DEFERRED owner decision — this gate keeps its current
+    numeric behaviour byte-identical; only the name/labels are corrected here.
 
     Because S₀(N) = se·√(2·ln N), the ratio reduces to ``S/se − √(2·ln N)`` — a Sharpe t-statistic
     measured against the best-of-N-noise bar; the gate direction depends only on the numerator sign,
@@ -417,16 +426,17 @@ def _deflated_sharpe_gate(
     s = _num(sharpe)
     t = _num(trades)
     if s is None or t is None or t < 2:
-        return {"id": "deflated_sharpe", "status": SKIPPED, "value": None,
+        return {"id": "multiplicity_tstat", "status": SKIPPED, "value": None,
                 "note": "no sharpe or < 2 trade observations — Sharpe standard error unassessable"}
     n = max(int(n_trials), 1)
     se = math.sqrt((1 + 0.5 * s * s) / (t - 1))
     s0 = se * math.sqrt(2 * math.log(n))
-    deflated = (s - s0) / se
-    return {"id": "deflated_sharpe", "status": PASS if deflated > 0 else FAIL,
-            "value": _round(deflated),
+    tstat = (s - s0) / se
+    return {"id": "multiplicity_tstat", "status": PASS if tstat > 0 else FAIL,
+            "value": _round(tstat),
             "note": f"N={n} trials; S={_round(s)}, se={_round(se)}, S0={_round(s0)} "
-                    f"(deflatedSharpe=(S-S0)/se, gate >0)"}
+                    f"(multiplicityTStat=(S-S0)/se, gate >0; naive multiplicity-adjusted Sharpe "
+                    f"t-stat, NOT a Deflated Sharpe Ratio)"}
 
 
 def _comparability_gate(engine_sha: str | None) -> dict[str, Any]:

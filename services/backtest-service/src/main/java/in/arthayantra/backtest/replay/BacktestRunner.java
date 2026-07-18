@@ -450,7 +450,7 @@ public class BacktestRunner {
           runId,
           m.full(),
           folds == null ? null : folds.oosFoldMean(),
-          oosFoldObjectives(folds));
+          oosFoldObjectives(config, folds));
     }
 
     progress.accept(100);
@@ -565,15 +565,30 @@ public class BacktestRunner {
     return series;
   }
 
-  /** The per-fold OOS objective (OOS sharpe) array for the pruner; empty for a full-window trial. */
-  private ArrayNode oosFoldObjectives(FoldPersistence folds) {
+  /**
+   * The per-fold OOS objective array for the sweep's fold-fed pruner (AY-OPT-02). Emits each fold's
+   * OOS value of the DECLARED objective metric ({@code backtest.optimize.objective.metric} — the
+   * SAME metric {@link WalkForwardRunner}/{@link
+   * in.arthayantra.backtest.replay.folds.ObjectiveAggregator} average into {@code oosFoldMean}), NOT
+   * a hardcoded Sharpe. The pre-fix array was always per-fold Sharpe, so a sweep optimizing (say)
+   * expectancy pruned on a metric it was not ranking — the pruner now keys off the metric the sweep
+   * actually optimizes. Empty for a full-window trial, a null config, or a fold missing the metric.
+   *
+   * <p>This is an optimizer-side telemetry stream (published only for a {@code JobKind.TRIAL} onto
+   * {@code optimizations.results}); it is NOT part of a run's persisted metrics/trades, so a normal
+   * (non-fold) run's golden-vector output is byte-identical regardless of this value.
+   */
+  private ArrayNode oosFoldObjectives(JsonNode config, FoldPersistence folds) {
     ArrayNode out = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
-    if (folds != null && folds.foldMetrics() != null) {
-      for (JsonNode fold : folds.foldMetrics()) {
-        JsonNode oosSharpe = fold.path("oosMetrics").path("sharpe");
-        if (oosSharpe.isValueNode() && !oosSharpe.isNull()) {
-          out.add(oosSharpe.asText());
-        }
+    if (config == null || folds == null || folds.foldMetrics() == null) {
+      return out;
+    }
+    String objectiveMetric =
+        config.path("backtest").path("optimize").path("objective").path("metric").asText("sharpe");
+    for (JsonNode fold : folds.foldMetrics()) {
+      JsonNode oosValue = fold.path("oosMetrics").path(objectiveMetric);
+      if (oosValue.isValueNode() && !oosValue.isNull()) {
+        out.add(oosValue.asText());
       }
     }
     return out;

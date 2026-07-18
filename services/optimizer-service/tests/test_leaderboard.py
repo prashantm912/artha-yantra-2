@@ -146,3 +146,42 @@ def test_best_omits_guard_metrics_for_full_window_run():
         sweep_id, top=10, sort="raw"
     )
     assert "guardMetrics" not in out["items"][0]
+
+
+# --- AY-OPT-03: an nsga2 sweep's leaderboard is the Pareto front, never a scalar collapse ---------
+
+_MO_OBJECTIVES = [
+    {"metric": "cagr", "direction": "maximize"},
+    {"metric": "maxDrawdown", "direction": "minimize"},
+]
+
+
+def test_pareto_front_drops_dominated_points_only():
+    trials = [
+        {"trialNumber": 1, "objectiveValues": {"cagr": 0.30, "maxDrawdown": 0.20}},
+        {"trialNumber": 2, "objectiveValues": {"cagr": 0.20, "maxDrawdown": 0.10}},
+        {"trialNumber": 3, "objectiveValues": {"cagr": 0.25, "maxDrawdown": 0.25}},  # dominated
+        {"trialNumber": 4, "objectiveValues": {"cagr": 0.28}},  # missing maxDrawdown → excluded
+    ]
+    front = leaderboard.pareto_front(trials, _MO_OBJECTIVES)
+    # 1 (best cagr) and 2 (best drawdown) trade off → both non-dominated; 3 is worse on BOTH than 1.
+    assert [t["trialNumber"] for t in front] == [1, 2]
+
+
+def test_best_multi_objective_returns_pareto_front_not_scalar():
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = jobs.insert_sweep(
+        None, {"method": "nsga2", "parameters": [], "objective": {"objectives": _MO_OBJECTIVES}}
+    )
+    trials.complete(trials.insert(sweep_id, 1, {"p": 1}), {"cagr": 0.30, "maxDrawdown": 0.20}, "r1")
+    trials.complete(trials.insert(sweep_id, 2, {"p": 2}), {"cagr": 0.20, "maxDrawdown": 0.10}, "r2")
+    trials.complete(trials.insert(sweep_id, 3, {"p": 3}), {"cagr": 0.25, "maxDrawdown": 0.25}, "r3")
+    out = _service(jobs, trials).best(sweep_id, top=1, sort="plateau")
+    # NOT collapsed to a single scalar winner even at top=1: the whole non-dominated front is kept.
+    assert out["sort"] == "pareto"
+    assert out["multiObjective"] is True
+    assert out["metric"] is None
+    assert out["objectives"] == _MO_OBJECTIVES
+    assert sorted(r["trialNumber"] for r in out["items"]) == [1, 2]
+    # every front row keeps BOTH objective values — no scalar collapse
+    assert all(set(r["objectiveValues"]) == {"cagr", "maxDrawdown"} for r in out["items"])

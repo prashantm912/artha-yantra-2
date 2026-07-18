@@ -175,7 +175,7 @@ def test_retro_score_deflated_sharpe_uses_full_trial_count():
         f"/api/v1/evolution/retro-score/{sweep_id}"
     ).json()
     assert len(body["items"]) == 2  # only the COMPLETE trials are scored
-    gate = next(g for g in body["items"][0]["gates"] if g["id"] == "deflated_sharpe")
+    gate = next(g for g in body["items"][0]["gates"] if g["id"] == "multiplicity_tstat")
     assert gate["status"] == "PASS"        # Sharpe 2.0 over 115 trades clears the N=5 bar
     assert "N=5 trials" in gate["note"]    # full count (2 complete + 3 failed), not the 2 scored
 
@@ -223,7 +223,7 @@ def test_recorder_charges_campaign_cumulative_multiplicity():
 
     # Standalone retro read: per-sweep N=100 → PASS (+0.1624), flagged as per-sweep-only.
     retro = client.get(f"/api/v1/evolution/retro-score/{sweep_id}").json()
-    gate = next(g for g in retro["items"][0]["gates"] if g["id"] == "deflated_sharpe")
+    gate = next(g for g in retro["items"][0]["gates"] if g["id"] == "multiplicity_tstat")
     assert gate["status"] == "PASS"
     assert gate["value"] == 0.1624
     assert "N=100 trials" in gate["note"]
@@ -235,7 +235,7 @@ def test_recorder_charges_campaign_cumulative_multiplicity():
     )
     assert resp.status_code == 201
     card = repo.candidates["camp-1"][0]["scorecard"]
-    rec_gate = next(g for g in card["gates"] if g["id"] == "deflated_sharpe")
+    rec_gate = next(g for g in card["gates"] if g["id"] == "multiplicity_tstat")
     assert rec_gate["status"] == "FAIL"
     assert rec_gate["value"] == -0.1803
     assert "N=300 trials" in rec_gate["note"]

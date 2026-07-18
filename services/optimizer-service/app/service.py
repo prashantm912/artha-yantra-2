@@ -314,7 +314,11 @@ class SweepService:
         return {"items": items, "limit": limit, "offset": offset}
 
     def best(self, sweep_id: str, top: int, sort: str) -> dict[str, Any]:
-        """The plateau-adjusted leaderboard (§D.9); COMPLETE trials only (pruned/failed dropped)."""
+        """The plateau-adjusted leaderboard (§D.9); COMPLETE trials only (pruned/failed dropped).
+
+        A MULTI-objective (``nsga2``) sweep returns its Pareto front — the non-dominated set — NOT a
+        scalar-ranked top-N (AY-OPT-03: never collapse a multi-objective front to one number). A
+        single-objective sweep is unchanged: plateau/raw scalar ranking, capped at ``top``."""
         jobs = self._jobs_factory()
         trials = self._trials_factory()
         try:
@@ -323,11 +327,15 @@ class SweepService:
                 raise ApiError(404, "NOT_FOUND_JOB", f"no such job: {sweep_id}")
             request = job.get("request") or {}
             parameters = request.get("parameters", [])
-            metric, direction = _primary_objective(request.get("objective", {}))
+            objective = request.get("objective", {})
+            multi = request.get("method") == "nsga2"
+            metric, direction = _primary_objective(objective)
             rows = trials.list_for_sweep(sweep_id, _PROMOTABLE, 1000, 0)
         finally:
             jobs.close()
             trials.close()
+        if multi:
+            return self._best_pareto(objective, rows)
         items = []
         for row in rows:
             values = row.get("objectiveValues") or {}
@@ -345,6 +353,35 @@ class SweepService:
         ranked = leaderboard.best(items, parameters, top, direction, sort)
         self._attach_guard_metrics(ranked)
         return {"metric": metric, "sort": "raw" if sort == "raw" else "plateau", "items": ranked}
+
+    def _best_pareto(
+        self, objective: dict[str, Any], rows: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """The Pareto front for a multi-objective (``nsga2``) sweep: the non-dominated COMPLETE
+        trials across ALL objectives, each carrying its full ``objectiveValues`` — the front is
+        preserved, never collapsed to a single scalar winner (AY-OPT-03). ``top`` does NOT apply:
+        truncating a Pareto front is itself an arbitrary collapse, so the whole non-dominated set is
+        returned (bounded by the 1000-trial read). Picking ONE point off the front is an explicit,
+        deliberate owner choice downstream (``promote``) — never a silent scalar collapse here."""
+        objectives = sweep.multi_objectives(objective)
+        front = leaderboard.pareto_front(rows, objectives)
+        items = [
+            {
+                "trialNumber": row["trialNumber"],
+                "params": row["params"],
+                "objectiveValues": row.get("objectiveValues") or {},
+                "backtestRunId": row.get("backtestRunId"),
+            }
+            for row in front
+        ]
+        self._attach_guard_metrics(items)
+        return {
+            "metric": None,
+            "objectives": objectives,
+            "sort": "pareto",
+            "multiObjective": True,
+            "items": items,
+        }
 
     def _attach_guard_metrics(self, ranked: list[dict[str, Any]]) -> None:
         """Surfaces the §D.4 guard outputs (already persisted — never recomputed) as a compact
@@ -561,8 +598,12 @@ def _sweep_summary(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _primary_objective(objective: dict[str, Any]) -> tuple[str, str]:
-    """The scalar metric + direction the leaderboard ranks on (the first of an nsga2 ``objectives``
-    list, else the single-objective ``metric``)."""
+    """The single scalar metric + direction for the surfaces that genuinely NEED one — the retro
+    scorecard's ``rawObjective`` and the neighbour-probe geometry (both are inherently 1-D). For a
+    multi-objective (``nsga2``) sweep this is the FIRST objective: a DOCUMENTED, deliberate single
+    pick, NOT the leaderboard ranking. The ``/best`` leaderboard does NOT route through this for an
+    nsga2 sweep — it returns the whole Pareto front (``_best_pareto``), so a multi-objective front
+    is never silently collapsed to a scalar there (AY-OPT-03)."""
     objectives = objective.get("objectives")
     if objectives:
         first = objectives[0]

@@ -3,10 +3,19 @@ vectors and dispatches each as a TRIAL job; backtest-service evaluates them
 through the SAME engine JAR (D6) and streams metrics back. The loop never
 evaluates a strategy itself.
 
-``grid``/``random``/``tpe`` are single-objective and support fold-fed
-``MedianPruner`` early stopping; ``nsga2`` is multi-objective and returns a
-Pareto front (never collapsed to one number, never pruned — Optuna does not
-prune multi-objective studies).
+``grid``/``random``/``tpe`` are single-objective; ``nsga2`` is multi-objective and
+returns a Pareto front (never collapsed to one number, never pruned — Optuna does
+not prune multi-objective studies).
+
+Fold-fed ``MedianPruner`` (AY-OPT-02): a walk-forward trial reports its per-fold
+OOS objective values (of the DECLARED objective, not a fixed Sharpe) into the
+study so the running median informs whether FUTURE trials should prune. But a
+backtest that ran to completion is a COMPLETED trial — it is recorded COMPLETE and
+NEVER relabelled PRUNED post-hoc. The trial is fully evaluated in backtest-service
+(all folds run), so post-hoc "pruning" saved no compute and only hid a valid
+completed result from the leaderboard; genuine early-stopping would require
+mid-flight fold streaming + cancel-at-fold-boundary (deferred, WalkForwardRunner
+CD-12 seam).
 
 Collaborators (jobs/trials repos, dispatcher) are injected so the loop is unit
 tested with in-memory fakes — no Postgres, no Redis."""
@@ -50,26 +59,30 @@ def multi_objectives(objective: dict[str, Any]) -> list[dict[str, Any]]:
     return list(objs) if objs else [dict(o) for o in _DEFAULT_MULTI_OBJECTIVES]
 
 
-def should_prune_trial(trial: optuna.Trial, result: dict[str, Any]) -> bool:
+def report_fold_objectives(trial: optuna.Trial, result: dict[str, Any]) -> None:
     """Reports a trial's per-fold OOS objectives (CD-12 — the flat ``oosFoldObjectives`` array the
-    TRIAL worker emits) into the study's pruner and returns whether the trial should be pruned.
-    A full-window trial (no folds) is never pruned. Fed by OOS fold values only."""
+    TRIAL worker emits, now the DECLARED objective per-fold, not a fixed Sharpe) into the study's
+    ``MedianPruner``, so its running median informs whether FUTURE trials should prune. A
+    full-window trial (no folds) reports nothing.
+
+    This NEVER decides the CURRENT trial's terminal state (AY-OPT-02): the backtest already ran to
+    completion, so the trial is a COMPLETED trial — Optuna retains the reported intermediate values
+    regardless of terminal state, and relabelling an already-complete trial PRUNED is exactly the
+    dishonest post-hoc pruning this removes. It therefore reports but does NOT call
+    ``trial.should_prune()``: nothing here can prune a completed trial."""
     raw = result.get("oosFoldObjectives")
     if not raw:
-        return False
+        return
     try:
         folds = json.loads(raw)
     except (TypeError, ValueError):
-        return False
+        return
     for step, fold_oos in enumerate(folds):
         try:
             value = float(fold_oos)
         except (TypeError, ValueError):
             continue
         trial.report(value, step)
-        if trial.should_prune():
-            return True
-    return False
 
 
 def build_trial_request(
@@ -186,8 +199,7 @@ def _resolve(
     trials: Any,
 ) -> float | None:
     """Tells the study one trial result and updates its ledger row. Returns the single-objective
-    value on success (for best/early-stop tracking), else ``None`` (multi-objective, failed,
-    or pruned)."""
+    value on success (for best/early-stop tracking), else ``None`` (multi-objective or failed)."""
     if multi:
         values = [objective_value(result, o["metric"]) for o in objs]
         if any(math.isnan(v) for v in values):
@@ -198,16 +210,15 @@ def _resolve(
             trials.complete(row_id, _named(objs, values), result.get("runId"))
         return None
 
-    if should_prune_trial(trial, result):
-        _tell(study, trial, state=optuna.trial.TrialState.PRUNED)
-        trials.prune(row_id)
-        return None
-
     value = objective_value(result, metric)
     if math.isnan(value):
         _tell(study, trial, state=optuna.trial.TrialState.FAIL)
         trials.fail(row_id)
         return None
+    # Feed the pruner the per-fold OOS intermediate values (of the declared objective) so the
+    # study's running median informs FUTURE trials — but a trial whose backtest ran to completion is
+    # COMPLETE, never relabelled PRUNED (AY-OPT-02). Report BEFORE the completing tell.
+    report_fold_objectives(trial, result)
     _tell(study, trial, value=value)
     trials.complete(row_id, {metric: value}, result.get("runId"))
     return value

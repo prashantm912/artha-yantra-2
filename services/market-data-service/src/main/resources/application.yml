@@ -40,6 +40,17 @@ artha:
   db:
     # read into spring.datasource.password by SecretFilePasswordPostProcessor
     password-file: ${ARTHA_DB_PASSWORD_FILE:/run/secrets/postgres_password}
+  console:
+    # SEC-02: the B5 read-only SQL console runs under a DEDICATED least-privilege Postgres LOGIN role
+    # (ay_console — NOSUPERUSER, SELECT-only on marketdata; admin lineage V002) via its OWN datasource,
+    # NOT the artha superuser — so `SELECT pg_read_file(...)` can no longer read container secrets.
+    # The role's password is set by the console-role-init compose one-shot from the SAME env var, so
+    # the app and the role always agree; a single shared .env keeps mock+live consistent. The URL is
+    # reused from spring.datasource.url. Name MUST byte-match the compose passthrough
+    # ARTHA_CONSOLE_DB_PASSWORD (#653). Default below is the documented mock/CI credential.
+    datasource:
+      username: ay_console
+      password: ${ARTHA_CONSOLE_DB_PASSWORD:console-readonly-local}
   feed:
     autostart: ${ARTHA_FEED_AUTOSTART:true}
   mock:

@@ -147,6 +147,41 @@ services:
     restart: "no"
     logging: *default-logging
 
+  # ---- one-shot: set the read-only console role password (SEC-02) ---------
+  # The admin lineage (V002) creates ay_console with PASSWORD NULL — no credential
+  # ever lives in a migration (A.9). This sets its password from
+  # ARTHA_CONSOLE_DB_PASSWORD every boot (idempotent ALTER ROLE) so the market-data
+  # SQL console can authenticate as the least-privilege role (NOSUPERUSER,
+  # SELECT-only on marketdata) instead of the artha superuser — closing the
+  # `SELECT pg_read_file('/run/secrets/...')` secret-read. A single shared .env means
+  # one value for mock+live (the role is cluster-global), so the app and the role
+  # never disagree across a profile switch. market-data-service does NOT depend on
+  # this: its console datasource is lazy, so a console-credential problem can never
+  # block the feed — it only fails the console (fail-closed). The password is
+  # injected into ALTER ROLE, so live values must be ALPHANUMERIC (no quotes / $).
+  console-role-init:
+    image: postgres:17-alpine
+    container_name: ay-console-role-init
+    secrets: [postgres_password]
+    environment:
+      ARTHA_CONSOLE_DB_PASSWORD: ${ARTHA_CONSOLE_DB_PASSWORD:-console-readonly-local}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        export PGPASSWORD="$$(cat /run/secrets/postgres_password)"
+        psql -h timescaledb -U artha -d postgres -v ON_ERROR_STOP=1 \
+          -c "ALTER ROLE ay_console LOGIN PASSWORD '$${ARTHA_CONSOLE_DB_PASSWORD}'"
+        echo "[console-role-init] ay_console password set"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      flyway-init:
+        condition: service_completed_successfully
+    mem_limit: 64m
+    restart: "no"
+    logging: *default-logging
+
   # ---- always-on nightly backup sidecar (A.11 / D16) ----------------------
   # 00:30 IST WHOLE-DATABASE pg_dump -Fc + cluster globals (post-#395) into
   # the bind-mounted ./backups on the WINDOWS filesystem - outside the WSL2 VM
@@ -235,6 +270,12 @@ services:
       MOCK_SCENARIO: ${MOCK_SCENARIO:-trend-up}
       # Stage B: marketdata schema access — password via secret file, never env
       ARTHA_DB_PASSWORD_FILE: /run/secrets/postgres_password
+      # SEC-02: the read-only SQL console authenticates as the least-privilege ay_console role via its
+      # OWN datasource (NOT the artha superuser). The console-role-init one-shot sets this SAME password
+      # on the role, so the app and the role agree. Shared .env => one value across mock+live (the role
+      # is cluster-global). Name MUST byte-match the application.yml placeholder (#653). Live: set a
+      # strong ALPHANUMERIC value in .env; the mock/CI default is used otherwise.
+      ARTHA_CONSOLE_DB_PASSWORD: ${ARTHA_CONSOLE_DB_PASSWORD:-console-readonly-local}
       # Profile isolation: per-profile database + Redis logical DB (live → artha/0, mock → artha_mock/1)
       SPRING_DATASOURCE_URL: jdbc:postgresql://timescaledb:5432/${ARTHA_DB_NAME:?unset - run via the ay CLI (derives mock->artha_mock, live->artha); raw compose must export it}?currentSchema=marketdata
       SPRING_DATA_REDIS_DATABASE: ${ARTHA_REDIS_DB:?unset - run via the ay CLI (derives mock->1, live->0); raw compose must export it}

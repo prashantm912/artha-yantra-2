@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.backfill;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import in.arthayantra.marketdata.config.ConsoleDataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
@@ -11,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -30,10 +32,15 @@ import org.springframework.stereotype.Service;
  *       data-modifying CTE).
  *   <li><b>statement_timeout</b> + a hard <b>row cap</b> — a runaway scan can't hang the pool or OOM.
  *   <li><b>search_path = marketdata</b> — unqualified names resolve to the marketdata schema.
+ *   <li><b>least-privilege login (SEC-02)</b> — the query runs on the {@link ConsoleDataSource} pool,
+ *       authenticated as the {@code ay_console} role (NOSUPERUSER, SELECT-only on marketdata), NOT the
+ *       artha superuser. So a statement the verb blocklist misses ({@code SELECT pg_read_file(...)}) is
+ *       refused by Postgres itself — it can no longer read container secrets.
  * </ol>
  *
- * The connection is the service's normal datasource; the READ ONLY transaction is the authoritative
- * write guard. The whole surface sits behind the gateway auth filter on a loopback-only deploy.
+ * The connection comes from the dedicated least-privilege console pool; the READ ONLY transaction is
+ * still the authoritative write guard, and the least-privilege role is the authoritative secret-read
+ * guard. The whole surface sits behind the gateway auth filter on a loopback-only deploy.
  */
 @Service
 public class AdminQueryService {
@@ -59,11 +66,13 @@ public class AdminQueryService {
   public record QueryResult(
       List<String> columns, List<List<String>> rows, int rowCount, boolean truncated) {}
 
-  private final JdbcTemplate jdbc;
+  /** Least-privilege console pool (ay_console) — NEVER the artha superuser datasource (SEC-02). */
+  private final JdbcTemplate consoleJdbc;
+
   private final AdminAuditLedger audit;
 
-  public AdminQueryService(JdbcTemplate jdbc, AdminAuditLedger audit) {
-    this.jdbc = jdbc;
+  public AdminQueryService(ConsoleDataSource console, AdminAuditLedger audit) {
+    this.consoleJdbc = console.jdbcTemplate();
     this.audit = audit;
   }
 
@@ -93,6 +102,15 @@ public class AdminQueryService {
       long durationMs = (System.nanoTime() - start) / 1_000_000L;
       audit.recordQuery(action, cleaned, limit, result.rowCount(), result.truncated(), durationMs, null);
       return result;
+    } catch (CannotGetJdbcConnectionException e) {
+      // FAIL-CLOSED (SEC-02): the console's ONLY datasource is the least-privilege pool. If it can't
+      // connect/authenticate, the query does not run and we NEVER retry on the artha superuser.
+      long durationMs = (System.nanoTime() - start) / 1_000_000L;
+      audit.recordQuery(action, cleaned, limit, 0, false, durationMs, e.getMessage());
+      throw new ApiException(
+          500,
+          ErrorCodes.INTERNAL_ERROR,
+          "read-only console datasource unavailable — the query was not run (fail-closed)");
     } catch (RuntimeException e) {
       long durationMs = (System.nanoTime() - start) / 1_000_000L;
       audit.recordQuery(action, cleaned, limit, 0, false, durationMs, e.getMessage());
@@ -101,7 +119,7 @@ public class AdminQueryService {
   }
 
   private QueryResult execute(String cleaned, int limit) {
-    return jdbc.execute(
+    return consoleJdbc.execute(
         (ConnectionCallback<QueryResult>)
             con -> {
               boolean prevAuto = con.getAutoCommit();

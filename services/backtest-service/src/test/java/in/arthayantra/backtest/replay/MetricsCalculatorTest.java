@@ -38,7 +38,7 @@ class MetricsCalculatorTest {
             closedTrade(5, "200", "190", "-50"));
 
     MetricsCalculator.Metrics m =
-        calc.compute(trades, equity, INITIAL, new BigDecimal("120000"), "1d", 4L, 2L);
+        calc.compute(trades, equity, INITIAL, new BigDecimal("120000"), "1d", "1d", 4L, 2L);
     ObjectNode full = m.full();
 
     assertThat(full.get("totalReturn").asText()).isEqualTo("20.000000");
@@ -67,6 +67,7 @@ class MetricsCalculatorTest {
             INITIAL,
             new BigDecimal("120000"),
             "1d",
+            "1d",
             3L,
             1L);
     ObjectNode full = m.full();
@@ -79,7 +80,7 @@ class MetricsCalculatorTest {
   @Test
   void emptyRunEmitsAllThreeKeysWithZeroOrNull() {
     MetricsCalculator.Metrics m =
-        calc.compute(List.of(), List.of(), INITIAL, INITIAL, "1d", 0L, 0L);
+        calc.compute(List.of(), List.of(), INITIAL, INITIAL, "1d", "1d", 0L, 0L);
     ObjectNode full = m.full();
 
     // All three keys must be present unconditionally (the metrics catalog pins the emit key set).
@@ -103,7 +104,7 @@ class MetricsCalculatorTest {
             closedTrade(1, "100", "101", "1"),
             closedTrade(1, "100", "101", "1"));
     MetricsCalculator.Metrics m =
-        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "1m", 750L, 100L);
+        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "1m", "1m", 750L, 100L);
 
     assertThat(m.full().get("tradeFrequency").asText()).isEqualTo("1.500000");
   }
@@ -124,7 +125,7 @@ class MetricsCalculatorTest {
             closedTrade(1, "100", "101", "1"),
             closedTrade(1, "100", "101", "1"));
     MetricsCalculator.Metrics m =
-        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "3m", 125L, 50L);
+        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "3m", "3m", 125L, 50L);
 
     assertThat(m.full().get("tradeFrequency").asText()).isEqualTo("3.000000");
   }
@@ -144,7 +145,7 @@ class MetricsCalculatorTest {
             closedTrade(1, "100", "101", "1"));
     // 5m: 150 bars / 75 == 2 sessions; 3 trades / 2 == 1.5.
     assertThat(
-            calc.compute(three, equity, INITIAL, new BigDecimal("101000"), "5m", 150L, 50L)
+            calc.compute(three, equity, INITIAL, new BigDecimal("101000"), "5m", "5m", 150L, 50L)
                 .full()
                 .get("tradeFrequency")
                 .asText())
@@ -156,6 +157,7 @@ class MetricsCalculatorTest {
                     equity,
                     INITIAL,
                     new BigDecimal("101000"),
+                    "1h",
                     "1h",
                     25L,
                     10L)
@@ -178,7 +180,7 @@ class MetricsCalculatorTest {
             new EquityPoint(T0, new BigDecimal("100000")),
             new EquityPoint(T1, new BigDecimal("101000")));
     MetricsCalculator.Metrics m =
-        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "1d", 4L, 2L);
+        calc.compute(trades, equity, INITIAL, new BigDecimal("101000"), "1d", "1d", 4L, 2L);
     ObjectNode full = m.full();
 
     assertThat(full.get("turnover").asText()).isEqualTo("0.032000");

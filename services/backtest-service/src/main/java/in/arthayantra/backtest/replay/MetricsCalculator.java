@@ -40,19 +40,30 @@ public final class MetricsCalculator {
       int tradeCount,
       ObjectNode full) {}
 
-  /** Computes the catalog from closed trades + the mark-to-market equity curve. */
+  /**
+   * Computes the catalog from closed trades + the mark-to-market equity curve.
+   *
+   * <p>AY-SL-01 cadence split: {@code interval} is the strategy's PRIMARY timeframe and keys the
+   * session-denominated metrics (tradeFrequency, #785); {@code curveInterval} is the cadence of the
+   * SERIES THE EQUITY CURVE IS BUILT ON and keys the ratio-metric annualization (Sharpe/Sortino) —
+   * periodic returns are computed between consecutive curve points, so annualizing them at any other
+   * cadence mis-scales by ≈√(ratio). The intraday replay engines mark to market per 1m bar regardless
+   * of primary timeframe, so their callers pass {@code "1m"}; a caller with a daily-spaced curve must
+   * pass {@code "1d"}. maxDrawdown/CAGR/totalReturn are cadence-independent.
+   */
   public Metrics compute(
       List<Trade> trades,
       List<EquityPoint> equity,
       BigDecimal initialEquity,
       BigDecimal finalEquity,
       String interval,
+      String curveInterval,
       long totalBars,
       long barsInPosition) {
 
     BigDecimal totalReturn = pct(finalEquity.subtract(initialEquity), initialEquity);
     double[] periodic = periodicReturns(equity);
-    double periodsPerYear = periodsPerYear(interval);
+    double periodsPerYear = periodsPerYear(curveInterval);
 
     double sharpe = sharpe(periodic, periodsPerYear);
     double sortino = sortino(periodic, periodsPerYear);

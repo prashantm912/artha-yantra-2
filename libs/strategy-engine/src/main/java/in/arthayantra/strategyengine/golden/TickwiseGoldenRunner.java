@@ -107,6 +107,29 @@ public final class TickwiseGoldenRunner {
       IntConsumer onBar,
       boolean relaxSession,
       DecisionListener decisionListener) {
+    return run(primaryOneMinute, contextCandles, onBar, relaxSession, decisionListener, null);
+  }
+
+  /**
+   * As above, with a {@code warmupUntil} boundary (AY-SL-03): bars whose decision timestamp is BEFORE
+   * {@code warmupUntil} warm the primary/context/indicator state normally but emit NO signal and NEVER
+   * open a tracked position — so a fold replayed from the run's data start reaches the fold boundary
+   * with WARM indicators yet a clean, position-free state, and every emitted event (entry, exit,
+   * square_off, decision-diagnostic) belongs to the in-window portion only. {@code null} (the live +
+   * golden + whole-run path) disables suppression → every bar emits, byte-identical to before.
+   *
+   * <p>The gate is the emit timestamp itself ({@code bar.bucketStart()} — the same instant every path
+   * stamps its event with), so it is uniform across the 1m / coarse-primary / btst decision points and
+   * deterministic (no wall-clock, no randomness). Suppressing the entry evaluation keeps {@code open}
+   * null throughout warmup, so no warmup position can leak across the boundary.
+   */
+  public List<GoldenSignalsJson.SignalEvent> run(
+      List<EngineCandle> primaryOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      IntConsumer onBar,
+      boolean relaxSession,
+      DecisionListener decisionListener,
+      OffsetDateTime warmupUntil) {
     boolean btst = "btst".equals(definition.session().style());
     boolean coarsePrimary = !definition.primaryTimeframe().equals("1m") && !btst;
     EngineSeries live1m = new EngineSeries(new SeriesKey(exchange, tradingsymbol, "1m"));
@@ -170,6 +193,9 @@ public final class TickwiseGoldenRunner {
         onBar.accept(barIndex);
       }
       barIndex++;
+      // AY-SL-03 warmup: bars before the boundary warm state (series appends, context advance,
+      // indicator caches) but emit nothing and open no position — only `emit` bars decide/emit.
+      boolean emit = warmupUntil == null || !bar.bucketStart().isBefore(warmupUntil);
       advanceContexts(contexts, contextCursor, contextCandles, bar);
 
       LocalDate barDay = EngineSeries.sessionDate(bar);
@@ -187,48 +213,51 @@ public final class TickwiseGoldenRunner {
           primary.append(aggregate(bucketBuffer, currentBucketFloor));
           bucketBuffer.clear();
           int primaryIndex = primary.size() - 1;
-          if (open != null && gate.pastSquareOff(barTime)) {
-            events.add(exitEvent(bar.bucketStart(), open, "square_off"));
-            open = null;
-          }
-          if (open != null) {
-            Optional<ExitEvaluator.ExitDecision> exit =
-                ExitEvaluator.evaluate(
-                    definition, bank,
-                    new ExitEvaluator.Position(
-                        open.direction(), open.entryPrice(), open.entryPrimaryIndex()),
-                    primaryIndex, open.firedTiers());
-            if (exit.isPresent()) {
-              open = applyExit(open, exit.get(), bar.bucketStart(), events);
+          if (emit) {
+            if (open != null && gate.pastSquareOff(barTime)) {
+              events.add(exitEvent(bar.bucketStart(), open, "square_off"));
+              open = null;
             }
-          }
-          if (open == null) {
-            Optional<EntryEvaluator.Evaluation> evaluation =
-                EntryEvaluator.evaluate(definition, bank, primaryIndex);
-            boolean entryAllowed =
-                evaluation.isPresent()
-                    && evaluation.get().entry()
-                    && gate.entryAllowed(barTime, barDay);
-            if (decisionListener != null) {
-              emitDecision(
-                  decisionListener,
-                  primary.candle(primaryIndex),
+            if (open != null) {
+              Optional<ExitEvaluator.ExitDecision> exit =
+                  ExitEvaluator.evaluate(
+                      definition, bank,
+                      new ExitEvaluator.Position(
+                          open.direction(), open.entryPrice(), open.entryPrimaryIndex()),
+                      primaryIndex, open.firedTiers());
+              if (exit.isPresent()) {
+                open = applyExit(open, exit.get(), bar.bucketStart(), events);
+              }
+            }
+            if (open == null) {
+              Optional<EntryEvaluator.Evaluation> evaluation =
+                  EntryEvaluator.evaluate(definition, bank, primaryIndex);
+              boolean entryAllowed =
+                  evaluation.isPresent()
+                      && evaluation.get().entry()
+                      && gate.entryAllowed(barTime, barDay);
+              if (decisionListener != null) {
+                emitDecision(
+                    decisionListener,
+                    primary.candle(primaryIndex),
+                    bar.bucketStart(),
+                    evaluation,
+                    entryAllowed);
+              }
+              if (entryAllowed) {
+                events.add(
+                    entryEvent(
+                        bar.bucketStart(), evaluation.get(),
+                        entryLevels(bank, primary, primaryIndex)));
+                open = openPosition(primary, primaryIndex, live1m.size(), evaluation.get());
+              }
+            } else if (decisionListener != null) {
+              decisionListener.onDecision(
+                  EngineSeries.sessionDate(primary.candle(primaryIndex)),
                   bar.bucketStart(),
-                  evaluation,
-                  entryAllowed);
+                  "position_open",
+                  null);
             }
-            if (entryAllowed) {
-              events.add(
-                  entryEvent(
-                      bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, primaryIndex)));
-              open = openPosition(primary, primaryIndex, live1m.size(), evaluation.get());
-            }
-          } else if (decisionListener != null) {
-            decisionListener.onDecision(
-                EngineSeries.sessionDate(primary.candle(primaryIndex)),
-                bar.bucketStart(),
-                "position_open",
-                null);
           }
         }
         currentBucketFloor = floor;
@@ -264,43 +293,46 @@ public final class TickwiseGoldenRunner {
           preCloseDone = true;
           primary.append(preCloseDailyBar(dayBuffer));
           int index = primary.size() - 1;
-          if (open != null) {
-            Optional<ExitEvaluator.ExitDecision> exit =
-                ExitEvaluator.evaluate(
-                    definition, bank,
-                    new ExitEvaluator.Position(
-                        open.direction(), open.entryPrice(), open.entryPrimaryIndex()),
-                    index, open.firedTiers());
-            if (exit.isPresent()) {
-              open = applyExit(open, exit.get(), bar.bucketStart(), events);
+          if (emit) {
+            if (open != null) {
+              Optional<ExitEvaluator.ExitDecision> exit =
+                  ExitEvaluator.evaluate(
+                      definition, bank,
+                      new ExitEvaluator.Position(
+                          open.direction(), open.entryPrice(), open.entryPrimaryIndex()),
+                      index, open.firedTiers());
+              if (exit.isPresent()) {
+                open = applyExit(open, exit.get(), bar.bucketStart(), events);
+              }
             }
-          }
-          if (open == null) {
-            Optional<EntryEvaluator.Evaluation> evaluation =
-                EntryEvaluator.evaluate(definition, bank, index);
-            boolean entryAllowed =
-                evaluation.isPresent()
-                    && evaluation.get().entry()
-                    && gate.entryAllowed(barTime, barDay);
-            if (decisionListener != null) {
-              emitDecision(
-                  decisionListener,
-                  primary.candle(index),
+            if (open == null) {
+              Optional<EntryEvaluator.Evaluation> evaluation =
+                  EntryEvaluator.evaluate(definition, bank, index);
+              boolean entryAllowed =
+                  evaluation.isPresent()
+                      && evaluation.get().entry()
+                      && gate.entryAllowed(barTime, barDay);
+              if (decisionListener != null) {
+                emitDecision(
+                    decisionListener,
+                    primary.candle(index),
+                    bar.bucketStart(),
+                    evaluation,
+                    entryAllowed);
+              }
+              if (entryAllowed) {
+                events.add(
+                    entryEvent(
+                        bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, index)));
+                open = openPosition(primary, index, live1m.size() - 1, evaluation.get());
+              }
+            } else if (decisionListener != null) {
+              decisionListener.onDecision(
+                  EngineSeries.sessionDate(primary.candle(index)),
                   bar.bucketStart(),
-                  evaluation,
-                  entryAllowed);
+                  "position_open",
+                  null);
             }
-            if (entryAllowed) {
-              events.add(
-                  entryEvent(bar.bucketStart(), evaluation.get(), entryLevels(bank, primary, index)));
-              open = openPosition(primary, index, live1m.size() - 1, evaluation.get());
-            }
-          } else if (decisionListener != null) {
-            decisionListener.onDecision(
-                EngineSeries.sessionDate(primary.candle(index)),
-                bar.bucketStart(),
-                "position_open",
-                null);
           }
         }
         continue;
@@ -308,6 +340,9 @@ public final class TickwiseGoldenRunner {
 
       // 1m primary: exits resolve before a new entry on the same bar
       int index = primary.size() - 1;
+      if (!emit) {
+        continue;
+      }
       if (open != null && gate.pastSquareOff(barTime)) {
         events.add(exitEvent(bar.bucketStart(), open, "square_off"));
         open = null;

@@ -3,7 +3,6 @@ package in.arthayantra.backtest.replay.options;
 import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.backtest.client.MarketDataClient;
 import in.arthayantra.backtest.replay.CostConfig;
-import in.arthayantra.backtest.replay.EquityCurveDownsampler;
 import in.arthayantra.backtest.replay.EquityPoint;
 import in.arthayantra.backtest.replay.ReplayResult;
 import in.arthayantra.backtest.replay.Trade;
@@ -149,15 +148,66 @@ public class OptionsPremiumReplay {
       BigDecimal initialEquity,
       GateCoverage gateCoverage,
       BigDecimal slippageMultiplier) {
+    return replay(
+        definition,
+        config,
+        underlyingExchange,
+        underlyingTradingsymbol,
+        underlyingOneMinute,
+        strikeReferenceOneMinute,
+        contextCandles,
+        initialEquity,
+        gateCoverage,
+        slippageMultiplier,
+        null);
+  }
+
+  /**
+   * As above, with a {@code warmupPrefix} of PAST-ONLY underlying bars fed to the signal runner ahead
+   * of the window (AY-SL-03 walk-forward fold warmup). The runner warms the underlying indicators over
+   * {@code warmupPrefix + underlyingOneMinute} but SUPPRESSES every signal before the first in-window
+   * bar, so a long-lookback signal gate can evaluate inside a short fold — while leg pairing, premium
+   * pricing and the MTM equity loop run over {@code underlyingOneMinute} ONLY (no pre-window
+   * contamination). {@code contextCandles} must carry the matching warmup depth; the strike-reference
+   * series needs none (it is a price lookup at in-window entry instants). A {@code null}/empty prefix
+   * (the whole-run + premium golden path) is byte-identical to the un-warmed replay.
+   */
+  public ReplayResult replay(
+      StrategyDefinition definition,
+      JsonNode config,
+      String underlyingExchange,
+      String underlyingTradingsymbol,
+      List<EngineCandle> underlyingOneMinute,
+      List<EngineCandle> strikeReferenceOneMinute,
+      Map<SeriesKey, List<EngineCandle>> contextCandles,
+      BigDecimal initialEquity,
+      GateCoverage gateCoverage,
+      BigDecimal slippageMultiplier,
+      List<EngineCandle> warmupPrefix) {
     // NEW: backtest.relax_session (opt-in, default false) disables the intraday clock rail so an
     // armed scalper fires its signal-driven entries across the FULL session for functional evaluation
     // (the live confluence gates are firewalled out of replay anyway). It does NOT relax the signal
     // gate or indicator warmup — those would manufacture fake trades — so a sparse backtest stays a
     // signal/data-fidelity artifact (judge on live). Off ⇒ premium goldens are byte-identical.
     boolean relaxSession = config.path("backtest").path("relax_session").asBoolean(false);
+    // AY-SL-03: prepend the warmup prefix for signal generation only, boundary at the first in-window
+    // bar. Nothing before the boundary is emitted, so every paired leg + premium trade is in-window.
+    boolean warmed =
+        warmupPrefix != null && !warmupPrefix.isEmpty() && !underlyingOneMinute.isEmpty();
+    List<EngineCandle> signalBars;
+    OffsetDateTime warmupUntil;
+    if (warmed) {
+      signalBars = new java.util.ArrayList<>(warmupPrefix.size() + underlyingOneMinute.size());
+      signalBars.addAll(warmupPrefix);
+      signalBars.addAll(underlyingOneMinute);
+      warmupUntil = underlyingOneMinute.get(0).bucketStart();
+    } else {
+      signalBars = underlyingOneMinute;
+      warmupUntil = null;
+    }
     List<SignalEvent> signals =
         new TickwiseGoldenRunner(definition, underlyingExchange, underlyingTradingsymbol)
-            .run(underlyingOneMinute, contextCandles, null, relaxSession);
+            .run(signalBars, contextCandles, null, relaxSession, null, warmupUntil);
     List<PairedLeg> legs = pairLegs(signals, underlyingOneMinute);
     OiGate gate = parseOiGate(config);
     // 2b-E2: the option legs + the OI-confluence index resolve from {@code universe.underlying} (the
@@ -632,8 +682,10 @@ public class OptionsPremiumReplay {
     return new ReplayResult(
         signals,
         trades,
-        EquityCurveDownsampler.downsample(equity, 500),
-        EquityCurveDownsampler.downsample(drawdown, 500),
+        // AY-SL-01: carry the FULL curves for metric fidelity (Sharpe/Sortino/maxDD at true per-bar
+        // cadence); RunRepository downsamples the STORED/display curve at the persistence boundary.
+        equity,
+        drawdown,
         initialEquity,
         finalEquity,
         underlying.size(),

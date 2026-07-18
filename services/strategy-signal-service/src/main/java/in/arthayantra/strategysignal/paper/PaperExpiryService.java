@@ -41,6 +41,7 @@ public class PaperExpiryService {
   private final PaperPositionRepository positions;
   private final ContractInfoClient contracts;
   private final LastTickReader lastTick;
+  private final ExpirySpotReader expirySpot;
   private final PaperStaleTickAlerter staleTicks;
   private final NotifierClient notifier;
   private final NotificationRepository notifications;
@@ -60,6 +61,7 @@ public class PaperExpiryService {
       PaperPositionRepository positions,
       ContractInfoClient contracts,
       LastTickReader lastTick,
+      ExpirySpotReader expirySpot,
       PaperStaleTickAlerter staleTicks,
       NotifierClient notifier,
       NotificationRepository notifications,
@@ -69,6 +71,7 @@ public class PaperExpiryService {
     this.positions = positions;
     this.contracts = contracts;
     this.lastTick = lastTick;
+    this.expirySpot = expirySpot;
     this.staleTicks = staleTicks;
     this.notifier = notifier;
     this.notifications = notifications;
@@ -93,6 +96,82 @@ public class PaperExpiryService {
       }
     }
     return settled;
+  }
+
+  /**
+   * Durable recovery for positions STRANDED past their expiry (audit AY-SL-04 follow-through). {@link
+   * #settleExpiries} acts ONLY on the expiry date, so a settle that refused there — the spot never
+   * ticked live (an unpinned spot / key mismatch / feed outage) — would otherwise stay OPEN forever,
+   * exactly the invisible-strand class the #694 doctrine's review eliminated. This re-attempts every
+   * OPEN derivative position whose contract already expired, settling it at the EXPIRY-SESSION spot
+   * (the expiry-day close from history — NOT today's spot, since the contract cash-settled at the
+   * expiry-day spot). Idempotent: a settled position is CLOSED and never re-seen; a position not yet
+   * past expiry belongs to {@link #settleExpiries} and is skipped. Run from the evening scheduler; a
+   * position whose expiry-session spot is still uncaptured is left durably OPEN and re-alerted each
+   * pass (never fabricated, never settled at a wrong-session spot). Returns the count settled this run.
+   */
+  public int settlePastExpiries() {
+    LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
+    int settled = 0;
+    for (PositionRow pos : positions.listOpen()) {
+      Optional<ContractInfo> info = contracts.contract(pos.exchange(), pos.tradingsymbol());
+      // Skip non-derivatives (empty) and anything not yet strictly past expiry — the expiry-date
+      // settle owns the expiry day; the instruments master tombstones (never deletes) expired
+      // contracts, so a past-expiry contract still resolves here.
+      if (info.isEmpty() || !info.get().expiry().isBefore(today)) {
+        continue;
+      }
+      try {
+        if (settlePastExpiryOne(pos, info.get())) {
+          settled++;
+        }
+      } catch (Exception e) {
+        log.warn("past-expiry recovery failed for position {}: {}", pos.id(), e.getMessage());
+      }
+    }
+    return settled;
+  }
+
+  /**
+   * Settles one stranded past-expiry position at its EXPIRY-SESSION reference, or leaves it durably
+   * OPEN + re-alerts when that session's close was never captured. Returns true iff it settled. The
+   * reference is resolved from HISTORY ({@link ExpirySpotReader}), never the live tick — the live tick
+   * is now a later session and would settle at the wrong price. Mirrors {@link #settleOne}'s
+   * per-underlying split (index option to intrinsic vs spot; index future to spot; stock F&amp;O to its
+   * own close, physical delivery never modeled), but every branch refuses by leaving OPEN (never
+   * fabricates from {@code avgEntryPrice}).
+   */
+  private boolean settlePastExpiryOne(PositionRow pos, ContractInfo info) {
+    if (!info.indexUnderlying()) {
+      // stock F&O: physical delivery is never modeled — settle off the option's OWN expiry-day close.
+      Optional<BigDecimal> close =
+          expirySpot.expirySessionClose(pos.exchange(), pos.tradingsymbol(), info.expiry());
+      if (close.isEmpty()) {
+        staleTicks.settleRefused(
+            pos, "EXPIRY_SETTLEMENT_RECON", pos.exchange() + ":" + pos.tradingsymbol());
+        return false;
+      }
+      log.warn(
+          "stock F&O paper position {} {}:{} settled late off its expiry-day close — a real position"
+              + " would go to physical delivery / auction (never modeled)",
+          pos.id(), pos.exchange(), pos.tradingsymbol());
+      paper.settleExpiry(pos, close.get(), false);
+      return true;
+    }
+    // Index derivatives cash-settle vs the EXPIRY-day SPOT close (a documented approximation).
+    Optional<BigDecimal> spot =
+        expirySpot.expirySessionClose(info.spotExchange(), info.spotSymbol(), info.expiry());
+    if (spot.isEmpty()) {
+      staleTicks.settleRefused(
+          pos, "EXPIRY_SETTLEMENT_RECON", info.spotExchange() + ":" + info.spotSymbol());
+      return false;
+    }
+    if (info.instrumentClass() == InstrumentClass.OPTION) {
+      paper.settleExpiry(pos, intrinsic(info.optionType(), spot.get(), info.strike()), true);
+    } else {
+      paper.settleExpiry(pos, spot.get(), false);
+    }
+    return true;
   }
 
   /**

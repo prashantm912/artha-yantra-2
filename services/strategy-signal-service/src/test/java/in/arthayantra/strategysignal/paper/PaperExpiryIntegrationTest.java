@@ -57,7 +57,12 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
     ContractInfoClient stubContracts() {
       return (exchange, tradingsymbol) -> {
         LocalDate today = LocalDate.now(IST);
-        LocalDate expiry = tradingsymbol.contains("-T1-") ? today.plusDays(1) : today;
+        // -T1- expires tomorrow; -PAST- expired 3 sessions ago (a strand the recon must pick up);
+        // otherwise expiring today (the on-time settle path).
+        LocalDate expiry =
+            tradingsymbol.contains("-T1-")
+                ? today.plusDays(1)
+                : tradingsymbol.contains("-PAST-") ? today.minusDays(3) : today;
         if (tradingsymbol.startsWith("EXPFUT")) {
           return Optional.of(
               new ContractInfo(expiry, "NSE", "NIFTY 50", null, null, InstrumentClass.FUTURE, true));
@@ -73,6 +78,27 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
         return Optional.empty(); // other symbols (leftover positions) are not derivatives here
       };
     }
+
+    /** The expiry-session (historical) spot the past-expiry recon settles against — no real market-data here. */
+    @Bean
+    @Primary
+    StubExpirySpot stubExpirySpot() {
+      return new StubExpirySpot();
+    }
+  }
+
+  /** A configurable {@link ExpirySpotReader} that records the (key, session) it was asked for. */
+  static final class StubExpirySpot implements ExpirySpotReader {
+    volatile Optional<BigDecimal> value = Optional.empty();
+    final java.util.List<String> keysQueried = new java.util.concurrent.CopyOnWriteArrayList<>();
+    final java.util.List<LocalDate> sessionsQueried = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    @Override
+    public Optional<BigDecimal> expirySessionClose(String exchange, String tradingsymbol, LocalDate session) {
+      keysQueried.add(exchange + ":" + tradingsymbol);
+      sessionsQueried.add(session);
+      return value;
+    }
   }
 
   @Autowired private MockMvc mockMvc;
@@ -83,6 +109,7 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
   @Autowired private StringRedisTemplate redis;
   @Autowired private ObjectMapper objectMapper;
   @Autowired private MeterRegistry meterRegistry;
+  @Autowired private StubExpirySpot expirySpot;
 
   @BeforeEach
   void clean() {
@@ -184,6 +211,77 @@ class PaperExpiryIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(positions.listClosed(null, null, sym, 10, 0)).isEmpty();
     // Prove the REFUSE path executed (not merely skipped): doSettle refused off the position's own tick.
     assertThat(counter("ay_paper_settle_refused_total")).isGreaterThan(refusedBefore);
+  }
+
+  /**
+   * AY-SL-04 strand recovery (1): a position refused on its expiry day stays OPEN past expiry; the
+   * past-expiry recon picks it up on a later run and settles it at the EXPIRY-SESSION spot (the
+   * expiry-day close from history), NOT today's live spot. The stub returns 18500 for the expiry
+   * session while Redis carries a different current spot (18100), and the recon reads ONLY history —
+   * so a settle proves it used the expiry-session value.
+   */
+  @Test
+  void pastExpiryStrandIsRecoveredWithExpirySessionSpot() {
+    String sym = "EXPOPT-PAST-" + UUID.randomUUID().toString().substring(0, 8);
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("80.00"), null, null));
+    expirySpot.value = Optional.of(new BigDecimal("18500.00")); // the expiry-day close (18000 CE -> intrinsic 500)
+
+    assertThat(expiry.settlePastExpiries()).isEqualTo(1);
+
+    var settled = positions.listClosed(null, null, sym, 10, 0);
+    assertThat(settled).hasSize(1);
+    assertThat(settled.get(0).closeReason()).isEqualTo("EXPIRY_SETTLEMENT");
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isEmpty();
+    // It resolved the spot AS OF the expiry session (3 days ago) for the SPOT symbol — not today.
+    assertThat(expirySpot.keysQueried).contains("NSE:NIFTY 50");
+    assertThat(expirySpot.sessionsQueried).contains(LocalDate.now(IST).minusDays(3));
+    // Settled at the expiry-session intrinsic (500, gross ~25000), unmistakably not today's (100).
+    assertThat(settled.get(0).realizedPnl()).isGreaterThan(new BigDecimal("15000"));
+  }
+
+  /**
+   * AY-SL-04 strand recovery (2): when the expiry-session spot was NEVER captured, the recon leaves
+   * the position durably OPEN and re-attempts + re-alerts EACH run — never fabricated, never settled
+   * at a wrong-session spot. Two consecutive runs bump the refused counter twice (per-attempt).
+   */
+  @Test
+  void pastExpiryWithNoExpirySessionSpotStaysOpenAndReAlertsEachRun() {
+    String sym = "EXPOPT-PAST-" + UUID.randomUUID().toString().substring(0, 8);
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("80.00"), null, null));
+    expirySpot.value = Optional.empty(); // the expiry-session close was never captured
+    double refusedBefore = counter("ay_paper_settle_refused_total");
+
+    assertThat(expiry.settlePastExpiries()).isEqualTo(0); // run 1 — refuses, does not fabricate
+    assertThat(expiry.settlePastExpiries()).isEqualTo(0); // run 2 (a later pass) — re-attempts
+
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isPresent(); // durably OPEN, never closed
+    assertThat(positions.listClosed(null, null, sym, 10, 0)).isEmpty();
+    // Per-attempt counter bumped on BOTH runs — the strand is re-alerted, never silently stranded.
+    assertThat(counter("ay_paper_settle_refused_total")).isGreaterThanOrEqualTo(refusedBefore + 2);
+  }
+
+  /**
+   * AY-SL-04 strand recovery (3, idempotency): the recon touches ONLY strictly-past-expiry OPEN
+   * positions. A position still expiring TODAY is left for {@link PaperExpiryService#settleExpiries},
+   * and once settled (CLOSED) it is never re-seen — no double-settle.
+   */
+  @Test
+  void pastExpiryReconLeavesCurrentAndSettledPositionsUntouched() {
+    String sym = "EXPOPT-" + UUID.randomUUID(); // expiry == today (NOT past)
+    paper.openOrder(new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("80.00"), null, null));
+    expirySpot.value = Optional.of(new BigDecimal("18500.00"));
+
+    // Expiry today is not strictly past -> the recon skips it (settleExpiries owns the expiry date).
+    assertThat(expiry.settlePastExpiries()).isEqualTo(0);
+    assertThat(positions.findOpen("manual", "NFO", sym, "BUY")).isPresent();
+
+    // Settle it on its expiry day via the normal path (live Redis spot 18100), then it is CLOSED.
+    assertThat(expiry.settleExpiries()).isEqualTo(1);
+    BigDecimal realized = positions.listClosed(null, null, sym, 10, 0).get(0).realizedPnl();
+
+    // A CLOSED position is not in listOpen -> the recon never re-touches it (idempotent).
+    assertThat(expiry.settlePastExpiries()).isEqualTo(0);
+    assertThat(positions.listClosed(null, null, sym, 10, 0).get(0).realizedPnl()).isEqualByComparingTo(realized);
   }
 
   @Test

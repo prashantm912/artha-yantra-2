@@ -63,6 +63,19 @@ export interface BestRow {
   guardMetrics?: GuardMetrics | null;
 }
 
+/**
+ * One non-dominated point on a multi-objective (`nsga2`) sweep's Pareto front, exposed additively
+ * on `GET /optimizations/{id}/best` under `paretoFront` (AY-OPT-03: the front is surfaced, never
+ * collapsed to the scalar `items` ranking). Carries objective values only — no fold-guard
+ * enrichment. The FE may adopt this later; `nsga2` sweeps are latent today.
+ */
+export interface ParetoPoint {
+  trialNumber: number;
+  params: Record<string, unknown>;
+  objectiveValues?: Record<string, number> | null;
+  backtestRunId?: string | null;
+}
+
 /** One trial (`GET /optimizations/{id}/trials`) — all states; pruned/failed flagged, not hidden. */
 export interface TrialRow {
   trialNumber: number;
@@ -134,7 +147,15 @@ export function useSweeps(offset: number) {
 export function useSweepBest(sweepId: string, sort: SortMode) {
   return useQuery({
     queryKey: ['sweep', sweepId, 'best', sort],
-    queryFn: () => apiFetch<{ metric?: string; items: BestRow[] }>(`/optimizations/${sweepId}/best?sort=${sort}&top=50`),
+    queryFn: () =>
+      apiFetch<{
+        metric?: string;
+        items: BestRow[];
+        // Additive nsga2-only fields (AY-OPT-03); absent for single-objective sweeps.
+        multiObjective?: boolean;
+        objectives?: Array<{ metric?: string; direction?: string }>;
+        paretoFront?: ParetoPoint[];
+      }>(`/optimizations/${sweepId}/best?sort=${sort}&top=50`),
     enabled: !!sweepId,
     refetchInterval: REFETCH_MS,
   });

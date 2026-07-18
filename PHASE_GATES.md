@@ -12,6 +12,13 @@ subset is CI-enforced).
 
 ## Current phase
 
+> **⚠️ CURRENCY (2026-07-18): this file's top "Current frontier (2026-07-02)" marker + the dated currency
+> blocks below are a HISTORICAL LOG, not the live frontier (audit AY-META-04). The authoritative current
+> open-work state is the ledger `docs/superpowers/plans/2026-07-02-remaining-items.md §0`. Latest: the
+> 2026-07 comprehensive audit merged (#911, `docs/audits/2026-07-18-comprehensive-audit.md`) — its P0 set
+> (SL-01 metrics, SEC-01/02, OPS-R01, SL-03) is the next build frontier. Also note: SEC-07/08 show the
+> Stage-G hardening layer below was SPEC'd but NOT fully built — "merged as-built" overstates Stage G.**
+
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the
 forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the sections below is the

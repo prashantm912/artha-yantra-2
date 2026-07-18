@@ -3,6 +3,8 @@ import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { addDecimal, compareDecimal, formatDecimal, isNegative, multiplyByInt } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
 import { PageHeader } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
+import { Skeleton } from '../../components/Skeletons.tsx';
 import { FIELD_HELP } from '../../core/fieldHelp.ts';
 import { BeatStrip, BeatItem, LoadBeat } from '../../components/LoadBeat.tsx';
 import { OrderPrefillTicket } from './OrderPrefillTicket.tsx';
@@ -222,40 +224,81 @@ export function OrdersPage() {
           URL carries prefill params, so the plain read surface is unchanged when reached from the nav. */}
       <OrderPrefillTicket />
 
-      <PnlStrip positions={positions.data ?? []} funds={funds.data} />
+      {/* The P&L strip summarises the positions read model client-side; suppress it when that fetch
+          ERRORED so it can't paint a misleading all-zero "no positions" summary — the Positions
+          section below carries the authoritative error state. */}
+      {!positions.isError && <PnlStrip positions={positions.data ?? []} funds={funds.data} />}
 
+      {/* Each read surface routes through the shared QueryState wrapper so a 500 renders the error
+          card (role=alert) instead of a false-empty table — error ≠ empty. `isEmpty` stays false so
+          a genuinely empty (but successful) response falls through to the DataTable's own empty
+          message / the funds "not configured" notice, preserving the no-broker-wired UX. */}
       <Section title="Funds">
-        {funds.isLoading ? <p className="text-sm text-ay-muted">Loading…</p> : <FundsCard funds={funds.data} />}
+        <QueryState
+          query={funds}
+          isEmpty={() => false}
+          errorTitle="Couldn't load funds"
+          skeleton={<Skeleton variant="card" className="rounded border border-ay-border p-3" />}
+        >
+          {(data) => <FundsCard funds={data} />}
+        </QueryState>
       </Section>
 
       <Section title="Orderbook">
-        <DataTable
-          columns={orderColumns}
-          rows={orderbook.data ?? []}
-          rowKey={(r) => r.orderId || `${r.symbol}-${r.timestamp}`}
-          emptyMessage="No orders."
-          ariaLabel="Orderbook"
-        />
+        <QueryState
+          query={orderbook}
+          isEmpty={() => false}
+          errorTitle="Couldn't load the orderbook"
+          skeleton={<Skeleton variant="table-rows" rows={4} cols={7} className="rounded-lg border border-ay-border p-2" />}
+        >
+          {(rows) => (
+            <DataTable
+              columns={orderColumns}
+              rows={rows}
+              rowKey={(r) => r.orderId || `${r.symbol}-${r.timestamp}`}
+              emptyMessage="No orders."
+              ariaLabel="Orderbook"
+            />
+          )}
+        </QueryState>
       </Section>
 
       <Section title="Positions">
-        <DataTable
-          columns={positionColumns}
-          rows={positions.data ?? []}
-          rowKey={(r) => `${r.exchange}:${r.symbol}:${r.product}`}
-          emptyMessage="No open positions."
-          ariaLabel="Positions"
-        />
+        <QueryState
+          query={positions}
+          isEmpty={() => false}
+          errorTitle="Couldn't load positions"
+          skeleton={<Skeleton variant="table-rows" rows={4} cols={6} className="rounded-lg border border-ay-border p-2" />}
+        >
+          {(rows) => (
+            <DataTable
+              columns={positionColumns}
+              rows={rows}
+              rowKey={(r) => `${r.exchange}:${r.symbol}:${r.product}`}
+              emptyMessage="No open positions."
+              ariaLabel="Positions"
+            />
+          )}
+        </QueryState>
       </Section>
 
       <Section title="Tradebook">
-        <DataTable
-          columns={tradeColumns}
-          rows={tradebook.data ?? []}
-          rowKey={(r) => `${r.orderId}-${r.tradeTime}-${r.symbol}`}
-          emptyMessage="No trades."
-          ariaLabel="Tradebook"
-        />
+        <QueryState
+          query={tradebook}
+          isEmpty={() => false}
+          errorTitle="Couldn't load the tradebook"
+          skeleton={<Skeleton variant="table-rows" rows={4} cols={5} className="rounded-lg border border-ay-border p-2" />}
+        >
+          {(rows) => (
+            <DataTable
+              columns={tradeColumns}
+              rows={rows}
+              rowKey={(r) => `${r.orderId}-${r.tradeTime}-${r.symbol}`}
+              emptyMessage="No trades."
+              ariaLabel="Tradebook"
+            />
+          )}
+        </QueryState>
       </Section>
     </LoadBeat>
   );

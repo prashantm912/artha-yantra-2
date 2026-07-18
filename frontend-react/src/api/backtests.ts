@@ -350,17 +350,14 @@ export function useBacktestTrades(id: string) {
   });
 }
 
-/** Walk-forward folds — [] when the run had no walk-forward (the endpoint returns []). */
+/** Walk-forward folds — the endpoint returns [] (200) when the run had no walk-forward, 404 for an
+ *  unknown run and 5xx on a server fault. The errors PROPAGATE (query.isError) so the consumer can
+ *  render an error state; a former swallow-to-[] made a fold-fetch failure indistinguishable from a
+ *  genuine no-walk-forward run — a false-empty "no folds" on a real error (FE-03). */
 export function useBacktestFolds(id: string) {
   return useQuery({
     queryKey: ['backtest', id, 'folds'],
-    queryFn: async () => {
-      try {
-        return await apiFetch<FoldRow[]>(`/backtests/${id}/folds`);
-      } catch {
-        return [];
-      }
-    },
+    queryFn: () => apiFetch<FoldRow[]>(`/backtests/${id}/folds`),
     enabled: !!id,
   });
 }

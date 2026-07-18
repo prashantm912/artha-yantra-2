@@ -488,6 +488,9 @@ services:
       ARTHA_SIGNALS_STARVATION_WATCHDOG_ENABLED: ${ARTHA_SIGNALS_STARVATION_WATCHDOG_ENABLED:-false}
       ARTHA_SIGNALS_STARVATION_WATCHDOG_BAR_GAP_MS: ${ARTHA_SIGNALS_STARVATION_WATCHDOG_BAR_GAP_MS:-180000}
       ARTHA_SIGNALS_STARVATION_WATCHDOG_WINDOW_MS: ${ARTHA_SIGNALS_STARVATION_WATCHDOG_WINDOW_MS:-300000}
+      # PF-03 risk_suppressions retention (task_f168c23c): daily 02:30-IST prune of rows older than N
+      # days (append-only, low volume). Env-tunable without an image rebuild; 0/negative disables.
+      ARTHA_SIGNALS_RISK_SUPPRESSION_RETENTION_DAYS: ${ARTHA_SIGNALS_RISK_SUPPRESSION_RETENTION_DAYS:-180}
       # Phase 41 notifier (Q6): the signal-push ntfy endpoint + its OWN topic (distinct from the
       # ops topic). Under mock this points at the WireMock stub; live mode overrides both.
       # Fail-CLOSED defaults (audit P0-6): the old wiremock fallback ran in LIVE too — every

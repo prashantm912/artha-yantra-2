@@ -25,6 +25,8 @@ import java.math.BigDecimal;
  *   <li>{@code expiry} — epoch MILLIS at the contract's end-of-day IST instant ({@code 23:59:59 IST});
  *       converted by the resolver to the IST {@link java.time.LocalDate}.
  *   <li>{@code strike_price} — the option strike ({@code 0.0} for futures).
+ *   <li>{@code lot_size} — the contract's tradable market lot (e.g. NIFTY 65 for 2026). Present on
+ *       the F&amp;O rows; {@code null} for the non-F&amp;O rows (index/equity) the resolver skips.
  * </ul>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -37,4 +39,5 @@ public record UpstoxInstrumentMaster(
     @JsonProperty("instrument_type") String instrumentType,
     @JsonProperty("trading_symbol") String tradingSymbol,
     Long expiry,
-    @JsonProperty("strike_price") BigDecimal strikePrice) {}
+    @JsonProperty("strike_price") BigDecimal strikePrice,
+    @JsonProperty("lot_size") Integer lotSize) {}

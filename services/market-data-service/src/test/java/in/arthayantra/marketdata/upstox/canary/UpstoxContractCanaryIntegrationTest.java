@@ -153,7 +153,12 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
           + "\"additional_margin\":0.0,\"total_margin\":387004.85,\"tender_margin\":0.0}],"
           + "\"required_margin\":387004.85,\"final_margin\":188604.45}}";
 
-  /** The gzipped F&O master with one NIFTY 24000 CE at the next weekly index expiry (Tuesday). */
+  /**
+   * The gzipped F&O master with one NIFTY 24000 CE at the next weekly index expiry (Tuesday). Carries
+   * {@code lot_size:50} — a value distinct from the canary's 65 hardcoded fallback, so the probe qty
+   * asserted below can ONLY have come from the master (proves the lot is master-resolved, not a
+   * hardcode).
+   */
   private static byte[] marginMaster() {
     LocalDate expiry =
         MarketCalendar.nse().nextWeeklyIndexExpiry(LocalDate.now(ZoneId.of("Asia/Kolkata")));
@@ -164,7 +169,7 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
             + "\"underlying_symbol\":\"NIFTY\",\"instrument_key\":\"NSE_FO|MARGINPROBE\","
             + "\"instrument_type\":\"CE\",\"trading_symbol\":\"NIFTY 24000 CE\",\"expiry\":"
             + expiryMillis
-            + ",\"strike_price\":24000.0}]";
+            + ",\"strike_price\":24000.0,\"lot_size\":50}]";
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     try (GZIPOutputStream gz = new GZIPOutputStream(out)) {
       gz.write(json.getBytes(StandardCharsets.UTF_8));
@@ -220,11 +225,13 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     assertThat(result.drift()).isEmpty();
     assertThat(result.lastContractCheck()).isNotNull();
     WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
-    // The margin probe MUST post a lot-multiple qty (NIFTY 2026 lot = 65); a wrong qty 400s UDAPI1104
-    // → silent skip → a blind canary, so pin it (EXT-03 residual review finding).
+    // The margin probe MUST post a lot-multiple qty (a wrong qty 400s UDAPI1104 → silent skip → a
+    // blind canary). The qty is resolved FROM the master's lot_size (fixture: 50) — a value distinct
+    // from the 65 hardcoded fallback, so asserting 50 proves the lot flows from the master (an NSE
+    // lot change is reflected automatically), not a stale hardcode (task_309ea822).
     WIREMOCK.verify(
         postRequestedFor(urlPathEqualTo(MARGIN_PATH))
-            .withRequestBody(matchingJsonPath("$.instruments[0].quantity", equalTo("65"))));
+            .withRequestBody(matchingJsonPath("$.instruments[0].quantity", equalTo("50"))));
     assertThat(redis.opsForValue().get(UpstoxContractCanary.RESULT_KEY)).contains("\"drift\":[]");
   }
 

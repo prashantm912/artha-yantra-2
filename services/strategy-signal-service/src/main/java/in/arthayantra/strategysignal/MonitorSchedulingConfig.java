@@ -39,10 +39,14 @@ public class MonitorSchedulingConfig {
   }
 
   /**
-   * The dedicated detector pool: a single daemon thread with the {@code monitor-sched-} prefix. Pure
-   * detectors bind to it by qualifier/bean-name; their recovery triggers stay off-pool
-   * ({@code SignalEngine.forceResubscribe} only enqueues on the recovery executor and returns), so a
-   * monitor sweep never holds this thread long enough to starve a sibling monitor.
+   * The dedicated detector pool: a <b>single</b> daemon thread with the {@code monitor-sched-} prefix.
+   * One thread is sufficient here (market-data uses two) because the strategy-signal detectors do only
+   * fast, bounded work on the sweep thread — in-memory engine heartbeats and the live series store, and
+   * at most one bounded local-Postgres read (DotHealthCanary: today's newest 40 rejection rows, LIMIT
+   * 40). None makes an external-broker HTTP call with multi-attempt retries the way market-data's
+   * session/contract probes do, so no sweep holds this thread long enough to starve a sibling.
+   * Detectors bind by qualifier/bean-name; their recovery triggers stay off-pool
+   * ({@code SignalEngine.forceResubscribe} only enqueues on the recovery executor and returns).
    */
   @Bean
   public ThreadPoolTaskScheduler monitorTaskScheduler() {

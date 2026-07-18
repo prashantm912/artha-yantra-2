@@ -38,15 +38,22 @@ public class MonitorSchedulingConfig {
   }
 
   /**
-   * The dedicated detector pool: a single daemon thread with the {@code monitor-sched-} prefix. Pure
-   * detectors bind to it by qualifier/bean-name; their recovery triggers stay off-pool (the feed
-   * restart is a bounded stop/start, session-state mutation is atomic), so a monitor sweep never
-   * holds this thread long enough to starve a sibling monitor.
+   * The dedicated detector pool. <b>Two threads</b> here (vs. one in strategy-signal): unlike the
+   * strategy-signal detectors — pure in-memory reads that never block — two of the market-data
+   * detectors do bounded-but-slow synchronous network I/O on the monitor thread:
+   * {@code SessionHealthProbe.scheduledProbe} does a {@code getProfile} HTTP call (bounded by the
+   * global {@code read-timeout: 60s}) and, on the first LIVE transition of the day, its on-live hook
+   * runs {@code ContractCanary.runNow()} — four sequential Kite probes through {@code KiteCallExecutor}
+   * (Retry max 4 attempts, backoff to 8s), all on the caller thread, so up to a couple of minutes.
+   * With a single monitor thread that would queue {@code FeedWatchdog.check} + {@code DataHealthCanary.sweep}
+   * behind it — re-introducing the exact starvation this fixes. A second thread keeps the fast
+   * feed/data detectors live while the session probe is mid-call. Their own recovery triggers stay
+   * off-pool ({@code FeedPipeline.restartFeed} is a bounded stop/start).
    */
   @Bean
   public ThreadPoolTaskScheduler monitorTaskScheduler() {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-    scheduler.setPoolSize(1);
+    scheduler.setPoolSize(2);
     scheduler.setThreadNamePrefix("monitor-sched-");
     scheduler.setDaemon(true);
     return scheduler;

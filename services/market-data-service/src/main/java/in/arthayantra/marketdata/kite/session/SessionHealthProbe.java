@@ -33,7 +33,7 @@ public class SessionHealthProbe {
   }
 
   /** 5-min cadence; the first run lands shortly after startup so restarts re-validate fast. */
-  @Scheduled(fixedDelay = 300_000, initialDelay = 10_000)
+  @Scheduled(fixedDelay = 300_000, initialDelay = 10_000, scheduler = "monitorTaskScheduler")
   public void scheduledProbe() {
     probeNow();
   }

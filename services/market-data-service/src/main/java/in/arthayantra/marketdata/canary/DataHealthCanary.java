@@ -192,7 +192,7 @@ public class DataHealthCanary {
   }
 
   /** The 60 s alerting sweep; the initial delay covers boot. */
-  @Scheduled(fixedDelay = 60_000, initialDelay = 120_000)
+  @Scheduled(fixedDelay = 60_000, initialDelay = 120_000, scheduler = "monitorTaskScheduler")
   public void sweep() {
     CanaryReport report;
     try {

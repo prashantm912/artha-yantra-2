@@ -589,9 +589,8 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
             meterRegistry,
             Optional.empty(),
             Optional.empty(),
-            mock(SignalRejectionRepository.class),
+            mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
-            mock(ShadowBookService.class),
             mock(org.springframework.transaction.PlatformTransactionManager.class),
             60);
     isolatedEngine.kiteConnectedReloadDelayMillis = 500L;
@@ -1485,9 +1484,8 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         meterRegistry,
         Optional.empty(),
         Optional.empty(),
-        mock(SignalRejectionRepository.class),
+        mock(RejectionWriter.class),
         mock(RiskSuppressionWriter.class),
-        mock(ShadowBookService.class),
         mock(org.springframework.transaction.PlatformTransactionManager.class),
         60);
   }

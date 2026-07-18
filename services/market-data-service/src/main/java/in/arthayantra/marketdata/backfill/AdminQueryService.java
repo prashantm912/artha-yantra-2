@@ -52,13 +52,24 @@ public class AdminQueryService {
   private static final int STATEMENT_TIMEOUT_MS = 15_000;
   private static final int MAX_SQL_LEN = 20_000;
 
-  /** Whole-word tokens that must never appear — write/DDL/session/transaction verbs. */
+  /**
+   * Whole-word tokens that must never appear — write/DDL/session/transaction verbs, plus the advisory
+   * lock functions (SEC-02 fix round): a pure SELECT may call {@code pg_advisory_lock}, and SESSION
+   * advisory locks survive the rollback AND the pooled connection's reuse — a generate_series
+   * aggregate acquires thousands while returning one row (shared lock-memory exhaustion). No console
+   * use is legitimate, so every session/xact/try/unlock variant is blocked; {@link
+   * #releaseAdvisoryLocks} is the engine-level backstop for anything a future variant slips past.
+   */
   private static final Set<String> BLOCKED =
       Set.of(
           "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE",
           "COPY", "CALL", "DO", "MERGE", "VACUUM", "REINDEX", "REFRESH", "COMMENT", "LOCK", "SET",
           "RESET", "BEGIN", "COMMIT", "ROLLBACK", "ANALYZE", "CLUSTER", "PREPARE", "EXECUTE",
-          "DEALLOCATE", "NOTIFY", "LISTEN", "DISCARD");
+          "DEALLOCATE", "NOTIFY", "LISTEN", "DISCARD", "PG_ADVISORY_LOCK", "PG_ADVISORY_LOCK_SHARED",
+          "PG_ADVISORY_XACT_LOCK", "PG_ADVISORY_XACT_LOCK_SHARED", "PG_TRY_ADVISORY_LOCK",
+          "PG_TRY_ADVISORY_LOCK_SHARED", "PG_TRY_ADVISORY_XACT_LOCK",
+          "PG_TRY_ADVISORY_XACT_LOCK_SHARED", "PG_ADVISORY_UNLOCK", "PG_ADVISORY_UNLOCK_SHARED",
+          "PG_ADVISORY_UNLOCK_ALL");
 
   private static final Pattern WORD = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
@@ -137,8 +148,24 @@ public class AdminQueryService {
               } finally {
                 safeRollback(con);
                 con.setAutoCommit(prevAuto);
+                releaseAdvisoryLocks(con);
               }
             });
+  }
+
+  /**
+   * Belt-and-suspenders for the advisory-lock blocklist (SEC-02 fix round): SESSION advisory locks
+   * survive rollback and ride the pooled connection back into reuse, so before the connection returns
+   * to the pool every one it might hold is released. Best-effort — the blocklist is the primary guard,
+   * and a cleanup hiccup must not turn a successful query into an error. Runs after autocommit is
+   * restored so the call is a standalone statement, not a dangling transaction.
+   */
+  private static void releaseAdvisoryLocks(Connection con) {
+    try (Statement st = con.createStatement()) {
+      st.execute("SELECT pg_advisory_unlock_all()");
+    } catch (SQLException ignored) {
+      // best-effort backstop; the validator blocklist is the primary guard
+    }
   }
 
   private static QueryResult read(ResultSet rs, int limit) throws SQLException {

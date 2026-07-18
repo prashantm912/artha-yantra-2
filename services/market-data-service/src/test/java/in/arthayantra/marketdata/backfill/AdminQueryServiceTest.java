@@ -41,7 +41,13 @@ class AdminQueryServiceTest {
           "SET ROLE postgres",
           "RESET ROLE",
           "VACUUM candles",
-          "REFRESH MATERIALIZED VIEW candles_1d"
+          "REFRESH MATERIALIZED VIEW candles_1d",
+          // SEC-02 fix round: session advisory locks survive rollback + pooled reuse
+          "SELECT pg_advisory_lock(42)",
+          "SELECT PG_ADVISORY_LOCK(42)",
+          "SELECT pg_try_advisory_lock_shared(1, 2) FROM generate_series(1, 100000)",
+          "SELECT pg_advisory_xact_lock(7)",
+          "SELECT pg_advisory_unlock_all()"
         }) {
       assertThatThrownBy(() -> AdminQueryService.validate(sql))
           .as("must reject: %s", sql)

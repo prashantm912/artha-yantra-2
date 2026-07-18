@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.marketdata.backfill.AdminQueryService.QueryResult;
+import in.arthayantra.marketdata.config.ConsoleDataSource;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -42,6 +43,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 class ConsoleRoleLeastPrivilegeIntegrationTest extends MarketDataIntegrationTestBase {
 
   @Autowired private AdminQueryService adminQueryService;
+  @Autowired private ConsoleDataSource consoleDataSource;
 
   @Test
   void consoleServiceCannotReadServerFilesWithPgReadFile() {
@@ -86,5 +88,51 @@ class ConsoleRoleLeastPrivilegeIntegrationTest extends MarketDataIntegrationTest
         assertThat(rs.next()).isTrue();
       }
     }
+  }
+
+  @Test
+  void advisoryLockAcquisitionIsRejectedByTheValidator() {
+    // SEC-02 fix round: a pure SELECT can acquire SESSION advisory locks that survive the rollback
+    // and the pooled connection's reuse (shared lock-memory exhaustion) — so every variant is blocked.
+    for (String sql :
+        new String[] {
+          "SELECT pg_advisory_lock(42)",
+          "SELECT pg_try_advisory_lock(1, 2) FROM generate_series(1, 100000)",
+          "SELECT pg_advisory_unlock_all()"
+        }) {
+      assertThatThrownBy(() -> adminQueryService.run(sql, 10))
+          .as("must reject: %s", sql)
+          .isInstanceOf(ApiException.class)
+          .hasMessageContaining("disallowed keyword");
+    }
+  }
+
+  @Test
+  void consoleConnectionHoldsZeroAdvisoryLocksAfterQuery() throws Exception {
+    // Belt-and-suspenders proof: leak a SESSION advisory lock onto the console pool's connection
+    // OUT-OF-BAND (straight on the pool, bypassing the validator — simulating anything a future
+    // variant might slip past), then run one legit console query. Hikari hands the sequential test
+    // the same (only) pooled connection back, and the service's cleanup must have unlocked it.
+    long key = 424_242L; // objid = low 32 bits of the bigint key
+    consoleDataSource.jdbcTemplate().execute("SELECT pg_advisory_lock(" + key + ")");
+
+    try (Connection connection = DriverManager.getConnection(jdbcUrl(), dbUser(), dbPassword());
+        Statement statement = connection.createStatement()) {
+      try (var rs = statement.executeQuery(advisoryLockCount(key))) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getInt(1)).as("the leaked session advisory lock is held").isEqualTo(1);
+      }
+
+      adminQueryService.run("SELECT 1", 5);
+
+      try (var rs = statement.executeQuery(advisoryLockCount(key))) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getInt(1)).as("pg_advisory_unlock_all cleared the connection").isZero();
+      }
+    }
+  }
+
+  private static String advisoryLockCount(long key) {
+    return "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = " + key;
   }
 }

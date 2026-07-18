@@ -44,6 +44,35 @@ class UpstoxMarginClientTest {
         "message":"Quantity should be multiple of lot size"}]}
       """;
 
+  // EXT-03 drift shape A: Upstox returns 200 but every margin field is present-and-ZERO and both
+  // basket totals are 0 — the "empty computation" the armed F9 heat cap must never read as a real
+  // (tiny) SPAN.
+  private static final String ALL_ZERO_BODY =
+      """
+      {"status":"success","data":{"margins":[
+        {"span_margin":0.0,"exposure_margin":0.0,"equity_margin":0.0,
+         "net_buy_premium":0.0,"additional_margin":0.0,"total_margin":0.0,"tender_margin":0.0}],
+       "required_margin":0.0,"final_margin":0.0}}
+      """;
+
+  // EXT-03 drift shape B: Upstox renames/removes the margin fields — each maps to null, the basket
+  // totals are absent. Structurally distinct from all-zero (null vs 0.0), same silent-defeat vector.
+  private static final String ABSENT_FIELDS_BODY =
+      """
+      {"status":"success","data":{"margins":[{"tender_margin":0.0}]}}
+      """;
+
+  // A LEGITIMATE zero-SPAN basket: a long-only options leg costs only its premium, so span/exposure
+  // are 0 but net_buy_premium + total_margin + the basket totals are positive. Must stay PRICED (the
+  // guard keys on "no positive margin ANYWHERE", not on span alone) — heat then reads a true 0%.
+  private static final String LONG_ONLY_BODY =
+      """
+      {"status":"success","data":{"margins":[
+        {"span_margin":0.0,"exposure_margin":0.0,"equity_margin":0.0,
+         "net_buy_premium":9375.0,"additional_margin":0.0,"total_margin":9375.0,"tender_margin":0.0}],
+       "required_margin":9375.0,"final_margin":9375.0}}
+      """;
+
   @BeforeAll
   static void start() {
     wireMock = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
@@ -121,5 +150,56 @@ class UpstoxMarginClientTest {
     assertThat(q.priced()).isFalse();
     assertThat(q.unpricedReason()).contains("20 legs");
     wireMock.verify(0, postRequestedFor(urlPathEqualTo("/v2/charges/margin")));
+  }
+
+  @Test
+  void anAllZeroMarginBasketIsUnpricedNotPricedZero() {
+    // EXT-03: present-but-zero fields must NOT certify as priced=true, spanMargin=0 (that silently
+    // defeats the armed F9 heat cap). The client returns unpriced so the governor sees "cannot assess".
+    wireMock.stubFor(
+        post(urlPathEqualTo("/v2/charges/margin"))
+            .willReturn(
+                aResponse().withHeader("Content-Type", "application/json").withBody(ALL_ZERO_BODY)));
+
+    MarginQuote q = client().quote(List.of(new Leg("NSE_FO|44454", 65, "SELL", "D")));
+
+    assertThat(q.priced()).isFalse();
+    assertThat(q.unpricedReason()).isEqualTo("Upstox returned a zero/empty margin basket");
+    assertThat(q.spanMargin()).isNull();
+  }
+
+  @Test
+  void absentMarginFieldsAreUnpricedNotPricedZero() {
+    // A drift that RENAMES/REMOVES the margin fields (each → null, no basket totals) is the same
+    // silent-defeat vector as all-zero and must also fail honest.
+    wireMock.stubFor(
+        post(urlPathEqualTo("/v2/charges/margin"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(ABSENT_FIELDS_BODY)));
+
+    MarginQuote q = client().quote(List.of(new Leg("NSE_FO|44454", 65, "SELL", "D")));
+
+    assertThat(q.priced()).isFalse();
+    assertThat(q.unpricedReason()).isEqualTo("Upstox returned a zero/empty margin basket");
+    assertThat(q.spanMargin()).isNull();
+  }
+
+  @Test
+  void aLongOnlyBasketWithZeroSpanButPositivePremiumStaysPriced() {
+    // Guards against over-triggering: a genuine long-only options book has span=0 (margin = premium),
+    // but carries a positive premium/total — it must stay PRICED so the heat cap reads a true 0%.
+    wireMock.stubFor(
+        post(urlPathEqualTo("/v2/charges/margin"))
+            .willReturn(
+                aResponse().withHeader("Content-Type", "application/json").withBody(LONG_ONLY_BODY)));
+
+    MarginQuote q = client().quote(List.of(new Leg("NSE_FO|44454", 75, "BUY", "D")));
+
+    assertThat(q.priced()).isTrue();
+    assertThat(q.spanMargin()).isEqualByComparingTo("0");
+    assertThat(q.totalMargin()).isEqualByComparingTo("9375.0");
+    assertThat(q.finalMargin()).isEqualByComparingTo("9375.0");
   }
 }

@@ -125,6 +125,22 @@ public final class UpstoxMarginClient {
       additional = additional.add(nz(m.additionalMargin()));
       total = total.add(nz(m.totalMargin()));
     }
+    // EXT-03 fail-soft-but-HONEST: a real F&O basket ALWAYS costs a positive margin — a short leg
+    // needs SPAN+exposure, a long leg needs its premium. If Upstox drifts or returns empty/all-zero
+    // margin fields (present-but-0, OR absent → null → summed as 0 by nz()), every summed component
+    // is 0 AND both authoritative basket totals are null/0. Certifying THAT as priced=true,
+    // spanMargin=0 would silently defeat the ARMED F9 heat cap: RiskService.currentHeatPct reads a
+    // present-but-zero span as a genuine tiny margin → heat 0% < cap → the gate never trips. So the
+    // client must NOT certify a no-margin basket as a real quote — with no positive margin anywhere
+    // authoritative (summed per-leg total, OR either Upstox basket total) it returns UNPRICED, just
+    // like the UDAPI1104 path, and the F9 governor routes to its VISIBLE fail-soft branch (audits
+    // UNPRICED, never a phantom "under cap"). A LEGITIMATE zero — a long-only options book — keeps
+    // span==0 but carries its premium in total/required/final, so it stays priced (heat then reads a
+    // true 0%). A single-field span_margin RENAME while the other totals stay valid is a
+    // CONSUMED-field drift that belongs to the daily UpstoxContractCanary layer, not this guard.
+    if (!isPositive(total) && !isPositive(data.requiredMargin()) && !isPositive(data.finalMargin())) {
+      return MarginQuote.unpriced("Upstox returned a zero/empty margin basket");
+    }
     return new MarginQuote(
         true, null, span, exposure, equity, premium, additional, total,
         data.requiredMargin(), data.finalMargin());
@@ -132,6 +148,11 @@ public final class UpstoxMarginClient {
 
   private static BigDecimal nz(BigDecimal v) {
     return v == null ? BigDecimal.ZERO : v;
+  }
+
+  /** A margin figure that is present and strictly positive (null / zero / negative → false). */
+  private static boolean isPositive(BigDecimal v) {
+    return v != null && v.signum() > 0;
   }
 
   /** Best-effort pull of the first Upstox error message from the JSON error body. */

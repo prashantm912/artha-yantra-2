@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.feed;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -186,6 +187,97 @@ class FeedPipelineTest {
     } finally {
       resumeStop.countDown(); // never leave a thread parked, even on a failure path
       pipeline.stop();
+    }
+  }
+
+  /**
+   * Redis-outside-the-lock (task_ff56fd20): a failing canonical-status write must never propagate
+   * out of a lifecycle transition. The seed write ({@code SESSION_STATUS}/CONNECTING) and the
+   * shutdown write (DISCONNECTED) are both log-and-swallow — so {@code startFeed}/{@code stop} still
+   * complete even when Redis is down.
+   */
+  @Test
+  @SuppressWarnings("unchecked")
+  void aFailingRedisStatusWriteNeverPropagatesOutOfLifecycleTransition() {
+    ValueOperations<String, String> ops = mock(ValueOperations.class);
+    doThrow(new IllegalStateException("redis down")).when(ops).set(any(), any());
+    SessionGateway session = mock(SessionGateway.class);
+    when(session.statusLabel()).thenReturn("CONNECTED");
+    FeedPipeline pipeline =
+        new FeedPipeline(
+            mock(MarketFeed.class), session, mock(IngressQueue.class), mock(TickNormalizer.class),
+            mock(RedisTickPublisher.class), mock(LastTickStore.class), redisWithOps(ops),
+            List.of(), false);
+    try {
+      pipeline.startFeed(); // the transition must complete despite the failing seed write
+
+      assertThat(pipeline.isRunning())
+          .as("the feed started even though the status seed write threw")
+          .isTrue();
+    } finally {
+      pipeline.stop(); // the DISCONNECTED write also throws — must not propagate either
+    }
+  }
+
+  /**
+   * Redis-outside-the-lock regression (task_ff56fd20): the canonical status writes must run OUTSIDE
+   * {@code lifecycleLock}. A hung loopback Redis (bounded only by the ~60s Lettuce command timeout)
+   * parked in {@code startFeed}'s seed write must NOT hold the lock — a concurrent {@code stop()}
+   * (the shape of an F10 self-heal restart) must still acquire it and complete its locked
+   * transition, reaching {@code marketFeed.stop()}. Against the pre-fix code (seed write INSIDE the
+   * lock) the parked writer would hold the lock and {@code feedStopped} would never count down.
+   */
+  @Test
+  @SuppressWarnings("unchecked")
+  void aHungRedisStatusWriteDoesNotBlockConcurrentLifecycleTransition() throws Exception {
+    CountDownLatch redisEntered = new CountDownLatch(1);
+    CountDownLatch releaseRedis = new CountDownLatch(1);
+    CountDownLatch feedStopped = new CountDownLatch(1);
+
+    ValueOperations<String, String> ops = mock(ValueOperations.class);
+    doAnswer(
+            inv -> {
+              redisEntered.countDown();
+              releaseRedis.await(); // simulate a hung loopback Redis holding the command
+              return null;
+            })
+        .when(ops)
+        .set(eq(FeedPipeline.SESSION_STATUS_KEY), any());
+
+    MarketFeed feed = mock(MarketFeed.class);
+    doAnswer(
+            inv -> {
+              feedStopped.countDown(); // reached only once stop() has acquired lifecycleLock
+              return null;
+            })
+        .when(feed)
+        .stop();
+    SessionGateway session = mock(SessionGateway.class);
+    when(session.statusLabel()).thenReturn("CONNECTED");
+
+    FeedPipeline pipeline =
+        new FeedPipeline(
+            feed, session, new IngressQueue(new SimpleMeterRegistry()), mock(TickNormalizer.class),
+            mock(RedisTickPublisher.class), mock(LastTickStore.class), redisWithOps(ops),
+            List.of(), false);
+
+    Thread starter = new Thread(pipeline::startFeed, "starter");
+    try {
+      starter.start();
+      assertThat(redisEntered.await(2, TimeUnit.SECONDS))
+          .as("startFeed released the lock and reached the (now hung) Redis seed write")
+          .isTrue();
+
+      // startFeed is parked in the Redis write with the lifecycle lock already released.
+      Thread stopper = new Thread(pipeline::stop, "stopper");
+      stopper.start();
+      assertThat(feedStopped.await(2, TimeUnit.SECONDS))
+          .as("a concurrent stop() completes its locked transition while the Redis write is hung")
+          .isTrue();
+      stopper.join(2000);
+    } finally {
+      releaseRedis.countDown(); // unpark the starter so it can finish
+      starter.join(2000);
     }
   }
 }

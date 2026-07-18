@@ -44,10 +44,15 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
   // BEJ-01 scheduler split, FeedWatchdog.restartFeed() runs on the monitor thread while the morning
   // start (TickerSchedule) and SmartLifecycle start/stop run on the default thread — pre-split they
   // shared one scheduler thread and could never interleave. Without this lock a restart's
-  // stop()+startFeed() can interleave a concurrent start, overwriting normalizerThread and leaking a
+  // stop+start can interleave a concurrent start, overwriting normalizerThread and leaking a
   // second, un-interruptible tick-normalizer thread — a silent violation of the single-writer
-  // guarantee. A dedicated ReentrantLock (NOT synchronized(this)) is used because restartFeed re-enters
-  // via stop()+startFeed(); no async/hot path (fanOut, the connection-state callback) ever takes it.
+  // guarantee. restartFeed holds the lock across stopUnderLock()+startUnderLock() as ONE atomic
+  // critical section. A dedicated ReentrantLock (NOT synchronized(this)) keeps the monitor private;
+  // no async/hot path (fanOut, the connection-state callback) ever takes it. The Redis status writes
+  // are performed OUTSIDE this lock (writeSeedStatus / writeDisconnectedStatus) so a hung loopback
+  // Redis (bounded by the ~60s Lettuce command timeout) can never hold the lock and stall a
+  // concurrent restartFeed self-heal — and are swallowed so a Redis failure never propagates out of
+  // a lifecycle transition.
   private final java.util.concurrent.locks.ReentrantLock lifecycleLock =
       new java.util.concurrent.locks.ReentrantLock();
 
@@ -82,26 +87,55 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
 
   /** Explicit start (the Phase-16 09:10 ticker schedule) — bypasses the autostart gate. */
   public void startFeed() {
+    String sessionStatus;
     lifecycleLock.lock();
     try {
       if (running) {
         return;
       }
-      running = true;
-      redis.opsForValue().set(SESSION_STATUS_KEY, sessionGateway.statusLabel());
+      sessionStatus = startUnderLock();
+    } finally {
+      lifecycleLock.unlock();
+    }
+    // Status I/O runs OUTSIDE the lock (see writeSeedStatus): a hung loopback Redis must never hold
+    // lifecycleLock and block a concurrent FeedWatchdog.restartFeed self-heal.
+    writeSeedStatus(sessionStatus);
+  }
+
+  /**
+   * Core start transition — caller MUST hold {@link #lifecycleLock}; precondition {@code !running}.
+   * Mutates ONLY the serialized lifecycle state (running flag, connection-state callback, normalizer
+   * thread, MarketFeed handle) and does NO Redis I/O. Returns the session status label the caller
+   * seeds into Redis after releasing the lock.
+   */
+  private String startUnderLock() {
+    running = true;
+    String sessionStatus = sessionGateway.statusLabel();
+    marketFeed.onConnectionState(
+        connected -> writeTickerStatus(connected ? "CONNECTED" : "DISCONNECTED"));
+    normalizerThread = new Thread(this::normalizerLoop, "tick-normalizer");
+    normalizerThread.setDaemon(true);
+    normalizerThread.start();
+    marketFeed.start(ingressQueue);
+    log.info("feed pipeline started (status={})", sessionStatus);
+    return sessionStatus;
+  }
+
+  /**
+   * Seeds the canonical session/ticker status keys after a start — performed OUTSIDE
+   * {@link #lifecycleLock} so a slow/failing loopback Redis (bounded by the ~60s Lettuce command
+   * timeout) can never hold the lock and stall a concurrent lifecycle transition, and swallowed so a
+   * Redis failure never propagates out of the transition.
+   */
+  private void writeSeedStatus(String sessionStatus) {
+    try {
+      redis.opsForValue().set(SESSION_STATUS_KEY, sessionStatus);
       // Seeded CONNECTING; the feed's connect/disconnect callbacks own the CONNECTED/DISCONNECTED
       // transitions (an eager CONNECTED write here asserted a socket that a stale-token 403 never
       // opened — the status surface lied all day exactly when it mattered).
       redis.opsForValue().set(TICKER_STATUS_KEY, "CONNECTING");
-      marketFeed.onConnectionState(
-          connected -> writeTickerStatus(connected ? "CONNECTED" : "DISCONNECTED"));
-      normalizerThread = new Thread(this::normalizerLoop, "tick-normalizer");
-      normalizerThread.setDaemon(true);
-      normalizerThread.start();
-      marketFeed.start(ingressQueue);
-      log.info("feed pipeline started (status={})", sessionGateway.statusLabel());
-    } finally {
-      lifecycleLock.unlock();
+    } catch (RuntimeException redisGone) {
+      log.warn("feed status seed write failed: {}", redisGone.getMessage());
     }
   }
 
@@ -117,17 +151,25 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
    */
   @Override
   public void restartFeed() {
+    String sessionStatus;
     lifecycleLock.lock();
     try {
       if (!running) {
         return;
       }
       log.info("re-arming feed after session change");
-      stop();
-      startFeed();
+      // One atomic critical section (stop then start) — a concurrent lifecycle transition must not
+      // slip between the two halves. Composed from the *UnderLock cores directly, so no Redis I/O
+      // happens while the lock is held.
+      stopUnderLock();
+      sessionStatus = startUnderLock();
     } finally {
       lifecycleLock.unlock();
     }
+    // Status I/O OUTSIDE the lock — this IS the self-heal path, so it must never block on a hung
+    // Redis while holding lifecycleLock. Mirrors stop()+startFeed()'s write order.
+    writeDisconnectedStatus();
+    writeSeedStatus(sessionStatus);
   }
 
   private void normalizerLoop() {
@@ -183,18 +225,35 @@ public class FeedPipeline implements SmartLifecycle, in.arthayantra.marketdata.k
   public void stop() {
     lifecycleLock.lock();
     try {
-      running = false;
-      marketFeed.stop();
-      try {
-        redis.opsForValue().set(TICKER_STATUS_KEY, "DISCONNECTED");
-      } catch (RuntimeException redisGone) {
-        log.debug("ticker status write skipped on shutdown: {}", redisGone.getMessage());
-      }
-      if (normalizerThread != null) {
-        normalizerThread.interrupt();
-      }
+      stopUnderLock();
     } finally {
       lifecycleLock.unlock();
+    }
+    // Status I/O OUTSIDE the lock (see writeDisconnectedStatus).
+    writeDisconnectedStatus();
+  }
+
+  /**
+   * Core stop transition — caller MUST hold {@link #lifecycleLock}. Mutates ONLY the serialized
+   * lifecycle state (running flag, MarketFeed handle, normalizer thread) and does NO Redis I/O.
+   */
+  private void stopUnderLock() {
+    running = false;
+    marketFeed.stop();
+    if (normalizerThread != null) {
+      normalizerThread.interrupt();
+    }
+  }
+
+  /**
+   * Writes the DISCONNECTED ticker status after a stop — performed OUTSIDE {@link #lifecycleLock}
+   * so a hung Redis cannot stall a concurrent lifecycle transition, and swallowed on failure.
+   */
+  private void writeDisconnectedStatus() {
+    try {
+      redis.opsForValue().set(TICKER_STATUS_KEY, "DISCONNECTED");
+    } catch (RuntimeException redisGone) {
+      log.debug("ticker status write skipped on shutdown: {}", redisGone.getMessage());
     }
   }
 

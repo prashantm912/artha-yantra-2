@@ -154,10 +154,12 @@ function Get-RestoreScalar {
 # READ-ONLY (SELECT sizes only); hypertable_size() counts the _timescaledb_internal
 # chunk data a plain pg_total_relation_size() misses (the root bug). Uses
 # Invoke-ComposeAllowFail so a stopped stack degrades to a skip note, not an abort.
+# The 50 GB trigger is a LIVE ('artha') budget: mock ('artha_mock') reports size only,
+# never a % / warning against the live threshold (profile classified as in Set-ProfileEnv).
 function Show-StorageGauge {
-    if (-not $env:ARTHA_DB_NAME) { Set-ProfileEnv }
-    $db = $env:ARTHA_DB_NAME
-    if (-not $db) { $db = 'artha' }
+    $profileList = Get-ActiveProfileList
+    $isLive = -not ($profileList -contains 'mock')
+    if ($isLive) { $db = 'artha' } else { $db = 'artha_mock' }
     $reviewTriggerBytes = 50.0 * 1GB
     $totalOut = Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-t', '-A', '-c', 'SELECT pg_database_size(current_database())')
     $dbBytes = $null
@@ -170,11 +172,16 @@ function Show-StorageGauge {
         Write-Host "[ay] storage: database '$db' not reachable (stack down?) - size gauge skipped"
         return
     }
-    $pct  = [math]::Round(($dbBytes / $reviewTriggerBytes) * 100, 1)
     $dbGb = [math]::Round($dbBytes / 1GB, 1)
-    Write-Host "[ay] storage: DB '$db' = $dbGb GB / 50 GB review trigger ($pct%)"
-    if ($pct -ge 80) {
-        Write-Host '[ay]   WARNING >= 80% of the 50 GB review trigger - review compression + snapshot scope (docs/retention.md); widen disk or narrow scope, never silent retention.'
+    if ($isLive) {
+        $pct = [math]::Round(($dbBytes / $reviewTriggerBytes) * 100, 1)
+        Write-Host "[ay] storage: DB '$db' = $dbGb GB / 50 GB review trigger ($pct%)"
+        if ($pct -ge 80) {
+            Write-Host '[ay]   WARNING >= 80% of the 50 GB review trigger - review compression + snapshot scope (docs/retention.md); widen disk or narrow scope, never silent retention.'
+        }
+    } else {
+        Write-Host "[ay] storage: DB '$db' = $dbGb GB (mock DB size only)"
+        Write-Host "[ay]   the 50 GB review trigger applies to live 'artha', not evaluated here; switch to the live profile to check it."
     }
     # Largest hypertables, continuous aggregates and plain tables. hypertable_size() counts
     # both the source hypertable and each cagg's materialization hypertable (the chunk data

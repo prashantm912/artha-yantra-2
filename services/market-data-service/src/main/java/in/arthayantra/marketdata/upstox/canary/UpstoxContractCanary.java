@@ -30,7 +30,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.HttpClientErrorException;
 
 /**
  * The daily Upstox Market-Information contract canary (ADR-0002 U7) — the twin of {@link
@@ -92,7 +92,10 @@ public class UpstoxContractCanary {
   // Margin probe (EXT-03 residual). The weekly expiry is resolved FRESH each run off the calendar
   // (never a stale hardcode); a small round-strike ladder spans the plausible NIFTY band so one
   // near-ATM strike stays listed even as spot drifts (all unlisted -> the probe skips, never alarms).
-  // qty MUST be a lot multiple or Upstox 400s UDAPI1104 (tolerated as a skip); 75 = the NIFTY F&O lot.
+  // qty MUST be a lot multiple or Upstox 400s UDAPI1104 (tolerated as a skip). NIFTY's F&O market lot
+  // is 65 for 2026 contracts (NSE FAOP/70616; was 75). A stale lot silently UDAPI1104s → the probe is
+  // blind, so it is asserted in the WireMock matcher. Robustness follow-up: resolve the lot from the
+  // F&O master alongside the key (survives the next lot change) — chip task_1071ba0b.
   private static final String MARGIN_PROBE_UNDERLYING = "NIFTY";
   private static final List<BigDecimal> MARGIN_PROBE_STRIKES =
       List.of(
@@ -101,7 +104,7 @@ public class UpstoxContractCanary {
           new BigDecimal("23000"),
           new BigDecimal("26000"),
           new BigDecimal("22000"));
-  private static final int MARGIN_PROBE_QTY = 75;
+  private static final int MARGIN_PROBE_QTY = 65;
 
   private static final Logger log = LoggerFactory.getLogger(UpstoxContractCanary.class);
 
@@ -295,8 +298,10 @@ public class UpstoxContractCanary {
     String body;
     try {
       body = postMargin(key);
-    } catch (RestClientResponseException http) {
-      // A stale probe contract / lot-size change 400s (UDAPI1104) — skip like an empty chain, never alarm.
+    } catch (HttpClientErrorException http) {
+      // A stale probe contract / lot-size change 4xx (UDAPI1104) — skip like an empty chain, never alarm.
+      // A 5xx is NOT caught here: it propagates to the outer probe handler → PROBE_FAILED alert (an
+      // Upstox server fault is a real signal, not benign drift-tolerance).
       log.info("upstox canary: {} probe skipped (Upstox {})", probe, http.getStatusCode());
       return;
     }

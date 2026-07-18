@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.upstox.canary;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
@@ -219,6 +220,11 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     assertThat(result.drift()).isEmpty();
     assertThat(result.lastContractCheck()).isNotNull();
     WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+    // The margin probe MUST post a lot-multiple qty (NIFTY 2026 lot = 65); a wrong qty 400s UDAPI1104
+    // → silent skip → a blind canary, so pin it (EXT-03 residual review finding).
+    WIREMOCK.verify(
+        postRequestedFor(urlPathEqualTo(MARGIN_PATH))
+            .withRequestBody(matchingJsonPath("$.instruments[0].quantity", equalTo("65"))));
     assertThat(redis.opsForValue().get(UpstoxContractCanary.RESULT_KEY)).contains("\"drift\":[]");
   }
 
@@ -340,6 +346,18 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
 
     assertThat(result.drift()).noneMatch(d -> d.contains("margin"));
     WIREMOCK.verify(0, postRequestedFor(urlPathEqualTo("/ay-test-topic")));
+  }
+
+  @Test
+  void marginEndpoint5xxIsAProbeFailureNotASilentSkip() {
+    // A 4xx (UDAPI1104 / stale contract) is benign drift-tolerance; a 5xx is an Upstox server fault —
+    // it must reach PROBE_FAILED + alert, never be swallowed like a 4xx (EXT-03 residual review finding).
+    WIREMOCK.stubFor(
+        post(urlPathEqualTo(MARGIN_PATH)).willReturn(aResponse().withStatus(500)));
+
+    UpstoxContractCanary.CanaryResult result = canary.runNow();
+
+    assertThat(result.drift()).anyMatch(d -> d.startsWith("PROBE_FAILED:"));
   }
 
   @Test

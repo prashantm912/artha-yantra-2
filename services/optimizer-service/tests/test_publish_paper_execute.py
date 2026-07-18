@@ -80,7 +80,9 @@ def test_end_to_end_record_score_select_generate_approve_execute():
     request = {"parameters": [], "objective": {"metric": "oos_fold_mean", "direction": "maximize"},
                "strategyId": _STRATEGY_ID, "strategyVersion": "1.0.1"}
     sweep_id = jobs.insert_sweep(None, request)
-    for i in range(2):
+    # 5 trials so the now-REQUIRED stability_floor gate (≥4 plateau neighbors — audit PF-01) is
+    # affirmatively assessable and selection yields a genuinely stage-ready SURVIVOR.
+    for i in range(5):
         row_id = trials.insert(sweep_id, i, {"indicators[0].params.period": 10 + i})
         trials.complete(row_id, {"oos_fold_mean": 1.0}, f"run-{i}")
     jobs.set_status(sweep_id, "completed", 100)
@@ -88,12 +90,12 @@ def test_end_to_end_record_score_select_generate_approve_execute():
     # record + score
     gen = client.post(f"/api/v1/evolution/campaigns/{campaign_id}/generations",
                       json={"sweepJobId": sweep_id}).json()
-    assert gen["candidatesRecorded"] == 2
+    assert gen["candidatesRecorded"] == 5
 
     # select top-1 -> exactly one SURVIVOR
     sel = client.post(f"/api/v1/evolution/campaigns/{campaign_id}/generations/1/select",
                       json={"topK": 1}).json()
-    assert sel["survivors"] == 1 and sel["retired"] == 1
+    assert sel["survivors"] == 1 and sel["retired"] == 4
 
     # generate proposals -> one PUBLISH_PAPER for the survivor (no champion -> pendingInput, still
     # generated end-to-end because selection produced a SURVIVOR)

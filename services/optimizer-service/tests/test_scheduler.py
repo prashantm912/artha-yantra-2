@@ -545,6 +545,9 @@ def _proposal_fixture(holdout: str | None):
         "mutationKind": "PARAMS", "params": {"period": 15}, "structureDiff": None,
         "sweepJobId": "sweep-1", "holdoutRunId": holdout,
         "scorecard": {"robustScore": 1.0, "rankable": True,
+                      "stageReadiness": {"evidencePolicy": "SIM_FIRST",
+                                         "stage": "SCORED_TO_SURVIVOR", "ready": True,
+                                         "requiredGates": [], "blockedBy": []},
                       "gates": [{"id": "oos_sign", "status": "PASS"}]},
         "state": "SURVIVOR", "updatedAt": "2026-07-11T00:00:00+00:00",
     }

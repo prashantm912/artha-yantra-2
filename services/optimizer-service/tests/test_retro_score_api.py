@@ -66,6 +66,21 @@ def test_retro_score_returns_items_envelope_and_context():
     assert any("multiplicity N = this sweep only" in c for c in body["items"][0]["caveats"])
 
 
+def test_retro_score_round_trips_stage_readiness():
+    # audit PF-01 finding #7: the typed Scorecard carries the ``stageReadiness`` field, so the read
+    # never silently strips it (a loose extra dict would be dropped by Pydantic's extra-ignore).
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, n=2)
+    body = _client(jobs, trials, FakeBacktest(folds=_FOLDS, results=_RESULTS)).get(
+        f"/api/v1/evolution/retro-score/{sweep_id}"
+    ).json()
+    sr = body["items"][0]["stageReadiness"]
+    assert sr is not None
+    assert sr["evidencePolicy"] == "SIM_FIRST"
+    assert sr["stage"] == "SCORED_TO_SURVIVOR"
+    assert set(sr) >= {"ready", "requiredGates", "blockedBy"}
+
+
 def test_retro_score_assembles_oos_fold_metrics_into_gates():
     jobs, trials = FakeJobs(), FakeTrials()
     sweep_id = _seed_sweep(jobs, trials, n=2)

@@ -65,17 +65,34 @@ _TE_MIN_CLOSED_TRADES = 20
 _TE_MIN_PF = 1.3
 _TE_MAX_DD_PCT = 0.25
 
-# PAPER→TAKE_ELIGIBLE required-gate set (audit PF-01, stage-aware fail-CLOSED readiness). Design
-# §8.2: "≥20 closed paper trades + PF ≥ 1.3 + expectancy > 0 + maxDD ≤ 25 % … plus … live-gap
-# gate". A REQUIRED gate that is SKIPPED / absent BLOCKS (a gate that could not run must not read
-# as a pass) — most notably the §7.2 live-gap gate: an absent/INSUFFICIENT reconciliation used to
-# be silently "assessed as not-DIVERGENT" and admitted, the fail-open this closes. ``max_drawdown``
-# SKIPPED (no capital base on the clone config) likewise blocks — drawdown discipline must be
-# affirmatively verified, never waved through. EXCLUDED: ``robust_vs_champion`` — the live-weighted
-# re-score is a not-yet-implemented follow-up (always SKIPPED); requiring it would block every
-# candidate, so it is excluded (informational only) until it is built.
-_TAKE_ELIGIBLE_REQUIRED_GATES = frozenset(
+# PAPER→TAKE_ELIGIBLE required-gate set (audit PF-01, fail-CLOSED, PER evidencePolicy). A REQUIRED
+# gate that is SKIPPED / absent BLOCKS (a gate that could not run must not read as a pass);
+# ``max_drawdown`` SKIPPED (no capital base) blocks — drawdown discipline must be verified.
+#
+# SIM_FIRST (swing) — the §8.2 F7 bars + the §7.2 live-gap gate (a swing re-sim is the CORRECT
+# reconciliation plane: it pins fill_timing at_close, reconciliation.py:660-667). An absent /
+# INSUFFICIENT reconciliation used to be silently "assessed as not-DIVERGENT" and admitted — closed.
+_TAKE_ELIGIBLE_REQUIRED_SIM_FIRST = frozenset(
     {"paper_trade_floor", "profit_factor", "expectancy", "max_drawdown", "live_gap"}
+)
+# LIVE_FIRST (scalper) — live_gap is EXCLUDED (interim, see below): the only reconciliation producer
+# runs a RAW backtest, which is a §7.2 STRUCTURAL divergence for gate-armed intraday options
+# (OI/Dow/IV muted on derived history → ~0 armed trades) and MUST NOT count as a PASS; the correct
+# shadow-vs-paper producer is unbuilt. So a raw scalper reconciliation is whitelisted (never PASS,
+# never blocks) and live_gap is not required — else an absent shadow-vs-paper recon would forever
+# block. The F7 bars still gate. FLAGGED FOLLOW-UP: build the scalper shadow-vs-paper reconciliation
+# producer, then move live_gap (+ the §6 LIVE_FIRST gates below) into this set.
+_TAKE_ELIGIBLE_REQUIRED_LIVE_FIRST = frozenset(
+    {"paper_trade_floor", "profit_factor", "expectancy", "max_drawdown"}
+)
+# §6.1 LIVE_FIRST hard gates NOT YET COMPUTED anywhere (weekly-window consistency, daily-loss
+# discipline, adjacent-neighbor live stability, replay/holdout sign, comparability + data-health,
+# live-weighted RobustScore-vs-champion). Emitted as explicit NOT_IMPLEMENTED gates on the card and
+# INTERIM-EXCLUDED from the required set (requiring an unbuilt gate would block every candidate).
+# FLAGGED FOLLOW-UP: wire each computation, then require it. Owner sees them on the HOLD card.
+_TAKE_ELIGIBLE_INTERIM_EXCLUDED = (
+    "weekly_consistency", "daily_loss_discipline", "neighbor_stability_live",
+    "holdout_replay_sign", "comparability_data_health", "robust_live_weighted_vs_champion",
 )
 
 # §8.2 demoted-champion counterfactual: kept running for 6 weeks as the rollback comparator. The
@@ -232,18 +249,20 @@ def _champion_score(
 def _publish_paper_eligibility(
     cand: dict[str, Any], champion_score: float | None, champion_version_id: str | None
 ) -> tuple[bool, list[str]]:
-    """Apply the §8.2 PUBLISH_PAPER bar. The QUERYABLE predicates GATE (SURVIVOR state + rankable —
-    a FAILed hard gate is RETIRE material, never PUBLISH_PAPER). The near-champion RobustScore bar
-    and the holdout-consumed bar are applied ONLY when their inputs are populated: a VERIFIED miss
-    (RobustScore < champion - 0.1) blocks; an UNPOPULATED input (no champion score / no holdout run)
-    never blocks — it stamps a ``pendingInputs`` caveat. Returns ``(eligible, pending_inputs)``."""
+    """Apply the §8.2 PUBLISH_PAPER bar. The QUERYABLE predicates GATE (SURVIVOR state + fail-closed
+    STAGE READINESS — audit PF-01: the promotion-admission verdict, NOT the permissive descriptive
+    ``rankable``; a required gate that FAILed OR was never affirmatively evaluated is RETIRE
+    material, never PUBLISH_PAPER). The near-champion RobustScore bar and the holdout-consumed bar
+    are applied ONLY when their inputs are populated: a VERIFIED miss (RobustScore < champion - 0.1)
+    blocks; an UNPOPULATED input (no champion score / no holdout run) never blocks — it stamps a
+    ``pendingInputs`` caveat. Returns ``(eligible, pending_inputs)``."""
     scorecard = cand.get("scorecard") or {}
     # the incumbent champion is not a challenger — never propose publishing it to a paper clone.
     if champion_version_id is not None and cand.get("versionId") == champion_version_id:
         return False, []
     if cand.get("state") != "SURVIVOR":
         return False, []
-    if not scorecard.get("rankable"):
+    if not (scorecard.get("stageReadiness") or {}).get("ready"):
         return False, []
 
     pending: list[str] = []
@@ -351,11 +370,16 @@ def _next_steps(kind: str) -> NextSteps:
 
 
 def _capital_base(config: dict[str, Any] | None) -> float | None:
-    """The paper-book capital base for the maxDD% gate, read from the clone's config (the paper book
-    seeds capital from the strategy config). Absent → maxDD% is not computable → SKIPPED + a pending
-    caveat, never a fabricated percentage."""
+    """The paper-book capital base for the maxDD% gate, read from the clone's config. The CANONICAL
+    schema path is ``backtest.defaults.initial_capital`` (strategy-schema-v1.json — the paper book
+    seeds capital from it); top-level ``capital`` is schema-INVALID (additionalProperties:false),
+    so it was never a real source (audit finding #2). Legacy non-schema paths are read last as a
+    defensive fallback only. Absent → maxDD% is not computable → SKIPPED + a pending caveat, never a
+    fabricated percentage."""
     config = config or {}
     for candidate in (
+        ((config.get("backtest") or {}).get("defaults") or {}).get("initial_capital"),
+        # defensive legacy fallbacks (not schema-valid paths; harmless if absent):
         config.get("capital"),
         (config.get("paper") or {}).get("capital"),
         (config.get("risk") or {}).get("capital"),
@@ -392,12 +416,15 @@ def _take_eligible_assessment(
     campaign: dict[str, Any],
     champion_score: float | None,
 ) -> tuple[bool, dict[str, Any]]:
-    """Apply the §8.2 TAKE_ELIGIBLE bar over the evo clone's paper book. The QUERYABLE gates
-    (≥20 closed trades + PF ≥ 1.3 + expectancy > 0, plus maxDD ≤ 25 % when a capital base is known,
-    plus the §7.2 live-gap gate = NOT DIVERGENT) GATE — any hard FAIL blocks. The bars whose inputs
-    are absent (maxDD without a capital base; RobustScore(live-weighted) ≥ champion — a
-    live-weighted re-score is a follow-up) never fabricate a pass; they SKIP and stamp an honest
-    ``pendingInputs`` caveat. Returns ``(eligible, evidence_card)``."""
+    """Apply the §8.2 TAKE_ELIGIBLE bar over the evo clone's paper book, PER evidencePolicy (audit
+    PF-01 findings #1/#3). The F7 quant gates (≥20 closed trades + PF ≥ 1.3 + expectancy > 0 + maxDD
+    ≤ 25 %) gate for BOTH policies. The §7.2 live-gap gate is REQUIRED for SIM_FIRST (a swing re-sim
+    is the correct reconciliation plane) but EXCLUDED for LIVE_FIRST (the only scalper recon
+    producer runs a RAW backtest — a structural divergence that must never count as a PASS; the
+    shadow-vs-paper producer is a flagged follow-up). The §6.1 LIVE_FIRST gates not yet computed
+    anywhere are emitted as explicit NOT_IMPLEMENTED entries and INTERIM-EXCLUDED (a flagged
+    follow-up). A REQUIRED gate that is SKIPPED / absent blocks (fail-closed); absent inputs never
+    fabricate a pass. Returns ``(eligible, evidence_card)``."""
     closed = [t for t in trades if t.get("realizedPnl") is not None]
     n_closed = len(closed)
     pnls = [_num(t.get("realizedPnl")) or 0.0 for t in closed]
@@ -415,6 +442,7 @@ def _take_eligible_assessment(
 
     pending: list[str] = []
     gates: list[dict[str, Any]] = []
+    policy = campaign.get("evidencePolicy") or "SIM_FIRST"
 
     gates.append({
         "id": "paper_trade_floor",
@@ -434,8 +462,9 @@ def _take_eligible_assessment(
     if max_dd is None:
         gates.append({"id": "max_drawdown", "status": "SKIPPED", "value": None})
         pending.append(
-            "maxDD % not computable — no capital base on the clone config; the ≤25 % drawdown "
-            "gate was NOT applied"
+            "maxDD % not computable — no capital base on the clone config "
+            "(backtest.defaults.initial_capital); the ≤25 % drawdown gate is a REQUIRED gate and "
+            "SKIPPED blocks (fail-closed)"
         )
     else:
         gates.append({
@@ -447,30 +476,51 @@ def _take_eligible_assessment(
     gates.append(_live_gap_gate_from_recon(recon, pending))
 
     # RobustScore(live-weighted) ≥ champion — the live-weighted re-score is a follow-up; never
-    # fabricate a pass. Stamp the SIM comparison as informational only.
+    # fabricate a pass. FIRST-CHAMPION exception: no champion → the vs-champion bar is n/a.
     sim_robust = _num((cand.get("scorecard") or {}).get("robustScore"))
     gates.append({"id": "robust_vs_champion", "status": "SKIPPED", "value": None})
     if champion_score is None:
         pending.append(
-            "no champion RobustScore on the campaign — the RobustScore(live-weighted) ≥ champion "
-            "bar (§8.2) is not applicable (first-mover champion)"
+            "no champion on the campaign — the RobustScore(live-weighted) ≥ champion bar (§8.2) is "
+            "not applicable (FIRST-CHAMPION exception)"
         )
     else:
         pending.append(
-            "RobustScore(live-weighted) ≥ champion NOT evaluated this slice — a live-weighted "
-            f"re-score is a follow-up; sim RobustScore {sim_robust} vs champion {champion_score}"
+            "RobustScore(live-weighted) ≥ champion NOT evaluated — a live-weighted re-score is a "
+            f"flagged follow-up; sim RobustScore {sim_robust} vs champion {champion_score}"
         )
 
-    # PAPER→TAKE_ELIGIBLE gate readiness (audit PF-01): a REQUIRED gate that could not be
-    # affirmatively evaluated blocks (fail-closed), instead of the old fail-open "no FAIL ⇒
-    # eligible" that admitted a SKIPPED live-gap / max-drawdown gate as a pass.
-    eligible, blocked_by = scoring.gate_readiness(gates, _TAKE_ELIGIBLE_REQUIRED_GATES)
+    # §6.1 LIVE_FIRST hard gates not yet computed ANYWHERE — emitted explicitly (owner sees them on
+    # the HOLD card) and INTERIM-EXCLUDED from the required set (requiring an unbuilt gate would
+    # block every candidate). Flagged follow-up: wire each computation, then require it.
+    for gate_id in _TAKE_ELIGIBLE_INTERIM_EXCLUDED:
+        gates.append({
+            "id": gate_id, "status": scoring.NOT_IMPLEMENTED, "value": None,
+            "note": "§6.1 LIVE_FIRST gate not yet computed — interim-excluded (flagged follow-up)",
+        })
+    pending.append(
+        "§6.1 LIVE_FIRST gates (weekly consistency / daily-loss discipline / adjacent-neighbor "
+        "live stability / holdout-replay sign / comparability+data-health / live-weighted "
+        "RobustScore-vs-champion) are NOT YET COMPUTED — interim-excluded; the full LIVE_FIRST "
+        "TAKE bar is a flagged follow-up"
+    )
+
+    # PAPER→TAKE_ELIGIBLE readiness (audit PF-01), fail-closed and PER evidencePolicy: a REQUIRED
+    # gate that could not be affirmatively evaluated blocks (was fail-open "no FAIL ⇒ eligible").
+    required = (
+        _TAKE_ELIGIBLE_REQUIRED_LIVE_FIRST if policy == "LIVE_FIRST"
+        else _TAKE_ELIGIBLE_REQUIRED_SIM_FIRST
+    )
+    eligible, blocked_by = scoring.gate_readiness(gates, required)
     card = {
         "kind": _PROMOTE,
         "gateReadiness": {
+            "evidencePolicy": policy,
             "stage": "PAPER_TO_TAKE_ELIGIBLE",
-            "requiredGates": sorted(_TAKE_ELIGIBLE_REQUIRED_GATES),
+            "ready": eligible,
+            "requiredGates": sorted(required),
             "blockedBy": blocked_by,
+            "interimExcluded": list(_TAKE_ELIGIBLE_INTERIM_EXCLUDED),
         },
         "candidateId": cand.get("id"),
         "campaignId": campaign["id"],
@@ -516,13 +566,30 @@ def _take_eligible_assessment(
 def _live_gap_gate_from_recon(
     recon: dict[str, Any] | None, pending: list[str]
 ) -> dict[str, Any]:
-    """The §7.2 live-gap gate over the latest reconciliation: DIVERGENT → FAIL (promotion blocked);
-    ALIGNED/PENALIZED → PASS; no reconciliation / INSUFFICIENT → SKIPPED + a pending caveat
-    (assessed as NOT-DIVERGENT on absent/insufficient evidence, never a fabricated pass)."""
+    """The §7.2 live-gap gate over the latest reconciliation, EVIDENCE-PLANE aware (audit finding
+    #1). A scalper reconciliation (``gap.mode == "scalper"``) comes from the ONLY producer, which
+    runs a RAW backtest — a §7.2 STRUCTURAL divergence for gate-armed intraday options (OI/Dow/IV
+    muted on derived history → ~0 armed trades). It is WHITELISTED: SKIPPED, and it must NEVER count
+    as a PASS (a raw-plane result must never unlock a scalper promotion). Combined with live_gap
+    being EXCLUDED from the LIVE_FIRST required set, a raw scalper recon neither unlocks nor
+    permanently blocks — the correct shadow-vs-paper producer is a flagged follow-up. For the swing
+    plane (``mode == "swing"``, the CORRECT reconciliation plane — the re-sim pins fill_timing at
+    the close): DIVERGENT → FAIL; ALIGNED/PENALIZED → PASS; absent / INSUFFICIENT → SKIPPED, which
+    (as a REQUIRED gate for SIM_FIRST TAKE) BLOCKS — an absent reconciliation is NOT read as
+    not-DIVERGENT (the closed fail-open)."""
+    gap = recon.get("gap") if isinstance(recon, dict) else None
+    if isinstance(gap, dict) and gap.get("mode") == "scalper":
+        pending.append(
+            "§7.2 scalper reconciliation is a RAW-plane STRUCTURAL divergence — whitelisted (never "
+            "counts as a live-gap PASS); the shadow-vs-paper producer is a flagged follow-up"
+        )
+        return {"id": "live_gap", "status": "SKIPPED", "value": recon.get("gapZ"),
+                "note": "§7.2 scalper raw-plane whitelist — not a valid promotion gate (interim)"}
     if recon is None:
         pending.append(
-            "no reconciliation yet for the clone version — the §7.2 live-gap gate is SKIPPED "
-            "(assessed as not-DIVERGENT on absent evidence)"
+            "no reconciliation yet for the clone version — the §7.2 live-gap gate is SKIPPED; it "
+            "is REQUIRED for the SIM_FIRST TAKE bar, so an absent reconciliation BLOCKS (it is NOT "
+            "read as not-DIVERGENT — the fail-open this closes)"
         )
         return {"id": "live_gap", "status": "SKIPPED", "value": None}
     verdict = recon.get("verdict")
@@ -532,8 +599,9 @@ def _live_gap_gate_from_recon(
     if verdict in ("ALIGNED", "PENALIZED"):
         return {"id": "live_gap", "status": "PASS", "value": gap_z}
     pending.append(
-        f"reconciliation verdict {verdict!r} is not DIVERGENT but below the evidence floor — the "
-        "§7.2 live-gap gate is SKIPPED (assessed as not-DIVERGENT)"
+        f"reconciliation verdict {verdict!r} is below the §7.2 evidence floor — the live-gap gate "
+        "is SKIPPED; REQUIRED for SIM_FIRST TAKE, so INSUFFICIENT evidence BLOCKS (never a "
+        "fabricated not-DIVERGENT pass)"
     )
     return {"id": "live_gap", "status": "SKIPPED", "value": gap_z}
 
@@ -1215,6 +1283,35 @@ class ProposalService:
             "strategyId + sweep strategyId both absent) — cannot promote",
         )
 
+    def _revalidate_take_eligible(
+        self, candidate: dict[str, Any], campaign: dict[str, Any]
+    ) -> None:
+        """Audit PF-01 finding #6: re-run the fail-closed TAKE_ELIGIBLE readiness on the candidate's
+        CURRENT live evidence (paper book + latest reconciliation + config), immediately before a
+        PROMOTE publishes. 409 ``PROMOTION_READINESS_NOT_MET`` if the bar is no longer met — the
+        candidate is not demoted (assessment never demotes), but execution is refused. ``champion``
+        RobustScore is not re-derived here (robust_vs_champion is an interim-excluded gate, so it
+        never affects the verdict). 500 if the live/reconciliation repos are not wired (execute
+        needs them to re-read evidence)."""
+        if self._live_factory is None or self._recon_factory is None:
+            raise ApiError(
+                500, "REVALIDATE_NOT_WIRED",
+                "PROMOTE execute needs the live-evidence + reconciliation repos wired to "
+                "re-validate readiness before publishing",
+            )
+        evidence = self._read_paper_evidence([candidate]).get(candidate["id"]) or {}
+        ready, card = _take_eligible_assessment(
+            candidate, evidence.get("trades") or [], evidence.get("recon"),
+            evidence.get("config"), campaign, None,
+        )
+        if not ready:
+            blocked = (card.get("gateReadiness") or {}).get("blockedBy")
+            raise ApiError(
+                409, "PROMOTION_READINESS_NOT_MET",
+                f"candidate {candidate['id']} no longer meets the TAKE_ELIGIBLE bar at execute "
+                f"time (fail-closed re-validation) — blocked by {blocked}; promotion refused",
+            )
+
     def _execute_promote(self, ctx: dict[str, Any], actor: str | None) -> PromotionResult:
         """§8.2 PROMOTE: publish the candidate's config onto the BASE strategy (champion pointer
         moves), register the demoted-champion counterfactual so its P&L accrues live, and archive
@@ -1225,6 +1322,10 @@ class ProposalService:
         self._guard_not_executed(ctx["proposal"], "promotion")
         candidate = ctx["candidate"]
         campaign = ctx["campaign"]
+        # audit PF-01 finding #6: re-validate the TAKE_ELIGIBLE readiness on FRESH live evidence
+        # IMMEDIATELY before any registry mutation — a proposal minted when the bar was met but
+        # whose evidence has since degraded (or a candidate admitted BEFORE PF-01) must NOT publish.
+        self._revalidate_take_eligible(candidate, campaign)
         base_id = self._resolve_base_strategy_id(ctx)
         # The candidate's own evo PAPER clone (to archive after the champion move) — its strategy
         # id lives on the prior PUBLISH_PAPER proposal's execution stamp. Read BEFORE any HTTP.

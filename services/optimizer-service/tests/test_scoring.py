@@ -103,16 +103,22 @@ def test_gate_degradations_on_a_bare_candidate():
     assert gates["comparability"] == "UNKNOWN"  # NULL engine SHA (pre-#703)
     assert gates["live_gap"] == "SKIPPED"  # no live evidence
     assert gates["deflated_sharpe"] == "SKIPPED"  # no sharpe/trade count on a bare candidate
-    # audit PF-01: fail-CLOSED — a bare candidate whose REQUIRED gates could not run is NOT rankable
-    # (was fail-open "no FAIL ⇒ rankable"). oos_sign PASSes, but evidence_floor / drawdown_cap
-    # (UNKNOWN) and deflated_sharpe (SKIPPED) are required and unevaluated → blocked.
-    assert card["rankable"] is False
-    assert card["gateReadiness"]["stage"] == "SCORED_TO_SURVIVOR"
-    assert set(card["gateReadiness"]["blockedBy"]) == {
-        "deflated_sharpe:SKIPPED", "drawdown_cap:UNKNOWN", "evidence_floor:UNKNOWN"
+    # DESCRIPTIVE rankable (permissive, unchanged): no hard-gate FAIL among the statuses → True.
+    assert card["rankable"] is True
+    # PROMOTION-ADMISSION stageReadiness (audit PF-01, fail-CLOSED): a bare candidate whose REQUIRED
+    # SIM_FIRST gates could not run is NOT stage-ready (silently admitted under the old fail-open).
+    sr = card["stageReadiness"]
+    assert sr["ready"] is False
+    assert sr["evidencePolicy"] == "SIM_FIRST" and sr["stage"] == "SCORED_TO_SURVIVOR"
+    # every unevaluated REQUIRED SIM_FIRST gate is named (comparability/regime/fold/stability now
+    # REQUIRED — #703/#705 closed); holdout + live_gap are the only excluded gates (post-select /
+    # no-live), so they never appear.
+    assert set(sr["blockedBy"]) == {
+        "comparability:UNKNOWN", "deflated_sharpe:SKIPPED", "drawdown_cap:UNKNOWN",
+        "evidence_floor:UNKNOWN", "fold_consistency:UNKNOWN", "regime_floor:UNKNOWN",
+        "stability_floor:SKIPPED",
     }
-    # fold_consistency is EXCLUDED (not-applicable on a foldless run), so its UNKNOWN never blocks
-    assert not any("fold_consistency" in b for b in card["gateReadiness"]["blockedBy"])
+    assert not any(g in b for b in sr["blockedBy"] for g in ("holdout", "live_gap"))
 
 
 def _healthy(n: int) -> dict:
@@ -138,6 +144,42 @@ def test_all_gates_pass_on_a_healthy_cohort():
     assert gates["stability_floor"]["status"] == "PASS"  # ratio 1.0 ≥ 0.8, 4 neighbors
     assert gates["comparability"]["status"] == "PASS"
     assert cards[0]["rankable"] is True
+    # audit PF-01: every REQUIRED SIM_FIRST gate PASSes → stage-ready (promotable).
+    sr = cards[0]["stageReadiness"]
+    assert sr["ready"] is True and sr["blockedBy"] == []
+    assert sr["evidencePolicy"] == "SIM_FIRST"
+    assert set(sr["requiredGates"]) == {
+        "evidence_floor", "oos_sign", "deflated_sharpe", "fold_consistency", "drawdown_cap",
+        "regime_floor", "stability_floor", "comparability",
+    }
+
+
+def test_sim_first_survivor_requires_regime_and_comparability():
+    # audit PF-01 finding #4: #703/#705 closed → comparability + regime_floor are now REQUIRED. A
+    # candidate that clears every other bar but lacks an engine SHA (comparability UNKNOWN) is
+    # rankable (descriptive, no FAIL) yet NOT stage-ready (fail-closed promotion admission).
+    cohort = [_healthy(i) for i in range(5)]
+    cohort[0]["engineSha"] = None  # comparability → UNKNOWN
+    card = scoring.score_cohort(cohort, [])[0]
+    assert card["rankable"] is True
+    assert card["stageReadiness"]["ready"] is False
+    assert "comparability:UNKNOWN" in card["stageReadiness"]["blockedBy"]
+
+
+def test_live_first_sim_cohort_is_never_stage_ready():
+    # audit PF-01 finding #5: a LIVE_FIRST campaign's sim cohort is functional-smoke only (§1.2) and
+    # must NEVER become selectable. Even an all-gates-PASS healthy cohort is not stage-ready under
+    # LIVE_FIRST — the SURVIVOR gate is live-evidence-led, not computed from sim. Descriptive
+    # rankable is unaffected (still permissive).
+    cards = scoring.score_cohort([_healthy(i) for i in range(5)], [], policy="LIVE_FIRST")
+    assert cards[0]["rankable"] is True
+    sr = cards[0]["stageReadiness"]
+    assert sr["ready"] is False
+    assert sr["evidencePolicy"] == "LIVE_FIRST"
+    assert any("LIVE_FIRST" in b for b in sr["blockedBy"])
+    # a LIVE_FIRST sim cohort names no SIM required gates (the live-evidence set is a flagged
+    # follow-up, not computed here)
+    assert sr["requiredGates"] == []
 
 
 def test_regime_floor_fails_when_min_too_negative():
@@ -253,13 +295,15 @@ def _dsr_gate(cards, trial_number=1):
 
 
 def test_deflated_sharpe_skipped_without_sharpe_or_trades():
-    # No sharpe → SKIPPED (never fabricated). audit PF-01: deflated_sharpe is a REQUIRED SURVIVOR
-    # gate (the overfitting guard), so a SKIPPED one now BLOCKS — the candidate is NOT rankable
-    # (was fail-open "SKIPPED never blocks", the marquee defect this closes).
+    # No sharpe → SKIPPED (never fabricated). DESCRIPTIVE rankable stays True (no hard FAIL), but
+    # deflated_sharpe is a REQUIRED SURVIVOR gate (the overfitting guard), so a SKIPPED one BLOCKS
+    # promotion — stageReadiness.ready is False (was fail-open "SKIPPED never blocks", the marquee
+    # defect this closes).
     no_sharpe = scoring.score_cohort([_dsr_cand(1, sharpe=None)], [], n_trials=1000)[0]
     assert _dsr_gate([no_sharpe])["status"] == "SKIPPED"
-    assert no_sharpe["rankable"] is False
-    assert no_sharpe["gateReadiness"]["blockedBy"] == ["deflated_sharpe:SKIPPED"]
+    assert no_sharpe["rankable"] is True
+    assert no_sharpe["stageReadiness"]["ready"] is False
+    assert "deflated_sharpe:SKIPPED" in no_sharpe["stageReadiness"]["blockedBy"]
     # A Sharpe SE needs T ≥ 2; a single-observation trade count is unassessable → SKIPPED.
     one_trade = scoring.score_cohort([_dsr_cand(1, oosTradeCount=1)], [], n_trials=1000)[0]
     assert _dsr_gate([one_trade])["status"] == "SKIPPED"

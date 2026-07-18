@@ -36,13 +36,19 @@ def _gen(n=1, gen_id=_GEN_ID, campaign_id=_CAMPAIGN_ID):
     }
 
 
-def _cand(cid, *, state="SCORED", robust=1.0, rankable=True, gates=None, trial=0, gen_id=_GEN_ID):
+def _cand(cid, *, state="SCORED", robust=1.0, rankable=True, ready=None, gates=None, trial=0,
+          gen_id=_GEN_ID):
+    # audit PF-01: SURVIVOR selection consumes the fail-closed ``stageReadiness.ready`` (not the
+    # permissive ``rankable``). ``ready`` mirrors ``rankable`` unless overridden.
+    stage_ready = rankable if ready is None else ready
     return {
         "id": cid, "generationId": gen_id, "versionId": None, "parentCandidateId": None,
         "mutationKind": "PARAMS", "params": {"indicators[0].params.period": 15},
         "structureDiff": None, "sweepJobId": "sweep-1", "holdoutRunId": None,
         "scorecard": {
             "robustScore": robust, "rankable": rankable, "trialNumber": trial,
+            "stageReadiness": {"evidencePolicy": "SIM_FIRST", "stage": "SCORED_TO_SURVIVOR",
+                               "ready": stage_ready, "requiredGates": [], "blockedBy": []},
             "gates": gates or [{"id": "oos_sign", "status": "PASS"}],
         },
         "state": state, "updatedAt": "2026-07-11T00:00:00+00:00",

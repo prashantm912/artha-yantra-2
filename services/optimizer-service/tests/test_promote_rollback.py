@@ -55,9 +55,13 @@ _FOLDS = [
 _RESULTS = {"metrics": {"totalReturn": "12.0", "maxDrawdown": "12.0", "tradeCount": 115},
             "dataHash": "hash-1", "engineSha": "sha-1", "caveats": []}
 
-# The clone's config as read back over the live-evidence repo — carries a capital base so the
-# TAKE_ELIGIBLE maxDD gate actually computes (not just a pending caveat).
-_CLONE_CONFIG = {"id": "manas-arora-breakout--evo-g1-x", "capital": 100000}
+# The clone's config as read back over the live-evidence repo — carries a capital base at the
+# CANONICAL, schema-VALID path (backtest.defaults.initial_capital; top-level `capital` is rejected
+# by additionalProperties:false — audit finding #2) so the TAKE_ELIGIBLE maxDD gate computes.
+_CLONE_CONFIG = {
+    "id": "manas-arora-breakout--evo-g1-x",
+    "backtest": {"defaults": {"initial_capital": 100000}},
+}
 
 
 def _paper_book(n_win=14, n_loss=6, win=100.0, loss=-50.0):
@@ -117,7 +121,9 @@ def test_full_state_machine_walk_on_fixture(capsys):
     request = {"parameters": [], "objective": {"metric": "oos_fold_mean", "direction": "maximize"},
                "strategyId": _STRATEGY_ID, "strategyVersion": "1.0.1"}
     sweep_id = jobs.insert_sweep(None, request)
-    for i in range(2):
+    # 5 trials so the now-REQUIRED stability_floor gate (≥4 plateau neighbors — audit PF-01) is
+    # affirmatively assessable and the survivors are genuinely stage-ready.
+    for i in range(5):
         row_id = trials.insert(sweep_id, i, {"indicators[0].params.period": 10 + i})
         trials.complete(row_id, {"oos_fold_mean": 1.0}, f"run-{i}")
     jobs.set_status(sweep_id, "completed", 100)
@@ -125,14 +131,14 @@ def test_full_state_machine_walk_on_fixture(capsys):
                       json={"sweepJobId": sweep_id}).json()
     trace.append(f"1. RECORD+SCORE  -> generation {gen['n']}, {gen['candidatesRecorded']} SCORED")
 
-    # 2. select top-1 -> 1 SURVIVOR, 1 RETIRED (+ 1 auto-APPROVED RETIRE ack)
+    # 2. select top-1 -> 1 SURVIVOR, 4 RETIRED (+ 4 auto-APPROVED RETIRE acks)
     sel = client.post(f"/api/v1/evolution/campaigns/{campaign_id}/generations/1/select",
                       json={"topK": 1}).json()
     trace.append(
         f"2. SELECT topK=1 -> survivors={sel['survivors']} retired={sel['retired']} "
         f"retireAcks={sel['retireAcks']}"
     )
-    assert sel["survivors"] == 1 and sel["retired"] == 1 and sel["retireAcks"] == 1
+    assert sel["survivors"] == 1 and sel["retired"] == 4 and sel["retireAcks"] == 4
 
     # 3. PUBLISH_PAPER: generate -> approve -> execute (SURVIVOR -> PAPER)
     props = client.post(f"/api/v1/evolution/campaigns/{campaign_id}/proposals").json()
@@ -368,6 +374,43 @@ def test_take_eligible_is_idempotent():
     assert second["generated"] == 0 and second["refreshed"] == 1  # OPEN PROMOTE refreshed in place
 
 
+def test_take_eligible_scalper_raw_recon_never_gates():
+    # audit PF-01 finding #1: a LIVE_FIRST (scalper) campaign's ONLY reconciliation is a RAW
+    # backtest (gap.mode == "scalper") — a §7.2 STRUCTURAL divergence. It must NEVER be a live-gap
+    # PASS NOR permanently block. live_gap is whitelisted (SKIPPED) and EXCLUDED from the LIVE_FIRST
+    # required set; the F7 bars alone gate. Even a raw DIVERGENT scalper recon leaves an F7-clearing
+    # candidate eligible — the raw plane is not a promotion signal for scalpers.
+    repo = FakeEvoRepo(campaigns=[_campaign(policy="LIVE_FIRST")],
+                       candidates={_CAMPAIGN_ID: [_paper_candidate()]})
+    live = FakeLiveRepo(versions={"ver-clone": {"config": _CLONE_CONFIG}},
+                        trades={"ver-clone": _paper_book()})
+    recon = FakeReconRepo()
+    recon.insert(version_id="ver-clone", strategy_id="s", window_from="a", window_to="b",
+                 sim_job_id=None, sim_run_id=None, gap={"mode": "scalper", "returnGap": -9.0},
+                 gap_z=-2.0, paired_trades=30, evidence_floor_met=True, verdict="DIVERGENT",
+                 diagnosis=None)
+    client = _te_app(repo, live, recon)
+    body = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/take-eligible").json()
+    assert body["eligible"] == 1 and body["generated"] == 1
+    prop = body["items"][0]
+    gates = {g["id"]: g["status"] for g in prop["evidence"]["gates"]}
+    assert gates["live_gap"] == "SKIPPED"          # whitelisted — NEVER a PASS, NEVER a FAIL
+    sr = prop["evidence"]["gateReadiness"]
+    assert sr["evidencePolicy"] == "LIVE_FIRST" and "live_gap" not in sr["requiredGates"]
+    assert sr["interimExcluded"]                   # the §6 LIVE_FIRST gates are flagged, not silent
+
+
+def test_take_eligible_scalper_still_blocked_by_f7_floor():
+    # The F7 bars still gate scalpers — a thin paper book blocks even a LIVE_FIRST candidate.
+    repo = FakeEvoRepo(campaigns=[_campaign(policy="LIVE_FIRST")],
+                       candidates={_CAMPAIGN_ID: [_paper_candidate()]})
+    live = FakeLiveRepo(versions={"ver-clone": {"config": _CLONE_CONFIG}},
+                        trades={"ver-clone": _paper_book(n_win=5, n_loss=2)})  # 7 < 20 trades
+    client = _te_app(repo, live, FakeReconRepo())
+    body = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/take-eligible").json()
+    assert body["eligible"] == 0 and body["generated"] == 0
+
+
 def test_take_eligible_unwired_is_500():
     service = ProposalService(repo_factory=lambda: FakeEvoRepo(), ntfy=FakeNtfy())
     try:
@@ -410,11 +453,17 @@ def _promote_seed(repo, *, policy="SIM_FIRST", cand_state="TAKE_ELIGIBLE", execu
 def _exec_app(repo, strategy):
     app = FastAPI()
     app.add_exception_handler(ApiError, api_error_handler)
+    # Seed the clone's live evidence so the PROMOTE-execute re-validation (audit PF-01 #6: a fresh
+    # readiness recheck immediately before publish) passes for the mechanic tests: a clearing paper
+    # book + a canonical capital base + an ALIGNED swing reconciliation.
+    live = FakeLiveRepo(versions={"ver-clone": {"config": _CLONE_CONFIG}},
+                        trades={"ver-clone": _paper_book()})
+    recon = _aligned_recon(FakeReconRepo())
     app.state.evo = EvoReadService(repo_factory=lambda: repo)
     app.state.proposals = ProposalService(
         repo_factory=lambda: repo, ntfy=FakeNtfy(),
         strategy_client=strategy, jobs_factory=lambda: FakeJobs(),
-        live_factory=lambda: FakeLiveRepo(), recon_factory=lambda: FakeReconRepo(),
+        live_factory=lambda: live, recon_factory=lambda: recon,
     )
     app.include_router(evolution.router)
     app.include_router(proposals.router)
@@ -494,6 +543,31 @@ def test_promote_execute_is_not_double_executable():
     assert resp.status_code == 409
     assert resp.json()["code"] == "PROPOSAL_ALREADY_EXECUTED"
     assert strategy.drafts == []
+
+
+def test_promote_execute_revalidates_and_blocks_degraded_candidate():
+    # audit PF-01 finding #6: readiness is re-checked on FRESH live evidence IMMEDIATELY before any
+    # registry mutation. A PROMOTE proposal whose candidate's paper book no longer clears the
+    # TAKE_ELIGIBLE bar (evidence degraded, or admitted before PF-01) is REFUSED (409) and nothing
+    # is published.
+    repo, strategy = FakeEvoRepo(), FakeStrategy(_CONFIG)
+    pid = _promote_seed(repo, policy="SIM_FIRST")
+    app = FastAPI()
+    app.add_exception_handler(ApiError, api_error_handler)
+    live = FakeLiveRepo(versions={"ver-clone": {"config": _CLONE_CONFIG}},
+                        trades={"ver-clone": _paper_book(n_win=3, n_loss=1)})  # 4 < 20 trades now
+    app.state.proposals = ProposalService(
+        repo_factory=lambda: repo, ntfy=FakeNtfy(), strategy_client=strategy,
+        jobs_factory=lambda: FakeJobs(), live_factory=lambda: live,
+        recon_factory=lambda: _aligned_recon(FakeReconRepo()),
+    )
+    app.include_router(proposals.router)
+    client = TestClient(app)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "PROMOTION_READINESS_NOT_MET"
+    assert strategy.drafts == []                 # no registry mutation happened
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "TAKE_ELIGIBLE"  # not demoted, just refused
 
 
 # --- ROLLBACK check + execute -------------------------------------------------------------------

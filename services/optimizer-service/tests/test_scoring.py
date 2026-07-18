@@ -128,6 +128,7 @@ def _healthy(n: int) -> dict:
         "sortino": 1.5, "sharpe": 1.5, "expectancy": 500.0, "regimeOosMin": 0.4,
         "regimeOosMean": 0.8,
         "regimesCovered": ["UP_QUIET", "DOWN_QUIET", "UP_TURBULENT"], "engineSha": "abc123",
+        "dataHash": "epoch-1",  # audit PF-01 #4: comparability requires SHA AND epoch present
     }
 
 
@@ -191,6 +192,39 @@ def test_comparability_passes_when_cohort_shares_sha_and_epoch():
     cohort = [_healthy(i) | {"dataHash": "epoch-1"} for i in range(5)]
     for card in scoring.score_cohort(cohort, []):
         assert next(g for g in card["gates"] if g["id"] == "comparability")["status"] == "PASS"
+
+
+def test_comparability_partition_isolates_normalization():
+    # audit PF-01 #4(b): a drifted-signature (incomparable) bag must NOT pollute the COMPARABLE
+    # partition's z-scores/plateau. 4 healthy candidates (SHA "abc") + 1 drifted (SHA "xyz") with an
+    # EXTREME oosReturn — the healthy candidates' oos_return z is computed over the 4 healthy ONLY.
+    healthy = [
+        {"trialNumber": i, "rawObjective": 1.0, "oosReturn": r,
+         "engineSha": "abc", "dataHash": "e1"}
+        for i, r in enumerate([10.0, 20.0, 30.0, 40.0])
+    ]
+    drifted = {"trialNumber": 4, "rawObjective": 1.0, "oosReturn": 1000.0,
+               "engineSha": "xyz", "dataHash": "e1"}          # incomparable (different SHA)
+    cards = {c["trialNumber"]: c for c in scoring.score_cohort(healthy + [drifted], [])}
+    # the drifted bag FAILs comparability and is not rankable — it is refused, not promoted.
+    assert next(g for g in cards[4]["gates"] if g["id"] == "comparability")["status"] == "FAIL"
+    assert cards[4]["rankable"] is False
+    # the healthy oosReturn=40 has z over [10,20,30,40] ONLY (mean 25, pstdev √125=11.1803) →
+    # 15/11.1803 = 1.3416; the 1000 outlier NEVER entered the column (no pollution).
+    assert next(x for x in cards[3]["components"] if x["id"] == "oos_return")["z"] == 1.3416
+    # the drifted bag dropped OUT of the partition's column entirely → its own oos_return z is 0.
+    assert next(x for x in cards[4]["components"] if x["id"] == "oos_return")["z"] == 0.0
+
+
+def test_comparability_all_absent_epoch_cohort_blocks_not_passes():
+    # audit PF-01 #4(a): when NO candidate carries a data epoch, comparability is UNKNOWN (not
+    # establishable) for every candidate — it must NOT fall through to PASS. Descriptive rankable
+    # stays permissive (no FAIL), but stage readiness is blocked.
+    cohort = [{"trialNumber": i, "rawObjective": 1.0, "oosReturn": 10.0 + i, "engineSha": "abc"}
+              for i in range(5)]  # engine SHA present, NO dataHash anywhere
+    card = scoring.score_cohort(cohort, [])[0]
+    assert next(g for g in card["gates"] if g["id"] == "comparability")["status"] == "UNKNOWN"
+    assert "comparability:UNKNOWN" in card["stageReadiness"]["blockedBy"]
 
 
 def test_live_first_sim_cohort_is_never_stage_ready():
@@ -341,7 +375,7 @@ def test_multiplicity_tstat_value_unchanged_by_the_rename():
 
 def test_deflated_sharpe_skipped_without_sharpe_or_trades():
     # No sharpe → SKIPPED (never fabricated). DESCRIPTIVE rankable stays True (no hard FAIL), but
-    # multiplicity_tstat is a REQUIRED SURVIVOR gate (the overfitting guard), so a SKIPPED one BLOCKS
+    # multiplicity_tstat is a REQUIRED SURVIVOR gate (the overfitting guard) — a SKIPPED one BLOCKS
     # promotion — stageReadiness.ready is False (was fail-open "SKIPPED never blocks", the marquee
     # defect this closes).
     no_sharpe = scoring.score_cohort([_dsr_cand(1, sharpe=None)], [], n_trials=1000)[0]

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections import Counter
 from typing import Any
 
 from app import leaderboard
@@ -184,18 +185,43 @@ def score_cohort(
     # candidate flips live_alignment from the retro z=0 stub to a live z-column (E3, §12 item 10);
     # candidates without a countable row then carry a per-candidate note (below), mirroring stress.
     cohort_has_live = any(_counts_toward_live(c.get("reconciliation")) for c in candidates)
-    # §1.3 comparability comparator: the cohort's representative engine SHA + data epoch (first
-    # non-null of each — the same source the recorder lifts, evolution.py). Every candidate's SHA +
-    # epoch must MATCH it (audit PF-01 #4) — a differing side is not comparable and is refused.
-    comparator_sha = next((c.get("engineSha") for c in candidates if c.get("engineSha")), None)
-    comparator_epoch = next((c.get("dataHash") for c in candidates if c.get("dataHash")), None)
-    stab = _stability_inputs(candidates, _plateau(candidates, parameters), direction)
+    # §1.3 comparability + PARTITIONING (audit PF-01 #4): a candidate is comparable ONLY within a
+    # partition sharing the SAME (engine SHA, data epoch). Normalizing RobustScore/plateau across
+    # INCOMPARABLE peers would pollute even the healthy candidates, so we compute the dominant
+    # complete signature (the most common (SHA, epoch) among candidates carrying BOTH) and score /
+    # normalize ONLY within that partition; a candidate outside it (or missing either SHA or epoch)
+    # FAILs comparability and is masked out of every z-column + the plateau (never pollutes peers).
+    comparator_sha, comparator_epoch = _dominant_signature(candidates)
+    # The partition to normalize WITHIN: when a dominant complete signature EXISTS, only its members
+    # are comparable (incomparable bags are masked out so they never pollute peers). With NO
+    # signature exists (comparator None — e.g. a retro cohort with no SHA/epoch), there is no
+    # comparable partition to protect, we normalize DESCRIPTIVELY over the whole cohort (nobody is
+    # stage-ready anyway — comparability is UNKNOWN for all). The comparability GATE (per candidate)
+    # still requires SHA + epoch present and matching the dominant signature.
+    if comparator_sha is not None:
+        partition = [
+            c.get("engineSha") == comparator_sha and c.get("dataHash") == comparator_epoch
+            for c in candidates
+        ]
+    else:
+        partition = [True] * len(candidates)
+    stab = _stability_inputs(
+        candidates, _plateau(candidates, parameters, partition), direction
+    )
 
-    # Per-component z's (cohort-normalized) + the raw constituents + any structural caveat.
+    # Per-component z's (normalized WITHIN the comparable partition — incomparable bags masked to
+    # None so they drop out of the mean/std) + the raw constituents + any structural caveat.
+    subsignals_by_comp = _component_subsignals(candidates, stab, n_params)
+    if not all(partition):
+        subsignals_by_comp = {
+            comp: [(label, [(v if partition[i] else None) for i, v in enumerate(vals)])
+                   for (label, vals) in cols]
+            for comp, cols in subsignals_by_comp.items()
+        }
     comp_zs: dict[str, list[float]] = {}
     comp_raws: list[dict[str, dict[str, Any]]] = [dict() for _ in candidates]
     comp_caveats: dict[str, str | None] = {}
-    for comp, subsignals in _component_subsignals(candidates, stab, n_params).items():
+    for comp, subsignals in subsignals_by_comp.items():
         zs, raws = _component_z(subsignals, len(candidates))
         comp_zs[comp] = zs
         comp_caveats[comp] = None if subsignals else _EMPTY_COMPONENT_CAVEATS.get(comp)
@@ -539,27 +565,31 @@ def _comparability_gate(
     engine_sha: str | None, data_hash: str | None,
     comparator_sha: str | None, comparator_epoch: str | None,
 ) -> dict[str, Any]:
-    """§6.1 / §1.3 "refuse to compare across differing engine SHA / data epoch" (audit PF-01 #4 —
-    was "any non-null SHA PASSes", which never actually compared). The comparator = the cohort's
-    representative (engine SHA, data epoch) — the first non-null of each, the same source the
-    recorder lifts for the generation. The candidate PASSes ONLY when its SHA AND its data epoch
-    MATCH the comparator:
-      * NULL engine SHA (run predates #703 stamping) → UNKNOWN (not establishable — blocks a
-        REQUIRED gate, never fabricates a match);
-      * engine SHA ≠ comparator SHA                 → FAIL (cross-SHA comparison refused);
-      * a comparator data epoch exists and the candidate's differs / is absent → FAIL (cross-epoch);
-      * SHA present + matches, and the epoch matches (or no comparator epoch to check) → PASS."""
+    """§6.1 / §1.3 "refuse to compare across differing engine SHA / data epoch" (audit PF-01 #4).
+    The comparator = the cohort's DOMINANT complete ``(SHA, epoch)`` signature. A candidate PASSes
+    ONLY when it carries BOTH a SHA and a data epoch AND both MATCH the dominant signature. Both
+    be PRESENT — an absent SHA OR an absent epoch is not establishable and blocks (fail-closed,
+    never a fabricated match):
+      * NULL engine SHA (run predates #703 stamping)  → UNKNOWN (blocks);
+      * NULL data epoch (no data hash on the run)     → UNKNOWN (blocks — §1.3 needs the epoch too);
+      * no dominant signature (no candidate carries both) → FAIL (no comparable partition exists);
+      * SHA or epoch ≠ the dominant signature         → FAIL (cross-signature comparison refused);
+      * SHA + epoch both present and MATCH the dominant signature → PASS."""
     if engine_sha is None:
         return {"id": "comparability", "status": UNKNOWN, "value": None,
                 "note": "NULL engine SHA (run predates #703 stamping) — not establishable"}
-    if comparator_sha is not None and engine_sha != comparator_sha:
+    if data_hash is None:
+        return {"id": "comparability", "status": UNKNOWN, "value": None,
+                "note": "NULL data epoch (no dataHash) — §1.3 needs SHA AND epoch; unestablishable"}
+    if comparator_sha is None or comparator_epoch is None:
         return {"id": "comparability", "status": FAIL, "value": engine_sha,
-                "note": f"engine SHA {engine_sha} ≠ comparator {comparator_sha} — §1.3 refuses a "
-                        "cross-SHA comparison (the stale side is re-queued, never ranked together)"}
-    if comparator_epoch is not None and data_hash != comparator_epoch:
-        return {"id": "comparability", "status": FAIL, "value": data_hash,
-                "note": f"data epoch {data_hash} ≠ comparator {comparator_epoch} — §1.3 refuses a "
-                        "cross-data-epoch comparison"}
+                "note": "no comparable cohort partition — no candidate carries both a SHA and a "
+                        "data epoch, so this candidate has no comparable baseline (§1.3)"}
+    if engine_sha != comparator_sha or data_hash != comparator_epoch:
+        return {"id": "comparability", "status": FAIL, "value": engine_sha,
+                "note": f"signature (SHA {engine_sha}, epoch {data_hash}) ≠ the dominant cohort "
+                        f"signature (SHA {comparator_sha}, epoch {comparator_epoch}) — §1.3 bars "
+                        "a cross-SHA / cross-data-epoch comparison (the stale side is re-queued)"}
     return {"id": "comparability", "status": PASS, "value": engine_sha}
 
 
@@ -803,16 +833,47 @@ def _assign_ranks(scorecards: list[dict[str, Any]]) -> None:
         card["rank"] = position
 
 
+def _dominant_signature(
+    candidates: list[dict[str, Any]],
+) -> tuple[str | None, str | None]:
+    """The cohort's dominant comparability signature = the MOST COMMON complete ``(engineSha,
+    dataHash)`` among candidates carrying BOTH (audit PF-01 #4). Ties break by first appearance
+    (``Counter.most_common`` is insertion-stable). ``(None, None)`` when NO candidate carries both a
+    SHA and a data epoch — then every candidate FAILs/blocks comparability (no comparable partition
+    exists, fail-closed)."""
+    complete = [
+        (c.get("engineSha"), c.get("dataHash"))
+        for c in candidates
+        if c.get("engineSha") is not None and c.get("dataHash") is not None
+    ]
+    if not complete:
+        return None, None
+    return Counter(complete).most_common(1)[0][0]
+
+
 def _plateau(
-    candidates: list[dict[str, Any]], parameters: list[dict[str, Any]]
+    candidates: list[dict[str, Any]], parameters: list[dict[str, Any]],
+    comparable: list[bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Reuse the leaderboard's plateau/neighbor computation on the sweep's own objective — the
-    stability signal (§6.2) and the stability_floor gate both read it, so it is computed once."""
+    stability signal (§6.2) and the stability_floor gate both read it, so it is computed once.
+    ``comparable`` (audit PF-01 #4) restricts the plateau to the comparable partition: neighbors are
+    counted ONLY among comparable peers, so an incomparable (drifted-signature) bag never enters a
+    healthy candidate's plateau. A non-comparable candidate gets an EMPTY result (plateau undefined
+    → stability_floor SKIPPED; it FAILs comparability regardless)."""
+    if comparable is None:
+        comparable = [True] * len(candidates)
+    idx = [i for i, ok in enumerate(comparable) if ok]
     trials = [
-        {"params": c.get("params") or {}, "objective": _num(c.get("rawObjective")) or 0.0}
-        for c in candidates
+        {"params": candidates[i].get("params") or {},
+         "objective": _num(candidates[i].get("rawObjective")) or 0.0}
+        for i in idx
     ]
-    return leaderboard.plateau_scores(trials, parameters)
+    scores = leaderboard.plateau_scores(trials, parameters)
+    out: list[dict[str, Any]] = [{} for _ in candidates]
+    for position, i in enumerate(idx):
+        out[i] = scores[position]
+    return out
 
 
 def _explainability(cand: dict[str, Any], n_params: int) -> float:

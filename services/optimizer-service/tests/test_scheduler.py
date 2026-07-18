@@ -31,7 +31,7 @@ from tests.fakes import (
 )
 
 # Three OOS folds over three regimes (mirrors the recorder suite) so gates can be assessed + scored.
-# A per-fold OOS Sharpe is carried so the REQUIRED multiplicity_tstat gate is affirmatively evaluated
+# A per-fold OOS Sharpe is carried so the REQUIRED multiplicity_tstat gate is affirmatively assessed
 # (audit PF-01) and selection can produce SURVIVORs.
 _FOLDS = [
     {"fold": 0, "regimeOos": {"UP_QUIET": {"sharpe": "1.0"}},

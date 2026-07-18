@@ -1562,9 +1562,24 @@ class ProposalService:
         merged = {**(proposal.get("evidence") or {}), "promotion": promotion}
         repo = self._repo_factory()
         try:
+            # audit PF-01 #6: the champion move is a DURABLE ATOMIC compare-and-set — commits ONLY
+            # while the champion is STILL what this execute validated against (``expected``). Two
+            # concurrent sibling promotes both reach here against champion V0; exactly ONE CAS wins
+            # (the loser gets None) → the champion pointer is never double-moved to an untested
+            # hybrid. Done FIRST, so a lost race refuses before mutating the candidate / proposal.
+            expected_champion = campaign.get("championVersionId")
+            moved = repo.update_campaign_champion(
+                campaign["id"], new_champion_version_id, expected_champion
+            )
+            if moved is None:
+                raise ApiError(
+                    409, "CHAMPION_CHANGED",
+                    f"the campaign champion moved from {expected_champion!r} under proposal "
+                    f"{proposal['id']} (a concurrent sibling promote won the compare-and-set) — "
+                    "this promotion is refused; reassess/regenerate against the current champion",
+                )
             repo.update_candidate_publish(candidate["id"], new_champion_version_id, "PROMOTED")
             repo.record_proposal_execution(proposal["id"], merged)
-            repo.update_campaign_champion(campaign["id"], new_champion_version_id)
         finally:
             repo.close()
         if clone_archive.get("archived"):

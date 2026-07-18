@@ -561,6 +561,38 @@ def test_promote_execute_blocks_stale_champion_hybrid():
     assert strategy.drafts == []                          # nothing published — no untested hybrid
 
 
+def test_promote_execute_cas_loses_the_champion_race():
+    # audit PF-01 #6 (durable atomic claim): even if the pre-publish read-guard PASSED, the champion
+    # move is a compare-and-set. A concurrent sibling that moved the champion between our guard and
+    # our write makes the CAS MISS → this executor is refused (409); the champion pointer is NEVER
+    # double-moved (the candidate is not PROMOTED, the campaign champion is untouched). NOTE: the
+    # loser may have already published a registry version before the CAS caught it — see the
+    # flagged follow-up for a pre-publish durable claim.
+    class _RacingRepo(FakeEvoRepo):
+        def update_campaign_champion(self, campaign_id, version_id, expected_version_id=None):
+            return None  # simulate the CAS losing to a concurrent winner
+
+    repo, strategy = _RacingRepo(), FakeStrategy(_CONFIG)
+    pid = _promote_seed(repo, policy="SIM_FIRST")   # captured champion == current (guard passes)
+    client = _exec_app(repo, strategy)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "CHAMPION_CHANGED"
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "TAKE_ELIGIBLE"   # never PROMOTED
+    assert repo.campaigns[0]["championVersionId"] is None                 # champion never moved
+
+
+def test_update_campaign_champion_cas_semantics():
+    # audit PF-01 #6: the champion move is compare-and-set — a stale expected does NOT move the
+    # pointer (exactly one of two concurrent promotes can win).
+    repo = FakeEvoRepo(campaigns=[_campaign()])
+    repo.campaigns[0]["championVersionId"] = "V0"
+    assert repo.update_campaign_champion(_CAMPAIGN_ID, "V1", "WRONG") is None      # CAS miss
+    assert repo.get_campaign(_CAMPAIGN_ID)["championVersionId"] == "V0"            # unchanged
+    moved = repo.update_campaign_champion(_CAMPAIGN_ID, "V1", "V0")                # CAS hit
+    assert moved is not None and repo.get_campaign(_CAMPAIGN_ID)["championVersionId"] == "V1"
+
+
 def test_promote_execute_revalidates_and_blocks_degraded_candidate():
     # audit PF-01 finding #6: readiness is re-checked on FRESH live evidence IMMEDIATELY before any
     # registry mutation. A PROMOTE proposal whose candidate's paper book no longer clears the

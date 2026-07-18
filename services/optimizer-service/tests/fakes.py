@@ -404,6 +404,9 @@ class FakeBacktest:
         return value
 
 
+_CHAMPION_CAS_ANY = object()  # mirrors repos._CHAMPION_CAS_ANY (no-CAS sentinel for the fake)
+
+
 class FakeEvoRepo:
     """In-memory ``evo_*`` read model — returns the same camelCase envelope shape EvoRepo
     emits, so EvoReadService maps it to the response models identically to production."""
@@ -692,13 +695,18 @@ class FakeEvoRepo:
         return _strip_seq(row)
 
     def update_campaign_champion(
-        self, campaign_id: str, version_id: str | None
+        self, campaign_id: str, version_id: str | None,
+        expected_version_id: Any = _CHAMPION_CAS_ANY,
     ) -> dict[str, Any] | None:
         """Mirrors EvoRepo.update_campaign_champion: move the champion pointer (PROMOTE forward,
-        ROLLBACK back)."""
+        ROLLBACK back). When ``expected_version_id`` is given it is a compare-and-set — the move
+        only fires while the champion is STILL that value (PF-01 #6); a stale expected → None."""
         campaign = self.get_campaign(campaign_id)
         if campaign is None:
             return None
+        if (expected_version_id is not _CHAMPION_CAS_ANY
+                and campaign.get("championVersionId") != expected_version_id):
+            return None  # CAS miss — the champion moved under us (a concurrent promote won)
         campaign["championVersionId"] = version_id
         campaign["updatedAt"] = "2026-07-12T00:00:00+00:00"
         return dict(campaign)

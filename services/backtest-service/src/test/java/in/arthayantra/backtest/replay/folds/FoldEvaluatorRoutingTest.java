@@ -71,9 +71,10 @@ class FoldEvaluatorRoutingTest {
   }
 
   private StrategyDefinition def() {
-    StrategyDefinition d = mock(StrategyDefinition.class);
-    when(d.primaryTimeframe()).thenReturn("1m");
-    return d;
+    // metricsFor no longer reads the primary timeframe (chip task_8fb59761 keys tradeFrequency off the
+    // curve cadence), so the mock needs no primaryTimeframe stub; the routing under test only inspects
+    // universe.mode on the config JSON.
+    return mock(StrategyDefinition.class);
   }
 
   @Test
@@ -83,7 +84,7 @@ class FoldEvaluatorRoutingTest {
     when(premium.replay(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(empty());
-    when(metrics.compute(any(), any(), any(), any(), any(), any(), anyLong(), anyLong()))
+    when(metrics.compute(any(), any(), any(), any(), any(), anyLong(), anyLong()))
         .thenReturn(FoldTestFixtures.metricsWithSharpe(1.0));
 
     evaluator.evaluate(
@@ -112,7 +113,7 @@ class FoldEvaluatorRoutingTest {
     when(plain.replay(
             any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any()))
         .thenReturn(empty());
-    when(metrics.compute(any(), any(), any(), any(), any(), any(), anyLong(), anyLong()))
+    when(metrics.compute(any(), any(), any(), any(), any(), anyLong(), anyLong()))
         .thenReturn(FoldTestFixtures.metricsWithSharpe(1.0));
 
     evaluator.evaluate(

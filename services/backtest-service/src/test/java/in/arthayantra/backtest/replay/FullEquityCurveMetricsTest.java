@@ -52,10 +52,10 @@ class FullEquityCurveMetricsTest {
     // sanity: the downsampler genuinely strips the trough this test relies on.
     assertThat(down).doesNotContain(full.get(501));
 
-    Metrics onFull = calc.compute(List.of(), full, INITIAL, full.get(999).equity(), "1m", "1m", 1000L, 0L);
+    Metrics onFull = calc.compute(List.of(), full, INITIAL, full.get(999).equity(), "1m", 1000L, 0L);
     Metrics onDown =
         calc.compute(
-            List.of(), down, INITIAL, down.get(down.size() - 1).equity(), "1m", "1m", 1000L, 0L);
+            List.of(), down, INITIAL, down.get(down.size() - 1).equity(), "1m", 1000L, 0L);
 
     // The FULL curve captures the ~60% drawdown; the downsampled curve misses it entirely.
     assertThat(onFull.maxDrawdown()).isGreaterThan(new BigDecimal("59"));
@@ -86,12 +86,15 @@ class FullEquityCurveMetricsTest {
   }
 
   @Test
-  void sharpeSortinoAnnualizeAtTheCurveCadenceNotThePrimaryTimeframe() {
-    // AY-SL-01 fix round 2: the replay equity curve is 1m-spaced REGARDLESS of primary timeframe
-    // (the primary rolls up signals only), so a 3m-primary run's ratio metrics must annualize at the
-    // curve's 1m cadence — annualizing the same 1m-spaced returns at 3m periodsPerYear understates
-    // Sharpe/Sortino ≈√3 (1h ≈√60). tradeFrequency, by contrast, legitimately keys off the PRIMARY
-    // timeframe (#785). This pins the split: wrong wiring in either direction fails.
+  void cadenceKeyedMetricsFollowTheCurveIntervalCadence() {
+    // AY-SL-01 (#913) + chip task_8fb59761: the replay equity curve is 1m-spaced REGARDLESS of the
+    // strategy's primary timeframe (the primary rolls up signals only), so EVERY cadence-dependent
+    // metric keys off curveInterval — the cadence the curve + totalBars are actually in — not a
+    // separate primary timeframe. Feeding the SAME 1m-spaced curve a coarser curveInterval ("3m")
+    // mis-scales both Sharpe/Sortino (≈√3) AND the tradeFrequency session divisor (375 vs 125). The
+    // production callers pass "1m" (the true curve cadence); this pins that a wrong curveInterval in
+    // EITHER metric fails. Pre-fix, tradeFrequency keyed the primary timeframe while totalBars stayed
+    // 1m, so the two metrics disagreed on cadence (the bug this closes).
     List<EquityPoint> curve = new ArrayList<>();
     for (int i = 0; i < 1000; i++) {
       // 1m-spaced zigzag with genuine down-moves so sharpe/sortino are non-degenerate (non-zero).
@@ -101,25 +104,19 @@ class FullEquityCurveMetricsTest {
     List<Trade> trades =
         List.of(closedTrade(1, "100", "110", "10"), closedTrade(1, "100", "110", "10"));
 
-    Metrics m3mPrimary = calc.compute(trades, curve, INITIAL, fin, "3m", "1m", 1000L, 100L);
-    Metrics m1mPrimary = calc.compute(trades, curve, INITIAL, fin, "1m", "1m", 1000L, 100L);
-    Metrics wrongCadence = calc.compute(trades, curve, INITIAL, fin, "3m", "3m", 1000L, 100L);
+    Metrics oneMinuteCurve = calc.compute(trades, curve, INITIAL, fin, "1m", 1000L, 100L);
+    Metrics threeMinuteCurve = calc.compute(trades, curve, INITIAL, fin, "3m", 1000L, 100L);
 
-    // sanity: the fixture discriminates (3m-annualized values genuinely differ from 1m-annualized).
-    assertThat(wrongCadence.sharpe()).isNotEqualByComparingTo(m1mPrimary.sharpe());
-    // Sharpe/Sortino follow the CURVE cadence: a 3m-primary run over the same 1m-spaced curve equals
-    // the 1m-primary run — if compute wrongly annualized at the primary timeframe, m3mPrimary would
-    // instead equal wrongCadence and this fails.
-    assertThat(m3mPrimary.sharpe()).isEqualByComparingTo(m1mPrimary.sharpe());
-    assertThat(m3mPrimary.sortino()).isEqualByComparingTo(m1mPrimary.sortino());
-    assertThat(m3mPrimary.sharpe()).isNotEqualByComparingTo(wrongCadence.sharpe());
-    // tradeFrequency still keys off the PRIMARY timeframe (sessions divisor 125 for 3m vs 375 for
-    // 1m) — the cadence split must not leak into the session-denominated metrics (#785).
-    assertThat(m3mPrimary.full().get("tradeFrequency").asText())
-        .isEqualTo(wrongCadence.full().get("tradeFrequency").asText())
-        .isNotEqualTo(m1mPrimary.full().get("tradeFrequency").asText());
+    // Sharpe/Sortino annualize at the curve cadence: the same 1m-spaced returns scaled as if 3m-spaced
+    // genuinely differ (the #913 discrimination). Production passes "1m", the true curve cadence.
+    assertThat(oneMinuteCurve.sharpe()).isNotEqualByComparingTo(threeMinuteCurve.sharpe());
+    assertThat(oneMinuteCurve.sortino()).isNotEqualByComparingTo(threeMinuteCurve.sortino());
+    // tradeFrequency now keys the SAME curve cadence: "1m" => 1000/375 == 2.6667 sessions =>
+    // 2/2.6667 == 0.75/day; "3m" => 1000/125 == 8 sessions => 0.25. Both metrics agree on cadence.
+    assertThat(oneMinuteCurve.full().get("tradeFrequency").asText()).isEqualTo("0.750000");
+    assertThat(threeMinuteCurve.full().get("tradeFrequency").asText()).isEqualTo("0.250000");
     // maxDrawdown is cadence-independent.
-    assertThat(m3mPrimary.maxDrawdown()).isEqualByComparingTo(wrongCadence.maxDrawdown());
+    assertThat(oneMinuteCurve.maxDrawdown()).isEqualByComparingTo(threeMinuteCurve.maxDrawdown());
   }
 
   @Test
@@ -134,9 +131,9 @@ class FullEquityCurveMetricsTest {
     assertThat(stored).isSameAs(curve); // no-op below the target
 
     Metrics onFull =
-        calc.compute(List.of(), curve, INITIAL, curve.get(299).equity(), "1m", "1m", 300L, 0L);
+        calc.compute(List.of(), curve, INITIAL, curve.get(299).equity(), "1m", 300L, 0L);
     Metrics onStored =
-        calc.compute(List.of(), stored, INITIAL, curve.get(299).equity(), "1m", "1m", 300L, 0L);
+        calc.compute(List.of(), stored, INITIAL, curve.get(299).equity(), "1m", 300L, 0L);
 
     assertThat(onStored.sharpe()).isEqualByComparingTo(onFull.sharpe());
     assertThat(onStored.sortino()).isEqualByComparingTo(onFull.sortino());

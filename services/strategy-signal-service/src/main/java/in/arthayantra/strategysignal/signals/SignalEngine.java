@@ -207,6 +207,9 @@ public class SignalEngine {
   private final java.util.Optional<ScalperConfluenceGate> scalperGate;
   // Live-only diagnostics: every scalper chart-entry the confluence gate blocked (why + margin).
   private final SignalRejectionRepository rejections;
+  // PF-03 live-only: every ENTRY the per-book risk governor vetoed (which rail + would-be leg).
+  // Bounded ASYNC writer so a DB stall can never park the sole signal-eval thread (#866 class).
+  private final RiskSuppressionWriter riskSuppressions;
   // Shadow book: opens an eligible rejection as a virtual 1-lot position (signal-analysis §7.1/7.2).
   private final ShadowBookService shadowBook;
 
@@ -407,12 +410,14 @@ public class SignalEngine {
       java.util.Optional<EmissionGuard> emissionGuard,
       java.util.Optional<ScalperConfluenceGate> scalperGate,
       SignalRejectionRepository rejections,
+      RiskSuppressionWriter riskSuppressions,
       ShadowBookService shadowBook,
       org.springframework.transaction.PlatformTransactionManager transactionManager,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
     this.registry = registry;
     this.signals = signals;
     this.rejections = rejections;
+    this.riskSuppressions = riskSuppressions;
     this.shadowBook = shadowBook;
     this.publisher = publisher;
     this.events = events;
@@ -1504,10 +1509,18 @@ public class SignalEngine {
     lastGateOutputAtMs = clock.millis();
     // Per-book risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission for
     // this strategy's book for the rest of the IST day — exit/stop evaluation (emit()) is NOT gated.
-    if (emissionGuard.isPresent() && !emissionGuard.get().entryAllowed(strategy.book())) {
-      log.info("ENTRY suppressed by {} risk gate: {} {}:{}",
-          strategy.book(), strategy.slug(), exchange, tradingsymbol);
-      return;
+    // entryVeto is behaviourally identical to entryAllowed (a single call, same decision AND audit
+    // side-effects — see EmissionGuard.entryVeto) but surfaces WHICH rail vetoed. PF-03: a veto now
+    // writes a durable risk_suppressions record (observability only — the veto itself is unchanged).
+    if (emissionGuard.isPresent()) {
+      java.util.Optional<String> veto = emissionGuard.get().entryVeto(strategy.book());
+      if (veto.isPresent()) {
+        log.info("ENTRY suppressed by {} risk gate ({}): {} {}:{}",
+            strategy.book(), veto.get(), strategy.slug(), exchange, tradingsymbol);
+        recordRiskSuppression(
+            strategy, exchange, tradingsymbol, interval, bar, decision, veto.get());
+        return;
+      }
     }
     BigDecimal entryPrice = bar.close();
     BigDecimal stopLoss = levelFromRules(strategy.definition(), entryPrice, "stop_loss");
@@ -1764,6 +1777,36 @@ public class SignalEngine {
         "scalper confluence blocked entry: {} {}:{} rail={} operand={} threshold={} margin={} composite={}/{} ({})",
         strategy.slug(), exchange, tradingsymbol, d.blockingRail(), d.operand(), d.threshold(),
         d.margin(), d.compositeScore(), d.compositeThreshold(), d.reason());
+  }
+
+  /**
+   * PF-03: record a durable {@code risk_suppressions} row when the per-book risk governor vetoed an
+   * ENTRY on THIS (tick/paper-engine) entry path — scalper, non-scalper intraday, and the btst carry.
+   * (The daily {@code SwingBatchEngine}, {@code session.style=swing}, has its own veto and stays
+   * log-only — not covered here.) OBSERVABILITY ONLY — called AFTER the veto decision is made; it
+   * records, never decides. The persist is ENQUEUED to the bounded async {@link RiskSuppressionWriter}
+   * so a DB stall can never park the sole {@code signal-eval} thread (the write is O(1) here and
+   * fail-soft inside the writer). Everything computed below is in-memory: the would-be option leg
+   * ({@code side}/{@code optionType}/{@code optionTradingsymbol}) is read cheaply from the confluence
+   * {@link ScalperConfluenceGate.Decision} in hand — no new state; {@code decision} is null on the
+   * non-scalper path, leaving the option columns null.
+   */
+  private void recordRiskSuppression(
+      Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
+      ScalperConfluenceGate.Decision decision, String rail) {
+    OffsetDateTime barTime = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
+    String side =
+        strategy.definition().direction() == StrategyDefinition.Direction.SHORT ? "SELL" : "BUY";
+    String optionType = null;
+    String optionTradingsymbol = null;
+    if (decision != null) {
+      // side() is null for the #11 neutral straddle; pick() is the primary leg (never empty).
+      optionType = decision.side() == null ? null : decision.side().name();
+      optionTradingsymbol = decision.pick().candidate().tradingsymbol();
+    }
+    riskSuppressions.record(
+        strategy.versionId(), strategy.slug(), strategy.book(), rail, exchange, tradingsymbol,
+        interval, side, optionType, optionTradingsymbol, barTime);
   }
 
   /**

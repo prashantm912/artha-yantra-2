@@ -6,6 +6,7 @@ import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.signals.EmissionGuard;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -45,6 +46,13 @@ public class PaperEmissionGuard implements EmissionGuard {
   @Override
   public boolean entryAllowed(String book) {
     return risk.entryAllowed(book);
+  }
+
+  @Override
+  public Optional<String> entryVeto(String book) {
+    // PF-03: surface the exact governor rail (the single source of truth is RiskService.entryVeto,
+    // of which risk.entryAllowed is a thin isEmpty() view — identical decision AND audit side-effects).
+    return risk.entryVeto(book);
   }
 
   @Override

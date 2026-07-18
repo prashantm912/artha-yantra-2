@@ -297,6 +297,8 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private MeterRegistry meterRegistry;
+  @Autowired private RiskSuppressionRepository riskSuppressions; // PF-03
+  @Autowired private in.arthayantra.strategysignal.paper.RiskService risk; // PF-03: park the book at a cap
 
   private static UUID strategyId;
   private static long firstSignalId;
@@ -588,6 +590,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
             Optional.empty(),
             Optional.empty(),
             mock(SignalRejectionRepository.class),
+            mock(RiskSuppressionRepository.class),
             mock(ShadowBookService.class),
             mock(org.springframework.transaction.PlatformTransactionManager.class),
             60);
@@ -1372,6 +1375,71 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         .isPositive();
   }
 
+  /**
+   * PF-03: an ENTRY the per-book risk governor vetoes (here the kill switch) leaves a durable,
+   * queryable {@code risk_suppressions} row — the incidence used to be knowable only from a
+   * transient log line — AND emits NO signal (the observability record never changes the veto).
+   * Drives the REAL autowired engine (mock profile ⇒ EmissionGuard present) end-to-end.
+   */
+  @Test
+  @Order(22)
+  void aRiskGovernorVetoWritesADurableRecordAndEmitsNoSignal() {
+    String suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    String slug = "engine-it-risksuppress-" + suffix;
+    String name = "Engine IT Risk Suppress " + suffix;
+    String yaml =
+        STRATEGY_YAML
+            .replace("id: engine-it-momentum", "id: " + slug)
+            .replace("name: \"Engine IT Momentum\"", "name: \"" + name + "\"");
+    UUID id = (UUID) registryService.create(name, null, null, yaml).get("id");
+    registryService.publish(id, null, null);
+    UUID versionId = repository.findById(id).orElseThrow().publishedVersionId();
+    engine.reload();
+    await().atMost(Duration.ofSeconds(20)).until(() -> engine.loadedSlugs().contains(slug));
+
+    // This tag-less strategy resolves to Books.OTHER; park that book at the kill switch BEFORE any
+    // bar arrives so a fired entry is vetoed at emission.
+    risk.update(Books.OTHER, "kill_switch", "{\"enabled\":true}");
+    try {
+      OffsetDateTime base = WARM_BASE.plusMinutes(40);
+      // Re-publish the rising ramp each poll to ride out the resubscribe gap (see @Order(21)); a
+      // fired bar is vetoed by the kill switch and lands a durable risk_suppressions row.
+      await()
+          .atMost(Duration.ofSeconds(30))
+          .pollInterval(Duration.ofMillis(500))
+          .until(
+              () -> {
+                BigDecimal price = new BigDecimal("106.00");
+                for (int i = 0; i < 12; i++) {
+                  price = price.add(new BigDecimal("0.50"));
+                  publishBar("SIGTEST", base.plusMinutes(i), price);
+                }
+                return !riskSuppressions.list(versionId, null, null, 10, 0).isEmpty();
+              });
+
+      RiskSuppressionRepository.RiskSuppressionRow suppression =
+          riskSuppressions.list(versionId, null, null, 10, 0).get(0);
+      assertThat(suppression.rail()).isEqualTo("kill_switch");
+      assertThat(suppression.book()).isEqualTo(Books.OTHER);
+      assertThat(suppression.strategySlug()).isEqualTo(slug);
+      assertThat(suppression.exchange()).isEqualTo("NSE");
+      assertThat(suppression.tradingsymbol()).isEqualTo("SIGTEST");
+      assertThat(suppression.interval()).isEqualTo("1m");
+      assertThat(suppression.side()).isEqualTo("BUY"); // definition direction is long
+      assertThat(suppression.optionType()).as("non-scalper: no option leg").isNull();
+      assertThat(suppression.barTime().toInstant())
+          .isBetween(base.toInstant(), base.plusMinutes(12).toInstant());
+
+      // Emission is UNCHANGED by the record: a vetoed entry persists no signal row.
+      Integer signalRows =
+          jdbc.queryForObject(
+              "SELECT count(*) FROM signals WHERE strategy_version_id = ?", Integer.class, versionId);
+      assertThat(signalRows).as("the veto emits no signal — behaviour unchanged").isZero();
+    } finally {
+      risk.update(Books.OTHER, "kill_switch", "{\"enabled\":false}");
+    }
+  }
+
   private double outcomeSum() {
     return meterRegistry.find("ay_signal_eval_outcome_total").counters().stream()
         .mapToDouble(Counter::count)
@@ -1418,6 +1486,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         Optional.empty(),
         Optional.empty(),
         mock(SignalRejectionRepository.class),
+        mock(RiskSuppressionRepository.class),
         mock(ShadowBookService.class),
         mock(org.springframework.transaction.PlatformTransactionManager.class),
         60);

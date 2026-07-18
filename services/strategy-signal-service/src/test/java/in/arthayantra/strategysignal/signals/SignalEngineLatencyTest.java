@@ -125,6 +125,7 @@ class SignalEngineLatencyTest {
             Optional.empty(),
             Optional.empty(),
             mock(SignalRejectionRepository.class),
+            mock(RiskSuppressionRepository.class),
             mock(ShadowBookService.class),
             mock(PlatformTransactionManager.class),
             60);

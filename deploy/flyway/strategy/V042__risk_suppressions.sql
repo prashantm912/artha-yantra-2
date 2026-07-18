@@ -8,13 +8,24 @@
 -- §12.3 CONFLUENCE GATE blocked a chart-entry (gate returned no Decision) and its consumers
 -- (DotHealthCanary liveness window, RejectionReader rail-trend, StrategyEvidenceReader) assume
 -- every row carries the confluence diagnostic. A governor veto happens AFTER the gate APPROVED,
--- at the book-level emission gate, and applies to EVERY strategy type (scalper / swing / btst) —
--- so it gets its own table rather than polluting the confluence-rejection analytics.
+-- at the book-level emission gate — so it gets its own table rather than polluting the
+-- confluence-rejection analytics.
+--
+-- SCOPE: the tick/paper-engine ENTRY path only (SignalEngine.emitEntry) — scalper, non-scalper
+-- intraday, and the btst carry. The daily SwingBatchEngine (session.style=swing) has its OWN
+-- per-book veto and stays LOG-ONLY; extending this record to the swing batch is a separate
+-- follow-up, NOT covered here.
 --
 -- OBSERVABILITY ONLY — recording this never changes the emission/veto decision (the gate is
--- consulted exactly as before). LIVE path only: the golden replay injects no EmissionGuard, so
--- the risk branch is never reached on backtest → no rows on replay → parity-safe. Plain OLTP
--- table (not a hypertable) — bounded volume (only fires when a book is at a governor limit).
+-- consulted exactly as before, and the write is a bounded async enqueue off the eval thread).
+-- LIVE path only: the golden replay injects no EmissionGuard, so the risk branch is never reached
+-- on backtest → no rows on replay → parity-safe. Plain OLTP table (not a hypertable).
+--
+-- RETENTION: append-only, currently UNBOUNDED. Row rate is low — a row lands only when a book is
+-- AT a governor limit AND a would-be entry fires; most sessions write zero. Worst case (a cap
+-- pinned all day across ~21 scalpers on a 3m cadence) is ~2-3k rows/day, so this stays small for a
+-- long time and is retained indefinitely for incidence history. A prune job (the A10
+-- options-snapshot pattern) is chipped as a follow-up if the rate ever warrants it.
 
 CREATE TABLE risk_suppressions (
   id                    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

@@ -590,7 +590,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
             Optional.empty(),
             Optional.empty(),
             mock(SignalRejectionRepository.class),
-            mock(RiskSuppressionRepository.class),
+            mock(RiskSuppressionWriter.class),
             mock(ShadowBookService.class),
             mock(org.springframework.transaction.PlatformTransactionManager.class),
             60);
@@ -1486,7 +1486,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         Optional.empty(),
         Optional.empty(),
         mock(SignalRejectionRepository.class),
-        mock(RiskSuppressionRepository.class),
+        mock(RiskSuppressionWriter.class),
         mock(ShadowBookService.class),
         mock(org.springframework.transaction.PlatformTransactionManager.class),
         60);

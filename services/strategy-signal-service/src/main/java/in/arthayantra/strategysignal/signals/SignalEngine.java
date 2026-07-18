@@ -208,7 +208,8 @@ public class SignalEngine {
   // Live-only diagnostics: every scalper chart-entry the confluence gate blocked (why + margin).
   private final SignalRejectionRepository rejections;
   // PF-03 live-only: every ENTRY the per-book risk governor vetoed (which rail + would-be leg).
-  private final RiskSuppressionRepository riskSuppressions;
+  // Bounded ASYNC writer so a DB stall can never park the sole signal-eval thread (#866 class).
+  private final RiskSuppressionWriter riskSuppressions;
   // Shadow book: opens an eligible rejection as a virtual 1-lot position (signal-analysis §7.1/7.2).
   private final ShadowBookService shadowBook;
 
@@ -409,7 +410,7 @@ public class SignalEngine {
       java.util.Optional<EmissionGuard> emissionGuard,
       java.util.Optional<ScalperConfluenceGate> scalperGate,
       SignalRejectionRepository rejections,
-      RiskSuppressionRepository riskSuppressions,
+      RiskSuppressionWriter riskSuppressions,
       ShadowBookService shadowBook,
       org.springframework.transaction.PlatformTransactionManager transactionManager,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
@@ -1779,13 +1780,16 @@ public class SignalEngine {
   }
 
   /**
-   * PF-03: persist a durable {@code risk_suppressions} row when the per-book risk governor vetoed an
-   * ENTRY. OBSERVABILITY ONLY — this is called AFTER the veto decision is already made; it records,
-   * never decides. Fail-soft: a failed insert logs and returns, never blocks/delays the single
-   * {@code signal-eval} thread (same doctrine as {@link #recordRejection}). The would-be option leg
+   * PF-03: record a durable {@code risk_suppressions} row when the per-book risk governor vetoed an
+   * ENTRY on THIS (tick/paper-engine) entry path — scalper, non-scalper intraday, and the btst carry.
+   * (The daily {@code SwingBatchEngine}, {@code session.style=swing}, has its own veto and stays
+   * log-only — not covered here.) OBSERVABILITY ONLY — called AFTER the veto decision is made; it
+   * records, never decides. The persist is ENQUEUED to the bounded async {@link RiskSuppressionWriter}
+   * so a DB stall can never park the sole {@code signal-eval} thread (the write is O(1) here and
+   * fail-soft inside the writer). Everything computed below is in-memory: the would-be option leg
    * ({@code side}/{@code optionType}/{@code optionTradingsymbol}) is read cheaply from the confluence
-   * {@link ScalperConfluenceGate.Decision} in hand — no new state is computed; {@code decision} is
-   * null on the non-scalper (swing/btst) path, leaving the option columns null.
+   * {@link ScalperConfluenceGate.Decision} in hand — no new state; {@code decision} is null on the
+   * non-scalper path, leaving the option columns null.
    */
   private void recordRiskSuppression(
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
@@ -1800,15 +1804,9 @@ public class SignalEngine {
       optionType = decision.side() == null ? null : decision.side().name();
       optionTradingsymbol = decision.pick().candidate().tradingsymbol();
     }
-    try {
-      riskSuppressions.insert(
-          strategy.versionId(), strategy.slug(), strategy.book(), rail, exchange, tradingsymbol,
-          interval, side, optionType, optionTradingsymbol, barTime);
-    } catch (RuntimeException e) {
-      log.warn(
-          "failed to persist risk suppression {} {}:{} rail={}: {}",
-          strategy.slug(), exchange, tradingsymbol, rail, e.toString());
-    }
+    riskSuppressions.record(
+        strategy.versionId(), strategy.slug(), strategy.book(), rail, exchange, tradingsymbol,
+        interval, side, optionType, optionTradingsymbol, barTime);
   }
 
   /**

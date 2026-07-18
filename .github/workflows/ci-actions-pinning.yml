@@ -1,0 +1,59 @@
+# ci-actions-pinning (SEC-07): supply-chain guard. Every `uses:` in .github/workflows
+# must pin to a full 40-hex commit SHA — never a mutable ref (@v4, @main, @v4.3.1). A
+# moved tag or a compromised release would inject arbitrary code into CI with repo
+# secrets. Pure bash + grep, no third-party scanner action (which would itself add
+# supply-chain surface). Local composite actions / reusable workflows (uses: ./...) are
+# exempt. Path-filtered to workflow edits; mirrors ci-codex-harness's minimal shape.
+name: ci-actions-pinning
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  ref-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Every workflow `uses:` must pin to a commit SHA
+        run: |
+          set -euo pipefail
+
+          # path:line:content for every `uses:` line across all workflow files
+          mapfile -t entries < <(grep -rnE '^[[:space:]]*(-[[:space:]]*)?uses:' .github/workflows || true)
+
+          bad=0
+          for entry in "${entries[@]}"; do
+            # drop the "path:line:" prefix, isolate the ref, strip a trailing "# comment"
+            content="${entry#*:*:}"
+            ref="$(printf '%s' "$content" \
+              | sed -E 's/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*//; s/[[:space:]]*#.*$//; s/[[:space:]]*$//')"
+
+            # local composite actions / reusable workflows are exempt
+            case "$ref" in
+              ./*|"") continue ;;
+            esac
+
+            # require owner/repo@<40-hex-sha> (a subpath owner/repo/dir@sha is fine too)
+            if printf '%s' "$ref" | grep -qE '^[^@]+@[0-9a-f]{40}$'; then
+              continue
+            fi
+
+            echo "::error::Unpinned action reference (pin to a full commit SHA — SEC-07): $entry"
+            bad=1
+          done
+
+          if [ "$bad" -ne 0 ]; then
+            echo "One or more workflow 'uses:' references are not pinned to a commit SHA." >&2
+            exit 1
+          fi
+          echo "OK: all workflow 'uses:' references are pinned to commit SHAs."

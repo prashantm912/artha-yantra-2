@@ -56,6 +56,12 @@ artha:
     strategy: ${ARTHA_OPENALGO_STRATEGY:ArthaYantra}
   signals:
     engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
+    # PF-03 risk_suppressions retention prune (task_f168c23c). The table is append-only with a low row
+    # rate (most sessions zero; worst ~2-3k/day) — retained GENEROUSLY (180d). A daily 02:30-IST
+    # off-market DELETE removes rows older than this horizon (live-only; mock DB is ephemeral).
+    # 0/negative DISABLES the prune (the guard never lets a non-positive horizon delete everything).
+    # Env name MUST match the compose passthrough exactly (#653 trap: a mismatch swallows the override).
+    risk-suppression-retention-days: ${ARTHA_SIGNALS_RISK_SUPPRESSION_RETENTION_DAYS:180}
     # Subscriber-side watchdog knobs were previously pinned to @Value defaults (#653) — no yml key
     # and no compose passthrough meant .env did NOTHING and they could not be tuned or disabled
     # without an image rebuild. Names MUST match the compose passthroughs exactly (the #653 trap: a

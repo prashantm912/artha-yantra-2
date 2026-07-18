@@ -185,12 +185,22 @@ jobs:
             printf '%s\n' "$fatal_lines"
             exit 1
           fi
-          if [ "$restore_rc" -ne 0 ] && [ "$benign_count" -eq 0 ]; then
-            echo "::error::pg_restore exit=$restore_rc with NO classifiable error line (unclassified failure)"
-            exit 1
-          fi
+          # Review round 3: a non-zero exit is tolerated ONLY when pg_restore terminated
+          # NORMALLY — PG17 pg_restore.c prints 'pg_restore: warning: errors ignored on
+          # restore: N' iff n_errors>0 then exits 1 — AND N equals our benign-classified
+          # count. Killed-after-a-benign-line (exit 137, no summary) or a summary above
+          # the benign count is FATAL. Mirrors ay.ps1 exactly.
+          summary_n=$(printf '%s\n' "$restore_out" | grep -ioE 'warning: *errors ignored on restore: *[0-9]+' | grep -oE '[0-9]+' | tail -1 || true)
           if [ "$restore_rc" -ne 0 ]; then
-            echo "pg_restore exit=$restore_rc tolerated: all $benign_count error line(s) matched the anchored benign allowlist"
+            if [ -z "$summary_n" ]; then
+              echo "::error::pg_restore exit=$restore_rc WITHOUT its terminal 'errors ignored on restore' summary — abnormal termination (killed, connection lost, partial run)"
+              exit 1
+            fi
+            if [ "$summary_n" -ne "$benign_count" ]; then
+              echo "::error::pg_restore summary reports $summary_n ignored error(s) but only $benign_count classified benign — unaccounted error(s)"
+              exit 1
+            fi
+            echo "pg_restore exit=$restore_rc tolerated: $benign_count benign error line(s), terminal summary consistent"
           fi
           docker exec tsdb psql -U postgres -d dst -c "SELECT timescaledb_post_restore()"
           docker exec tsdb psql -U postgres -d dst -c "ANALYZE"

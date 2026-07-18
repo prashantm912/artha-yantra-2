@@ -322,9 +322,11 @@ switch ($Verb) {
             'must be owner of extension timescaledb'
         )
         $benignHits = 0
+        $summaryN = -1   # pg_restore's terminal 'errors ignored on restore: N' count (-1 = summary absent)
         $fatalLines = @()
         foreach ($line in @($restoreOut)) {
             $t = "$line"
+            if ($t -match '(?i)warning:\s*errors ignored on restore:\s*(\d+)') { $summaryN = [int]$Matches[1]; continue }
             if ($t -notmatch '(?i)pg_restore:\s*error:' -and $t -notmatch '(?i)^\s*error:') { continue }
             $isBenign = $false
             foreach ($b in $benignPatterns) { if ($t -match [regex]::Escape($b)) { $isBenign = $true } }
@@ -335,12 +337,22 @@ switch ($Verb) {
             foreach ($fl in $fatalLines) { Write-Host "[ay]   $fl" }
             exit 1
         }
-        if ($restoreExit -ne 0 -and $benignHits -eq 0) {
-            Write-Host "[ay] RESTORE FAILED: pg_restore exit=$restoreExit with NO classifiable error line (unclassified failure - crash, connection loss, or an unrecognized error shape). Stack NOT restarted."
-            exit 1
-        }
+        # Review round 3: tolerate a non-zero exit ONLY when pg_restore terminated
+        # NORMALLY and self-accounts for every error. PG17 pg_restore.c prints
+        # 'pg_restore: warning: errors ignored on restore: N' iff n_errors>0, then
+        # exits 1 — so a run killed AFTER a benign error line (SIGKILL 137, docker
+        # disconnect) has NO summary and must never pass as tolerated, and a summary
+        # count above our benign-classified count means unaccounted errors.
         if ($restoreExit -ne 0) {
-            Write-Host "[ay] note: pg_restore exit=$restoreExit; all $benignHits reported error(s) matched the anchored benign allowlist."
+            if ($summaryN -lt 0) {
+                Write-Host "[ay] RESTORE FAILED: pg_restore exit=$restoreExit WITHOUT its terminal 'errors ignored on restore' summary - abnormal termination (killed, connection lost, partial run). Stack NOT restarted."
+                exit 1
+            }
+            if ($summaryN -ne $benignHits) {
+                Write-Host "[ay] RESTORE FAILED: pg_restore summary reports $summaryN ignored error(s) but only $benignHits classified benign - unaccounted error(s). Stack NOT restarted."
+                exit 1
+            }
+            Write-Host "[ay] note: pg_restore exit=$restoreExit; all $benignHits error(s) matched the anchored benign allowlist and the terminal summary is consistent."
         }
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'SELECT timescaledb_post_restore()')
         Invoke-Compose         @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-c', 'ANALYZE')

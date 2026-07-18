@@ -52,10 +52,10 @@ class FullEquityCurveMetricsTest {
     // sanity: the downsampler genuinely strips the trough this test relies on.
     assertThat(down).doesNotContain(full.get(501));
 
-    Metrics onFull = calc.compute(List.of(), full, INITIAL, full.get(999).equity(), "1m", 1000L, 0L);
+    Metrics onFull = calc.compute(List.of(), full, INITIAL, full.get(999).equity(), "1m", "1m", 1000L, 0L);
     Metrics onDown =
         calc.compute(
-            List.of(), down, INITIAL, down.get(down.size() - 1).equity(), "1m", 1000L, 0L);
+            List.of(), down, INITIAL, down.get(down.size() - 1).equity(), "1m", "1m", 1000L, 0L);
 
     // The FULL curve captures the ~60% drawdown; the downsampled curve misses it entirely.
     assertThat(onFull.maxDrawdown()).isGreaterThan(new BigDecimal("59"));
@@ -86,6 +86,43 @@ class FullEquityCurveMetricsTest {
   }
 
   @Test
+  void sharpeSortinoAnnualizeAtTheCurveCadenceNotThePrimaryTimeframe() {
+    // AY-SL-01 fix round 2: the replay equity curve is 1m-spaced REGARDLESS of primary timeframe
+    // (the primary rolls up signals only), so a 3m-primary run's ratio metrics must annualize at the
+    // curve's 1m cadence — annualizing the same 1m-spaced returns at 3m periodsPerYear understates
+    // Sharpe/Sortino ≈√3 (1h ≈√60). tradeFrequency, by contrast, legitimately keys off the PRIMARY
+    // timeframe (#785). This pins the split: wrong wiring in either direction fails.
+    List<EquityPoint> curve = new ArrayList<>();
+    for (int i = 0; i < 1000; i++) {
+      // 1m-spaced zigzag with genuine down-moves so sharpe/sortino are non-degenerate (non-zero).
+      curve.add(new EquityPoint(T0.plusMinutes(i), new BigDecimal(100000 + i * 5 + (i % 3) * 40)));
+    }
+    BigDecimal fin = curve.get(999).equity();
+    List<Trade> trades =
+        List.of(closedTrade(1, "100", "110", "10"), closedTrade(1, "100", "110", "10"));
+
+    Metrics m3mPrimary = calc.compute(trades, curve, INITIAL, fin, "3m", "1m", 1000L, 100L);
+    Metrics m1mPrimary = calc.compute(trades, curve, INITIAL, fin, "1m", "1m", 1000L, 100L);
+    Metrics wrongCadence = calc.compute(trades, curve, INITIAL, fin, "3m", "3m", 1000L, 100L);
+
+    // sanity: the fixture discriminates (3m-annualized values genuinely differ from 1m-annualized).
+    assertThat(wrongCadence.sharpe()).isNotEqualByComparingTo(m1mPrimary.sharpe());
+    // Sharpe/Sortino follow the CURVE cadence: a 3m-primary run over the same 1m-spaced curve equals
+    // the 1m-primary run — if compute wrongly annualized at the primary timeframe, m3mPrimary would
+    // instead equal wrongCadence and this fails.
+    assertThat(m3mPrimary.sharpe()).isEqualByComparingTo(m1mPrimary.sharpe());
+    assertThat(m3mPrimary.sortino()).isEqualByComparingTo(m1mPrimary.sortino());
+    assertThat(m3mPrimary.sharpe()).isNotEqualByComparingTo(wrongCadence.sharpe());
+    // tradeFrequency still keys off the PRIMARY timeframe (sessions divisor 125 for 3m vs 375 for
+    // 1m) — the cadence split must not leak into the session-denominated metrics (#785).
+    assertThat(m3mPrimary.full().get("tradeFrequency").asText())
+        .isEqualTo(wrongCadence.full().get("tradeFrequency").asText())
+        .isNotEqualTo(m1mPrimary.full().get("tradeFrequency").asText());
+    // maxDrawdown is cadence-independent.
+    assertThat(m3mPrimary.maxDrawdown()).isEqualByComparingTo(wrongCadence.maxDrawdown());
+  }
+
+  @Test
   void shortRunBelow500PointsIsByteIdenticalMetricsBeforeAndAfter() {
     // A ≤500-point curve: the persistence downsampler is a NO-OP (returns the same list), so a short
     // run's metrics are byte-identical to the pre-fix behaviour (regression guard).
@@ -97,13 +134,19 @@ class FullEquityCurveMetricsTest {
     assertThat(stored).isSameAs(curve); // no-op below the target
 
     Metrics onFull =
-        calc.compute(List.of(), curve, INITIAL, curve.get(299).equity(), "1m", 300L, 0L);
+        calc.compute(List.of(), curve, INITIAL, curve.get(299).equity(), "1m", "1m", 300L, 0L);
     Metrics onStored =
-        calc.compute(List.of(), stored, INITIAL, curve.get(299).equity(), "1m", 300L, 0L);
+        calc.compute(List.of(), stored, INITIAL, curve.get(299).equity(), "1m", "1m", 300L, 0L);
 
     assertThat(onStored.sharpe()).isEqualByComparingTo(onFull.sharpe());
     assertThat(onStored.sortino()).isEqualByComparingTo(onFull.sortino());
     assertThat(onStored.maxDrawdown()).isEqualByComparingTo(onFull.maxDrawdown());
+  }
+
+  private static Trade closedTrade(long qty, String entry, String exit, String pnl) {
+    return new Trade(
+        0, null, qty, T0, new BigDecimal(entry), T0.plusMinutes(30), new BigDecimal(exit),
+        new BigDecimal(pnl), null, null, 0, null, null, null, null, null, null);
   }
 
   private record Fixture(StrategyDefinition definition, List<EngineCandle> primary) {}

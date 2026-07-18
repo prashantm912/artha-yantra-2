@@ -128,6 +128,10 @@ public class FoldEvaluator {
         result.initialEquity(),
         result.finalEquity(),
         definition.primaryTimeframe(),
+        // AY-SL-01 cadence: fold slices replay through the same engines, whose equity curves are
+        // 1m-spaced regardless of primary timeframe — annualize at the curve cadence (see
+        // BacktestRunner's matching call).
+        "1m",
         result.totalBars(),
         result.barsInPosition());
   }

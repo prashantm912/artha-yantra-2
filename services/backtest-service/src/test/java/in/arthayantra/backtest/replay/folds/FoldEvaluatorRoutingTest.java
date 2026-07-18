@@ -78,9 +78,10 @@ class FoldEvaluatorRoutingTest {
 
   @Test
   void optionsStrategyFoldRoutesThroughPremiumReplay() {
-    // 10-arg core: the 8 replay inputs + a per-fold GateCoverage + the cost-stress slippageMultiplier.
+    // 11-arg core: the 8 replay inputs + a per-fold GateCoverage + the cost-stress slippageMultiplier
+    // + the AY-SL-03 warmup prefix (the pre-window PAST-ONLY bars).
     when(premium.replay(
-            any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(empty());
     when(metrics.compute(any(), any(), any(), any(), any(), anyLong(), anyLong()))
         .thenReturn(FoldTestFixtures.metricsWithSharpe(1.0));
@@ -100,13 +101,16 @@ class FoldEvaluatorRoutingTest {
 
     // train + OOS = two premium replays per fold; the bare candle-close engine is never touched.
     verify(premium, times(2))
-        .replay(any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+        .replay(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     verifyNoInteractions(plain);
   }
 
   @Test
   void nonOptionsStrategyFoldUsesPlainEngine() {
-    when(plain.replay(any(), any(), any(), any(), any(), any(), any(), anyBoolean()))
+    // 11-arg warmup overload: the 8 candle inputs + the two null progress/decision side-channels +
+    // the AY-SL-03 warmup prefix.
+    when(plain.replay(
+            any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any()))
         .thenReturn(empty());
     when(metrics.compute(any(), any(), any(), any(), any(), anyLong(), anyLong()))
         .thenReturn(FoldTestFixtures.metricsWithSharpe(1.0));
@@ -124,7 +128,8 @@ class FoldEvaluatorRoutingTest {
         CostConfig.defaults(),
         true);
 
-    verify(plain, times(2)).replay(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
+    verify(plain, times(2))
+        .replay(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any());
     verifyNoInteractions(premium);
   }
 }

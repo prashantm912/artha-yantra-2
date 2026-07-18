@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -11,11 +11,16 @@ const state: {
   positions: PositionEntry[];
   tradebook: TradebookEntry[];
   funds: Funds | undefined;
-} = { orderbook: [], positions: [], tradebook: [], funds: undefined };
+  positionsError: boolean;
+} = { orderbook: [], positions: [], tradebook: [], funds: undefined, positionsError: false };
+
+// An errored query is what the QueryState wrapper keys off (isError → the shared error card); a
+// success is the plain `{ data }`. FE-04: on a positions 500 the page must NOT paint a false-empty.
+const errored = () => ({ isError: true, refetch: vi.fn() });
 
 vi.mock('../../api/orders.ts', () => ({
   useOrderbook: () => ({ data: state.orderbook, isLoading: false }),
-  usePositions: () => ({ data: state.positions, isLoading: false }),
+  usePositions: () => (state.positionsError ? errored() : { data: state.positions, isLoading: false }),
   useTradebook: () => ({ data: state.tradebook, isLoading: false }),
   useFunds: () => ({ data: state.funds, isLoading: false }),
 }));
@@ -34,6 +39,10 @@ function renderPage() {
 }
 
 describe('OrdersPage', () => {
+  beforeEach(() => {
+    state.positionsError = false;
+  });
+
   it('renders the four read-only tables with faithful columns and rows', () => {
     state.orderbook = [
       {
@@ -116,5 +125,24 @@ describe('OrdersPage', () => {
     expect(within(strip).getAllByText('0.00').length).toBe(2); // total MTM + net exposure both 0.00
     expect(within(strip).getByText('0 / 0')).toBeInTheDocument(); // no longs / shorts
     expect(within(strip).getByText('—')).toBeInTheDocument(); // funds dash when not configured
+  });
+
+  it('renders an error state (not a false-empty) when the positions fetch 500s (FE-04)', () => {
+    state.orderbook = [];
+    state.tradebook = [];
+    state.funds = { status: 'OK', availableCash: '100', collateral: '0', m2mRealized: '0', m2mUnrealized: '0', utilisedDebits: '0' };
+    state.positionsError = true;
+
+    renderPage();
+
+    // Positions renders the shared error card (role=alert), NOT the "No open positions." empty
+    // message — and it's the only errored query, so exactly one error card shows.
+    expect(screen.getByTestId('qs-error')).toBeInTheDocument();
+    expect(screen.getByText('Couldn\'t load positions')).toBeInTheDocument();
+    expect(screen.queryByText('No open positions.')).not.toBeInTheDocument();
+    // The healthy orderbook/tradebook still show their genuine empty messages (empty ≠ error).
+    expect(screen.getAllByText('No orders.').length).toBeGreaterThan(0);
+    // The client-side P&L summary strip is suppressed on a positions error — no misleading zero book.
+    expect(screen.queryByTestId('orders-pnl-strip')).not.toBeInTheDocument();
   });
 });

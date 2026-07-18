@@ -20,6 +20,7 @@ import { usePaperAccount, usePaperPnl, usePaperPositions } from '../../api/paper
 import { JOB_ACTIVE_STATES, useRecentJobs, useSystemStatus } from '../../api/dashboard.ts';
 import { useDataHealth } from '../../api/health.ts';
 import { PageHeader, LiveDot } from '../../components/PageHeader.tsx';
+import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import { FocusPanel } from '../../components/insights/FocusPanel.tsx';
@@ -101,7 +102,6 @@ export function DashboardPage() {
   );
 
   const s = status.data;
-  const summary = pnl.data?.summary ?? null;
   const health = dataHealth.data;
   const healthValue = !health
     ? '—'
@@ -159,45 +159,55 @@ export function DashboardPage() {
         <Skeleton variant="metric-strip" cols={5} className="mb-4" />
       )}
 
-      {/* C. KPI strip — Paper P&L hero numbers (Realized rendered HERE, in exactly one node) */}
-      {summary ? (
-        <BeatStrip data-testid="dashboard-kpis" className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <BeatItem>
-            <Kpi
-              label="Realized P&L"
-              value={money(summary.realizedTotal)}
-              sub="₹ · all sessions"
-              tone={toneClass(summary.realizedTotal)}
-              arrow={isNegative(summary.realizedTotal) ? 'down' : 'up'}
-            />
-          </BeatItem>
-          <BeatItem>
-            <Kpi
-              label="Day P&L"
-              value={account.data ? money(account.data.dayPnl) : '—'}
-              sub="₹ · today"
-              tone={account.data ? toneClass(account.data.dayPnl) : undefined}
-              arrow={account.data ? (isNegative(account.data.dayPnl) ? 'down' : 'up') : undefined}
-            />
-          </BeatItem>
-          <BeatItem>
-            <Kpi
-              label="Open / Closed"
-              value={`${positions.data?.items.length ?? 0} / ${summary.trades}`}
-              sub="positions / trades"
-            />
-          </BeatItem>
-          <BeatItem>
-            <Kpi
-              label="Win rate"
-              value={summary.winRate ? formatDecimal(summary.winRate, 4) : '—'}
-              sub="closed trades"
-            />
-          </BeatItem>
-        </BeatStrip>
-      ) : (
-        <Skeleton variant="metric-strip" cols={4} className="mb-4" />
-      )}
+      {/* C. KPI strip — Paper P&L hero numbers (Realized rendered HERE, in exactly one node). Routed
+          through QueryState(pnl) so a paper-P&L 500 shows the shared error card — never a
+          forever-skeleton or a false-empty zero book (FE-04). */}
+      <QueryState
+        query={pnl}
+        isEmpty={() => false}
+        errorTitle="Couldn't load paper P&L"
+        skeleton={<Skeleton variant="metric-strip" cols={4} className="mb-4" />}
+      >
+        {(pnlData) => {
+          const summary = pnlData.summary;
+          return (
+            <BeatStrip data-testid="dashboard-kpis" className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <BeatItem>
+                <Kpi
+                  label="Realized P&L"
+                  value={money(summary.realizedTotal)}
+                  sub="₹ · all sessions"
+                  tone={toneClass(summary.realizedTotal)}
+                  arrow={isNegative(summary.realizedTotal) ? 'down' : 'up'}
+                />
+              </BeatItem>
+              <BeatItem>
+                <Kpi
+                  label="Day P&L"
+                  value={account.data ? money(account.data.dayPnl) : '—'}
+                  sub="₹ · today"
+                  tone={account.data ? toneClass(account.data.dayPnl) : undefined}
+                  arrow={account.data ? (isNegative(account.data.dayPnl) ? 'down' : 'up') : undefined}
+                />
+              </BeatItem>
+              <BeatItem>
+                <Kpi
+                  label="Open / Closed"
+                  value={`${positions.data?.items.length ?? 0} / ${summary.trades}`}
+                  sub="positions / trades"
+                />
+              </BeatItem>
+              <BeatItem>
+                <Kpi
+                  label="Win rate"
+                  value={summary.winRate ? formatDecimal(summary.winRate, 4) : '—'}
+                  sub="closed trades"
+                />
+              </BeatItem>
+            </BeatStrip>
+          );
+        }}
+      </QueryState>
 
       {/* D. Focus panel (INT-I1, shadow mode) — an additive preview of the priority-ranked decision
           surface that will replace the passive "Active Signals" card below once the layer is trusted
@@ -227,18 +237,29 @@ export function DashboardPage() {
         </SectionCard>
 
         <SectionCard icon={Wallet} title="Paper P&L" to="/paper">
-          {summary ? (
-            <dl className="grid grid-cols-2 gap-y-1 text-body-sm">
-              <dt className="text-ay-muted">Win rate</dt>
-              <dd className="nums text-right">{summary.winRate ? formatDecimal(summary.winRate, 4) : '—'}</dd>
-              <dt className="text-ay-muted">Closed trades</dt>
-              <dd className="nums text-right">{summary.trades}</dd>
-              <dt className="text-ay-muted">Open positions</dt>
-              <dd className="nums text-right">{positions.data?.items.length ?? 0}</dd>
-            </dl>
-          ) : (
-            <p className="text-body-sm text-ay-muted">No paper activity yet.</p>
-          )}
+          {/* Routed through QueryState(pnl): a paper-P&L 500 renders the shared error card rather than
+              the "No paper activity yet." copy — a real fault must not read as an empty book (FE-04).
+              A genuine idle account is a 200 with zero counts and still renders the figures below. */}
+          <QueryState
+            query={pnl}
+            isEmpty={() => false}
+            errorTitle="Couldn't load paper P&L"
+            skeleton={<Skeleton variant="table-rows" rows={3} cols={2} />}
+          >
+            {(pnlData) => {
+              const summary = pnlData.summary;
+              return (
+                <dl className="grid grid-cols-2 gap-y-1 text-body-sm">
+                  <dt className="text-ay-muted">Win rate</dt>
+                  <dd className="nums text-right">{summary.winRate ? formatDecimal(summary.winRate, 4) : '—'}</dd>
+                  <dt className="text-ay-muted">Closed trades</dt>
+                  <dd className="nums text-right">{summary.trades}</dd>
+                  <dt className="text-ay-muted">Open positions</dt>
+                  <dd className="nums text-right">{positions.data?.items.length ?? 0}</dd>
+                </dl>
+              );
+            }}
+          </QueryState>
         </SectionCard>
 
         <SectionCard icon={Cog} title="Jobs">

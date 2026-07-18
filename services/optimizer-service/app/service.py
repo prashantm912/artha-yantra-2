@@ -92,6 +92,22 @@ def _fold_objective_guard(
     return overridden, warning
 
 
+def _effective_fold_metric(
+    request_objective: dict[str, Any], optimize_block: dict[str, Any]
+) -> str | None:
+    """The metric each OOS fold is measured in — what ``oos_fold_mean`` aggregates and what the
+    fold-fed pruner keys off (AY-OPT-02). The objective is REQUEST-owned (the documented split:
+    objective/walkForward/maxTrials come from the request, only parameters from the YAML), so the
+    request's concrete objective metric wins; the YAML ``optimize.objective.metric`` is the fallback
+    ONLY when the request names none. ``oos_fold_mean`` is the AGGREGATE (the mean of the
+    fold metric), not a per-fold metric, so it too falls back to the YAML. ``None`` when neither
+    names one (the backtest worker then defaults to ``sharpe``)."""
+    request_metric = (request_objective or {}).get("metric")
+    if request_metric and request_metric != _OOS_METRIC:
+        return request_metric
+    return ((optimize_block or {}).get("objective") or {}).get("metric")
+
+
 def _coerce_int(value: Any, field: str) -> int:
     """Coerce a request field to int, raising a 400 (not an opaque int()/KeyError 500) on a
     non-numeric value (register §9-8)."""
@@ -162,6 +178,7 @@ class SweepService:
         # Fold-sweep objective guard: a walk-forward sweep on an in-sample metric overfits — steer
         # it to oos_fold_mean (+ warn). Run before the echo so the job records the EFFECTIVE
         # objective, not the as-submitted one.
+        raw_objective = request.get("objective") or {}  # pre-guard: the request's own metric
         objective = request.get("objective", {"metric": "sharpe", "direction": "maximize"})
         objective, fold_warning = _fold_objective_guard(objective, walk_forward)
         if fold_warning:
@@ -199,6 +216,11 @@ class SweepService:
         for warning in _yaml_precedence_warnings(optimize_block, request):
             _LOG.warning(warning)
 
+        # The REQUEST-owned fold objective metric (AY-OPT-02) — threaded into each trial's backtest
+        # request so the fold aggregation (oos_fold_mean) + per-fold pruner telemetry key off the
+        # metric the REQUEST declared, not whatever the YAML names.
+        fold_objective_metric = _effective_fold_metric(raw_objective, optimize_block)
+
         jobs = self._jobs_factory()
         try:
             sweep_id = jobs.insert_sweep(None, _sweep_echo(request, parameters, objective))
@@ -227,6 +249,7 @@ class SweepService:
                 "walk_forward": walk_forward,
                 "request_base": request_base,
                 "early_stopping": early_stopping,
+                "fold_objective_metric": fold_objective_metric,
             },
             daemon=True,
             name=f"sweep-{sweep_id[:8]}",

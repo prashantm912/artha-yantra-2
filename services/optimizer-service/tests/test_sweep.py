@@ -68,6 +68,33 @@ def test_foldless_trial_request_marks_full_window():
     request = sweep.build_trial_request(REQUEST_BASE, {"x": 1}, None)
     assert request["foldContext"] is False
     assert request["paramsOverride"] == {"x": 1}
+    assert "foldObjectiveMetric" not in request  # none given → no stray field (worker defaults)
     request_wf = sweep.build_trial_request(REQUEST_BASE, {"x": 1}, {"train_days": 60})
     assert request_wf["foldContext"] is True
     assert request_wf["walkForward"] == {"train_days": 60}
+
+
+def test_trial_request_carries_the_request_owned_fold_metric():
+    # AY-OPT-02: the REQUEST-owned fold metric is threaded onto every trial job's backtest request,
+    # so backtest-service measures each OOS fold + prunes on the metric the sweep declared.
+    jobs, trials = FakeJobs(), FakeTrials()
+    sweep_id = jobs.insert_sweep(None, {"echo": True})
+    sweep.run_sweep(
+        sweep_id=sweep_id,
+        strategy_version_id=None,
+        parameters=PARAMS,
+        method="grid",
+        max_trials=21,
+        objective={"metric": "oos_fold_mean", "direction": "maximize"},
+        seed=1,
+        walk_forward={"train_days": 60, "test_days": 20},
+        request_base=REQUEST_BASE,
+        jobs=jobs,
+        trials=trials,
+        dispatcher=FakeDispatcher(jobs),
+        parallelism=4,
+        fold_objective_metric="expectancy",  # request said expectancy even if the YAML says sharpe
+    )
+    trial_requests = [r["request"] for r in jobs.rows.values() if r.get("kind") == "TRIAL"]
+    assert trial_requests
+    assert all(req["foldObjectiveMetric"] == "expectancy" for req in trial_requests)

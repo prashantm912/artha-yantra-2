@@ -73,6 +73,9 @@ public class WalkForwardRunner {
    *
    * @param config the raw resolved config JSONB (carries {@code walk_forward}/{@code constraints}/
    *     {@code objective} — the compiled definition does not)
+   * @param objectiveMetric the §D.9 metric each OOS fold is measured in — REQUEST-owned (AY-OPT-02),
+   *     resolved + threaded by the optimizer (request objective, YAML {@code objective.metric}
+   *     fallback), so the fold aggregation keys off the metric the sweep declared, not the YAML's
    * @param regimeLabels the benchmark entry-day → regime label map (T−1 computed), used to fill each
    *     fold's {@code regimeMix} + per-regime OOS aggregates + per-trade entry-day tags (guard 6)
    * @return the fold persistence bundle (never null; its {@code foldMetrics} array may be empty when
@@ -80,6 +83,7 @@ public class WalkForwardRunner {
    */
   public FoldPersistence run(
       JsonNode config,
+      String objectiveMetric,
       StrategyDefinition definition,
       String exchange,
       String tradingsymbol,
@@ -94,7 +98,6 @@ public class WalkForwardRunner {
       Map<LocalDate, RegimeLabel> regimeLabels) {
     JsonNode optimize = config.path("backtest").path("optimize");
     int minTrades = optimize.path("constraints").path("min_trades").asInt(DEFAULT_MIN_TRADES);
-    String objectiveMetric = optimize.path("objective").path("metric").asText("sharpe");
     String aggregation =
         optimize.path("objective").path("fold_aggregation").asText(DEFAULT_AGGREGATION);
 

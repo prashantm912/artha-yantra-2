@@ -86,14 +86,22 @@ def report_fold_objectives(trial: optuna.Trial, result: dict[str, Any]) -> None:
 
 
 def build_trial_request(
-    request_base: dict[str, Any], params: dict[str, Any], walk_forward: dict[str, Any] | None
+    request_base: dict[str, Any],
+    params: dict[str, Any],
+    walk_forward: dict[str, Any] | None,
+    fold_objective_metric: str | None = None,
 ) -> dict[str, Any]:
-    """A TRIAL job request = the base run spec + the sampled override + fold context."""
+    """A TRIAL job request = the base run spec + the sampled override + fold context. Carries the
+    REQUEST-owned ``foldObjectiveMetric`` (AY-OPT-02) so backtest-service measures each OOS fold in
+    the metric the sweep declared, not the strategy YAML's — omitted when neither named one (the
+    worker then defaults to ``sharpe``, its pre-existing behaviour)."""
     request = dict(request_base)
     request["paramsOverride"] = params
     request["foldContext"] = bool(walk_forward)
     if walk_forward:
         request["walkForward"] = walk_forward
+    if fold_objective_metric:
+        request["foldObjectiveMetric"] = fold_objective_metric
     return request
 
 
@@ -115,6 +123,7 @@ def run_sweep(
     parallelism: int = 4,
     early_stopping: int | None = None,
     cancelled: Callable[[], bool] | None = None,
+    fold_objective_metric: str | None = None,
 ) -> optuna.Study:
     """Runs the sweep to completion and returns the in-memory study.
 
@@ -155,7 +164,9 @@ def run_sweep(
             trial_job_id = jobs.insert_trial(
                 sweep_id,
                 strategy_version_id,
-                build_trial_request(request_base, params, walk_forward),
+                build_trial_request(
+                    request_base, params, walk_forward, fold_objective_metric
+                ),
             )
             row_id = trials.insert(sweep_id, trial.number, params)
             pending[str(trial_job_id)] = (trial, row_id)

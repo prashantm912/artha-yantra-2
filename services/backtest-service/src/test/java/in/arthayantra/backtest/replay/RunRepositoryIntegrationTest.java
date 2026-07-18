@@ -13,6 +13,7 @@ import in.arthayantra.backtest.replay.options.PremiumSource;
 import in.arthayantra.backtest.testsupport.BacktestIntegrationTestBase;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -115,6 +116,63 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
             UUID.randomUUID().toString(),
             "owner")
         .id();
+  }
+
+  // AY-SL-01: risk metrics compute on the FULL in-memory equity curve, but the PERSISTED curve is
+  // still downsampled at the persistence boundary — a dense (>500-point) run stores ≤501 points, so
+  // the storage/API shape is unchanged even though the metric VALUES are now full-cadence.
+  @Test
+  void persistedEquityAndDrawdownCurvesAreDownsampledToAtMost501PointsForADenseRun() {
+    RunRepository runs = new RunRepository(jdbc, MAPPER, EngineIdentity.of(null, null));
+    OffsetDateTime t0 = OffsetDateTime.parse("2026-01-05T09:15:00+05:30");
+    List<EquityPoint> dense = new ArrayList<>();
+    for (int i = 0; i < 2000; i++) {
+      dense.add(new EquityPoint(t0.plusMinutes(i), new BigDecimal(100000 + i)));
+    }
+    ReplayResult result =
+        new ReplayResult(
+            List.of(), List.of(), dense, dense,
+            new BigDecimal("100000"), new BigDecimal("101999"), 2000L, 0L);
+    Metrics metrics =
+        new Metrics(
+            BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+            BigDecimal.ZERO, BigDecimal.ZERO, 0, MAPPER.createObjectNode());
+    UUID runId =
+        runs.insert(
+            newJobId(),
+            UUID.randomUUID(),
+            "NSE",
+            "NIFTY 50",
+            "1m",
+            t0,
+            t0.plusMinutes(1999),
+            result,
+            metrics,
+            null,
+            0L,
+            "dense-curve-hash",
+            null,
+            "strategy-engine/test",
+            PremiumSource.NA,
+            null,
+            null,
+            DatasetProvenance.none(),
+            "owner");
+
+    Integer equityLen =
+        jdbc.queryForObject(
+            "SELECT jsonb_array_length(equity_curve) FROM backtest_runs WHERE id=?",
+            Integer.class,
+            runId);
+    Integer drawdownLen =
+        jdbc.queryForObject(
+            "SELECT jsonb_array_length(drawdown_curve) FROM backtest_runs WHERE id=?",
+            Integer.class,
+            runId);
+    assertThat(equityLen).isNotNull().isLessThanOrEqualTo(501);
+    assertThat(drawdownLen).isNotNull().isLessThanOrEqualTo(501);
+    // strided, not collapsed to the endpoints — a meaningful display curve survives.
+    assertThat(equityLen).isGreaterThan(100);
   }
 
   @Test

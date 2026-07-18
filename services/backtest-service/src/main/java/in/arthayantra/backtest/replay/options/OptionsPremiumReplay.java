@@ -3,7 +3,6 @@ package in.arthayantra.backtest.replay.options;
 import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.backtest.client.MarketDataClient;
 import in.arthayantra.backtest.replay.CostConfig;
-import in.arthayantra.backtest.replay.EquityCurveDownsampler;
 import in.arthayantra.backtest.replay.EquityPoint;
 import in.arthayantra.backtest.replay.ReplayResult;
 import in.arthayantra.backtest.replay.Trade;
@@ -632,8 +631,10 @@ public class OptionsPremiumReplay {
     return new ReplayResult(
         signals,
         trades,
-        EquityCurveDownsampler.downsample(equity, 500),
-        EquityCurveDownsampler.downsample(drawdown, 500),
+        // AY-SL-01: carry the FULL curves for metric fidelity (Sharpe/Sortino/maxDD at true per-bar
+        // cadence); RunRepository downsamples the STORED/display curve at the persistence boundary.
+        equity,
+        drawdown,
         initialEquity,
         finalEquity,
         underlying.size(),

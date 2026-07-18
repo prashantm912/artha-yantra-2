@@ -334,8 +334,12 @@ public class ReplayEngine {
     return new ReplayResult(
         signals,
         trades,
-        EquityCurveDownsampler.downsample(equityCurve, 500),
-        EquityCurveDownsampler.downsample(drawdownCurve, 500),
+        // AY-SL-01: carry the FULL mark-to-market curves on the in-memory result so every risk
+        // metric (Sharpe/Sortino/maxDD, run-level AND per-fold) is computed at true per-bar cadence —
+        // a strided curve inflates Sharpe/Sortino ≈√stride and understates maxDD. Downsampling to a
+        // display curve happens ONLY at the persistence boundary (RunRepository).
+        equityCurve,
+        drawdownCurve,
         initialEquity,
         finalEquity,
         primaryOneMinute.size(),

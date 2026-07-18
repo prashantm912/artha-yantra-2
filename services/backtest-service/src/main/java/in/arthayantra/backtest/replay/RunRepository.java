@@ -25,6 +25,13 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class RunRepository {
 
+  /**
+   * The persisted equity/drawdown/benchmark curve is downsampled to at most this many points for
+   * lightweight-charts (§D.3). Risk metrics are computed on the FULL curve upstream (AY-SL-01); only
+   * the STORED/display curve is strided here, at the persistence boundary.
+   */
+  private static final int PERSISTED_CURVE_POINTS = 500;
+
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
   private final EngineIdentity engineIdentity;
@@ -72,8 +79,14 @@ public class RunRepository {
     BigDecimal sharpeDegradation = folds == null ? null : folds.sharpeDegradation();
     // §D.16: benchmark columns persist NULL — flagged, never silently zero — when coverage absent.
     boolean bench = benchmark != null && benchmark.present();
+    // AY-SL-01: the benchmark overlay is built on the FULL strategy curve (for correct alpha/beta),
+    // so downsample it here at the SAME target as the equity curve below — both curves are parallel
+    // (identical length + timestamps), so the strided subsets align point-for-point on the chart.
     String benchmarkCurve =
-        bench && !benchmark.benchmarkCurve().isEmpty() ? curveJson(benchmark.benchmarkCurve()) : null;
+        bench && !benchmark.benchmarkCurve().isEmpty()
+            ? curveJson(
+                EquityCurveDownsampler.downsample(benchmark.benchmarkCurve(), PERSISTED_CURVE_POINTS))
+            : null;
     // Replace-on-rerun (audit P1-10): a crash-recovery re-execution replaces the job's prior run
     // instead of persisting a duplicate (trades cascade via ON DELETE); uq_runs_job (V007) is the
     // backstop. The replay is deterministic, so the replacement is equivalent.
@@ -115,8 +128,10 @@ public class RunRepository {
         metrics.profitFactor(),
         metrics.tradeCount(),
         json(metrics.full()),
-        curveJson(result.equityCurve()),
-        curveJson(result.drawdownCurve()),
+        // AY-SL-01: metrics were computed on the FULL curve upstream; the STORED curve is downsampled
+        // here so the persisted equity_curve/drawdown_curve stay ≤501 points (storage shape unchanged).
+        curveJson(EquityCurveDownsampler.downsample(result.equityCurve(), PERSISTED_CURVE_POINTS)),
+        curveJson(EquityCurveDownsampler.downsample(result.drawdownCurve(), PERSISTED_CURVE_POINTS)),
         engineVersion,
         premiumSource.name(),
         foldMetrics == null ? null : json(foldMetrics),

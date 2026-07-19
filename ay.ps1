@@ -146,21 +146,24 @@ function Get-RestoreScalar {
     return ''
 }
 
-# AYDB-03: storage review-trigger gauge. The 50 GB retention REVIEW trigger
-# (docs/retention.md, Q4/A2) is a WHOLE-DATABASE volume, but the ay_hypertable_bytes
-# metric samples only marketdata.candles (~half the DB) — a candles-only read
-# under-reports the trigger by ~2x and it can be silently blown. This surfaces the true
-# pg_database_size total vs the 50 GB trigger, plus the largest hypertables, caggs and tables.
+# AYDB-03: storage budget gauge. The 100 GB storage budget (docs/retention.md, the
+# owner's hard disk ceiling — re-baselined 2026-07-19 from the old soft 50 GB "review
+# trigger") is a WHOLE-DATABASE volume, but the ay_hypertable_bytes metric samples only
+# marketdata.candles (~half the DB) — a candles-only read under-reports the budget by ~2x
+# and it can be silently blown. This surfaces the true pg_database_size total vs the 100 GB
+# budget (warn at 75 GB, alert at 90 GB), plus the largest hypertables, caggs and tables.
 # READ-ONLY (SELECT sizes only); hypertable_size() counts the _timescaledb_internal
 # chunk data a plain pg_total_relation_size() misses (the root bug). Uses
 # Invoke-ComposeAllowFail so a stopped stack degrades to a skip note, not an abort.
-# The 50 GB trigger is a LIVE ('artha') budget: mock ('artha_mock') reports size only,
+# The 100 GB budget is a LIVE ('artha') ceiling: mock ('artha_mock') reports size only,
 # never a % / warning against the live threshold (profile classified as in Set-ProfileEnv).
 function Show-StorageGauge {
     $profileList = Get-ActiveProfileList
     $isLive = -not ($profileList -contains 'mock')
     if ($isLive) { $db = 'artha' } else { $db = 'artha_mock' }
-    $reviewTriggerBytes = 50.0 * 1GB
+    $budgetBytes = 100.0 * 1GB   # owner's hard storage ceiling (was a soft 50 GB review trigger)
+    $warnBytes = 75.0 * 1GB      # review compression + snapshot scope
+    $alertBytes = 90.0 * 1GB     # urgent — approaching the ceiling
     $totalOut = Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-t', '-A', '-c', 'SELECT pg_database_size(current_database())')
     $dbBytes = $null
     foreach ($line in @($totalOut)) {
@@ -174,20 +177,22 @@ function Show-StorageGauge {
     }
     $dbGb = [math]::Round($dbBytes / 1GB, 1)
     if ($isLive) {
-        $pct = [math]::Round(($dbBytes / $reviewTriggerBytes) * 100, 1)
-        Write-Host "[ay] storage: DB '$db' = $dbGb GB / 50 GB review trigger ($pct%)"
-        if ($pct -ge 80) {
-            Write-Host '[ay]   WARNING >= 80% of the 50 GB review trigger - review compression + snapshot scope (docs/retention.md); widen disk or narrow scope, never silent retention.'
+        $pct = [math]::Round(($dbBytes / $budgetBytes) * 100, 1)
+        Write-Host "[ay] storage: DB '$db' = $dbGb GB / 100 GB budget ($pct%)"
+        if ($dbBytes -ge $alertBytes) {
+            Write-Host '[ay]   ALERT >= 90 GB (90% of the 100 GB ceiling) - act now: raise compression / narrow snapshot scope or widen disk (docs/retention.md); never silent retention.'
+        } elseif ($dbBytes -ge $warnBytes) {
+            Write-Host '[ay]   WARNING >= 75 GB (75% of the 100 GB budget) - review compression + snapshot scope (docs/retention.md).'
         }
     } else {
         Write-Host "[ay] storage: DB '$db' = $dbGb GB (mock DB size only)"
-        Write-Host "[ay]   the 50 GB review trigger applies to live 'artha', not evaluated here; switch to the live profile to check it."
+        Write-Host "[ay]   the 100 GB budget applies to live 'artha', not evaluated here; switch to the live profile to check it."
     }
     # Largest hypertables, continuous aggregates and plain tables. hypertable_size() counts
     # both the source hypertable and each cagg's materialization hypertable (the chunk data
     # a plain pg_total_relation_size() misses); hypertable parents are excluded from the plain
     # branch (NOT EXISTS) so they are not double-counted at their tiny parent size. Itemizing
-    # caggs matters: they are uncompressed (audit AYDB-01) and can rival the source table.
+    # caggs matters: pre-#940 they were uncompressed (audit AYDB-01, now resolved) and rivaled the source.
     $breakdownSql = 'SELECT name, kind, pg_size_pretty(bytes) FROM (SELECT format(''%I.%I'', hypertable_schema, hypertable_name) AS name, ''hypertable'' AS kind, hypertable_size(format(''%I.%I'', hypertable_schema, hypertable_name)::regclass) AS bytes FROM timescaledb_information.hypertables UNION ALL SELECT format(''%I.%I'', view_schema, view_name) AS name, ''cagg'' AS kind, hypertable_size(format(''%I.%I'', materialization_hypertable_schema, materialization_hypertable_name)::regclass) AS bytes FROM timescaledb_information.continuous_aggregates UNION ALL SELECT format(''%I.%I'', schemaname, tablename) AS name, ''table'' AS kind, pg_total_relation_size(format(''%I.%I'', schemaname, tablename)::regclass) AS bytes FROM pg_catalog.pg_tables t WHERE schemaname IN (''marketdata'',''strategy'',''backtest'',''admin'') AND NOT EXISTS (SELECT 1 FROM timescaledb_information.hypertables h WHERE h.hypertable_schema = t.schemaname AND h.hypertable_name = t.tablename)) u ORDER BY bytes DESC LIMIT 14'
     $breakdownOut = Invoke-ComposeAllowFail @('exec', '-T', 'timescaledb', 'psql', '-U', 'artha', '-d', "$db", '-t', '-A', '-F', '|', '-c', $breakdownSql)
     $rows = @()
@@ -195,7 +200,7 @@ function Show-StorageGauge {
         if ("$line" -match '\|') { $rows += "$line" }
     }
     if ($rows.Count -gt 0) {
-        Write-Host '[ay]   largest objects (hypertable_size / pg_total_relation_size; caggs are uncompressed, AYDB-01):'
+        Write-Host '[ay]   largest objects (hypertable_size / pg_total_relation_size; caggs compressed since #940, AYDB-01 resolved):'
         foreach ($r in $rows) {
             $parts = "$r".Split('|')
             if ($parts.Count -lt 3) { continue }
@@ -312,7 +317,7 @@ switch ($Verb) {
     }
     'status' {
         Invoke-Compose @('ps', '-a', '--format', 'table {{.Name}}\t{{.Service}}\t{{.Status}}\t{{.Publishers}}')
-        # AYDB-03: whole-DB storage total vs the 50 GB review trigger + largest objects.
+        # AYDB-03: whole-DB storage total vs the 100 GB budget + largest objects.
         Show-StorageGauge
     }
     'backup' {
@@ -531,8 +536,8 @@ ay - ArthaYantra operator CLI (project-scoped docker compose)
   ay down                   stop project containers (volumes kept)
   ay logs <svc>             follow logs for one service
   ay status                 healthcheck summary of all containers + whole-DB storage
-                            total; live 'artha' is evaluated vs the 50 GB review trigger
-                            (% + warning), mock reports DB size only (trigger not evaluated)
+                            total; live 'artha' is evaluated vs the 100 GB budget
+                            (% + warn 75 GB / alert 90 GB), mock reports DB size only
   ay backup [keep]          manual whole-db pg_dump (+ globals) into ./backups
                             (`keep` = a rotation-EXEMPT pre-migration dump into backups/pinned/)
   ay restore <dir|file>     restore a whole-db backup (dir or *-full.dump) — DROPS+recreates the DB

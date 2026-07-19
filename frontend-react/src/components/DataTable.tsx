@@ -1,5 +1,7 @@
 import {
+  Fragment,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -22,7 +24,7 @@ import {
   type SortingState,
   type VisibilityState,
 } from '@tanstack/react-table';
-import { ChevronDown, ChevronUp, ChevronsUpDown, Columns3 } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, ChevronsUpDown, Columns3 } from 'lucide-react';
 import { cn } from '../lib/cn.ts';
 import { InfoTip } from './atoms/InfoTip.tsx';
 import { adaptColumns, type AyColumnMeta } from './columnAdapter.ts';
@@ -123,6 +125,16 @@ interface DataTableProps<Row> {
   /** Override the desktop scroll container's max-height cap with any CSS length (e.g. '24rem',
    *  '65vh'). Omit to keep today's hardcoded max-h-[68vh]. */
   maxHeight?: string;
+  /** Make every row expandable into an inline detail panel. When provided, a leading expander column
+   *  appears whose control is a REAL in-cell `<button type="button">` (aria-expanded + aria-controls +
+   *  an Expand/Collapse aria-label) — NEVER a role="button" on the <tr> (audit M23 / #596: that strips
+   *  the cells of their required `row` parent → axe aria-required-parent + AT sees zero data rows). The
+   *  button is the keyboard/AT path; a row/card mouse onClick toggles too as a convenience (only when
+   *  {@link onRowClick} is unset). When a row is open, a detail <tr id=…> spanning EVERY column
+   *  (expander included) renders immediately after it with {@link renderExpanded}(row); the mobile card
+   *  gets the same button + the panel appended. Expansion state is internal (uncontrolled), keyed by
+   *  {@link rowKey}. Omit to keep today's exact render — no expander column, no detail rows, no state. */
+  renderExpanded?: (row: Row) => ReactNode;
 }
 
 const ALIGN: Record<ColumnAlign, string> = {
@@ -159,6 +171,7 @@ export function DataTable<Row>({
   onSortChange,
   onRowClick,
   maxHeight,
+  renderExpanded,
   // virtualizeAfter (§3.2.5) + persistKey (§3.2.3) are accepted but intentionally unimplemented
   // no-ops for this phase — left off the destructure so omitting them yields today's exact render.
 }: DataTableProps<Row>) {
@@ -238,6 +251,22 @@ export function DataTable<Row>({
   const total = table.getFilteredRowModel().rows.length;
   const empty = bodyRows.length === 0;
 
+  // Optional expandable rows (opt-in via renderExpanded). Internal, uncontrolled state keyed by rowKey.
+  // The leading expander column adds one to the column count, so the detail cell — and the empty-state
+  // cell — must span visibleLeafCount + 1 to reach full width. Omitting renderExpanded leaves
+  // `expandable` false, so the count, the state, and the render collapse to today's exact output.
+  const expandable = renderExpanded != null;
+  const totalColumnCount = visibleLeafCount + (expandable ? 1 : 0);
+  const instanceId = useId();
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = (key: string) =>
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   const mobileLeafCols = table
     .getVisibleLeafColumns()
     .filter((c) => (c.columnDef.meta as AyColumnMeta<Row> | undefined)?.mobileLabel);
@@ -261,9 +290,17 @@ export function DataTable<Row>({
   // desktop cell and the mobile card, so it is the keyboard path on both. The row/card onClick stays
   // a pure mouse convenience. Unset onRowClick → {}, leaving rows plain, non-interactive (today's
   // exact render — no role, no tabIndex, no pointer).
-  const rowInteractive = onRowClick != null;
-  const rowClickProps = (row: Row, index: number): HTMLAttributes<HTMLElement> =>
-    onRowClick ? { onClick: () => onRowClick(row, index) } : {};
+  // A row/card gets a MOUSE-ONLY expand-toggle when it's expandable and the adopter hasn't claimed the
+  // click for its own onRowClick — this preserves the "click anywhere on the row to expand" convenience
+  // the hand-rolled adopters had. The in-cell expander <button> stays the required keyboard/AT path
+  // either way (and stopPropagations so it never double-fires against this row handler).
+  const rowMouseToggle = expandable && onRowClick == null;
+  const rowInteractive = onRowClick != null || rowMouseToggle;
+  const rowClickProps = (row: Row, index: number, key: string): HTMLAttributes<HTMLElement> => {
+    if (onRowClick) return { onClick: () => onRowClick(row, index) };
+    if (rowMouseToggle) return { onClick: () => toggleExpanded(key) };
+    return {};
+  };
 
   return (
     <div>
@@ -339,6 +376,11 @@ export function DataTable<Row>({
           <thead className="sticky top-0 z-10 bg-surface-1 text-ay-muted shadow-[inset_0_-1px_0_var(--ay-border)]">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
+                {expandable && (
+                  <th scope="col" className={cn(cellPad, 'w-8')}>
+                    <span className="ay-sr-only">Expand</span>
+                  </th>
+                )}
                 {hg.headers.map((h) => {
                   const col = h.column;
                   const meta = col.columnDef.meta as AyColumnMeta<Row>;
@@ -402,43 +444,75 @@ export function DataTable<Row>({
             ))}
           </thead>
           <tbody>
-            {bodyRows.map((r, i) => (
-              <tr
-                key={r.id}
-                ref={scrollToRowKey != null && r.id === scrollToRowKey ? centerRef : null}
-                {...rowClickProps(r.original, i)}
-                className={cn(
-                  'border-t border-ay-border text-ay-text transition-colors',
-                  zebra && (i % 2 === 1 ? 'bg-surface-1/40' : 'bg-transparent'),
-                  'hover:bg-surface-2/60',
-                  rowInteractive && 'cursor-pointer',
-                  rowClassName?.(r.original),
-                )}
-              >
-                {r.getVisibleCells().map((cell) => {
-                  const meta = cell.column.columnDef.meta as AyColumnMeta<Row>;
-                  const pinned = cell.column.getIsPinned() === 'left';
-                  return (
-                    <td
-                      key={cell.id}
-                      style={pinnedStyle(cell.column)}
-                      className={cn(
-                        cellPad,
-                        meta.mono && 'tabular-nums',
-                        ALIGN[meta.align],
-                        pinned && PINNED_CLASS,
-                        meta.cellClassName?.(r.original),
-                      )}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+            {bodyRows.map((r, i) => {
+              const isOpen = expandable && expandedKeys.has(r.id);
+              const detailId = expandable ? `${instanceId}-${r.id}-detail` : undefined;
+              return (
+                <Fragment key={r.id}>
+                  <tr
+                    ref={scrollToRowKey != null && r.id === scrollToRowKey ? centerRef : null}
+                    {...rowClickProps(r.original, i, r.id)}
+                    className={cn(
+                      'border-t border-ay-border text-ay-text transition-colors',
+                      zebra && (i % 2 === 1 ? 'bg-surface-1/40' : 'bg-transparent'),
+                      'hover:bg-surface-2/60',
+                      rowInteractive && 'cursor-pointer',
+                      rowClassName?.(r.original),
+                    )}
+                  >
+                    {expandable && (
+                      <td className={cn(cellPad, 'w-8 text-center')}>
+                        <button
+                          type="button"
+                          aria-expanded={isOpen}
+                          aria-controls={detailId}
+                          aria-label={isOpen ? 'Collapse details' : 'Expand details'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleExpanded(r.id);
+                          }}
+                          className="inline-flex items-center justify-center rounded-sm text-ay-muted hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                        >
+                          <ChevronRight
+                            aria-hidden="true"
+                            className={cn('size-4 transition-transform', isOpen && 'rotate-90')}
+                          />
+                        </button>
+                      </td>
+                    )}
+                    {r.getVisibleCells().map((cell) => {
+                      const meta = cell.column.columnDef.meta as AyColumnMeta<Row>;
+                      const pinned = cell.column.getIsPinned() === 'left';
+                      return (
+                        <td
+                          key={cell.id}
+                          style={pinnedStyle(cell.column)}
+                          className={cn(
+                            cellPad,
+                            meta.mono && 'tabular-nums',
+                            ALIGN[meta.align],
+                            pinned && PINNED_CLASS,
+                            meta.cellClassName?.(r.original),
+                          )}
+                        >
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  {isOpen && (
+                    <tr id={detailId} className="border-t border-ay-border bg-surface-2/30">
+                      <td colSpan={totalColumnCount} className="whitespace-normal px-3 py-3">
+                        {renderExpanded!(r.original)}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
             {empty && (
               <tr>
-                <td colSpan={visibleLeafCount} className="px-2 py-4 text-center text-ay-muted">
+                <td colSpan={totalColumnCount} className="px-2 py-4 text-center text-ay-muted">
                   {emptyMessage}
                 </td>
               </tr>
@@ -449,35 +523,64 @@ export function DataTable<Row>({
 
       {/* Phone (portrait): one card per row, label: value per mobile-visible column */}
       <div className="space-y-2 md:hidden">
-        {bodyRows.map((r, i) => (
-          <div
-            key={r.id}
-            {...rowClickProps(r.original, i)}
-            className={cn(
-              'rounded border border-ay-border bg-surface-1 p-2 text-xs',
-              rowInteractive && 'cursor-pointer',
-              rowClassName?.(r.original),
-            )}
-          >
-            <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-              {mobileLeafCols.map((col) => {
-                const meta = col.columnDef.meta as AyColumnMeta<Row>;
-                const cell = r.getAllCells().find((c) => c.column.id === col.id);
-                return (
-                  <div key={col.id} className="flex justify-between gap-2">
-                    <dt className="inline-flex items-center gap-1 text-ay-muted">
-                      {meta.mobileLabel}
-                      {meta.help && <InfoTip text={meta.help} label={meta.mobileLabel} />}
-                    </dt>
-                    <dd className={cn('tabular-nums', meta.cellClassName?.(r.original))}>
-                      {cell && flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </dd>
-                  </div>
-                );
-              })}
-            </dl>
-          </div>
-        ))}
+        {bodyRows.map((r, i) => {
+          const isOpen = expandable && expandedKeys.has(r.id);
+          const detailId = expandable ? `${instanceId}-${r.id}-detail-m` : undefined;
+          return (
+            <div
+              key={r.id}
+              {...rowClickProps(r.original, i, r.id)}
+              className={cn(
+                'rounded border border-ay-border bg-surface-1 p-2 text-xs',
+                rowInteractive && 'cursor-pointer',
+                rowClassName?.(r.original),
+              )}
+            >
+              {expandable && (
+                <div className="mb-1 flex justify-end">
+                  <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    aria-controls={detailId}
+                    aria-label={isOpen ? 'Collapse details' : 'Expand details'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleExpanded(r.id);
+                    }}
+                    className="inline-flex items-center justify-center rounded-sm text-ay-muted hover:text-accent focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+                  >
+                    <ChevronRight
+                      aria-hidden="true"
+                      className={cn('size-4 transition-transform', isOpen && 'rotate-90')}
+                    />
+                  </button>
+                </div>
+              )}
+              <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                {mobileLeafCols.map((col) => {
+                  const meta = col.columnDef.meta as AyColumnMeta<Row>;
+                  const cell = r.getAllCells().find((c) => c.column.id === col.id);
+                  return (
+                    <div key={col.id} className="flex justify-between gap-2">
+                      <dt className="inline-flex items-center gap-1 text-ay-muted">
+                        {meta.mobileLabel}
+                        {meta.help && <InfoTip text={meta.help} label={meta.mobileLabel} />}
+                      </dt>
+                      <dd className={cn('tabular-nums', meta.cellClassName?.(r.original))}>
+                        {cell && flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+              {isOpen && (
+                <div id={detailId} className="mt-2 border-t border-ay-border pt-2">
+                  {renderExpanded!(r.original)}
+                </div>
+              )}
+            </div>
+          );
+        })}
         {empty && <p className="text-center text-ay-muted">{emptyMessage}</p>}
       </div>
 

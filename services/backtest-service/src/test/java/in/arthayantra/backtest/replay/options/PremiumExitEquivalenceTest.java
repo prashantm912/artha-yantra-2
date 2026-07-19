@@ -29,21 +29,27 @@ class PremiumExitEquivalenceTest {
   @Test
   void premiumExitEvaluatorMatchesTheSharedEquivalenceFixture() throws Exception {
     JsonNode fx = fixture();
-    BigDecimal entry = new BigDecimal(fx.path("entryPremium").asText());
-    // the same YAML-shaped rules the live side resolves: stop_loss 50 / take_profit 35 premium_pct
-    BigDecimal slPct = null;
-    BigDecimal tpPct = null;
-    for (JsonNode rule : fx.path("config").path("exit_rules")) {
-      BigDecimal pct = new BigDecimal(rule.path("params").path("value").asText());
-      if ("stop_loss".equals(rule.path("type").asText())) {
-        slPct = pct;
-      } else if ("take_profit".equals(rule.path("type").asText())) {
-        tpPct = pct;
-      }
-    }
-    PremiumExitEvaluator.Rules rules = new PremiumExitEvaluator.Rules(slPct, tpPct, null, null, null);
 
     for (JsonNode sc : fx.path("scenarios")) {
+      // a scenario may override entryPremium/config (the sub-paise case does); else inherit top-level.
+      BigDecimal entry =
+          new BigDecimal(
+              (sc.has("entryPremium") ? sc.path("entryPremium") : fx.path("entryPremium")).asText());
+      JsonNode config = sc.has("config") ? sc.path("config") : fx.path("config");
+      // the same YAML-shaped rules the live side resolves: stop_loss / take_profit premium_pct
+      BigDecimal slPct = null;
+      BigDecimal tpPct = null;
+      for (JsonNode rule : config.path("exit_rules")) {
+        BigDecimal pct = new BigDecimal(rule.path("params").path("value").asText());
+        if ("stop_loss".equals(rule.path("type").asText())) {
+          slPct = pct;
+        } else if ("take_profit".equals(rule.path("type").asText())) {
+          tpPct = pct;
+        }
+      }
+      PremiumExitEvaluator.Rules rules =
+          new PremiumExitEvaluator.Rules(slPct, tpPct, null, null, null);
+
       List<BigDecimal> premiums = new ArrayList<>();
       sc.path("premiums").forEach(n -> premiums.add(new BigDecimal(n.asText())));
       PremiumExitEvaluator.Exit exit =

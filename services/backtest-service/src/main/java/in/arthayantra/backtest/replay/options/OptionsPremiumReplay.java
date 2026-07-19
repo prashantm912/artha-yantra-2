@@ -1008,11 +1008,16 @@ public class OptionsPremiumReplay {
             new Fees(FeeConstants.STT_OPTION_EXERCISE, null, null, null, null)));
   }
 
+  // The recorded entry-time protective levels on the Trade row: paise-rounded (2dp HALF_UP) to match
+  // the LIVE bracket (PremiumBracketRules.resolve) and PremiumExitEvaluator's exit levels — audit
+  // AY-SL-06, so a scalper's backtest trade card shows the SAME SL/TP the identical paper trade records.
   private static BigDecimal level(BigDecimal entry, BigDecimal pct, boolean up) {
     if (pct == null) {
       return null;
     }
-    BigDecimal frac = pct.movePointLeft(2);
-    return entry.multiply(up ? BigDecimal.ONE.add(frac) : BigDecimal.ONE.subtract(frac));
+    BigDecimal frac = pct.divide(new BigDecimal("100"), 6, RoundingMode.HALF_UP);
+    return entry
+        .multiply(up ? BigDecimal.ONE.add(frac) : BigDecimal.ONE.subtract(frac))
+        .setScale(2, RoundingMode.HALF_UP);
   }
 }

@@ -134,9 +134,10 @@ describe('BacktestResultsPage', () => {
     expect(reasonCell).toBeInTheDocument();
     const row = reasonCell.closest('tr')!;
     expect(within(row).getByText('100.0%')).toBeInTheDocument(); // 1/1 wins
-    // The per-trade table (still a hand-rolled table, not a DataTable) also lists the trade's reason.
-    const perTrade = screen.getAllByRole('table').find((t) => t !== breakdown)!;
-    expect(within(perTrade).getByText('TARGET')).toBeInTheDocument();
+    // The per-trade table (now a shared DataTable named "Trades") also lists the trade's reason. Scope
+    // to the named desktop table — DataTable paints a desktop <table> AND an md:hidden card twin.
+    const perTrade = within(screen.getByRole('table', { name: 'Trades' }));
+    expect(perTrade.getByText('TARGET')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Folds' }));
     const foldsTable = screen.getByRole('table', { name: 'Walk-forward folds' });

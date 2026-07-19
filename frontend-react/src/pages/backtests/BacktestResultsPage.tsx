@@ -301,6 +301,92 @@ export function BacktestResultsPage() {
     return Object.entries(c).map(([k, v]) => ({ k, v: String(v) }));
   }, [selected]);
 
+  // Per-trade table columns. A useMemo (not a module const) because the OI-confluence and #-selector
+  // cells close over page state (oiBySeq / oiInterval / the selected seq). Same values/order/formatting
+  // as the hand-rolled table it replaced — DataTable adds zebra + sticky header + a mobile card list.
+  const perTradeColumns = useMemo<DataColumn<TradeRow>[]>(
+    () => [
+      {
+        id: 'seq',
+        header: '#',
+        align: 'left',
+        mono: true,
+        mobileLabel: '#',
+        // Audit M23: the row keeps its table `row` semantics (a `role="button"` on a <tr> destroys the
+        // grid for AT). The keyboard/AT activator is this real in-cell toggle button; the DataTable
+        // onRowClick stays a mouse-only convenience.
+        render: (tr) => (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelected(tr);
+            }}
+            aria-pressed={selected?.seq === tr.seq}
+            aria-label={`Show details for trade ${tr.seq}`}
+            className="rounded tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            {tr.seq}
+          </button>
+        ),
+      },
+      {
+        id: 'side',
+        header: 'Side',
+        align: 'left',
+        mobileLabel: 'Side',
+        // real trades carry side=BUY (option legs) — the old ==='LONG' check never matched, so every
+        // BUY rendered bear-red (audit 2026-07-02 §3)
+        render: (tr) => (
+          <span className={cn('text-xs font-semibold', tr.side === 'LONG' || tr.side === 'BUY' ? 'text-bull' : 'text-bear')}>
+            {tr.side}
+          </span>
+        ),
+      },
+      {
+        id: 'time',
+        header: 'Time',
+        align: 'left',
+        mono: true,
+        mobileLabel: 'Time',
+        cellClassName: () => 'text-ay-muted',
+        render: (tr) => tr.entryTs.slice(5, 16).replace('T', ' '),
+      },
+      { id: 'entry', header: 'Entry', align: 'right', mobileLabel: 'Entry', render: (tr) => price(tr.entryPrice) },
+      { id: 'exit', header: 'Exit', align: 'right', mobileLabel: 'Exit', render: (tr) => price(tr.exitPrice) },
+      {
+        id: 'pnl',
+        header: 'P&L',
+        align: 'right',
+        mobileLabel: 'P&L',
+        cellClassName: (tr) => (Number(tr.pnl) < 0 ? 'text-bear' : 'text-bull'),
+        render: (tr) => price(tr.pnl),
+      },
+      { id: 'pnlPct', header: '%', align: 'right', mobileLabel: '%', render: (tr) => price(tr.pnlPct) },
+      {
+        id: 'oiConf',
+        header: 'OI Conf.',
+        align: 'left',
+        mobileLabel: 'OI Conf.',
+        render: (tr) => {
+          const a = oiBySeq.get(tr.seq);
+          const oiTone =
+            a == null ? 'text-ay-muted' : a.trend > 0 ? 'text-bull' : a.trend < 0 ? 'text-bear' : 'text-ay-muted';
+          return (
+            <span
+              className={cn('text-xs font-medium', oiTone)}
+              title={a ? `Connecting-Dots trend at entry (${oiInterval})` : 'No captured OI at entry'}
+            >
+              {a?.trendLabel ?? '—'}
+            </span>
+          );
+        },
+      },
+      { id: 'reason', header: 'Reason', align: 'left', mobileLabel: 'Reason', render: (tr) => tr.exitReason },
+    ],
+    [oiBySeq, oiInterval, selected?.seq],
+  );
+
   return (
     <LoadBeat>
       <PageHeader title="Backtest results" subtitle={headerSubtitle} help="Full report for one backtest run — headline metrics, equity and drawdown curves, every trade, walk-forward folds, Monte Carlo, and OI-confluence attribution." />
@@ -392,77 +478,16 @@ export function BacktestResultsPage() {
               />
             </div>
           )}
-          <div className="max-h-[calc(100vh-18rem)] overflow-auto rounded-lg border border-ay-border">
-            <table className="w-full border-collapse text-sm">
-              <thead className="sticky top-0 bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                <tr>
-                  <th className="px-2 py-2 font-medium">#</th>
-                  <th className="px-2 py-2 font-medium">Side</th>
-                  <th className="px-2 py-2 font-medium">Time</th>
-                  <th className="px-2 py-2 text-right font-medium">Entry</th>
-                  <th className="px-2 py-2 text-right font-medium">Exit</th>
-                  <th className="px-2 py-2 text-right font-medium">P&L</th>
-                  <th className="px-2 py-2 text-right font-medium">%</th>
-                  <th className="px-2 py-2 font-medium">OI Conf.</th>
-                  <th className="px-2 py-2 font-medium">Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(trades.data?.items ?? []).map((tr) => {
-                  const a = oiBySeq.get(tr.seq);
-                  const oiTone =
-                    a == null ? 'text-ay-muted' : a.trend > 0 ? 'text-bull' : a.trend < 0 ? 'text-bear' : 'text-ay-muted';
-                  return (
-                  <tr
-                    key={tr.seq}
-                    onClick={() => setSelected(tr)}
-                    className={cn(
-                      'cursor-pointer border-t border-ay-border hover:bg-surface-2',
-                      selected?.seq === tr.seq && 'bg-surface-2',
-                    )}
-                  >
-                    {/* Audit M23: the row keeps its table `row` semantics (a `role="button"` on a
-                        <tr> destroys the grid for AT). The keyboard/AT activator is a real toggle
-                        button in the first cell; the row onClick stays a mouse-only convenience. */}
-                    <td className="px-2 py-2 tabular-nums">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelected(tr);
-                        }}
-                        aria-pressed={selected?.seq === tr.seq}
-                        aria-label={`Show details for trade ${tr.seq}`}
-                        className="rounded tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                      >
-                        {tr.seq}
-                      </button>
-                    </td>
-                    <td className="px-2 py-2">
-                      {/* real trades carry side=BUY (option legs) — the old ==='LONG' check never
-                          matched, so every BUY rendered bear-red (audit 2026-07-02 §3) */}
-                      <span className={cn('text-xs font-semibold', tr.side === 'LONG' || tr.side === 'BUY' ? 'text-bull' : 'text-bear')}>{tr.side}</span>
-                    </td>
-                    <td className="px-2 py-2 tabular-nums text-ay-muted">{tr.entryTs.slice(5, 16).replace('T', ' ')}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{price(tr.entryPrice)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{price(tr.exitPrice)}</td>
-                    <td className={cn('px-2 py-2 text-right tabular-nums', Number(tr.pnl) < 0 ? 'text-bear' : 'text-bull')}>{price(tr.pnl)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{price(tr.pnlPct)}</td>
-                    <td className={cn('px-2 py-2 text-xs font-medium', oiTone)} title={a ? `Connecting-Dots trend at entry (${oiInterval})` : 'No captured OI at entry'}>
-                      {a?.trendLabel ?? '—'}
-                    </td>
-                    <td className="px-2 py-2">{tr.exitReason}</td>
-                  </tr>
-                  );
-                })}
-                {(trades.data?.items ?? []).length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="px-2 py-6 text-center text-ay-muted">No trades.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            columns={perTradeColumns}
+            rows={trades.data?.items ?? []}
+            rowKey={(tr) => String(tr.seq)}
+            ariaLabel="Trades"
+            onRowClick={(tr) => setSelected(tr)}
+            rowClassName={(tr) => (selected?.seq === tr.seq ? 'bg-surface-2' : '')}
+            maxHeight="calc(100vh - 18rem)"
+            emptyMessage="No trades."
+          />
           {selected && (
             <div className="mt-2 rounded-lg border border-ay-border bg-surface-1 p-3 text-sm">
               <strong>Trade #{selected.seq}</strong> — entry {selected.entryTs.slice(0, 16)} · touch{' '}

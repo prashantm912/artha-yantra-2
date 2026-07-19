@@ -1431,11 +1431,16 @@ class ProposalService:
         #   latest row. This is the immutable version-config read the registry already serves.
         try:
             demoted_config = self._strategy.version_config(base_id, demoted_semver)
-        except httpx.HTTPStatusError as exc:
+        except httpx.HTTPError as exc:
+            #   Widen to HTTPError so a connection failure / timeout (no .response) is also an
+            #   actionable 502 before any live change, not a generic 500 — render the status only
+            #   when the exception carries one (same intent as the assessment read failure above).
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            status_note = f" ({status})" if status is not None else ""
             raise ApiError(
                 502, "CHAMPION_CONFIG_READ_FAILED",
-                f"could not read the captured champion {base_id}@{demoted_semver} config "
-                f"({exc.response.status_code}) — aborted before any live change; retry once "
+                f"could not read the captured champion {base_id}@{demoted_semver} config"
+                f"{status_note} — aborted before any live change; retry once "
                 "the registry is reachable (the captured champion version is immutable).",
             ) from exc
         if not demoted_config:

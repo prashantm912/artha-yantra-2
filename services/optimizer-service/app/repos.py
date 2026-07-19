@@ -380,6 +380,10 @@ def _candidate_row(r: tuple) -> dict[str, Any]:
     }
 
 
+# Sentinel for update_campaign_champion: distinguishes "no CAS, move unconditionally" (ROLLBACK)
+# from an explicit expected champion (PROMOTE — None is a valid value, the first champion).
+_CHAMPION_CAS_ANY = object()
+
 _CAMPAIGN_COLS = (
     "id, strategy_id, family, evidence_policy, objective_spec, search_space, budget, "
     "status, champion_version_id, created_at, updated_at"
@@ -838,21 +842,69 @@ class EvoRepo:
         return _proposal_row(row)
 
     def update_campaign_champion(
-        self, campaign_id: str, version_id: str | None
+        self, campaign_id: str, version_id: str | None,
+        expected_version_id: Any = _CHAMPION_CAS_ANY,
     ) -> dict[str, Any] | None:
         """Move the campaign's champion pointer (``champion_version_id``) — PROMOTE sets it to the
         newly-published version, ROLLBACK restores the demoted champion's version. ``updated_at`` is
         maintained explicitly (the DDL default fires on INSERT only — an UPDATE must set it,
-        V011:74-76). RETURNs the updated campaign row."""
+        V011:74-76). When ``expected_version_id`` is given, the move is a DURABLE ATOMIC
+        compare-and-set (audit PF-01 #6): the UPDATE only fires while the champion is STILL the
+        expected value (``IS NOT DISTINCT FROM`` so None==None first-champion works), so exactly one
+        of two concurrent promotes wins the champion move and the loser gets 0 rows (→ None). It
+        RETURNs the updated row, or None when the CAS did not match (champion moved under us)."""
         with self._conn.cursor() as cur:
-            cur.execute(
-                "UPDATE evo_campaigns SET champion_version_id=%s, updated_at=now() "
-                f"WHERE id=%s RETURNING {_CAMPAIGN_COLS}",
-                (version_id, campaign_id),
-            )
+            if expected_version_id is _CHAMPION_CAS_ANY:
+                cur.execute(
+                    "UPDATE evo_campaigns SET champion_version_id=%s, updated_at=now() "
+                    f"WHERE id=%s RETURNING {_CAMPAIGN_COLS}",
+                    (version_id, campaign_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE evo_campaigns SET champion_version_id=%s, updated_at=now() "
+                    "WHERE id=%s AND champion_version_id IS NOT DISTINCT FROM %s "
+                    f"RETURNING {_CAMPAIGN_COLS}",
+                    (version_id, campaign_id, expected_version_id),
+                )
             row = cur.fetchone()
         self._conn.commit()
         return _campaign_row(row) if row is not None else None
+
+    def record_promotion_atomic(
+        self, campaign_id: str, expected_champion: str | None, new_version_id: str | None,
+        candidate_id: str, proposal_id: str, evidence: dict[str, Any] | None,
+    ) -> bool:
+        """Round-5 #2: the WINNING promotion's three writes — champion compare-and-set + candidate
+        advance (→ PROMOTED, ``version_id`` = the new champion) + proposal execution stamp — in ONE
+        transaction (all-or-nothing). Returns True iff the champion CAS matched (exactly one
+        concurrent promoter wins); False (and rolls back) when the champion moved under us. No
+        partial state can survive — a failure after any leg rolls the WHOLE promotion back, so there
+        is never an advanced champion with a TAKE_ELIGIBLE candidate + unstamped proposal."""
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE evo_campaigns SET champion_version_id=%s, updated_at=now() "
+                    "WHERE id=%s AND champion_version_id IS NOT DISTINCT FROM %s",
+                    (new_version_id, campaign_id, expected_champion),
+                )
+                if cur.rowcount == 0:
+                    self._conn.rollback()
+                    return False
+                cur.execute(
+                    "UPDATE evo_candidates SET version_id=%s, state='PROMOTED', updated_at=now() "
+                    "WHERE id=%s",
+                    (new_version_id, candidate_id),
+                )
+                cur.execute(
+                    "UPDATE evo_proposals SET evidence=%s::jsonb WHERE id=%s AND status='APPROVED'",
+                    (_jsonb(evidence), proposal_id),
+                )
+            self._conn.commit()
+            return True
+        except Exception:
+            self._conn.rollback()
+            raise
 
     # --- E6 item 16: autonomy-scheduler durable state (V017) -------------------------------------
     # The scheduler's per-campaign state lives in three columns ISOLATED behind these methods (the

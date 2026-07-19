@@ -72,10 +72,12 @@ def test_scorecard_is_deterministic():
 # --- ranking + rankability --------------------------------------------------------------------
 
 def test_rank_orders_by_robustscore_and_excludes_failed_gate():
+    # gate-complete candidates (audit PF-01: partial-evidence candidates are no longer rankable) so
+    # only the oos_sign FAIL, not a missing required gate, decides rankability.
     cands = [
-        {"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 30.0},
-        {"trialNumber": 2, "rawObjective": 1.0, "oosReturn": 20.0},
-        {"trialNumber": 3, "rawObjective": 1.0, "oosReturn": -5.0},  # FAILs oos_sign ⇒ unrankable
+        _healthy(1) | {"oosReturn": 30.0},
+        _healthy(2) | {"oosReturn": 20.0},
+        _healthy(3) | {"oosReturn": -5.0},  # FAILs oos_sign ⇒ unrankable
     ]
     cards = {c["trialNumber"]: c for c in scoring.score_cohort(cands, [])}
     assert cards[1]["rank"] == 1
@@ -89,8 +91,8 @@ def test_rank_orders_by_robustscore_and_excludes_failed_gate():
 # --- gate statuses: degradations + passes -----------------------------------------------------
 
 def test_gate_degradations_on_a_bare_candidate():
-    cards = scoring.score_cohort([{"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 5.0}], [])
-    gates = {g["id"]: g["status"] for g in cards[0]["gates"]}
+    card = scoring.score_cohort([{"trialNumber": 1, "rawObjective": 1.0, "oosReturn": 5.0}], [])[0]
+    gates = {g["id"]: g["status"] for g in card["gates"]}
     assert gates["oos_sign"] == "PASS"  # 5 > 0
     assert gates["evidence_floor"] == "UNKNOWN"  # no oosTradeCount
     assert gates["fold_consistency"] == "UNKNOWN"  # no foldReturns (full-window)
@@ -101,15 +103,32 @@ def test_gate_degradations_on_a_bare_candidate():
     assert gates["comparability"] == "UNKNOWN"  # NULL engine SHA (pre-#703)
     assert gates["live_gap"] == "SKIPPED"  # no live evidence
     assert gates["multiplicity_tstat"] == "SKIPPED"  # no sharpe/trade count on a bare candidate
-    assert cards[0]["rankable"] is True  # no FAIL among the statuses
+    # DESCRIPTIVE rankable (permissive, unchanged): no hard-gate FAIL among the statuses → True.
+    assert card["rankable"] is True
+    # PROMOTION-ADMISSION stageReadiness (audit PF-01, fail-CLOSED): a bare candidate whose REQUIRED
+    # SIM_FIRST gates could not run is NOT stage-ready (silently admitted under the old fail-open).
+    sr = card["stageReadiness"]
+    assert sr["ready"] is False
+    assert sr["evidencePolicy"] == "SIM_FIRST" and sr["stage"] == "SCORED_TO_SURVIVOR"
+    # every unevaluated REQUIRED SIM_FIRST gate is named (comparability/regime/fold/stability now
+    # REQUIRED — #703/#705 closed); holdout + live_gap are the only excluded gates (post-select /
+    # no-live), so they never appear.
+    assert set(sr["blockedBy"]) == {
+        "comparability:UNKNOWN", "multiplicity_tstat:SKIPPED", "drawdown_cap:UNKNOWN",
+        "evidence_floor:UNKNOWN", "fold_consistency:UNKNOWN", "regime_floor:UNKNOWN",
+        "stability_floor:SKIPPED",
+    }
+    assert not any(g in b for b in sr["blockedBy"] for g in ("holdout", "live_gap"))
 
 
 def _healthy(n: int) -> dict:
     return {
         "trialNumber": n, "rawObjective": 1.0, "oosReturn": 12.0,
         "foldReturns": [0.1, 0.2, 0.3, -0.05], "oosTradeCount": 80, "maxDrawdown": 20.0,
-        "sortino": 1.5, "expectancy": 500.0, "regimeOosMin": 0.4, "regimeOosMean": 0.8,
+        "sortino": 1.5, "sharpe": 1.5, "expectancy": 500.0, "regimeOosMin": 0.4,
+        "regimeOosMean": 0.8,
         "regimesCovered": ["UP_QUIET", "DOWN_QUIET", "UP_TURBULENT"], "engineSha": "abc123",
+        "dataHash": "epoch-1",  # audit PF-01 #4: comparability requires SHA AND epoch present
     }
 
 
@@ -126,6 +145,128 @@ def test_all_gates_pass_on_a_healthy_cohort():
     assert gates["stability_floor"]["status"] == "PASS"  # ratio 1.0 ≥ 0.8, 4 neighbors
     assert gates["comparability"]["status"] == "PASS"
     assert cards[0]["rankable"] is True
+    # audit PF-01: every REQUIRED SIM_FIRST gate PASSes → stage-ready (promotable).
+    sr = cards[0]["stageReadiness"]
+    assert sr["ready"] is True and sr["blockedBy"] == []
+    assert sr["evidencePolicy"] == "SIM_FIRST"
+    assert set(sr["requiredGates"]) == {
+        "evidence_floor", "oos_sign", "multiplicity_tstat", "fold_consistency", "drawdown_cap",
+        "regime_floor", "stability_floor", "comparability",
+    }
+
+
+def test_sim_first_survivor_requires_regime_and_comparability():
+    # audit PF-01 finding #4: #703/#705 closed → comparability + regime_floor are now REQUIRED. A
+    # candidate that clears every other bar but lacks an engine SHA (comparability UNKNOWN) is
+    # rankable (descriptive, no FAIL) yet NOT stage-ready (fail-closed promotion admission).
+    cohort = [_healthy(i) for i in range(5)]
+    cohort[0]["engineSha"] = None  # comparability → UNKNOWN
+    card = scoring.score_cohort(cohort, [])[0]
+    assert card["rankable"] is True
+    assert card["stageReadiness"]["ready"] is False
+    assert "comparability:UNKNOWN" in card["stageReadiness"]["blockedBy"]
+
+
+def test_comparability_fails_on_mismatched_sha_or_epoch():
+    # audit PF-01 #4: comparability now CHECKS equality against the cohort comparator, not mere
+    # presence (§1.3 refuses a cross-SHA / cross-data-epoch comparison). A differing SHA → FAIL
+    # (blocks + drops the descriptive rankable too, since a FAIL is a real negative).
+    cohort = [_healthy(i) for i in range(5)]        # comparator SHA = the first non-null, "abc123"
+    cohort[1]["engineSha"] = "deadbeef"             # candidate 1 ran under a DIFFERENT engine
+    card = next(c for c in scoring.score_cohort(cohort, []) if c["trialNumber"] == 1)
+    gate = next(g for g in card["gates"] if g["id"] == "comparability")
+    assert gate["status"] == "FAIL"
+    assert card["rankable"] is False
+    assert card["stageReadiness"]["ready"] is False
+    assert "comparability:FAIL" in card["stageReadiness"]["blockedBy"]
+    # a differing DATA EPOCH also FAILs (comparator epoch = the first non-null dataHash).
+    cohort2 = [_healthy(i) | {"dataHash": "epoch-A"} for i in range(5)]
+    cohort2[2]["dataHash"] = "epoch-B"
+    card2 = next(c for c in scoring.score_cohort(cohort2, []) if c["trialNumber"] == 2)
+    assert next(g for g in card2["gates"] if g["id"] == "comparability")["status"] == "FAIL"
+
+
+def test_comparability_passes_when_cohort_shares_sha_and_epoch():
+    # The healthy path: all trials of one sweep share the engine SHA + data epoch → comparability
+    # PASSes for every candidate (the common, correct case).
+    cohort = [_healthy(i) | {"dataHash": "epoch-1"} for i in range(5)]
+    for card in scoring.score_cohort(cohort, []):
+        assert next(g for g in card["gates"] if g["id"] == "comparability")["status"] == "PASS"
+
+
+def test_comparability_partition_isolates_normalization():
+    # audit PF-01 #4(b): a drifted-signature (incomparable) bag must NOT pollute the COMPARABLE
+    # partition's z-scores/plateau. 4 healthy candidates (SHA "abc") + 1 drifted (SHA "xyz") with an
+    # EXTREME oosReturn — the healthy candidates' oos_return z is computed over the 4 healthy ONLY.
+    healthy = [
+        {"trialNumber": i, "rawObjective": 1.0, "oosReturn": r,
+         "engineSha": "abc", "dataHash": "e1"}
+        for i, r in enumerate([10.0, 20.0, 30.0, 40.0])
+    ]
+    drifted = {"trialNumber": 4, "rawObjective": 1.0, "oosReturn": 1000.0,
+               "engineSha": "xyz", "dataHash": "e1"}          # incomparable (different SHA)
+    cards = {c["trialNumber"]: c for c in scoring.score_cohort(healthy + [drifted], [])}
+    # the drifted bag FAILs comparability and is not rankable — it is refused, not promoted.
+    assert next(g for g in cards[4]["gates"] if g["id"] == "comparability")["status"] == "FAIL"
+    assert cards[4]["rankable"] is False
+    # the healthy oosReturn=40 has z over [10,20,30,40] ONLY (mean 25, pstdev √125=11.1803) →
+    # 15/11.1803 = 1.3416; the 1000 outlier NEVER entered the column (no pollution).
+    assert next(x for x in cards[3]["components"] if x["id"] == "oos_return")["z"] == 1.3416
+    # the drifted bag dropped OUT of the partition's column entirely → its own oos_return z is 0.
+    assert next(x for x in cards[4]["components"] if x["id"] == "oos_return")["z"] == 0.0
+
+
+def test_dominant_signature_is_deterministic_regardless_of_input_order():
+    # round-5 #3: on an equal-frequency tie the SAME signature wins regardless of the order the
+    # trials were assembled in (the tie-break is the signature tuple, NOT insertion order).
+    a = {"engineSha": "aaa", "dataHash": "e1"}
+    b = {"engineSha": "bbb", "dataHash": "e1"}
+    assert scoring._dominant_signature([a, b]) == scoring._dominant_signature([b, a])
+    assert scoring._dominant_signature([a, b]) == ("aaa", "e1")  # lexicographically smallest on tie
+    # a clear majority always wins (no tie)
+    assert scoring._dominant_signature([b, a, a]) == ("aaa", "e1")
+
+
+def test_stale_signature_candidate_is_marked_for_requeue():
+    # round-5 #3: a candidate whose complete signature differs from the dominant one is marked
+    # staleSignature (→ selection re-queues it, never retires it); a dominant-partition candidate is
+    # not. 3 of the "abc" signature dominate; the lone "xyz" is the stale side.
+    cohort = [_healthy(i) for i in range(3)] + [
+        _healthy(9) | {"engineSha": "xyz-drift"},
+    ]
+    cards = {c["trialNumber"]: c for c in scoring.score_cohort(cohort, [])}
+    assert cards[0]["stageReadiness"]["staleSignature"] is False   # dominant partition
+    assert cards[9]["stageReadiness"]["staleSignature"] is True    # stale side → re-queue
+    # per-candidate provenance is persisted (round-5 #4)
+    assert cards[9]["provenance"] == {"engineSha": "xyz-drift", "dataHash": "epoch-1"}
+    assert cards[0]["provenance"] == {"engineSha": "abc123", "dataHash": "epoch-1"}
+
+
+def test_comparability_all_absent_epoch_cohort_blocks_not_passes():
+    # audit PF-01 #4(a): when NO candidate carries a data epoch, comparability is UNKNOWN (not
+    # establishable) for every candidate — it must NOT fall through to PASS. Descriptive rankable
+    # stays permissive (no FAIL), but stage readiness is blocked.
+    cohort = [{"trialNumber": i, "rawObjective": 1.0, "oosReturn": 10.0 + i, "engineSha": "abc"}
+              for i in range(5)]  # engine SHA present, NO dataHash anywhere
+    card = scoring.score_cohort(cohort, [])[0]
+    assert next(g for g in card["gates"] if g["id"] == "comparability")["status"] == "UNKNOWN"
+    assert "comparability:UNKNOWN" in card["stageReadiness"]["blockedBy"]
+
+
+def test_live_first_sim_cohort_is_never_stage_ready():
+    # audit PF-01 finding #5: a LIVE_FIRST campaign's sim cohort is functional-smoke only (§1.2) and
+    # must NEVER become selectable. Even an all-gates-PASS healthy cohort is not stage-ready under
+    # LIVE_FIRST — the SURVIVOR gate is live-evidence-led, not computed from sim. Descriptive
+    # rankable is unaffected (still permissive).
+    cards = scoring.score_cohort([_healthy(i) for i in range(5)], [], policy="LIVE_FIRST")
+    assert cards[0]["rankable"] is True
+    sr = cards[0]["stageReadiness"]
+    assert sr["ready"] is False
+    assert sr["evidencePolicy"] == "LIVE_FIRST"
+    assert any("LIVE_FIRST" in b for b in sr["blockedBy"])
+    # a LIVE_FIRST sim cohort names no SIM required gates (the live-evidence set is a flagged
+    # follow-up, not computed here)
+    assert sr["requiredGates"] == []
 
 
 def test_regime_floor_fails_when_min_too_negative():
@@ -259,10 +400,15 @@ def test_multiplicity_tstat_value_unchanged_by_the_rename():
 
 
 def test_deflated_sharpe_skipped_without_sharpe_or_trades():
-    # No sharpe → SKIPPED (never fabricated); the candidate stays rankable (SKIPPED never blocks).
+    # No sharpe → SKIPPED (never fabricated). DESCRIPTIVE rankable stays True (no hard FAIL), but
+    # multiplicity_tstat is a REQUIRED SURVIVOR gate (the overfitting guard) — a SKIPPED one BLOCKS
+    # promotion — stageReadiness.ready is False (was fail-open "SKIPPED never blocks", the marquee
+    # defect this closes).
     no_sharpe = scoring.score_cohort([_dsr_cand(1, sharpe=None)], [], n_trials=1000)[0]
     assert _dsr_gate([no_sharpe])["status"] == "SKIPPED"
     assert no_sharpe["rankable"] is True
+    assert no_sharpe["stageReadiness"]["ready"] is False
+    assert "multiplicity_tstat:SKIPPED" in no_sharpe["stageReadiness"]["blockedBy"]
     # A Sharpe SE needs T ≥ 2; a single-observation trade count is unassessable → SKIPPED.
     one_trade = scoring.score_cohort([_dsr_cand(1, oosTradeCount=1)], [], n_trials=1000)[0]
     assert _dsr_gate([one_trade])["status"] == "SKIPPED"

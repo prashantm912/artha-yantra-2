@@ -216,6 +216,7 @@ class FakeStrategy:
         existing: list[dict[str, Any]] | None = None,
         create_conflict: bool = False,
         archive_fails: bool = False,
+        publish_conflict: bool = False,
     ) -> None:
         self._config = config
         self.drafts: list[dict[str, Any]] = []
@@ -226,6 +227,23 @@ class FakeStrategy:
         self._create_conflict = create_conflict
         # slice-3 fail-soft archive path: force the archive call to raise (a registry fault).
         self._archive_fails = archive_fails
+        # round-5 #1: force the CAS publish to 409 (simulate a concurrent promoter winning the
+        # registry compare-and-set). Records the CAS args on ``publish_calls`` for assertions.
+        self._publish_conflict = publish_conflict
+        self.publish_calls: list[dict[str, Any]] = []
+        # round-7 #1: the LIVE published-version pointer per strategy — models the registry
+        # compare-and-set. A base strategy's pointer is its ``champ-`` version; a created draft has
+        # none until published. ``publish(cas=True)`` fails when the expected != current.
+        self._published_version: dict[str, str | None] = {}
+        # round-8: the SEMVER of the live published version per strategy (what detail() returns as
+        # ``publishedVersion`` — the captured champion the promote reads its config by). Distinct
+        # from the strategy row's ``version`` (the LATEST version's semver, which detail() also
+        # carries) so a base whose latest is a NEWER orphan draft can still name its published one.
+        self._published_semver: dict[str, str | None] = {}
+        # round-8 CRITICAL A: per-(strategy, semver) config, so ``version_config`` resolves
+        # the EXACT captured champion version — not a single blanket config. Unseeded (id, semver)
+        # pairs fall back to ``self._config`` (the pre-round-8 single-version fixtures stay valid).
+        self._version_configs: dict[str, dict[str, dict[str, Any]]] = {}
         self.created: list[dict[str, Any]] = []
         self.published: list[str] = []
         # slice-3 PROMOTE / ROLLBACK surface: counterfactuals + rollbacks + archived clone ids.
@@ -248,9 +266,36 @@ class FakeStrategy:
                 "config": self._config,
             }
             self._registry[strategy_id] = row
+            # a lazily-materialized BASE strategy is already published on its champion.
+            self._published_version.setdefault(strategy_id, f"champ-{strategy_id}")
+            self._published_semver.setdefault(strategy_id, "1.0.0")
         return row
 
+    def seed_base_with_newer_draft(
+        self, strategy_id: str, *, published_config: dict[str, Any], published_semver: str,
+        published_version_id: str, latest_config: dict[str, Any], latest_semver: str,
+        latest_version_id: str,
+    ) -> None:
+        """round-8 CRITICAL A fixture: model a base whose LATEST version (what ``detail`` returns as
+        latestVersion) is a NEWER orphan/manual DRAFT, while the live PUBLISHED champion is an OLDER
+        version. ``version_config`` resolves each semver to its own config — so a promote that
+        correctly reads the captured *published* semver gets the champion config, while the old bug
+        (reading ``detail().config`` = latestVersion) would get the orphan draft."""
+        self._registry[strategy_id] = {
+            "id": strategy_id, "slug": published_config.get("id"),
+            "name": published_config.get("name"), "tags": published_config.get("tags") or [],
+            "status": "draft", "versionId": latest_version_id, "version": latest_semver,
+            "config": latest_config,
+        }
+        self._published_version[strategy_id] = published_version_id
+        self._published_semver[strategy_id] = published_semver
+        self._version_configs.setdefault(strategy_id, {})[published_semver] = published_config
+        self._version_configs.setdefault(strategy_id, {})[latest_semver] = latest_config
+
     def version_config(self, strategy_id: str, version: str) -> dict[str, Any]:
+        per_version = self._version_configs.get(strategy_id, {})
+        if version in per_version:
+            return per_version[version]
         return self._config
 
     def resolve(self, strategy_id: str, version: str | None) -> tuple[str, dict[str, Any]]:
@@ -295,13 +340,45 @@ class FakeStrategy:
         return {"id": strategy_id, "version": "1.0.0", "status": "draft", "checksum": "chk"}
 
     def publish(
-        self, strategy_id: str, target_version: str | None = None, notes: str | None = None
+        self, strategy_id: str, target_version: str | None = None, notes: str | None = None,
+        cas: bool = False, expected_published_version_id: str | None = None,
     ) -> dict[str, Any]:
-        row = self._row(strategy_id)
+        self.publish_calls.append(
+            {"strategyId": strategy_id, "cas": cas, "expected": expected_published_version_id,
+             "targetVersion": target_version}
+        )
+        row = self._row(strategy_id)   # materializes a base + its published pointer
+        if self._publish_conflict:  # blanket: simulate a concurrent promoter winning the CAS
+            raise self._publish_409(strategy_id)
+        # round-7 #1: model the registry published-version compare-and-set — the publish fails when
+        # the caller's expected pointer no longer matches the current LIVE published version.
+        if cas and expected_published_version_id != self._published_version.get(strategy_id):
+            raise self._publish_409(strategy_id)
         row["status"] = "published"
-        row["versionId"] = f"ver-{strategy_id}"
+        # round-6 #1: the published version UUID is SPECIFIC to the exact version published (mirrors
+        # RegistryService returning target.id()) — a version-specific `ver-{strategy}-{semver}`.
+        version_id = (
+            f"ver-{strategy_id}-{target_version}" if target_version else f"ver-{strategy_id}"
+        )
+        row["versionId"] = version_id
+        self._published_version[strategy_id] = version_id   # the LIVE pointer moves
+        # round-8: the published SEMVER moves with the pointer (the exact version published) — so a
+        # subsequent detail() reports the new champion's semver, and version_config can serve it.
+        published_semver = target_version or row["version"]
+        self._published_semver[strategy_id] = published_semver
+        self._version_configs.setdefault(strategy_id, {})[published_semver] = row.get("config")
         self.published.append(strategy_id)
-        return {"id": strategy_id, "version": row["version"], "status": "published"}
+        return {"id": strategy_id, "version": row["version"], "status": "published",
+                "versionId": version_id}
+
+    @staticmethod
+    def _publish_409(strategy_id: str) -> httpx.HTTPStatusError:
+        request = httpx.Request("POST", f"http://x/api/v1/strategies/{strategy_id}/publish")
+        body = {"code": "CONFLICT_PUBLISHED_VERSION_CHANGED"}
+        return httpx.HTTPStatusError(
+            "409 conflict", request=request,
+            response=httpx.Response(409, json=body, request=request),
+        )
 
     def detail(self, strategy_id: str) -> dict[str, Any]:
         row = self._row(strategy_id)
@@ -309,6 +386,10 @@ class FakeStrategy:
             "id": strategy_id, "versionId": row["versionId"], "version": row["version"],
             "status": row["status"], "slug": row["slug"], "name": row["name"],
             "tags": row["tags"], "config": row.get("config"),
+            "publishedVersionId": self._published_version.get(strategy_id),
+            # round-8: the SEMVER of the live published version (mirrors RegistryService.detail's
+            # publishedVersion) — the immutable champion the promote reads its config by.
+            "publishedVersion": self._published_semver.get(strategy_id),
         }
 
     def list_strategies(
@@ -402,6 +483,9 @@ class FakeBacktest:
         if isinstance(value, Exception):
             raise value
         return value
+
+
+_CHAMPION_CAS_ANY = object()  # mirrors repos._CHAMPION_CAS_ANY (no-CAS sentinel for the fake)
 
 
 class FakeEvoRepo:
@@ -661,6 +745,27 @@ class FakeEvoRepo:
                 return _strip_seq(r)
         return None
 
+    def record_promotion_atomic(
+        self, campaign_id: str, expected_champion: str | None, new_version_id: str | None,
+        candidate_id: str, proposal_id: str, evidence: dict[str, Any] | None,
+    ) -> bool:
+        """Mirrors EvoRepo.record_promotion_atomic: champion CAS + candidate advance + proposal
+        stamp, all-or-nothing (round-5 #2). Returns False (no mutation) when the CAS misses."""
+        campaign = self.get_campaign(campaign_id)
+        if campaign is None or campaign.get("championVersionId") != expected_champion:
+            return False  # CAS miss — nothing mutated
+        campaign["championVersionId"] = new_version_id
+        campaign["updatedAt"] = "2026-07-12T00:00:00+00:00"
+        cand = self._find_candidate(candidate_id)
+        if cand is not None:
+            cand.update(versionId=new_version_id, state="PROMOTED",
+                        updatedAt="2026-07-12T00:00:00+00:00")
+        for r in self.proposals:
+            if r["id"] == proposal_id and r["status"] == "APPROVED":
+                r["evidence"] = evidence
+                break
+        return True
+
     # --- E4 slice 3: RETIRE acks + PROMOTE lineage + champion pointer ---------------------------
 
     def find_latest_proposal(self, candidate_id: str, kind: str) -> dict[str, Any] | None:
@@ -692,13 +797,18 @@ class FakeEvoRepo:
         return _strip_seq(row)
 
     def update_campaign_champion(
-        self, campaign_id: str, version_id: str | None
+        self, campaign_id: str, version_id: str | None,
+        expected_version_id: Any = _CHAMPION_CAS_ANY,
     ) -> dict[str, Any] | None:
         """Mirrors EvoRepo.update_campaign_champion: move the champion pointer (PROMOTE forward,
-        ROLLBACK back)."""
+        ROLLBACK back). When ``expected_version_id`` is given it is a compare-and-set — the move
+        only fires while the champion is STILL that value (PF-01 #6); a stale expected → None."""
         campaign = self.get_campaign(campaign_id)
         if campaign is None:
             return None
+        if (expected_version_id is not _CHAMPION_CAS_ANY
+                and campaign.get("championVersionId") != expected_version_id):
+            return None  # CAS miss — the champion moved under us (a concurrent promote won)
         campaign["championVersionId"] = version_id
         campaign["updatedAt"] = "2026-07-12T00:00:00+00:00"
         return dict(campaign)

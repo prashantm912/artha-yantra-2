@@ -1245,6 +1245,8 @@ export interface components {
         PublishRequest: {
             targetVersion?: string;
             notes?: string;
+            cas?: boolean;
+            expectedPublishedVersionId?: string;
         };
         ToggleResult: {
             /** Format: uuid */

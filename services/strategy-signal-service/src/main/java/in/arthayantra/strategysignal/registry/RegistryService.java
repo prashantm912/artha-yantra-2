@@ -187,9 +187,30 @@ public class RegistryService {
     return response;
   }
 
-  /** POST /{id}/publish — one published version per strategy; full re-validation. */
+  /**
+   * POST /{id}/publish — one published version per strategy; full re-validation. Unconditional
+   * publish (all in-process callers + a plain owner publish) — byte-for-byte the pre-CAS behaviour.
+   * PF-01 round-6 #2: this method itself is {@code @Transactional} (the round-5 self-invocation of
+   * the annotated overload silently dropped the transaction — a self-call bypasses Spring's proxy).
+   * The inner call to the shared body runs within THIS transaction.
+   */
   @Transactional
   public Map<String, Object> publish(UUID id, String targetVersion, String notes) {
+    return publish(id, targetVersion, notes, false, null);
+  }
+
+  /**
+   * Publish with an optional compare-and-set on the current published pointer (PF-01 round-5 #1).
+   * When {@code cas} is true the pointer moves ONLY while the strategy's current published version
+   * still equals {@code expectedPublishedVersionId} (null = a first publish onto a never-published
+   * strategy); otherwise a concurrent promoter already moved the LIVE pointer and this call is
+   * rejected with 409 before it can overwrite live state. The whole method is {@code @Transactional},
+   * so a lost CAS rolls back the draft's status change too. {@code cas=false} is unconditional and
+   * identical to the legacy behaviour.
+   */
+  @Transactional
+  public Map<String, Object> publish(
+      UUID id, String targetVersion, String notes, boolean cas, String expectedPublishedVersionId) {
     StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
     StrategyRepository.VersionRow target =
         targetVersion != null
@@ -216,7 +237,25 @@ public class RegistryService {
       }
     }
     repository.updateVersionStatus(target.id(), "published", true);
-    repository.setPublishedVersion(id, target.id());
+    // Move the LIVE published pointer. In CAS mode this is the atomic claim: exactly one of two
+    // concurrent publishers wins the row-locked conditional UPDATE; the loser gets 0 rows and 409s
+    // (the @Transactional rolls back this call's archive + draft-status changes), so it never
+    // overwrites live state nor reaches the engine-reload publish below. cas=false is unconditional
+    // (byte-for-byte the legacy behaviour).
+    if (cas) {
+      UUID expected =
+          expectedPublishedVersionId != null ? UUID.fromString(expectedPublishedVersionId) : null;
+      int moved = repository.casPublishedVersion(id, target.id(), expected);
+      if (moved == 0) {
+        throw new ApiException(
+            409, ErrorCodes.CONFLICT_PUBLISHED_VERSION_CHANGED,
+            "the published version of strategy " + id + " changed since the caller read it "
+                + "(expected " + expectedPublishedVersionId + ") — a concurrent promoter won; "
+                + "this publish is rejected to avoid overwriting live state");
+      }
+    } else {
+      repository.setPublishedVersion(id, target.id());
+    }
     repository.audit(
         id, "PUBLISH", previousVersion, target.version(),
         notes != null ? notes : "published " + target.version(), "owner");
@@ -224,6 +263,10 @@ public class RegistryService {
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("id", id);
     response.put("version", target.version());
+    // PF-01 round-6 #1: the EXACT version UUID that was published — the caller records THIS as the
+    // champion, never a subsequent unversioned `detail` read (which returns latestVersion and could
+    // be a concurrent promoter's draft).
+    response.put("versionId", target.id());
     response.put("status", "published");
     return response;
   }
@@ -450,6 +493,20 @@ public class RegistryService {
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("id", strategy.id());
     response.put("versionId", row.id());
+    // PF-01 round-7/8 #1: the LIVE published-version pointer + its SEMVER (distinct from
+    // ``versionId``/``version``, which are the requested/latest row). The optimizer captures BOTH as
+    // the immutable champion a promote is decided against — the CAS expects the unchanging UUID, and
+    // the promote reads THAT exact version's config by its semver (never the latest row, which could
+    // be a newer manual/orphan draft).
+    response.put("publishedVersionId", strategy.publishedVersionId());
+    response.put(
+        "publishedVersion",
+        strategy.publishedVersionId() == null
+            ? null
+            : repository
+                .findVersionById(strategy.publishedVersionId())
+                .map(StrategyRepository.VersionRow::version)
+                .orElse(null));
     response.put("slug", strategy.slug());
     response.put("name", strategy.name());
     response.put("description", strategy.description());

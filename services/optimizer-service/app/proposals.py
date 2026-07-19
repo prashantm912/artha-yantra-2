@@ -25,6 +25,7 @@ rides the selection/domination logic, which is a later slice — not generated h
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from typing import Any
@@ -33,11 +34,13 @@ import httpx
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from app import config_patch
+from app import config_patch, scoring
 from app.errors import ApiError
 from app.path_grammar import InvalidParameterPath
 
 router = APIRouter(prefix="/api/v1/evolution")
+
+_LOG = logging.getLogger(__name__)
 
 # §8.2 PUBLISH_PAPER: "SURVIVOR + RobustScore >= champion - ε (ε = 0.1) + holdout consumed".
 _PUBLISH_PAPER = "PUBLISH_PAPER"
@@ -61,6 +64,36 @@ _RETIRE = "RETIRE"
 _TE_MIN_CLOSED_TRADES = 20
 _TE_MIN_PF = 1.3
 _TE_MAX_DD_PCT = 0.25
+
+# PAPER→TAKE_ELIGIBLE required-gate set (audit PF-01, fail-CLOSED, PER evidencePolicy). A REQUIRED
+# gate that is SKIPPED / absent BLOCKS (a gate that could not run must not read as a pass);
+# ``max_drawdown`` SKIPPED (no capital base) blocks — drawdown discipline must be verified.
+#
+# SIM_FIRST (swing) — the §8.2 F7 bars + the §7.2 live-gap gate (a swing re-sim is the CORRECT
+# reconciliation plane: it pins fill_timing at_close, reconciliation.py:660-667). An absent /
+# INSUFFICIENT reconciliation used to be silently "assessed as not-DIVERGENT" and admitted — closed.
+_TAKE_ELIGIBLE_REQUIRED_SIM_FIRST = frozenset(
+    {"paper_trade_floor", "profit_factor", "expectancy", "max_drawdown", "live_gap"}
+)
+# LIVE_FIRST (scalper) — live_gap is EXCLUDED (interim, see below): the only reconciliation producer
+# runs a RAW backtest, which is a §7.2 STRUCTURAL divergence for gate-armed intraday options
+# (OI/Dow/IV muted on derived history → ~0 armed trades) and MUST NOT count as a PASS; the correct
+# shadow-vs-paper producer is unbuilt. So a raw scalper reconciliation is whitelisted (never PASS,
+# never blocks) and live_gap is not required — else an absent shadow-vs-paper recon would forever
+# block. The F7 bars still gate. FLAGGED FOLLOW-UP: build the scalper shadow-vs-paper reconciliation
+# producer, then move live_gap (+ the §6 LIVE_FIRST gates below) into this set.
+_TAKE_ELIGIBLE_REQUIRED_LIVE_FIRST = frozenset(
+    {"paper_trade_floor", "profit_factor", "expectancy", "max_drawdown"}
+)
+# §6.1 LIVE_FIRST hard gates NOT YET COMPUTED anywhere (weekly-window consistency, daily-loss
+# discipline, adjacent-neighbor live stability, replay/holdout sign, comparability + data-health,
+# live-weighted RobustScore-vs-champion). Emitted as explicit NOT_IMPLEMENTED gates on the card and
+# INTERIM-EXCLUDED from the required set (requiring an unbuilt gate would block every candidate).
+# FLAGGED FOLLOW-UP: wire each computation, then require it. Owner sees them on the HOLD card.
+_TAKE_ELIGIBLE_INTERIM_EXCLUDED = (
+    "weekly_consistency", "daily_loss_discipline", "neighbor_stability_live",
+    "holdout_replay_sign", "comparability_data_health", "robust_live_weighted_vs_champion",
+)
 
 # §8.2 demoted-champion counterfactual: kept running for 6 weeks as the rollback comparator. The
 # routing is by evidence policy — LIVE_FIRST (scalpers) → shadow variant (#733, the shadow book
@@ -216,18 +249,20 @@ def _champion_score(
 def _publish_paper_eligibility(
     cand: dict[str, Any], champion_score: float | None, champion_version_id: str | None
 ) -> tuple[bool, list[str]]:
-    """Apply the §8.2 PUBLISH_PAPER bar. The QUERYABLE predicates GATE (SURVIVOR state + rankable —
-    a FAILed hard gate is RETIRE material, never PUBLISH_PAPER). The near-champion RobustScore bar
-    and the holdout-consumed bar are applied ONLY when their inputs are populated: a VERIFIED miss
-    (RobustScore < champion - 0.1) blocks; an UNPOPULATED input (no champion score / no holdout run)
-    never blocks — it stamps a ``pendingInputs`` caveat. Returns ``(eligible, pending_inputs)``."""
+    """Apply the §8.2 PUBLISH_PAPER bar. The QUERYABLE predicates GATE (SURVIVOR state + fail-closed
+    STAGE READINESS — audit PF-01: the promotion-admission verdict, NOT the permissive descriptive
+    ``rankable``; a required gate that FAILed OR was never affirmatively evaluated is RETIRE
+    material, never PUBLISH_PAPER). The near-champion RobustScore bar and the holdout-consumed bar
+    are applied ONLY when their inputs are populated: a VERIFIED miss (RobustScore < champion - 0.1)
+    blocks; an UNPOPULATED input (no champion score / no holdout run) never blocks — it stamps a
+    ``pendingInputs`` caveat. Returns ``(eligible, pending_inputs)``."""
     scorecard = cand.get("scorecard") or {}
     # the incumbent champion is not a challenger — never propose publishing it to a paper clone.
     if champion_version_id is not None and cand.get("versionId") == champion_version_id:
         return False, []
     if cand.get("state") != "SURVIVOR":
         return False, []
-    if not scorecard.get("rankable"):
+    if not (scorecard.get("stageReadiness") or {}).get("ready"):
         return False, []
 
     pending: list[str] = []
@@ -335,11 +370,16 @@ def _next_steps(kind: str) -> NextSteps:
 
 
 def _capital_base(config: dict[str, Any] | None) -> float | None:
-    """The paper-book capital base for the maxDD% gate, read from the clone's config (the paper book
-    seeds capital from the strategy config). Absent → maxDD% is not computable → SKIPPED + a pending
-    caveat, never a fabricated percentage."""
+    """The paper-book capital base for the maxDD% gate, read from the clone's config. The CANONICAL
+    schema path is ``backtest.defaults.initial_capital`` (strategy-schema-v1.json — the paper book
+    seeds capital from it); top-level ``capital`` is schema-INVALID (additionalProperties:false),
+    so it was never a real source (audit finding #2). Legacy non-schema paths are read last as a
+    defensive fallback only. Absent → maxDD% is not computable → SKIPPED + a pending caveat, never a
+    fabricated percentage."""
     config = config or {}
     for candidate in (
+        ((config.get("backtest") or {}).get("defaults") or {}).get("initial_capital"),
+        # defensive legacy fallbacks (not schema-valid paths; harmless if absent):
         config.get("capital"),
         (config.get("paper") or {}).get("capital"),
         (config.get("risk") or {}).get("capital"),
@@ -375,13 +415,18 @@ def _take_eligible_assessment(
     config: dict[str, Any] | None,
     campaign: dict[str, Any],
     champion_score: float | None,
+    expected_base_champion: str | None = None,
+    expected_base_champion_version: str | None = None,
 ) -> tuple[bool, dict[str, Any]]:
-    """Apply the §8.2 TAKE_ELIGIBLE bar over the evo clone's paper book. The QUERYABLE gates
-    (≥20 closed trades + PF ≥ 1.3 + expectancy > 0, plus maxDD ≤ 25 % when a capital base is known,
-    plus the §7.2 live-gap gate = NOT DIVERGENT) GATE — any hard FAIL blocks. The bars whose inputs
-    are absent (maxDD without a capital base; RobustScore(live-weighted) ≥ champion — a
-    live-weighted re-score is a follow-up) never fabricate a pass; they SKIP and stamp an honest
-    ``pendingInputs`` caveat. Returns ``(eligible, evidence_card)``."""
+    """Apply the §8.2 TAKE_ELIGIBLE bar over the evo clone's paper book, PER evidencePolicy (audit
+    PF-01 findings #1/#3). The F7 quant gates (≥20 closed trades + PF ≥ 1.3 + expectancy > 0 + maxDD
+    ≤ 25 %) gate for BOTH policies. The §7.2 live-gap gate is REQUIRED for SIM_FIRST (a swing re-sim
+    is the correct reconciliation plane) but EXCLUDED for LIVE_FIRST (the only scalper recon
+    producer runs a RAW backtest — a structural divergence that must never count as a PASS; the
+    shadow-vs-paper producer is a flagged follow-up). The §6.1 LIVE_FIRST gates not yet computed
+    anywhere are emitted as explicit NOT_IMPLEMENTED entries and INTERIM-EXCLUDED (a flagged
+    follow-up). A REQUIRED gate that is SKIPPED / absent blocks (fail-closed); absent inputs never
+    fabricate a pass. Returns ``(eligible, evidence_card)``."""
     closed = [t for t in trades if t.get("realizedPnl") is not None]
     n_closed = len(closed)
     pnls = [_num(t.get("realizedPnl")) or 0.0 for t in closed]
@@ -399,6 +444,7 @@ def _take_eligible_assessment(
 
     pending: list[str] = []
     gates: list[dict[str, Any]] = []
+    policy = campaign.get("evidencePolicy") or "SIM_FIRST"
 
     gates.append({
         "id": "paper_trade_floor",
@@ -418,8 +464,9 @@ def _take_eligible_assessment(
     if max_dd is None:
         gates.append({"id": "max_drawdown", "status": "SKIPPED", "value": None})
         pending.append(
-            "maxDD % not computable — no capital base on the clone config; the ≤25 % drawdown "
-            "gate was NOT applied"
+            "maxDD % not computable — no capital base on the clone config "
+            "(backtest.defaults.initial_capital); the ≤25 % drawdown gate is a REQUIRED gate and "
+            "SKIPPED blocks (fail-closed)"
         )
     else:
         gates.append({
@@ -431,23 +478,52 @@ def _take_eligible_assessment(
     gates.append(_live_gap_gate_from_recon(recon, pending))
 
     # RobustScore(live-weighted) ≥ champion — the live-weighted re-score is a follow-up; never
-    # fabricate a pass. Stamp the SIM comparison as informational only.
+    # fabricate a pass. FIRST-CHAMPION exception: no champion → the vs-champion bar is n/a.
     sim_robust = _num((cand.get("scorecard") or {}).get("robustScore"))
     gates.append({"id": "robust_vs_champion", "status": "SKIPPED", "value": None})
     if champion_score is None:
         pending.append(
-            "no champion RobustScore on the campaign — the RobustScore(live-weighted) ≥ champion "
-            "bar (§8.2) is not applicable (first-mover champion)"
+            "no champion on the campaign — the RobustScore(live-weighted) ≥ champion bar (§8.2) is "
+            "not applicable (FIRST-CHAMPION exception)"
         )
     else:
         pending.append(
-            "RobustScore(live-weighted) ≥ champion NOT evaluated this slice — a live-weighted "
-            f"re-score is a follow-up; sim RobustScore {sim_robust} vs champion {champion_score}"
+            "RobustScore(live-weighted) ≥ champion NOT evaluated — a live-weighted re-score is a "
+            f"flagged follow-up; sim RobustScore {sim_robust} vs champion {champion_score}"
         )
 
-    eligible = all(g["status"] != "FAIL" for g in gates)
+    # §6.1 LIVE_FIRST hard gates not yet computed ANYWHERE — emitted explicitly (owner sees them on
+    # the HOLD card) and INTERIM-EXCLUDED from the required set (requiring an unbuilt gate would
+    # block every candidate). Flagged follow-up: wire each computation, then require it.
+    for gate_id in _TAKE_ELIGIBLE_INTERIM_EXCLUDED:
+        gates.append({
+            "id": gate_id, "status": scoring.NOT_IMPLEMENTED, "value": None,
+            "note": "§6.1 LIVE_FIRST gate not yet computed — interim-excluded (flagged follow-up)",
+        })
+    pending.append(
+        "§6.1 LIVE_FIRST gates (weekly consistency / daily-loss discipline / adjacent-neighbor "
+        "live stability / holdout-replay sign / comparability+data-health / live-weighted "
+        "RobustScore-vs-champion) are NOT YET COMPUTED — interim-excluded; the full LIVE_FIRST "
+        "TAKE bar is a flagged follow-up"
+    )
+
+    # PAPER→TAKE_ELIGIBLE readiness (audit PF-01), fail-closed and PER evidencePolicy: a REQUIRED
+    # gate that could not be affirmatively evaluated blocks (was fail-open "no FAIL ⇒ eligible").
+    required = (
+        _TAKE_ELIGIBLE_REQUIRED_LIVE_FIRST if policy == "LIVE_FIRST"
+        else _TAKE_ELIGIBLE_REQUIRED_SIM_FIRST
+    )
+    eligible, blocked_by = scoring.gate_readiness(gates, required)
     card = {
         "kind": _PROMOTE,
+        "gateReadiness": {
+            "evidencePolicy": policy,
+            "stage": "PAPER_TO_TAKE_ELIGIBLE",
+            "ready": eligible,
+            "requiredGates": sorted(required),
+            "blockedBy": blocked_by,
+            "interimExcluded": list(_TAKE_ELIGIBLE_INTERIM_EXCLUDED),
+        },
         "candidateId": cand.get("id"),
         "campaignId": campaign["id"],
         "whatChanges": (
@@ -466,6 +542,12 @@ def _take_eligible_assessment(
         "gates": gates,
         "robustScore": sim_robust,
         "championVersionId": campaign.get("championVersionId"),
+        # round-7/8 #1: the base strategy's LIVE published version at DECISION time — the IMMUTABLE
+        # champion this promote is validated against. Execute CAS-publishes against THIS exact UUID
+        # (never a fresh re-read) AND reads THIS exact version's config by its semver (never the
+        # latest row, which could be a newer manual/orphan draft — the untested-hybrid class).
+        "expectedBaseChampionVersionId": expected_base_champion,
+        "expectedBaseChampionVersion": expected_base_champion_version,
         "championRobustScore": champion_score,
         "liveGap": (
             {"verdict": recon.get("verdict"), "gapZ": recon.get("gapZ")} if recon else None
@@ -492,13 +574,30 @@ def _take_eligible_assessment(
 def _live_gap_gate_from_recon(
     recon: dict[str, Any] | None, pending: list[str]
 ) -> dict[str, Any]:
-    """The §7.2 live-gap gate over the latest reconciliation: DIVERGENT → FAIL (promotion blocked);
-    ALIGNED/PENALIZED → PASS; no reconciliation / INSUFFICIENT → SKIPPED + a pending caveat
-    (assessed as NOT-DIVERGENT on absent/insufficient evidence, never a fabricated pass)."""
+    """The §7.2 live-gap gate over the latest reconciliation, EVIDENCE-PLANE aware (audit finding
+    #1). A scalper reconciliation (``gap.mode == "scalper"``) comes from the ONLY producer, which
+    runs a RAW backtest — a §7.2 STRUCTURAL divergence for gate-armed intraday options (OI/Dow/IV
+    muted on derived history → ~0 armed trades). It is WHITELISTED: SKIPPED, and it must NEVER count
+    as a PASS (a raw-plane result must never unlock a scalper promotion). Combined with live_gap
+    being EXCLUDED from the LIVE_FIRST required set, a raw scalper recon neither unlocks nor
+    permanently blocks — the correct shadow-vs-paper producer is a flagged follow-up. For the swing
+    plane (``mode == "swing"``, the CORRECT reconciliation plane — the re-sim pins fill_timing at
+    the close): DIVERGENT → FAIL; ALIGNED/PENALIZED → PASS; absent / INSUFFICIENT → SKIPPED, which
+    (as a REQUIRED gate for SIM_FIRST TAKE) BLOCKS — an absent reconciliation is NOT read as
+    not-DIVERGENT (the closed fail-open)."""
+    gap = recon.get("gap") if isinstance(recon, dict) else None
+    if isinstance(gap, dict) and gap.get("mode") == "scalper":
+        pending.append(
+            "§7.2 scalper reconciliation is a RAW-plane STRUCTURAL divergence — whitelisted (never "
+            "counts as a live-gap PASS); the shadow-vs-paper producer is a flagged follow-up"
+        )
+        return {"id": "live_gap", "status": "SKIPPED", "value": recon.get("gapZ"),
+                "note": "§7.2 scalper raw-plane whitelist — not a valid promotion gate (interim)"}
     if recon is None:
         pending.append(
-            "no reconciliation yet for the clone version — the §7.2 live-gap gate is SKIPPED "
-            "(assessed as not-DIVERGENT on absent evidence)"
+            "no reconciliation yet for the clone version — the §7.2 live-gap gate is SKIPPED; it "
+            "is REQUIRED for the SIM_FIRST TAKE bar, so an absent reconciliation BLOCKS (it is NOT "
+            "read as not-DIVERGENT — the fail-open this closes)"
         )
         return {"id": "live_gap", "status": "SKIPPED", "value": None}
     verdict = recon.get("verdict")
@@ -508,8 +607,9 @@ def _live_gap_gate_from_recon(
     if verdict in ("ALIGNED", "PENALIZED"):
         return {"id": "live_gap", "status": "PASS", "value": gap_z}
     pending.append(
-        f"reconciliation verdict {verdict!r} is not DIVERGENT but below the evidence floor — the "
-        "§7.2 live-gap gate is SKIPPED (assessed as not-DIVERGENT)"
+        f"reconciliation verdict {verdict!r} is below the §7.2 evidence floor — the live-gap gate "
+        "is SKIPPED; REQUIRED for SIM_FIRST TAKE, so INSUFFICIENT evidence BLOCKS (never a "
+        "fabricated not-DIVERGENT pass)"
     )
     return {"id": "live_gap", "status": "SKIPPED", "value": gap_z}
 
@@ -700,6 +800,29 @@ class ProposalService:
 
     # --- E4 slice 3: TAKE_ELIGIBLE / ROLLBACK assessment (§8.1-8.2 / §12 item 13) ---------------
 
+    def _base_published_version(
+        self, campaign: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
+        """round-7/8 #1: the campaign base's CURRENT live published ``(versionId, semver)`` — the
+        immutable champion a PROMOTE decided now is validated against AND reads its config from.
+        ``(None, None)`` when the base is unresolvable, the registry client is not wired, or it
+        is LEGITIMATELY unpublished (never published). round-8 MINOR C: a registry read FAILURE is
+        NOT silently converted to a null champion — it raises an actionable 502 so the assessment
+        aborts, rather than persisting a None that would predictably CAS-fail at execute."""
+        base_id = campaign.get("strategyId")
+        if not base_id or self._strategy is None:
+            return None, None
+        try:
+            detail = self._strategy.detail(str(base_id))
+        except httpx.HTTPError as exc:
+            raise ApiError(
+                502, "REGISTRY_READ_FAILED",
+                f"could not read the base strategy {base_id}'s published version at assessment — "
+                "aborted rather than persisting a null champion (round-8 MINOR C); retry the "
+                "assessment once the registry is reachable",
+            ) from exc
+        return detail.get("publishedVersionId"), detail.get("publishedVersion")
+
     def assess_take_eligible(self, campaign_id: str) -> AssessmentResponse:
         """Assess the campaign's PAPER (and already-TAKE_ELIGIBLE) candidates against the §8.2
         TAKE_ELIGIBLE bar over each evo clone's live paper book, advancing the eligible ones to
@@ -722,6 +845,10 @@ class ProposalService:
             repo.close()
 
         champion_score = _champion_score(candidates, campaign.get("championVersionId"))
+        # round-7/8 #1: capture the base strategy's LIVE published (versionId, semver) NOW (decision
+        # time) — the immutable champion each PROMOTE proposal is validated against + CAS-publishes
+        # against + reads its config from (never the latest row).
+        expected_base_id, expected_base_semver = self._base_published_version(campaign)
         assessable = [c for c in candidates if c.get("state") in ("PAPER", "TAKE_ELIGIBLE")]
         evidence_by_id = self._read_paper_evidence(assessable)
 
@@ -730,10 +857,18 @@ class ProposalService:
             ev = evidence_by_id.get(cand["id"]) or {}
             ok, card = _take_eligible_assessment(
                 cand, ev.get("trades") or [], ev.get("recon"), ev.get("config"),
-                campaign, champion_score,
+                campaign, champion_score, expected_base_id, expected_base_semver,
             )
             if ok:
                 eligible.append((cand, card))
+            else:
+                # audit PF-01 observability: say WHY a PAPER candidate did NOT graduate — the exact
+                # required gates that FAILed or could not be affirmatively evaluated (fail-closed).
+                _LOG.info(
+                    "TAKE_ELIGIBLE blocked candidate %s (campaign %s): blockedBy=%s",
+                    cand.get("id"), campaign_id,
+                    card.get("gateReadiness", {}).get("blockedBy"),
+                )
 
         generated, refreshed, new_alerts = self._persist_promote_proposals(
             campaign, eligible
@@ -1183,6 +1318,56 @@ class ProposalService:
             "strategyId + sweep strategyId both absent) — cannot promote",
         )
 
+    def _revalidate_take_eligible(
+        self, candidate: dict[str, Any], campaign: dict[str, Any]
+    ) -> None:
+        """Audit PF-01 finding #6: re-run the fail-closed TAKE_ELIGIBLE readiness on the candidate's
+        CURRENT live evidence (paper book + latest reconciliation + config), immediately before a
+        PROMOTE publishes. 409 ``PROMOTION_READINESS_NOT_MET`` if the bar is no longer met — the
+        candidate is not demoted (assessment never demotes), but execution is refused. ``champion``
+        RobustScore is not re-derived here (robust_vs_champion is an interim-excluded gate, so it
+        never affects the verdict). 500 if the live/reconciliation repos are not wired (execute
+        needs them to re-read evidence)."""
+        if self._live_factory is None or self._recon_factory is None:
+            raise ApiError(
+                500, "REVALIDATE_NOT_WIRED",
+                "PROMOTE execute needs the live-evidence + reconciliation repos wired to "
+                "re-validate readiness before publishing",
+            )
+        evidence = self._read_paper_evidence([candidate]).get(candidate["id"]) or {}
+        ready, card = _take_eligible_assessment(
+            candidate, evidence.get("trades") or [], evidence.get("recon"),
+            evidence.get("config"), campaign, None,
+        )
+        if not ready:
+            blocked = (card.get("gateReadiness") or {}).get("blockedBy")
+            raise ApiError(
+                409, "PROMOTION_READINESS_NOT_MET",
+                f"candidate {candidate['id']} no longer meets the TAKE_ELIGIBLE bar at execute "
+                f"time (fail-closed re-validation) — blocked by {blocked}; promotion refused",
+            )
+
+    @staticmethod
+    def _guard_champion_unchanged(
+        proposal: dict[str, Any], campaign: dict[str, Any]
+    ) -> None:
+        """Audit PF-01 finding #6 (stale-champion CAS): the PROMOTE proposal captured the champion
+        it was assessed against (``evidence.championVersionId``). If the campaign's CURRENT champion
+        differs — a sibling candidate promoted since — this proposal is stale: publishing it would
+        overlay its params onto a DIFFERENT champion config than the one it was validated against —
+        an untested hybrid. 409 ``CHAMPION_CHANGED``; the owner must reassess/regenerate it against
+        the current champion first. (The FIRST-CHAMPION case is captured==current==None.)"""
+        captured = (proposal.get("evidence") or {}).get("championVersionId")
+        current = campaign.get("championVersionId")
+        if captured != current:
+            raise ApiError(
+                409, "CHAMPION_CHANGED",
+                f"proposal {proposal['id']} was assessed against champion {captured!r} but the "
+                f"current champion is {current!r} — the base moved since (a sibling promoted). "
+                "Reassess/regenerate this proposal against the current champion before promoting "
+                "(a stale proposal must not overlay its params onto a changed champion).",
+            )
+
     def _execute_promote(self, ctx: dict[str, Any], actor: str | None) -> PromotionResult:
         """§8.2 PROMOTE: publish the candidate's config onto the BASE strategy (champion pointer
         moves), register the demoted-champion counterfactual so its P&L accrues live, and archive
@@ -1193,25 +1378,79 @@ class ProposalService:
         self._guard_not_executed(ctx["proposal"], "promotion")
         candidate = ctx["candidate"]
         campaign = ctx["campaign"]
+        # audit PF-01 finding #6: BEFORE any registry mutation, guard the two ways a stale proposal
+        # could publish an untested config —
+        #   (a) CAS the champion: the proposal was assessed against a captured champion; if the
+        #       current champion has since moved (a sibling C1 promoted first), executing C2 would
+        #       overlay C2's params onto C1's now-changed config → an UNTESTED HYBRID. Refuse.
+        #   (b) re-validate the TAKE_ELIGIBLE readiness on FRESH live evidence — a proposal minted
+        #       when the bar was met but whose evidence has since degraded must NOT publish.
+        self._guard_champion_unchanged(ctx["proposal"], campaign)
+        self._revalidate_take_eligible(candidate, campaign)
         base_id = self._resolve_base_strategy_id(ctx)
         # The candidate's own evo PAPER clone (to archive after the champion move) — its strategy
         # id lives on the prior PUBLISH_PAPER proposal's execution stamp. Read BEFORE any HTTP.
         clone_strategy_id = self._find_candidate_clone_id(candidate["id"])
 
-        # The DEMOTED champion = the base strategy's CURRENT published version, captured BEFORE the
-        # candidate is published onto it (config + version UUID + semver — the rollback target).
-        demoted = self._strategy.detail(base_id)
-        demoted_config = demoted.get("config") or {}
+        # PF-01 round-8 CRITICAL A/B: the DEMOTED champion is the EXACT published version this
+        # proposal was ASSESSED against — captured immutably at decision time
+        # (``expectedBaseChampionVersionId`` + ``expectedBaseChampionVersion``), NEVER a fresh
+        # ``detail(base_id)`` read. ``detail`` returns the base's *latestVersion*, which under a
+        # concurrent manual edit could be a NEWER orphan/draft that was never validated here —
+        # overlaying the candidate's tuned params onto THAT and publishing it is the untested-hybrid
+        # live-promotion class this round closes. Everything about the demoted champion (config to
+        # overlay, rollback-target identity, counterfactual lineage, registry CAS expectation) comes
+        # from this one captured version.
+        evidence = ctx["proposal"].get("evidence") or {}
+        #   CRITICAL B — a legacy proposal minted BEFORE this capture existed has no validated
+        #   champion to build on; FAIL CLOSED (reassess to re-capture it) rather than fall back to
+        #   the fresh latest read, which is exactly the race this round removes.
+        if "expectedBaseChampionVersionId" not in evidence:
+            raise ApiError(
+                409, "REASSESSMENT_REQUIRED",
+                f"proposal {ctx['proposal']['id']} predates the immutable-champion capture "
+                "(no expectedBaseChampionVersionId) — it cannot be promoted safely without "
+                "re-deriving its config from a validated champion. Reassess the campaign to "
+                "regenerate this proposal against the current champion, then promote.",
+            )
+        expected_champion = evidence["expectedBaseChampionVersionId"]
+        demoted_semver = evidence.get("expectedBaseChampionVersion")
+        #   the capture must name a REAL published version (non-null id + semver). A null means the
+        #   base had no published champion at assessment (or the registry read failed — round-8
+        #   MINOR C aborts assessment now, so a persisted null is a pre-round-8 proposal). There is
+        #   no validated config to overlay → refuse; reassess once the base is published.
+        if not expected_champion or not demoted_semver:
+            raise ApiError(
+                409, "REASSESSMENT_REQUIRED",
+                f"proposal {ctx['proposal']['id']} captured no published base champion "
+                f"(id={expected_champion!r}, version={demoted_semver!r}) — there is no validated "
+                "config to promote onto. Reassess after the base has a published champion.",
+            )
+        demoted_version_id = expected_champion
+        #   CRITICAL A — read the config from THAT exact captured version by its semver, never the
+        #   latest row. This is the immutable version-config read the registry already serves.
+        try:
+            demoted_config = self._strategy.version_config(base_id, demoted_semver)
+        except httpx.HTTPError as exc:
+            #   Widen to HTTPError so a connection failure / timeout (no .response) is also an
+            #   actionable 502 before any live change, not a generic 500 — render the status only
+            #   when the exception carries one (same intent as the assessment read failure above).
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            status_note = f" ({status})" if status is not None else ""
+            raise ApiError(
+                502, "CHAMPION_CONFIG_READ_FAILED",
+                f"could not read the captured champion {base_id}@{demoted_semver} config"
+                f"{status_note} — aborted before any live change; retry once "
+                "the registry is reachable (the captured champion version is immutable).",
+            ) from exc
         if not demoted_config:
             raise ApiError(
                 422, "CHAMPION_CONFIG_UNRESOLVED",
-                f"base strategy {base_id} detail carries no config — cannot build the promoted "
-                "version or the counterfactual",
+                f"base {base_id} version {demoted_semver} (captured champion) carries no config "
+                "— cannot build the promoted version or the counterfactual",
             )
-        demoted_version_id = demoted.get("versionId")
-        demoted_semver = demoted.get("version")
 
-        # The promoted config = the demoted champion config with the candidate's tuned params
+        # The promoted config = the CAPTURED champion config with the candidate's tuned params
         # overlaid (KEEPS the base identity — it is published onto the base, not as a sibling).
         try:
             promoted_config = config_patch.apply_overrides(
@@ -1224,8 +1463,14 @@ class ProposalService:
             ) from exc
 
         created_by = f"evo:{campaign.get('family')}"
+        # PF-01 round-7 #1: the registry publish is a compare-and-set on the SAME captured champion
+        # UUID whose config we just overlaid — never a fresh re-read. A fresh read lets a LOSING
+        # promoter "catch up" to a just-published pointer and stack V2 on top of V1 (the sibling
+        # published but hadn't yet stamped optimizer state, so this call's V0 optimizer guard still
+        # passed). Using the immutable decision-time champion makes the registry CAS FAIL for the
+        # loser → 409 CHAMPION_CHANGED BEFORE any counterfactual/archive/stamp side effect.
         new_champion_version_id = self._publish_onto_base(
-            base_id, promoted_config, candidate, created_by
+            base_id, promoted_config, candidate, created_by, expected_champion
         )
         # Champion has moved; register the demoted-champion counterfactual (fail-loud: a failure
         # surfaces 502 so the owner knows the counterfactual did NOT register — see open-doubts on
@@ -1280,22 +1525,57 @@ class ProposalService:
         return {"archived": True, "clonedStrategyId": clone_strategy_id}
 
     def _publish_onto_base(
-        self, base_id: str, config: dict[str, Any], candidate: dict[str, Any], created_by: str
+        self, base_id: str, config: dict[str, Any], candidate: dict[str, Any], created_by: str,
+        expected_published_version_id: str | None,
     ) -> str | None:
         """Create a new draft version on the BASE strategy from the promoted config, publish it (the
-        champion pointer moves), and read back the new published version UUID. A registry HTTP fault
-        surfaces as 502."""
+        champion pointer moves), and read back the new published version UUID. PF-01 round-5 #1: the
+        publish is a compare-and-set on the LIVE registry pointer — it commits ONLY while the base's
+        current published version still equals ``expected_published_version_id`` (the champion this
+        promote was validated against). If a concurrent promoter moved it first, the registry 409s
+        and this is rejected as CHAMPION_CHANGED BEFORE it can overwrite live state or run the
+        counterfactual / clone side effects (an orphan DRAFT may remain — see the flagged
+        follow-up). Any other registry fault surfaces as 502."""
         notes = f"evo PROMOTE — candidate {candidate['id']} (§8.2 champion move)"
         try:
-            self._strategy.create_draft(base_id, config, notes, created_by=created_by)
-            self._strategy.publish(base_id, notes=notes)
-            detail = self._strategy.detail(base_id)
+            # round-6 #1: version-specific end-to-end. Capture the EXACT semver we just created and
+            # CAS-publish THAT version (never "publish the newest draft", which under a concurrent
+            # promote could be a sibling's draft); the champion is the EXACT published version UUID
+            # from the publish response, never a subsequent unversioned detail read (latestVersion).
+            created = self._strategy.create_draft(base_id, config, notes, created_by=created_by)
+            created_version = created.get("version")
+            published = self._strategy.publish(
+                base_id, target_version=created_version, notes=notes, cas=True,
+                expected_published_version_id=expected_published_version_id,
+            )
         except httpx.HTTPStatusError as exc:
-            raise ApiError(
-                502, "REGISTRY_PROMOTE_FAILED",
-                f"registry rejected the champion move ({exc.response.status_code})",
-            ) from exc
-        return detail.get("versionId")
+            raise self._promote_registry_error(exc) from exc
+        return published.get("versionId")
+
+    @staticmethod
+    def _promote_registry_error(exc: httpx.HTTPStatusError) -> ApiError:
+        """Translate a registry HTTP fault on the promote publish. round-6 #4: ONLY a
+        CONFLICT_PUBLISHED_VERSION_CHANGED (the CAS lost — a concurrent promoter won) maps to
+        CHAMPION_CHANGED; every OTHER conflict (e.g. CONFLICT_NO_CONTENT_CHANGE on create_draft,
+        CONFLICT_NOT_A_DRAFT) surfaces AS ITSELF, never relabelled a champion race."""
+        code = None
+        try:
+            code = (exc.response.json() or {}).get("code")
+        except (ValueError, AttributeError):
+            pass
+        if exc.response.status_code == 409 and code == "CONFLICT_PUBLISHED_VERSION_CHANGED":
+            return ApiError(
+                409, "CHAMPION_CHANGED",
+                "the base strategy's published version moved since this promote was validated "
+                "(a concurrent promoter won the registry compare-and-set) — rejected before "
+                "overwriting live state; reassess/regenerate against the current champion",
+            )
+        if exc.response.status_code == 409 and code:
+            return ApiError(409, code, f"registry rejected the champion move: {code}")
+        return ApiError(
+            502, "REGISTRY_PROMOTE_FAILED",
+            f"registry rejected the champion move ({exc.response.status_code})",
+        )
 
     def _register_counterfactual(
         self,
@@ -1403,9 +1683,24 @@ class ProposalService:
         merged = {**(proposal.get("evidence") or {}), "promotion": promotion}
         repo = self._repo_factory()
         try:
-            repo.update_candidate_publish(candidate["id"], new_champion_version_id, "PROMOTED")
-            repo.record_proposal_execution(proposal["id"], merged)
-            repo.update_campaign_champion(campaign["id"], new_champion_version_id)
+            # round-5 #2 (+ audit PF-01 #6): the champion compare-and-set + candidate advance +
+            # proposal stamp are ONE transaction (all-or-nothing). The CAS commits ONLY while the
+            # champion is STILL what this execute validated against — exactly one of two concurrent
+            # sibling promotes wins; the loser gets False (nothing mutated, no half-recorded
+            # promotion) → 409. So the champion pointer is never double-moved to an untested hybrid,
+            # and a winning promotion is never left with an advanced champion + unstamped proposal.
+            expected_champion = campaign.get("championVersionId")
+            won = repo.record_promotion_atomic(
+                campaign["id"], expected_champion, new_champion_version_id,
+                candidate["id"], proposal["id"], merged,
+            )
+            if not won:
+                raise ApiError(
+                    409, "CHAMPION_CHANGED",
+                    f"the campaign champion moved from {expected_champion!r} under proposal "
+                    f"{proposal['id']} (a concurrent sibling promote won the compare-and-set) — "
+                    "this promotion is refused; reassess/regenerate against the current champion",
+                )
         finally:
             repo.close()
         if clone_archive.get("archived"):

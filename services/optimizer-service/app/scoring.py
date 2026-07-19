@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections import Counter
 from typing import Any
 
 from app import leaderboard
@@ -42,6 +43,74 @@ FAIL = "FAIL"
 SKIPPED = "SKIPPED"
 UNKNOWN = "UNKNOWN"
 NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
+
+# --- Two distinct verdicts (audit PF-01 / AY-SL-08) -------------------------------------------
+# NEVER conflated (the original defect conflated them into one fail-open flag):
+#   * rankable       — DESCRIPTIVE: "no hard-gate FAIL". Drives the retro/leaderboard DISPLAY, the
+#                      RobustScore ranking, and the stress top-K (which candidate is worth probing).
+#                      Permissive by design — a degraded card still shows on the board.
+#   * stageReadiness — PROMOTION ADMISSION: fail-CLOSED, computed PER evidencePolicy (design §1.2).
+#                      A REQUIRED gate that is anything other than PASS blocks; a FAIL on any gate
+#                      blocks; a gate legitimately not-applicable at the stage is excluded (its
+#                      non-PASS neither passes nor blocks). This is what SURVIVOR selection consumes
+#                      — a sim-smoke must NEVER become selectable (§1.2 LIVE_FIRST).
+#
+# SCORED→SURVIVOR SIM_FIRST required set — every §6.1 SIM_FIRST hard gate a walk-forward cohort must
+# AFFIRMATIVELY pass. #703 (engine SHA) and #705 (regime-label vocab) are CLOSED (design doc lines
+# 29-34), so comparability + regime_floor are now affirmatively computable and REQUIRED. Foldless /
+# <4-neighbor = INCOMPLETE evidence = blocks (not a free pass). Excluded from THIS stage — and only
+# this stage — are the two gates a sim SURVIVOR decision genuinely cannot own: ``holdout`` (§8.2 —
+# consumed at the PUBLISH_PAPER bar, after selection) and ``live_gap`` (§6.1 "when live evidence
+# exists" — a sim sweep has none). A FAIL on either still blocks via the FAIL rule.
+_SIM_FIRST_SURVIVOR_REQUIRED = frozenset({
+    "evidence_floor", "oos_sign", "multiplicity_tstat", "fold_consistency",
+    "drawdown_cap", "regime_floor", "stability_floor", "comparability",
+})
+
+# Interim (flagged follow-up): the LIVE_FIRST SURVIVOR gate is live-evidence-led (shadow-vs-paper
+# challenger variants — design §1.2/§1.3), a producer NOT built here. A LIVE_FIRST campaign's sim
+# cohort is functional-smoke ONLY (never ranks, §1.2), so it is never stage-ready from sim evidence.
+_LIVE_FIRST_SIM_SMOKE_BLOCK = (
+    "evidencePolicy:LIVE_FIRST — sim evidence is functional-smoke only (design §1.2); the SURVIVOR "
+    "gate is live-evidence-led (shadow-vs-paper) and is NOT computed from a sim cohort"
+)
+
+
+def gate_readiness(
+    gates: list[dict[str, Any]], required_ids: frozenset[str]
+) -> tuple[bool, list[str]]:
+    """Fail-CLOSED readiness over gates against a required-id set. Returns ``(ready, blocked)``
+    where ``blocked`` names WHY as ``"<gateId>:<status>"`` entries — a FAILed gate, or a REQUIRED
+    gate that was not affirmatively evaluated (SKIPPED / UNKNOWN / INSUFFICIENT / NOT_IMPLEMENTED /
+    ABSENT). A gate id NOT in ``required_ids`` never blocks on a non-PASS status (excluded), but a
+    FAIL on ANY gate always blocks. ``ready`` iff ``blocked`` is empty. Pure — the WHY is returned
+    for the caller to surface/log, never logged here. Reused by proposals.py for the TAKE stage."""
+    by_id = {g.get("id"): g for g in gates}
+    blocked = [f"{g.get('id')}:{FAIL}" for g in gates if g.get("status") == FAIL]
+    for req in sorted(required_ids):
+        gate = by_id.get(req)
+        status = gate.get("status") if gate else "ABSENT"
+        if status not in (PASS, FAIL):  # a required-gate FAIL is already captured above
+            blocked.append(f"{req}:{status}")
+    return not blocked, blocked
+
+
+def survivor_stage_readiness(
+    gates: list[dict[str, Any]], policy: str
+) -> tuple[bool, list[str], list[str]]:
+    """The SCORED→SURVIVOR promotion-admission verdict, PER evidencePolicy. Returns
+    ``(ready, blocked, required_ids)``. SIM_FIRST → fail-closed over the SIM_FIRST required set.
+    LIVE_FIRST → a sim cohort is functional-smoke only and NEVER ranks (§1.2), so it is never
+    stage-ready from sim evidence (the live-evidence LIVE_FIRST survivor path is a flagged
+    follow-up). Any other/unknown policy (e.g. SIM_BLOCKED, which the recorder refuses before
+    scoring) → blocked, defensively."""
+    if policy == "SIM_FIRST":
+        required = sorted(_SIM_FIRST_SURVIVOR_REQUIRED)
+        ready, blocked = gate_readiness(gates, _SIM_FIRST_SURVIVOR_REQUIRED)
+        return ready, blocked, required
+    if policy == "LIVE_FIRST":
+        return False, [_LIVE_FIRST_SIM_SMOKE_BLOCK], []
+    return False, [f"evidencePolicy:{policy} — not a sim-scorable promotion plane"], []
 
 # §6.2 RobustScore weights (SIM_FIRST family default; they sum to 1.00). The owner can override
 # per campaign — the weights actually used are echoed into every scorecard (reproducible ranking).
@@ -116,13 +185,43 @@ def score_cohort(
     # candidate flips live_alignment from the retro z=0 stub to a live z-column (E3, §12 item 10);
     # candidates without a countable row then carry a per-candidate note (below), mirroring stress.
     cohort_has_live = any(_counts_toward_live(c.get("reconciliation")) for c in candidates)
-    stab = _stability_inputs(candidates, _plateau(candidates, parameters), direction)
+    # §1.3 comparability + PARTITIONING (audit PF-01 #4): a candidate is comparable ONLY within a
+    # partition sharing the SAME (engine SHA, data epoch). Normalizing RobustScore/plateau across
+    # INCOMPARABLE peers would pollute even the healthy candidates, so we compute the dominant
+    # complete signature (the most common (SHA, epoch) among candidates carrying BOTH) and score /
+    # normalize ONLY within that partition; a candidate outside it (or missing either SHA or epoch)
+    # FAILs comparability and is masked out of every z-column + the plateau (never pollutes peers).
+    comparator_sha, comparator_epoch = _dominant_signature(candidates)
+    # The partition to normalize WITHIN: when a dominant complete signature EXISTS, only its members
+    # are comparable (incomparable bags are masked out so they never pollute peers). With NO
+    # signature exists (comparator None — e.g. a retro cohort with no SHA/epoch), there is no
+    # comparable partition to protect, we normalize DESCRIPTIVELY over the whole cohort (nobody is
+    # stage-ready anyway — comparability is UNKNOWN for all). The comparability GATE (per candidate)
+    # still requires SHA + epoch present and matching the dominant signature.
+    if comparator_sha is not None:
+        partition = [
+            c.get("engineSha") == comparator_sha and c.get("dataHash") == comparator_epoch
+            for c in candidates
+        ]
+    else:
+        partition = [True] * len(candidates)
+    stab = _stability_inputs(
+        candidates, _plateau(candidates, parameters, partition), direction
+    )
 
-    # Per-component z's (cohort-normalized) + the raw constituents + any structural caveat.
+    # Per-component z's (normalized WITHIN the comparable partition — incomparable bags masked to
+    # None so they drop out of the mean/std) + the raw constituents + any structural caveat.
+    subsignals_by_comp = _component_subsignals(candidates, stab, n_params)
+    if not all(partition):
+        subsignals_by_comp = {
+            comp: [(label, [(v if partition[i] else None) for i, v in enumerate(vals)])
+                   for (label, vals) in cols]
+            for comp, cols in subsignals_by_comp.items()
+        }
     comp_zs: dict[str, list[float]] = {}
     comp_raws: list[dict[str, dict[str, Any]]] = [dict() for _ in candidates]
     comp_caveats: dict[str, str | None] = {}
-    for comp, subsignals in _component_subsignals(candidates, stab, n_params).items():
+    for comp, subsignals in subsignals_by_comp.items():
         zs, raws = _component_z(subsignals, len(candidates))
         comp_zs[comp] = zs
         comp_caveats[comp] = None if subsignals else _EMPTY_COMPONENT_CAVEATS.get(comp)
@@ -139,8 +238,23 @@ def score_cohort(
         weighted = sum(weights[comp] * comp_zs[comp][i] for comp in weights)
         penalties = _penalties(cand, n_params)
         robust = _round(weighted - penalties["dof"] - penalties["caveats"])
-        gates = _gates(cand, stab[i], n)
+        gates = _gates(cand, stab[i], n, comparator_sha, comparator_epoch)
+        # DESCRIPTIVE rankability (unchanged, permissive): no hard-gate FAIL. Drives display /
+        # ranking / stress top-K — NOT promotion admission.
         rankable = all(g["status"] != FAIL for g in gates)
+        # PROMOTION-ADMISSION readiness (audit PF-01), fail-closed and PER evidencePolicy — this is
+        # what SURVIVOR selection consumes, so a SKIPPED/UNKNOWN required gate no longer reads as a
+        # pass and a LIVE_FIRST sim-smoke is never selectable.
+        stage_ready, stage_blocked, stage_required = survivor_stage_readiness(gates, policy)
+        # round-5 #3/#4: a candidate carrying a COMPLETE signature that differs from the dominant
+        # one is on the STALE side (a different SHA/epoch than the authoritative partition).
+        # It must be REQUEUED (re-run under the current epoch), NOT retired — the design's §1.3
+        # "stale side is re-queued". Selection reads this marker.
+        stale_signature = (
+            comparator_sha is not None
+            and cand.get("engineSha") is not None and cand.get("dataHash") is not None
+            and not partition[i]
+        )
         scorecards.append({
             "trialNumber": cand.get("trialNumber"),
             "runId": cand.get("runId"),
@@ -150,6 +264,21 @@ def score_cohort(
             "robustScore": robust,
             "rank": None,  # assigned below, over rankable candidates only
             "rankable": rankable,
+            # round-5 #4: PER-CANDIDATE provenance (its OWN engine SHA + data epoch), persisted so
+            # stress compares each candidate against ITS OWN recorded signature — never a
+            # cohort-synthetic one — and the recorder persists the dominant tuple, not first-nn.
+            "provenance": {"engineSha": cand.get("engineSha"), "dataHash": cand.get("dataHash")},
+            # audit PF-01: the per-policy promotion-admission verdict, persisted so SURVIVOR
+            # selection consumes it (not `rankable`) and the owner sees WHY a candidate did not
+            # survive (which required gate FAILed or was never affirmatively evaluated).
+            "stageReadiness": {
+                "evidencePolicy": policy,
+                "stage": "SCORED_TO_SURVIVOR",
+                "ready": stage_ready,
+                "requiredGates": stage_required,
+                "blockedBy": stage_blocked,
+                "staleSignature": stale_signature,
+            },
             "weights": dict(weights),
             "gates": gates,
             "components": components,
@@ -357,11 +486,16 @@ def _zscores(values: list[float | None]) -> list[float | None]:
 
 # --- Hard gates (§6.1, SIM_FIRST column) ------------------------------------------------------
 
-def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[dict[str, Any]]:
+def _gates(
+    cand: dict[str, Any], stab: dict[str, Any], n_trials: int,
+    comparator_sha: str | None = None, comparator_epoch: str | None = None,
+) -> list[dict[str, Any]]:
     """The §6.1 SIM_FIRST hard gates as {id, status, value[, note]}. Retro degradations: no holdout
     run → holdout SKIPPED; NULL engine SHA → comparability UNKNOWN; no reconciliation / INSUFFICIENT
     / whitelisted-scalper → live_gap SKIPPED (§7.2, item 10); no sharpe / trade count → the
-    multiplicity t-stat gate SKIPPED."""
+    multiplicity t-stat gate SKIPPED. ``comparator_sha``/``comparator_epoch`` are the cohort's
+    representative engine SHA + data epoch — comparability FAILs a candidate whose own differs
+    (§1.3)."""
     oos_return = cand.get("oosReturn")
     fold_returns = cand.get("foldReturns")
     trades = cand.get("oosTradeCount")
@@ -384,7 +518,9 @@ def _gates(cand: dict[str, Any], stab: dict[str, Any], n_trials: int) -> list[di
         _stability_floor_gate(stab),
         {"id": "holdout", "status": SKIPPED, "value": None,
          "note": "no holdout run linked to a historical sweep trial (retro)"},
-        _comparability_gate(cand.get("engineSha")),
+        _comparability_gate(
+            cand.get("engineSha"), cand.get("dataHash"), comparator_sha, comparator_epoch
+        ),
         _live_gap_gate(cand.get("reconciliation")),
     ]
 
@@ -439,13 +575,35 @@ def _multiplicity_tstat_gate(
                     f"t-stat, NOT a Deflated Sharpe Ratio)"}
 
 
-def _comparability_gate(engine_sha: str | None) -> dict[str, Any]:
-    """Same engine SHA + data epoch as the comparator (§6.1). A run predating #703 SHA-stamping has
-    a NULL SHA → UNKNOWN (can't be established, didn't fail); a stamped run PASSes (the sweep's own
-    trials share the SHA — a fuller cross-comparator check is E3's reconciliation)."""
+def _comparability_gate(
+    engine_sha: str | None, data_hash: str | None,
+    comparator_sha: str | None, comparator_epoch: str | None,
+) -> dict[str, Any]:
+    """§6.1 / §1.3 "refuse to compare across differing engine SHA / data epoch" (audit PF-01 #4).
+    The comparator = the cohort's DOMINANT complete ``(SHA, epoch)`` signature. A candidate PASSes
+    ONLY when it carries BOTH a SHA and a data epoch AND both MATCH the dominant signature. Both
+    be PRESENT — an absent SHA OR an absent epoch is not establishable and blocks (fail-closed,
+    never a fabricated match):
+      * NULL engine SHA (run predates #703 stamping)  → UNKNOWN (blocks);
+      * NULL data epoch (no data hash on the run)     → UNKNOWN (blocks — §1.3 needs the epoch too);
+      * no dominant signature (no candidate carries both) → FAIL (no comparable partition exists);
+      * SHA or epoch ≠ the dominant signature         → FAIL (cross-signature comparison refused);
+      * SHA + epoch both present and MATCH the dominant signature → PASS."""
     if engine_sha is None:
         return {"id": "comparability", "status": UNKNOWN, "value": None,
                 "note": "NULL engine SHA (run predates #703 stamping) — not establishable"}
+    if data_hash is None:
+        return {"id": "comparability", "status": UNKNOWN, "value": None,
+                "note": "NULL data epoch (no dataHash) — §1.3 needs SHA AND epoch; unestablishable"}
+    if comparator_sha is None or comparator_epoch is None:
+        return {"id": "comparability", "status": FAIL, "value": engine_sha,
+                "note": "no comparable cohort partition — no candidate carries both a SHA and a "
+                        "data epoch, so this candidate has no comparable baseline (§1.3)"}
+    if engine_sha != comparator_sha or data_hash != comparator_epoch:
+        return {"id": "comparability", "status": FAIL, "value": engine_sha,
+                "note": f"signature (SHA {engine_sha}, epoch {data_hash}) ≠ the dominant cohort "
+                        f"signature (SHA {comparator_sha}, epoch {comparator_epoch}) — §1.3 bars "
+                        "a cross-SHA / cross-data-epoch comparison (the stale side is re-queued)"}
     return {"id": "comparability", "status": PASS, "value": engine_sha}
 
 
@@ -689,16 +847,52 @@ def _assign_ranks(scorecards: list[dict[str, Any]]) -> None:
         card["rank"] = position
 
 
+def _dominant_signature(
+    candidates: list[dict[str, Any]],
+) -> tuple[str | None, str | None]:
+    """The cohort's AUTHORITATIVE comparability signature = the most common complete ``(engineSha,
+    dataHash)`` among candidates carrying BOTH (audit PF-01 #4). The tie-break is DETERMINISTIC and
+    INPUT-ORDER-INDEPENDENT (round-5 #3): ties in frequency break by the lexicographically smallest
+    signature — the SAME signature wins regardless of the order the trials were assembled in (so the
+    normalization partition + readiness are reproducible). ``(None, None)`` when NO candidate has
+    both a SHA and a data epoch — then every candidate FAILs/blocks comparability (no comparable
+    partition exists, fail-closed)."""
+    complete = [
+        (c.get("engineSha"), c.get("dataHash"))
+        for c in candidates
+        if c.get("engineSha") is not None and c.get("dataHash") is not None
+    ]
+    if not complete:
+        return None, None
+    counts = Counter(complete)
+    # highest count first, ties broken by the signature tuple ascending (deterministic, NOT
+    # insertion order) — ``min`` over ``(-count, signature)``.
+    return min(counts, key=lambda sig: (-counts[sig], sig))
+
+
 def _plateau(
-    candidates: list[dict[str, Any]], parameters: list[dict[str, Any]]
+    candidates: list[dict[str, Any]], parameters: list[dict[str, Any]],
+    comparable: list[bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Reuse the leaderboard's plateau/neighbor computation on the sweep's own objective — the
-    stability signal (§6.2) and the stability_floor gate both read it, so it is computed once."""
+    stability signal (§6.2) and the stability_floor gate both read it, so it is computed once.
+    ``comparable`` (audit PF-01 #4) restricts the plateau to the comparable partition: neighbors are
+    counted ONLY among comparable peers, so an incomparable (drifted-signature) bag never enters a
+    healthy candidate's plateau. A non-comparable candidate gets an EMPTY result (plateau undefined
+    → stability_floor SKIPPED; it FAILs comparability regardless)."""
+    if comparable is None:
+        comparable = [True] * len(candidates)
+    idx = [i for i, ok in enumerate(comparable) if ok]
     trials = [
-        {"params": c.get("params") or {}, "objective": _num(c.get("rawObjective")) or 0.0}
-        for c in candidates
+        {"params": candidates[i].get("params") or {},
+         "objective": _num(candidates[i].get("rawObjective")) or 0.0}
+        for i in idx
     ]
-    return leaderboard.plateau_scores(trials, parameters)
+    scores = leaderboard.plateau_scores(trials, parameters)
+    out: list[dict[str, Any]] = [{} for _ in candidates]
+    for position, i in enumerate(idx):
+        out[i] = scores[position]
+    return out
 
 
 def _explainability(cand: dict[str, Any], n_params: int) -> float:

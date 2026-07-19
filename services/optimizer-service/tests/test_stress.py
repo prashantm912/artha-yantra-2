@@ -556,7 +556,9 @@ def test_rescore_unstressed_candidate_gates_pinned_byte_equal():
     # value) are byte-equal to the recorded card (same evidence, same campaign-cumulative N).
     repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
     sweep_id = _seed_sweep(jobs, trials, 2)
-    metrics = {"sharpe": 1.0, "tradeCount": 60, "totalReturn": 12.0}
+    # maxDrawdown carried so the REQUIRED drawdown_cap gate is evaluated (audit PF-01) and the
+    # foldless candidate is rankable — hence stress-targetable.
+    metrics = {"sharpe": 1.0, "tradeCount": 60, "totalReturn": 12.0, "maxDrawdown": 12.0}
     backtest = FakeStressBacktest(
         run_metrics={"run-0": dict(metrics), "run-1": dict(metrics)}, jobs=jobs
     )
@@ -588,6 +590,55 @@ def test_rescore_unstressed_candidate_gates_pinned_byte_equal():
     assert cr0["raw"].get("costResilience") is not None
 
 
+def test_evidence_drifted_uses_per_candidate_provenance():
+    # round-5 #4: drift is judged against the candidate's OWN recorded provenance, NOT the
+    # generation's cohort epoch. A candidate whose own (sha, hash) matches its re-assembled bag is
+    # NOT drifted even when the generation's recorded epoch differs (a minority/synthetic epoch) —
+    # this is what previously caused unchanged dominant candidates to be falsely flagged drifted.
+    from app.stress import _evidence_drifted
+    stored = {"provenance": {"engineSha": "sha-A", "dataHash": "epoch-A"}, "gates": []}
+    same_bag = {"engineSha": "sha-A", "dataHash": "epoch-A", "caveats": []}
+    assert _evidence_drifted(stored, same_bag, {"dataHash": "epoch-B"}) is False   # gen epoch diff
+    # a genuine per-candidate change IS drift
+    drifted_bag = {"engineSha": "sha-A", "dataHash": "epoch-Z", "caveats": []}
+    assert _evidence_drifted(stored, drifted_bag, None) is True
+    # pre-round-5 cards (no provenance) fall back to the comparability-gate value + generation epoch
+    legacy = {"gates": [{"id": "comparability", "value": "sha-A"}]}
+    assert _evidence_drifted(legacy, {"engineSha": "sha-A", "dataHash": "epoch-B", "caveats": []},
+                             {"dataHash": "epoch-B"}) is False
+
+
+def test_live_first_candidate_not_stage_ready_after_stress_rescore():
+    # audit PF-01 #5 (regression guard): the stress rescore PERSISTS the card, so it MUST carry the
+    # campaign's evidencePolicy. A LIVE_FIRST candidate must stay NOT stage-ready (never selectable)
+    # after a stress rescore — else a sim-smoke would be re-stamped SIM_FIRST and leak into SURVIVOR
+    # selection through the stress path.
+    repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
+    sweep_id = _seed_sweep(jobs, trials, 2)
+    metrics = {"sharpe": 1.0, "tradeCount": 60, "totalReturn": 12.0, "maxDrawdown": 12.0}
+    backtest = FakeStressBacktest(
+        run_metrics={"run-0": dict(metrics), "run-1": dict(metrics)}, jobs=jobs
+    )
+    scorer = RetroScoreService(lambda: jobs, lambda: trials, backtest)
+    stored_cards = scorer.score_sweep(sweep_id, policy="LIVE_FIRST").cards
+    cands = [
+        {"id": f"cand-{i}", "generationId": _GEN_ID, "params": card["params"],
+         "sweepJobId": sweep_id, "state": "SCORED", "scorecard": card}
+        for i, card in enumerate(stored_cards)
+    ]
+    _seed_generation(repo, sweep_id, cands, policy="LIVE_FIRST")
+    svc = _service(repo, jobs, trials, backtest)
+
+    svc.stress(_GEN_ID, top_k=1, multipliers=[2, 4])   # descriptive rankable selects; policy=LF
+    _wait(lambda: repo.get_generation(_GEN_ID)["stressTouches"] == 1)
+
+    persisted = [c["scorecard"] for c in repo.list_candidates_for_generation(_GEN_ID)]
+    assert persisted  # sanity
+    for card in persisted:
+        assert card["stageReadiness"]["evidencePolicy"] == "LIVE_FIRST"
+        assert card["stageReadiness"]["ready"] is False   # never selectable, even after stress
+
+
 # ================================================================================================
 # lifecycle: the durable STRESSING→DONE round marker + boot reaper
 # ================================================================================================
@@ -610,8 +661,13 @@ def test_stress_lifecycle_stressing_then_done_then_repostable():
     repo, jobs, trials = FakeEvoRepo(), FakeJobs(), FakeTrials()
     sweep_id = _seed_sweep(jobs, trials, 2)
     _seed_generation(repo, sweep_id, [_candidate(0), _candidate(1)])
+    # Full base-run evidence so the round's RE-SCORE (which overwrites the candidate scorecards)
+    # leaves them RANKABLE — else the re-POSTed round finds no rankable candidate to stress (audit
+    # PF-01: a re-scored card missing required-gate evidence is no longer rankable). Production
+    # reads this from real backtest results; the fixture must mirror it for the repostable round.
+    base = {_METRIC: 1.0, "tradeCount": 60, "maxDrawdown": 12.0, "totalReturn": 12.0}
     backtest = GatedStressBacktest(
-        run_metrics={"run-0": {_METRIC: 1.0}, "run-1": {_METRIC: 1.0}}, jobs=jobs
+        run_metrics={"run-0": dict(base), "run-1": dict(base)}, jobs=jobs
     )
     svc = _service(repo, jobs, trials, backtest)
 

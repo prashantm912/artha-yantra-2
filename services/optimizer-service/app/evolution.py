@@ -191,6 +191,22 @@ class Evidence(BaseModel):
     liveWindow: dict[str, Any] | None = None
 
 
+class StageReadiness(BaseModel):
+    """The audit-PF-01 promotion-admission verdict for the SCORED→SURVIVOR stage, PER evidencePolicy
+    (design §1.2) — fail-closed, DISTINCT from the descriptive ``rankable``. ``ready`` gates
+    SURVIVOR selection; ``blockedBy`` names the required gates that FAILed or were never
+    affirmatively evaluated. A typed field (not a loose dict) so the read never strips it (#7)."""
+
+    evidencePolicy: str
+    stage: str
+    ready: bool
+    requiredGates: list[str] = []
+    blockedBy: list[str] = []
+    # round-5 #3: True when the candidate is on the STALE signature side (a complete SHA/epoch
+    # different from the cohort's dominant one) — selection REQUEUES it rather than retiring it.
+    staleSignature: bool = False
+
+
 class Scorecard(BaseModel):
     """A §6.3 scorecard for one sweep trial, cohort-normalized. Extends the ``/best`` leaderboard
     identity (trialNumber/runId/params) with the gates + RobustScore + penalties, rather than
@@ -204,6 +220,10 @@ class Scorecard(BaseModel):
     robustScore: float
     rank: int | None = None
     rankable: bool
+    stageReadiness: StageReadiness | None = None
+    # round-5 #4: the candidate's OWN (engineSha, dataHash) provenance (not the cohort's) — stress
+    # compares each candidate against this, so a minority-signature bag never falsely reads drifted.
+    provenance: dict[str, Any] | None = None
     weights: dict[str, float]
     gates: list[GateResult]
     components: list[ComponentScore]
@@ -406,20 +426,25 @@ class RetroScoreService:
         finally:
             recon.close()
 
-    def score_sweep(self, sweep_id: str, prior_trials: int = 0) -> ScoredSweep:
+    def score_sweep(
+        self, sweep_id: str, prior_trials: int = 0, policy: str = "SIM_FIRST"
+    ) -> ScoredSweep:
         """Assemble + score an existing sweep's COMPLETE trials as a cohort — the shared core reused
         by the retro-score read AND the campaign recorder (do NOT duplicate this assembly). Reads
         the sweep job + its trials + each trial's backtest evidence, then scores the whole cohort
         via ``scoring.score_cohort``. ``prior_trials`` is the campaign's trials-to-date from PRIOR
         generations, added to this sweep's own full trial count to form the multiplicity-t-stat
-        N (§4) — the recorder passes it; the standalone retro read has no campaign
-        context so it stays 0 (per-sweep N, flagged by ``_RETRO_N_CAVEAT``). Returns the raw cards
-        (no retro caveat appended — the caller stamps it) plus the frozen job/objective/parameters
-        context. Raises 404 for an unknown / non-OPTIMIZATION job (the shared idiom)."""
+        N (§4) — the recorder passes it; the standalone retro read has no campaign context so it
+        stays 0 (per-sweep N, flagged by ``_RETRO_N_CAVEAT``). ``policy`` is the campaign's
+        evidencePolicy (design §1.2) — it drives the fail-closed STAGE-READINESS verdict (a
+        LIVE_FIRST sim cohort is functional-smoke only → never stage-ready); the recorder passes the
+        campaign's policy, the standalone retro read stays SIM_FIRST (descriptive). Returns the raw
+        cards (no retro caveat appended — the caller stamps it) plus the frozen job/objective/
+        parameters context. Raises 404 for an unknown / non-OPTIMIZATION job (the shared idiom)."""
         cohort = self.assemble_cohort(sweep_id, prior_trials)
         cards = scoring.score_cohort(
             cohort.candidates, cohort.parameters,
-            direction=cohort.direction, n_trials=cohort.n_trials,
+            direction=cohort.direction, n_trials=cohort.n_trials, policy=policy,
         )
         return ScoredSweep(
             job=cohort.job,
@@ -679,7 +704,9 @@ class EvoRecorderService:
         prior_trials = sum(self._scorer.count_trials(sid) for sid in prior_sweep_ids)
 
         # Score the cohort (reuses the retro assembly + score_cohort); 404 for an unknown sweep.
-        scored = self._scorer.score_sweep(sweep_id, prior_trials=prior_trials)
+        # The campaign's evidencePolicy drives the fail-closed stage-readiness verdict (§1.2): a
+        # LIVE_FIRST sim cohort is functional-smoke only and can NEVER become a SURVIVOR from sim.
+        scored = self._scorer.score_sweep(sweep_id, prior_trials=prior_trials, policy=policy)
 
         # A generation freezes its cohort at registration: recording a still-running sweep would
         # persist a PARTIAL cohort, and the 409 idempotency above would then lock out the full one.
@@ -706,11 +733,12 @@ class EvoRecorderService:
             "direction": scored.direction,
             "parameters": scored.parameters,
         }
-        # engine_sha / data_epoch lifted from the sweep's run evidence when present (all a sweep's
-        # trials share one engine SHA / data epoch — the first assembled candidate that carries them
-        # is representative; NULL on runs predating #703 SHA-stamping — recorded, never fabricated).
-        engine_sha = next((c["engineSha"] for c in scored.candidates if c.get("engineSha")), None)
-        data_hash = next((c["dataHash"] for c in scored.candidates if c.get("dataHash")), None)
+        # engine_sha / data_epoch = the EXACT DOMINANT (engineSha, dataHash) signature scoring used
+        # to partition/normalize (round-5 #4) — NOT an independent first-non-null of each field,
+        # which could persist a minority/synthetic tuple and make stress falsely flag the unchanged
+        # dominant candidates as drifted. NULL on runs predating #703 SHA-stamping (no complete
+        # signature) — recorded, never fabricated.
+        engine_sha, data_hash = scoring._dominant_signature(scored.candidates)
         data_epoch = {"dataHash": data_hash} if data_hash else None
         candidate_rows = [
             {
@@ -830,13 +858,18 @@ def _decide_selection(
     candidates: list[dict[str, Any]], top_k: int, n: int
 ) -> list[dict[str, Any]]:
     """Pure §8.1 selection over a generation's candidates. SELECTABLE = SCORED/SURVIVOR/RETIRED
-    (advanced-state candidates are skipped entirely). Among the selectable, RANKABLE = no hard-gate
-    FAIL (scoring's ``rankable``) AND a RobustScore present; rank those by RobustScore desc, keep
-    the top-K as SURVIVOR and RETIRE the rest (dominated); non-rankable → RETIRED (gate-fail).
-    Returns one decision per selectable candidate: the new state, the scorecard with the
-    ``selection`` rationale added, and whether it CHANGED (drives the idempotent write)."""
+    (advanced-state candidates are skipped entirely). Among the selectable, ELIGIBLE FOR SELECTION =
+    fail-closed STAGE READINESS (audit PF-01: ``scorecard.stageReadiness.ready`` — a required gate
+    that FAILed OR was never affirmatively evaluated blocks; a LIVE_FIRST sim-smoke is never ready)
+    AND a RobustScore present; rank those by RobustScore desc, keep the top-K as SURVIVOR and RETIRE
+    the rest (dominated); the not-ready → RETIRED, EXCEPT a STALE-SIGNATURE candidate (round-5 #3):
+    a candidate from a different SHA/data epoch than the cohort's dominant one is NOT comparable
+    generation but must be RE-QUEUED not retired (§1.3 "the stale side is re-queued") — it keeps its
+    state so it is re-evaluated under the current epoch. Returns one decision per selectable
+    candidate: the new state, the scorecard with the ``selection`` rationale added, and whether it
+    CHANGED."""
     selectable = [c for c in candidates if c.get("state") in _SELECTABLE_STATES]
-    ranked = sorted((c for c in selectable if _is_rankable(c)), key=_selection_sort_key)
+    ranked = sorted((c for c in selectable if _is_stage_ready(c)), key=_selection_sort_key)
     rank_by_id = {c["id"]: position for position, c in enumerate(ranked, start=1)}
     rankable_count = len(ranked)
 
@@ -845,20 +878,38 @@ def _decide_selection(
         scorecard = cand.get("scorecard") or {}
         robust = _num(scorecard.get("robustScore"))
         rank = rank_by_id.get(cand["id"])
+        readiness = scorecard.get("stageReadiness") or {}
         if rank is not None:
             if rank <= top_k:
                 state = "SURVIVOR"
+                decision = "SURVIVOR"
                 reason = f"top-{top_k} by RobustScore (rank {rank}/{rankable_count})"
             else:
                 state = "RETIRED"
+                decision = "RETIRED"
                 reason = (
                     f"dominated: RobustScore rank {rank}/{rankable_count} beyond top-{top_k}"
                 )
+        elif readiness.get("staleSignature"):
+            # §1.3: the stale-signature side is RE-QUEUED, never retired. round-6 #3: park it in the
+            # durable REQUEUED state (NOT a cosmetic SCORED label) — REQUEUED is EXCLUDED from
+            # re-selection as-is (_SELECTABLE_STATES), so repeating selection never re-processes the
+            # same stale evidence. An external scheduler resubmits a REQUEUED candidate's run under
+            # the authoritative epoch and flips it back to SCORED with fresh evidence (the actual
+            # re-run is that separate orchestration mechanism, not selection).
+            state = "REQUEUED"
+            decision = "REQUEUED"
+            reason = (
+                "re-queued: stale signature (a different engine SHA / data epoch than the cohort's "
+                "dominant one) — not comparable this generation; parked in REQUEUED (excluded from "
+                "re-selection) pending an external re-run under the current epoch (§1.3)"
+            )
         else:
             state = "RETIRED"
+            decision = "RETIRED"
             reason = _retire_reason(scorecard, robust)
         selection = {
-            "decision": state,
+            "decision": decision,
             "reason": reason,
             "rank": rank,
             "rankableCohort": rankable_count,
@@ -879,11 +930,15 @@ def _decide_selection(
     return decisions
 
 
-def _is_rankable(cand: dict[str, Any]) -> bool:
-    """RANKABLE for selection = scoring's ``rankable`` (no hard-gate FAIL) AND a RobustScore present
-    to sort on (a rankable card with a missing score can't be ranked — it retires)."""
+def _is_stage_ready(cand: dict[str, Any]) -> bool:
+    """ELIGIBLE FOR SELECTION (audit PF-01) = the fail-closed promotion-admission verdict
+    ``scorecard.stageReadiness.ready`` (NOT the permissive descriptive ``rankable``) AND a
+    RobustScore present to sort on. A card with no ``stageReadiness`` (pre-PF-01 / a foreign card)
+    is treated as NOT ready — fail-closed by construction, never admitted by omission."""
     scorecard = cand.get("scorecard") or {}
-    return bool(scorecard.get("rankable")) and _num(scorecard.get("robustScore")) is not None
+    readiness = scorecard.get("stageReadiness") or {}
+    ready = bool(readiness.get("ready"))
+    return ready and _num(scorecard.get("robustScore")) is not None
 
 
 def _selection_sort_key(cand: dict[str, Any]) -> tuple[float, float, str]:
@@ -897,12 +952,15 @@ def _selection_sort_key(cand: dict[str, Any]) -> tuple[float, float, str]:
 
 
 def _retire_reason(scorecard: dict[str, Any], robust: float | None) -> str:
+    blocked = (scorecard.get("stageReadiness") or {}).get("blockedBy") or []
+    if blocked:
+        return f"not stage-ready: {', '.join(str(b) for b in blocked)}"
     failed = [g.get("id") for g in scorecard.get("gates") or [] if g.get("status") == "FAIL"]
     if failed:
         return f"hard-gate FAIL: {', '.join(str(g) for g in failed)}"
     if robust is None:
-        return "not rankable: no RobustScore in the scorecard"
-    return "not rankable"
+        return "not stage-ready: no RobustScore in the scorecard"
+    return "not stage-ready"
 
 
 def _writer(request: Request) -> EvoRecorderService:

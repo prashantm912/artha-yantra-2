@@ -23,11 +23,13 @@ from tests.test_scheduler import _FOLDS, _RESULTS, SchedulerFakeRepo
 
 
 def _seed_campaign_with_generation(
-    *, n_trials: int = 4, top_k: int = 2, budget: dict[str, Any] | None = None
+    *, n_trials: int = 5, top_k: int = 2, budget: dict[str, Any] | None = None
 ) -> tuple[SchedulerFakeRepo, str]:
     """A campaign with one recorded generation of ``n_trials`` scored candidates, selected to
     ``top_k`` SURVIVORs (the rest RETIRED with a recorded reason), and its PUBLISH_PAPER proposals
-    minted — the full research trail the report reads."""
+    minted — the full research trail the report reads. ``n_trials`` defaults to 5 so the
+    now-REQUIRED stability_floor gate (needs ≥4 plateau neighbors — audit PF-01) is affirmatively
+    assessable and the survivors are genuinely stage-ready."""
     repo = SchedulerFakeRepo()
     jobs = FakeJobs()
     trials = FakeTrials(jobs)
@@ -69,7 +71,7 @@ def _report(repo: SchedulerFakeRepo, campaign_id: str) -> dict[str, Any]:
 
 
 def test_report_summarizes_generations_and_scores():
-    repo, campaign_id = _seed_campaign_with_generation(n_trials=4, top_k=2)
+    repo, campaign_id = _seed_campaign_with_generation(top_k=2)
     body = _report(repo, campaign_id)
 
     assert body["campaignId"] == campaign_id
@@ -78,7 +80,7 @@ def test_report_summarizes_generations_and_scores():
     assert len(body["generations"]) == 1
     generation = body["generations"][0]
     assert generation["n"] == 1
-    assert generation["candidateCount"] == 4
+    assert generation["candidateCount"] == 5
     assert generation["survivorCount"] == 2
     assert generation["bestRobustScore"] is not None
     # §1.3 comparability provenance surfaces per generation (lifted from the sweep's run evidence)
@@ -88,9 +90,9 @@ def test_report_summarizes_generations_and_scores():
 
 
 def test_report_candidate_states_and_survivors():
-    repo, campaign_id = _seed_campaign_with_generation(n_trials=4, top_k=2)
+    repo, campaign_id = _seed_campaign_with_generation(top_k=2)
     body = _report(repo, campaign_id)
-    assert body["candidateStates"] == {"SURVIVOR": 2, "RETIRED": 2}
+    assert body["candidateStates"] == {"SURVIVOR": 2, "RETIRED": 3}
     assert body["survivors"] == 2
     # both survivors have no consumed holdout — the owner's cue to trigger the holdout runs (the
     # autonomous scheduler will not mint their PUBLISH_PAPER proposals until then, §6.1)
@@ -100,21 +102,21 @@ def test_report_candidate_states_and_survivors():
 def test_report_graveyard_carries_retire_reasons():
     # §8.3: the graveyard is a first-class output — every RETIRED candidate with WHY (the recorded
     # selection reason), so the report proves the search is not cherry-picking.
-    repo, campaign_id = _seed_campaign_with_generation(n_trials=4, top_k=2)
+    repo, campaign_id = _seed_campaign_with_generation(top_k=2)
     body = _report(repo, campaign_id)
-    assert len(body["graveyard"]) == 2
+    assert len(body["graveyard"]) == 3
     for entry in body["graveyard"]:
         assert entry["generationN"] == 1
         assert entry["reason"]  # a recorded reason (dominated / hard-gate fail), never blank
 
 
 def test_report_proposal_tallies():
-    repo, campaign_id = _seed_campaign_with_generation(n_trials=4, top_k=2)
+    repo, campaign_id = _seed_campaign_with_generation(top_k=2)
     body = _report(repo, campaign_id)
     tallies = {(t["kind"], t["status"]): t["count"] for t in body["proposals"]}
-    # two survivors → two PENDING PUBLISH_PAPER; two retires → two auto-APPROVED RETIRE acks
+    # two survivors → two PENDING PUBLISH_PAPER; three retires → three auto-APPROVED RETIRE acks
     assert tallies.get(("PUBLISH_PAPER", "PENDING")) == 2
-    assert tallies.get(("RETIRE", "APPROVED")) == 2
+    assert tallies.get(("RETIRE", "APPROVED")) == 3
 
 
 def test_report_budget_spend_and_scheduler_state():

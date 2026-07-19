@@ -30,13 +30,19 @@ def _campaign(champion=None, family="manas-arora", campaign_id=_CAMPAIGN_ID):
     }
 
 
-def _cand(cid, *, state="SURVIVOR", robust=1.0, rankable=True, holdout=None, version_id=None):
+def _cand(cid, *, state="SURVIVOR", robust=1.0, rankable=True, ready=None, holdout=None,
+          version_id=None):
+    # audit PF-01: PUBLISH_PAPER eligibility consumes the fail-closed ``stageReadiness.ready`` (not
+    # the permissive ``rankable``). ``ready`` mirrors ``rankable`` unless overridden.
+    stage_ready = rankable if ready is None else ready
     return {
         "id": cid, "generationId": "gen-1", "versionId": version_id, "parentCandidateId": None,
         "mutationKind": "PARAMS", "params": {"period": 15}, "structureDiff": None,
         "sweepJobId": "sweep-1", "holdoutRunId": holdout,
         "scorecard": {
             "robustScore": robust, "rankable": rankable,
+            "stageReadiness": {"evidencePolicy": "SIM_FIRST", "stage": "SCORED_TO_SURVIVOR",
+                               "ready": stage_ready, "requiredGates": [], "blockedBy": []},
             "gates": [{"id": "oos_sign", "status": "PASS"},
                       {"id": "drawdown_cap", "status": "PASS"}],
         },

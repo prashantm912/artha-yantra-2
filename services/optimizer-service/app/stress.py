@@ -551,6 +551,11 @@ class StressService:
             cohort.parameters,
             direction=cohort.direction,
             n_trials=cohort.n_trials,
+            # audit PF-01 #5: the re-scored card is PERSISTED, so it MUST carry the campaign's
+            # evidencePolicy — else a LIVE_FIRST sim-smoke would be re-stamped SIM_FIRST and become
+            # selectable via the stress path (the descriptive rankable that stress selects on stays
+            # permissive; only the persisted stageReadiness verdict must match the policy).
+            policy=context.policy or "SIM_FIRST",
         )
         if context.policy == "LIVE_FIRST":  # sim evidence never ranks a LIVE_FIRST family (§1.2)
             for card in cards:
@@ -686,22 +691,31 @@ def _evidence_drifted(
     stored: dict[str, Any], bag: dict[str, Any], data_epoch: dict[str, Any] | None
 ) -> bool:
     """True when the re-assembled bag's evidence no longer matches what the candidate was RECORDED
-    on: the bag carries a ``run fetch failed`` caveat (purged/unreachable run), its ``engineSha``
-    differs from the stored card's comparability-gate value, or its ``dataHash`` differs from the
-    generation's recorded ``data_epoch``. A side missing (pre-#703 NULL SHA, UNKNOWN gate, no
-    epoch) can't ESTABLISH drift — only a present-and-different pair does (degrade, don't block)."""
+    on: the bag carries a ``run fetch failed`` caveat (purged/unreachable run), or its ``engineSha``
+    / ``dataHash`` differ from the candidate's OWN recorded provenance. round-5 #4: the compare is
+    PER-CANDIDATE — each candidate is checked against its own recorded ``provenance`` (engineSha,
+    dataHash), NOT the generation's cohort-synthetic epoch, so a minority-signature bag is not
+    falsely flagged as drifted and healthy dominant candidates keep their re-score. Falls back to
+    comparability-gate value / generation ``data_epoch`` for pre-round-5 cards. A side missing (NULL
+    SHA, no epoch) can't ESTABLISH drift — only a present-and-different pair does (degrade, don't
+    block)."""
     if any(str(c).startswith("run fetch failed") for c in bag.get("caveats") or []):
         return True
-    stored_sha = next(
-        (g.get("value") for g in stored.get("gates") or [] if g.get("id") == "comparability"),
-        None,
-    )
+    provenance = stored.get("provenance") or {}
+    stored_sha = provenance.get("engineSha")
+    if stored_sha is None:
+        stored_sha = next(
+            (g.get("value") for g in stored.get("gates") or [] if g.get("id") == "comparability"),
+            None,
+        )
+    stored_hash = provenance.get("dataHash")
+    if stored_hash is None:
+        stored_hash = (data_epoch or {}).get("dataHash")
     bag_sha = bag.get("engineSha")
     if stored_sha is not None and bag_sha is not None and stored_sha != bag_sha:
         return True
-    epoch_hash = (data_epoch or {}).get("dataHash")
     bag_hash = bag.get("dataHash")
-    return epoch_hash is not None and bag_hash is not None and epoch_hash != bag_hash
+    return stored_hash is not None and bag_hash is not None and stored_hash != bag_hash
 
 
 def _stress_request(

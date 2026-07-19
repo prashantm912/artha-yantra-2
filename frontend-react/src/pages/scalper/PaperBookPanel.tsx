@@ -15,6 +15,7 @@ import {
 import { useLiveTicks } from '../../api/ticks.ts';
 import { Select } from '../../components/atoms/Select.tsx';
 import { InfoTip } from '../../components/atoms/InfoTip.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 
 // The cockpit's live PAPER BOOK panel: the operator's open positions + live P&L + total exposure +
 // the per-book risk-limit guard, so they watch their book while watching signals. Reuses the SAME paper
@@ -111,6 +112,89 @@ export function PaperBookPanel({ onBookChange }: { onBookChange?: (book: string)
     return { mark, unrealized };
   };
 
+  // Open-positions grid via the shared DataTable — same columns, order, right-alignment and
+  // number formatting as the hand-rolled table it replaced (adoption adds zebra + sticky header +
+  // the md:hidden card list). Read-only status panel, so no onRowClick; the per-row Close button is
+  // preserved as an Actions cell (hidden text header, the shipped JobsPage pattern). Mark / uP&L are
+  // computed per render via mtm() so the live-tick overlay keeps updating exactly as before.
+  const columns: DataColumn<PaperPosition>[] = [
+    {
+      id: 'instrument',
+      header: 'Instrument',
+      align: 'left',
+      mobileLabel: 'Instrument',
+      render: (p) => `${p.exchange}:${p.tradingsymbol}`,
+    },
+    {
+      id: 'side',
+      header: 'Side',
+      align: 'left',
+      mobileLabel: 'Side',
+      render: (p) => (
+        <span className={cn('text-xs font-semibold', p.side === 'BUY' ? 'text-bull' : 'text-bear')}>
+          {p.side}
+        </span>
+      ),
+    },
+    {
+      id: 'qty',
+      header: 'Qty',
+      align: 'right',
+      mobileLabel: 'Qty',
+      render: (p) => p.qty,
+    },
+    {
+      id: 'mark',
+      header: 'Mark',
+      align: 'right',
+      mobileLabel: 'Mark',
+      render: (p) => {
+        const { mark } = mtm(p);
+        return mark ? money(mark) : '—';
+      },
+    },
+    {
+      id: 'upnl',
+      header: 'uP&L',
+      align: 'right',
+      mobileLabel: 'uP&L',
+      cellClassName: (p) => {
+        const { unrealized } = mtm(p);
+        return unrealized ? toneClass(unrealized) : '';
+      },
+      render: (p) => {
+        const { unrealized } = mtm(p);
+        return unrealized ? money(unrealized) : '—';
+      },
+    },
+    {
+      id: 'sltp',
+      header: 'SL / TP',
+      align: 'right',
+      mobileLabel: 'SL / TP',
+      cellClassName: () => 'text-xs text-ay-muted',
+      render: (p) =>
+        `${p.stopLoss ? money(p.stopLoss) : '—'} / ${p.takeProfit ? money(p.takeProfit) : '—'}`,
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      align: 'right',
+      headerClassName: 'ay-sr-only',
+      mobileLabel: 'Actions',
+      render: (p) => (
+        <button
+          type="button"
+          onClick={() => close.mutate({ id: p.id })}
+          title="Simulate exiting this position at the current mark — paper only, never a live order"
+          className="px-1.5 text-xs text-accent hover:underline"
+        >
+          Close
+        </button>
+      ),
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-3">
       {/* Book selector — names WHAT this panel shows so the aggregate is never mistaken for one book. */}
@@ -174,75 +258,14 @@ export function PaperBookPanel({ onBookChange }: { onBookChange?: (book: string)
           label="Open positions"
         />
       </h3>
-      <div className="max-h-[24rem] overflow-auto rounded-lg border border-ay-border">
-        <table className="w-full border-collapse text-sm">
-          <thead className="sticky top-0 bg-surface-1 text-left text-xs uppercase text-ay-muted">
-            <tr>
-              <th className="px-2 py-2 font-medium">Instrument</th>
-              <th className="px-2 py-2 font-medium">Side</th>
-              <th className="px-2 py-2 text-right font-medium">Qty</th>
-              <th className="px-2 py-2 text-right font-medium">Mark</th>
-              <th className="px-2 py-2 text-right font-medium">uP&L</th>
-              <th className="px-2 py-2 text-right font-medium">SL / TP</th>
-              <th className="px-2 py-2">
-                <span className="ay-sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((p) => {
-              const m = mtm(p);
-              return (
-                <tr key={p.id} className="border-t border-ay-border">
-                  <td className="px-2 py-2">
-                    {p.exchange}:{p.tradingsymbol}
-                  </td>
-                  <td className="px-2 py-2">
-                    <span
-                      className={cn(
-                        'text-xs font-semibold',
-                        p.side === 'BUY' ? 'text-bull' : 'text-bear',
-                      )}
-                    >
-                      {p.side}
-                    </span>
-                  </td>
-                  <td className="px-2 py-2 text-right tabular-nums">{p.qty}</td>
-                  <td className="px-2 py-2 text-right tabular-nums">{m.mark ? money(m.mark) : '—'}</td>
-                  <td
-                    className={cn(
-                      'px-2 py-2 text-right tabular-nums',
-                      m.unrealized && toneClass(m.unrealized),
-                    )}
-                  >
-                    {m.unrealized ? money(m.unrealized) : '—'}
-                  </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-xs text-ay-muted">
-                    {p.stopLoss ? money(p.stopLoss) : '—'} / {p.takeProfit ? money(p.takeProfit) : '—'}
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    <button
-                      type="button"
-                      onClick={() => close.mutate({ id: p.id })}
-                      title="Simulate exiting this position at the current mark — paper only, never a live order"
-                      className="px-1.5 text-xs text-accent hover:underline"
-                    >
-                      Close
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-            {items.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-2 py-6 text-center text-ay-muted">
-                  No open positions — take a signal above to open a paper trade.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={items}
+        rowKey={(p) => String(p.id)}
+        ariaLabel="Open positions"
+        maxHeight="24rem"
+        emptyMessage="No open positions — take a signal above to open a paper trade."
+      />
     </div>
   );
 }

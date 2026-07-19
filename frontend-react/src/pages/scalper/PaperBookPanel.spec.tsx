@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // The cockpit paper-book panel renders the operator's open positions + account P&L/exposure + the
@@ -80,22 +80,54 @@ describe('PaperBookPanel', () => {
     });
     renderPanel();
 
-    // Account header — equity / day P&L / exposure (capital used) / open count.
+    // Account header — equity / day P&L / exposure (capital used) / open count (outside the table).
     expect(screen.getByText('1010000.00')).toBeInTheDocument();
     expect(screen.getByText('2500.00')).toBeInTheDocument();
     expect(screen.getByText('150000.00')).toBeInTheDocument();
 
+    // The positions grid now renders through the shared DataTable (desktop <table> + md:hidden card
+    // list) → each cell text exists twice in jsdom, so scope every table assertion to the named table.
+    const grid = within(screen.getByRole('table', { name: 'Open positions' }));
+
     // Position row + server-marked unrealized P&L (no live tick → falls back to BE mark).
-    expect(screen.getByText('NSE:INFY')).toBeInTheDocument();
-    expect(screen.getByText('1000.00')).toBeInTheDocument();
+    expect(grid.getByText('NSE:INFY')).toBeInTheDocument();
+    expect(grid.getByText('1000.00')).toBeInTheDocument();
 
     // Risk chips reflect on/off state (kill switch armed, daily loss off).
     expect(screen.getByText('Kill switch: on')).toBeInTheDocument();
     expect(screen.getByText('Max open: 5')).toBeInTheDocument();
     expect(screen.getByText('Daily loss ₹: off')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(grid.getByRole('button', { name: 'Close' }));
     expect(close).toHaveBeenCalledWith({ id: 3 });
+  });
+
+  it('renders the positions grid header + row cell-for-cell (content preserved through adoption)', () => {
+    usePaperPositions.mockReturnValue({ data: { items: [position] } });
+    usePaperAccount.mockReturnValue({ data: account });
+    useRiskSettings.mockReturnValue({ data: { items: [] } });
+    renderPanel();
+
+    const grid = within(screen.getByRole('table', { name: 'Open positions' }));
+    expect(grid.getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
+      'Instrument',
+      'Side',
+      'Qty',
+      'Mark',
+      'uP&L',
+      'SL / TP',
+      'Actions',
+    ]);
+    const dataRow = grid.getAllByRole('row').slice(1)[0]; // [0] = header row
+    expect(within(dataRow).getAllByRole('cell').map((c) => c.textContent)).toEqual([
+      'NSE:INFY',
+      'SELL',
+      '100',
+      '1490.00', // mtm mark = BE markPrice (no live tick)
+      '1000.00', // SELL: (1500 − 1490) × 100
+      '1520.00 / 1450.00',
+      'Close',
+    ]);
   });
 
   it('shows the empty state when there are no open positions', () => {
@@ -104,7 +136,8 @@ describe('PaperBookPanel', () => {
     useRiskSettings.mockReturnValue({ data: { items: [] } });
     renderPanel();
 
-    expect(screen.getByText(/No open positions —/)).toBeInTheDocument();
+    // DataTable paints the empty message in both the desktop table and the mobile card list.
+    expect(screen.getAllByText(/No open positions —/).length).toBeGreaterThan(0);
     // With no risk settings, every chip reads off.
     expect(screen.getByText('Kill switch: off')).toBeInTheDocument();
   });

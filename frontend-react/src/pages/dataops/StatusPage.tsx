@@ -12,6 +12,7 @@ import {
 import { LogFeed } from '../../components/dataops/LogFeed.tsx';
 import { Modal } from '../../components/dataops/Modal.tsx';
 import { QuotaGauge } from '../../components/dataops/QuotaGauge.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -183,6 +184,60 @@ function ts(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : '—';
 }
 
+// B1 history columns (kind · status · rows · timings · error). Same content/order as the hand-rolled
+// table it replaced — DataTable adds zebra + sticky header + the mobile card list.
+const backfillColumns: DataColumn<BackfillJobRow>[] = [
+  { id: 'kind', header: 'Kind', align: 'left', mobileLabel: 'Kind', render: (job) => job.kind },
+  {
+    id: 'status',
+    header: 'Status',
+    align: 'left',
+    mobileLabel: 'Status',
+    render: (job) => (
+      <span
+        className={cn(
+          'inline-block rounded px-2 py-0.5 text-xs font-semibold ring-1',
+          jobStatusClass(job.status),
+        )}
+      >
+        {job.status}
+      </span>
+    ),
+  },
+  {
+    id: 'rows',
+    header: 'Rows',
+    align: 'right',
+    mobileLabel: 'Rows',
+    cellClassName: () => 'text-ay-text',
+    render: (job) => (job.rowsWritten == null ? '—' : fmt(job.rowsWritten)),
+  },
+  {
+    id: 'started',
+    header: 'Started',
+    align: 'left',
+    mobileLabel: 'Started',
+    cellClassName: () => 'text-ay-muted',
+    render: (job) => ts(job.startedAt),
+  },
+  {
+    id: 'finished',
+    header: 'Finished',
+    align: 'left',
+    mobileLabel: 'Finished',
+    cellClassName: () => 'text-ay-muted',
+    render: (job) => ts(job.finishedAt),
+  },
+  {
+    id: 'error',
+    header: 'Error',
+    align: 'left',
+    mobileLabel: 'Error',
+    cellClassName: () => 'text-bear',
+    render: (job) => job.error ?? '',
+  },
+];
+
 /** B1 history: the recent backfill runs from the V030 audit ledger (kind · status · rows · timings · error). */
 function BackfillHistoryCard({ jobs }: { jobs: BackfillJobRow[] }) {
   return (
@@ -194,43 +249,12 @@ function BackfillHistoryCard({ jobs }: { jobs: BackfillJobRow[] }) {
       {jobs.length === 0 ? (
         <p className="text-xs text-ay-muted">No backfill runs recorded yet.</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-caption uppercase tracking-wide text-ay-muted">
-                <th className="py-1 pr-3 font-medium">Kind</th>
-                <th className="py-1 pr-3 font-medium">Status</th>
-                <th className="py-1 pr-3 text-right font-medium">Rows</th>
-                <th className="py-1 pr-3 font-medium">Started</th>
-                <th className="py-1 pr-3 font-medium">Finished</th>
-                <th className="py-1 font-medium">Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((job) => (
-                <tr key={job.id} className="border-t border-ay-border align-top">
-                  <td className="py-1 pr-3 text-ay-text">{job.kind}</td>
-                  <td className="py-1 pr-3">
-                    <span
-                      className={cn(
-                        'inline-block rounded px-2 py-0.5 text-xs font-semibold ring-1',
-                        jobStatusClass(job.status),
-                      )}
-                    >
-                      {job.status}
-                    </span>
-                  </td>
-                  <td className="nums py-1 pr-3 text-right text-ay-text">
-                    {job.rowsWritten == null ? '—' : fmt(job.rowsWritten)}
-                  </td>
-                  <td className="py-1 pr-3 text-ay-muted">{ts(job.startedAt)}</td>
-                  <td className="py-1 pr-3 text-ay-muted">{ts(job.finishedAt)}</td>
-                  <td className="py-1 text-bear">{job.error ?? ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={backfillColumns}
+          rows={jobs}
+          rowKey={(job) => String(job.id)}
+          ariaLabel="Backfill history"
+        />
       )}
     </section>
   );

@@ -14,7 +14,23 @@ import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { CalendarSpreadChart } from '../../components/CalendarSpreadChart.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { BeatStrip, BeatItem, BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
+
+// The two legs of the calendar spread (near/far) as a small table. Same content/order as the
+// hand-rolled positions table — DataTable adds zebra + the mobile card list.
+interface LegRow {
+  leg: string;
+  expiry: string;
+  strike: string;
+  type: string;
+}
+const legColumns: DataColumn<LegRow>[] = [
+  { id: 'leg', header: 'Leg', align: 'left', mono: true, mobileLabel: 'Leg', render: (r) => r.leg },
+  { id: 'expiry', header: 'Expiry', align: 'left', mono: true, mobileLabel: 'Expiry', render: (r) => r.expiry },
+  { id: 'strike', header: 'Strike', align: 'left', mono: true, mobileLabel: 'Strike', render: (r) => r.strike },
+  { id: 'type', header: 'Type', align: 'left', mono: true, mobileLabel: 'Type', render: (r) => r.type },
+];
 
 // Calendar Spread Chart (oipulse strategies/calendar-spread). Charts the premium DIFFERENTIAL of one
 // strike+type across two expiries (near − far) as candles with VWAP/20-EMA/Near/Far overlays — a
@@ -195,30 +211,15 @@ export function CalendarSpreadPage() {
                 </section>
                 <section className="card shadow-e1">
                   <h2 className="mb-2 text-h3 text-ay-text">Positions</h2>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs uppercase text-ay-muted">
-                        <th className="py-1">Leg</th>
-                        <th className="py-1">Expiry</th>
-                        <th className="py-1">Strike</th>
-                        <th className="py-1">Type</th>
-                      </tr>
-                    </thead>
-                    <tbody className="tabular-nums">
-                      <tr className="border-t border-ay-border">
-                        <td className="py-1">Near</td>
-                        <td className="py-1">{data.nearExpiry}</td>
-                        <td className="py-1">{data.strike}</td>
-                        <td className="py-1">{data.optionType}</td>
-                      </tr>
-                      <tr className="border-t border-ay-border">
-                        <td className="py-1">Far</td>
-                        <td className="py-1">{data.farExpiry}</td>
-                        <td className="py-1">{data.strike}</td>
-                        <td className="py-1">{data.optionType}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  <DataTable
+                    columns={legColumns}
+                    rows={[
+                      { leg: 'Near', expiry: data.nearExpiry, strike: data.strike, type: data.optionType },
+                      { leg: 'Far', expiry: data.farExpiry, strike: data.strike, type: data.optionType },
+                    ]}
+                    rowKey={(r) => r.leg}
+                    ariaLabel="Positions"
+                  />
                 </section>
               </div>
             </BeatBlock>

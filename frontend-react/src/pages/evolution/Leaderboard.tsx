@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import {
   fmtNum,
   fmtSigned,
@@ -77,6 +78,119 @@ export function Leaderboard({
     { value: 'state', label: 'Sort: State' },
   ];
 
+  // The leaderboard grid via the shared DataTable — same columns, order, formatting and left
+  // alignment as the hand-rolled table it replaced (adoption adds zebra + sticky header + the
+  // md:hidden card list; density is normalized). Rows are pre-sorted by the toolbar Select above,
+  // so no column carries a sortValue (headers stay non-sortable, matching the original). Row-click →
+  // onOpen via DataTable's onRowClick: the desktop row is a mouse-only convenience (audit M23 — it
+  // keeps its table `row` semantics), and the RobustScore cell's in-cell button is the keyboard/AT
+  // activator (preserved from the original hand-rolled table); the mobile card is a keyboard button.
+  const columns = useMemo<DataColumn<Candidate>[]>(
+    () => [
+      {
+        id: 'rank',
+        header: 'Rank',
+        align: 'left',
+        mono: true,
+        mobileLabel: 'Rank',
+        cellClassName: () => 'text-ay-muted',
+        render: (c) => (c.scorecard?.rank != null ? `#${c.scorecard.rank}` : '—'),
+      },
+      {
+        id: 'score',
+        header: 'RobustScore',
+        align: 'left',
+        mono: true,
+        mobileLabel: 'RobustScore',
+        // The RobustScore cell carries a real in-cell button — the M23 keyboard/AT activator (the
+        // desktop row itself is a mouse-only convenience, no keyboard). stopPropagation so a click
+        // on it doesn't also fire the row's mouse onClick.
+        render: (c) => {
+          const isChampion = championVersionId != null && c.versionId === championVersionId;
+          return (
+            <>
+              <button
+                type="button"
+                aria-label={`Open scorecard for candidate ${c.id.slice(0, 8)}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpen(c);
+                }}
+                className="tabular-nums text-ay-text hover:text-accent"
+              >
+                {fmtNum(scoreOf(c), 3)}
+              </button>
+              {isChampion && (
+                <span className="ml-1.5 rounded bg-surface-2 px-1 py-0.5 text-[10px] uppercase text-bull">
+                  champion
+                </span>
+              )}
+            </>
+          );
+        },
+      },
+      {
+        id: 'vsChamp',
+        header: 'vs champ',
+        align: 'left',
+        mono: true,
+        mobileLabel: 'vs champ',
+        cellClassName: (c) => ((c.scorecard?.comparator?.delta ?? 0) >= 0 ? 'text-bull' : 'text-bear'),
+        render: (c) =>
+          c.scorecard?.comparator?.delta != null ? fmtSigned(c.scorecard.comparator.delta) : '—',
+      },
+      {
+        id: 'gates',
+        header: 'Gates',
+        align: 'left',
+        mobileLabel: 'Gates',
+        render: (c) => {
+          const summary = gateSummary(c.scorecard?.gates);
+          return (
+            <span
+              className={cn(
+                'rounded px-1.5 py-0.5 text-[11px] font-medium ring-1',
+                summary.failed === 0 && summary.total > 0
+                  ? 'text-bull ring-bull/40'
+                  : summary.failed > 0
+                    ? 'text-bear ring-bear/40'
+                    : 'text-ay-muted ring-ay-border',
+              )}
+              title={summary.failed > 0 ? `Failing: ${summary.failedIds.join(', ')}` : undefined}
+            >
+              {summary.passed}/{summary.total}
+            </span>
+          );
+        },
+      },
+      {
+        id: 'state',
+        header: 'State',
+        align: 'left',
+        mobileLabel: 'State',
+        render: (c) => <StateBadge state={c.state} />,
+      },
+      {
+        id: 'gen',
+        header: 'Gen',
+        align: 'left',
+        mobileLabel: 'Gen',
+        cellClassName: () => 'text-xs text-ay-muted',
+        render: (c) =>
+          genLabel.get(c.generationId) != null ? `Gen ${genLabel.get(c.generationId)}` : '—',
+      },
+      {
+        id: 'flags',
+        header: 'Flags',
+        align: 'left',
+        mobileLabel: 'Flags',
+        cellClassName: () => 'text-xs text-warn',
+        render: (c) => (c.scorecard?.flags && c.scorecard.flags.length > 0 ? c.scorecard.flags.length : ''),
+      },
+    ],
+    [championVersionId, genLabel, onOpen],
+  );
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -98,95 +212,14 @@ export function Leaderboard({
           No candidates match this filter.
         </p>
       ) : (
-        <div
-          className="max-h-[65vh] overflow-auto rounded-md border"
-          style={{ contain: 'paint' }}
-          tabIndex={0}
-          role="region"
-          aria-label="Candidates leaderboard"
-        >
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-surface-1 text-left text-xs text-ay-muted">
-              <tr>
-                <th className="px-2 py-2 font-medium">Rank</th>
-                <th className="px-2 py-2 font-medium">RobustScore</th>
-                <th className="px-2 py-2 font-medium">vs champ</th>
-                <th className="px-2 py-2 font-medium">Gates</th>
-                <th className="px-2 py-2 font-medium">State</th>
-                <th className="px-2 py-2 font-medium">Gen</th>
-                <th className="px-2 py-2 font-medium">Flags</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((c) => {
-                const card = c.scorecard;
-                const summary = gateSummary(card?.gates);
-                const isChampion = championVersionId != null && c.versionId === championVersionId;
-                return (
-                  <tr
-                    key={c.id}
-                    onClick={() => onOpen(c)}
-                    className="cursor-pointer border-t hover:bg-surface-2/50"
-                  >
-                    <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-ay-muted">
-                      {card?.rank != null ? `#${card.rank}` : '—'}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <button
-                        type="button"
-                        aria-label={`Open scorecard for candidate ${c.id.slice(0, 8)}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpen(c);
-                        }}
-                        className="tabular-nums text-ay-text hover:text-accent"
-                      >
-                        {fmtNum(scoreOf(c), 3)}
-                      </button>
-                      {isChampion && (
-                        <span className="ml-1.5 rounded bg-surface-2 px-1 py-0.5 text-[10px] uppercase text-bull">
-                          champion
-                        </span>
-                      )}
-                    </td>
-                    <td
-                      className={cn(
-                        'whitespace-nowrap px-2 py-1.5 tabular-nums',
-                        (card?.comparator?.delta ?? 0) >= 0 ? 'text-bull' : 'text-bear',
-                      )}
-                    >
-                      {card?.comparator?.delta != null ? fmtSigned(card.comparator.delta) : '—'}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-1.5">
-                      <span
-                        className={cn(
-                          'rounded px-1.5 py-0.5 text-[11px] font-medium ring-1',
-                          summary.failed === 0 && summary.total > 0
-                            ? 'text-bull ring-bull/40'
-                            : summary.failed > 0
-                              ? 'text-bear ring-bear/40'
-                              : 'text-ay-muted ring-ay-border',
-                        )}
-                        title={summary.failed > 0 ? `Failing: ${summary.failedIds.join(', ')}` : undefined}
-                      >
-                        {summary.passed}/{summary.total}
-                      </span>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <StateBadge state={c.state} />
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-xs text-ay-muted">
-                      {genLabel.get(c.generationId) != null ? `Gen ${genLabel.get(c.generationId)}` : '—'}
-                    </td>
-                    <td className="px-2 py-1.5 text-xs text-warn">
-                      {card?.flags && card.flags.length > 0 ? card.flags.length : ''}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(c) => c.id}
+          ariaLabel="Candidates leaderboard"
+          onRowClick={(c) => onOpen(c)}
+          maxHeight="65vh"
+        />
       )}
       <p className="text-xs text-ay-muted">
         {rows.length} candidate{rows.length === 1 ? '' : 's'}. Click a row to open its scorecard, gate

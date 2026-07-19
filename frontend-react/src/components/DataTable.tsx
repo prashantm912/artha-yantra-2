@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type HTMLAttributes,
+  type ReactNode,
+} from 'react';
 import {
   flexRender,
   getCoreRowModel,
@@ -102,6 +110,19 @@ interface DataTableProps<Row> {
   manualSorting?: boolean;
   sortState?: { id: string; dir: 'asc' | 'desc' } | null;
   onSortChange?: (sort: { id: string; dir: 'asc' | 'desc' } | null) => void;
+  /** Make each row clickable as a MOUSE-ONLY convenience — the desktop <tr> and the mobile card both
+   *  get an onClick + cursor-pointer only, NO role/tabIndex/keyboard (audit M23 / #596). A
+   *  role="button" on a <tr> strips its cells of their required `row` parent → axe
+   *  `aria-required-parent` + AT sees a table with zero data rows; and because the mobile card
+   *  renders the same cells, a card-as-button would wrap any in-cell control as `nested-interactive`.
+   *  So keyboard + AT activation MUST come from a real in-cell <button>/<a> the adopter renders and
+   *  stopPropagations (the M23 pattern — see SignalsPage / BacktestResultsPage); it renders into both
+   *  the desktop cell and the mobile card, so it is the keyboard path on both. Omit to keep rows
+   *  plain, non-interactive (today's exact render — no role, no tabIndex, no pointer). */
+  onRowClick?: (row: Row, index: number) => void;
+  /** Override the desktop scroll container's max-height cap with any CSS length (e.g. '24rem',
+   *  '65vh'). Omit to keep today's hardcoded max-h-[68vh]. */
+  maxHeight?: string;
 }
 
 const ALIGN: Record<ColumnAlign, string> = {
@@ -136,6 +157,8 @@ export function DataTable<Row>({
   manualSorting = false,
   sortState,
   onSortChange,
+  onRowClick,
+  maxHeight,
   // virtualizeAfter (§3.2.5) + persistKey (§3.2.3) are accepted but intentionally unimplemented
   // no-ops for this phase — left off the destructure so omitting them yields today's exact render.
 }: DataTableProps<Row>) {
@@ -226,6 +249,22 @@ export function DataTable<Row>({
 
   const showToolbar = enableColumnVisibility || enableDensityToggle || hasFilter;
 
+  // Row-click affordance (opt-in) — a MOUSE-ONLY convenience on BOTH the desktop <tr> and the mobile
+  // card. It is deliberately NOT turned into a keyboard/AT button on either surface (audit M23 / #596):
+  //  • Desktop: a role="button" on a <tr> overrides its implicit `row` role, stripping every <td> of
+  //    its required `row` parent → axe `aria-required-parent`, and a screen-reader in table mode sees
+  //    a table with ZERO data rows.
+  //  • Mobile: the card renders the SAME cells as the row, so a card-as-button would wrap whatever
+  //    in-cell control the adopter provides for keyboard access → axe `nested-interactive`.
+  // So keyboard + AT activation MUST come from a real in-cell <button>/<a> the adopter renders and
+  // stopPropagations (the M23 pattern — SignalsPage / BacktestResultsPage); it renders into BOTH the
+  // desktop cell and the mobile card, so it is the keyboard path on both. The row/card onClick stays
+  // a pure mouse convenience. Unset onRowClick → {}, leaving rows plain, non-interactive (today's
+  // exact render — no role, no tabIndex, no pointer).
+  const rowInteractive = onRowClick != null;
+  const rowClickProps = (row: Row, index: number): HTMLAttributes<HTMLElement> =>
+    onRowClick ? { onClick: () => onRowClick(row, index) } : {};
+
   return (
     <div>
       {showToolbar && (
@@ -286,7 +325,12 @@ export function DataTable<Row>({
       {/* Desktop / landscape: sticky-header sortable table */}
       <div
         ref={scrollRef}
-        className="ay-table-scroll hidden max-h-[68vh] overflow-auto rounded border border-ay-border md:block"
+        className={cn(
+          'ay-table-scroll hidden overflow-auto rounded border border-ay-border md:block',
+          // Keep the hardcoded cap (today's exact render) unless an explicit maxHeight overrides it.
+          maxHeight == null && 'max-h-[68vh]',
+        )}
+        style={maxHeight != null ? { maxHeight } : undefined}
         tabIndex={0}
         role="region"
         aria-label={ariaLabel}
@@ -362,10 +406,12 @@ export function DataTable<Row>({
               <tr
                 key={r.id}
                 ref={scrollToRowKey != null && r.id === scrollToRowKey ? centerRef : null}
+                {...rowClickProps(r.original, i)}
                 className={cn(
                   'border-t border-ay-border text-ay-text transition-colors',
                   zebra && (i % 2 === 1 ? 'bg-surface-1/40' : 'bg-transparent'),
                   'hover:bg-surface-2/60',
+                  rowInteractive && 'cursor-pointer',
                   rowClassName?.(r.original),
                 )}
               >
@@ -403,11 +449,13 @@ export function DataTable<Row>({
 
       {/* Phone (portrait): one card per row, label: value per mobile-visible column */}
       <div className="space-y-2 md:hidden">
-        {bodyRows.map((r) => (
+        {bodyRows.map((r, i) => (
           <div
             key={r.id}
+            {...rowClickProps(r.original, i)}
             className={cn(
               'rounded border border-ay-border bg-surface-1 p-2 text-xs',
+              rowInteractive && 'cursor-pointer',
               rowClassName?.(r.original),
             )}
           >

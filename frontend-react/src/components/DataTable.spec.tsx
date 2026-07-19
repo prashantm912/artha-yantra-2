@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { DataTable, type DataColumn } from './DataTable.tsx';
 
@@ -109,5 +109,65 @@ describe('DataTable', () => {
     renderTable();
     // 'Symbol' is the mobileLabel for the name column; 'Price'/'Qty' have none → no card <dt>.
     expect(screen.getAllByText('Symbol').length).toBe(ROWS.length);
+  });
+
+  // --- onRowClick (opt-in row-click; audit M23 — mouse-only convenience, keyboard via in-cell controls) ---
+
+  it('fires onRowClick from a desktop-row mouse click while the row KEEPS table `row` semantics (no button role)', () => {
+    const onRowClick = vi.fn();
+    renderTable({ onRowClick });
+    // Audit M23: a role="button" on a <tr> strips its cells of their required `row` parent, so the
+    // desktop row must stay role="row" — getAllByRole('row') therefore sees every data row.
+    const rows = within(body()).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(ROWS.length);
+    for (const r of rows) {
+      expect(r).not.toHaveAttribute('role'); // implicit `row`, NOT overridden to button
+      expect(r).not.toHaveAttribute('tabindex');
+    }
+    fireEvent.click(rows[0]); // BBB = first data row (index 0)
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(onRowClick).toHaveBeenNthCalledWith(1, ROWS[0], 0);
+  });
+
+  it('introduces NO role="button" (desktop or mobile) — the M23 + nested-interactive guard — yet the mobile card still fires onRowClick on a mouse click', () => {
+    const onRowClick = vi.fn();
+    const { container } = renderTable({ onRowClick });
+    // onRowClick must not turn any row/card into a button: not the <tr> (aria-required-parent) and
+    // not the mobile card (it renders the same cells → a card-button would nest an in-cell control).
+    expect(screen.queryByRole('button', { name: /BBB/ })).toBeNull();
+    // The mobile card list is the md:hidden container; its cards are plain <div>s with a mouse onClick.
+    const card = container.querySelector('.md\\:hidden > div');
+    expect(card).not.toBeNull();
+    fireEvent.click(card as Element); // first card = BBB (index 0)
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(onRowClick).toHaveBeenNthCalledWith(1, ROWS[0], 0);
+  });
+
+  it('leaves rows plain and non-interactive (no role/tabindex/button anywhere) when onRowClick is unset', () => {
+    renderTable();
+    const rows = within(body()).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(ROWS.length);
+    for (const r of rows) {
+      expect(r).not.toHaveAttribute('role');
+      expect(r).not.toHaveAttribute('tabindex');
+    }
+    // No row buttons on desktop OR mobile — only the two sortable-header buttons (Name, Price).
+    expect(screen.queryByRole('button', { name: /BBB/ })).toBeNull();
+  });
+
+  // --- maxHeight (scroll-cap override) ---
+
+  it('caps the desktop scroll region at max-h-[68vh] by default (no inline height)', () => {
+    renderTable();
+    const region = screen.getByRole('region', { name: 'Test table' });
+    expect(region.className).toContain('max-h-[68vh]');
+    expect(region.style.maxHeight).toBe('');
+  });
+
+  it('applies a custom maxHeight inline and drops the default cap when set', () => {
+    renderTable({ maxHeight: '24rem' });
+    const region = screen.getByRole('region', { name: 'Test table' });
+    expect(region.style.maxHeight).toBe('24rem');
+    expect(region.className).not.toContain('max-h-[68vh]');
   });
 });

@@ -46,7 +46,7 @@ public final class PremiumExitEvaluator {
       int signalExitOffset) {
     BigDecimal slLevel = level(entryPremium, rules.stopLossPct(), false);
     BigDecimal tpLevel = level(entryPremium, rules.takeProfitPct(), true);
-    BigDecimal trailArm = level(entryPremium, rules.trailActivatePct(), true);
+    BigDecimal trailArm = rawLevel(entryPremium, rules.trailActivatePct(), true);
     boolean armed = rules.trailByPct() != null && rules.trailActivatePct() == null;
     BigDecimal peak = entryPremium;
 
@@ -67,7 +67,7 @@ public final class PremiumExitEvaluator {
           armed = true;
         }
         if (armed) {
-          BigDecimal trailStop = level(peak, rules.trailByPct(), false);
+          BigDecimal trailStop = rawLevel(peak, rules.trailByPct(), false);
           if (p.compareTo(trailStop) <= 0) {
             return new Exit(i, p, "TRAILING_STOP");
           }
@@ -85,18 +85,33 @@ public final class PremiumExitEvaluator {
   }
 
   /**
-   * {@code round2(base × (1 ± pct/100))} — paise-rounded (2dp HALF_UP, pct/100 taken at 6dp), the SAME
-   * derivation the live bracket ({@code PremiumBracketRules.resolve}) uses, so a premium-pct level fires
-   * at the identical bar in backtest and paper (audit AY-SL-06; real premiums trade in paise, and the
-   * bracket order actually placed is a paise value). {@code up = +} (target / trailing-arm) else −
-   * (stop / trailing-off-peak). {@code base} is the entry premium for SL/TP/arm, the running peak for
-   * the trailing stop. Null when the pct is absent.
+   * {@code round2(entry × (1 ± pct/100))} — paise-rounded (2dp HALF_UP, pct/100 taken at 6dp), the SAME
+   * derivation the live bracket ({@code PremiumBracketRules.resolve}) uses, so a premium-pct STOP/TARGET
+   * fires at the identical bar in backtest and paper (audit AY-SL-06; real premiums trade in paise, and
+   * the bracket order actually placed is a paise value). {@code up = +} (target) else − (stop). Null
+   * when the pct is absent. Used for SL/TP ONLY — the live resolver implements only stop_loss/take_profit,
+   * so only those levels have a paper counterpart to be parity with.
    */
-  private static BigDecimal level(BigDecimal base, BigDecimal pct, boolean up) {
+  private static BigDecimal level(BigDecimal entry, BigDecimal pct, boolean up) {
     if (pct == null) {
       return null;
     }
     BigDecimal frac = pct.divide(new BigDecimal("100"), 6, RoundingMode.HALF_UP);
-    return base.multiply(up ? ONE.add(frac) : ONE.subtract(frac)).setScale(2, RoundingMode.HALF_UP);
+    return entry.multiply(up ? ONE.add(frac) : ONE.subtract(frac)).setScale(2, RoundingMode.HALF_UP);
+  }
+
+  /**
+   * {@code base × (1 ± pct/100)} — FULL precision (no paise rounding). Used for the trailing arm + stop,
+   * which are backtest-only (the live {@code PremiumBracketRules} has no trailing bracket) and unpinned
+   * by the shared exit-equivalence fixture — so the AY-SL-06 paise rounding, which exists solely to match
+   * the live SL/TP levels, must NOT touch these (it would silently shift unpinned trailing exit bars).
+   * {@code up = +} (trailing-arm) else − (trailing-off-peak). Null when the pct is absent.
+   */
+  private static BigDecimal rawLevel(BigDecimal base, BigDecimal pct, boolean up) {
+    if (pct == null) {
+      return null;
+    }
+    BigDecimal frac = pct.movePointLeft(2);
+    return base.multiply(up ? ONE.add(frac) : ONE.subtract(frac));
   }
 }

@@ -126,17 +126,21 @@ describe('BacktestResultsPage', () => {
     expect(screen.getByText('cafebabe1234')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Trades' }));
-    // Exit-reason breakdown summarises the loaded trades above the table (one TARGET bucket here).
+    // Exit-reason breakdown summarises the loaded trades above the table (one TARGET bucket here). It
+    // rides the shared DataTable, which paints a desktop <table> AND an md:hidden card list — so scope
+    // every assertion to the named desktop table (a bare getByText would match the card twin too).
     const breakdown = screen.getByRole('table', { name: 'Exit-reason breakdown' });
     const reasonCell = within(breakdown).getByText('TARGET');
     expect(reasonCell).toBeInTheDocument();
     const row = reasonCell.closest('tr')!;
     expect(within(row).getByText('100.0%')).toBeInTheDocument(); // 1/1 wins
-    // The per-trade table still lists the trade's reason.
-    expect(screen.getAllByText('TARGET').length).toBe(2);
+    // The per-trade table (still a hand-rolled table, not a DataTable) also lists the trade's reason.
+    const perTrade = screen.getAllByRole('table').find((t) => t !== breakdown)!;
+    expect(within(perTrade).getByText('TARGET')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Folds' }));
-    expect(screen.getByText(/2026-03-01 → 2026-04-01/)).toBeInTheDocument();
+    const foldsTable = screen.getByRole('table', { name: 'Walk-forward folds' });
+    expect(within(foldsTable).getByText(/2026-03-01 → 2026-04-01/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Monte Carlo' }));
     expect(screen.getByText(/risk of ruin 0.02/)).toBeInTheDocument();

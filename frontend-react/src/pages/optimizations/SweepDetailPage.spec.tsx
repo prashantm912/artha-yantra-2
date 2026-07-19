@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -64,11 +64,15 @@ function renderPage() {
 describe('SweepDetailPage', () => {
   it('shows the leaderboard + flagged trials, and promotes a trial to a draft', () => {
     renderPage();
-    expect(screen.getAllByText('#5').length).toBeGreaterThan(0); // leaderboard + all-trials
+    // The leaderboard rides the shared DataTable (desktop <table> + an md:hidden card list) — scope
+    // the leaderboard assertions to the named desktop table so they guard the desktop render, not the
+    // card (the jsdom double-paint). COMPLETE/PRUNED live in the raw all-trials table (single render).
+    const board = within(screen.getByRole('table', { name: 'Sweep leaderboard' }));
+    expect(board.getByText('#5')).toBeInTheDocument();
     expect(screen.getByText('COMPLETE')).toBeInTheDocument();
     expect(screen.getByText('PRUNED')).toBeInTheDocument(); // flagged, not hidden
 
-    fireEvent.click(screen.getAllByText('Promote')[0]);
+    fireEvent.click(board.getAllByText('Promote')[0]);
     expect(screen.getByText('Promote trial → new draft')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Create draft'));
     expect(promote).toHaveBeenCalledWith(5, expect.anything());
@@ -76,12 +80,15 @@ describe('SweepDetailPage', () => {
 
   it('surfaces the fold guards (regimes / min-OOS / folds-excluded) and the no-guards badge', () => {
     renderPage();
+    // The leaderboard rides the shared DataTable, which paints a desktop <table> AND an md:hidden card
+    // list — so every guard chip exists twice in jsdom. Scope to the named desktop table.
+    const board = within(screen.getByRole('table', { name: 'Sweep leaderboard' }));
     // trial 5 carries fold guards
-    expect(screen.getByText('UP_QUIET')).toBeInTheDocument();
-    expect(screen.getByText('DOWN_QUIET')).toBeInTheDocument();
-    expect(screen.getByText('OOS≥ 0.400')).toBeInTheDocument(); // min per-regime OOS Sharpe
-    expect(screen.getByText('−2 folds')).toBeInTheDocument(); // min_trades exclusions
+    expect(board.getByText('UP_QUIET')).toBeInTheDocument();
+    expect(board.getByText('DOWN_QUIET')).toBeInTheDocument();
+    expect(board.getByText('OOS≥ 0.400')).toBeInTheDocument(); // min per-regime OOS Sharpe
+    expect(board.getByText('−2 folds')).toBeInTheDocument(); // min_trades exclusions
     // trial 8 is full-window → the badge, not a hollow guard cell
-    expect(screen.getByText('no fold guards')).toBeInTheDocument();
+    expect(board.getByText('no fold guards')).toBeInTheDocument();
   });
 });

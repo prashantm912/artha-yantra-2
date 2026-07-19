@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type { EChartsOption } from 'echarts';
 import { formatDecimal } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -120,6 +121,79 @@ export function SweepDetailPage() {
   // every trial over the same data window — a mismatch means not like-for-like, like the compare view).
   const modalHash = useMemo(() => modalDataHash(bestRows), [bestRows]);
 
+  // Guard-aware leaderboard columns for the shared DataTable (§3.2, GraduationPage pattern): same
+  // values/order/formatting as the hand-rolled table, with zebra + sticky header + a mobile card list.
+  // The Guards/Params/Actions cells stay JSX renders; only the string HEADER is DataTable-typed, so the
+  // sr-only Actions header rides `headerClassName: 'ay-sr-only'` (the shipped JobsPage pattern).
+  const leaderboardColumns = useMemo<DataColumn<BestRow>[]>(
+    () => [
+      { id: 'trial', header: 'Trial', align: 'left', mono: true, mobileLabel: 'Trial', render: (row) => `#${row.trialNumber}` },
+      { id: 'objective', header: `Objective (${metric})`, align: 'right', mobileLabel: `Objective (${metric})`, render: (row) => num(row.objective) },
+      { id: 'plateau', header: 'Plateau', align: 'right', mobileLabel: 'Plateau', render: (row) => num(row.plateauObjective) },
+      {
+        id: 'guards',
+        header: 'Guards',
+        align: 'left',
+        mobileLabel: 'Guards',
+        render: (row) => (
+          <GuardCell
+            guard={row.guardMetrics}
+            hashMismatch={
+              !!row.guardMetrics?.dataHash && !!modalHash && row.guardMetrics.dataHash !== modalHash
+            }
+          />
+        ),
+      },
+      {
+        id: 'params',
+        header: 'Params',
+        align: 'left',
+        mobileLabel: 'Params',
+        cellClassName: () => 'font-mono text-xs text-ay-muted',
+        render: (row) => paramStr(row),
+      },
+      {
+        id: 'actions',
+        header: 'Actions',
+        align: 'right',
+        headerClassName: 'ay-sr-only',
+        mobileLabel: 'Actions',
+        render: (row) => (
+          <>
+            <button
+              type="button"
+              onClick={() => setFoldsTrial(row.trialNumber)}
+              title="Break this trial's out-of-sample results down by walk-forward fold and regime"
+              className="px-1.5 text-xs text-accent hover:underline"
+              aria-label={`Fold drill-down for trial ${row.trialNumber}`}
+            >
+              Folds
+            </button>
+            {row.backtestRunId && (
+              <button
+                type="button"
+                onClick={() => navigate(`/backtests/${row.backtestRunId}`)}
+                title="Open the full backtest results for this trial"
+                className="px-1.5 text-xs text-accent hover:underline"
+              >
+                Results
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setPromoteRow(row)}
+              title="Apply this trial's parameter values onto the source strategy as a new draft"
+              className="px-1.5 text-xs text-accent hover:underline"
+            >
+              Promote
+            </button>
+          </>
+        ),
+      },
+    ],
+    [metric, modalHash, navigate],
+  );
+
   const scatterOption = useCallback(
     (t: ChartTheme): EChartsOption => {
       const byState = (state: TrialState) =>
@@ -178,71 +252,14 @@ export function SweepDetailPage() {
       </BeatBlock>
 
       <h3 className="mb-2 mt-4 text-h3">Leaderboard ({sort} sort)</h3>
-      <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-            <tr>
-              <th className="px-2 py-2 font-medium">Trial</th>
-              <th className="px-2 py-2 text-right font-medium">Objective ({metric})</th>
-              <th className="px-2 py-2 text-right font-medium">Plateau</th>
-              <th className="px-2 py-2 font-medium">Guards</th>
-              <th className="px-2 py-2 font-medium">Params</th>
-              <th className="px-2 py-2"><span className="ay-sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {bestRows.map((row) => (
-              <tr key={row.trialNumber} className="border-t border-ay-border">
-                <td className="px-2 py-2 tabular-nums">#{row.trialNumber}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{num(row.objective)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{num(row.plateauObjective)}</td>
-                <td className="px-2 py-2">
-                  <GuardCell
-                    guard={row.guardMetrics}
-                    hashMismatch={
-                      !!row.guardMetrics?.dataHash && !!modalHash && row.guardMetrics.dataHash !== modalHash
-                    }
-                  />
-                </td>
-                <td className="px-2 py-2 font-mono text-xs text-ay-muted">{paramStr(row)}</td>
-                <td className="px-2 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => setFoldsTrial(row.trialNumber)}
-                    title="Break this trial's out-of-sample results down by walk-forward fold and regime"
-                    className="px-1.5 text-xs text-accent hover:underline"
-                    aria-label={`Fold drill-down for trial ${row.trialNumber}`}
-                  >
-                    Folds
-                  </button>
-                  {row.backtestRunId && (
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/backtests/${row.backtestRunId}`)}
-                      title="Open the full backtest results for this trial"
-                      className="px-1.5 text-xs text-accent hover:underline"
-                    >
-                      Results
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setPromoteRow(row)}
-                    title="Apply this trial's parameter values onto the source strategy as a new draft"
-                    className="px-1.5 text-xs text-accent hover:underline"
-                  >
-                    Promote
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {bestRows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-2 py-6 text-center text-ay-muted">No completed trials yet.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <BeatBlock>
+        <DataTable
+          columns={leaderboardColumns}
+          rows={bestRows}
+          rowKey={(row) => String(row.trialNumber)}
+          ariaLabel="Sweep leaderboard"
+          emptyMessage="No completed trials yet."
+        />
       </BeatBlock>
 
       <h3 className="mb-2 mt-4 text-h3">All trials (pruned/failed flagged, never hidden)</h3>

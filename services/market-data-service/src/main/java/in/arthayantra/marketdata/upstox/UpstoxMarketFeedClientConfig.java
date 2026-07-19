@@ -23,11 +23,17 @@ import org.springframework.web.client.RestClient;
 @EnableConfigurationProperties(UpstoxAnalyticsProperties.class)
 public class UpstoxMarketFeedClientConfig {
 
-  /** The hand-rolled Upstox v3 WS feed client — bound only when the ticker is routed to Upstox. */
+  /**
+   * The hand-rolled Upstox v3 WS feed client — bound only when the ticker is routed to Upstox. The WS
+   * authorize-GET debits the ONE shared token budget (EXT-02, defined in {@link UpstoxAnalyticsConfig},
+   * present whenever {@code source.ticker=upstox}).
+   */
   @Bean
   @ConditionalOnProperty(name = "artha.marketdata.source.ticker", havingValue = "upstox")
   public UpstoxMarketFeedClient upstoxMarketFeedClient(
-      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
-    return new UpstoxMarketFeedClient(restClientBuilder, properties);
+      RestClient.Builder restClientBuilder,
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter upstoxRateLimiter) {
+    return new UpstoxMarketFeedClient(restClientBuilder, properties, upstoxRateLimiter);
   }
 }

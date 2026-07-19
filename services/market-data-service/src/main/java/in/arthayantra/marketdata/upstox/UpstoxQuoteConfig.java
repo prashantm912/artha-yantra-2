@@ -24,12 +24,19 @@ import org.springframework.web.client.RestClient;
 @EnableConfigurationProperties(UpstoxAnalyticsProperties.class)
 public class UpstoxQuoteConfig {
 
-  /** The hand-rolled Upstox market-quote client — bound only when quotes are routed to Upstox. */
+  /**
+   * The hand-rolled Upstox market-quote client — bound only when quotes are routed to Upstox. Draws
+   * from the ONE token-scoped {@link UpstoxRateLimiter} bean (EXT-02, defined in {@link
+   * UpstoxAnalyticsConfig}, present whenever {@code source.quotes=upstox}), so live quotes share the
+   * token's 2000/30min budget with every other analytics-token client instead of running unmetered.
+   */
   @Bean
   @ConditionalOnProperty(name = "artha.marketdata.source.quotes", havingValue = "upstox")
   public UpstoxQuoteClient upstoxQuoteClient(
-      RestClient.Builder restClientBuilder, UpstoxAnalyticsProperties properties) {
-    return new UpstoxQuoteClient(restClientBuilder, properties);
+      RestClient.Builder restClientBuilder,
+      UpstoxAnalyticsProperties properties,
+      UpstoxRateLimiter upstoxRateLimiter) {
+    return new UpstoxQuoteClient(restClientBuilder, properties, upstoxRateLimiter);
   }
 
   /**

@@ -51,7 +51,8 @@ class UpstoxFiiDiiFetcherTest {
   private static UpstoxAnalyticsClient client() {
     return new UpstoxAnalyticsClient(
         RestClient.builder(),
-        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"));
+        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"),
+        new UpstoxRateLimiter());
   }
 
   private static void stub(String endpoint, String body) {

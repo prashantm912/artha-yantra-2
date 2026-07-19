@@ -45,7 +45,8 @@ class UpstoxFiiDerivativeFetcherTest {
     UpstoxAnalyticsClient client =
         new UpstoxAnalyticsClient(
             RestClient.builder(),
-            new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"));
+            new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"),
+            new UpstoxRateLimiter());
     return new UpstoxFiiDerivativeFetcher(client);
   }
 

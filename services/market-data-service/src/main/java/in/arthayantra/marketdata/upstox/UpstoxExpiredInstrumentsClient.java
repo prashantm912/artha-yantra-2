@@ -37,12 +37,16 @@ public final class UpstoxExpiredInstrumentsClient {
 
   private final RestClient restClient;
   private final UpstoxAnalyticsProperties properties;
-  /** Pre-emptive sliding-window pacing (50/s, 500/min, 2000/30min) — the 30-min cap is the binding one. */
-  private final UpstoxRateLimiter limiter = new UpstoxRateLimiter();
+  /**
+   * The token-scoped budget shared across EVERY Upstox analytics-token client (EXT-02). This is the
+   * heavy backfill walker, so it draws from the BATCH ceiling ({@link UpstoxRateLimiter#acquireForBatch()})
+   * — it can never consume the headroom the live capture / quote / margin path reserves.
+   */
+  private final UpstoxRateLimiter limiter;
 
   /** Binds the wire client to the configured base URL (real Upstox, or WireMock in tests). */
   public UpstoxExpiredInstrumentsClient(
-      RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
+      RestClient.Builder builder, UpstoxAnalyticsProperties properties, UpstoxRateLimiter limiter) {
     // Bounded timeouts so a throttled/dead Upstox call fails fast (caught per-leg) rather than
     // parking a backfill worker forever at the run's barrier.
     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -50,11 +54,7 @@ public final class UpstoxExpiredInstrumentsClient {
     factory.setReadTimeout(45_000);
     this.restClient = builder.baseUrl(properties.baseUrl()).requestFactory(factory).build();
     this.properties = properties;
-  }
-
-  /** The shared sliding-window rate limiter — exposed read-only for the B4 quota widget. */
-  public UpstoxRateLimiter rateLimiter() {
-    return limiter;
+    this.limiter = limiter;
   }
 
   /** One expired contract's spec — the orchestration's unit of work (a CE/PE leg or a future). */
@@ -91,7 +91,8 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiry.class));
+                    .body(UpstoxExpiry.class),
+            true);
     if (response == null || response.data() == null) {
       return List.of();
     }
@@ -124,7 +125,8 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiredContract.class));
+                    .body(UpstoxExpiredContract.class),
+            true);
     if (response == null || response.data() == null) {
       return List.of();
     }
@@ -164,18 +166,36 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiredCandles.class));
+                    .body(UpstoxExpiredCandles.class),
+            true);
     return toBars(response);
   }
 
   /**
    * OHLCV+OI bars for an ACTIVE instrument over {@code [from, to]} inclusive — the {@code
    * expired-instruments/}-less sibling of {@link #candles} ({@code GET
-   * /v2/historical-candle/{key}/{interval}/{to}/{from}}), identical wire shape + Plus token. Used by
-   * the E1 Market-Movers screener to read a live stock FUTURE's daily OHLC+OI on-demand (no capture, no
-   * storage). {@code instrumentKey} is the active contract's {@code instrument_key}.
+   * /v2/historical-candle/{key}/{interval}/{to}/{from}}), identical wire shape + Plus token. The
+   * <b>on-demand LIVE lane</b> used by the E1 Market-Movers screener + the stock-chain reads to read a
+   * live stock FUTURE's daily OHLC+OI on-demand (no capture, no storage) — bounded, never pauses, so a
+   * user radar stays responsive. {@code instrumentKey} is the active contract's {@code instrument_key}.
    */
   public List<Bar> activeCandles(String instrumentKey, String interval, LocalDate from, LocalDate to) {
+    return activeCandles(instrumentKey, interval, from, to, false);
+  }
+
+  /**
+   * The BATCH-lane variant of {@link #activeCandles} for the full-universe equity daily backfill — it
+   * pauses in the batch-quiet guard window and draws the batch ceiling (like the expired-contract
+   * walk), so a mid-session admin trigger of the whole-NSE backfill can never consume the live budget
+   * out from under capture / quotes / F9 margin.
+   */
+  public List<Bar> activeCandlesForBatch(
+      String instrumentKey, String interval, LocalDate from, LocalDate to) {
+    return activeCandles(instrumentKey, interval, from, to, true);
+  }
+
+  private List<Bar> activeCandles(
+      String instrumentKey, String interval, LocalDate from, LocalDate to, boolean batch) {
     UpstoxExpiredCandles response =
         withRetry(
             () ->
@@ -188,7 +208,8 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiredCandles.class));
+                    .body(UpstoxExpiredCandles.class),
+            batch);
     return toBars(response);
   }
 
@@ -211,7 +232,8 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Authorization", "Bearer " + properties.resolveToken())
                     .header("Accept", "application/json")
                     .retrieve()
-                    .body(UpstoxExpiredCandles.class));
+                    .body(UpstoxExpiredCandles.class),
+            false);
     return toBars(response);
   }
 
@@ -242,10 +264,18 @@ public final class UpstoxExpiredInstrumentsClient {
    * exponential) lets it succeed instead of failing the leg. After {@value #MAX_429_RETRIES} retries
    * the 429 propagates (the leg fails + is retried next run). Other errors propagate immediately.
    */
-  private <T> T withRetry(Supplier<T> call) {
+  private <T> T withRetry(Supplier<T> call, boolean batch) {
     int attempt = 0;
     while (true) {
-      limiter.acquire(); // pre-emptive pacing so we never burst past the 2000/30min cap
+      // The heavy expired-contract WALK ({@code batch}) draws from the batch ceiling AND pauses while
+      // the market is open (a background job that yields the token to live capture during the session).
+      // The on-demand E1 Market-Movers reads use the bounded LIVE path so a user radar never pauses for
+      // the whole session — the off-hours reserve keeps them headroom so this effectively never throws.
+      if (batch) {
+        limiter.acquireForBatch();
+      } else if (!limiter.tryAcquire()) {
+        throw new IllegalStateException("Upstox rate budget exhausted");
+      }
       try {
         return call.get();
       } catch (HttpClientErrorException.TooManyRequests e) {

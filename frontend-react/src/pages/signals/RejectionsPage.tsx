@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Ban } from 'lucide-react';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
@@ -8,6 +8,7 @@ import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { LoadBeat, BeatBlock } from '../../components/LoadBeat.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import {
   useSignalRejections,
   useRejectionRailCounts,
@@ -155,11 +156,101 @@ function DotHealthPanel() {
 
 const PAGE_SIZE = 200;
 
+// The main rejections table, adopted onto the shared DataTable (each cell's content/formatting is
+// preserved 1:1 from the hand-rolled table; DataTable owns the expander column + the inline detail row).
+// Columns are non-sortable to match the original static-header table; the expanded breakdown rides
+// renderExpanded (see RejectionDetail below), NOT a column.
+const REJECTION_COLUMNS: DataColumn<SignalRejectionDto>[] = [
+  {
+    id: 'time',
+    header: 'Time (IST)',
+    align: 'left',
+    render: (r) => fmtTime(r.barTime),
+    cellClassName: () => 'text-ay-muted',
+    mobileLabel: 'Time (IST)',
+  },
+  {
+    id: 'strategy',
+    header: 'Strategy',
+    align: 'left',
+    render: (r) => r.strategySlug,
+    mobileLabel: 'Strategy',
+  },
+  {
+    id: 'symbol',
+    header: 'Symbol',
+    align: 'left',
+    render: (r) => r.tradingsymbol,
+    cellClassName: () => 'text-ay-muted',
+    mobileLabel: 'Symbol',
+  },
+  {
+    id: 'side',
+    header: 'Side',
+    align: 'left',
+    render: (r) =>
+      r.side ? (
+        <span className={r.side === 'CE' ? 'text-bull' : 'text-bear'}>{r.side}</span>
+      ) : (
+        <span className="text-ay-muted">—</span>
+      ),
+    mobileLabel: 'Side',
+  },
+  {
+    id: 'rail',
+    header: 'Blocking rail',
+    align: 'left',
+    render: (r) => (
+      <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ay-text">{r.blockingRail}</span>
+    ),
+    mobileLabel: 'Blocking rail',
+  },
+  {
+    id: 'operand',
+    header: 'Operand',
+    align: 'right',
+    render: (r) => fmtNum(r.blockingOperand),
+    mobileLabel: 'Operand',
+  },
+  {
+    id: 'threshold',
+    header: 'Threshold',
+    align: 'right',
+    render: (r) => fmtNum(r.blockingThreshold),
+    mobileLabel: 'Threshold',
+  },
+  {
+    id: 'margin',
+    header: 'Margin',
+    align: 'right',
+    render: (r) => <Margin value={r.blockingMargin} />,
+    mobileLabel: 'Margin',
+  },
+  {
+    id: 'composite',
+    header: 'Composite',
+    align: 'right',
+    render: (r) =>
+      r.compositeScore == null
+        ? '—'
+        : `${fmtNum(r.compositeScore)} / ${fmtNum(r.compositeThreshold)}`,
+    cellClassName: () => 'text-ay-muted',
+    mobileLabel: 'Composite',
+  },
+  {
+    id: 'reason',
+    header: 'Reason',
+    align: 'left',
+    render: (r) => r.blockingReason,
+    cellClassName: () => 'text-ay-muted',
+    mobileLabel: 'Reason',
+  },
+];
+
 export function RejectionsPage() {
   const [date, setDate] = useState<string>(todayIst());
   const [rail, setRail] = useState<string>('');
   const [offset, setOffset] = useState(0);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const isToday = date === todayIst();
   const bounds = useMemo(() => dayBoundsIst(date), [date]);
@@ -170,14 +261,6 @@ export function RejectionsPage() {
   const rows = q.data?.items ?? [];
   const railOptions = counts.data?.items ?? [];
   const shadowBooks = shadow.data?.items ?? [];
-
-  const toggle = (id: number) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   return (
     <LoadBeat>
@@ -277,68 +360,17 @@ export function RejectionsPage() {
       >
         {() => (
           <BeatBlock>
-            <div className="max-h-[70vh] overflow-auto rounded-md border" style={{ contain: 'paint' }} tabIndex={0} role="region" aria-label="Signal rejections table">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-surface-1 text-left text-xs text-ay-muted">
-                  <tr>
-                    <th className="px-2 py-2 font-medium">Time (IST)</th>
-                    <th className="px-2 py-2 font-medium">Strategy</th>
-                    <th className="px-2 py-2 font-medium">Symbol</th>
-                    <th className="px-2 py-2 font-medium">Side</th>
-                    <th className="px-2 py-2 font-medium">Blocking rail</th>
-                    <th className="px-2 py-2 text-right font-medium">Operand</th>
-                    <th className="px-2 py-2 text-right font-medium">Threshold</th>
-                    <th className="px-2 py-2 text-right font-medium">Margin</th>
-                    <th className="px-2 py-2 text-right font-medium">Composite</th>
-                    <th className="px-2 py-2 font-medium">Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <Fragment key={r.id}>
-                      <tr
-                        className="cursor-pointer border-t hover:bg-surface-2/50"
-                        onClick={() => toggle(r.id)}
-                      >
-                        <td className="whitespace-nowrap px-2 py-1.5 text-ay-muted">{fmtTime(r.barTime)}</td>
-                        <td className="px-2 py-1.5 text-ay-text">{r.strategySlug}</td>
-                        <td className="whitespace-nowrap px-2 py-1.5 text-ay-muted">{r.tradingsymbol}</td>
-                        <td className="px-2 py-1.5">
-                          {r.side ? (
-                            <span className={r.side === 'CE' ? 'text-bull' : 'text-bear'}>{r.side}</span>
-                          ) : (
-                            <span className="text-ay-muted">—</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <span className="rounded bg-surface-2 px-1.5 py-0.5 text-xs text-ay-text">
-                            {r.blockingRail}
-                          </span>
-                        </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtNum(r.blockingOperand)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtNum(r.blockingThreshold)}</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">
-                          <Margin value={r.blockingMargin} />
-                        </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums text-ay-muted">
-                          {r.compositeScore == null ? '—' : `${fmtNum(r.compositeScore)} / ${fmtNum(r.compositeThreshold)}`}
-                        </td>
-                        <td className="px-2 py-1.5 text-xs text-ay-muted">{r.blockingReason}</td>
-                      </tr>
-                      {expanded.has(r.id) && (
-                        <tr className="border-t bg-surface-2/30">
-                          <td colSpan={10} className="px-3 py-3">
-                            <RejectionDetail row={r} />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={REJECTION_COLUMNS}
+              rows={rows}
+              rowKey={(r) => String(r.id)}
+              ariaLabel="Signal rejections"
+              maxHeight="70vh"
+              renderExpanded={(r) => <RejectionDetail row={r} />}
+            />
             <p className="mt-2 text-xs text-ay-muted">
-              Click any row to expand the full breakdown. {rows.length} blocked {rows.length === 1 ? 'entry' : 'entries'}
+              Expand any row (the ▸ toggle is keyboard-accessible) for the full breakdown. {rows.length} blocked{' '}
+              {rows.length === 1 ? 'entry' : 'entries'}
               {rail ? ` for rail “${rail}”` : ''}{offset > 0 ? ` (from row ${offset + 1})` : ''}.
             </p>
             <Pager offset={offset} limit={PAGE_SIZE} count={rows.length} onOffset={setOffset} />

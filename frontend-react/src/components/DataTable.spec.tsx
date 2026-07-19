@@ -171,3 +171,65 @@ describe('DataTable', () => {
     expect(region.className).not.toContain('max-h-[68vh]');
   });
 });
+
+// --- renderExpanded (opt-in expandable rows; audit M23 — the expander is a real in-cell <button>,
+//     NEVER role="button" on the <tr>) ---
+describe('DataTable — expandable rows (renderExpanded)', () => {
+  const renderExpanded = (r: Row) => <div>detail for {r.name}</div>;
+
+  it('adds a leading expander <button aria-expanded> per row, keeping the <tr> a plain table row (no role=button)', () => {
+    renderTable({ renderExpanded });
+    const rows = within(body()).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(ROWS.length);
+    for (const r of rows) {
+      expect(r).not.toHaveAttribute('role'); // implicit `row`, never overridden to button (M23)
+      expect(r).not.toHaveAttribute('tabindex');
+    }
+    const buttons = within(body()).getAllByRole('button', { name: 'Expand details' });
+    expect(buttons).toHaveLength(ROWS.length);
+    for (const b of buttons) {
+      expect(b.tagName).toBe('BUTTON'); // a real, keyboard-focusable <button> (the AT control)
+      expect(b).toHaveAttribute('aria-expanded', 'false');
+      expect(b).toHaveAttribute('aria-controls'); // wired to the (not-yet-rendered) detail id
+    }
+  });
+
+  it('toggles the inline detail row open/closed from the expander button and wires aria-controls to the detail id', () => {
+    renderTable({ renderExpanded });
+    expect(within(body()).queryByText('detail for BBB')).toBeNull();
+
+    fireEvent.click(within(body()).getAllByRole('button', { name: 'Expand details' })[0]);
+
+    const collapseBtn = within(body()).getAllByRole('button', { name: 'Collapse details' })[0];
+    expect(collapseBtn).toHaveAttribute('aria-expanded', 'true');
+    const controlledId = collapseBtn.getAttribute('aria-controls')!;
+    const detailRow = document.getElementById(controlledId);
+    expect(detailRow).not.toBeNull();
+    expect(within(detailRow as HTMLElement).getByText('detail for BBB')).toBeInTheDocument();
+
+    fireEvent.click(collapseBtn); // toggle back
+    expect(within(body()).queryByText('detail for BBB')).toBeNull();
+  });
+
+  it('spans the detail cell across every column including the expander (colSpan = data columns + 1)', () => {
+    renderTable({ renderExpanded });
+    fireEvent.click(within(body()).getAllByRole('button', { name: 'Expand details' })[0]);
+    const cell = within(body()).getByText('detail for BBB').closest('td');
+    expect(cell).toHaveAttribute('colspan', String(COLUMNS.length + 1));
+  });
+
+  it('also toggles from a desktop-row mouse click as a convenience (button stopPropagations, so no double-toggle)', () => {
+    renderTable({ renderExpanded });
+    const firstRow = within(body()).getAllByRole('row').slice(1)[0];
+    fireEvent.click(firstRow); // mouse-only convenience, since no onRowClick is set
+    expect(within(body()).getByText('detail for BBB')).toBeInTheDocument();
+  });
+
+  it('renders NO expander column, detail row, or expander button when renderExpanded is omitted (backward-compat)', () => {
+    renderTable();
+    // Header count is exactly the data columns — no leading expander header cell.
+    expect(within(body()).getAllByRole('columnheader')).toHaveLength(COLUMNS.length);
+    expect(names()).toEqual(['BBB', 'AAA', 'CCC']); // unchanged data-cell order/content
+    expect(screen.queryByRole('button', { name: /Expand details|Collapse details/ })).toBeNull();
+  });
+});

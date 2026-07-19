@@ -23,15 +23,20 @@ chains, ~200 active equities, pinned FUT/VIX):
 | 1m candles (~250 instruments × 375 bars/day, compressed) | ~2–4 MB/day | ~0.7–1.5 GB |
 | Everything else | noise | < 0.5 GB |
 
-**Review trigger: 50 GB total volume.** This is a **whole-database** volume
-(`pg_database_size`), not any single hypertable, and a **live-`artha` budget**.
-`ay status` is the input: on the live profile it prints the DB total vs the 50 GB
-trigger (`DB 'artha' = 46.1 GB / 50 GB review trigger (92%)`) and warns at ≥ 80 %;
-on a mock profile it reports the `artha_mock` DB size only (the trigger is not
-evaluated). Either way it lists the largest hypertables, continuous aggregates and
-tables (`hypertable_size` / `pg_total_relation_size`). At the trigger, review
-compression ratios and snapshot scope — the answer is widening disk or
-narrowing scope, never silent retention.
+**Storage budget: 100 GB total volume** (re-baselined 2026-07-19 from the old soft
+50 GB "review trigger" to the owner's real hard disk ceiling). This is a
+**whole-database** volume (`pg_database_size`), not any single hypertable, and a
+**live-`artha` budget**. `ay status` is the input: on the live profile it prints the
+DB total vs the 100 GB budget (`DB 'artha' = 28.0 GB / 100 GB budget (28%)`) and warns
+at ≥ 75 GB / alerts at ≥ 90 GB; on a mock profile it reports the `artha_mock` DB size
+only (the budget is not evaluated). Either way it lists the largest hypertables,
+continuous aggregates and tables (`hypertable_size` / `pg_total_relation_size`). Near
+the budget, review compression ratios and snapshot scope — the answer is widening disk
+or narrowing scope, never silent retention.
+
+> Headroom note (2026-07-19): the TimescaleDB 2.17.2 → 2.18.2 upgrade + cagg
+> compression (#940, AYDB-01 resolved) cut the live DB ~46 GB → ~28 GB. Steady growth
+> is the OI-snapshot capture (~1.7 GB/month), so the 100 GB ceiling is multi-year runway.
 
 > Metric caveat (audit AYDB-03): the `ay_hypertable_bytes` Micrometer gauge
 > samples **only `marketdata.candles`** (~half the DB), so it under-reports the

@@ -567,6 +567,13 @@ services:
       # to arm, and set the external check to expect a ping on 15 20 * * 1-5 (TZ Asia/Kolkata).
       ARTHA_HEARTBEAT_URL: "${ARTHA_HEARTBEAT_URL:-}"
       ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 15 20 * * MON-FRI}"
+      # Session-cadence dead-man's-switch for the LIVE trading session (the swing ping above proves only
+      # the 20:15 batch ran — a stack dead 09:15-15:30 but recovered by 20:15 pings it happily). Pings
+      # every ~10 min while candles are flowing; the withheld ping is the alarm. Blank = dormant; paste a
+      # SEPARATE healthchecks.io/UptimeRobot heartbeat URL to arm, and create a DISTINCT external check
+      # expecting a ping every ~10 min within 09:30-15:20 IST (TZ Asia/Kolkata) with a grace window.
+      ARTHA_HEARTBEAT_SESSION_URL: "${ARTHA_HEARTBEAT_SESSION_URL:-}"
+      ARTHA_HEARTBEAT_SESSION_CRON: "${ARTHA_HEARTBEAT_SESSION_CRON:-0 */10 9-15 * * MON-FRI}"
       # Connect-the-Dots dead-dot recalibration (signal-analysis rollup §Proposals P1/P2, owner-approved
       # 2026-07-10): the iv_pair min-gap + oi_spurt price floor, ops-tunable via .env WITHOUT an image
       # rebuild (like the scalper relative-volume knobs). The compose-side default MUST stay non-empty and

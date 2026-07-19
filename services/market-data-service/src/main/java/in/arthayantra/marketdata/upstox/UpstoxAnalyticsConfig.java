@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.upstox;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.feeds.FiiDerivativeFetcher;
@@ -10,6 +11,9 @@ import in.arthayantra.marketdata.nse.LiveFiiDiiFetcher;
 import in.arthayantra.marketdata.upstox.canary.UpstoxContractCanary;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -37,9 +41,10 @@ public class UpstoxAnalyticsConfig {
    * analytics token (the expired-backfill walker + the fundamentals bulk walk + the daily contract
    * canary + the live option-chain / quote / margin / ws-authorize / page clients), so the whole token
    * draws from the ONE 2000/30min budget instead of each client fragmenting it (or running unmetered).
-   * The batch path pauses while the market is open, so the live capture path owns the token during the
-   * session; the gate mirrors {@code OptionsSnapshotService.isOpenSafe} (an uncovered calendar year →
-   * treated as closed, i.e. batch runs, which is safe because live capture is also halted then). Bound
+   * The batch path pauses through the batch-quiet guard window — from one full 30-min rate-window
+   * BEFORE the session open through the close — so the 30-min deque has drained of batch hits by the
+   * open and the live capture path owns the WHOLE budget during the session. An uncovered calendar year
+   * is treated as NOT quiet (batch runs), which is safe because live capture is also halted then. Bound
    * whenever ANY analytics-token client can bind — analytics enabled, OR the quote / chain / ticker
    * source flipped to Upstox, OR the canary enabled — so the injected dependency always exists; absent
    * on the mock stack (non-live profile) so the B4 quota widget reports {@code configured=false}.
@@ -52,13 +57,26 @@ public class UpstoxAnalyticsConfig {
           + "or '${artha.marketdata.source.ticker:kite}' == 'upstox' "
           + "or '${artha.upstox.canary-enabled:false}' == 'true'")
   public UpstoxRateLimiter upstoxRateLimiter(MarketCalendar calendar, Clock clock) {
-    return new UpstoxRateLimiter(() -> isOpenSafe(calendar, clock));
+    return new UpstoxRateLimiter(() -> isBatchQuiet(calendar, clock));
   }
 
-  /** Market-open, tolerant of an uncovered calendar year (→ closed) — mirrors the capture gate. */
-  private static boolean isOpenSafe(MarketCalendar calendar, Clock clock) {
+  /** One full 30-min rate-window of lead time, so the deque fully drains of batch hits before the open. */
+  private static final Duration BATCH_QUIET_LEAD = Duration.ofMinutes(30);
+
+  /**
+   * The batch-quiet guard window: true from {@link #BATCH_QUIET_LEAD} before the session open (derived
+   * from the calendar, not hardcoded) through the close, on a trading day — so batch work stops before
+   * open and the 30-min deque has drained of its hits by 09:15. Tolerant of an uncovered calendar year
+   * (→ not quiet, batch runs; safe because live capture is halted then).
+   */
+  private static boolean isBatchQuiet(MarketCalendar calendar, Clock clock) {
+    Instant now = clock.instant();
+    LocalDate day = now.atZone(Ist.ZONE).toLocalDate();
     try {
-      return calendar.isOpen(clock.instant());
+      return calendar
+          .sessionBounds(day)
+          .map(b -> !now.isBefore(b.open().minus(BATCH_QUIET_LEAD)) && now.isBefore(b.close()))
+          .orElse(false);
     } catch (IllegalArgumentException uncoveredYear) {
       return false;
     }

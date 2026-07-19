@@ -174,11 +174,28 @@ public final class UpstoxExpiredInstrumentsClient {
   /**
    * OHLCV+OI bars for an ACTIVE instrument over {@code [from, to]} inclusive — the {@code
    * expired-instruments/}-less sibling of {@link #candles} ({@code GET
-   * /v2/historical-candle/{key}/{interval}/{to}/{from}}), identical wire shape + Plus token. Used by
-   * the E1 Market-Movers screener to read a live stock FUTURE's daily OHLC+OI on-demand (no capture, no
-   * storage). {@code instrumentKey} is the active contract's {@code instrument_key}.
+   * /v2/historical-candle/{key}/{interval}/{to}/{from}}), identical wire shape + Plus token. The
+   * <b>on-demand LIVE lane</b> used by the E1 Market-Movers screener + the stock-chain reads to read a
+   * live stock FUTURE's daily OHLC+OI on-demand (no capture, no storage) — bounded, never pauses, so a
+   * user radar stays responsive. {@code instrumentKey} is the active contract's {@code instrument_key}.
    */
   public List<Bar> activeCandles(String instrumentKey, String interval, LocalDate from, LocalDate to) {
+    return activeCandles(instrumentKey, interval, from, to, false);
+  }
+
+  /**
+   * The BATCH-lane variant of {@link #activeCandles} for the full-universe equity daily backfill — it
+   * pauses in the batch-quiet guard window and draws the batch ceiling (like the expired-contract
+   * walk), so a mid-session admin trigger of the whole-NSE backfill can never consume the live budget
+   * out from under capture / quotes / F9 margin.
+   */
+  public List<Bar> activeCandlesForBatch(
+      String instrumentKey, String interval, LocalDate from, LocalDate to) {
+    return activeCandles(instrumentKey, interval, from, to, true);
+  }
+
+  private List<Bar> activeCandles(
+      String instrumentKey, String interval, LocalDate from, LocalDate to, boolean batch) {
     UpstoxExpiredCandles response =
         withRetry(
             () ->
@@ -192,7 +209,7 @@ public final class UpstoxExpiredInstrumentsClient {
                     .header("Accept", "application/json")
                     .retrieve()
                     .body(UpstoxExpiredCandles.class),
-            false);
+            batch);
     return toBars(response);
   }
 

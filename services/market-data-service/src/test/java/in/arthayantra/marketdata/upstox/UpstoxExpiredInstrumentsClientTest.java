@@ -174,4 +174,60 @@ class UpstoxExpiredInstrumentsClientTest {
                 urlPathEqualTo("/v2/historical-candle/NSEFORELFUT/day/2026-06-16/2026-06-02"))
             .withHeader("Authorization", equalTo("Bearer test-token")));
   }
+
+  @Test
+  void theEquityBackfillLaneParksInTheGuardWindowWhileMarketMoversProceeds()
+      throws InterruptedException {
+    // EXT-02 finding 2: the full-universe equity backfill uses the BATCH lane (activeCandlesForBatch),
+    // so it PARKS in the guard window instead of drawing the live budget; the on-demand E1 market-movers
+    // read (activeCandles) is the LIVE lane and still proceeds on the same clock.
+    wireMock.stubFor(
+        get(urlPathEqualTo("/v2/historical-candle/NSEEQRELIANCE/day/2026-06-16/2026-06-02"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        "{\"status\":\"success\",\"data\":{\"candles\":["
+                            + "[\"2026-06-16T00:00:00+05:30\",1500.0,1525.5,1498.0,1520.0,4500000,12500000]]}}")));
+
+    UpstoxRateLimiter paused = new UpstoxRateLimiter(() -> true); // guard window open → batch paused
+    UpstoxExpiredInstrumentsClient client =
+        new UpstoxExpiredInstrumentsClient(
+            RestClient.builder(),
+            new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"),
+            paused);
+    LocalDate from = LocalDate.of(2026, 6, 2);
+    LocalDate to = LocalDate.of(2026, 6, 16);
+
+    Thread backfill =
+        new Thread(
+            () -> {
+              try {
+                client.activeCandlesForBatch("NSEEQRELIANCE", "day", from, to);
+              } catch (RuntimeException ignored) {
+                // interrupted at teardown — expected
+              }
+            });
+    backfill.setDaemon(true);
+    backfill.start();
+
+    List<Bar> bars = client.activeCandles("NSEEQRELIANCE", "day", from, to);
+
+    assertThat(bars).hasSize(1);
+    assertThat(used30m(paused))
+        .as("only the live market-movers read drew the budget; the backfill parked")
+        .isEqualTo(1);
+    assertThat(backfill.isAlive()).as("the equity-backfill lane parked in the guard window").isTrue();
+
+    backfill.interrupt();
+    backfill.join(1_000);
+  }
+
+  private static int used30m(UpstoxRateLimiter limiter) {
+    return limiter.getUsageStats().stream()
+        .filter(w -> w.window().equals("30m"))
+        .findFirst()
+        .orElseThrow()
+        .used();
+  }
 }

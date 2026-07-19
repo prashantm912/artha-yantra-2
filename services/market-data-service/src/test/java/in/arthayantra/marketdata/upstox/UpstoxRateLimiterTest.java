@@ -3,15 +3,19 @@ package in.arthayantra.marketdata.upstox;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.upstox.UpstoxRateLimiter.WindowStat;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 
 /**
  * Unit tests for the token-scoped {@link UpstoxRateLimiter} (EXT-02): the live and the batch path draw
- * from ONE shared budget; the batch path PAUSES while the market is open so the live capture path owns
- * the token during the session (item 1); a saturated budget makes the live {@code tryAcquire} fail FAST
- * rather than parking (item 2); and off-hours a saturated backfill still cannot consume the live reserve.
+ * from ONE shared budget; the batch path PAUSES through the batch-quiet guard window (from before open
+ * through close) so the live capture path owns the token during the session, and it will NOT record a
+ * hit admitted before the window inside it (item 1); a saturated budget makes the live {@code tryAcquire}
+ * fail FAST rather than parking (item 2); off-hours a saturated backfill still cannot consume the reserve.
  */
 class UpstoxRateLimiterTest {
 
@@ -47,14 +51,14 @@ class UpstoxRateLimiterTest {
   }
 
   @Test
-  void batchPausesWhileMarketOpenSoLiveOwnsTheBudget() throws InterruptedException {
-    AtomicBoolean marketOpen = new AtomicBoolean(true);
+  void batchParksInTheGuardWindowSoLiveOwnsTheBudget() throws InterruptedException {
+    // A batch call at, say, 09:00 IST (inside the [open−30min, close] guard window) must PARK — it
+    // records nothing, so the whole budget stays available to the live capture path through the session.
+    AtomicBoolean inGuardWindow = new AtomicBoolean(true);
     UpstoxRateLimiter limiter =
         new UpstoxRateLimiter(
-            0.0, marketOpen::get, new String[] {"w"}, new long[] {3_600_000L}, new int[] {5});
+            0.0, inGuardWindow::get, new String[] {"w"}, new long[] {3_600_000L}, new int[] {5});
 
-    // A batch call started while the market is open must PARK in the pause loop — it records nothing,
-    // so the whole budget stays available to the live capture path during the session.
     Thread batch =
         new Thread(
             () -> {
@@ -70,7 +74,43 @@ class UpstoxRateLimiterTest {
     // The live path proceeds immediately even though the batch is trying to run.
     assertThat(limiter.tryAcquire(200)).isTrue();
     assertThat(used(limiter, "w")).as("only the live hit is recorded; batch is paused").isEqualTo(1);
-    assertThat(batch.isAlive()).as("batch stays paused while the market is open").isTrue();
+    assertThat(batch.isAlive()).as("batch stays paused in the guard window").isTrue();
+
+    batch.interrupt();
+    batch.join(1_000);
+  }
+
+  @Test
+  void aBatchHitAdmittedBeforeTheGuardWindowIsNotRecordedInsideIt() throws InterruptedException {
+    // gate = false on the FIRST check (the call passes the pre-record pause, i.e. admitted before the
+    // window) then true (the guard window opened by the time a slot is about to be recorded). The batch
+    // hit must NOT record across that boundary — the call re-pauses instead. The window has a free slot,
+    // so the ONLY thing that can stop the record is the record-time gate re-check.
+    AtomicInteger checks = new AtomicInteger();
+    UpstoxRateLimiter limiter =
+        new UpstoxRateLimiter(
+            0.0,
+            () -> checks.getAndIncrement() >= 1,
+            new String[] {"w"},
+            new long[] {3_600_000L},
+            new int[] {5});
+
+    Thread batch =
+        new Thread(
+            () -> {
+              try {
+                limiter.acquireForBatch();
+              } catch (RuntimeException ignored) {
+                // interrupted at teardown — expected
+              }
+            });
+    batch.setDaemon(true);
+    batch.start();
+
+    // Wait until the call has passed the pause (check 0) AND done the record-time re-check (check 1).
+    Awaitility.await().atMost(Duration.ofSeconds(2)).until(() -> checks.get() >= 2);
+    assertThat(used(limiter, "w")).as("no batch hit recorded across the guard boundary").isEqualTo(0);
+    assertThat(batch.isAlive()).as("the batch re-parked instead of recording").isTrue();
 
     batch.interrupt();
     batch.join(1_000);

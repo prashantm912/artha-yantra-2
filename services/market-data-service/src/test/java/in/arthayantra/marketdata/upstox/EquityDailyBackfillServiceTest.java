@@ -84,7 +84,7 @@ class EquityDailyBackfillServiceTest {
 
     when(master.equityKey("RELIANCE")).thenReturn(KEY_RELIANCE);
     when(master.equityKey("TCS")).thenReturn(KEY_TCS);
-    when(upstox.activeCandles(any(), eq("day"), any(), any()))
+    when(upstox.activeCandlesForBatch(any(), eq("day"), any(), any()))
         .thenReturn(List.of(dayBar("2026-06-29T00:00:00+05:30", "108")));
 
     EquityDailyBackfillService service = service(master, upstox, candles, jdbc);
@@ -114,7 +114,7 @@ class EquityDailyBackfillServiceTest {
 
     when(master.equityKey("RELIANCE")).thenReturn(KEY_RELIANCE);
     when(master.equityKey("NOTLISTED")).thenReturn(null);
-    when(upstox.activeCandles(any(), eq("day"), any(), any()))
+    when(upstox.activeCandlesForBatch(any(), eq("day"), any(), any()))
         .thenReturn(List.of(dayBar("2026-06-29T00:00:00+05:30", "108")));
 
     EquityDailyBackfillService service = service(master, upstox, candles, mock(JdbcTemplate.class));
@@ -135,9 +135,9 @@ class EquityDailyBackfillServiceTest {
 
     when(master.equityKey("RELIANCE")).thenReturn(KEY_RELIANCE);
     when(master.equityKey("TCS")).thenReturn(KEY_TCS);
-    when(upstox.activeCandles(eq(KEY_RELIANCE), eq("day"), any(), any()))
+    when(upstox.activeCandlesForBatch(eq(KEY_RELIANCE), eq("day"), any(), any()))
         .thenThrow(new RuntimeException("upstream 500"));
-    when(upstox.activeCandles(eq(KEY_TCS), eq("day"), any(), any()))
+    when(upstox.activeCandlesForBatch(eq(KEY_TCS), eq("day"), any(), any()))
         .thenReturn(List.of(dayBar("2026-06-29T00:00:00+05:30", "108")));
 
     EquityDailyBackfillService service = service(master, upstox, candles, mock(JdbcTemplate.class));
@@ -159,7 +159,7 @@ class EquityDailyBackfillServiceTest {
 
     when(jdbc.queryForList(any(String.class), eq(String.class))).thenReturn(List.of("RELIANCE"));
     when(master.equityKey("RELIANCE")).thenReturn(KEY_RELIANCE);
-    when(upstox.activeCandles(any(), eq("day"), any(), any()))
+    when(upstox.activeCandlesForBatch(any(), eq("day"), any(), any()))
         .thenReturn(List.of(dayBar("2026-06-29T00:00:00+05:30", "108")));
 
     EquityDailyBackfillService service = service(master, upstox, candles, jdbc);

@@ -146,4 +146,39 @@ describe('RejectionsPage main table (adopted onto DataTable)', () => {
     expect(within(t).getByText('Rails evaluated')).toBeInTheDocument();
     expect(within(t).getByText('Context')).toBeInTheDocument();
   });
+
+  it('gives each confluence dot a non-colour supports/opposes cue (WCAG 1.4.1)', () => {
+    state.items = [
+      {
+        ...MOCK_ROW,
+        diagnostic: {
+          ...MOCK_ROW.diagnostic,
+          confluence: {
+            aggregate: 0.42,
+            threshold: 0.6,
+            bullish: true,
+            bearish: false,
+            vwapAligned: true,
+            biasAligned: false,
+            standAside: false,
+            dots: [
+              { dot: 'oi_spurt', supports: true, weight: 2, reason: 'call OI building' },
+              { dot: 'iv_pair', supports: false, weight: 1, reason: 'IV skew against' },
+            ],
+          },
+        },
+      },
+    ];
+    renderPage();
+
+    const t = table();
+    fireEvent.click(within(t).getByRole('button', { name: 'Expand details' }));
+
+    // Colour is NOT the only cue: each dot carries an sr-only polarity word + a ▲/▼ shape
+    // (supports vs opposes must be distinguishable without seeing the bull/bear colour).
+    expect(within(t).getByText(/^Supports —/)).toBeInTheDocument();
+    expect(within(t).getByText(/^Opposes —/)).toBeInTheDocument();
+    expect(within(t).getByText('▲')).toBeInTheDocument();
+    expect(within(t).getByText('▼')).toBeInTheDocument();
+  });
 });

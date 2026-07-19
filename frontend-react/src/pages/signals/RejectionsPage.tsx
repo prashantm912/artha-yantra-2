@@ -438,6 +438,10 @@ function RejectionDetail({ row }: { row: SignalRejectionDto }) {
                     dot.supports ? 'bg-bull/15 text-bull' : 'bg-bear/15 text-bear',
                   )}
                 >
+                  {/* WCAG 1.4.1: a non-colour cue for supports vs opposes — a ▲/▼ shape for sighted
+                      colour-blind users + an sr-only word for AT (colour alone is not sufficient). */}
+                  <span aria-hidden="true">{dot.supports ? '▲' : '▼'} </span>
+                  <span className="ay-sr-only">{dot.supports ? 'Supports — ' : 'Opposes — '}</span>
                   {dot.dot}
                 </span>
               ))}

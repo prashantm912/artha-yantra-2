@@ -28,9 +28,12 @@ public final class UpstoxOptionChainClient {
 
   private final RestClient restClient;
   private final UpstoxAnalyticsProperties properties;
+  /** The token-scoped budget shared across every analytics-token client (EXT-02); live path (full cap). */
+  private final UpstoxRateLimiter limiter;
 
   /** Binds the wire client to the configured base URL (real Upstox, or WireMock in tests). */
-  public UpstoxOptionChainClient(RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
+  public UpstoxOptionChainClient(
+      RestClient.Builder builder, UpstoxAnalyticsProperties properties, UpstoxRateLimiter limiter) {
     // Bounded timeouts so a throttled/dead Upstox call fails fast (the snapshot pass logs + skips the
     // expiry) rather than parking the single-threaded snapshotter.
     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -38,6 +41,7 @@ public final class UpstoxOptionChainClient {
     factory.setReadTimeout(45_000);
     this.restClient = builder.baseUrl(properties.baseUrl()).requestFactory(factory).build();
     this.properties = properties;
+    this.limiter = limiter;
   }
 
   /** One strike side's live market data (the raw fields the chain pipeline consumes). */
@@ -55,6 +59,11 @@ public final class UpstoxOptionChainClient {
    * the expiry.
    */
   public Chain optionChain(String instrumentKey, LocalDate expiry) {
+    // Live-critical OI capture: BOUNDED wait for the shared token budget; on a saturated budget skip
+    // this expiry (fail-soft, same as a transport miss) rather than parking the snapshotter thread.
+    if (!limiter.tryAcquire()) {
+      return null;
+    }
     UpstoxOptionChain response =
         restClient
             .get()

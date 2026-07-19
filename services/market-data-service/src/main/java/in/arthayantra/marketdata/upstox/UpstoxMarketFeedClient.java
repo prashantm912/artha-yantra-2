@@ -69,9 +69,10 @@ public final class UpstoxMarketFeedClient {
   private Thread supervisor;
 
   /** Live ctor: authorize via the analytics token + the real nv-websocket transport. */
-  public UpstoxMarketFeedClient(RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
+  public UpstoxMarketFeedClient(
+      RestClient.Builder builder, UpstoxAnalyticsProperties properties, UpstoxRateLimiter limiter) {
     this(
-        authorizeSupplier(builder, properties),
+        authorizeSupplier(builder, properties, limiter),
         NvUpstoxWebSocket::new,
         new UpstoxReconnectPolicy(),
         Thread::sleep);
@@ -236,14 +237,22 @@ public final class UpstoxMarketFeedClient {
     }
   }
 
-  /** The live authorize-GET: analytics bearer → {@code data.authorized_redirect_uri} wss URL. */
-  private static Supplier<String> authorizeSupplier(
-      RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
+  /**
+   * The live authorize-GET: analytics bearer → {@code data.authorized_redirect_uri} wss URL. Debits
+   * the ONE shared token budget (EXT-02) on the live path — a BOUNDED wait so a saturated budget
+   * throws (the reconnect loop retries with backoff) rather than parking the connect thread ~30 min.
+   * Package-private so the shared-budget test can drive it without opening a real socket.
+   */
+  static Supplier<String> authorizeSupplier(
+      RestClient.Builder builder, UpstoxAnalyticsProperties properties, UpstoxRateLimiter limiter) {
     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
     factory.setConnectTimeout(15_000);
     factory.setReadTimeout(15_000);
     RestClient client = builder.baseUrl(properties.baseUrl()).requestFactory(factory).build();
     return () -> {
+      if (!limiter.tryAcquire()) {
+        throw new IllegalStateException("Upstox rate budget exhausted");
+      }
       UpstoxFeedAuthorize response =
           client
               .get()

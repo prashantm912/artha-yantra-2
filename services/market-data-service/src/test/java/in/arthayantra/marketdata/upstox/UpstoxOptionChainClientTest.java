@@ -69,7 +69,8 @@ class UpstoxOptionChainClientTest {
   private static UpstoxOptionChainClient client() {
     return new UpstoxOptionChainClient(
         RestClient.builder(),
-        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"));
+        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"),
+        new UpstoxRateLimiter());
   }
 
   @Test

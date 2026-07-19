@@ -20,8 +20,20 @@ public final class UpstoxFundamentalsClient {
   private final UpstoxAnalyticsProperties properties;
 
   /** Binds the wire client to the configured base URL (real Upstox, or WireMock in tests). */
-  public UpstoxFundamentalsClient(RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
-    this.restClient = builder.baseUrl(properties.baseUrl()).build();
+  public UpstoxFundamentalsClient(
+      RestClient.Builder builder, UpstoxAnalyticsProperties properties, UpstoxRateLimiter limiter) {
+    // The Minervini universe fundamentals refresh is a BULK walk (3 calls/symbol), so every call
+    // debits the ONE shared token budget (EXT-02) on the BATCH path — paced below the live reserve and
+    // paused during market hours so it never competes with live capture.
+    this.restClient =
+        builder
+            .baseUrl(properties.baseUrl())
+            .requestInterceptor(
+                (request, body, execution) -> {
+                  limiter.acquireForBatch();
+                  return execution.execute(request, body);
+                })
+            .build();
     this.properties = properties;
   }
 

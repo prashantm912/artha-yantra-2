@@ -11,6 +11,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import in.arthayantra.marketdata.upstox.UpstoxAnalyticsClient;
 import in.arthayantra.marketdata.upstox.UpstoxAnalyticsProperties;
+import in.arthayantra.marketdata.upstox.UpstoxRateLimiter;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
@@ -52,7 +53,8 @@ class UpstoxOptionAnalyticsSourceTest {
     UpstoxAnalyticsClient client =
         new UpstoxAnalyticsClient(
             RestClient.builder(),
-            new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"));
+            new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"),
+            new UpstoxRateLimiter());
     return new UpstoxOptionAnalyticsSource(client);
   }
 

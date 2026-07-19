@@ -30,9 +30,12 @@ public final class UpstoxQuoteClient {
 
   private final RestClient restClient;
   private final UpstoxAnalyticsProperties properties;
+  /** The token-scoped budget shared across every analytics-token client (EXT-02); live path (full cap). */
+  private final UpstoxRateLimiter limiter;
 
   /** Binds the wire client to the configured base URL (real Upstox, or WireMock in tests). */
-  public UpstoxQuoteClient(RestClient.Builder builder, UpstoxAnalyticsProperties properties) {
+  public UpstoxQuoteClient(
+      RestClient.Builder builder, UpstoxAnalyticsProperties properties, UpstoxRateLimiter limiter) {
     // Bounded timeouts so a throttled/dead Upstox call fails fast (the quote pass logs + skips) rather
     // than parking the caller.
     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -40,6 +43,7 @@ public final class UpstoxQuoteClient {
     factory.setReadTimeout(45_000);
     this.restClient = builder.baseUrl(properties.baseUrl()).requestFactory(factory).build();
     this.properties = properties;
+    this.limiter = limiter;
   }
 
   /** One instrument's mapped quote — the raw fields the quote seam consumes (greeks-free). */
@@ -68,6 +72,11 @@ public final class UpstoxQuoteClient {
       return Map.of();
     }
     String csv = String.join(",", instrumentKeys);
+    // Live-critical quote: BOUNDED wait for the shared token budget; on a saturated budget return an
+    // empty map (fail-soft, same as a transport miss) rather than parking the caller's thread.
+    if (!limiter.tryAcquire()) {
+      return Map.of();
+    }
     UpstoxMarketQuote response =
         restClient
             .get()

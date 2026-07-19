@@ -271,7 +271,9 @@ public class EquityDailyBackfillService {
       }
       List<Bar> bars;
       try {
-        bars = upstox.activeCandles(key, UPSTOX_INTERVAL, from, to);
+        // BATCH lane (EXT-02): a full-universe equity backfill pauses in the batch-quiet guard window
+        // and draws the batch ceiling, so a mid-session trigger never starves live capture / quotes / F9.
+        bars = upstox.activeCandlesForBatch(key, UPSTOX_INTERVAL, from, to);
       } catch (RuntimeException e) {
         p.failed.incrementAndGet();
         p.log("FAIL " + symbol + " (" + key + "): " + e.getMessage());

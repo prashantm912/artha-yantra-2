@@ -69,7 +69,8 @@ class UpstoxMarketStatusClientTest {
   private static UpstoxMarketStatusClient client() {
     return new UpstoxMarketStatusClient(
         RestClient.builder(),
-        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"));
+        new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token"),
+        new UpstoxRateLimiter());
   }
 
   private static void stubStatus(String exchange, String status) {

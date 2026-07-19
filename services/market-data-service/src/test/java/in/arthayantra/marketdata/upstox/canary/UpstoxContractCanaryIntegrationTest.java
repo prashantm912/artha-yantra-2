@@ -14,6 +14,7 @@ import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
+import in.arthayantra.marketdata.upstox.UpstoxRateLimiter;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -186,6 +187,7 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
 
   @Autowired private UpstoxContractCanary canary;
   @Autowired private StringRedisTemplate redis;
+  @Autowired private UpstoxRateLimiter rateLimiter;
 
   @BeforeEach
   void stubFaithfulFixtures() {
@@ -223,6 +225,26 @@ class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase 
 
   private static ResponseDefinitionBuilder json(String body) {
     return aResponse().withHeader("Content-Type", "application/json").withBody(body);
+  }
+
+  @Test
+  void everyProbeDebitsTheOneSharedTokenBudget() {
+    int before = used30m();
+
+    canary.runNow();
+
+    // Each probe (fii / fii / dii / max-pain / pcr / option-chain / market-quote / ws-authorize /
+    // margin) debits the ONE shared token budget (EXT-02) — the canary is no longer unmetered on the
+    // analytics token. The bounded LIVE path never pauses, so this stays deterministic on any clock.
+    assertThat(used30m()).as("the canary's probes debit the shared token budget").isGreaterThan(before);
+  }
+
+  private int used30m() {
+    return rateLimiter.getUsageStats().stream()
+        .filter(w -> w.window().equals("30m"))
+        .findFirst()
+        .orElseThrow()
+        .used();
   }
 
   // BEFORE_METHOD gives the singleton F&O-master client a COLD cache so it loads THIS test's lot=50

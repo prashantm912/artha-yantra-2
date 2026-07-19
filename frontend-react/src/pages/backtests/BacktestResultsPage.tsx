@@ -4,6 +4,7 @@ import { m } from 'motion/react';
 import type { EChartsOption } from 'echarts';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { EChart, type ChartTheme } from '../../components/atoms/EChart.tsx';
 import { Button } from '../../components/atoms/Button.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
@@ -18,6 +19,8 @@ import {
   useOiAttribution,
   type BacktestResults,
   type CurvePoint,
+  type FoldRow,
+  type OiAttributionBucket,
   type OiAttributionTradeRow,
   type TradeRow,
 } from '../../api/backtests.ts';
@@ -28,7 +31,7 @@ import {
   exportTrades,
   type ExportFormat,
 } from '../../api/backtestExport.ts';
-import { exitReasonBreakdown } from './exitReasonBreakdown.ts';
+import { exitReasonBreakdown, type ExitReasonStat } from './exitReasonBreakdown.ts';
 
 const OI_INTERVALS = ['3m', '5m', '10m', '15m'] as const;
 
@@ -89,6 +92,39 @@ function metric(r: BacktestResults, m: MetricDef): string {
 const price = (v: string | null | undefined) => (v == null ? '—' : formatDecimal(v, 2));
 const nums = (a: string[] | undefined) => (a ?? []).map(Number);
 const curveNums = (c: CurvePoint[] | null | undefined) => (c ?? []).map((p) => Number(p.value));
+
+// Shared DataTable columns for the three tabular archetypes on this page (exit-reason breakdown,
+// walk-forward folds, OI-confluence buckets). Same values/order/formatting as the hand-rolled tables
+// they replaced — DataTable adds zebra + sticky header + a mobile card list (§3.2, GraduationPage
+// pattern). The interactive per-trade table keeps its bespoke row-select markup (not a DataTable fit).
+const EXIT_COLUMNS: DataColumn<ExitReasonStat>[] = [
+  { id: 'reason', header: 'Reason', align: 'left', mobileLabel: 'Reason', render: (s) => s.reason },
+  { id: 'count', header: 'Count', align: 'right', mobileLabel: 'Count', render: (s) => s.count },
+  { id: 'winRate', header: 'Win rate', align: 'right', mobileLabel: 'Win rate', render: (s) => `${formatDecimal(String(s.winRate), 1)}%` },
+  { id: 'totalPnl', header: 'Total P&L', align: 'right', mobileLabel: 'Total P&L', cellClassName: (s) => (isNegative(s.totalPnl) ? 'text-bear' : 'text-bull'), render: (s) => price(s.totalPnl) },
+  { id: 'avgPnl', header: 'Avg P&L', align: 'right', mobileLabel: 'Avg P&L', cellClassName: (s) => (isNegative(s.avgPnl) ? 'text-bear' : 'text-bull'), render: (s) => price(s.avgPnl) },
+];
+
+const FOLD_COLUMNS: DataColumn<FoldRow>[] = [
+  { id: 'fold', header: 'Fold', align: 'left', mono: true, mobileLabel: 'Fold', render: (f) => f.fold.index },
+  { id: 'window', header: 'Test window', align: 'left', mono: true, mobileLabel: 'Test window', render: (f) => `${f.fold.testFrom.slice(0, 10)} → ${f.fold.testTo.slice(0, 10)}` },
+  ...FOLD_METRICS.map((mk): DataColumn<FoldRow> => ({
+    id: `oos-${mk}`,
+    header: `OOS ${mk}`,
+    align: 'right',
+    mobileLabel: `OOS ${mk}`,
+    render: (f) => (f.oosMetrics[mk] != null ? formatDecimal(String(f.oosMetrics[mk]), 2) : '—'),
+  })),
+];
+
+const OI_COLUMNS: DataColumn<OiAttributionBucket>[] = [
+  { id: 'label', header: 'Entry confluence', align: 'left', mobileLabel: 'Entry confluence', render: (b) => b.label },
+  { id: 'count', header: 'Trades', align: 'right', mobileLabel: 'Trades', render: (b) => b.count },
+  { id: 'wins', header: 'Wins', align: 'right', mobileLabel: 'Wins', render: (b) => b.wins },
+  { id: 'winRate', header: 'Win rate', align: 'right', mobileLabel: 'Win rate', render: (b) => (b.winRate == null ? '—' : formatDecimal(String(b.winRate), 3)) },
+  { id: 'totalPnl', header: 'Total P&L', align: 'right', mobileLabel: 'Total P&L', cellClassName: (b) => (isNegative(b.totalPnl) ? 'text-bear' : 'text-bull'), render: (b) => price(b.totalPnl) },
+  { id: 'avgPnl', header: 'Avg P&L', align: 'right', mobileLabel: 'Avg P&L', cellClassName: (b) => (isNegative(b.avgPnl ?? '0') ? 'text-bear' : 'text-bull'), render: (b) => price(b.avgPnl) },
+];
 
 type Tab = 'overview' | 'trades' | 'folds' | 'mc' | 'oi';
 
@@ -348,34 +384,12 @@ export function BacktestResultsPage() {
               <h3 className="mb-1.5 text-caption uppercase tracking-wide text-ay-muted">
                 Exit-reason breakdown <span className="normal-case">(loaded trades)</span>
               </h3>
-              <div className="overflow-auto rounded-lg border border-ay-border">
-                <table className="w-full border-collapse text-sm" aria-label="Exit-reason breakdown">
-                  <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                    <tr>
-                      <th scope="col" className="px-2 py-2 font-medium">Reason</th>
-                      <th scope="col" className="px-2 py-2 text-right font-medium">Count</th>
-                      <th scope="col" className="px-2 py-2 text-right font-medium">Win rate</th>
-                      <th scope="col" className="px-2 py-2 text-right font-medium">Total P&L</th>
-                      <th scope="col" className="px-2 py-2 text-right font-medium">Avg P&L</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {exitStats.map((s) => (
-                      <tr key={s.reason} className="border-t border-ay-border">
-                        <td className="px-2 py-2">{s.reason}</td>
-                        <td className="px-2 py-2 text-right tabular-nums">{s.count}</td>
-                        <td className="px-2 py-2 text-right tabular-nums">{formatDecimal(String(s.winRate), 1)}%</td>
-                        <td className={cn('px-2 py-2 text-right tabular-nums', isNegative(s.totalPnl) ? 'text-bear' : 'text-bull')}>
-                          {price(s.totalPnl)}
-                        </td>
-                        <td className={cn('px-2 py-2 text-right tabular-nums', isNegative(s.avgPnl) ? 'text-bear' : 'text-bull')}>
-                          {price(s.avgPnl)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={EXIT_COLUMNS}
+                rows={exitStats}
+                rowKey={(s) => s.reason}
+                ariaLabel="Exit-reason breakdown"
+              />
             </div>
           )}
           <div className="max-h-[calc(100vh-18rem)] overflow-auto rounded-lg border border-ay-border">
@@ -484,36 +498,12 @@ export function BacktestResultsPage() {
           skeleton={<Skeleton variant="table-rows" rows={4} cols={6} className="rounded-lg border border-ay-border p-2" />}
         >
           {(rows) => (
-            <div className="overflow-auto rounded-lg border border-ay-border">
-              <table className="w-full border-collapse text-sm">
-                <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                  <tr>
-                    <th className="px-2 py-2 font-medium">Fold</th>
-                    <th className="px-2 py-2 font-medium">Test window</th>
-                    {FOLD_METRICS.map((m) => (
-                      <th key={m} className="px-2 py-2 text-right font-medium">
-                        OOS {m}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((f) => (
-                    <tr key={f.fold.index} className="border-t border-ay-border">
-                      <td className="px-2 py-2 tabular-nums">{f.fold.index}</td>
-                      <td className="px-2 py-2 tabular-nums">
-                        {f.fold.testFrom.slice(0, 10)} → {f.fold.testTo.slice(0, 10)}
-                      </td>
-                      {FOLD_METRICS.map((m) => (
-                        <td key={m} className="px-2 py-2 text-right tabular-nums">
-                          {f.oosMetrics[m] != null ? formatDecimal(String(f.oosMetrics[m]), 2) : '—'}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={FOLD_COLUMNS}
+              rows={rows}
+              rowKey={(f) => String(f.fold.index)}
+              ariaLabel="Walk-forward folds"
+            />
           )}
         </QueryState>
         </>
@@ -590,38 +580,12 @@ export function BacktestResultsPage() {
                       ariaLabel="Win rate by entry OI-confluence trend"
                     />
                   </BeatBlock>
-                  <div className="overflow-auto rounded-lg border border-ay-border">
-                    <table className="w-full border-collapse text-sm" aria-label="OI-confluence attribution buckets">
-                      <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-                        <tr>
-                          <th scope="col" className="px-2 py-2 font-medium">Entry confluence</th>
-                          <th scope="col" className="px-2 py-2 text-right font-medium">Trades</th>
-                          <th scope="col" className="px-2 py-2 text-right font-medium">Wins</th>
-                          <th scope="col" className="px-2 py-2 text-right font-medium">Win rate</th>
-                          <th scope="col" className="px-2 py-2 text-right font-medium">Total P&L</th>
-                          <th scope="col" className="px-2 py-2 text-right font-medium">Avg P&L</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {d.buckets.filter((b) => b.count > 0).map((b) => (
-                          <tr key={b.label} className="border-t border-ay-border">
-                            <td className="px-2 py-2">{b.label}</td>
-                            <td className="px-2 py-2 text-right tabular-nums">{b.count}</td>
-                            <td className="px-2 py-2 text-right tabular-nums">{b.wins}</td>
-                            <td className="px-2 py-2 text-right tabular-nums">
-                              {b.winRate == null ? '—' : `${formatDecimal(String(b.winRate), 3)}`}
-                            </td>
-                            <td className={cn('px-2 py-2 text-right tabular-nums', isNegative(b.totalPnl) ? 'text-bear' : 'text-bull')}>
-                              {price(b.totalPnl)}
-                            </td>
-                            <td className={cn('px-2 py-2 text-right tabular-nums', isNegative(b.avgPnl ?? '0') ? 'text-bear' : 'text-bull')}>
-                              {price(b.avgPnl)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <DataTable
+                    columns={OI_COLUMNS}
+                    rows={d.buckets.filter((b) => b.count > 0)}
+                    rowKey={(b) => b.label}
+                    ariaLabel="OI-confluence attribution buckets"
+                  />
                 </>
               )
             }

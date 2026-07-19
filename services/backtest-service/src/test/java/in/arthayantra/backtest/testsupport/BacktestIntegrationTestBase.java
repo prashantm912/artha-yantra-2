@@ -12,7 +12,7 @@ import org.testcontainers.utility.DockerImageName;
 
 /**
  * Shared IT substrate (the Stage-B pattern): SINGLETON containers pinned to the production compose
- * tags — TimescaleDB 2.17.2-pg17 with the REAL {@code deploy/flyway} lineages applied (admin first,
+ * tags — TimescaleDB 2.18.2-pg17 with the REAL {@code deploy/flyway} lineages applied (admin first,
  * then backtest — what flyway-init does for this schema) and Redis 7.4 — reused across every IT
  * class in the module. The datasource targets the {@code backtest} schema like production. The
  * {@code marketdata} lineage is added by Phase 30 when the replay engine needs candle tables.
@@ -21,7 +21,7 @@ public abstract class BacktestIntegrationTestBase {
 
   static final PostgreSQLContainer<?> TIMESCALE =
       new PostgreSQLContainer<>(
-              DockerImageName.parse("timescale/timescaledb:2.17.2-pg17")
+              DockerImageName.parse("timescale/timescaledb:2.18.2-pg17")
                   .asCompatibleSubstituteFor("postgres"))
           .withDatabaseName("artha")
           .withUsername("artha")

@@ -23,13 +23,21 @@ class PremiumBracketEquivalenceTest {
     Path p = Path.of("..", "..", "contracts", "fixtures", "exit-equivalence.json");
     JsonNode fx = new ObjectMapper().readTree(Files.readString(p));
 
-    PremiumBracketRules.Brackets brackets =
-        PremiumBracketRules.resolve(
-            fx.path("config"), new BigDecimal(fx.path("entryPremium").asText()));
+    for (JsonNode sc : fx.path("scenarios")) {
+      // a scenario may override entryPremium/config/expectedLevels (the sub-paise case does); else
+      // inherit the top-level defaults. Proves the LIVE derivation paise-rounds identically per case.
+      JsonNode config = sc.has("config") ? sc.path("config") : fx.path("config");
+      BigDecimal entry =
+          new BigDecimal(
+              (sc.has("entryPremium") ? sc.path("entryPremium") : fx.path("entryPremium")).asText());
+      JsonNode levels = sc.has("expectedLevels") ? sc.path("expectedLevels") : fx.path("expectedLevels");
 
-    assertThat(brackets.stopLoss())
-        .isEqualByComparingTo(fx.path("expectedLevels").path("stopLoss").asText());
-    assertThat(brackets.takeProfit())
-        .isEqualByComparingTo(fx.path("expectedLevels").path("takeProfit").asText());
+      PremiumBracketRules.Brackets brackets = PremiumBracketRules.resolve(config, entry);
+      String name = sc.path("name").asText();
+      assertThat(brackets.stopLoss()).as(name).isEqualByComparingTo(levels.path("stopLoss").asText());
+      assertThat(brackets.takeProfit())
+          .as(name)
+          .isEqualByComparingTo(levels.path("takeProfit").asText());
+    }
   }
 }

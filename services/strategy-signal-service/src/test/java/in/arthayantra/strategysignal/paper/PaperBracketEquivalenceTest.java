@@ -37,16 +37,23 @@ class PaperBracketEquivalenceTest {
   void liveBracketEnforcementMatchesTheSharedEquivalenceFixture() throws Exception {
     Path p = Path.of("..", "..", "contracts", "fixtures", "exit-equivalence.json");
     JsonNode fx = new ObjectMapper().readTree(Files.readString(p));
-    PositionRow pos =
-        new PositionRow(
-            1L, "NFO", "NIFTY26JUL25000CE", "BUY", 75,
-            new BigDecimal(fx.path("entryPremium").asText()), BigDecimal.ZERO, "OPEN",
-            OffsetDateTime.parse("2026-07-03T09:18:00+05:30"), null, null,
-            new BigDecimal(fx.path("expectedLevels").path("stopLoss").asText()),
-            new BigDecimal(fx.path("expectedLevels").path("takeProfit").asText()),
-            "scalper");
 
     for (JsonNode sc : fx.path("scenarios")) {
+      // a scenario may override entryPremium/expectedLevels (the sub-paise case does); else inherit
+      // the top-level defaults. The bracket levels are the ones PremiumBracketRules derives (paise).
+      BigDecimal entry =
+          new BigDecimal(
+              (sc.has("entryPremium") ? sc.path("entryPremium") : fx.path("entryPremium")).asText());
+      JsonNode levels = sc.has("expectedLevels") ? sc.path("expectedLevels") : fx.path("expectedLevels");
+      PositionRow pos =
+          new PositionRow(
+              1L, "NFO", "NIFTY26JUL25000CE", "BUY", 75,
+              entry, BigDecimal.ZERO, "OPEN",
+              OffsetDateTime.parse("2026-07-03T09:18:00+05:30"), null, null,
+              new BigDecimal(levels.path("stopLoss").asText()),
+              new BigDecimal(levels.path("takeProfit").asText()),
+              "scalper");
+
       String name = sc.path("name").asText();
       FirstBreach got = walk(pos, sc.path("premiums"));
       JsonNode expect = sc.path("expect");

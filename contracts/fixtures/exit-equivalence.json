@@ -1,5 +1,5 @@
 {
-  "comment": "Live-vs-backtest premium-exit equivalence fixture (audit no-live-vs-backtest-exit-equivalence-test). BOTH suites assert against THIS file: backtest-service PremiumExitEquivalenceTest runs PremiumExitEvaluator over each scenario; strategy-signal PremiumBracketEquivalenceTest derives the live bracket levels (PremiumBracketRules) and PaperBracketEquivalenceTest walks the same premium closes through PaperBracketEvaluator.breach. If either implementation drifts from the recorded semantics, its suite goes red. Semantics pinned: long option, close-based checks, SL <= level, TP >= level, SL checked before TP, entry bar (index 0) never exits.",
+  "comment": "Live-vs-backtest premium-exit equivalence fixture (audit no-live-vs-backtest-exit-equivalence-test). BOTH suites assert against THIS file: backtest-service PremiumExitEquivalenceTest runs PremiumExitEvaluator over each scenario; strategy-signal PremiumBracketEquivalenceTest derives the live bracket levels (PremiumBracketRules) and PaperBracketEquivalenceTest walks the same premium closes through PaperBracketEvaluator.breach. If either implementation drifts from the recorded semantics, its suite goes red. Semantics pinned: long option, close-based checks, SL <= level, TP >= level, SL checked before TP, entry bar (index 0) never exits. A scenario MAY override entryPremium/config/expectedLevels (else it inherits the top-level defaults) — the stop-subpaise-rounding case (audit AY-SL-06) uses that to pin the 2dp-paise level rounding both sides must share.",
   "entryPremium": "100.00",
   "config": {
     "exit_rules": [
@@ -33,6 +33,20 @@
       "name": "no-hit",
       "premiums": ["100.00", "90.00", "110.00", "120.00"],
       "expect": { "reason": null, "barOffset": null }
+    },
+    {
+      "name": "stop-subpaise-rounding",
+      "comment": "Pins the live-vs-backtest paise rounding (audit AY-SL-06). entry 100.01, stop_loss 33.33% -> raw level 66.676667; both sides round to 66.68 (2dp HALF_UP). A premium close of exactly 66.68 is <= the rounded 66.68 (STOP fires at bar 2) but > the un-rounded 66.676667 (the OLD full-precision backtest MISSED the stop here and fell through to END_OF_DATA at bar 3). This scenario turns that sub-paise divergence into a red test.",
+      "entryPremium": "100.01",
+      "config": {
+        "exit_rules": [
+          { "type": "stop_loss", "params": { "basis": "premium_pct", "value": 33.33 } },
+          { "type": "take_profit", "params": { "basis": "premium_pct", "value": 35 } }
+        ]
+      },
+      "expectedLevels": { "stopLoss": "66.68", "takeProfit": "135.01" },
+      "premiums": ["100.01", "80.00", "66.68", "70.00"],
+      "expect": { "reason": "STOP_LOSS", "barOffset": 2 }
     }
   ]
 }

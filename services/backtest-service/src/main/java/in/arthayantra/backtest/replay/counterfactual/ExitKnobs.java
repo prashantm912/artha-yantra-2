@@ -18,8 +18,9 @@ import java.math.BigDecimal;
  * knobs holds each entry to the session-close square-off (END_OF_DATA), a valid baseline.
  *
  * <p>Percent convention: WHOLE-NUMBER percent of the entry premium — {@code takeProfitPct: 35}
- * means +35% (the pinned evaluator does {@code movePointLeft(2)}; the exit-equivalence fixture's
- * grammar). Passing {@code 0.35} intending 35% silently yields a 0.35% band.</p>
+ * means +35% (the pinned evaluator reads it as {@code pct/100} then paise-rounds the level; the
+ * exit-equivalence fixture's grammar). Passing {@code 0.35} intending 35% silently yields a 0.35%
+ * band.</p>
  */
 public record ExitKnobs(
     BigDecimal takeProfitPct,

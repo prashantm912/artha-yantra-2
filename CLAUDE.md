@@ -58,7 +58,7 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   2-core bottleneck; serial reactor was ~23m, sharded ~5m). Safe because `jacoco-check`
   binds PER MODULE, not an aggregate root goal. **Adding a new service?** Add a matrix
   shard or its tests NEVER run in CI. Libs ride upstream via `-am` (covered in ≥1 shard).
-- IT harness: singleton Testcontainers (Timescale 2.17.2-pg17 + redis 7.4), real
+- IT harness: singleton Testcontainers (Timescale 2.18.2-pg17 + redis 7.4), real
   Flyway lineages, `@DynamicPropertySource` for `currentSchema`. Services connect to
   Postgres as `artha` (D10 single-writer by convention); per-schema roles like
   `ay_backtest` are read-only, asserted via SET ROLE grant tests.

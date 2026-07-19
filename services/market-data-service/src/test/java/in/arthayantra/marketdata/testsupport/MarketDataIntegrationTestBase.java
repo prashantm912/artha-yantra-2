@@ -12,7 +12,7 @@ import org.testcontainers.utility.DockerImageName;
 
 /**
  * Shared IT substrate (A.10 conventions): SINGLETON containers pinned to the production compose
- * tags — TimescaleDB 2.17.2-pg17 with the REAL {@code deploy/flyway} lineages applied (admin
+ * tags — TimescaleDB 2.18.2-pg17 with the REAL {@code deploy/flyway} lineages applied (admin
  * first, then marketdata — exactly what flyway-init does) and Redis 7.4 — reused across every IT
  * class in the module so the suite cost stays sane. Subclasses declare their own
  * {@code @SpringBootTest}; the datasource targets the {@code marketdata} schema like production.
@@ -23,7 +23,7 @@ public abstract class MarketDataIntegrationTestBase {
   // currentSchema=marketdata URL the service needs; explicit properties below.
   static final PostgreSQLContainer<?> TIMESCALE =
       new PostgreSQLContainer<>(
-              DockerImageName.parse("timescale/timescaledb:2.17.2-pg17")
+              DockerImageName.parse("timescale/timescaledb:2.18.2-pg17")
                   .asCompatibleSubstituteFor("postgres"))
           .withDatabaseName("artha")
           .withUsername("artha")

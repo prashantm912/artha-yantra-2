@@ -287,9 +287,16 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   the desktop table** (`GraduationPage.spec.tsx:82-86` is the convention). Bit two builders on the #890/wave-2 slices.
   Its `header` is typed **`string`** (`DataTable.tsx:43`): a JSX header (`<Link>`, a chip, a select-all checkbox) cannot
   convert — but a *hidden text* header can and must (`header: 'Actions'` + `headerClassName: 'ay-sr-only'`, the shipped
-  pattern at `JobsPage.tsx:707-712`; a builder wrongly called that a blocker and skipped 2 pages over it). `max-h-[68vh]`
-  is **hardcoded** (`:289`) with no override prop and no adopter bounding it — a bounded panel is a genuine SKIP (don't
-  nest scroll containers: two scrollbars + a sticky header stranded against the inner one). **Adoption is a REFACTOR:**
+  pattern at `JobsPage.tsx:707-712`; a builder wrongly called that a blocker and skipped 2 pages over it). **The 2026-07-19
+  wave added three OPTIONAL props — all default-off / omitted-render byte-identical** (#945/#946): `maxHeight` (overrides the
+  `max-h-[68vh]` cap — a bounded panel is NO LONGER a skip), `onRowClick` (a **MOUSE-ONLY** row/card click), and
+  `renderExpanded` (inline expandable detail rows via a leading expander column). ⚠️ **THE a11y RULE THEY CARRY (audit
+  M23/#596, re-broken and re-fixed in #945): NEVER put `role="button"` on a `<tr>`** — it overrides the row's implicit
+  `role="row"`, strips every `<td>` of its required `row` parent (axe `aria-required-parent`) and makes AT see a table with
+  ZERO data rows. A clickable/selectable/expandable row keeps `role="row"`; the keyboard/AT control is a **real in-cell
+  `<button>`** (`onRowClick` is mouse convenience only; the expander / `aria-pressed` selector is the keyboard path —
+  templates: `SignalsPage.tsx:203-218`, `BacktestResultsPage.tsx` per-trade `#` cell, `Leaderboard.tsx` RobustScore).
+  **Adoption is a REFACTOR:**
   prove it by dumping every header + cell `textContent` before/after and diffing (empty or it didn't happen) — "the spec
   passes before and after" proves nothing, since an unconverted table has no accessible name and `within(table)` throws
   for unrelated reasons. Honest claim is *same content/order/formatting*, **not pixel-identical** (adoption intentionally

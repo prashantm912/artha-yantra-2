@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatDecimal } from '../../lib/decimal.ts';
-import { cn } from '../../lib/cn.ts';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
@@ -99,115 +99,140 @@ export function ManasAroraBacktestPage() {
   );
 }
 
+/** The net-of-cost RS-priority portfolio (falls back to gross RS-priority, then plain). */
+function portfolioOf(v: ManasReport) {
+  return v.portfolioRsPriorityNet ?? v.portfolioRsPriority ?? v.portfolio;
+}
+
+// Headline A/B portfolio columns (one row per variant). Same content/order as the hand-rolled table
+// it replaced — DataTable adds zebra + sticky header + the mobile card list.
+const portfolioColumns: DataColumn<ManasReport>[] = [
+  {
+    id: 'variant',
+    header: 'Variant',
+    align: 'left',
+    mobileLabel: 'Variant',
+    cellClassName: () => 'font-medium text-ay-text',
+    render: (v) => (
+      <>
+        {v.variant}
+        {v.variant === PRIMARY_VARIANT && (
+          <span className="ml-1 text-[10px] uppercase text-accent">live</span>
+        )}
+      </>
+    ),
+  },
+  { id: 'trades', header: 'Trades', align: 'right', mobileLabel: 'Trades', render: (v) => v.totalTrades },
+  { id: 'cagr', header: 'CAGR', align: 'right', mobileLabel: 'CAGR', render: (v) => signedPct(portfolioOf(v)?.cagrPct) },
+  {
+    id: 'totalRet',
+    header: 'Total ret',
+    align: 'right',
+    mobileLabel: 'Total ret',
+    render: (v) => signedPct(portfolioOf(v)?.totalReturnPct),
+  },
+  {
+    id: 'maxDd',
+    header: 'Max DD',
+    align: 'right',
+    mobileLabel: 'Max DD',
+    cellClassName: () => 'text-bear',
+    render: (v) => plain(portfolioOf(v)?.maxDrawdownPct),
+  },
+  { id: 'sharpe', header: 'Sharpe', align: 'right', mobileLabel: 'Sharpe', render: (v) => plain(portfolioOf(v)?.sharpe, 2) },
+  {
+    id: 'posMonths',
+    header: '+Months',
+    align: 'right',
+    mobileLabel: '+Months',
+    render: (v) => plain(portfolioOf(v)?.positiveMonthsPct),
+  },
+];
+
 /** One row per variant: its RS-priority (net-of-cost) portfolio summary — the headline A/B numbers. */
 function PortfolioTable({ variants }: { variants: ManasReport[] }) {
   return (
-    <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-      <h3 className="border-b border-ay-border bg-surface-1 px-3 py-2 text-sm font-semibold text-ay-text">
+    <BeatBlock>
+      <h3 className="mb-2 text-sm font-semibold text-ay-text">
         Portfolio comparison (RS-priority, net of cost)
       </h3>
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-          <tr>
-            <th className="px-2 py-2 font-medium">Variant</th>
-            <th className="px-2 py-2 text-right font-medium">Trades</th>
-            <th className="px-2 py-2 text-right font-medium">CAGR</th>
-            <th className="px-2 py-2 text-right font-medium">Total ret</th>
-            <th className="px-2 py-2 text-right font-medium">Max DD</th>
-            <th className="px-2 py-2 text-right font-medium">Sharpe</th>
-            <th className="px-2 py-2 text-right font-medium">+Months</th>
-          </tr>
-        </thead>
-        <tbody>
-          {variants.map((v) => {
-            const p = v.portfolioRsPriorityNet ?? v.portfolioRsPriority ?? v.portfolio;
-            return (
-              <tr
-                key={v.variant}
-                className={cn(
-                  'border-t border-ay-border',
-                  v.variant === PRIMARY_VARIANT && 'bg-accent/5',
-                )}
-              >
-                <td className="px-2 py-2 font-medium text-ay-text">
-                  {v.variant}
-                  {v.variant === PRIMARY_VARIANT && (
-                    <span className="ml-1 text-[10px] uppercase text-accent">live</span>
-                  )}
-                </td>
-                <td className="px-2 py-2 text-right tabular-nums">{v.totalTrades}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{signedPct(p?.cagrPct)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{signedPct(p?.totalReturnPct)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-bear">{plain(p?.maxDrawdownPct)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{plain(p?.sharpe, 2)}</td>
-                <td className="px-2 py-2 text-right tabular-nums">{plain(p?.positiveMonthsPct)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <DataTable
+        columns={portfolioColumns}
+        rows={variants}
+        rowKey={(v) => String(v.variant)}
+        rowClassName={(v) => (v.variant === PRIMARY_VARIANT ? 'bg-accent/5' : '')}
+        ariaLabel="Portfolio comparison"
+      />
     </BeatBlock>
   );
 }
 
+// Per-setup trade stats columns (breakout / vcp / ALL). Same content/order as the hand-rolled table.
+const setupColumns: DataColumn<ManasSetupStat>[] = [
+  {
+    id: 'setup',
+    header: 'Setup',
+    align: 'left',
+    mobileLabel: 'Setup',
+    cellClassName: () => 'uppercase text-ay-text',
+    render: (s) => s.setup,
+  },
+  { id: 'trades', header: 'Trades', align: 'right', mobileLabel: 'Trades', render: (s) => s.trades },
+  { id: 'winRate', header: 'Win %', align: 'right', mobileLabel: 'Win %', render: (s) => plain(s.winRatePct) },
+  {
+    id: 'expectancy',
+    header: 'Expectancy',
+    align: 'right',
+    mobileLabel: 'Expectancy',
+    render: (s) => signedPct(s.expectancyPct),
+  },
+  { id: 'payoff', header: 'Payoff', align: 'right', mobileLabel: 'Payoff', render: (s) => plain(s.payoffRatio, 2) },
+  {
+    id: 'avgWin',
+    header: 'Avg win',
+    align: 'right',
+    mobileLabel: 'Avg win',
+    cellClassName: () => 'text-bull',
+    render: (s) => plain(s.avgWinPct),
+  },
+  {
+    id: 'avgLoss',
+    header: 'Avg loss',
+    align: 'right',
+    mobileLabel: 'Avg loss',
+    cellClassName: () => 'text-bear',
+    render: (s) => plain(s.avgLossPct),
+  },
+  {
+    id: 'profitFactor',
+    header: 'Profit factor',
+    align: 'right',
+    mobileLabel: 'Profit factor',
+    render: (s) => plain(s.profitFactor, 2),
+  },
+  { id: 'avgHold', header: 'Avg hold', align: 'right', mobileLabel: 'Avg hold', render: (s) => plain(s.avgBarsHeld, 0) },
+  { id: 'stopOut', header: 'Stop-out %', align: 'right', mobileLabel: 'Stop-out %', render: (s) => plain(s.stopOutPct) },
+];
+
 /** Per-setup trade stats for one variant (breakout / vcp / ALL). */
 function VariantSetups({ v }: { v: ManasReport }) {
   return (
-    <BeatBlock className="overflow-auto rounded-lg border border-ay-border">
-      <h3 className="border-b border-ay-border bg-surface-1 px-3 py-2 text-sm font-semibold text-ay-text">
+    <BeatBlock>
+      <h3 className="mb-2 text-sm font-semibold text-ay-text">
         {v.variant} · per-setup stats
         <span className="ml-2 text-xs font-normal text-ay-muted">
           {v.symbolsScanned} symbols · {v.totalTrades} trades
         </span>
       </h3>
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-surface-1 text-left text-xs uppercase text-ay-muted">
-          <tr>
-            <th className="px-2 py-2 font-medium">Setup</th>
-            <th className="px-2 py-2 text-right font-medium">Trades</th>
-            <th className="px-2 py-2 text-right font-medium">Win %</th>
-            <th className="px-2 py-2 text-right font-medium">Expectancy</th>
-            <th className="px-2 py-2 text-right font-medium">Payoff</th>
-            <th className="px-2 py-2 text-right font-medium">Avg win</th>
-            <th className="px-2 py-2 text-right font-medium">Avg loss</th>
-            <th className="px-2 py-2 text-right font-medium">Profit factor</th>
-            <th className="px-2 py-2 text-right font-medium">Avg hold</th>
-            <th className="px-2 py-2 text-right font-medium">Stop-out %</th>
-          </tr>
-        </thead>
-        <tbody>
-          {v.setups.map((s) => (
-            <SetupRow key={s.setup} s={s} />
-          ))}
-          {v.setups.length === 0 && (
-            <tr>
-              <td colSpan={10} className="px-2 py-6 text-center text-ay-muted">
-                No trades for this variant.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <DataTable
+        columns={setupColumns}
+        rows={v.setups}
+        rowKey={(s) => s.setup}
+        rowClassName={(s) => (s.setup === 'ALL' ? 'bg-surface-1 font-medium' : '')}
+        ariaLabel={`${v.variant} per-setup stats`}
+        emptyMessage="No trades for this variant."
+      />
     </BeatBlock>
-  );
-}
-
-function SetupRow({ s }: { s: ManasSetupStat }) {
-  return (
-    <tr
-      className={cn('border-t border-ay-border', s.setup === 'ALL' && 'bg-surface-1 font-medium')}
-    >
-      <td className="px-2 py-2 uppercase text-ay-text">{s.setup}</td>
-      <td className="px-2 py-2 text-right tabular-nums">{s.trades}</td>
-      <td className="px-2 py-2 text-right tabular-nums">{plain(s.winRatePct)}</td>
-      <td className="px-2 py-2 text-right tabular-nums">{signedPct(s.expectancyPct)}</td>
-      <td className="px-2 py-2 text-right tabular-nums">{plain(s.payoffRatio, 2)}</td>
-      <td className="px-2 py-2 text-right tabular-nums text-bull">{plain(s.avgWinPct)}</td>
-      <td className="px-2 py-2 text-right tabular-nums text-bear">{plain(s.avgLossPct)}</td>
-      <td className="px-2 py-2 text-right tabular-nums">{plain(s.profitFactor, 2)}</td>
-      <td className="px-2 py-2 text-right tabular-nums">{plain(s.avgBarsHeld, 0)}</td>
-      <td className="px-2 py-2 text-right tabular-nums">{plain(s.stopOutPct)}</td>
-    </tr>
   );
 }
 

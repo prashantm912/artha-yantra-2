@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Lightbulb } from 'lucide-react';
-import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
+import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import {
@@ -51,26 +51,41 @@ function TornadoRow({ item, max }: { item: ImportanceItem; max: number }) {
   );
 }
 
-function BrittlenessRow({ item }: { item: BrittlenessItem }) {
-  return (
-    <tr className={cn('border-t border-ay-border/40', item.brittle && 'bg-warn/5')}>
-      <td className="py-1 pr-2 text-ay-text">{item.param}</td>
-      <td className="py-1 pr-2 text-right tabular-nums text-ay-muted">{fmtNum(item.importance, 3)}</td>
-      <td className="py-1 pr-2 text-right tabular-nums text-ay-muted">
-        {item.localVariance == null ? '—' : fmtNum(item.localVariance, 4)}
-      </td>
-      <td className="py-1 text-right">
-        {item.brittle ? (
-          <span className="rounded px-1.5 py-0.5 text-[11px] font-medium text-warn ring-1 ring-warn/40">
-            brittle
-          </span>
-        ) : (
-          <span className="text-[11px] text-ay-muted">stable</span>
-        )}
-      </td>
-    </tr>
-  );
-}
+// Brittleness grid columns (importance × local variance). Same content/order as the hand-rolled
+// table it replaced — DataTable adds zebra + sticky header + the mobile card list.
+const brittlenessColumns: DataColumn<BrittlenessItem>[] = [
+  { id: 'param', header: 'Parameter', align: 'left', mobileLabel: 'Parameter', render: (item) => item.param },
+  {
+    id: 'importance',
+    header: 'Importance',
+    align: 'right',
+    mobileLabel: 'Importance',
+    cellClassName: () => 'text-ay-muted',
+    render: (item) => fmtNum(item.importance, 3),
+  },
+  {
+    id: 'localVariance',
+    header: 'Local variance',
+    align: 'right',
+    mobileLabel: 'Local variance',
+    cellClassName: () => 'text-ay-muted',
+    render: (item) => (item.localVariance == null ? '—' : fmtNum(item.localVariance, 4)),
+  },
+  {
+    id: 'verdict',
+    header: 'Verdict',
+    align: 'right',
+    mobileLabel: 'Verdict',
+    render: (item) =>
+      item.brittle ? (
+        <span className="rounded px-1.5 py-0.5 text-[11px] font-medium text-warn ring-1 ring-warn/40">
+          brittle
+        </span>
+      ) : (
+        <span className="text-[11px] text-ay-muted">stable</span>
+      ),
+  },
+];
 
 interface InsightsViewProps {
   generations: Generation[];
@@ -165,23 +180,13 @@ export function InsightsView({ generations, candidates }: InsightsViewProps) {
               {data.brittleness.length === 0 ? (
                 <p className="text-caption text-ay-muted">No brittleness signal available.</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="text-left text-ay-muted">
-                      <tr>
-                        <th className="py-1 pr-2 font-medium">Parameter</th>
-                        <th className="py-1 pr-2 text-right font-medium">Importance</th>
-                        <th className="py-1 pr-2 text-right font-medium">Local variance</th>
-                        <th className="py-1 text-right font-medium">Verdict</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.brittleness.map((b) => (
-                        <BrittlenessRow key={b.param} item={b} />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <DataTable
+                  columns={brittlenessColumns}
+                  rows={data.brittleness}
+                  rowKey={(b) => b.param}
+                  rowClassName={(b) => (b.brittle ? 'bg-warn/5' : '')}
+                  ariaLabel="Brittleness grid"
+                />
               )}
             </section>
 

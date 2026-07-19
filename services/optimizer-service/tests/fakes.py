@@ -235,6 +235,15 @@ class FakeStrategy:
         # compare-and-set. A base strategy's pointer is its ``champ-`` version; a created draft has
         # none until published. ``publish(cas=True)`` fails when the expected != current.
         self._published_version: dict[str, str | None] = {}
+        # round-8: the SEMVER of the live published version per strategy (what detail() returns as
+        # ``publishedVersion`` — the captured champion the promote reads its config by). Distinct
+        # from the strategy row's ``version`` (the LATEST version's semver, which detail() also
+        # carries) so a base whose latest is a NEWER orphan draft can still name its published one.
+        self._published_semver: dict[str, str | None] = {}
+        # round-8 CRITICAL A: per-(strategy, semver) config, so ``version_config`` resolves
+        # the EXACT captured champion version — not a single blanket config. Unseeded (id, semver)
+        # pairs fall back to ``self._config`` (the pre-round-8 single-version fixtures stay valid).
+        self._version_configs: dict[str, dict[str, dict[str, Any]]] = {}
         self.created: list[dict[str, Any]] = []
         self.published: list[str] = []
         # slice-3 PROMOTE / ROLLBACK surface: counterfactuals + rollbacks + archived clone ids.
@@ -259,9 +268,34 @@ class FakeStrategy:
             self._registry[strategy_id] = row
             # a lazily-materialized BASE strategy is already published on its champion.
             self._published_version.setdefault(strategy_id, f"champ-{strategy_id}")
+            self._published_semver.setdefault(strategy_id, "1.0.0")
         return row
 
+    def seed_base_with_newer_draft(
+        self, strategy_id: str, *, published_config: dict[str, Any], published_semver: str,
+        published_version_id: str, latest_config: dict[str, Any], latest_semver: str,
+        latest_version_id: str,
+    ) -> None:
+        """round-8 CRITICAL A fixture: model a base whose LATEST version (what ``detail`` returns as
+        latestVersion) is a NEWER orphan/manual DRAFT, while the live PUBLISHED champion is an OLDER
+        version. ``version_config`` resolves each semver to its own config — so a promote that
+        correctly reads the captured *published* semver gets the champion config, while the old bug
+        (reading ``detail().config`` = latestVersion) would get the orphan draft."""
+        self._registry[strategy_id] = {
+            "id": strategy_id, "slug": published_config.get("id"),
+            "name": published_config.get("name"), "tags": published_config.get("tags") or [],
+            "status": "draft", "versionId": latest_version_id, "version": latest_semver,
+            "config": latest_config,
+        }
+        self._published_version[strategy_id] = published_version_id
+        self._published_semver[strategy_id] = published_semver
+        self._version_configs.setdefault(strategy_id, {})[published_semver] = published_config
+        self._version_configs.setdefault(strategy_id, {})[latest_semver] = latest_config
+
     def version_config(self, strategy_id: str, version: str) -> dict[str, Any]:
+        per_version = self._version_configs.get(strategy_id, {})
+        if version in per_version:
+            return per_version[version]
         return self._config
 
     def resolve(self, strategy_id: str, version: str | None) -> tuple[str, dict[str, Any]]:
@@ -328,6 +362,11 @@ class FakeStrategy:
         )
         row["versionId"] = version_id
         self._published_version[strategy_id] = version_id   # the LIVE pointer moves
+        # round-8: the published SEMVER moves with the pointer (the exact version published) — so a
+        # subsequent detail() reports the new champion's semver, and version_config can serve it.
+        published_semver = target_version or row["version"]
+        self._published_semver[strategy_id] = published_semver
+        self._version_configs.setdefault(strategy_id, {})[published_semver] = row.get("config")
         self.published.append(strategy_id)
         return {"id": strategy_id, "version": row["version"], "status": "published",
                 "versionId": version_id}
@@ -348,6 +387,9 @@ class FakeStrategy:
             "status": row["status"], "slug": row["slug"], "name": row["name"],
             "tags": row["tags"], "config": row.get("config"),
             "publishedVersionId": self._published_version.get(strategy_id),
+            # round-8: the SEMVER of the live published version (mirrors RegistryService.detail's
+            # publishedVersion) — the immutable champion the promote reads its config by.
+            "publishedVersion": self._published_semver.get(strategy_id),
         }
 
     def list_strategies(

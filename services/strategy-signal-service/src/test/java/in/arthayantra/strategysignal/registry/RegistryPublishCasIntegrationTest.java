@@ -83,8 +83,11 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
     UUID v0 = versionId(id, "1.0.0");
     assertThat(repository.findVersionById(v0).orElseThrow().status()).isEqualTo("published");
     // round-7 #1: detail exposes the LIVE published pointer (the optimizer captures it as the
-    // immutable champion its promote CAS-publishes against).
+    // immutable champion its promote CAS-publishes against). round-8 #A: it ALSO exposes that
+    // version's SEMVER (publishedVersion) — the optimizer reads the champion config by THIS semver,
+    // never the latest row (which could be a newer manual/orphan draft).
     assertThat(service.detail(id, null).get("publishedVersionId")).isEqualTo(v0);
+    assertThat(service.detail(id, null).get("publishedVersion")).isEqualTo("1.0.0");
 
     // a CAS publish of 1.0.1 against the CURRENT champion V0 WINS — the pointer moves to V1.
     service.update(id, withPeriod(11), null, "tune");
@@ -95,6 +98,8 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
     assertThat(won.get("versionId")).isEqualTo(v1);
     assertThat(repository.findVersionById(v1).orElseThrow().status()).isEqualTo("published");
     assertThat(repository.findVersionById(v0).orElseThrow().status()).isEqualTo("archived");
+    // round-8 #A: the published-version pointer + its semver both moved to V1 (1.0.1).
+    assertThat(service.detail(id, null).get("publishedVersion")).isEqualTo("1.0.1");
 
     // a CAS publish of 1.0.2 against the now-STALE expected V0 is REJECTED (a concurrent promoter
     // already moved the pointer to V1) — 409, and the pointer + the 1.0.2 draft are UNCHANGED.

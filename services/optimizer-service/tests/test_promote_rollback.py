@@ -9,6 +9,7 @@ approve+execute → ROLLBACK trigger → ROLLBACK approve+execute), the §12 ite
 registry-touching transition happens ONLY in an owner-clicked execute endpoint — nothing self-arms.
 """
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -440,7 +441,14 @@ def _promote_seed(repo, *, policy="SIM_FIRST", cand_state="TAKE_ELIGIBLE", execu
             "expiresAt": None, "createdAt": "2026-07-10T00:00:00+00:00",
             "evidence": {"execution": {"executed": True, "clonedStrategyId": "clone-old",
                                        "clonedSlug": "base--evo-g1-old"}}})
-    evidence = {"kind": "PROMOTE", "candidateId": "c-te"}
+    # round-8 CRITICAL B: a PROMOTE proposal carries the IMMUTABLE champion it was assessed against
+    # (id + semver), captured at assessment. Seed it here (assessment stamps it live) — the base's
+    # lazily-materialized champion is champ-{id}@1.0.0. Without it, execute now fails closed.
+    evidence = {
+        "kind": "PROMOTE", "candidateId": "c-te",
+        "expectedBaseChampionVersionId": f"champ-{_STRATEGY_ID}",
+        "expectedBaseChampionVersion": "1.0.0",
+    }
     if executed:
         evidence["promotion"] = {"executed": True, "championVersionId": "old"}
     repo.proposals.append({
@@ -771,6 +779,122 @@ def test_promote_execute_revalidates_and_blocks_degraded_candidate():
     assert resp.json()["code"] == "PROMOTION_READINESS_NOT_MET"
     assert strategy.drafts == []                 # no registry mutation happened
     assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "TAKE_ELIGIBLE"  # not demoted, just refused
+
+
+# --- round-8: promote builds on the CAPTURED published champion, never detail().latestVersion ----
+
+# U0 = the base's LIVE published champion at assessment (@1.0.0); D1 = a NEWER manual/orphan draft
+# created on the base AFTER assessment (@1.1.0), which detail() would return as latestVersion. The
+# ``marker`` key is the discriminator: a promote built on U0 carries "U0", one built on D1 "D1".
+_U0 = {"id": "manas-arora-breakout", "name": "Manas Arora Breakout", "tags": ["manas-arora"],
+       "marker": "U0",
+       "indicators": [{"alias": "ema", "type": "ema", "params": {"period": 20}}]}
+_D1 = {"id": "manas-arora-breakout", "name": "Manas Arora Breakout", "tags": ["manas-arora"],
+       "marker": "D1",
+       "indicators": [{"alias": "ema", "type": "ema", "params": {"period": 99}}]}
+
+
+def test_promote_builds_on_captured_champion_not_newer_orphan_draft():
+    # round-8 CRITICAL A: between assessment and execute a NEWER draft (D1) was created on the
+    # base, so detail() now returns D1 as latestVersion. The promote MUST overlay the candidate's
+    # params onto the CAPTURED published champion (U0@1.0.0) read by its semver — NOT D1. Overlaying
+    # onto D1 (a draft) and publishing it live is the untested-hybrid class this closes.
+    # The demoted-champion identity + counterfactual + rollback lineage all name U0, never D1.
+    repo, strategy = FakeEvoRepo(), FakeStrategy(_CONFIG)
+    strategy.seed_base_with_newer_draft(
+        _STRATEGY_ID, published_config=_U0, published_semver="1.0.0",
+        published_version_id=f"champ-{_STRATEGY_ID}", latest_config=_D1, latest_semver="1.1.0",
+        latest_version_id=f"draft-{_STRATEGY_ID}-newer",
+    )
+    pid = _promote_seed(repo, policy="SIM_FIRST")  # captures champ-{id}@1.0.0 (== U0)
+    client = _exec_app(repo, strategy)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["candidateState"] == "PROMOTED"
+    # the champion move (the base draft) was built on U0's config, NOT the newer orphan draft D1
+    base_draft = next(d for d in strategy.drafts if d["strategyId"] == _STRATEGY_ID)
+    assert base_draft["config"]["marker"] == "U0"
+    # the candidate's tuned param overlaid U0's leaf (period 20 -> 10 from the candidate params)
+    assert base_draft["config"]["indicators"][0]["params"]["period"] == 10
+    # the demoted-champion identity + rollback lineage are U0's (1.0.0 / champ-id), never D1's
+    assert body["demotedChampionVersion"] == "1.0.0"
+    assert body["demotedChampionVersionId"] == f"champ-{_STRATEGY_ID}"
+    # the retained counterfactual clone was cloned from U0's config (marker U0), never D1
+    cf = next(c for c in strategy.created if "evo-cf" in c["config"]["id"])
+    assert cf["config"]["marker"] == "U0"
+    # the registry CAS-published the champion move against U0's UUID (the captured champion), not a
+    # fresh re-read (the later publish_calls entry is the counterfactual clone's non-CAS publish)
+    base_publish = next(p for p in strategy.publish_calls if p["strategyId"] == _STRATEGY_ID)
+    assert base_publish["cas"] is True and base_publish["expected"] == f"champ-{_STRATEGY_ID}"
+
+
+def test_promote_execute_fails_closed_without_captured_champion():
+    # round-8 CRITICAL B: a legacy PROMOTE proposal minted BEFORE the immutable-champion capture (no
+    # expectedBaseChampionVersionId) must FAIL CLOSED — never fall back to a fresh latest read (the
+    # race this round removes). It has no validated champion to build on until re-assessed.
+    repo, strategy = FakeEvoRepo(), FakeStrategy(_CONFIG)
+    pid = _promote_seed(repo, policy="SIM_FIRST")
+    prop = next(p for p in repo.proposals if p["id"] == pid)
+    del prop["evidence"]["expectedBaseChampionVersionId"]
+    del prop["evidence"]["expectedBaseChampionVersion"]
+    client = _exec_app(repo, strategy)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "REASSESSMENT_REQUIRED"
+    # no side effects: nothing published/created, no counterfactual, candidate not promoted
+    assert strategy.drafts == [] and strategy.created == []
+    assert strategy.shadow_variants == [] and strategy.archived == []
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "TAKE_ELIGIBLE"
+    assert repo.campaigns[0]["championVersionId"] is None
+
+
+def test_promote_execute_fails_closed_when_captured_champion_is_null():
+    # round-8 CRITICAL B (present-but-null): the base had no published champion at assessment (or a
+    # pre-round-8 persisted null). Still fail closed — there is no validated config to overlay.
+    repo, strategy = FakeEvoRepo(), FakeStrategy(_CONFIG)
+    pid = _promote_seed(repo, policy="SIM_FIRST")
+    prop = next(p for p in repo.proposals if p["id"] == pid)
+    prop["evidence"]["expectedBaseChampionVersionId"] = None
+    prop["evidence"]["expectedBaseChampionVersion"] = None
+    client = _exec_app(repo, strategy)
+    resp = client.post(f"/api/v1/evolution/proposals/{pid}/execute")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "REASSESSMENT_REQUIRED"
+    assert strategy.drafts == [] and strategy.created == []
+
+
+def test_assess_take_eligible_aborts_on_registry_read_failure():
+    # round-8 MINOR C: a FAILED base published-version read at assessment must abort with an
+    # actionable 502 — never silently persist a null champion (which would predictably CAS-fail at
+    # execute). Distinct from a legitimately-unpublished base (which returns None and is handled).
+    class _FailingBaseRead(FakeStrategy):
+        def detail(self, strategy_id: str) -> dict:
+            req = httpx.Request("GET", f"http://x/api/v1/strategies/{strategy_id}")
+            raise httpx.ConnectError("registry down", request=req)
+
+    repo = FakeEvoRepo(campaigns=[_campaign()],
+                       candidates={_CAMPAIGN_ID: [_paper_candidate()]})
+    live = FakeLiveRepo(versions={"ver-clone": {"config": _CLONE_CONFIG}},
+                        trades={"ver-clone": _paper_book()})
+    recon = _aligned_recon(FakeReconRepo())
+    app = FastAPI()
+    app.add_exception_handler(ApiError, api_error_handler)
+    app.state.evo = EvoReadService(repo_factory=lambda: repo)
+    app.state.proposals = ProposalService(
+        repo_factory=lambda: repo, ntfy=FakeNtfy(),
+        strategy_client=_FailingBaseRead(_CONFIG), jobs_factory=lambda: FakeJobs(),
+        live_factory=lambda: live, recon_factory=lambda: recon,
+    )
+    app.include_router(evolution.router)
+    app.include_router(proposals.router)
+    client = TestClient(app)
+    resp = client.post(f"/api/v1/evolution/campaigns/{_CAMPAIGN_ID}/take-eligible")
+    assert resp.status_code == 502
+    assert resp.json()["code"] == "REGISTRY_READ_FAILED"
+    # nothing persisted — the candidate never advanced, no proposal was generated
+    assert repo.candidates[_CAMPAIGN_ID][0]["state"] == "PAPER"
+    assert repo.proposals == []
 
 
 # --- ROLLBACK check + execute -------------------------------------------------------------------

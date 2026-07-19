@@ -493,11 +493,20 @@ public class RegistryService {
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("id", strategy.id());
     response.put("versionId", row.id());
-    // PF-01 round-7 #1: the LIVE published-version pointer (distinct from ``versionId``, which is the
-    // requested/latest version). The optimizer captures THIS as the immutable champion a promote is
-    // decided against, so its registry-CAS publish expects an unchanging value (never a fresh
-    // re-read that could catch up to a concurrent promoter's just-moved pointer).
+    // PF-01 round-7/8 #1: the LIVE published-version pointer + its SEMVER (distinct from
+    // ``versionId``/``version``, which are the requested/latest row). The optimizer captures BOTH as
+    // the immutable champion a promote is decided against — the CAS expects the unchanging UUID, and
+    // the promote reads THAT exact version's config by its semver (never the latest row, which could
+    // be a newer manual/orphan draft).
     response.put("publishedVersionId", strategy.publishedVersionId());
+    response.put(
+        "publishedVersion",
+        strategy.publishedVersionId() == null
+            ? null
+            : repository
+                .findVersionById(strategy.publishedVersionId())
+                .map(StrategyRepository.VersionRow::version)
+                .orElse(null));
     response.put("slug", strategy.slug());
     response.put("name", strategy.name());
     response.put("description", strategy.description());

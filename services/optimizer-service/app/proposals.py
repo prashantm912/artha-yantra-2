@@ -416,6 +416,7 @@ def _take_eligible_assessment(
     campaign: dict[str, Any],
     champion_score: float | None,
     expected_base_champion: str | None = None,
+    expected_base_champion_version: str | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Apply the §8.2 TAKE_ELIGIBLE bar over the evo clone's paper book, PER evidencePolicy (audit
     PF-01 findings #1/#3). The F7 quant gates (≥20 closed trades + PF ≥ 1.3 + expectancy > 0 + maxDD
@@ -541,11 +542,12 @@ def _take_eligible_assessment(
         "gates": gates,
         "robustScore": sim_robust,
         "championVersionId": campaign.get("championVersionId"),
-        # round-7 #1: the base strategy's LIVE published version at DECISION time — the IMMUTABLE
+        # round-7/8 #1: the base strategy's LIVE published version at DECISION time — the IMMUTABLE
         # champion this promote is validated against. Execute CAS-publishes against THIS exact UUID
-        # (never a fresh re-read), so a sibling that promoted since makes the registry CAS fail and
-        # this promote is refused BEFORE any counterfactual/archive/stamp side effect.
+        # (never a fresh re-read) AND reads THIS exact version's config by its semver (never the
+        # latest row, which could be a newer manual/orphan draft — the untested-hybrid class).
         "expectedBaseChampionVersionId": expected_base_champion,
+        "expectedBaseChampionVersion": expected_base_champion_version,
         "championRobustScore": champion_score,
         "liveGap": (
             {"verdict": recon.get("verdict"), "gapZ": recon.get("gapZ")} if recon else None
@@ -798,18 +800,28 @@ class ProposalService:
 
     # --- E4 slice 3: TAKE_ELIGIBLE / ROLLBACK assessment (§8.1-8.2 / §12 item 13) ---------------
 
-    def _base_published_version(self, campaign: dict[str, Any]) -> str | None:
-        """round-7 #1: the campaign's base strategy's CURRENT live published version (its registry
-        ``published_version_id``) — the immutable champion a PROMOTE decided now is validated
-        against. None when the base is unresolvable, the registry client is not wired, or the read
-        faults (execute then falls back to a fresh read — the pre-round-7 behaviour)."""
+    def _base_published_version(
+        self, campaign: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
+        """round-7/8 #1: the campaign base's CURRENT live published ``(versionId, semver)`` — the
+        immutable champion a PROMOTE decided now is validated against AND reads its config from.
+        ``(None, None)`` when the base is unresolvable, the registry client is not wired, or it
+        is LEGITIMATELY unpublished (never published). round-8 MINOR C: a registry read FAILURE is
+        NOT silently converted to a null champion — it raises an actionable 502 so the assessment
+        aborts, rather than persisting a None that would predictably CAS-fail at execute."""
         base_id = campaign.get("strategyId")
         if not base_id or self._strategy is None:
-            return None
+            return None, None
         try:
-            return self._strategy.detail(str(base_id)).get("publishedVersionId")
-        except httpx.HTTPError:
-            return None
+            detail = self._strategy.detail(str(base_id))
+        except httpx.HTTPError as exc:
+            raise ApiError(
+                502, "REGISTRY_READ_FAILED",
+                f"could not read the base strategy {base_id}'s published version at assessment — "
+                "aborted rather than persisting a null champion (round-8 MINOR C); retry the "
+                "assessment once the registry is reachable",
+            ) from exc
+        return detail.get("publishedVersionId"), detail.get("publishedVersion")
 
     def assess_take_eligible(self, campaign_id: str) -> AssessmentResponse:
         """Assess the campaign's PAPER (and already-TAKE_ELIGIBLE) candidates against the §8.2
@@ -833,9 +845,10 @@ class ProposalService:
             repo.close()
 
         champion_score = _champion_score(candidates, campaign.get("championVersionId"))
-        # round-7 #1: capture the base strategy's LIVE published version NOW (decision time) — the
-        # immutable champion each PROMOTE proposal is validated against + will CAS-publish against.
-        expected_base_champion = self._base_published_version(campaign)
+        # round-7/8 #1: capture the base strategy's LIVE published (versionId, semver) NOW (decision
+        # time) — the immutable champion each PROMOTE proposal is validated against + CAS-publishes
+        # against + reads its config from (never the latest row).
+        expected_base_id, expected_base_semver = self._base_published_version(campaign)
         assessable = [c for c in candidates if c.get("state") in ("PAPER", "TAKE_ELIGIBLE")]
         evidence_by_id = self._read_paper_evidence(assessable)
 
@@ -844,7 +857,7 @@ class ProposalService:
             ev = evidence_by_id.get(cand["id"]) or {}
             ok, card = _take_eligible_assessment(
                 cand, ev.get("trades") or [], ev.get("recon"), ev.get("config"),
-                campaign, champion_score, expected_base_champion,
+                campaign, champion_score, expected_base_id, expected_base_semver,
             )
             if ok:
                 eligible.append((cand, card))
@@ -1379,20 +1392,60 @@ class ProposalService:
         # id lives on the prior PUBLISH_PAPER proposal's execution stamp. Read BEFORE any HTTP.
         clone_strategy_id = self._find_candidate_clone_id(candidate["id"])
 
-        # The DEMOTED champion = the base strategy's CURRENT published version, captured BEFORE the
-        # candidate is published onto it (config + version UUID + semver — the rollback target).
-        demoted = self._strategy.detail(base_id)
-        demoted_config = demoted.get("config") or {}
+        # PF-01 round-8 CRITICAL A/B: the DEMOTED champion is the EXACT published version this
+        # proposal was ASSESSED against — captured immutably at decision time
+        # (``expectedBaseChampionVersionId`` + ``expectedBaseChampionVersion``), NEVER a fresh
+        # ``detail(base_id)`` read. ``detail`` returns the base's *latestVersion*, which under a
+        # concurrent manual edit could be a NEWER orphan/draft that was never validated here —
+        # overlaying the candidate's tuned params onto THAT and publishing it is the untested-hybrid
+        # live-promotion class this round closes. Everything about the demoted champion (config to
+        # overlay, rollback-target identity, counterfactual lineage, registry CAS expectation) comes
+        # from this one captured version.
+        evidence = ctx["proposal"].get("evidence") or {}
+        #   CRITICAL B — a legacy proposal minted BEFORE this capture existed has no validated
+        #   champion to build on; FAIL CLOSED (reassess to re-capture it) rather than fall back to
+        #   the fresh latest read, which is exactly the race this round removes.
+        if "expectedBaseChampionVersionId" not in evidence:
+            raise ApiError(
+                409, "REASSESSMENT_REQUIRED",
+                f"proposal {ctx['proposal']['id']} predates the immutable-champion capture "
+                "(no expectedBaseChampionVersionId) — it cannot be promoted safely without "
+                "re-deriving its config from a validated champion. Reassess the campaign to "
+                "regenerate this proposal against the current champion, then promote.",
+            )
+        expected_champion = evidence["expectedBaseChampionVersionId"]
+        demoted_semver = evidence.get("expectedBaseChampionVersion")
+        #   the capture must name a REAL published version (non-null id + semver). A null means the
+        #   base had no published champion at assessment (or the registry read failed — round-8
+        #   MINOR C aborts assessment now, so a persisted null is a pre-round-8 proposal). There is
+        #   no validated config to overlay → refuse; reassess once the base is published.
+        if not expected_champion or not demoted_semver:
+            raise ApiError(
+                409, "REASSESSMENT_REQUIRED",
+                f"proposal {ctx['proposal']['id']} captured no published base champion "
+                f"(id={expected_champion!r}, version={demoted_semver!r}) — there is no validated "
+                "config to promote onto. Reassess after the base has a published champion.",
+            )
+        demoted_version_id = expected_champion
+        #   CRITICAL A — read the config from THAT exact captured version by its semver, never the
+        #   latest row. This is the immutable version-config read the registry already serves.
+        try:
+            demoted_config = self._strategy.version_config(base_id, demoted_semver)
+        except httpx.HTTPStatusError as exc:
+            raise ApiError(
+                502, "CHAMPION_CONFIG_READ_FAILED",
+                f"could not read the captured champion {base_id}@{demoted_semver} config "
+                f"({exc.response.status_code}) — aborted before any live change; retry once "
+                "the registry is reachable (the captured champion version is immutable).",
+            ) from exc
         if not demoted_config:
             raise ApiError(
                 422, "CHAMPION_CONFIG_UNRESOLVED",
-                f"base strategy {base_id} detail carries no config — cannot build the promoted "
-                "version or the counterfactual",
+                f"base {base_id} version {demoted_semver} (captured champion) carries no config "
+                "— cannot build the promoted version or the counterfactual",
             )
-        demoted_version_id = demoted.get("versionId")
-        demoted_semver = demoted.get("version")
 
-        # The promoted config = the demoted champion config with the candidate's tuned params
+        # The promoted config = the CAPTURED champion config with the candidate's tuned params
         # overlaid (KEEPS the base identity — it is published onto the base, not as a sibling).
         try:
             promoted_config = config_patch.apply_overrides(
@@ -1405,20 +1458,12 @@ class ProposalService:
             ) from exc
 
         created_by = f"evo:{campaign.get('family')}"
-        # PF-01 round-7 #1: the registry publish is a compare-and-set on the champion captured at
-        # DECISION time (``expectedBaseChampionVersionId`` on the proposal), NOT the fresh re-read
-        # ``demoted_version_id`` above. A fresh read lets a LOSING promoter "catch up" to a
-        # just-published pointer and stack V2 on top of V1 (the sibling published but hadn't yet
-        # stamped optimizer state, so this call's V0 optimizer guard still passed). Using the
-        # immutable decision-time champion makes the registry CAS FAIL for the loser → 409
-        # CHAMPION_CHANGED BEFORE any counterfactual/archive/stamp side effect → the loser requeues.
-        # Pre-round-7 proposals (no captured field) fall back to the fresh read.
-        evidence = ctx["proposal"].get("evidence") or {}
-        expected_champion = (
-            evidence["expectedBaseChampionVersionId"]
-            if "expectedBaseChampionVersionId" in evidence
-            else demoted_version_id
-        )
+        # PF-01 round-7 #1: the registry publish is a compare-and-set on the SAME captured champion
+        # UUID whose config we just overlaid — never a fresh re-read. A fresh read lets a LOSING
+        # promoter "catch up" to a just-published pointer and stack V2 on top of V1 (the sibling
+        # published but hadn't yet stamped optimizer state, so this call's V0 optimizer guard still
+        # passed). Using the immutable decision-time champion makes the registry CAS FAIL for the
+        # loser → 409 CHAMPION_CHANGED BEFORE any counterfactual/archive/stamp side effect.
         new_champion_version_id = self._publish_onto_base(
             base_id, promoted_config, candidate, created_by, expected_champion
         )

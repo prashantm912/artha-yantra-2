@@ -360,7 +360,10 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
   /** Blank-topic NtfyClient — a silent no-op (the client short-circuits before any HTTP). */
   private static in.arthayantra.marketdata.alerts.NtfyClient noopNtfy() {
     return new in.arthayantra.marketdata.alerts.NtfyClient(
-        org.springframework.web.client.RestClient.builder(), "https://ntfy.sh", "");
+        org.springframework.web.client.RestClient.builder(),
+        new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+        "https://ntfy.sh",
+        "");
   }
 
   private static BseBhavcopyFetcher emptyBse() {

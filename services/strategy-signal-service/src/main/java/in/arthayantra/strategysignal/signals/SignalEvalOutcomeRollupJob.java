@@ -174,20 +174,26 @@ public class SignalEvalOutcomeRollupJob {
           repository.lastCumulativeForBoot(snapshot.epoch());
       Map<String, Long> deltas = deltas(checkpoint.cumulative(), cumulative);
       OffsetDateTime bucket = bucketFor(clock.instant());
-      OffsetDateTime recoveredFrom = crossDateOrigin(checkpoint.bucketTime(), bucket);
-      repository.upsertBucket(bucket, snapshot.epoch(), deltas, cumulative, recoveredFrom);
+      Map<String, OffsetDateTime> marks =
+          marks(crossDateOrigin(checkpoint.bucketTime(), bucket), deltas);
+      repository.upsertBucket(bucket, snapshot.epoch(), deltas, cumulative, marks);
       long total = deltas.values().stream().mapToLong(Long::longValue).sum();
-      if (recoveredFrom != null) {
+      long unattributable =
+          deltas.entrySet().stream()
+              .filter(entry -> marks.get(entry.getKey()) != null)
+              .mapToLong(Map.Entry::getValue)
+              .sum();
+      if (unattributable > 0) {
         log.warn(
             "signal_eval_outcomes: {} evaluation(s) recovered across an IST date boundary"
-                + " ({} -> {}) and recorded as UNATTRIBUTABLE — the counters carry no timing, so"
+                + " (since {}) and recorded as UNATTRIBUTABLE — the counters carry no timing, so"
                 + " they cannot be split between the dates they span. Both dates' attributable"
                 + " totals exclude them; the canonical query surfaces them separately.",
-            total, recoveredFrom, bucket);
+            unattributable, checkpoint.bucketTime());
       }
       log.debug(
           "signal_eval_outcomes rollup: bucket={} boot={} evaluations={} unattributable={}",
-          bucket, snapshot.epoch(), total, recoveredFrom != null);
+          bucket, snapshot.epoch(), total, unattributable);
       return total;
     } catch (RuntimeException e) {
       // Nothing to compensate: the checkpoint is durable, so the next tick differences against
@@ -264,6 +270,31 @@ public class SignalEvalOutcomeRollupJob {
       return null;
     }
     return istDate(checkpoint).equals(istDate(bucket)) ? null : checkpoint;
+  }
+
+  /**
+   * The per-outcome unattributable mark: {@code spanOrigin} for outcomes whose recovered delta is
+   * NONZERO, {@code null} for every other outcome.
+   *
+   * <p><b>The zero test is what keeps normal mornings clean.</b> A date span alone is not a
+   * recovery. Under the {@code 0 *&#47;3 9-15 * * MON-FRI} cron the previous tick is ~15:57 and the
+   * next is 09:00 the following trading day, so the IST dates ALWAYS differ on the first tick of
+   * every session — while nothing evaluates overnight, making every delta zero. Marking on the date
+   * span alone would therefore mark all seven rows EVERY trading morning: a daily false WARN, a
+   * contradiction of "recovered_from IS NULL on every normal tick", and — worst — it would drop the
+   * session's opening buckets out of {@code buckets_recorded}, which is precisely the
+   * process-is-alive evidence this table exists to provide. A zero delta spanning a date boundary
+   * is not a recovery of anything; there is nothing to mis-attribute, so it stays an ordinary
+   * liveness row.
+   *
+   * <p>Per OUTCOME rather than per bucket for the same reason: in a genuine cross-date recovery only
+   * the outcomes that actually moved are ambiguous. The rest are zeros and remain ordinary evidence.
+   */
+  static Map<String, OffsetDateTime> marks(OffsetDateTime spanOrigin, Map<String, Long> deltas) {
+    Map<String, OffsetDateTime> marks = new LinkedHashMap<>();
+    deltas.forEach(
+        (tag, delta) -> marks.put(tag, spanOrigin != null && delta != 0L ? spanOrigin : null));
+    return marks;
   }
 
   /**

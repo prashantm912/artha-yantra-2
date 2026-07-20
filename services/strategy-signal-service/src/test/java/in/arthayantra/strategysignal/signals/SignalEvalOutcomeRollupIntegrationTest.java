@@ -185,6 +185,54 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
   }
 
   @Test
+  void theFirstTickOfANewTradingDayIsNotMarkedWhenNothingWasRecovered() {
+    // THE NORMAL MORNING, end to end. Yesterday's last tick is ~15:57 and today's first is 09:00,
+    // so the IST dates always differ — but nothing evaluates overnight, so the counters are
+    // unchanged. These seven rows must stay ORDINARY liveness rows: unmarked, no alert, and
+    // counting toward buckets_recorded. They are the evidence that the engine came up today.
+    OffsetDateTime yesterdayClose =
+        OffsetDateTime.now(Ist.OFFSET)
+            .minusDays(8)
+            .withHour(15)
+            .withMinute(57)
+            .withSecond(0)
+            .withNano(0);
+    OffsetDateTime todayOpen = yesterdayClose.plusDays(1).withHour(9).withMinute(0);
+    UUID boot = UUID.randomUUID();
+    MutableClock clock = new MutableClock(yesterdayClose.toInstant());
+
+    // Yesterday's closing tick.
+    job(engineAt(boot, counters(4000, 12)), repository, clock, 180).rollup();
+    // This morning's first tick — counters IDENTICAL, because nothing ran overnight.
+    clock.set(todayOpen.toInstant());
+    assertThat(job(engineAt(boot, counters(4000, 12)), repository, clock, 180).rollup())
+        .as("an idle overnight window recovers nothing")
+        .isZero();
+
+    OffsetDateTime openingBucket = SignalEvalOutcomeRollupJob.bucketFor(todayOpen.toInstant());
+    Long marked =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM signal_eval_outcomes"
+                + " WHERE bucket_time = ? AND boot_id = ? AND recovered_from IS NOT NULL",
+            Long.class,
+            openingBucket,
+            boot);
+    assertThat(marked).as("no row of the session's first bucket is marked").isZero();
+
+    // And they count as process-alive evidence, which is the whole point of the zero rows.
+    Map<String, Object> todayLiveness = livenessFor(todayOpen, boot, "chart-gate-failed");
+    assertThat(asLong(todayLiveness, "buckets_recorded"))
+        .as("the opening bucket is counted as liveness evidence, not excluded")
+        .isEqualTo(1L);
+    assertThat(asLong(todayLiveness, "unattributable")).isZero();
+    assertThat(asLong(todayLiveness, "evaluations")).isZero();
+
+    // Yesterday keeps its own totals, undisturbed.
+    assertThat(asLong(livenessFor(yesterdayClose, boot, "chart-gate-failed"), "evaluations"))
+        .isEqualTo(4000L);
+  }
+
+  @Test
   void aRecoverySpanningIstDatesIsNotCountedAsCurrentDayActivity() {
     // THE WEEKEND PATH. The process runs continuously (boot_id stable), writes succeed on date D at
     // 15:00, then fail. No ticks fire until date D+3. Without the cross-date mark, D's final counts
@@ -220,8 +268,17 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
             recoveryBucket,
             boot);
     assertThat(marked)
-        .as("the cross-date recovery is marked on every outcome of that bucket")
-        .isEqualTo((long) Outcome.values().length);
+        .as("ONLY chart-gate-failed moved, so only it is marked — the six zero outcomes stay"
+            + " ordinary liveness rows")
+        .isEqualTo(1L);
+    Long unmarkedZeroRows =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM signal_eval_outcomes"
+                + " WHERE bucket_time = ? AND boot_id = ? AND recovered_from IS NULL",
+            Long.class,
+            recoveryBucket,
+            boot);
+    assertThat(unmarkedZeroRows).isEqualTo((long) Outcome.values().length - 1);
 
     // THE ASSERTION THE REVIEW ASKED FOR: the recovered evaluations do NOT land on D+3's total.
     Map<String, Object> dayD3Liveness = livenessFor(dayD3, boot, "chart-gate-failed");
@@ -422,8 +479,8 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
         SignalEvalOutcomeRollupJob.bucketFor(Instant.now().minus(Duration.ofHours(5)));
     UUID boot = UUID.randomUUID();
 
-    repository.upsertBucket(bucket, boot, Map.of("fired", 2L), Map.of("fired", 2L), null);
-    repository.upsertBucket(bucket, boot, Map.of("fired", 3L), Map.of("fired", 5L), null);
+    repository.upsertBucket(bucket, boot, Map.of("fired", 2L), Map.of("fired", 2L), Map.of());
+    repository.upsertBucket(bucket, boot, Map.of("fired", 3L), Map.of("fired", 5L), Map.of());
 
     // Safe because deltas are derived from the durable checkpoint, so a second write into the same
     // (bucket, boot) is always a genuine further increment.
@@ -445,8 +502,8 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
     OffsetDateTime origin = bucket.minusDays(3);
     UUID boot = UUID.randomUUID();
 
-    repository.upsertBucket(bucket, boot, Map.of("fired", 5L), Map.of("fired", 5L), origin);
-    repository.upsertBucket(bucket, boot, Map.of("fired", 1L), Map.of("fired", 6L), null);
+    repository.upsertBucket(bucket, boot, Map.of("fired", 5L), Map.of("fired", 5L), Map.of("fired", origin));
+    repository.upsertBucket(bucket, boot, Map.of("fired", 1L), Map.of("fired", 6L), Map.of());
 
     OffsetDateTime stored =
         jdbc.queryForObject(
@@ -466,7 +523,7 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
         SignalEvalOutcomeRollupJob.bucketFor(Instant.now().minus(Duration.ofHours(6)));
     UUID mine = UUID.randomUUID();
     UUID other = UUID.randomUUID();
-    repository.upsertBucket(bucket, other, Map.of("fired", 999L), Map.of("fired", 999L), null);
+    repository.upsertBucket(bucket, other, Map.of("fired", 999L), Map.of("fired", 999L), Map.of());
 
     assertThat(repository.lastCumulativeForBoot(mine).absent())
         .as("a fresh boot sees no checkpoint, so its first delta is everything since boot")
@@ -485,7 +542,7 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
     UUID boot = UUID.randomUUID();
     Map<String, Long> values =
         Map.of("chart-gate-failed", 125L, "fired", 4L, "discipline-paused", 0L);
-    repository.upsertBucket(bucket, boot, values, values, null);
+    repository.upsertBucket(bucket, boot, values, values, Map.of());
 
     List<Map<String, Object>> rows =
         jdbc.queryForList(
@@ -526,8 +583,8 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
     OffsetDateTime recent =
         SignalEvalOutcomeRollupJob.bucketFor(Instant.now().minus(Duration.ofDays(3)));
     UUID boot = UUID.randomUUID();
-    repository.upsertBucket(aged, boot, Map.of("fired", 1L), Map.of("fired", 1L), null);
-    repository.upsertBucket(recent, boot, Map.of("fired", 1L), Map.of("fired", 2L), null);
+    repository.upsertBucket(aged, boot, Map.of("fired", 1L), Map.of("fired", 1L), Map.of());
+    repository.upsertBucket(recent, boot, Map.of("fired", 1L), Map.of("fired", 2L), Map.of());
 
     int deleted = job(mock(SignalEngine.class), repository, Clock.systemUTC(), 180).prune();
 
@@ -541,7 +598,7 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
     OffsetDateTime ancient =
         SignalEvalOutcomeRollupJob.bucketFor(Instant.now().minus(Duration.ofDays(500)));
     UUID boot = UUID.randomUUID();
-    repository.upsertBucket(ancient, boot, Map.of("fired", 1L), Map.of("fired", 1L), null);
+    repository.upsertBucket(ancient, boot, Map.of("fired", 1L), Map.of("fired", 1L), Map.of());
 
     // A 0-day horizon would otherwise delete every row — including every live boot's checkpoint.
     int deleted = job(mock(SignalEngine.class), repository, Clock.systemUTC(), 0).prune();

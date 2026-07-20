@@ -190,6 +190,47 @@ class SignalEvalOutcomeRollupJobTest {
   }
 
   @Test
+  void theFirstTickOfANewTradingDayIsNotMarkedWhenNothingWasRecovered() {
+    // THE NORMAL MORNING. The cron's previous tick is ~15:57 and the next is 09:00 the following
+    // trading day, so the IST dates ALWAYS differ — while nothing evaluates overnight, so every
+    // delta is zero. Marking on the date span alone would mark all seven rows every single trading
+    // morning and drop the session's opening buckets out of the process-is-alive evidence.
+    OffsetDateTime yesterdayClose = OffsetDateTime.parse("2026-07-20T15:57:00+05:30");
+    OffsetDateTime todayOpen = OffsetDateTime.parse("2026-07-21T09:00:00+05:30");
+    Map<String, Long> nothingHappened =
+        SignalEvalOutcomeRollupJob.deltas(
+            Map.of("chart-gate-failed", 4000L),
+            SignalEvalOutcomeRollupJob.byTag(counts(Outcome.CHART_GATE_FAILED, 4000)));
+
+    Map<String, OffsetDateTime> marks =
+        SignalEvalOutcomeRollupJob.marks(
+            SignalEvalOutcomeRollupJob.crossDateOrigin(yesterdayClose, todayOpen), nothingHappened);
+
+    assertThat(nothingHappened.values()).allSatisfy(delta -> assertThat(delta).isZero());
+    assertThat(marks).hasSize(Outcome.values().length);
+    assertThat(marks.values())
+        .as("a zero delta across a date boundary recovers nothing — no mark")
+        .allSatisfy(mark -> assertThat(mark).isNull());
+  }
+
+  @Test
+  void onlyTheOutcomesThatActuallyMovedAreMarkedInARealRecovery() {
+    // In a genuine cross-date recovery the zero outcomes are not ambiguous — they stay ordinary
+    // liveness rows, so the mark is per outcome rather than per bucket.
+    OffsetDateTime origin = OffsetDateTime.parse("2026-07-24T15:00:00+05:30");
+    Map<String, Long> deltas =
+        SignalEvalOutcomeRollupJob.deltas(
+            Map.of("chart-gate-failed", 100L),
+            SignalEvalOutcomeRollupJob.byTag(counts(Outcome.CHART_GATE_FAILED, 130)));
+
+    Map<String, OffsetDateTime> marks = SignalEvalOutcomeRollupJob.marks(origin, deltas);
+
+    assertThat(marks.get("chart-gate-failed")).isEqualTo(origin);
+    assertThat(marks.get("fired")).isNull();
+    assertThat(marks.values().stream().filter(java.util.Objects::nonNull)).hasSize(1);
+  }
+
+  @Test
   void aBootsFirstTickIsNeverMarkedUnattributable() {
     // No prior date to span: the delta is "since boot", and boot is necessarily after the previous
     // process ended.

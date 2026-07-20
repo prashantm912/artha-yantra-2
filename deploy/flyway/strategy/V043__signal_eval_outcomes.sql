@@ -55,15 +55,27 @@
 -- during a blue/green restart do not collide at all -- different boot_id, different rows.
 --
 -- CROSS-DATE RECOVERY IS MARKED, NOT GUESSED. A delta covers (checkpoint, bucket], and recovering a
--- failed or skipped stretch makes that window arbitrarily long. If it crosses an IST session date,
--- the counts inside it CANNOT be attributed to either date: the counters carry a total and no
--- timing. The realistic path is a weekend -- the process runs continuously (so boot_id is stable),
--- writes start failing Friday 15:00, no ticks fire Sat/Sun, and Monday's first tick would otherwise
--- dump Friday's last half hour into Monday 09:00, leaving BOTH days wrong. Attributing such a window
--- to its ORIGIN date is no better: a Wednesday->Friday span genuinely mixes three sessions.
--- So the row is written in full (nothing is ever lost) with recovered_from set to the originating
--- bucket, and the canonical query below keeps it OUT of the attributable total and reports it
--- separately. recovered_from IS NULL on every normal tick.
+-- failed or skipped stretch makes that window arbitrarily long. If it crosses an IST session date
+-- AND carries a nonzero count, those evaluations CANNOT be attributed to either date: the counters
+-- carry a total and no timing. The realistic path is a weekend -- the process runs continuously (so
+-- boot_id is stable), writes start failing Friday 15:00, no ticks fire Sat/Sun, and Monday's first
+-- tick would otherwise dump Friday's last half hour into Monday 09:00, leaving BOTH days wrong.
+-- Attributing such a window to its ORIGIN date is no better: a Wednesday->Friday span genuinely
+-- mixes three sessions. So the row is written in full (nothing is ever lost) with recovered_from set
+-- to the originating bucket, and the canonical query below keeps it OUT of the attributable total
+-- and reports it separately.
+--
+-- THE MARK REQUIRES A NONZERO DELTA, AND IS PER OUTCOME. A date span alone is NOT a recovery. The
+-- cron fires 09:00-15:57 IST on weekdays, so the previous tick and the first tick of the next
+-- session ALWAYS fall on different IST dates -- while nothing evaluates overnight, so every delta is
+-- zero. Marking on the date span alone would therefore mark all seven rows EVERY trading morning:
+-- a daily false alert, a contradiction of the line below, and -- worst -- it would drop each
+-- session's OPENING buckets out of buckets_recorded, which is exactly the process-is-alive evidence
+-- this table exists to provide. The feature meant to prove liveness would quietly weaken it every
+-- morning. A zero delta spanning a date boundary recovers nothing and stays an ordinary liveness
+-- row; and in a genuine recovery only the outcomes that actually moved are ambiguous, so the mark is
+-- applied per outcome rather than per bucket. Consequently: recovered_from IS NULL on every normal
+-- tick, including the first tick of every trading day.
 --
 -- WHAT IS AND IS NOT GUARANTEED (stated plainly; this table's value is that it can be trusted when
 -- a health signal is in dispute):
@@ -163,12 +175,14 @@ CREATE TABLE signal_eval_outcomes (
   cumulative_count  BIGINT NOT NULL,      -- the counter's value at this snapshot, since THIS boot.
                                           -- The DURABLE CHECKPOINT the next delta differences
                                           -- against -- do not drop it as "redundant".
-  recovered_from    TIMESTAMPTZ,          -- NULL on every normal tick. Set to the originating
-                                          -- checkpoint bucket when this delta's window crosses an
-                                          -- IST session date, marking eval_count UNATTRIBUTABLE to
-                                          -- any single date (counters carry no timing, so the span
-                                          -- cannot be split). The canonical query keeps these out
-                                          -- of `evaluations` and reports them separately.
+  recovered_from    TIMESTAMPTZ,          -- NULL on every normal tick, INCLUDING the first tick of
+                                          -- each trading day. Set to the originating checkpoint
+                                          -- bucket only when this row's delta is NONZERO and its
+                                          -- window crosses an IST session date, marking eval_count
+                                          -- UNATTRIBUTABLE to any single date (counters carry no
+                                          -- timing, so the span cannot be split). The canonical
+                                          -- query keeps these out of `evaluations` and reports them
+                                          -- separately.
   PRIMARY KEY (bucket_time, boot_id, outcome)
 );
 

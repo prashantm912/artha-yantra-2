@@ -130,9 +130,11 @@ public class SignalEvalOutcomeRepository {
    * @param deltas per-outcome evaluations for the window ending at {@code bucketTime}; zeros are
    *     included on purpose (a zero row proves the process was alive)
    * @param cumulative per-outcome counter values at this snapshot — the next tick's checkpoint
-   * @param recoveredFrom non-null ONLY when this delta's window crosses an IST session date, in
-   *     which case it is the originating checkpoint's bucket and these counts are UNATTRIBUTABLE to
-   *     any single date (see the V043 header); null on every normal tick
+   * @param recoveredFrom per-outcome unattributable mark. An entry is non-null ONLY when that
+   *     outcome's delta is NONZERO and its window crosses an IST session date, in which case it is
+   *     the originating checkpoint's bucket and those counts are UNATTRIBUTABLE to any single date
+   *     (see the V043 header). Absent or null — the case on every normal tick, and on the
+   *     zero-delta outcomes of a genuine recovery — leaves the row an ordinary liveness row.
    * @return the number of rows inserted or merged
    */
   public int upsertBucket(
@@ -140,7 +142,7 @@ public class SignalEvalOutcomeRepository {
       UUID bootId,
       Map<String, Long> deltas,
       Map<String, Long> cumulative,
-      OffsetDateTime recoveredFrom) {
+      Map<String, OffsetDateTime> recoveredFrom) {
     if (deltas.isEmpty()) {
       return 0;
     }
@@ -152,7 +154,7 @@ public class SignalEvalOutcomeRepository {
           args.add(outcome);
           args.add(delta);
           args.add(cumulative.getOrDefault(outcome, 0L));
-          args.add(recoveredFrom);
+          args.add(recoveredFrom.get(outcome)); // absent == null == unmarked
         });
     String values = String.join(",", Collections.nCopies(deltas.size(), "(?, ?, ?, ?, ?, ?)"));
     return jdbc.update(

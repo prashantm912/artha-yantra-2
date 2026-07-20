@@ -2,8 +2,10 @@ package in.arthayantra.strategysignal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import in.arthayantra.strategysignal.signals.CompositeRejectionPruneJob;
 import in.arthayantra.strategysignal.signals.DotHealthCanary;
 import in.arthayantra.strategysignal.signals.PartialBucketCanary;
+import in.arthayantra.strategysignal.signals.RiskSuppressionPruneJob;
 import in.arthayantra.strategysignal.signals.SignalEvalOutcomeRollupJob;
 import in.arthayantra.strategysignal.signals.SignalStarvationCanary;
 import in.arthayantra.strategysignal.signals.SubscriberHealthCanary;
@@ -115,6 +117,52 @@ class MonitorSchedulingConfigTest {
           assertThat(scheduler)
               .as("a distinct pool from the default scheduling pool")
               .isNotSameAs(context.getBean("taskScheduler"));
+        });
+  }
+
+  /**
+   * The daily retention prunes issue a SYNCHRONOUS {@code DELETE}. On the default pool — a single
+   * thread that live logs show carrying {@code PaperStaleTickAlerter}, {@code SignalEngine}
+   * reconcile and {@code PaperScheduler.bracketEvaluation} (the 15-second stop-loss/target sweep) —
+   * a DELETE blocking on a lock at 02:30 IST parks stop-loss evaluation for the next session. BOTH
+   * prunes are pinned: leaving either on the default pool leaves the identical wedge in place.
+   *
+   * <p>Also pinned OFF the eval-outcome pool. That pool's output is evidence whose ABSENCE is
+   * interpreted as "the process was down", so a wedged prune there would manufacture a false
+   * engine-death reading — the 2026-07-20 misdiagnosis that V045 exists to prevent.
+   */
+  @Test
+  void theRetentionPrunesOwnTheMaintenancePoolAndNeverTheDefaultMonitorOrEvalOutcomeOne()
+      throws NoSuchMethodException {
+    for (Class<?> job : new Class<?>[] {RiskSuppressionPruneJob.class, CompositeRejectionPruneJob.class}) {
+      Scheduled scheduled = job.getDeclaredMethod("scheduledPrune").getAnnotation(Scheduled.class);
+      assertThat(scheduled).as("%s.scheduledPrune is @Scheduled", job.getSimpleName()).isNotNull();
+      assertThat(scheduled.scheduler())
+          .as(
+              "%s.scheduledPrune must NOT run on the default pool (paper stop-loss evaluation), the"
+                  + " fenced monitor pool, or the eval-outcome liveness pool",
+              job.getSimpleName())
+          .isEqualTo("maintenanceTaskScheduler");
+    }
+  }
+
+  /** The bean the prune annotations name must actually exist, distinct from all three siblings. */
+  @Test
+  void theMaintenanceSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("maintenanceTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the monitor detectors")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the default scheduling pool")
+              .isNotSameAs(context.getBean("taskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the eval-outcome liveness rollup")
+              .isNotSameAs(context.getBean("evalOutcomeTaskScheduler"));
         });
   }
 

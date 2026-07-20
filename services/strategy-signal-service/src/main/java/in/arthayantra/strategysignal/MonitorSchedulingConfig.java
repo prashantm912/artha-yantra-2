@@ -22,6 +22,10 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  *
  * <p>A THIRD pool, {@link #evalOutcomeTaskScheduler()}, carries the V045 eval-outcome rollup. It
  * belongs on neither of the other two — see that method's javadoc for why both were rejected.
+ *
+ * <p>A FOURTH, {@link #maintenanceTaskScheduler()}, carries the daily retention prunes. Same
+ * reasoning as the third, applied to a different risk class — see that method's javadoc, including
+ * why the prunes are NOT folded onto the eval-outcome pool.
  */
 @Configuration(proxyBeanMethods = false)
 public class MonitorSchedulingConfig {
@@ -93,6 +97,50 @@ public class MonitorSchedulingConfig {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     scheduler.setPoolSize(1);
     scheduler.setThreadNamePrefix("eval-outcome-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
+   * A single daemon thread for the daily 02:30 IST retention prunes —
+   * {@code RiskSuppressionPruneJob} and {@code CompositeRejectionPruneJob}. Both issue a synchronous
+   * row-wise {@code DELETE}, and both were on the DEFAULT pool.
+   *
+   * <p><b>Why they had to move.</b> There is no scheduler pool sizing anywhere in
+   * {@code application.yml} (the {@code maximum-pool-size: 5} there is Hikari, the datasource), so
+   * Boot's default of ONE thread applies and a live thread census shows {@code scheduling-1}
+   * carrying {@code PaperStaleTickAlerter} (paper SL/TP starvation alerting), {@code SignalEngine}
+   * reconcile, and {@code PaperScheduler.bracketEvaluation} — the 15-second stop-loss/target sweep.
+   * A DELETE that blocks on a Postgres lock at 02:30 parks that thread indefinitely, and the next
+   * session's stop-loss evaluation simply never fires. Money-adjacent, and silent.
+   *
+   * <p><b>Why BOTH prunes move, not just one.</b> The hazard is the pool, not the job: leaving
+   * either prune on the default pool leaves the identical wedge in place, so moving one alone would
+   * buy nothing.
+   *
+   * <p><b>Why not {@link #evalOutcomeTaskScheduler()}, which is already the "expendable synchronous
+   * JDBC" pool.</b> Because that pool's OUTPUT is evidence whose ABSENCE is interpreted: a missing
+   * {@code signal_eval_outcomes} row is read as "the process was down or its rollup could not
+   * write". A prune wedging at 02:30 would silence the 09:00–15:30 rollup ticks and manufacture
+   * exactly the false "engine was dead" reading that V045 exists to prevent — the same misreading
+   * that cost a live trading service an unnecessary restart on 2026-07-20. Retention work must not
+   * be able to forge a liveness verdict, so it gets its own thread.
+   *
+   * <p><b>Why not {@code monitorTaskScheduler}.</b> Fenced (audit BEJ-01 / #919) for pure in-memory
+   * detectors; a synchronous DELETE there could starve {@code SubscriberHealthCanary},
+   * {@code DotHealthCanary} and {@code PartialBucketCanary}.
+   *
+   * <p>Belt-and-braces, both DELETEs are also BOUNDED by a query timeout on their repository's
+   * private {@code JdbcTemplate}, so a wedge cannot outlive the statement timeout and cannot hold a
+   * Hikari connection (pool of 5) for the session. Pool isolation alone would leave that tail open;
+   * the timeout alone would still let a slow-but-legal DELETE delay stop-loss evaluation. Both are
+   * needed.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler maintenanceTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("maintenance-sched-");
     scheduler.setDaemon(true);
     return scheduler;
   }

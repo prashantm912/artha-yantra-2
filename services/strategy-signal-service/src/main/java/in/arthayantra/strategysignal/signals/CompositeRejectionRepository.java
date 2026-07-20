@@ -9,6 +9,7 @@ import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -41,12 +42,30 @@ public class CompositeRejectionRepository {
       OffsetDateTime barTime,
       OffsetDateTime generatedAt) {}
 
+  /**
+   * Query timeout for the retention DELETE only. The prune owns an expendable scheduler thread, so a
+   * stall parks nothing load-bearing — but an UNBOUNDED lock wait would hold that thread and one of
+   * the five Hikari connections for the whole session. Generous relative to the work (~192
+   * rows/session, so ~35k rows at the 180-day horizon) against local Postgres, so a legitimate prune
+   * never trips it; a tripped one is fail-soft, alerted, and retried by the next daily tick.
+   */
+  private static final int PRUNE_TIMEOUT_SECONDS = 60;
+
   private final JdbcTemplate jdbc;
+  private final JdbcTemplate pruneJdbc;
   private final ObjectMapper objectMapper;
 
-  /** Wires the strategy datasource. */
+  /**
+   * Wires the strategy datasource. The prune gets its OWN {@link JdbcTemplate} over the same
+   * DataSource because {@code setQueryTimeout} mutates template state — applying it to the shared
+   * injected bean would impose this timeout on every unrelated caller in the service.
+   */
   public CompositeRejectionRepository(JdbcTemplate jdbc, ObjectMapper objectMapper) {
     this.jdbc = jdbc;
+    this.pruneJdbc =
+        new JdbcTemplate(
+            Objects.requireNonNull(jdbc.getDataSource(), "JdbcTemplate has no DataSource"));
+    this.pruneJdbc.setQueryTimeout(PRUNE_TIMEOUT_SECONDS);
     this.objectMapper = objectMapper;
   }
 
@@ -104,10 +123,13 @@ public class CompositeRejectionRepository {
    * Plain row-wise DELETE — this is an OLTP table, not a hypertable, and the volume is trivial
    * (~192 rows/session). Runs as {@code artha}; the {@code ay_strategy} grant is append-only.
    *
+   * <p>Issued on the private {@link #pruneJdbc} so it is BOUNDED by {@link #PRUNE_TIMEOUT_SECONDS}:
+   * a lock wait must not pin a scheduler thread and a connection indefinitely.
+   *
    * @return the number of rows deleted
    */
   public int deleteOlderThanDays(int days) {
-    return jdbc.update(
+    return pruneJdbc.update(
         "DELETE FROM composite_rejections WHERE generated_at < now() - make_interval(days => ?)",
         days);
   }

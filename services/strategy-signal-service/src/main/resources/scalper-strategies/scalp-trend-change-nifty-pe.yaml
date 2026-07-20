@@ -1,11 +1,12 @@
 # PE-MIRROR (E11 STEP, owner 2026-06-30) of scalp-trend-change-nifty — the bearish counterpart that BUYS
 # a PUT on a DOWN-reversal, leaving the CE strategy byte-identical. The TrendChangeGate is already
 # internally bidirectional (its hard pre-gate fires on a swing-LOW taken out to the downside + a >=50%
-# Trending-OI shift in the PE direction — "the mirror"); the ConnectTheDots scorer scores the resolved
-# side symmetrically; the engine resolves side = PE when close < VWAP. The ONLY thing that kept the base
-# CE-only was `option_types: [CE]` + the bullish `close > vwap` gate. This variant flips BOTH to the PE
-# side (option_types: [PE], gate `close < vwap`, exit `close > vwap`) — a STRICTLY ADDITIVE config mirror:
-# no engine/scorer change, the CE goldens stay byte-identical, parity holds.
+# Trending-OI shift in the PE direction — "the mirror"); the engine resolves side = PE when close < VWAP.
+# This variant flips the directional gates to the PE side (option_types: [PE], gate `close < vwap`, exit
+# `close > vwap`) AND inverts the chart-composite normalizers to score bearish (rsi14 linear 50→30,
+# supertrend step −1→1) — the CE twin scored bullish, so an un-inverted PE cleared the chart stage only
+# on UP bars and never on the down-reversal it exists to trade (fixed 2026-07-20). Config-only: no engine
+# CODE change, the scorer reads the inverted normalizer config; the CE goldens stay byte-identical, parity holds.
 #
 # Seeded as a DRAFT (opt-in) like every scalper — it never auto-emits; the owner publishes it from the UI
 # after eyeballing the PE signals. This is the trend-change TEMPLATE for the PE-mirror set; once validated
@@ -38,9 +39,9 @@ indicators:
   - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
   - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
   - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
-      normalize: { type: rsi_momentum } }
+      normalize: { type: linear, from: 50, to: 30 } }
   - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
-      weight: 1.0, normalize: { type: direction } }
+      weight: 1.0, normalize: { type: step, bands: [{ upto: 0, score: 1 }, { score: 0 }] } }
   - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
   - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3: the ST LINE for the trail-with-Super-Trend exit
 

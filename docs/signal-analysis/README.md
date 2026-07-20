@@ -102,7 +102,16 @@ Run in order; each answers one question. Canned SQL in §6.
    A threshold above p100 is unpassable; above p95 is a near-never.
 9. **Time noise** — time-window/time-of-day rejection share (known-blocked bars logged repeatedly).
    Doesn't affect tuning; affects table signal-density.
-10. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+10. **Strategy-coverage ratio** (added 2026-07-17) — `count(DISTINCT strategy_slug)` in the session's
+    rejections vs `count(*)` of published+enabled strategies, PLUS the engine's boot line
+    (`signal engine loaded N published strategies (M dropped on an unresolved universe)`) pasted into the
+    findings file. A silently shrinking numerator is a load/resolution failure that every other health
+    signal misses: on 2026-07-17 only **17 of 63** strategies emitted anything (35 → 33 → 17 over three
+    sessions, the 38 sensex CE variants totally silent) while capture, chain, futures and eval-loop were
+    all healthy. Read the boot line the SAME day — the container's logs are lost on the next restart, which
+    is exactly what made 07-17's cause unverifiable. Standing check from 2026-07-16 §6.3 applies: the honest
+    health signal is `unresolved == 0`, never `loaded > 0`.
+11. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -245,6 +254,17 @@ WITH b AS (SELECT time_bucket('3 minutes', bucket) b3, sum(volume) vol FROM mark
     AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1)
 SELECT count(*), min(vol), percentile_disc(0.5) WITHIN GROUP (ORDER BY vol) p50,
        percentile_disc(0.9) WITHIN GROUP (ORDER BY vol) p90, max(vol) FROM b;
+
+-- §3.10 strategy-coverage ratio (emitting vs published+enabled) — pair with the engine boot line
+SELECT (generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
+       count(DISTINCT strategy_slug) emitting,
+       count(DISTINCT strategy_slug) FILTER (WHERE strategy_slug LIKE '%sensex%') sensex,
+       count(DISTINCT strategy_slug) FILTER (WHERE strategy_slug LIKE '%-pe') pe
+FROM strategy.signal_rejections WHERE generated_at >= :d0 GROUP BY 1 ORDER BY 1;
+SELECT count(*) published_enabled FROM strategy.strategies
+WHERE enabled AND published_version_id IS NOT NULL;
+-- boot line (READ IT THE SAME DAY — a restart destroys it):
+--   docker logs ay-strategy-signal-service 2>&1 | grep -E "loaded [0-9]+ published"
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

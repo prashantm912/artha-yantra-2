@@ -26,15 +26,20 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 | 2026-07-14 | — (starvation incident, see [[live-mode-findings]]) | — | 0 | — | — | — | — | **ZERO SIGNALS ALL SESSION — the eval loop parked on an unbounded market-data candle fetch (different root cause than the 07-07/07-10 subscriber-drop class). Fixed #866 (bounded fetch + dedup), deployed post-market. No dedicated findings file (incident tracked in `live-mode-findings` memory + ledger).** |
 | 2026-07-15 | 396 (09:50–15:21, **4th EVAL STALL 11:49–14:10, self-recovered, thread-level PROVEN, #634/#679 logged nothing**) | 33 | **3** (straddle only) | volume-floor 241/396 | 144 (all CE, max 0.7 — no 0.8 bucket) | 12, 0W/12, −54.7 avg pts, −656.3 pts total | 4 (breadth 72.0% = REGIME) | **rangy/flat day (24,073.5→24,072.0, ±212pt range). 4th confirmed eval stall, DIRECT thread-log proof this time (exactly 1 `signal-eval` line in 2h21m) — capture + an unrelated scheduled canary stayed healthy throughout, masking it from casual checks. SEPARATE finding: 16/17 paper positions had zero live ticks all session (`PaperStaleTickAlerter`). oi_spurt dot showed first-ever life (1.6%) post-#675/#676 recalibration; iv_pair still 0% despite its recalibration. findings `2026-07-15-session-findings.md`** |
 | 2026-07-16 | **0** (NULL SESSION — engine never evaluated a bar) | **0** of 39 published | 0 | — | — | — | — (dot-health: `rowsInspected 0`, every dot `alive:false`) | **F10 COLD-START STARVATION, 2nd occurrence (1st was 07-15, filed not fixed → recurred in a day). Stack cold-booted 08:57:04; engine `reload()` at 08:57:19–31 hit term-structure 403/DATA_STALE/breaker-open because market-data's IN-MEMORY `lastGood` cache is empty on a cold boot (a WARM container survives the same expired-token window off yesterday's cache — why only cold starts break); all 39 dropped → `loaded 0 published strategies` 08:57:31. Owner's Kite login landed 08:58:22 — **missed by 51s**. No reload path could recover (08:40 cron passed; 20s reconcile compares registry-vs-last-reload-SNAPSHOT so total failure ≡ steady state; no `kite.status` listener existed). CAPTURE WAS PERFECT throughout (375/375 1m bars, 373 OI snaps) — every health signal green while the engine did nothing. 18 paper positions unmanaged (28,441 `PaperStaleTickAlerter` WARNs) — supersedes 07-15's §6.2 "16/17 tickless" finding, SAME cause. **FIXED SAME NIGHT: [#874](https://github.com/prashantm912/artha-yantra-2/pull/874) @ d9f30a8f deployed + drill-proven live** (self-healed 0→39 from a `CONNECTED` alone). findings `2026-07-16-session-findings.md`** |
+| 2026-07-17 | 523 (09:24–15:18 — **FULL session, no eval stall**, first clean coverage since 07-06) | **17 of 63 published** ⚠ | **3** (straddle only; **0 paper positions opened**) | volume-floor 292/523 (55.8%); time-window 149 (28.5%) | 210 (all CE, 0 PE; **202 parked exactly in the 0.6 bucket**) | 11, 7W/11, +381.9 pts, **+₹23,946.92** (best session ever — but only **4 distinct entry events**, 6 rows are the same 24000CE @267.05 09:45 leg across 6 strategies; deduped **2 of 4 events won**) | **5**: iv_rank (ivRank NULL 523/523), iv_pair (gap 0.0004 ≪ 0.02 — recalibration #675/#676 did NOT revive it), vix (data alive, 0% = up-day direction), basis (**NEW — no operand visible in `context.macro`**), iv_abs_band (ATM IV 12.49% just outside the 10–12 band). Cap unchanged at 0.816; effective live-dot bar 0.735. **`vwap` supported 359/359 = the heaviest dot (w 2.5) discriminated NOTHING — new watch item** | **trend-up CE day, 24000CE 267→371.** volume-floor blocked the day's money (+₹22,345 / 6W-4L attributed); `vol-off`≡`vol-12k5` delta +₹4,475 2W/2, `composite-055` delta +₹2,063 2W/2L (bought the same winner **plus two losers**). ⚠ **NEW ALARM §6.1: coverage collapsed 35→33→17 of 63; 38 sensex CE variants emitted ZERO rows** while SENSEX chain (361 snaps, expiry rolled 07-16→07-23) + `SENSEX26JULFUT` (375/375 bars) + eval loop were all healthy — **cause UNVERIFIED, 07-17 container logs destroyed by the 07-20 restart** → promoted to README **§3.10** (log the boot line the SAME day). ⚠ **CARRIED: 18 paper positions still OPEN since 07-16 20:00 IST**, two sessions unmanaged. Shadow entry latency structural at p50 76s / p95 95s. findings `2026-07-17-session-findings.md` |
 
 ## Per-variant league (cumulative — refresh each rollup pass from the §6 league SQL)
 
+Refreshed 2026-07-20 (through the 2026-07-17 session). Note the challenger roster changed: the
+`composite-070` book was replaced by `composite-055`, so its all-time row is retired.
+
 | variant | closed | net wins | total net ₹ | total pts | verdict-so-far |
 |---|---|---|---|---|---|
-| champion | 54 | 19 | **−18,560.46** (07-06 +₹19.3k reversed by 07-10 −₹3.0k + prior grind losses) | −225.3 | net NEGATIVE all-time → the would-have-fired class mostly loses = **the gate is correctly rejecting losers** on balance; the +₹19.3k 07-06 trend day is the outlier |
-| vol-off | 6 | 2 | **+2,231.07** | +41.2 | loosest config marginally profitable (small n=6); best variant |
-| vol-12k5 | 2 | 0 | −247.33 | −1.6 | 2 marginal-loss trades (small n) |
-| composite-070 | 0 | — | — | — | still ZERO rows all-time (unfalsified; cap 0.816 has not opened it — watch) |
+| champion | 77 | 26 | **−38,251.21** | −499.7 | still deeply NEGATIVE all-time despite 07-17 being its best day ever (+₹23,946.92). The would-have-fired class mostly loses ⇒ **the gate is correctly rejecting losers on balance**; 07-06 and 07-17 are the two trend-day outliers |
+| vol-12k5 | 6 | 2 | **+1,348.76** | +28.2 | best all-time net; 07-17 added +₹2,747 on 2W/2 entries. Small n |
+| composite-055 | 6 | 2 | +654.89 | +17.9 | 07-17 delta bought the same winner as vol-12k5 **plus two losers** — loosening the composite buys noise |
+| vol-off | 12 | 4 | −3,400.90 | −37.8 | fully-disabled floor is NET NEGATIVE all-time — the floor is doing real work; `vol-12k5` (relax, don't remove) is the better shape |
+| composite-070 | 0 | — | — | — | RETIRED (never took a row; replaced by `composite-055`) |
 
 ## Structural-vs-regime watchlist
 
@@ -108,6 +113,29 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 - **Directional scalpers now fire (NEW 07-10)** — `golden-crossover` + `connect-the-dots` CE, first
   directional fires in analysis history, enabled by the relative floor. All small losers (whipsaw). The
   scalper family is now live-firing directionally, not just via the straddle path.
+- **⚠ STRATEGY-COVERAGE COLLAPSE (NEW 2026-07-17, UNRESOLVED — highest-priority open item).** Distinct
+  slugs emitting rejections fell **35 (07-10) → 33 (07-15) → 17 (07-17)** against a registry that GREW to
+  63 published+enabled. The 38 `%sensex%` CE variants emitted **zero rows all session**; the 4 surviving
+  sensex slugs are all `-pe` and emitted exactly 2 rows each at the same two bars (10:48, 12:42 IST).
+  Capture excluded as the cause (SENSEX chain 361 snaps with a correct 07-16→07-23 weekly roll;
+  `SENSEX26JULFUT` 375/375 1m bars); instrument split excluded (per ADR-0003 the sensex variants signal on
+  `NIFTY26JULFUT`/NFO and only execute on BFO — all 523 rows are NFO); eval stall excluded (rows ran to
+  15:18). **Cause is UNVERIFIED because the 07-17 container logs were destroyed by the 07-20 restart** —
+  read the boot line the SAME day from now on (README §3.10). Leading hypothesis is a partial load, per the
+  07-16 §6.3 standing check (`unresolved == 0`, never `loaded > 0`). Watch for two more sessions before
+  treating as structural; if the ratio stays low, this is a bigger finding than any gate tune in this file.
+- **`vwap` dot supports 100% (NEW 07-17)** — 359/359 at the heaviest weight (2.5 = 12.8% of Σw). A
+  permanently-supporting dot is an unlabelled threshold reduction, the mirror image of a dead dot. Confirm
+  across 2 more sessions before proposing a weight/condition change (single session ⇒ could be regime).
+- **`basis` dot 0/359 with no visible operand (NEW 07-17)** — suspected dead-data, not regime: unlike `vix`
+  (alive at 13.15, 0% support because it rose against a CE day), no basis field surfaces in
+  `context.macro` at all. Needs a code read of the dot's input before it can be classified.
+- **18 paper positions OPEN since 2026-07-16 20:00 IST (CARRIED, worsening)** — created by the 07-16 F10
+  incident, still unsquared two sessions later. No longer an incident artefact; an open-position hygiene
+  problem in its own right. Owner decision.
+- **Shadow entry latency is STRUCTURAL, not a flake** — p50 73–87 s / p95 85–170 s on every session logged
+  (07-03, 07-06, 07-10, 07-15, 07-17). README flags p95 > ~5 s. Every shadow PnL in this file is computed
+  off a fill stamped ~76 s after `bar_time`; bias direction unmeasured. Data-model fix belongs in README §7.
 
 ## Proposals (UNLOCKED — 5 sessions logged: 07-02, 07-03, 07-06, 07-07, 07-10; 07-08/09 outage skipped)
 

@@ -182,14 +182,33 @@ public class FuturesDigestService {
     return new FuturesDigest(quadrants, banks, term, asOf, trust, List.copyOf(reasons));
   }
 
-  /** The newest-two distinct IST buckets across the captured universe (end-of-window convention). */
+  /**
+   * The newest-two distinct IST buckets across the captured universe (end-of-window convention).
+   *
+   * <p><b>Why two {@code max(ts)} aggregates and not {@code SELECT DISTINCT time_bucket(..) ORDER BY
+   * b DESC LIMIT 2}.</b> TimescaleDB 2.18.2 aborts planning with {@code "non-Var pathkey not expected
+   * for compressed batch sorted merge"} whenever a top-level {@code DISTINCT}/{@code ORDER BY}/{@code
+   * GROUP BY} key is {@code time_bucket(iv, <expression>, tz)} — i.e. the end-of-window {@code ts -
+   * INTERVAL '1 second'} shift — AND the query carries a {@code LIMIT}, over a hypertable with
+   * compressed chunks. {@code time_bucket(iv, ts, tz)} on the bare column is fine; the shift is what
+   * makes the sort key a non-Var. This method is the futures-OI dot feeder, so the failure took
+   * {@code futures_oi}/{@code underlying_oi}/{@code oi_spurt} to the data-absent sentinel on 748 of
+   * 748 scored rows for the whole 2026-07-20 session (docs/signal-analysis/2026-07-20-session-findings.md
+   * §6.2). These two aggregates carry NO pathkey, so the sorted-merge path is never considered and the
+   * optimisation stays enabled for every other read.
+   *
+   * <p>Correctness rests on the end-of-window convention: a row belongs to bucket {@code B} iff
+   * {@code B < ts <= B + interval}. So every row NOT in the newest bucket satisfies {@code ts <=
+   * newestBucketStart}, and the bucket of the newest such row IS the prior non-empty bucket — gap
+   * robust, exactly what the {@code DISTINCT}-and-take-two form returned.
+   */
   private List<OffsetDateTime> latestTwoBuckets(LocalDate date) {
     String placeholders = String.join(",", java.util.Collections.nCopies(capturedUnderlyings.size(), "?"));
     StringBuilder sql =
         new StringBuilder(
-            "SELECT DISTINCT public.time_bucket(INTERVAL '"
+            "SELECT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
-                + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b "
+                + "', max(ts) - INTERVAL '1 second', 'Asia/Kolkata') AS b "
                 + "FROM futures_oi_snapshots WHERE underlying IN ("
                 + placeholders
                 + ")");
@@ -198,8 +217,21 @@ public class FuturesDigestService {
       sql.append(" AND (ts AT TIME ZONE 'Asia/Kolkata')::date = ?");
       args.add(java.sql.Date.valueOf(date));
     }
-    sql.append(" ORDER BY b DESC LIMIT 2");
-    return jdbc.query(sql.toString(), (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
+    OffsetDateTime newest = queryBucket(sql.toString(), args);
+    if (newest == null) {
+      return List.of();
+    }
+    List<Object> priorArgs = new ArrayList<>(args);
+    priorArgs.add(Timestamp.from(newest.toInstant()));
+    OffsetDateTime prior = queryBucket(sql + " AND ts <= ?", priorArgs);
+    return prior == null ? List.of(newest) : List.of(newest, prior);
+  }
+
+  /** Runs a single-row bucket aggregate; null when the filtered set is empty. */
+  private OffsetDateTime queryBucket(String sql, List<Object> args) {
+    List<OffsetDateTime> rows =
+        jdbc.query(sql, (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
+    return rows.isEmpty() ? null : rows.get(0);
   }
 
   /** One row per contract at the two anchoring buckets, de-duped per contract via {@code last()}. */

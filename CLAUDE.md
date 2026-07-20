@@ -248,6 +248,21 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   frozen ScoreBreakdownDto (`composite = Σ(w·s)/Σw`; an optional activates iff score≥optionalMinScore
   AND required-only composite≥threshold−optionalGateMargin). Scalper enrichment rides the
   `scalper_detail` V009 side-channel (option leg + confluence dots + `manual_checks`).
+- **Empty `strategy.signal_rejections` does NOT mean the engine is dead** — `recordRejection`'s two call
+  sites are BOTH downstream of the `chart != FIRED` early return (`SignalEngine:~1132`), so ONLY the
+  `confluence-blocked` outcome writes a row. On a down tape every scalper exits at the chart/composite stage
+  and the table stays empty ALL session — normal, not starvation. Liveness = **Σ `ay_signal_eval_outcome_total`
+  ADVANCING** (persisted to `signal_eval_outcomes`, V045). NEVER restart on an empty rejections table alone
+  (cost a needless live restart 2026-07-20).
+- **A scalper YAML/config change is a SILENT NO-OP until RE-PUBLISHED.** `ScalperStrategySeeder` mints a
+  fresh DRAFT on boot (`resyncConfig`→`update`), never publishes; the live engine runs the *published*
+  version. After deploying a config change, `POST /api/v1/strategies/{id}/publish` each affected strategy
+  (reconcile keys on published version-id, hot-swaps at the next bar) and verify the published config carries
+  the change before trusting it.
+- **A 2nd `PaperService.openPosition` on the same `(book,exchange,tradingsymbol,side)` AVERAGES into the open
+  position** (pyramiding, `newQty = qty + qty`), it does NOT reject — `uq_paper_positions_open` guards the
+  ROW, never the qty. Idempotency for anything that opens positions must claim BEFORE the open (atomic
+  marker/lock), never rely on the unique index.
 - **In-container `now()`/`::date` is UTC, not IST:** a 02:xx-IST row is the *previous* calendar day in
   the DB (e.g. 02:xx IST on 06-29 stores as `2026-06-28` UTC). Filter `signals.generated_at` / candle
   `bucket` by explicit `+05:30` ISO bounds, never `::date = CURRENT_DATE` (off-by-one across IST midnight).
@@ -264,8 +279,14 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   first, then ALWAYS DB-probe the new object (`to_regclass`/information_schema). A healthy container
   + an "up to date" flyway log do NOT prove the migration applied (a stale checkout deployed
   "healthy" without its migration once, 2026-07-11; only the probe caught it).
+- **Deploy migrations IN VERSION ORDER.** Deploying V044 before V043 makes flyway-init fail *validation*
+  (`Detected resolved migration not applied: 043`), which blocks EVERY future migration, not just the skipped
+  one. Fix = renumber the stranded (never-applied) migration HIGHER, never `outOfOrder=true` (2026-07-20).
 - **Thread-dump a stalled JVM service:** `docker exec ay-<svc> sh -c 'kill -3 1'` → dump lands in
   `docker logs` (jstack/jcmd absent in the slim image).
+- **Actuator/prometheus ports are per-service, NOT 8080** (8080 = edge-gateway/SPA): strategy-signal
+  `127.0.0.1:8082`, market-data `127.0.0.1:8081`. Probe via
+  `docker exec ay-<svc> sh -c 'wget -qO- http://127.0.0.1:<port>/actuator/prometheus'`.
 
 ## Frontend (`frontend-react` — React 19 + Vite 6 + Tailwind v4 + shadcn)
 The app is `frontend-react` (the Angular `frontend-ui` was removed after the React cutover, PR #104).

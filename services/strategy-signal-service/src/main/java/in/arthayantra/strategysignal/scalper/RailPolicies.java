@@ -22,6 +22,7 @@ final class RailPolicies {
           // -- hard preconditions: recorded only WHEN blocking (fail-closed by construction) -----
           Map.entry("chain-unavailable", FAIL_CLOSED), // gate L321: no chain -> no entry
           Map.entry("context-unavailable", FAIL_CLOSED), // gate L660: no OI/macro context -> block
+          Map.entry("option-side-constraint", FAIL_CLOSED), // gate: VWAP side not in option_types -> block
           Map.entry("strike-pick", FAIL_CLOSED), // StrikePicker: no strike in band -> block
           Map.entry("confluence-composite", FAIL_CLOSED), // invalid/unreached composite -> block
           // -- protective rails: absence of confirmation = no trade ------------------------------

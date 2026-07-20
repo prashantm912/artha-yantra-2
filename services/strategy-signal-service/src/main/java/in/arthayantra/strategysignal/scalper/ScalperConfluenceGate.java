@@ -287,7 +287,11 @@ public class ScalperConfluenceGate {
       Instant barInstant,
       LocalTime istTime,
       LocalDate eodDate) {
-    return evaluateWithDiagnostic(cfg, bank, future, index, barInstant, istTime, eodDate, null, false)
+    // Bare-decision ORACLE read (E9 D4 confluence-flip EXIT, SignalEngine.confluenceFlipExit): does NOT
+    // enforce option_types — the flip oracle must see the TRUE market side, including the one the strategy
+    // will not ENTER, so a held single-side position can detect a confluence flip against it.
+    return evaluateInternal(
+            cfg, bank, future, index, barInstant, istTime, eodDate, null, false, false)
         .decision();
   }
 
@@ -304,7 +308,9 @@ public class ScalperConfluenceGate {
       Instant barInstant,
       LocalTime istTime,
       LocalDate eodDate) {
-    return evaluateWithDiagnostic(cfg, bank, future, index, barInstant, istTime, eodDate, null, false);
+    // The ENTRY evaluation the live engine persists — ENFORCES the declared option-side constraint.
+    return evaluateInternal(
+        cfg, bank, future, index, barInstant, istTime, eodDate, null, false, true);
   }
 
   /**
@@ -327,12 +333,17 @@ public class ScalperConfluenceGate {
       LocalDate eodDate,
       OptionType forcedSide,
       boolean carryClock) {
-    return evaluateWithDiagnostic(
-            cfg, bank, future, index, barInstant, istTime, eodDate, forcedSide, carryClock)
+    // Bare-decision form (mirrors the 7-arg oracle): does NOT enforce option_types. Live BTST/STBT ENTRY
+    // uses the diagnostic form below; this decision-only overload is a read like the flip oracle.
+    return evaluateInternal(
+            cfg, bank, future, index, barInstant, istTime, eodDate, forcedSide, carryClock, false)
         .decision();
   }
 
-  /** The BTST-carry {@link Result} form — see the 7-arg {@link #evaluateWithDiagnostic}. */
+  /**
+   * The BTST-carry {@link Result} form — see the 7-arg {@link #evaluateWithDiagnostic}. Entry path:
+   * ENFORCES the declared option-side constraint (see {@link #evaluateInternal}).
+   */
   public Result evaluateWithDiagnostic(
       ScalperConfig cfg,
       BarValues bank,
@@ -343,6 +354,29 @@ public class ScalperConfluenceGate {
       LocalDate eodDate,
       OptionType forcedSide,
       boolean carryClock) {
+    return evaluateInternal(
+        cfg, bank, future, index, barInstant, istTime, eodDate, forcedSide, carryClock, true);
+  }
+
+  /**
+   * The shared evaluation core. {@code enforceOptionSide} is the LIVE-vs-BACKTEST parity guard scoped to
+   * ENTRY: when true (every {@code evaluateWithDiagnostic} entry path — the only path the live engine opens
+   * a position from), a non-empty {@code option_types} that excludes the VWAP-derived side BLOCKS. The bare
+   * {@code evaluate()} decision reads pass FALSE — the E9 D4 confluence-flip EXIT oracle
+   * ({@code SignalEngine.confluenceFlipExit}) must report the TRUE market side, INCLUDING the side the
+   * strategy will not ENTER, so a held single-side position can detect a confluence flip against it.
+   */
+  private Result evaluateInternal(
+      ScalperConfig cfg,
+      BarValues bank,
+      EngineSeries future,
+      int index,
+      Instant barInstant,
+      LocalTime istTime,
+      LocalDate eodDate,
+      OptionType forcedSide,
+      boolean carryClock,
+      boolean enforceOptionSide) {
     Diag diag = new Diag();
     // §0B hard pre-flight (§12.1): the time window — the one the YAML session cannot express (the
     // 11:00–13:00 midday block). Blocked early, before the chain fetch, to skip the HTTP fan-out.
@@ -466,6 +500,32 @@ public class ScalperConfluenceGate {
                 ? OptionType.CE
                 : OptionType.PE;
     diag.side = side;
+    // LIVE-vs-BACKTEST parity (option-side-constraint): the strategy's declared universe.options.option_types
+    // constrains which side it may trade. The backtest ENFORCES it (OptionContractSelector:94-96 skips a bias
+    // whose side isn't listed); the live gate derived `side` from VWAP alone and never enforced it — so a
+    // PE-only slug could open a CE (and a CE-only a PE) on a bar where the chart pre-gate (vwma20) and this
+    // seam (vwap) disagree. Fail-closed, mirrored exactly: a non-empty option_types that EXCLUDES the derived
+    // side BLOCKS — a wrong-side bar is categorically un-tradeable for this strategy. Empty ⇒ unconstrained
+    // (the side-agnostic straddle already returned above; a both-sides directional strategy is inert). Blocked
+    // HERE, before the OI/macro context fan-out, so a wrong-side bar skips the HTTP round-trips (the same §0B
+    // "block early to skip the fan-out" pattern the time window uses). Scoped to ENTRY (enforceOptionSide):
+    // the bare evaluate() decision reads — the E9 D4 confluence-flip EXIT oracle — must NOT enforce, or a
+    // single-side held position could never see the opposite side the market flipped to (a protective exit
+    // silently removed). Only evaluateWithDiagnostic (the entry path) enforces.
+    if (enforceOptionSide && !cfg.optionTypes().isEmpty()) {
+      boolean sideAllowed = cfg.optionTypes().contains(side.name());
+      if (diag.failsBool(
+          "option-side-constraint",
+          sideAllowed,
+          sideAllowed
+              ? "derived side " + side + " within declared option_types"
+              : "derived side "
+                  + side
+                  + " not in declared option_types "
+                  + new java.util.TreeSet<>(cfg.optionTypes()))) {
+        return diag.block();
+      }
+    }
     // E8 §2.2 r8 / §3.4 vwap-distance (tag vwap-distance): an entry too FAR from VWAP is an extended
     // chase, not a pullback — a HARD skip (the Siva "wait for a pullback near VWAP, don't chase the
     // move" discipline). Chart-only (|close-vwap|/close), side-agnostic; a null operand degrades to

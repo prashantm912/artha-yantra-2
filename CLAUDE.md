@@ -315,6 +315,23 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   an applied migration (even a comment) fails `flyway validate` / flyway-init.
   Corrections go in a **new suffix-versioned migration**, never an in-place edit.
 - `ay reset-db` drops volumes and rebuilds all four schema lineages from empty.
+- **A minor TimescaleDB bump can break QUERY PLANNING, not just APIs** — `ALTER EXTENSION
+  UPDATE` succeeding + containers going healthy PROVES NOTHING. 2.18.2 reintroduced a
+  planner assertion (`ERROR: non-Var pathkey not expected for compressed batch sorted
+  merge`) that aborts planning for a top-level `DISTINCT`/`ORDER BY`/`GROUP BY` on a
+  **computed expression** (`time_bucket(iv, ts - INTERVAL '1 second', tz)`, a cast, arithmetic)
+  **+ a `LIMIT`** over a hypertable with **any compressed chunk** in the (time-unpruned) scan,
+  when `timescaledb.enable_decompression_sorted_merge = on` (the shipped default). It took all
+  three OI-confluence dots offline for a whole session before it was caught
+  (docs/signal-analysis/2026-07-20-session-findings.md §6.2; fixed by the two-`max(ts)`-aggregate
+  form in `FuturesDigestService`/`FuturesSnapshotReader`/`OptionsSnapshotReader`, guarded by
+  `CompressedSortedMergeRegressionIntegrationTest`). `GROUP BY <expr>, <col>` (multi-key) and
+  `time_bucket(iv, ts, tz)` on the **bare** column are safe; only the expression-arg-under-LIMIT
+  shape trips. **After ANY Timescale bump, smoke the read paths** — especially the OI dot feeders
+  and anything ordering/grouping/distinct-ing by an expression over compressed chunks — don't
+  trust green healthchecks. A DB-level GUC flip
+  (`ALTER DATABASE artha SET timescaledb.enable_decompression_sorted_merge = off`) is the
+  emergency mitigation; the query rewrites are the real fix so the optimisation stays on.
 
 ## Docker / compose
 - **Never invoke `docker compose` directly without `--env-file .env`** — compose

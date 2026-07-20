@@ -412,30 +412,54 @@ public class OptionsSnapshotReader {
     return latestPair(underlying, expiry, interval, null);
   }
 
-  /** As {@link #latestPair(String, LocalDate, OiInterval)} but {@code date}-scoped (history mode). */
+  /**
+   * As {@link #latestPair(String, LocalDate, OiInterval)} but {@code date}-scoped (history mode).
+   *
+   * <p><b>Why two {@code max(ts)} aggregates and not {@code SELECT DISTINCT time_bucket(..) ORDER BY
+   * b DESC LIMIT 2}.</b> TimescaleDB 2.18.2 aborts planning with {@code "non-Var pathkey not expected
+   * for compressed batch sorted merge"} whenever a top-level {@code DISTINCT}/{@code ORDER BY}/{@code
+   * GROUP BY} key is {@code time_bucket(iv, <expression>, tz)} — i.e. our end-of-window {@code ts -
+   * INTERVAL '1 second'} shift — AND the query carries a {@code LIMIT}, over a hypertable with
+   * compressed chunks. {@code time_bucket(iv, ts, tz)} on the bare column is fine; the shift is what
+   * makes the sort key a non-Var. That defect took all three OI confluence dots offline for the whole
+   * 2026-07-20 session (see docs/signal-analysis/2026-07-20-session-findings.md §6.2). These two
+   * aggregates carry NO pathkey at all, so the sorted-merge path is never considered and the
+   * optimisation stays enabled for every other read.
+   *
+   * <p>Correctness rests on the end-of-window convention this class documents: a row belongs to
+   * bucket {@code B} iff {@code B < ts <= B + interval}. So every row NOT in the newest bucket
+   * satisfies {@code ts <= newestBucketStart}, and the bucket of the newest such row IS the prior
+   * non-empty bucket — gap robust, exactly what the {@code DISTINCT}-and-take-two form returned.
+   */
   public List<StrikePoint> latestPair(
       String underlying, LocalDate expiry, OiInterval interval, LocalDate date) {
     StringBuilder sql =
         new StringBuilder(
-            "SELECT DISTINCT public.time_bucket(INTERVAL '"
+            "SELECT public.time_bucket(INTERVAL '"
                 + interval.pgInterval()
-                + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b "
+                + "', max(ts) - INTERVAL '1 second', 'Asia/Kolkata') AS b "
                 + "FROM options_chain_snapshots "
                 + "WHERE underlying = ? AND expiry = ? AND (quarantined IS NOT TRUE)");
     List<Object> args = new ArrayList<>();
     args.add(underlying);
     args.add(java.sql.Date.valueOf(expiry));
     appendDayFilter(sql, args, date);
-    sql.append(" ORDER BY b DESC LIMIT 2");
-    List<OffsetDateTime> buckets =
-        jdbc.query(
-            sql.toString(), (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
-    if (buckets.isEmpty()) {
+    OffsetDateTime newestBucket = queryBucket(sql.toString(), args);
+    if (newestBucket == null) {
       return List.of();
     }
-    OffsetDateTime newest = buckets.get(0);
-    OffsetDateTime earliest = buckets.get(buckets.size() - 1);
-    return series(underlying, expiry, interval, earliest, newest.plus(interval.bucket()));
+    List<Object> priorArgs = new ArrayList<>(args);
+    priorArgs.add(Timestamp.from(newestBucket.toInstant()));
+    OffsetDateTime priorBucket = queryBucket(sql + " AND ts <= ?", priorArgs);
+    OffsetDateTime earliest = priorBucket == null ? newestBucket : priorBucket;
+    return series(underlying, expiry, interval, earliest, newestBucket.plus(interval.bucket()));
+  }
+
+  /** Runs a single-row bucket aggregate; null when the filtered set is empty. */
+  private OffsetDateTime queryBucket(String sql, List<Object> args) {
+    List<OffsetDateTime> rows =
+        jdbc.query(sql, (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
+    return rows.isEmpty() ? null : rows.get(0);
   }
 
   /** Appends an IST-day window predicate (history mode) when {@code date} is non-null. */

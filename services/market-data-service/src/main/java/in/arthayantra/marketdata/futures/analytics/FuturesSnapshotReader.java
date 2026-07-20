@@ -147,25 +147,61 @@ public class FuturesSnapshotReader {
 
   /** As {@link #latestPair(String, OiInterval)} but {@code date}-scoped (history mode). */
   public List<FutPoint> latestPair(String underlying, OiInterval interval, LocalDate date) {
-    StringBuilder sql =
-        new StringBuilder(
-            "SELECT DISTINCT public.time_bucket(INTERVAL '"
-                + interval.pgInterval()
-                + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b "
-                + "FROM futures_oi_snapshots WHERE underlying = ?");
-    List<Object> args = new ArrayList<>();
-    args.add(underlying);
-    appendDayFilter(sql, args, date);
-    sql.append(" ORDER BY b DESC LIMIT 2");
-    List<OffsetDateTime> buckets =
-        jdbc.query(
-            sql.toString(), (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
+    List<OffsetDateTime> buckets = latestTwoBuckets("underlying = ?", List.of(underlying), interval, date);
     if (buckets.isEmpty()) {
       return List.of();
     }
     OffsetDateTime newest = buckets.get(0);
     OffsetDateTime earliest = buckets.get(buckets.size() - 1);
     return series(underlying, interval, earliest, newest.plus(interval.bucket()));
+  }
+
+  /**
+   * The newest bucket that holds data, plus the newest bucket strictly before it (empty when there
+   * is no data; one element when only one bucket exists).
+   *
+   * <p><b>Why two {@code max(ts)} aggregates and not {@code SELECT DISTINCT time_bucket(..) ORDER BY
+   * b DESC LIMIT 2}.</b> TimescaleDB 2.18.2 aborts planning with {@code "non-Var pathkey not expected
+   * for compressed batch sorted merge"} whenever a top-level {@code DISTINCT}/{@code ORDER BY}/{@code
+   * GROUP BY} key is {@code time_bucket(iv, <expression>, tz)} — i.e. our end-of-window {@code ts -
+   * INTERVAL '1 second'} shift — AND the query carries a {@code LIMIT}, over a hypertable with
+   * compressed chunks. {@code time_bucket(iv, ts, tz)} on the bare column is fine; the shift is what
+   * makes the sort key a non-Var. That defect took all three OI confluence dots offline for the whole
+   * 2026-07-20 session (see docs/signal-analysis/2026-07-20-session-findings.md §6.2). These two
+   * aggregates carry NO pathkey at all, so the sorted-merge path is never considered and the
+   * optimisation stays enabled for every other read.
+   *
+   * <p>Correctness rests on the end-of-window convention: a row belongs to bucket {@code B} iff
+   * {@code B < ts <= B + interval}. So every row NOT in the newest bucket satisfies {@code ts <=
+   * newestBucketStart}, and the bucket of the newest such row IS the prior non-empty bucket — gap
+   * robust, exactly what the {@code DISTINCT}-and-take-two form returned.
+   */
+  private List<OffsetDateTime> latestTwoBuckets(
+      String predicate, List<String> keys, OiInterval interval, LocalDate date) {
+    String bucketExpr =
+        "public.time_bucket(INTERVAL '"
+            + interval.pgInterval()
+            + "', max(ts) - INTERVAL '1 second', 'Asia/Kolkata')";
+    StringBuilder sql =
+        new StringBuilder(
+            "SELECT " + bucketExpr + " AS b FROM futures_oi_snapshots WHERE " + predicate);
+    List<Object> args = new ArrayList<>(keys);
+    appendDayFilter(sql, args, date);
+    OffsetDateTime newest = queryBucket(sql.toString(), args);
+    if (newest == null) {
+      return List.of();
+    }
+    List<Object> priorArgs = new ArrayList<>(args);
+    priorArgs.add(Timestamp.from(newest.toInstant()));
+    OffsetDateTime prior = queryBucket(sql + " AND ts <= ?", priorArgs);
+    return prior == null ? List.of(newest) : List.of(newest, prior);
+  }
+
+  /** Runs a single-row bucket aggregate; null when the filtered set is empty. */
+  private OffsetDateTime queryBucket(String sql, List<Object> args) {
+    List<OffsetDateTime> rows =
+        jdbc.query(sql, (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
+    return rows.isEmpty() ? null : rows.get(0);
   }
 
   /**
@@ -179,20 +215,8 @@ public class FuturesSnapshotReader {
       return List.of();
     }
     String placeholders = String.join(",", java.util.Collections.nCopies(underlyings.size(), "?"));
-    StringBuilder sql =
-        new StringBuilder(
-            "SELECT DISTINCT public.time_bucket(INTERVAL '"
-                + interval.pgInterval()
-                + "', ts - INTERVAL '1 second', 'Asia/Kolkata') AS b "
-                + "FROM futures_oi_snapshots WHERE underlying IN ("
-                + placeholders
-                + ")");
-    List<Object> args = new ArrayList<>(underlyings);
-    appendDayFilter(sql, args, date);
-    sql.append(" ORDER BY b DESC LIMIT 2");
     List<OffsetDateTime> buckets =
-        jdbc.query(
-            sql.toString(), (rs, n) -> rs.getObject("b", OffsetDateTime.class), args.toArray());
+        latestTwoBuckets("underlying IN (" + placeholders + ")", underlyings, interval, date);
     if (buckets.isEmpty()) {
       return List.of();
     }

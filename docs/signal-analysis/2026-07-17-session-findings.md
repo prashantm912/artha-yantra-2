@@ -18,8 +18,18 @@ The scheduled post-market agent fired at **08:45 IST on 2026-07-20**, i.e. *befo
 completed session*, which was **Friday 2026-07-17** — and it had no findings file (the folder
 contract requires one per session). This file closes that gap. 2026-07-18/19 were the weekend.
 
-**Follow-up (not a finding, an ops item):** the cron currently lands pre-open, not post-market.
-Owner should re-point it to ≥16:00 IST.
+**Correction (2026-07-20, Architect).** The original draft of this section carried an ops item
+claiming "the cron currently lands pre-open, not post-market. Owner should re-point it to
+≥16:00 IST." **That was wrong** — acting on it would have broken a correct schedule. The cron is
+`47 15 * * 1-5` with +382 s dispatch jitter, i.e. **15:53 IST, post-close** (verified:
+`nextRunAt` = `2026-07-20T10:23:22Z`). The 08:45 fire was not a cron run at all — the task had been
+sitting disabled over the weekend and the Architect re-enabled it at 08:44 IST that morning, which
+triggers an immediate run. The agent could not see that and reasonably, but incorrectly, inferred a
+cron bug from its own fire time.
+
+**Carry:** re-enabling a paused scheduled task fires it immediately. A run that lands at an
+implausible hour should check whether it was enable-triggered before concluding its schedule is
+broken.
 
 ## 1 Funnel numbers (§3.1–3.2)
 

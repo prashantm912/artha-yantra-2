@@ -314,35 +314,20 @@ public class ScalperConfluenceGate {
   }
 
   /**
-   * E11 §3.8 BTST/STBT carry overload. {@code forcedSide} pins the CE/PE side the caller already
-   * resolved — the overnight carry's side is the day-close LOCATION (toward the day HIGH ⇒ CE/BTST,
-   * toward the LOW ⇒ PE/STBT, §3.8's BTST-vs-STBT split), NOT the intraday VWAP-decisive read; pass
-   * {@code null} to keep the default VWAP derivation. {@code carryClock=true} skips the §0B intraday
-   * time window (the 15:20 pre-close clock IS the carry's window — the intraday cap would otherwise
-   * block every carry). Every other rail (volume / RSI / confluence / OI / macro / strike pick) runs
-   * UNCHANGED against the pinned side, so the carry is validated by the SAME confluence the intraday
-   * scalps use — fail-closed, NEUTRAL on derived history (so a carry reads ~0 backtest trades).
-   */
-  public Optional<Decision> evaluate(
-      ScalperConfig cfg,
-      BarValues bank,
-      EngineSeries future,
-      int index,
-      Instant barInstant,
-      LocalTime istTime,
-      LocalDate eodDate,
-      OptionType forcedSide,
-      boolean carryClock) {
-    // Bare-decision form (mirrors the 7-arg oracle): does NOT enforce option_types. Live BTST/STBT ENTRY
-    // uses the diagnostic form below; this decision-only overload is a read like the flip oracle.
-    return evaluateInternal(
-            cfg, bank, future, index, barInstant, istTime, eodDate, forcedSide, carryClock, false)
-        .decision();
-  }
-
-  /**
-   * The BTST-carry {@link Result} form — see the 7-arg {@link #evaluateWithDiagnostic}. Entry path:
-   * ENFORCES the declared option-side constraint (see {@link #evaluateInternal}).
+   * E11 §3.8 BTST/STBT carry ENTRY — the {@link Result} form (see the 7-arg {@link
+   * #evaluateWithDiagnostic}). {@code forcedSide} pins the CE/PE side the caller already resolved — the
+   * overnight carry's side is the day-close LOCATION (toward the day HIGH ⇒ CE/BTST, toward the LOW ⇒
+   * PE/STBT, §3.8's BTST-vs-STBT split), NOT the intraday VWAP-decisive read; pass {@code null} to keep
+   * the default VWAP derivation. {@code carryClock=true} skips the §0B intraday time window (the 15:20
+   * pre-close clock IS the carry's window — the intraday cap would otherwise block every carry). Every
+   * other rail (volume / RSI / confluence / OI / macro / strike pick) runs UNCHANGED against the pinned
+   * side, so the carry is validated by the SAME confluence the intraday scalps use — fail-closed, NEUTRAL
+   * on derived history (so a carry reads ~0 backtest trades). Entry path: ENFORCES the declared
+   * option-side constraint (see {@link #evaluateInternal}).
+   *
+   * <p>There is deliberately NO bare-decision 9-arg {@code evaluate(...)} counterpart: the live BTST/STBT
+   * carry OPENS a position, so it must run through this enforcing form. The only bare, non-enforcing read
+   * is the 7-arg {@link #evaluate} flip-exit oracle ({@code SignalEngine.confluenceFlipExit}).
    */
   public Result evaluateWithDiagnostic(
       ScalperConfig cfg,

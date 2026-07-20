@@ -420,8 +420,11 @@ class ScalperConfluenceGateTest {
 
   @Test
   void btstCarryOverloadPinsForcedSideAndSkipsTheIntradayTimeWindow() {
-    // E11 §3.8: the BTST carry overload (forcedSide + carryClock) pins the CE/PE side resolved from the
+    // E11 §3.8: the BTST carry ENTRY (forcedSide + carryClock) pins the CE/PE side resolved from the
     // day-close location and SKIPS the §0B intraday window — the 15:20 pre-close clock IS the carry window.
+    // Routes through the ENTRY form (evaluateWithDiagnostic — the only live BTST-carry path, since the carry
+    // OPENS a position); CFG carries empty option_types so the option-side-constraint rail stays inert (the
+    // carry side is FORCED here, not VWAP-derived), leaving this test's outcomes byte-identical.
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
@@ -429,19 +432,22 @@ class ScalperConfluenceGateTest {
     LocalTime midday = LocalTime.of(12, 0); // inside the 11:00-13:00 default midday block
 
     // carryClock=false at 12:00 → the §0B midday block fires → no carry.
-    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, midday, EOD, CE, false)).isEmpty();
+    assertThat(gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, midday, EOD, CE, false).blocked())
+        .isTrue();
     // carryClock=true → the window is skipped; forced CE + the bullish confluence confirms → a carry fires.
-    Optional<Decision> ce = gate.evaluate(CFG, bullBank(), null, 0, NOW, midday, EOD, CE, true);
+    Optional<Decision> ce =
+        gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, midday, EOD, CE, true).decision();
     assertThat(ce).isPresent();
     assertThat(ce.get().side()).isEqualTo(CE);
     // forcedSide=PE pins the bearish side even though price>VWAP (CE by the default VWAP-decisive read):
     // the PE path is then blocked downstream (RSI 65 sits outside the PE 20-40 rail), whereas the CE path
     // above fired — proving the side is taken from forcedSide, not derived from price-vs-VWAP.
     assertThat(
-            gate.evaluate(
-                CFG, bullBank(), null, 0, NOW, midday, EOD,
-                in.arthayantra.black76.Black76.OptionType.PE, true))
-        .isEmpty();
+            gate.evaluateWithDiagnostic(
+                    CFG, bullBank(), null, 0, NOW, midday, EOD,
+                    in.arthayantra.black76.Black76.OptionType.PE, true)
+                .blocked())
+        .isTrue();
   }
 
   @Test

@@ -1,0 +1,197 @@
+-- Durable rollup of the SignalEngine ENTRY-EVALUATION outcome counters (chip: engine liveness
+-- must be answerable RETROACTIVELY).
+--
+-- WHY. `ay_signal_eval_outcome_total` (SignalEngine:445) is an in-memory Micrometer counter, so it
+-- resets to zero on every restart and only ever answers "what has happened since this JVM booted".
+-- "Was the engine alive on 2026-07-16?" is therefore UNANSWERABLE. That gap has now produced two
+-- false starvation diagnoses:
+--   * 2026-07-17 — an 84-minute silence that was simply a SuperTrend-DOWN leg (SignalEngine:220-227).
+--   * 2026-07-20 — a dead engine was inferred from an EMPTY strategy.signal_rejections table, which
+--     triggered an unnecessary restart of a LIVE trading service. The engine had been healthy the
+--     whole time (399 evaluations, 0 failures) — and the restart wiped the only evidence of that.
+-- The counters are the correct liveness signal; they simply did not survive a restart. This table
+-- makes them survive.
+--
+-- WHY NOT A ROW PER EVALUATION. A row per no-entry per strategy per 3m bar was DELIBERATELY rejected
+-- when the counters were introduced: ~63 published+enabled scalpers share one 3m series, so that is
+-- ~63 writes every bar all session on the sole live eval thread. Measured shape: ~7,875 evaluations/
+-- day and a signal_rejections row is 2,624 bytes. This rollup instead snapshots the counters on a 3m
+-- cadence -- 7 narrow rows per bucket, ~980 rows/day (140 session-window buckets x 7 outcomes).
+-- Roughly 8x fewer rows and ~100x fewer bytes, and ZERO added work on the eval thread (a scheduled
+-- reader of counters that are already in memory -- never an inline write).
+--
+-- ============================================================================================
+-- THE WRITE PROTOCOL: deltas, with a DURABLE checkpoint. Read this before changing any of it.
+-- ============================================================================================
+-- Each row carries TWO numbers for one (bucket, boot, outcome):
+--   * eval_count       -- the DELTA: evaluations in the window ending at this bucket.
+--   * cumulative_count -- the counter's absolute value at this snapshot, i.e. since THIS boot.
+-- cumulative_count is not redundant reporting: it IS the checkpoint. Every tick computes
+--   delta = (counter now) - (cumulative_count of the newest durable row for this boot_id)
+-- reading the previous value back FROM THE DATABASE rather than from process memory.
+--
+-- An earlier revision kept that checkpoint in a JVM field. Cross-vendor review correctly rejected
+-- it, because an in-memory checkpoint cannot survive the two failures that matter:
+--   * DOUBLE COUNT -- Postgres commits but the acknowledgement is lost. The in-memory baseline is
+--     not advanced, so the NEXT tick's delta re-covers evaluations the committed row already holds,
+--     and the day SUM counts them twice. (No explicit retry is needed to hit this; the next
+--     scheduled tick is the retry.)
+--   * LOSS -- a failed write followed by a restart takes the un-advanced baseline down with the
+--     process, so everything since the last successful snapshot is gone.
+-- Reading the checkpoint from the DB closes BOTH: after a lost ack the next tick SEES the committed
+-- cumulative and computes only the true increment; after any failure the next tick differences
+-- against the last DURABLE state, so a failed window rolls into the next successful row exactly
+-- once. The writer holds no state between ticks at all.
+--
+-- boot_id scopes the checkpoint to one counter epoch. It is generated WITH the counters
+-- (SignalEngine.OutcomeSnapshot) so the two can never disagree: a restart necessarily yields both a
+-- new boot_id and zeroed counters, so the first snapshot of a boot finds no checkpoint, reads 0, and
+-- reports exactly "everything since boot". A negative delta is therefore unreachable -- by
+-- construction, not by clamping.
+--
+-- ON CONFLICT: eval_count ADDS, cumulative_count REPLACES. Addition is correct because deltas are
+-- computed against the durable checkpoint, so a second write into the same (bucket, boot) is always
+-- a genuine additional increment, never a replay of one already counted. Two INSTANCES overlapping
+-- during a blue/green restart do not collide at all -- different boot_id, different rows.
+--
+-- CROSS-DATE RECOVERY IS MARKED, NOT GUESSED. A delta covers (checkpoint, bucket], and recovering a
+-- failed or skipped stretch makes that window arbitrarily long. If it crosses an IST session date
+-- AND carries a nonzero count, those evaluations CANNOT be attributed to either date: the counters
+-- carry a total and no timing. The realistic path is a weekend -- the process runs continuously (so
+-- boot_id is stable), writes start failing Friday 15:00, no ticks fire Sat/Sun, and Monday's first
+-- tick would otherwise dump Friday's last half hour into Monday 09:00, leaving BOTH days wrong.
+-- Attributing such a window to its ORIGIN date is no better: a Wednesday->Friday span genuinely
+-- mixes three sessions. So the row is written in full (nothing is ever lost) with recovered_from set
+-- to the originating bucket, and the canonical query below keeps it OUT of the attributable total
+-- and reports it separately.
+--
+-- THE MARK REQUIRES A NONZERO DELTA, AND IS PER OUTCOME. A date span alone is NOT a recovery. The
+-- cron fires 09:00-15:57 IST on weekdays, so the previous tick and the first tick of the next
+-- session ALWAYS fall on different IST dates -- while nothing evaluates overnight, so every delta is
+-- zero. Marking on the date span alone would therefore mark all seven rows EVERY trading morning:
+-- a daily false alert, a contradiction of the line below, and -- worst -- it would drop each
+-- session's OPENING buckets out of buckets_recorded, which is exactly the process-is-alive evidence
+-- this table exists to provide. The feature meant to prove liveness would quietly weaken it every
+-- morning. A zero delta spanning a date boundary recovers nothing and stays an ordinary liveness
+-- row; and in a genuine recovery only the outcomes that actually moved are ambiguous, so the mark is
+-- applied per outcome rather than per bucket. Consequently: recovered_from IS NULL on every normal
+-- tick, including the first tick of every trading day.
+--
+-- WHAT IS AND IS NOT GUARANTEED (stated plainly; this table's value is that it can be trusted when
+-- a health signal is in dispute):
+--   GUARANTEED  -- no double count, ever, on any failure path.
+--   GUARANTEED  -- no negative eval_count, ever.
+--   GUARANTEED  -- a failed or delayed tick loses nothing: the next successful tick's delta covers
+--                  every window since the last durable row. Only 3m resolution degrades.
+--   GUARANTEED  -- SUM(eval_count) needs no boot-awareness; boot_id scopes the checkpoint, not the
+--                  arithmetic.
+--   GUARANTEED  -- a recovery WITHIN one IST date is attributed to that date. Its counts land on a
+--                  later bucket of the same day, so the DAY total stays exact; only the 3m shape
+--                  of that stretch is approximate.
+--   NOT GUARANTEED -- a recovery SPANNING IST dates is not attributable to any single date, and is
+--                  deliberately not attributed to one. Such rows carry a non-null recovered_from,
+--                  are EXCLUDED from `evaluations` in the canonical query, and appear under
+--                  `unattributable` for every date their span touches. A date whose totals were
+--                  affected therefore under-reports in `evaluations` -- and says so, because the
+--                  same query surfaces the overlapping unattributable rows. It is never silently
+--                  folded into a day.
+--   NOT GUARANTEED -- evaluations between the last SUCCESSFUL write and process death are lost.
+--                  They exist only in JVM memory, so no protocol can persist them. On a GRACEFUL
+--                  shutdown a @PreDestroy flush closes this window (a planned restart or deploy
+--                  loses nothing). On a HARD kill / crash / OOM it is open, and it is bounded by
+--                  the time since the last successful write -- which is <= 3 min while writes are
+--                  succeeding, but is LONGER if writes were already failing. It is not a fixed
+--                  3-minute bound; do not read it as one.
+--
+-- ROWS ARE THE LIVENESS EVIDENCE. Every outcome is written every bucket, INCLUDING zeros. That is
+-- what separates the three states the counters used to conflate:
+--   * rows present, some eval_count > 0  -> process up AND the eval loop is evaluating.
+--   * rows present, all eval_count = 0   -> process up, scheduler ticking, but the eval loop
+--                                           produced nothing (no bars arriving, or a dead engine).
+--   * rows ABSENT                        -> the process was down, or its rollup could not write.
+--
+-- CANONICAL LIVENESS QUERY -- "was the engine evaluating on date X, and what was the outcome mix",
+-- one SELECT, no boot-awareness needed. NOTE the +05:30 BOUNDS (never ::date -- in-container
+-- now()/::date is UTC and is off-by-one across IST midnight) and the 'Asia/Kolkata' RENDER
+-- (AT TIME ZONE '+05:30' INVERTS under the POSIX sign convention: it prints 14:20 IST as 03:20):
+--
+--   SELECT outcome,
+--          SUM(eval_count) FILTER (WHERE recovered_from IS NULL)     AS evaluations,
+--          SUM(eval_count) FILTER (WHERE recovered_from IS NOT NULL) AS unattributable,
+--          COUNT(*)        FILTER (WHERE recovered_from IS NULL)     AS buckets_recorded,
+--          COUNT(*) FILTER (WHERE recovered_from IS NULL AND eval_count > 0) AS buckets_active,
+--          COUNT(DISTINCT boot_id)                                   AS boots,
+--          MIN(bucket_time) AT TIME ZONE 'Asia/Kolkata'              AS first_bucket_ist,
+--          MAX(bucket_time) AT TIME ZONE 'Asia/Kolkata'              AS last_bucket_ist
+--     FROM strategy.signal_eval_outcomes
+--    WHERE bucket_time >= timestamptz '2026-07-20T00:00:00+05:30'
+--      AND COALESCE(recovered_from, bucket_time) < timestamptz '2026-07-21T00:00:00+05:30'
+--    GROUP BY outcome
+--    ORDER BY evaluations DESC;
+--
+-- The WHERE is a SPAN-OVERLAP test, which is why it uses COALESCE rather than a plain bucket_time
+-- range. Each row's delta covers (COALESCE(recovered_from, bucket_time), bucket_time]; for a normal
+-- row recovered_from is NULL and the predicate collapses to exactly the plain range. For a marked
+-- row it makes the recovery visible from EVERY date its span touches -- so querying Friday still
+-- shows the unattributable counts that a Monday tick recovered, instead of Friday quietly
+-- under-reporting with no trace. A marked row appearing under two dates' `unattributable` is
+-- correct, not double counting: the point of the column is that those counts belong to no single
+-- date. `evaluations` never includes them.
+--
+-- Reading it: buckets_recorded > 0 proves the PROCESS was up; evaluations > 0 proves the EVAL LOOP
+-- was running; boots counts how many times it restarted that day; unattributable is 0 in normal
+-- operation and non-zero only after a cross-date outage, where it bounds how far off `evaluations`
+-- could be. The per-outcome split is the mix (e.g. an all-`composite-below-threshold` day is a
+-- healthy engine on a directionless leg -- exactly the 2026-07-17 SuperTrend-DOWN shape -- NOT a
+-- starved one). `confluence-blocked` is the only outcome that also writes a signal_rejections row,
+-- which is why an empty rejections table has never meant a dead engine.
+--
+-- OBSERVABILITY ONLY. Nothing here is consulted by any trading decision. The rollup runs on its OWN
+-- dedicated single-thread scheduler (evalOutcomeTaskScheduler) -- never the eval thread, never the
+-- shared default pool that carries paper stop-loss alerting and engine reconcile, and never the
+-- fenced monitor detector pool. The golden replay boots no scheduler, so no rows are written on
+-- backtest -> parity-safe by construction. Plain OLTP table (not a hypertable) -- volume is trivial.
+--
+-- RETENTION: 180 days via SignalEvalOutcomeRollupJob's daily 02:30-IST prune, matching the sibling
+-- risk_suppressions convention exactly (artha.signals.eval-outcome-retention-days /
+-- ARTHA_SIGNALS_EVAL_OUTCOME_RETENTION_DAYS; 0 or negative DISABLES the prune rather than wiping
+-- the table). ~980 rows/day * 180d ~= 176k rows -- a few MB. The prune cannot orphan a live boot's
+-- checkpoint: it deletes by bucket_time, and a running boot rewrites a fresh row every 3 minutes,
+-- so its newest row (the one the checkpoint read takes) is always far inside the horizon.
+
+CREATE TABLE signal_eval_outcomes (
+  bucket_time       TIMESTAMPTZ NOT NULL, -- snapshot instant floored to a 3m boundary (IST offset).
+                                          -- IST is +05:30 = 19800s = 110 * 180, so 3m boundaries
+                                          -- coincide in UTC and IST; 09:15 IST is always a boundary.
+  boot_id           UUID NOT NULL,        -- the counter epoch (SignalEngine.OutcomeSnapshot.epoch).
+                                          -- Scopes the checkpoint read; a restart yields a new one.
+  outcome           TEXT NOT NULL,        -- SignalEngine.Outcome tag: fired / confluence-blocked /
+                                          -- confluence-gate-absent / discipline-paused /
+                                          -- composite-below-threshold / chart-gate-failed /
+                                          -- unscoreable-indicators-warming
+  eval_count        BIGINT NOT NULL,      -- DELTA: evaluations in the window ending at bucket_time.
+                                          -- Never negative. Zero is meaningful -- it proves the
+                                          -- process was alive. This is the column you SUM.
+  cumulative_count  BIGINT NOT NULL,      -- the counter's value at this snapshot, since THIS boot.
+                                          -- The DURABLE CHECKPOINT the next delta differences
+                                          -- against -- do not drop it as "redundant".
+  recovered_from    TIMESTAMPTZ,          -- NULL on every normal tick, INCLUDING the first tick of
+                                          -- each trading day. Set to the originating checkpoint
+                                          -- bucket only when this row's delta is NONZERO and its
+                                          -- window crosses an IST session date, marking eval_count
+                                          -- UNATTRIBUTABLE to any single date (counters carry no
+                                          -- timing, so the span cannot be split). The canonical
+                                          -- query keeps these out of `evaluations` and reports them
+                                          -- separately.
+  PRIMARY KEY (bucket_time, boot_id, outcome)
+);
+
+-- Serves the checkpoint read (newest row per outcome for one boot). The PK's leading bucket_time
+-- already serves the date-bounded liveness query, so no other index is needed.
+CREATE INDEX idx_signal_eval_outcomes_boot
+  ON signal_eval_outcomes (boot_id, bucket_time DESC);
+
+-- ay_strategy is the READ-ONLY per-schema role and never writes here. Unlike the append-only
+-- siblings (V015/V027/V040/V042, which grant SELECT+INSERT), writing this table needs UPDATE too
+-- (the upsert merge), and only the `artha` owner does it. SELECT only is the honest grant.
+GRANT SELECT ON signal_eval_outcomes TO ay_strategy;

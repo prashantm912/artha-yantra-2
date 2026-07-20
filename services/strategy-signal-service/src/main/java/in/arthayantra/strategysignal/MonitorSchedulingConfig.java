@@ -19,6 +19,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * {@code PartialBucketCanary.sweep}, {@code SignalStarvationCanary.sweep} (dormant),
  * {@code DotHealthCanary.sweep}. The engine reload trio, PaperScheduler, and every EOD/batch job
  * keep the default pool (their serial single-thread assumption is load-bearing).
+ *
+ * <p>A THIRD pool, {@link #evalOutcomeTaskScheduler()}, carries the V043 eval-outcome rollup. It
+ * belongs on neither of the other two — see that method's javadoc for why both were rejected.
  */
 @Configuration(proxyBeanMethods = false)
 public class MonitorSchedulingConfig {
@@ -53,6 +56,43 @@ public class MonitorSchedulingConfig {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     scheduler.setPoolSize(1);
     scheduler.setThreadNamePrefix("monitor-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
+   * A single daemon thread owned solely by {@code SignalEvalOutcomeRollupJob} (V043). Unlike the two
+   * pools above, this one exists to be EXPENDABLE: the rollup makes a synchronous JDBC write, and
+   * the whole point is that a DB lock, a lock wait, or a network stall can park nothing but the
+   * rollup itself.
+   *
+   * <p>Both other pools were rejected, each for a concrete reason:
+   *
+   * <ul>
+   *   <li><b>The default {@code taskScheduler} is a single thread shared with money-adjacent work.</b>
+   *       There is no scheduler pool sizing anywhere in {@code application.yml} (the
+   *       {@code maximum-pool-size: 5} there is Hikari, the datasource — not this), so Boot's
+   *       default of ONE applies. A live thread census on {@code ay-strategy-signal-service} shows
+   *       {@code scheduling-1} carrying {@code PaperStaleTickAlerter} (paper SL/TP starvation
+   *       alerting) alongside {@code SignalEngine} reconcile. A stalled observability write there
+   *       would park stop-loss evaluation — precisely the class of silent failure this table exists
+   *       to make visible.
+   *   <li><b>{@code monitorTaskScheduler} is fenced</b> (audit BEJ-01 / #919) for pure detectors
+   *       doing fast, bounded, in-memory work. A synchronous Postgres write on that single thread
+   *       could starve {@code SubscriberHealthCanary} and {@code PartialBucketCanary} — the exact
+   *       hazard {@code RejectionWriter} and {@code RiskSuppressionWriter} are both async to avoid.
+   * </ul>
+   *
+   * <p>Belt-and-braces, the write is also BOUNDED: {@code SignalEvalOutcomeRepository} runs on its
+   * own {@code JdbcTemplate} with an explicit query timeout, so even this thread cannot hang
+   * indefinitely. A missed tick is harmless by design — the V043 delta protocol differences against
+   * the last DURABLE row, so the next successful tick absorbs every skipped window exactly once.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler evalOutcomeTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("eval-outcome-sched-");
     scheduler.setDaemon(true);
     return scheduler;
   }

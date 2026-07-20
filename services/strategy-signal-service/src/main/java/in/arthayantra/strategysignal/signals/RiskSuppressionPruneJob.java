@@ -19,10 +19,18 @@ import org.springframework.stereotype.Component;
  * because {@code options_chain_snapshots} is a ~1.12B-row compressed hypertable; here the volume is
  * trivial and a row-wise delete is correct and cheap).
  *
- * <p><b>Off the hot path.</b> Runs on the DEFAULT {@code @Scheduled} pool as a batch job — NOT the
- * dedicated {@code monitorTaskScheduler} (audit BEJ-01 / #919 reserves that pool for the pure
- * liveness detectors). It never touches the engine eval thread, and the golden replay injects no
- * suppression rows, so this is parity-safe (it cannot run on backtest).
+ * <p><b>Off the hot path — and off the DEFAULT pool.</b> Bound to the dedicated
+ * {@code maintenanceTaskScheduler}. It used to run on the default {@code @Scheduled} pool, which is
+ * a SINGLE thread ({@code application.yml} sizes Hikari, never the scheduler) that a live thread
+ * census shows carrying {@code PaperStaleTickAlerter}, {@code SignalEngine} reconcile and
+ * {@code PaperScheduler.bracketEvaluation} — the 15-second stop-loss/target sweep. A DELETE blocking
+ * on a lock at 02:30 parked that thread, and the next session's stop-loss evaluation would simply
+ * never fire. Still NOT the {@code monitorTaskScheduler} (audit BEJ-01 / #919 reserves that for the
+ * pure liveness detectors) and not the eval-outcome pool either — see
+ * {@code MonitorSchedulingConfig.maintenanceTaskScheduler}. The DELETE itself is additionally
+ * BOUNDED by a query timeout on the repository's private template. It never touches the engine eval
+ * thread, and the golden replay injects no suppression rows, so this is parity-safe (it cannot run
+ * on backtest).
  *
  * <p><b>Fail-soft.</b> A failed delete is logged, ops-alerted via the {@link SwingBatchAlert} bridge
  * (the notifier←signals event direction; this module cannot import notifier), and NEVER propagates
@@ -64,10 +72,15 @@ public class RiskSuppressionPruneJob {
    * The daily retention tick (02:30 IST). Six-field Spring cron with the explicit Asia/Kolkata zone
    * (the sibling scheduler convention); runs every calendar day since retention has no trading-day
    * dependence. Cron is property-overridable like every sibling scheduler. Live-only.
+   *
+   * <p>Bound to {@code maintenanceTaskScheduler} and pinned there by
+   * {@code MonitorSchedulingConfigTest}, so a refactor cannot silently drop a synchronous DELETE
+   * back onto the shared default pool that carries paper stop-loss evaluation.
    */
   @Scheduled(
       cron = "${artha.signals.risk-suppression-prune.cron:0 30 2 * * *}",
-      zone = "Asia/Kolkata")
+      zone = "Asia/Kolkata",
+      scheduler = "maintenanceTaskScheduler")
   public void scheduledPrune() {
     if (!live) {
       return;

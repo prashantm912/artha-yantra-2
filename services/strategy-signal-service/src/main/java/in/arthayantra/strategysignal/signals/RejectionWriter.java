@@ -1,16 +1,11 @@
 package in.arthayantra.strategysignal.signals;
 
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -48,9 +43,7 @@ public class RejectionWriter {
 
   private final SignalRejectionRepository repository;
   private final ShadowBookService shadowBook;
-  private final Counter dropped;
-  private final Counter shutdownDropped;
-  private final ThreadPoolExecutor executor;
+  private final BoundedAsyncWriter queue;
 
   /** Wires the JDBC repository + shadow book + the dropped-record counters (saturation + shutdown). */
   public RejectionWriter(
@@ -59,22 +52,13 @@ public class RejectionWriter {
       MeterRegistry meterRegistry) {
     this.repository = repository;
     this.shadowBook = shadowBook;
-    this.dropped = meterRegistry.counter("ay_signal_rejection_dropped_total");
-    this.shutdownDropped = meterRegistry.counter("ay_signal_rejection_shutdown_dropped_total");
-    this.executor =
-        new ThreadPoolExecutor(
-            1,
-            1,
-            0L,
-            TimeUnit.MILLISECONDS,
-            new ArrayBlockingQueue<>(QUEUE_CAPACITY),
-            r -> {
-              Thread t = new Thread(r, "signal-rejection-writer");
-              t.setDaemon(true);
-              return t;
-            },
-            // Queue full ⇒ DROP + count on the CALLING (eval) thread in O(1); never blocks, never throws.
-            (r, exec) -> dropped.increment());
+    this.queue =
+        new BoundedAsyncWriter(
+            "signal-rejection",
+            QUEUE_CAPACITY,
+            log,
+            meterRegistry.counter("ay_signal_rejection_dropped_total"),
+            meterRegistry.counter("ay_signal_rejection_shutdown_dropped_total"));
   }
 
   /**
@@ -101,7 +85,7 @@ public class RejectionWriter {
       String diagnosticJson,
       OffsetDateTime barTime,
       ScalperConfluenceGate.RejectionDiagnostic diagnostic) {
-    executor.execute(
+    queue.submit(
         () -> {
           try {
             long rejectionId =
@@ -129,31 +113,15 @@ public class RejectionWriter {
   }
 
   /**
-   * Graceful shutdown (package-private so a test can use a short drain window). Stops accepting new
-   * records, lets the queued inserts DRAIN for up to {@code drainMillis}, then abandons whatever is
-   * left. A silent {@code shutdownNow()} would DROP already-accepted diagnostics on an ordinary
-   * redeploy — for a "the rejection left a queryable row" trail that defeats the purpose. So any
-   * leftover is COUNTED ({@code ay_signal_rejection_shutdown_dropped_total}) and LOGGED, never
-   * silently lost. Fail-soft: never throws out of shutdown.
+   * Graceful shutdown (package-private so a test can use a short drain window). Delegates to the
+   * shared {@link BoundedAsyncWriter} two-phase drain: the queue drains for up to
+   * {@code drainMillis}, then whatever is left — INCLUDING an insert still running, which
+   * {@code shutdownNow()} does not report — is COUNTED in
+   * {@code ay_signal_rejection_shutdown_dropped_total} and WARNed. This class previously counted
+   * only the queued residue, so a graceful shutdown that caught the sole insert mid-flight lost that
+   * diagnostic with the counter reading 0 and no log line at all.
    */
   void drainAndShutdown(long drainMillis) {
-    executor.shutdown();
-    boolean drained = false;
-    try {
-      drained = executor.awaitTermination(drainMillis, TimeUnit.MILLISECONDS);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt(); // restore the flag; abandon the rest below
-    }
-    if (drained) {
-      return;
-    }
-    List<Runnable> abandoned = executor.shutdownNow();
-    if (!abandoned.isEmpty()) {
-      shutdownDropped.increment(abandoned.size());
-      log.warn(
-          "signal-rejection writer shutdown drain exceeded {}ms — {} queued rejection(s) abandoned"
-              + " (counted in ay_signal_rejection_shutdown_dropped_total)",
-          drainMillis, abandoned.size());
-    }
+    queue.drainAndShutdown(drainMillis);
   }
 }

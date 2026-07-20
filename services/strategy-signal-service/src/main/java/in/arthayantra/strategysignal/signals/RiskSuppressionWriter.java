@@ -1,15 +1,9 @@
 package in.arthayantra.strategysignal.signals;
 
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -40,42 +34,19 @@ public class RiskSuppressionWriter {
   /** On shutdown, let the queued inserts DRAIN up to this long before abandoning them. */
   static final long SHUTDOWN_DRAIN_MILLIS = 5_000L;
 
-  /**
-   * After {@code shutdownNow()} interrupts the drain, give a well-behaved insert this long to unwind
-   * before we conclude the still-running insert is stuck and count it as lost.
-   */
-  static final long SHUTDOWN_INFLIGHT_GRACE_MILLIS = 1_000L;
-
   private final RiskSuppressionRepository repository;
-  private final Counter dropped;
-  private final Counter shutdownDropped;
-  private final ThreadPoolExecutor executor;
-
-  /**
-   * True while the single writer thread is inside an insert attempt (set on dequeue, cleared on
-   * completion). Lets shutdown detect an insert that ignored interruption and would vanish silently.
-   */
-  private final AtomicBoolean inFlight = new AtomicBoolean(false);
+  private final BoundedAsyncWriter queue;
 
   /** Wires the JDBC repository + the dropped-record counters (runtime saturation + shutdown loss). */
   public RiskSuppressionWriter(RiskSuppressionRepository repository, MeterRegistry meterRegistry) {
     this.repository = repository;
-    this.dropped = meterRegistry.counter("ay_risk_suppression_dropped_total");
-    this.shutdownDropped = meterRegistry.counter("ay_risk_suppression_shutdown_dropped_total");
-    this.executor =
-        new ThreadPoolExecutor(
-            1,
-            1,
-            0L,
-            TimeUnit.MILLISECONDS,
-            new ArrayBlockingQueue<>(QUEUE_CAPACITY),
-            r -> {
-              Thread t = new Thread(r, "risk-suppression-writer");
-              t.setDaemon(true);
-              return t;
-            },
-            // Queue full ⇒ DROP + count on the CALLING (eval) thread in O(1); never blocks, never throws.
-            (r, exec) -> dropped.increment());
+    this.queue =
+        new BoundedAsyncWriter(
+            "risk-suppression",
+            QUEUE_CAPACITY,
+            log,
+            meterRegistry.counter("ay_risk_suppression_dropped_total"),
+            meterRegistry.counter("ay_risk_suppression_shutdown_dropped_total"));
   }
 
   /**
@@ -94,10 +65,8 @@ public class RiskSuppressionWriter {
       String optionType,
       String optionTradingsymbol,
       OffsetDateTime barTime) {
-    executor.execute(
+    queue.submit(
         () -> {
-          // Marker for shutdown accounting: set on dequeue, cleared once the attempt completes.
-          inFlight.set(true);
           try {
             repository.insert(
                 strategyVersionId, strategySlug, book, rail, exchange, tradingsymbol, interval,
@@ -106,8 +75,6 @@ public class RiskSuppressionWriter {
             log.warn(
                 "failed to persist risk suppression {} {}:{} rail={}: {}",
                 strategySlug, exchange, tradingsymbol, rail, e.toString());
-          } finally {
-            inFlight.set(false);
           }
         });
   }
@@ -125,42 +92,12 @@ public class RiskSuppressionWriter {
    * leftover is COUNTED ({@code ay_risk_suppression_shutdown_dropped_total}) and LOGGED, never
    * silently lost.
    *
-   * <p>{@code shutdownNow()} returns only the QUEUED tasks; the insert that was RUNNING at shutdown
-   * is not in that list. If it ignores the interrupt it would vanish at JVM exit with no counter and
-   * — when it is the sole task — no WARN at all. So after {@code shutdownNow()} a second bounded await
-   * gives a well-behaved insert time to unwind; a record still {@link #inFlight} afterwards is counted
-   * as lost too, and the drain-timeout WARN fires unconditionally (even on an empty queue) so a stuck
-   * in-flight insert is always visible. Fail-soft: never throws out of shutdown.
+   * <p>The two-phase drain that also accounts for the RUNNING insert (which {@code shutdownNow()}
+   * does not report) now lives in the shared {@link BoundedAsyncWriter} — see its javadoc. It was
+   * worked out here first and, being a copy rather than a shared implementation, never reached
+   * {@link RejectionWriter}. Fail-soft: never throws out of shutdown.
    */
   void drainAndShutdown(long drainMillis) {
-    executor.shutdown();
-    boolean drained = false;
-    try {
-      drained = executor.awaitTermination(drainMillis, TimeUnit.MILLISECONDS);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt(); // restore the flag; abandon the rest below
-    }
-    if (drained) {
-      return;
-    }
-    List<Runnable> abandoned = executor.shutdownNow(); // QUEUED tasks only — never the running one
-    int queuedLost = abandoned.size();
-    boolean terminated = false;
-    try {
-      terminated = executor.awaitTermination(SHUTDOWN_INFLIGHT_GRACE_MILLIS, TimeUnit.MILLISECONDS);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
-    // A record still in flight after the interrupt + grace ignored the interrupt: it will vanish at
-    // JVM exit, so count it as lost alongside the abandoned queue.
-    int inFlightLost = (!terminated && inFlight.get()) ? 1 : 0;
-    int lost = queuedLost + inFlightLost;
-    if (lost > 0) {
-      shutdownDropped.increment(lost);
-    }
-    log.warn(
-        "risk-suppression writer shutdown drain exceeded {}ms — {} queued + {} in-flight veto"
-            + " record(s) abandoned (counted in ay_risk_suppression_shutdown_dropped_total)",
-        drainMillis, queuedLost, inFlightLost);
+    queue.drainAndShutdown(drainMillis);
   }
 }

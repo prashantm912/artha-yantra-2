@@ -23,10 +23,16 @@ import org.springframework.stereotype.Component;
  * introduced it, so unlike a prune bolted onto {@code signal_rejections} this can never delete
  * history that predates the change.
  *
- * <p><b>Off the hot path.</b> Runs on the DEFAULT {@code @Scheduled} pool as a batch job — NOT the
- * dedicated {@code monitorTaskScheduler} (audit BEJ-01 / #919 reserves that pool for the pure
- * liveness detectors). It never touches the engine eval thread, and the golden replay writes no
- * rows here, so this is parity-safe (it cannot run on backtest).
+ * <p><b>Off the hot path — and off the DEFAULT pool.</b> Bound to the dedicated
+ * {@code maintenanceTaskScheduler}, for the same reason as {@link RiskSuppressionPruneJob}: the
+ * default {@code @Scheduled} pool is a SINGLE thread shared with {@code PaperStaleTickAlerter},
+ * {@code SignalEngine} reconcile and {@code PaperScheduler.bracketEvaluation} (the 15-second
+ * stop-loss/target sweep), so a DELETE blocking on a lock there parks stop-loss evaluation. Leaving
+ * THIS prune on the default pool while moving its sibling would have left the identical wedge in
+ * place. Still NOT the {@code monitorTaskScheduler} (audit BEJ-01 / #919). The DELETE is
+ * additionally BOUNDED by a query timeout on the repository's private template. It never touches
+ * the engine eval thread, and the golden replay writes no rows here, so this is parity-safe (it
+ * cannot run on backtest).
  *
  * <p><b>Fail-soft.</b> A failed delete is logged, ops-alerted via the {@link SwingBatchAlert} bridge
  * (the notifier←signals event direction; this module cannot import notifier), and NEVER propagates
@@ -79,10 +85,15 @@ public class CompositeRejectionPruneJob {
    * The daily retention tick (02:30 IST). Six-field Spring cron with the explicit Asia/Kolkata zone
    * (the sibling scheduler convention); runs every calendar day since retention has no trading-day
    * dependence. Cron is property-overridable like every sibling scheduler. Live-only.
+   *
+   * <p>Bound to {@code maintenanceTaskScheduler} and pinned there by
+   * {@code MonitorSchedulingConfigTest}, so a refactor cannot silently drop a synchronous DELETE
+   * back onto the shared default pool that carries paper stop-loss evaluation.
    */
   @Scheduled(
       cron = "${artha.signals.composite-rejection-prune.cron:0 30 2 * * *}",
-      zone = "Asia/Kolkata")
+      zone = "Asia/Kolkata",
+      scheduler = "maintenanceTaskScheduler")
   public void scheduledPrune() {
     if (!live) {
       return;

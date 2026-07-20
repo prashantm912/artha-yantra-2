@@ -409,6 +409,10 @@ public class SignalEngine {
   // returns, so ay_signal_eval_duration_seconds_count can never tell these outcomes apart; that is
   // part of why the chart-stage blind spot hid for so long.
   private final java.util.Map<Outcome, Counter> outcomeCounters = new java.util.EnumMap<>(Outcome.class);
+  // Identifies THIS generation of the counters above. Born with them and never reassigned, so a
+  // restart necessarily yields both zeroed counters and a fresh epoch — the invariant that lets
+  // SignalEvalOutcomeRollupJob keep its delta checkpoint in the DB instead of in memory (V043).
+  private final java.util.UUID counterEpoch = java.util.UUID.randomUUID();
   // Audit emit-entry-not-transactional: each emit path's dependent writes commit atomically —
   // a mid-sequence failure must never leave an ENTRY without its option leg / suggested qty,
   // or an EXIT inserted with the entry anchor still ACTIVE (duplicate EXIT next bar).
@@ -921,14 +925,28 @@ public class SignalEngine {
   }
 
   /**
+   * One read of every {@link Outcome} counter, stamped with the epoch those counters belong to.
+   *
+   * <p>The two travel together on purpose. {@link SignalEvalOutcomeRollupJob} persists deltas
+   * against a checkpoint it reads back from the database, scoped by {@code epoch}; if the epoch
+   * could ever be stale relative to the counts, the job would difference this boot's counters
+   * against a previous boot's checkpoint and silently over- or under-count. Returning both from a
+   * single call makes that mismatch unrepresentable.
+   *
+   * @param epoch identifies this counter generation — see {@link SignalEngine#counterEpoch}
+   * @param counts every {@code Outcome} tag, including those still at zero
+   */
+  record OutcomeSnapshot(java.util.UUID epoch, java.util.Map<Outcome, Long> counts) {}
+
+  /**
    * A point-in-time read of every {@link Outcome} counter, for {@link SignalEvalOutcomeRollupJob} to
    * persist (the counters are in-memory and reset on restart, so liveness was not answerable
    * retroactively — see {@code V043__signal_eval_outcomes.sql}).
    *
    * <p><b>Costs the eval thread nothing.</b> This is a read of counters already maintained in
-   * memory, called from the scheduler thread. Each {@code Counter.count()} is a {@code DoubleAdder}
-   * sum — non-blocking, no lock the eval thread could ever contend on. There is deliberately no
-   * inline write anywhere in the evaluation path.
+   * memory, called from the rollup's own scheduler thread. Each {@code Counter.count()} is a
+   * {@code DoubleAdder} sum — non-blocking, no lock the eval thread could ever contend on. There is
+   * deliberately no inline write anywhere in the evaluation path.
    *
    * <p>Returns a snapshot over ALL {@code Outcome.values()} — every tag is pre-registered at boot
    * (see the constructor), so an outcome that has not happened yet reads 0 rather than going
@@ -936,10 +954,10 @@ public class SignalEngine {
    * indistinguishable from an engine that never evaluated. Increments are always +1, so the
    * {@code double} is exact at these magnitudes and the {@code long} cast is lossless.
    */
-  java.util.Map<Outcome, Long> outcomeCounts() {
-    java.util.EnumMap<Outcome, Long> snapshot = new java.util.EnumMap<>(Outcome.class);
-    outcomeCounters.forEach((outcome, counter) -> snapshot.put(outcome, (long) counter.count()));
-    return snapshot;
+  OutcomeSnapshot outcomeSnapshot() {
+    java.util.EnumMap<Outcome, Long> counts = new java.util.EnumMap<>(Outcome.class);
+    outcomeCounters.forEach((outcome, counter) -> counts.put(outcome, (long) counter.count()));
+    return new OutcomeSnapshot(counterEpoch, counts);
   }
 
   /**

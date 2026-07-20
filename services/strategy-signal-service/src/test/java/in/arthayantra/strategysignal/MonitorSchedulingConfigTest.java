@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.strategysignal.signals.DotHealthCanary;
 import in.arthayantra.strategysignal.signals.PartialBucketCanary;
+import in.arthayantra.strategysignal.signals.SignalEvalOutcomeRollupJob;
 import in.arthayantra.strategysignal.signals.SignalStarvationCanary;
 import in.arthayantra.strategysignal.signals.SubscriberHealthCanary;
 import java.util.concurrent.CountDownLatch;
@@ -17,6 +18,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
  * BEJ-01 (monitor-scheduler isolation): the pure liveness detectors ({@code SubscriberHealthCanary},
@@ -73,6 +75,47 @@ class MonitorSchedulingConfigTest {
     assertThat(scheduled.scheduler())
         .as("%s.%s runs on the monitor pool", type.getSimpleName(), method)
         .isEqualTo("monitorTaskScheduler");
+  }
+
+  /**
+   * The V043 eval-outcome rollup makes a SYNCHRONOUS JDBC write, so it must own a third, expendable
+   * pool. Both alternatives are unsafe and this pins it against a silent refactor back onto either:
+   * the DEFAULT pool is a single thread that live logs show carrying {@code PaperStaleTickAlerter}
+   * (paper SL/TP starvation alerting) plus {@code SignalEngine} reconcile — an observability write
+   * stalling there would park stop-loss evaluation — and {@code monitorTaskScheduler} is fenced for
+   * pure in-memory detectors, where a DB stall could starve {@code SubscriberHealthCanary}.
+   */
+  @Test
+  void theEvalOutcomeRollupOwnsItsOwnPoolAndNeverTheDefaultOrMonitorOne()
+      throws NoSuchMethodException {
+    for (String method : new String[] {"scheduledRollup", "scheduledPrune"}) {
+      Scheduled scheduled =
+          SignalEvalOutcomeRollupJob.class.getDeclaredMethod(method).getAnnotation(Scheduled.class);
+      assertThat(scheduled).as("SignalEvalOutcomeRollupJob.%s is @Scheduled", method).isNotNull();
+      assertThat(scheduled.scheduler())
+          .as(
+              "SignalEvalOutcomeRollupJob.%s must NOT run on the default pool (paper SL/TP"
+                  + " alerting) or the fenced monitor pool",
+              method)
+          .isEqualTo("evalOutcomeTaskScheduler");
+    }
+  }
+
+  /** The bean the annotations name must actually exist, on its own single daemon thread. */
+  @Test
+  void theEvalOutcomeSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("evalOutcomeTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the monitor detectors")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the default scheduling pool")
+              .isNotSameAs(context.getBean("taskScheduler"));
+        });
   }
 
   @Configuration(proxyBeanMethods = false)

@@ -16,45 +16,77 @@
 -- when the counters were introduced: ~63 published+enabled scalpers share one 3m series, so that is
 -- ~63 writes every bar all session on the sole live eval thread. Measured shape: ~7,875 evaluations/
 -- day and a signal_rejections row is 2,624 bytes. This rollup instead snapshots the counters on a 3m
--- cadence -- 7 narrow rows per bucket, ~980 rows/day (140 session-window buckets x 7 outcomes) at
--- tens of bytes each. Roughly 8x fewer rows and ~100x fewer bytes, and ZERO added work on the eval
--- thread (a scheduled reader of counters that are already in memory -- never an inline write).
+-- cadence -- 7 narrow rows per bucket, ~980 rows/day (140 session-window buckets x 7 outcomes).
+-- Roughly 8x fewer rows and ~100x fewer bytes, and ZERO added work on the eval thread (a scheduled
+-- reader of counters that are already in memory -- never an inline write).
 --
--- SHAPE: DELTA, not cumulative. eval_count is the number of evaluations that landed in the window
--- ENDING at this snapshot, i.e. (counter now - counter at the previous SUCCESSFUL snapshot). The
--- delta baseline is an in-memory field of SignalEvalOutcomeRollupJob, so it shares its JVM lifetime
--- with the counter itself: both reset together on a restart, and the first post-boot snapshot
--- therefore reports "everything since boot". Consequences, all of them deliberate:
---   * A counter reset can NEVER read as negative activity -- a negative delta is impossible by
---     construction, not by clamping.
---   * A restart is NOT a gap: SUM(eval_count) over a day stays correct across any number of
---     restarts, so the day query needs no boot-awareness and no boot marker column.
---   * A MISSED snapshot (a wedged scheduler pool, a failed write) is self-healing: the baseline is
---     advanced only after a durable write, so the next successful snapshot's delta covers both
---     windows. Nothing is lost; only the 3m resolution of that stretch degrades.
---   * The ONLY lossy case is a hard stop between the last snapshot and process exit -- at most one
---     bucket (<= 3 min) of evaluations. Bounded and documented, not silent.
--- Cumulative-per-boot was the alternative; it would have needed a boot_id column AND a boot-aware
--- query (max-per-boot, then sum across boots) to answer the same question. Deltas answer it with a
--- plain SUM.
+-- ============================================================================================
+-- THE WRITE PROTOCOL: deltas, with a DURABLE checkpoint. Read this before changing any of it.
+-- ============================================================================================
+-- Each row carries TWO numbers for one (bucket, boot, outcome):
+--   * eval_count       -- the DELTA: evaluations in the window ending at this bucket.
+--   * cumulative_count -- the counter's absolute value at this snapshot, i.e. since THIS boot.
+-- cumulative_count is not redundant reporting: it IS the checkpoint. Every tick computes
+--   delta = (counter now) - (cumulative_count of the newest durable row for this boot_id)
+-- reading the previous value back FROM THE DATABASE rather than from process memory.
+--
+-- An earlier revision kept that checkpoint in a JVM field. Cross-vendor review correctly rejected
+-- it, because an in-memory checkpoint cannot survive the two failures that matter:
+--   * DOUBLE COUNT -- Postgres commits but the acknowledgement is lost. The in-memory baseline is
+--     not advanced, so the NEXT tick's delta re-covers evaluations the committed row already holds,
+--     and the day SUM counts them twice. (No explicit retry is needed to hit this; the next
+--     scheduled tick is the retry.)
+--   * LOSS -- a failed write followed by a restart takes the un-advanced baseline down with the
+--     process, so everything since the last successful snapshot is gone.
+-- Reading the checkpoint from the DB closes BOTH: after a lost ack the next tick SEES the committed
+-- cumulative and computes only the true increment; after any failure the next tick differences
+-- against the last DURABLE state, so a failed window rolls into the next successful row exactly
+-- once. The writer holds no state between ticks at all.
+--
+-- boot_id scopes the checkpoint to one counter epoch. It is generated WITH the counters
+-- (SignalEngine.OutcomeSnapshot) so the two can never disagree: a restart necessarily yields both a
+-- new boot_id and zeroed counters, so the first snapshot of a boot finds no checkpoint, reads 0, and
+-- reports exactly "everything since boot". A negative delta is therefore unreachable -- by
+-- construction, not by clamping.
+--
+-- ON CONFLICT: eval_count ADDS, cumulative_count REPLACES. Addition is correct because deltas are
+-- computed against the durable checkpoint, so a second write into the same (bucket, boot) is always
+-- a genuine additional increment, never a replay of one already counted. Two INSTANCES overlapping
+-- during a blue/green restart do not collide at all -- different boot_id, different rows.
+--
+-- WHAT IS AND IS NOT GUARANTEED (stated plainly; this table's value is that it can be trusted when
+-- a health signal is in dispute):
+--   GUARANTEED  -- no double count, ever, on any failure path.
+--   GUARANTEED  -- no negative eval_count, ever.
+--   GUARANTEED  -- a failed or delayed tick loses nothing: the next successful tick's delta covers
+--                  every window since the last durable row. Only 3m resolution degrades.
+--   GUARANTEED  -- SUM(eval_count) needs no boot-awareness. Deltas never span days, so a long-lived
+--                  process cannot over-attribute the way a raw cumulative counter would.
+--   NOT GUARANTEED -- evaluations between the last SUCCESSFUL write and process death are lost.
+--                  They exist only in JVM memory, so no protocol can persist them. On a GRACEFUL
+--                  shutdown a @PreDestroy flush closes this window (a planned restart or deploy
+--                  loses nothing). On a HARD kill / crash / OOM it is open, and it is bounded by
+--                  the time since the last successful write -- which is <= 3 min while writes are
+--                  succeeding, but is LONGER if writes were already failing. It is not a fixed
+--                  3-minute bound; do not read it as one.
 --
 -- ROWS ARE THE LIVENESS EVIDENCE. Every outcome is written every bucket, INCLUDING zeros. That is
 -- what separates the three states the counters used to conflate:
 --   * rows present, some eval_count > 0  -> process up AND the eval loop is evaluating.
 --   * rows present, all eval_count = 0   -> process up, scheduler ticking, but the eval loop
 --                                           produced nothing (no bars arriving, or a dead engine).
---   * rows ABSENT                        -> the process was down, or the default @Scheduled pool
---                                           was wedged for that stretch.
+--   * rows ABSENT                        -> the process was down, or its rollup could not write.
 --
 -- CANONICAL LIVENESS QUERY -- "was the engine evaluating on date X, and what was the outcome mix",
--- one SELECT. NOTE the +05:30 BOUNDS (never ::date -- in-container now()/::date is UTC and is
--- off-by-one across IST midnight) and the 'Asia/Kolkata' RENDER (AT TIME ZONE '+05:30' INVERTS
--- under the POSIX sign convention and would print 14:20 IST as 03:20):
+-- one SELECT, no boot-awareness needed. NOTE the +05:30 BOUNDS (never ::date -- in-container
+-- now()/::date is UTC and is off-by-one across IST midnight) and the 'Asia/Kolkata' RENDER
+-- (AT TIME ZONE '+05:30' INVERTS under the POSIX sign convention: it prints 14:20 IST as 03:20):
 --
 --   SELECT outcome,
 --          SUM(eval_count)                              AS evaluations,
 --          COUNT(*)                                     AS buckets_recorded,
 --          COUNT(*) FILTER (WHERE eval_count > 0)       AS buckets_active,
+--          COUNT(DISTINCT boot_id)                      AS boots,
 --          MIN(bucket_time) AT TIME ZONE 'Asia/Kolkata' AS first_bucket_ist,
 --          MAX(bucket_time) AT TIME ZONE 'Asia/Kolkata' AS last_bucket_ist
 --     FROM strategy.signal_eval_outcomes
@@ -64,44 +96,50 @@
 --    ORDER BY evaluations DESC;
 --
 -- Reading it: buckets_recorded > 0 proves the PROCESS was up; SUM(evaluations) > 0 proves the EVAL
--- LOOP was running; the per-outcome split is the mix (e.g. an all-`composite-below-threshold` day is
--- a healthy engine on a directionless leg -- exactly the 2026-07-17 SuperTrend-DOWN shape -- NOT a
--- starved one). `confluence-blocked` is the only outcome that also writes a signal_rejections row,
--- which is why an empty rejections table has never meant a dead engine.
+-- LOOP was running; boots counts how many times it restarted that day; the per-outcome split is the
+-- mix (e.g. an all-`composite-below-threshold` day is a healthy engine on a directionless leg --
+-- exactly the 2026-07-17 SuperTrend-DOWN shape -- NOT a starved one). `confluence-blocked` is the
+-- only outcome that also writes a signal_rejections row, which is why an empty rejections table has
+-- never meant a dead engine.
 --
--- OBSERVABILITY ONLY. Nothing here is consulted by any trading decision. The rollup runs on the
--- default @Scheduled pool off the eval thread, reads counters and writes rows; it can never alter
--- what is traded. The golden replay boots no scheduler, so no rows are written on backtest ->
--- parity-safe by construction. Plain OLTP table (not a hypertable) -- the volume is trivial.
+-- OBSERVABILITY ONLY. Nothing here is consulted by any trading decision. The rollup runs on its OWN
+-- dedicated single-thread scheduler (evalOutcomeTaskScheduler) -- never the eval thread, never the
+-- shared default pool that carries paper stop-loss alerting and engine reconcile, and never the
+-- fenced monitor detector pool. The golden replay boots no scheduler, so no rows are written on
+-- backtest -> parity-safe by construction. Plain OLTP table (not a hypertable) -- volume is trivial.
 --
 -- RETENTION: 180 days via SignalEvalOutcomeRollupJob's daily 02:30-IST prune, matching the sibling
 -- risk_suppressions convention exactly (artha.signals.eval-outcome-retention-days /
 -- ARTHA_SIGNALS_EVAL_OUTCOME_RETENTION_DAYS; 0 or negative DISABLES the prune rather than wiping
--- the table). ~980 rows/day * 180d ~= 176k rows -- a few MB.
+-- the table). ~980 rows/day * 180d ~= 176k rows -- a few MB. The prune cannot orphan a live boot's
+-- checkpoint: it deletes by bucket_time, and a running boot rewrites a fresh row every 3 minutes,
+-- so its newest row (the one the checkpoint read takes) is always far inside the horizon.
 
 CREATE TABLE signal_eval_outcomes (
-  bucket_time  TIMESTAMPTZ NOT NULL, -- snapshot instant floored to a 3m boundary (IST offset).
-                                     -- IST is +05:30 = 19800s = 110 * 180, so 3m boundaries coincide
-                                     -- in UTC and IST and 09:15 IST is always a boundary.
-  outcome      TEXT NOT NULL,        -- SignalEngine.Outcome tag: fired / confluence-blocked /
-                                     -- confluence-gate-absent / discipline-paused /
-                                     -- composite-below-threshold / chart-gate-failed /
-                                     -- unscoreable-indicators-warming
-  eval_count   BIGINT NOT NULL,      -- evaluations with this outcome in the window ENDING at
-                                     -- bucket_time. Never negative (see the DELTA note above).
-                                     -- Zero is meaningful: it proves the process was alive.
-  PRIMARY KEY (bucket_time, outcome)
+  bucket_time       TIMESTAMPTZ NOT NULL, -- snapshot instant floored to a 3m boundary (IST offset).
+                                          -- IST is +05:30 = 19800s = 110 * 180, so 3m boundaries
+                                          -- coincide in UTC and IST; 09:15 IST is always a boundary.
+  boot_id           UUID NOT NULL,        -- the counter epoch (SignalEngine.OutcomeSnapshot.epoch).
+                                          -- Scopes the checkpoint read; a restart yields a new one.
+  outcome           TEXT NOT NULL,        -- SignalEngine.Outcome tag: fired / confluence-blocked /
+                                          -- confluence-gate-absent / discipline-paused /
+                                          -- composite-below-threshold / chart-gate-failed /
+                                          -- unscoreable-indicators-warming
+  eval_count        BIGINT NOT NULL,      -- DELTA: evaluations in the window ending at bucket_time.
+                                          -- Never negative. Zero is meaningful -- it proves the
+                                          -- process was alive. This is the column you SUM.
+  cumulative_count  BIGINT NOT NULL,      -- the counter's value at this snapshot, since THIS boot.
+                                          -- The DURABLE CHECKPOINT the next delta differences
+                                          -- against -- do not drop it as "redundant".
+  PRIMARY KEY (bucket_time, boot_id, outcome)
 );
 
--- The PK's leading bucket_time column already serves the only query pattern (a date-bounded range
--- scan grouped by outcome), so no additional index is created.
-
--- The ON CONFLICT merge ADDS rather than replaces. Two writers can legitimately land in one bucket
--- during a blue/green restart overlap, where both instances really did evaluate; addition is the
--- delta-correct merge. A single-instance re-fire is otherwise impossible (one scheduler thread).
+-- Serves the checkpoint read (newest row per outcome for one boot). The PK's leading bucket_time
+-- already serves the date-bounded liveness query, so no other index is needed.
+CREATE INDEX idx_signal_eval_outcomes_boot
+  ON signal_eval_outcomes (boot_id, bucket_time DESC);
 
 -- ay_strategy is the READ-ONLY per-schema role and never writes here. Unlike the append-only
--- siblings (V015/V027/V040/V042, which grant SELECT+INSERT), a bare INSERT on this table conflicts
--- on the PK -- writing needs UPDATE too, and only the `artha` owner does it. SELECT only is the
--- honest grant.
+-- siblings (V015/V027/V040/V042, which grant SELECT+INSERT), writing this table needs UPDATE too
+-- (the upsert merge), and only the `artha` owner does it. SELECT only is the honest grant.
 GRANT SELECT ON signal_eval_outcomes TO ay_strategy;

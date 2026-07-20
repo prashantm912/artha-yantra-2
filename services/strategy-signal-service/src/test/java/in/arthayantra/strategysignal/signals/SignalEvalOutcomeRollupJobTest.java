@@ -15,10 +15,15 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 
 /**
- * The delta + bucketing semantics of the V043 rollup, tested as pure functions — no clock, no
- * engine, no database. These are the properties the retroactive-liveness record depends on: a
- * restart must never read as negative activity or as a gap, and every outcome must be recorded every
- * bucket including zeros.
+ * The delta, bucketing and scheduling semantics of the V043 rollup, tested as pure functions — no
+ * clock, no engine, no database. These are the properties the retroactive-liveness record depends
+ * on: every outcome recorded every bucket including zeros, a restart that reads as neither negative
+ * activity nor a gap, and a cron that actually parses.
+ *
+ * <p>The idempotency guarantees (no double count on a lost acknowledgement, no loss across a
+ * baseline reset) are proven against a real database in
+ * {@code SignalEvalOutcomeRollupIntegrationTest} — they are properties of the DURABLE checkpoint, so
+ * they cannot be demonstrated in-memory.
  */
 class SignalEvalOutcomeRollupJobTest {
 
@@ -30,15 +35,18 @@ class SignalEvalOutcomeRollupJobTest {
     return map;
   }
 
+  private static long sum(Map<String, Long> deltas) {
+    return deltas.values().stream().mapToLong(Long::longValue).sum();
+  }
+
   @Test
   void everyOutcomeIsRecordedEveryBucketIncludingZeros() {
-    Map<String, Long> deltas =
-        SignalEvalOutcomeRollupJob.deltas(Map.of(), counts(Outcome.FIRED, 3));
+    Map<String, Long> cumulative = SignalEvalOutcomeRollupJob.byTag(counts(Outcome.FIRED, 3));
 
     // A zero row is the evidence that the process was alive but the eval loop produced nothing —
     // omitting it would reproduce the very ambiguity this table exists to close.
-    assertThat(deltas).hasSize(Outcome.values().length);
-    assertThat(deltas.keySet())
+    assertThat(cumulative).hasSize(Outcome.values().length);
+    assertThat(cumulative.keySet())
         .containsExactlyInAnyOrder(
             "fired",
             "confluence-blocked",
@@ -47,29 +55,31 @@ class SignalEvalOutcomeRollupJobTest {
             "composite-below-threshold",
             "chart-gate-failed",
             "unscoreable-indicators-warming");
-    assertThat(deltas.get("fired")).isEqualTo(3L);
-    assertThat(deltas.get("chart-gate-failed")).isZero();
+    assertThat(cumulative.get("fired")).isEqualTo(3L);
+    assertThat(cumulative.get("chart-gate-failed")).isZero();
   }
 
   @Test
-  void deltaIsTheGrowthSinceTheLastSuccessfulSnapshot() {
-    Map<Outcome, Long> baseline = counts(Outcome.FIRED, 10, Outcome.CHART_GATE_FAILED, 200);
-    Map<Outcome, Long> current = counts(Outcome.FIRED, 12, Outcome.CHART_GATE_FAILED, 263);
+  void deltaIsTheGrowthSinceTheDurableCheckpoint() {
+    Map<String, Long> checkpoint = Map.of("fired", 10L, "chart-gate-failed", 200L);
+    Map<String, Long> cumulative =
+        SignalEvalOutcomeRollupJob.byTag(counts(Outcome.FIRED, 12, Outcome.CHART_GATE_FAILED, 263));
 
-    Map<String, Long> deltas = SignalEvalOutcomeRollupJob.deltas(baseline, current);
+    Map<String, Long> deltas = SignalEvalOutcomeRollupJob.deltas(checkpoint, cumulative);
 
     assertThat(deltas.get("fired")).isEqualTo(2L);
     assertThat(deltas.get("chart-gate-failed")).isEqualTo(63L);
   }
 
   @Test
-  void firstSnapshotAfterBootReportsEverythingSinceBootAndNeverGoesNegative() {
-    // A restart resets the Micrometer counters AND the in-memory baseline together — they share a
-    // JVM lifetime. So the post-restart baseline is empty and the first snapshot reports the
-    // post-restart counts in full. This is the whole restart contract: no negative, no gap.
-    Map<Outcome, Long> afterRestart = counts(Outcome.FIRED, 4, Outcome.COMPOSITE_BELOW_THRESHOLD, 91);
+  void aBootWithNoCheckpointReportsEverythingSinceBootAndNeverGoesNegative() {
+    // A restart yields BOTH zeroed counters and a fresh epoch, so the new boot finds no checkpoint
+    // of its own and differences against 0. That is the whole restart contract: no negative, no gap.
+    Map<String, Long> afterRestart =
+        SignalEvalOutcomeRollupJob.byTag(
+            counts(Outcome.FIRED, 4, Outcome.COMPOSITE_BELOW_THRESHOLD, 91));
 
-    Map<String, Long> deltas = SignalEvalOutcomeRollupJob.deltas(new EnumMap<>(Outcome.class), afterRestart);
+    Map<String, Long> deltas = SignalEvalOutcomeRollupJob.deltas(Map.of(), afterRestart);
 
     assertThat(deltas.values()).allSatisfy(v -> assertThat(v).isNotNegative());
     assertThat(deltas.get("fired")).isEqualTo(4L);
@@ -81,31 +91,27 @@ class SignalEvalOutcomeRollupJobTest {
     // 09:15-12:00 on one boot, then a restart, then 12:00-15:30 on the next. Summing the persisted
     // deltas must equal the true evaluation total — the counters themselves cannot answer this.
     long preRestart =
-        SignalEvalOutcomeRollupJob.deltas(Map.of(), counts(Outcome.CHART_GATE_FAILED, 4000))
-            .values()
-            .stream()
-            .mapToLong(Long::longValue)
-            .sum();
+        sum(
+            SignalEvalOutcomeRollupJob.deltas(
+                Map.of(),
+                SignalEvalOutcomeRollupJob.byTag(counts(Outcome.CHART_GATE_FAILED, 4000))));
     long postRestart =
-        SignalEvalOutcomeRollupJob.deltas(
-                new EnumMap<>(Outcome.class), counts(Outcome.CHART_GATE_FAILED, 3875))
-            .values()
-            .stream()
-            .mapToLong(Long::longValue)
-            .sum();
+        sum(
+            SignalEvalOutcomeRollupJob.deltas(
+                Map.of(),
+                SignalEvalOutcomeRollupJob.byTag(counts(Outcome.CHART_GATE_FAILED, 3875))));
 
     assertThat(preRestart + postRestart).isEqualTo(7875L);
   }
 
   @Test
-  void aMissedSnapshotIsAbsorbedByTheNextOneRatherThanLost() {
-    // The baseline advances only after a DURABLE write, so a failed/delayed tick leaves it behind
-    // and the next successful delta covers both windows. Only 3m resolution degrades; no count is
-    // lost and none is written twice.
-    Map<Outcome, Long> baseline = counts(Outcome.FIRED, 5);
-    Map<Outcome, Long> afterTwoWindows = counts(Outcome.FIRED, 9); // tick at +3m failed, +6m succeeds
+  void aMissedSnapshotIsAbsorbedByTheNextRatherThanLost() {
+    // The checkpoint only moves when a write commits, so a failed/delayed tick leaves it behind and
+    // the next delta covers both windows. Only 3m resolution degrades; no count is lost.
+    Map<String, Long> checkpoint = Map.of("fired", 5L);
+    Map<String, Long> afterTwoWindows = SignalEvalOutcomeRollupJob.byTag(counts(Outcome.FIRED, 9));
 
-    assertThat(SignalEvalOutcomeRollupJob.deltas(baseline, afterTwoWindows).get("fired"))
+    assertThat(SignalEvalOutcomeRollupJob.deltas(checkpoint, afterTwoWindows).get("fired"))
         .isEqualTo(4L);
   }
 
@@ -115,7 +121,10 @@ class SignalEvalOutcomeRollupJobTest {
    */
   private static String defaultCron(String method) throws NoSuchMethodException {
     String placeholder =
-        SignalEvalOutcomeRollupJob.class.getDeclaredMethod(method).getAnnotation(Scheduled.class).cron();
+        SignalEvalOutcomeRollupJob.class
+            .getDeclaredMethod(method)
+            .getAnnotation(Scheduled.class)
+            .cron();
     assertThat(placeholder).startsWith("${").endsWith("}");
     return placeholder.substring(placeholder.indexOf(':') + 1, placeholder.length() - 1);
   }

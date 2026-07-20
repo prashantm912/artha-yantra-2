@@ -591,8 +591,10 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
             Optional.empty(),
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
+            mock(CompositeRejectionWriter.class),
             mock(org.springframework.transaction.PlatformTransactionManager.class),
-            60);
+            60,
+            true);
     isolatedEngine.kiteConnectedReloadDelayMillis = 500L;
 
     try {
@@ -1486,8 +1488,10 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         Optional.empty(),
         mock(RejectionWriter.class),
         mock(RiskSuppressionWriter.class),
+        mock(CompositeRejectionWriter.class),
         mock(org.springframework.transaction.PlatformTransactionManager.class),
-        60);
+        60,
+        true);
   }
 
   private void publishBar(String tradingsymbol, OffsetDateTime bucket, BigDecimal close)

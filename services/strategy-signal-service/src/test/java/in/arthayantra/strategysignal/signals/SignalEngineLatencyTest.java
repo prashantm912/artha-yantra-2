@@ -126,8 +126,10 @@ class SignalEngineLatencyTest {
             Optional.empty(),
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
+            mock(CompositeRejectionWriter.class),
             mock(PlatformTransactionManager.class),
-            60);
+            60,
+            true);
     return new Fixture(engine, signals, meters, OffsetDateTime.now(clock));
   }
 

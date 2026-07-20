@@ -12,12 +12,14 @@ import in.arthayantra.strategyengine.eval.BarValues;
 import in.arthayantra.strategyengine.eval.EntryEvaluator;
 import in.arthayantra.strategyengine.eval.ExitEvaluator;
 import in.arthayantra.strategyengine.eval.IndicatorBank;
+import in.arthayantra.strategyengine.eval.ScoreBreakdown;
 import in.arthayantra.strategyengine.eval.ScoreBreakdownJson;
 import in.arthayantra.strategyengine.eval.SeriesProvider;
 import in.arthayantra.strategyengine.golden.TickwiseGoldenRunner;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
+import in.arthayantra.strategyschema.CanonicalJson;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer;
 import in.arthayantra.strategysignal.scalper.OpenHighLow;
@@ -212,6 +214,14 @@ public class SignalEngine {
   // PF-03 live-only: every ENTRY the per-book risk governor vetoed (which rail + would-be leg).
   // Bounded ASYNC writer so a DB stall can never park the sole signal-eval thread (#866 class).
   private final RiskSuppressionWriter riskSuppressions;
+  // Live-only tuning record: every entry whose chart gates passed but whose A1 composite came in
+  // under threshold (V044 composite_rejections). Bounded ASYNC writer so a DB stall can never park
+  // the sole signal-eval thread (#866 class).
+  private final CompositeRejectionWriter compositeRejections;
+  // Kill switch for the above. Default ON — the row is the whole point of the change — but flipping
+  // ARTHA_SIGNALS_RECORD_COMPOSITE_REJECTIONS=false in .env stops the writes without an image
+  // rebuild, which is the escape hatch if the added row rate (~192/session) ever bites.
+  private final boolean recordCompositeRejections;
 
   /**
    * The verdict of ONE entry evaluation at a primary bar close (chip task_37ee83e0).
@@ -292,8 +302,8 @@ public class SignalEngine {
 
   /**
    * Session date of the last unscoreable WARN per SERIES ({@code exchange:tradingsymbol:interval}).
-   * The fault is per-series, not per-strategy: all 63 published+enabled SCALPERS resolve to ONE 3m
-   * NIFTY-future series, so an unwarmed series would emit ~63 identical WARNs every bar (~1,260/h)
+   * The fault is per-series, not per-strategy: all published+enabled SCALPERS resolve to ONE 3m
+   * NIFTY-future series, so an unwarmed series would emit one identical WARN per scalper every bar
    * that say nothing the first one does not. Keyed by series and stamped with the session date, so
    * it self-expires each day and stays bounded by the number of live series.
    */
@@ -411,8 +421,12 @@ public class SignalEngine {
       java.util.Optional<ScalperConfluenceGate> scalperGate,
       RejectionWriter rejectionWriter,
       RiskSuppressionWriter riskSuppressions,
+      CompositeRejectionWriter compositeRejections,
       org.springframework.transaction.PlatformTransactionManager transactionManager,
-      @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes) {
+      @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes,
+      @Value("${artha.signals.record-composite-rejections:true}") boolean recordCompositeRejections) {
+    this.compositeRejections = compositeRejections;
+    this.recordCompositeRejections = recordCompositeRejections;
     this.registry = registry;
     this.signals = signals;
     this.rejectionWriter = rejectionWriter;
@@ -1130,6 +1144,11 @@ public class SignalEngine {
         EntryEvaluator.evaluate(strategy.definition(), bank, index);
     Outcome chart = classifyEntryOutcome(evaluation);
     if (chart != Outcome.FIRED) {
+      // Observability only: records what already happened, returns nothing, and cannot throw — the
+      // Outcome returned below is identical to the one this path returned before. The
+      // Σ(outcomes) == evaluations invariant is untouched: still exactly one Outcome out of this
+      // path, still counted exactly once by the sole caller.
+      recordCompositeRejection(chart, strategy, exchange, tradingsymbol, interval, bar, evaluation);
       return chart;
     }
     if (strategy.scalper() != null) {
@@ -1157,6 +1176,79 @@ public class SignalEngine {
     return evaluation.get().breakdown().gate().passed()
         ? Outcome.COMPOSITE_BELOW_THRESHOLD
         : Outcome.CHART_GATE_FAILED;
+  }
+
+  /**
+   * Persists ONE {@code composite_rejections} row (V044) when an entry evaluation ended in {@link
+   * Outcome#COMPOSITE_BELOW_THRESHOLD} — the outcome that carries the tuning signal. All 38
+   * surviving published scalpers share ONE composite ({@code rsi14} rsi_momentum w1 + {@code
+   * supertrend} direction w1 at threshold 0.2 on one 3m NIFTY-future series), so this outcome is
+   * effectively "RSI did not clear", and the row makes the RSI operand distribution vs the ~58 it
+   * needs analysable. Everything persisted is ALREADY computed: {@link EntryEvaluator} builds the
+   * full {@link ScoreBreakdown} on the no-entry path and returns it, and the engine used to discard
+   * it here.
+   *
+   * <p><b>Deliberately NOT recorded: {@link Outcome#CHART_GATE_FAILED}.</b> Measured 2026-07-20 it
+   * runs ~3.4x the volume (504 vs 192 in a session) and carries no tuning signal — a gate said no,
+   * and the composite was never consulted, so there is no operand distribution to study. The
+   * exclusion is load-bearing, not incidental; {@code SignalEngineCompositeRejectionTest} asserts it
+   * exhaustively over every {@link Outcome}. The other five outcomes are excluded for the same
+   * reason: none of them is a composite verdict.
+   *
+   * <p><b>Its own table, NOT a new {@code signal_rejections} rail.</b> That table records why the
+   * §12.3 CONFLUENCE gate blocked a chart-entry, and all of its consumers assume every row carries
+   * the confluence diagnostic. Sharing it was built and rejected: it forced a filter into
+   * {@link DotHealthCanary}'s query to stop ~38 dot-less rows per SuperTrend-DOWN bar flooding its
+   * 40-row window and paging every required dot as DEAD. See the V044 header.
+   *
+   * <p><b>Never breaks the live path.</b> The write is an O(1) enqueue onto the bounded async
+   * {@link CompositeRejectionWriter} (a saturated queue drops + counts, never back-pressures the
+   * sole {@code signal-eval} thread), and a persistence failure is swallowed and logged inside the
+   * writer — the same doctrine {@link #recordRejection} already follows.
+   *
+   * <p><b>{@code lastGateOutputAtMs} is deliberately NOT stamped here</b>, unlike
+   * {@link #recordRejection}. That heartbeat feeds {@link SignalStarvationCanary}; stamping it on
+   * every composite-below-threshold bar would mark the engine "producing output" throughout a
+   * SuperTrend-DOWN leg — exactly the quiet stretch the canary exists to distinguish from a dead
+   * engine — and would blind it. Recording an outcome must not re-arm a liveness detector.
+   *
+   * <p><b>Live-only by construction:</b> the deterministic golden replay drives
+   * {@code TickwiseGoldenRunner}, never this engine, so no rows exist on backtest and parity is
+   * unaffected.
+   *
+   * <p>Package-visible so the exhaustive per-outcome test can drive it directly.
+   */
+  void recordCompositeRejection(
+      Outcome outcome, Loaded strategy, String exchange, String tradingsymbol, String interval,
+      EngineCandle bar, Optional<EntryEvaluator.Evaluation> evaluation) {
+    // evaluation.isEmpty() cannot co-occur with this outcome (classifyEntryOutcome returns it only
+    // from the present branch) — folded into the same early return so the method is total and can
+    // never throw onto the eval thread.
+    if (!recordCompositeRejections
+        || outcome != Outcome.COMPOSITE_BELOW_THRESHOLD
+        || evaluation.isEmpty()) {
+      return;
+    }
+    ScoreBreakdown breakdown = evaluation.get().breakdown();
+    // CompositeScorer divides at scale 8, so a raw composite reads `0.12500000`. Normalize through
+    // the SAME canonicalization the persisted breakdown uses (no exponent, no trailing zeros) so the
+    // numeric columns and the JSON they summarize agree — otherwise the row's `composite` column
+    // reads 0.12500000 while its own score_breakdown reads 0.125.
+    BigDecimal composite = CanonicalJson.normalize(breakdown.composite());
+    BigDecimal threshold = CanonicalJson.normalize(breakdown.threshold());
+    compositeRejections.record(
+        strategy.versionId(),
+        strategy.slug(),
+        exchange,
+        tradingsymbol,
+        interval,
+        composite,
+        threshold,
+        CanonicalJson.normalize(composite.subtract(threshold)), // signed; negative = how far short
+        // The FROZEN canonical writer — the same one the live signals.score_breakdown column and the
+        // replay use. A READ of the frozen DTO: no new shape, and nothing here can move parity.
+        ScoreBreakdownJson.write(breakdown),
+        bar.bucketStart().withOffsetSameInstant(Ist.OFFSET));
   }
 
   /** True once the bar is past {@link #WARMUP_GRACE_UNTIL} in IST — i.e. mid-session. */

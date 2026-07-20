@@ -76,7 +76,7 @@ artha:
     # 0/negative DISABLES the prune (the guard never lets a non-positive horizon delete everything).
     # Env name MUST match the compose passthrough exactly (#653 trap: a mismatch swallows the override).
     risk-suppression-retention-days: ${ARTHA_SIGNALS_RISK_SUPPRESSION_RETENTION_DAYS:180}
-    # V043 signal_eval_outcomes retention. The 3m rollup of the engine's entry-evaluation counters
+    # V045 signal_eval_outcomes retention. The 3m rollup of the engine's entry-evaluation counters
     # is what makes "was the engine alive on date X" answerable after a restart (the Micrometer
     # counters reset to zero on boot). ~980 rows/day, so 180d is ~176k narrow rows — a few MB.
     # Same shape/default as the risk-suppression knob above: daily 02:30-IST off-market DELETE,

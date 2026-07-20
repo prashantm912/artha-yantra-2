@@ -20,7 +20,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * {@code DotHealthCanary.sweep}. The engine reload trio, PaperScheduler, and every EOD/batch job
  * keep the default pool (their serial single-thread assumption is load-bearing).
  *
- * <p>A THIRD pool, {@link #evalOutcomeTaskScheduler()}, carries the V043 eval-outcome rollup. It
+ * <p>A THIRD pool, {@link #evalOutcomeTaskScheduler()}, carries the V045 eval-outcome rollup. It
  * belongs on neither of the other two — see that method's javadoc for why both were rejected.
  */
 @Configuration(proxyBeanMethods = false)
@@ -61,7 +61,7 @@ public class MonitorSchedulingConfig {
   }
 
   /**
-   * A single daemon thread owned solely by {@code SignalEvalOutcomeRollupJob} (V043). Unlike the two
+   * A single daemon thread owned solely by {@code SignalEvalOutcomeRollupJob} (V045). Unlike the two
    * pools above, this one exists to be EXPENDABLE: the rollup makes a synchronous JDBC write, and
    * the whole point is that a DB lock, a lock wait, or a network stall can park nothing but the
    * rollup itself.
@@ -85,7 +85,7 @@ public class MonitorSchedulingConfig {
    *
    * <p>Belt-and-braces, the write is also BOUNDED: {@code SignalEvalOutcomeRepository} runs on its
    * own {@code JdbcTemplate} with an explicit query timeout, so even this thread cannot hang
-   * indefinitely. A missed tick is harmless by design — the V043 delta protocol differences against
+   * indefinitely. A missed tick is harmless by design — the V045 delta protocol differences against
    * the last DURABLE row, so the next successful tick absorbs every skipped window exactly once.
    */
   @Bean

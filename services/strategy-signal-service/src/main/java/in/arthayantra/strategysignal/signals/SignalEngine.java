@@ -411,7 +411,7 @@ public class SignalEngine {
   private final java.util.Map<Outcome, Counter> outcomeCounters = new java.util.EnumMap<>(Outcome.class);
   // Identifies THIS generation of the counters above. Born with them and never reassigned, so a
   // restart necessarily yields both zeroed counters and a fresh epoch — the invariant that lets
-  // SignalEvalOutcomeRollupJob keep its delta checkpoint in the DB instead of in memory (V043).
+  // SignalEvalOutcomeRollupJob keep its delta checkpoint in the DB instead of in memory (V045).
   private final java.util.UUID counterEpoch = java.util.UUID.randomUUID();
   // Audit emit-entry-not-transactional: each emit path's dependent writes commit atomically —
   // a mid-sequence failure must never leave an ENTRY without its option leg / suggested qty,
@@ -941,7 +941,7 @@ public class SignalEngine {
   /**
    * A point-in-time read of every {@link Outcome} counter, for {@link SignalEvalOutcomeRollupJob} to
    * persist (the counters are in-memory and reset on restart, so liveness was not answerable
-   * retroactively — see {@code V043__signal_eval_outcomes.sql}).
+   * retroactively — see {@code V045__signal_eval_outcomes.sql}).
    *
    * <p><b>Costs the eval thread nothing.</b> This is a read of counters already maintained in
    * memory, called from the rollup's own scheduler thread. Each {@code Counter.count()} is a

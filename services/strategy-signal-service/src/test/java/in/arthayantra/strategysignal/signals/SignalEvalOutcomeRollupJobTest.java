@@ -15,7 +15,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 
 /**
- * The delta, bucketing and scheduling semantics of the V043 rollup, tested as pure functions — no
+ * The delta, bucketing and scheduling semantics of the V045 rollup, tested as pure functions — no
  * clock, no engine, no database. These are the properties the retroactive-liveness record depends
  * on: every outcome recorded every bucket including zeros, a restart that reads as neither negative
  * activity nor a gap, and a cron that actually parses.

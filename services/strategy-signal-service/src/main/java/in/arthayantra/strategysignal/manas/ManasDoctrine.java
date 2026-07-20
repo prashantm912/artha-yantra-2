@@ -128,6 +128,11 @@ public class ManasDoctrine implements SwingDoctrine {
     return funnel.buyableAndOnDeck().stream().map(this::toCandidate).toList();
   }
 
+  @Override
+  public java.util.Optional<java.time.LocalDate> inputsAsOf() {
+    return funnel.screenDate();
+  }
+
   private SwingCandidate toCandidate(ManasFunnelClient.Candidate c) {
     // Seed ONLY the non-null pivot contexts — a 0-filled breakout/VCP context would make its crossover
     // gate (px > pivot) pass on every symbol.

@@ -107,6 +107,11 @@ public class MinerviniDoctrine implements SwingDoctrine {
     return funnel.buyableAndOnDeck().stream().map(this::toCandidate).toList();
   }
 
+  @Override
+  public java.util.Optional<java.time.LocalDate> inputsAsOf() {
+    return funnel.screenDate();
+  }
+
   private SwingCandidate toCandidate(MinerviniFunnelClient.Candidate c) {
     Map<String, BigDecimal> seeds = new LinkedHashMap<>();
     seeds.put(PIVOT, c.pivot() == null ? BigDecimal.ZERO : c.pivot());

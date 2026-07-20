@@ -6,8 +6,10 @@ import in.arthayantra.strategyengine.eval.ExitEvaluator;
 import in.arthayantra.strategyengine.eval.IndicatorBank;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * The family-specific rules a swing batch varies by — and nothing more. The {@link SwingBatchEngine}
@@ -58,6 +60,16 @@ public interface SwingDoctrine {
 
   /** The day's family-neutral funnel candidates (buyable + on-deck), normalized from the family funnel. */
   List<SwingCandidate> candidates();
+
+  /**
+   * WHICH session's screen {@link #candidates()} would serve right now — the catch-up's input-readiness
+   * gate. The funnel endpoint silently falls back to the newest PERSISTED screen date, so a batch fired
+   * before its screener landed reads the PRIOR session's names with no error and no exception; that is
+   * the 2026-07-17 shape (screens did not land until 22:15, so a 22:14 catch-up would have entered off
+   * 07-16's funnel). {@link SwingBatchCatchUp} refuses unless this equals the session it is catching up.
+   * Empty = unknown/unreachable, which the caller treats as NOT ready.
+   */
+  Optional<LocalDate> inputsAsOf();
 
   /**
    * The indicator-context seeds for a sell-decision / held-position re-evaluation, read from the

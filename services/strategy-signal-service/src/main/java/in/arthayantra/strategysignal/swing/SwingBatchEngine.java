@@ -24,6 +24,7 @@ import in.arthayantra.strategysignal.signals.SignalPublisher;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -145,6 +146,34 @@ public class SwingBatchEngine {
 
   /** Runs one full daily batch for a family: the entry pass over its funnel, then the exit pass. */
   public SwingRun runDaily(SwingDoctrine doctrine) {
+    return runDaily(doctrine, null, true);
+  }
+
+  /** Runs a batch PINNED to a session (entries enabled) — see {@link #runDaily(SwingDoctrine, LocalDate, boolean)}. */
+  public SwingRun runDaily(SwingDoctrine doctrine, LocalDate requiredBarDate) {
+    return runDaily(doctrine, requiredBarDate, true);
+  }
+
+  /**
+   * Runs one daily batch, optionally PINNED to the session whose daily bar it must decide on, with the
+   * entry pass optionally suppressed.
+   *
+   * <p><b>{@code requiredBarDate}</b> is the catch-up staleness guard ({@link SwingBatchCatchUp}):
+   * every scoring decision reads the LAST bar of a {@code now-warmupDays → now} fetch, so a late run
+   * would price entries and — far worse — EXITS off whatever bar is newest. When pinned, each series is
+   * TRUNCATED to end at the session's bar (see {@link #truncateToSession}): the exit then settles at
+   * the session's own daily close, exactly as the on-time run would have, whether the catch-up is that
+   * night or days later. A symbol with no bar for the session is dropped to empty, which both passes
+   * surface as a counted, alerted skip ("STOP NOT EVALUATED TODAY"). {@code null} — the scheduled /
+   * on-demand path — truncates nothing and is byte-identical to the pre-catch-up behaviour.
+   *
+   * <p><b>{@code entriesEnabled}</b> gates the ENTRY pass (and its F3 probe). The catch-up runs exits
+   * unconditionally — a held stop must be evaluated off the session bar regardless of the funnel — but
+   * only enters when the session's screen is actually available (the funnel silently serves the latest
+   * persisted screen, so entering off it would take the WRONG day's names). The scheduled path passes
+   * {@code true}.
+   */
+  public SwingRun runDaily(SwingDoctrine doctrine, LocalDate requiredBarDate, boolean entriesEnabled) {
     // The single arming gate for BOTH the scheduler AND the on-demand POST /run: with the family flag
     // off the batch is a NO-OP whoever calls it (audit P9 — else a curious authenticated POST /run
     // fires entries + auto-paper before the owner has armed the flag).
@@ -162,13 +191,20 @@ public class SwingBatchEngine {
     // doctrine.candidates() call is a fresh (time-sensitive) network read that could diverge from what
     // the entry pass actually admitted. Snapshot the held set BEFORE the entry pass mutates it (the
     // probe partitions would-be entrants into admitted/dropped by diffing against the held-AFTER set).
-    List<SwingCandidate> candidates = doctrine.candidates();
+    // Entries suppressed → no funnel fetch, no probe (a catch-up whose screen is not the session's).
+    List<SwingCandidate> candidates = entriesEnabled ? doctrine.candidates() : List.of();
     java.util.Set<String> heldBefore =
         new java.util.HashSet<>(openLotsBySymbol(resolution).keySet());
-    EntryResult entry = entryPass(doctrine, swings, resolution, seriesCache, candidates);
-    ExitResult exit = exitPass(doctrine, resolution, seriesCache);
+    EntryResult entry =
+        entriesEnabled
+            ? entryPass(doctrine, swings, resolution, seriesCache, candidates, requiredBarDate)
+            : new EntryResult(0, 0);
+    ExitResult exit = exitPass(doctrine, resolution, seriesCache, requiredBarDate);
     AdmissionProbe probe =
-        admissionProbe(doctrine, swings, resolution, seriesCache, candidates, heldBefore);
+        entriesEnabled
+            ? admissionProbe(
+                doctrine, swings, resolution, seriesCache, candidates, heldBefore, requiredBarDate)
+            : AdmissionProbe.empty();
     log.info(
         "{} swing batch: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped"
             + " (would-enter {}, admitted {}, cap-exceedance {})",
@@ -262,7 +298,8 @@ public class SwingBatchEngine {
 
   private EntryResult entryPass(
       SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
-      Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates) {
+      Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates,
+      LocalDate requiredBarDate) {
     // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped at the START
     // of the run takes no entries at all (cheap — skips the whole candidate scan).
     if (entryBlocked(doctrine)) {
@@ -287,7 +324,7 @@ public class SwingBatchEngine {
       if (isAdd && !pyramid.hasRoom(lots)) {
         continue; // held with no room → skip BEFORE any fetch (the single-lot held-skip)
       }
-      List<EngineCandle> series = series(doctrine, c.symbol(), seriesCache);
+      List<EngineCandle> series = series(doctrine, c.symbol(), seriesCache, requiredBarDate);
       if (series.size() < doctrine.minBars()) {
         continue;
       }
@@ -371,10 +408,10 @@ public class SwingBatchEngine {
   private AdmissionProbe admissionProbe(
       SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
       Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates,
-      java.util.Set<String> heldBefore) {
+      java.util.Set<String> heldBefore, LocalDate requiredBarDate) {
     try {
       return computeAdmissionProbe(
-          doctrine, swings, resolution, seriesCache, candidates, heldBefore);
+          doctrine, swings, resolution, seriesCache, candidates, heldBefore, requiredBarDate);
     } catch (RuntimeException e) {
       log.warn(
           "{} swing admission probe failed (measurement-only, ignored): {}",
@@ -395,7 +432,7 @@ public class SwingBatchEngine {
   private AdmissionProbe computeAdmissionProbe(
       SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
       Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates,
-      java.util.Set<String> heldBefore) {
+      java.util.Set<String> heldBefore, LocalDate requiredBarDate) {
     java.util.Set<String> heldAfter = openLotsBySymbol(resolution).keySet();
     int wouldEnter = 0;
     int admitted = 0;
@@ -406,7 +443,7 @@ public class SwingBatchEngine {
       if (heldBefore.contains(c.symbol())) {
         continue; // already held at start — an add does not compete for a fresh slot
       }
-      List<EngineCandle> series = series(doctrine, c.symbol(), seriesCache);
+      List<EngineCandle> series = series(doctrine, c.symbol(), seriesCache, requiredBarDate);
       if (series.size() < doctrine.minBars() || !firesEntry(swings, c, series)) {
         continue;
       }
@@ -529,7 +566,7 @@ public class SwingBatchEngine {
 
   private ExitResult exitPass(
       SwingDoctrine doctrine, AnchorResolution resolution,
-      Map<String, List<EngineCandle>> seriesCache) {
+      Map<String, List<EngineCandle>> seriesCache, LocalDate requiredBarDate) {
     // Group the open lots by symbol. A pyramided symbol holds several lots sharing ONE averaged paper
     // position (§3.4); the governing stop is the OLDEST lot's trailed stop — the tightest, first to
     // hit (§3.5.D). So the exit is driven off that lot and, when it fires, closes the whole position
@@ -545,12 +582,12 @@ public class SwingBatchEngine {
       if (strat == null) {
         continue; // another family's anchor, or unmanageable (already logged at ERROR)
       }
-      List<EngineCandle> series = series(doctrine, primary.tradingsymbol(), seriesCache);
+      List<EngineCandle> series = series(doctrine, primary.tradingsymbol(), seriesCache, requiredBarDate);
       if (series.isEmpty()) {
         // One retry OUTSIDE the per-run cache: MarketDataCandlesClient fail-softs to an empty list on
         // any REST hiccup and the cache pins it — silently skipping the position's ONLY daily
         // stop/trail evaluation (audit P0-3). A held anchor's series is worth a second round-trip.
-        series = retryFetch(doctrine, primary.tradingsymbol(), seriesCache);
+        series = retryFetch(doctrine, primary.tradingsymbol(), seriesCache, requiredBarDate);
       }
       if (series.isEmpty()) {
         log.error(
@@ -597,13 +634,52 @@ public class SwingBatchEngine {
    * and its only daily stop evaluation.
    */
   private List<EngineCandle> retryFetch(
-      SwingDoctrine doctrine, String symbol, Map<String, List<EngineCandle>> cache) {
+      SwingDoctrine doctrine, String symbol, Map<String, List<EngineCandle>> cache,
+      LocalDate requiredBarDate) {
     OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
-    List<EngineCandle> fresh = candles.fetch(EX, symbol, IV, now.minusDays(doctrine.warmupDays()), now);
+    List<EngineCandle> fresh =
+        truncateToSession(
+            candles.fetch(EX, symbol, IV, now.minusDays(doctrine.warmupDays()), now), symbol,
+            requiredBarDate);
     if (!fresh.isEmpty()) {
       cache.put(symbol, fresh);
     }
     return fresh;
+  }
+
+  /**
+   * The catch-up staleness rule: with a session pinned ({@code requiredBarDate} non-null), the series
+   * is TRUNCATED to end at that session's daily bar — every later bar is dropped. Both passes read only
+   * the last bar, so an unpinned late run would decide off whatever bar is newest — for an EXIT, a
+   * settle at the WRONG day's close, the exact harm the catch-up exists to undo. Truncating makes the
+   * decision identical to what the on-time run would have computed off the session's own bar, whether
+   * the catch-up runs that night or several sessions later (the intervening days moved the price, but
+   * the position should have exited on the session, so its later moves are irrelevant). When the
+   * session's own bar is absent (a data gap, or older than the warmup window), the series drops to
+   * empty — a counted, alerted skip ("STOP NOT EVALUATED TODAY"), retryable, never a settle off the
+   * wrong bar. {@code null} — the scheduled path — returns the series untouched (byte-identical).
+   */
+  private static List<EngineCandle> truncateToSession(
+      List<EngineCandle> series, String symbol, LocalDate requiredBarDate) {
+    if (requiredBarDate == null || series.isEmpty()) {
+      return series;
+    }
+    // Bars are ascending by bucket. Walk from the newest down to the session's bar.
+    for (int i = series.size() - 1; i >= 0; i--) {
+      LocalDate barDate =
+          series.get(i).bucketStart().withOffsetSameInstant(IST).toLocalDate();
+      if (barDate.equals(requiredBarDate)) {
+        return i == series.size() - 1 ? series : List.copyOf(series.subList(0, i + 1));
+      }
+      if (barDate.isBefore(requiredBarDate)) {
+        break; // walked past the session without finding its bar — it is missing
+      }
+    }
+    log.warn(
+        "swing catch-up: {} has no daily bar for the pinned session {} — series dropped (retryable,"
+            + " not settled off a newer bar)",
+        symbol, requiredBarDate);
+    return List.of();
   }
 
   private void emitExit(
@@ -681,12 +757,15 @@ public class SwingBatchEngine {
   }
 
   private List<EngineCandle> series(
-      SwingDoctrine doctrine, String symbol, Map<String, List<EngineCandle>> cache) {
+      SwingDoctrine doctrine, String symbol, Map<String, List<EngineCandle>> cache,
+      LocalDate requiredBarDate) {
     return cache.computeIfAbsent(
         symbol,
         s -> {
           OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(IST);
-          return candles.fetch(EX, s, IV, now.minusDays(doctrine.warmupDays()), now);
+          return truncateToSession(
+              candles.fetch(EX, s, IV, now.minusDays(doctrine.warmupDays()), now), s,
+              requiredBarDate);
         });
   }
 

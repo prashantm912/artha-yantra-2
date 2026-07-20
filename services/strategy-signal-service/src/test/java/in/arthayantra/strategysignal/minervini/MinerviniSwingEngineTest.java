@@ -213,6 +213,46 @@ class MinerviniSwingEngineTest {
   }
 
   @Test
+  void catchUpPinnedToTheSessionOfTheLastBarEvaluatesTheStopNormally() throws IOException {
+    // The catch-up path (2026-07-17 incident): pinned to the session whose bar IS the newest, the run
+    // is the ordinary run — same bar, same decision, same settle price the on-time batch would have got.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(), LAST_BAR_DATE);
+
+    assertThat(run.exits()).isEqualTo(1);
+    assertThat(run.exitSkipped()).isZero();
+  }
+
+  @Test
+  void catchUpRefusesToSettleOffABarFromTheWrongSession() throws IOException {
+    // THE money property. A catch-up fired for a session whose daily bar has NOT landed would otherwise
+    // read whatever bar is newest and settle the position at THAT day's close — the exact harm the
+    // catch-up exists to undo (position 29 was closed three days late). Pinned, the stale series is
+    // dropped and the un-evaluated stop is COUNTED + screamed, never silently priced off the wrong day.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(), LAST_BAR_DATE.plusDays(1));
+
+    assertThat(run.exits()).as("no exit is emitted off the wrong session's bar").isZero();
+    assertThat(run.exitSkipped()).as("the unevaluated stop is surfaced, not swallowed").isEqualTo(1);
+    verify(h.signals, org.mockito.Mockito.never()).transition(any(Long.class), any());
+  }
+
+  @Test
+  void unpinnedRunsAreUnaffectedByTheCatchUpBarGuard() throws IOException {
+    // The scheduled/on-demand path passes no session, so nothing is ever dropped — the guard is inert
+    // unless a catch-up explicitly pins a date.
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+
+    assertThat(h.engine().runDaily(h.doctrine()).exits())
+        .isEqualTo(h.engine().runDaily(h.doctrine(), null).exits());
+  }
+
+  @Test
   void entryGateIsReCheckedPerEntryAndStopsTheRunWhenTheBookTrips() throws IOException {
     UUID strategyId = UUID.randomUUID();
     UUID publishedVersion = UUID.randomUUID();
@@ -434,6 +474,9 @@ class MinerviniSwingEngineTest {
     bars.add(bar(24, 152.0, breakoutVolume));
     return bars;
   }
+
+  /** The IST date of {@link #craftDecline()}'s last bar — the session a catch-up would pin to. */
+  private static final java.time.LocalDate LAST_BAR_DATE = java.time.LocalDate.of(2026, 6, 25);
 
   private static List<EngineCandle> craftDecline() {
     List<EngineCandle> bars = new ArrayList<>();

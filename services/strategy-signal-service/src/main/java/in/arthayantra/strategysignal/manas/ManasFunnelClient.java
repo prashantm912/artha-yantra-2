@@ -57,13 +57,7 @@ public class ManasFunnelClient {
   /** The buyable + on-deck candidates (the base names at or approaching their pivot). Empty on failure. */
   public List<Candidate> buyableAndOnDeck() {
     try {
-      String body =
-          restClient
-              .get()
-              .uri("/api/v1/market/screener/manas-arora/funnel")
-              .retrieve()
-              .body(String.class);
-      JsonNode root = objectMapper.readTree(body);
+      JsonNode root = objectMapper.readTree(fetchFunnel());
       List<Candidate> out = new ArrayList<>();
       collect(root.path("immediatelyBuyable"), out, false);
       collect(root.path("onDeck"), out, true);
@@ -72,6 +66,33 @@ public class ManasFunnelClient {
       log.warn("manas funnel fetch failed — no swing candidates this run: {}", e.getMessage());
       return List.of();
     }
+  }
+
+  /**
+   * The funnel's own {@code screenDate} — WHICH session's screen these candidates came from. The
+   * catch-up path's input-readiness gate: the funnel endpoint falls back to the newest PERSISTED screen
+   * date, so a session whose screener never ran serves the PRIOR day's names with no error (exactly the
+   * 2026-07-17 shape — the screens did not land until 22:15). Empty on any upstream failure, which the
+   * caller must treat as "not ready", never as "ready".
+   */
+  public java.util.Optional<java.time.LocalDate> screenDate() {
+    try {
+      JsonNode date = objectMapper.readTree(fetchFunnel()).path("screenDate");
+      return date.isMissingNode() || date.isNull()
+          ? java.util.Optional.empty()
+          : java.util.Optional.of(java.time.LocalDate.parse(date.asText()));
+    } catch (java.io.IOException | RuntimeException e) {
+      log.warn("manas funnel screen-date read failed: {}", e.getMessage());
+      return java.util.Optional.empty();
+    }
+  }
+
+  private String fetchFunnel() {
+    return restClient
+        .get()
+        .uri("/api/v1/market/screener/manas-arora/funnel")
+        .retrieve()
+        .body(String.class);
   }
 
   private static void collect(JsonNode rows, List<Candidate> out, boolean onDeck) {

@@ -85,10 +85,12 @@ public class CompositeRejectionWriter {
             repository.insert(
                 strategyVersionId, strategySlug, exchange, tradingsymbol, interval,
                 composite, threshold, margin, scoreBreakdownJson, barTime);
+            return true;
           } catch (RuntimeException e) {
             log.warn(
                 "failed to persist composite rejection {} {}:{} composite={}/{}: {}",
                 strategySlug, exchange, tradingsymbol, composite, threshold, e.toString());
+            return false;
           }
         });
   }

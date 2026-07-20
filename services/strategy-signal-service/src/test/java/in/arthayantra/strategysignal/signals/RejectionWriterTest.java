@@ -266,4 +266,44 @@ class RejectionWriterTest {
       release.countDown();
     }
   }
+
+  @Test
+  void anInterruptResponsiveInsertAbortedByShutdownIsCountedNotSilentlyLost()
+      throws InterruptedException {
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    SignalRejectionRepository repo = mock(SignalRejectionRepository.class);
+    ShadowBookService shadow = mock(ShadowBookService.class);
+    CountDownLatch started = new CountDownLatch(1);
+    // Interrupt-RESPONSIVE insert: it blocks, and when shutdownNow() interrupts the writer thread it
+    // ABORTS and throws (pgjdbc cancels a running statement on Thread.interrupt() — reachable, not
+    // theoretical). It then unwinds WELL WITHIN the 1s in-flight grace, so the executor terminates
+    // and a naive "(!terminated && inFlight)" check reads 0 — the record is lost with the counter
+    // reading 0. This is the branch the interrupt-IGNORING test above does NOT exercise.
+    doAnswer(
+            inv -> {
+              started.countDown();
+              try {
+                Thread.sleep(60_000);
+                return 1L;
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("insert aborted by interrupt");
+              }
+            })
+        .when(repo)
+        .insert(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+            any(), any(), any());
+    RejectionWriter writer = new RejectionWriter(repo, shadow, meters);
+    record(writer); // sole task → the in-flight insert
+    assertThat(started.await(2, TimeUnit.SECONDS))
+        .as("the writer thread is confirmed inside the insert")
+        .isTrue();
+    // Graceful drain (200ms) times out on the blocked insert; shutdownNow() interrupts it; it aborts
+    // and fails FAST, so the executor terminates within the grace.
+    writer.drainAndShutdown(200);
+    assertThat(meters.counter("ay_signal_rejection_shutdown_dropped_total").count())
+        .as("an insert aborted by the shutdown interrupt is counted, not silently lost")
+        .isEqualTo(1.0);
+  }
 }

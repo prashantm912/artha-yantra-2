@@ -71,10 +71,12 @@ public class RiskSuppressionWriter {
             repository.insert(
                 strategyVersionId, strategySlug, book, rail, exchange, tradingsymbol, interval,
                 side, optionType, optionTradingsymbol, barTime);
+            return true;
           } catch (RuntimeException e) {
             log.warn(
                 "failed to persist risk suppression {} {}:{} rail={}: {}",
                 strategySlug, exchange, tradingsymbol, rail, e.toString());
+            return false;
           }
         });
   }

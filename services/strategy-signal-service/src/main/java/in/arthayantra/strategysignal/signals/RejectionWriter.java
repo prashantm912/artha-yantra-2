@@ -99,10 +99,12 @@ public class RejectionWriter {
             shadowBook.maybeOpen(
                 rejectionId, strategyVersionId, strategySlug, exchange, tradingsymbol, barTime,
                 diagnostic);
+            return true;
           } catch (RuntimeException e) {
             log.warn(
                 "failed to persist scalper rejection {} {}:{}: {}",
                 strategySlug, exchange, tradingsymbol, e.toString());
+            return false;
           }
         });
   }

@@ -32,9 +32,9 @@ indicators:
   - { name: VWMA,       alias: vwma20,    timeframe: 3m, params: { period: 20 } }
   - { name: PSAR,       alias: psar,      timeframe: 3m, params: { step: 0.02, max: 0.2 } }
   - { name: RSI,        alias: rsi14,     timeframe: 3m, params: { period: 14 }, weight: 1.0,
-      normalize: { type: rsi_momentum } }
+      normalize: { type: linear, from: 50, to: 30 } }
   - { name: SUPERTREND, alias: supertrend, timeframe: 3m, params: { period: 10, multiplier: 2.0 },
-      weight: 1.0, normalize: { type: direction } }
+      weight: 1.0, normalize: { type: step, bands: [{ upto: 0, score: 1 }, { score: 0 }] } }
   - { name: SUPERTREND, alias: bias60m,   timeframe: 1h, params: { period: 7, multiplier: 3.0 } }
   - { name: SUPERTREND_LINE, alias: supertrend_line, timeframe: 3m, params: { period: 10, multiplier: 2.0 } } # E9 §3: the ST LINE for the trail-with-Super-Trend exit
 

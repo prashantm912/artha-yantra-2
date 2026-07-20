@@ -1767,6 +1767,134 @@ class ScalperConfluenceGateTest {
         .isEmpty();
   }
 
+  // builds a scalper config through the REAL ScalperConfig.from parse (exercising the option_types
+  // plumbing), with the given option_types JSON array (e.g. "[\"PE\"]", "[]") over a NIFTY 50 underlying.
+  private static ScalperConfig cfgFrom(String optionTypesJsonArray, String... tags) {
+    try {
+      JsonNode config =
+          new ObjectMapper()
+              .readTree(
+                  "{\"universe\":{\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"},"
+                      + "\"options\":{\"option_types\":"
+                      + optionTypesJsonArray
+                      + "}}}");
+      return ScalperConfig.from(config, List.of(tags));
+    } catch (Exception e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  // a bank whose close (98) sits BELOW vwap (99) → the §0B VWAP-decisive read derives the PE side.
+  private static BarValues bearBank() {
+    Map<String, BigDecimal> builtins = Map.of("close", bd("98"), "vwap", bd("99"), "volume", bd("130000"));
+    Map<String, BigDecimal> aliases =
+        Map.of("vwma20", bd("100"), "psar", bd("101"), "rsi14", bd("35"), "supertrend", bd("-1"));
+    return new BarValues() {
+      @Override
+      public BigDecimal valueAt(String alias, int i) {
+        return aliases.get(alias);
+      }
+
+      @Override
+      public BigDecimal previousValueAt(String alias, int i) {
+        return null;
+      }
+
+      @Override
+      public BigDecimal builtin(String name, int i) {
+        return builtins.get(name);
+      }
+    };
+  }
+
+  @Test
+  void optionSideConstraintRailEnforcesDeclaredOptionTypesAgainstTheVwapSide() {
+    // LIVE-vs-BACKTEST parity: the live gate now enforces universe.options.option_types against the
+    // VWAP-derived side — mirroring the backtest OptionContractSelector:94-96. A PE-only slug on a
+    // CE-deriving bar (and a CE-only slug on a PE-deriving bar) is BLOCKED at the option-side-constraint
+    // rail; an in-band side and an unconstrained (empty) strategy are UNAFFECTED.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
+
+    // PE-only slug on a CE bar (bullBank: close 100 >= vwap 99 → CE) → BLOCKED at option-side-constraint.
+    ScalperConfluenceGate.Result peOnlyOnCe =
+        gate.evaluateWithDiagnostic(cfgFrom("[\"PE\"]", "scalper"), bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(peOnlyOnCe.blocked()).isTrue();
+    assertThat(peOnlyOnCe.rejection().blockingRail()).isEqualTo("option-side-constraint");
+    assertThat(peOnlyOnCe.rejection().side()).isEqualTo(CE); // the VWAP-derived side it refused
+    // the block short-circuits BEFORE the OI/macro fan-out (mirrors OptionContractSelector's immediate return)
+    org.mockito.Mockito.verify(client, org.mockito.Mockito.never())
+        .context(any(), any(), any(), any(), any(), any(), any());
+
+    // CE-only slug on a PE bar (bearBank: close 98 < vwap 99 → PE) → BLOCKED likewise.
+    ScalperConfluenceGate.Result ceOnlyOnPe =
+        gate.evaluateWithDiagnostic(cfgFrom("[\"CE\"]", "scalper"), bearBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(ceOnlyOnPe.blocked()).isTrue();
+    assertThat(ceOnlyOnPe.rejection().blockingRail()).isEqualTo("option-side-constraint");
+    assertThat(ceOnlyOnPe.rejection().side())
+        .isEqualTo(in.arthayantra.black76.Black76.OptionType.PE);
+
+    // a CE-only slug on the SAME CE bar is allowed → the rail passes and the entry fires (enforcing path).
+    assertThat(
+            gate.evaluateWithDiagnostic(cfgFrom("[\"CE\"]", "scalper"), bullBank(), null, 0, NOW, IST_TIME, EOD)
+                .decision())
+        .isPresent();
+    // an unconstrained (empty option_types) strategy is inert → fires on the CE bar exactly as before.
+    assertThat(
+            gate.evaluateWithDiagnostic(cfgFrom("[]", "scalper"), bullBank(), null, 0, NOW, IST_TIME, EOD)
+                .decision())
+        .isPresent();
+  }
+
+  @Test
+  void optionSideConstraintDoesNotAffectTheSideAgnosticStraddlePath() {
+    // The straddle path is direction-neutral and returns BEFORE the VWAP side derivation, so the new
+    // option-side-constraint rail never runs for it — a straddle declaring option_types:[CE,PE] (the shipped
+    // YAML) still fires BOTH ATM legs, and the directional OI/macro context is never consulted.
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithAtmPair()));
+    // the ENTRY path (evaluateWithDiagnostic, which enforces) — the straddle returns before the rail.
+    Optional<Decision> decision =
+        new ScalperConfluenceGate(client, ScalperOiProps.defaults())
+            .evaluateWithDiagnostic(
+                cfgFrom("[\"CE\",\"PE\"]", "scalper", "straddle"), bullBank(), null, 0, NOW, IST_TIME, EOD)
+            .decision();
+    assertThat(decision).isPresent();
+    assertThat(decision.get().neutral()).isTrue();
+    assertThat(decision.get().legs()).hasSize(2);
+    org.mockito.Mockito.verify(client, org.mockito.Mockito.never())
+        .context(any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void flipExitOracleEvaluateSeesTheTrueSideEvenWhenOptionTypesExcludesIt() {
+    // MONEY/EXIT regression guard (adversarial review): confluenceFlipExit (E9 D4 CONFLUENCE_FLIP
+    // protective exit, SignalEngine:2348) reads the CURRENT confluence via the bare evaluate() ORACLE and
+    // fires when the gate reports the side OPPOSITE the one held. The option-side ENTRY constraint must NOT
+    // gate this read: a single-side ([PE]-only) held position, when the market flips bullish, must still
+    // see the CE the gate now derives — else evaluate() returns empty and the protective flip-exit can
+    // NEVER fire, silently removing a protective exit. So the bare evaluate() does NOT enforce option_types
+    // (only the entry path evaluateWithDiagnostic does).
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
+    ScalperConfig peOnly = cfgFrom("[\"PE\"]", "scalper");
+
+    // ENTRY (evaluateWithDiagnostic) still BLOCKS the wrong-side entry — a PE-only slug never OPENS a CE.
+    assertThat(gate.evaluateWithDiagnostic(peOnly, bullBank(), null, 0, NOW, IST_TIME, EOD).blocked())
+        .isTrue();
+
+    // EXIT ORACLE (bare evaluate) does NOT enforce → returns the TRUE derived CE side the market flipped to.
+    Optional<Decision> oracle = gate.evaluate(peOnly, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(oracle).isPresent();
+    assertThat(oracle.get().side()).isEqualTo(CE);
+    // the confluenceFlipExit contract: held PE, oracle says CE → the read flipped against the held side.
+    assertThat(ScalperGates.confluenceFlippedAgainst("PE", oracle.get().side().name())).isTrue();
+  }
+
   @Test
   void nonStraddleStrategyIsUnaffectedByThePresenceOfAnAtmPair() {
     MarketOiClient client = mock(MarketOiClient.class);

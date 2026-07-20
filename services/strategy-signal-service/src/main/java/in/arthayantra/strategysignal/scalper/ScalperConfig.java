@@ -3,8 +3,10 @@ package in.arthayantra.strategysignal.scalper;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.math.BigDecimal;
 import java.time.LocalTime;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The per-strategy scalper knobs (master plan §12.2/§12.4). The underlying + exchange are read from
@@ -53,7 +55,12 @@ public record ScalperConfig(
     boolean requireRsiS24Bands,
     boolean requireOpenHighOiVeto,
     List<String> tags,
-    ScalperParams params) {
+    ScalperParams params,
+    // LIVE-vs-BACKTEST parity: the strategy's declared option sides (universe.options.option_types) —
+    // the SAME node the backtest OptionsPremiumReplay.universeSpec reads. The live confluence gate
+    // enforces the VWAP-derived side against these (the option-side-constraint rail). Empty ⇒
+    // unconstrained (both sides allowed, so the rail is inert).
+    Set<String> optionTypes) {
 
   /** Where the entry-time structural stop-loss is anchored (none = size off structure/VWAP only). */
   public enum StructuralStop {
@@ -129,7 +136,7 @@ public record ScalperConfig(
         underlyingExchange, underlying, signalIndex, oiIndex, rollDays, strikeParams,
         confluenceThreshold, requireTwoCandle, structuralStop, requireCallPutDeltaFilter, requireGapFill,
         requireTrendChange, requireOpenHighLow, openingTick, requireHeroZero, requireStraddle,
-        requireRsiS24Bands, requireOpenHighOiVeto, tags, ScalperParams.defaults());
+        requireRsiS24Bands, requireOpenHighOiVeto, tags, ScalperParams.defaults(), Set.of());
   }
 
   /** Whether the strategy carries a (W4) behaviour tag (the raw YAML tag list from {@link #from}). */
@@ -275,10 +282,17 @@ public record ScalperConfig(
     // per-strategy (vwap-distance, gap-suppress, indicator-distance, oi-divergence, iv-buyer-cap). Absent
     // ⇒ ScalperParams.defaults() = the ScalperGates constants, so an untuned strategy is byte-identical.
     ScalperParams scalperParams = ScalperParams.from(config.path("scalper").path("params"));
+    // LIVE-vs-BACKTEST parity: carry the declared option sides (universe.options.option_types) onto the
+    // config — the SAME node the backtest OptionsPremiumReplay.universeSpec reads — so the live confluence
+    // gate can enforce the VWAP-derived side against them. Absent/empty ⇒ unconstrained (the rail is inert).
+    Set<String> optionTypes = new LinkedHashSet<>();
+    for (JsonNode t : universe.path("options").path("option_types")) {
+      optionTypes.add(t.asText());
+    }
     return new ScalperConfig(
         exchange, underlying, signalIndex, oiIndex, rollDays, params, THRESHOLD, twoCandle, stop,
         callPutDeltaFilter, gapFill, trendChange, openHighLow, openingTick, heroZero, straddle,
-        rsiS24Bands, openHighOiVeto, List.copyOf(tags), scalperParams);
+        rsiS24Bands, openHighOiVeto, List.copyOf(tags), scalperParams, Set.copyOf(optionTypes));
   }
 
   /** A {@code (exchange, tradingsymbol)} index reference for live front-future resolution. */

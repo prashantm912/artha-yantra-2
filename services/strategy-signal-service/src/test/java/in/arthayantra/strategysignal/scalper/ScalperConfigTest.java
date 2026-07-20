@@ -153,4 +153,23 @@ class ScalperConfigTest {
     assertThat(p.vwapDistanceMinFrac()).isEqualByComparingTo(ScalperGates.VWAP_DISTANCE_MIN_FRAC);
     assertThat(p.noFreshEntryAfter()).isEqualTo(ScalperGates.NO_FRESH_ENTRY_AFTER); // unset → default
   }
+
+  @Test
+  void optionTypesAreReadFromTheUniverseOptionsNode() throws Exception {
+    // LIVE-vs-BACKTEST parity plumbing: from() carries universe.options.option_types onto the config (the
+    // SAME node the backtest OptionsPremiumReplay.universeSpec reads), so the live gate can enforce it.
+    JsonNode pe =
+        M.readTree(
+            "{\"universe\":{\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"},"
+                + "\"options\":{\"option_types\":[\"PE\"]}}}");
+    assertThat(ScalperConfig.from(pe, List.of("scalper")).optionTypes()).containsExactly("PE");
+    JsonNode both =
+        M.readTree(
+            "{\"universe\":{\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"},"
+                + "\"options\":{\"option_types\":[\"CE\",\"PE\"]}}}");
+    assertThat(ScalperConfig.from(both, List.of("scalper")).optionTypes())
+        .containsExactlyInAnyOrder("CE", "PE");
+    // absent option_types ⇒ empty (unconstrained — the option-side-constraint rail stays inert).
+    assertThat(ScalperConfig.from(config("NIFTY 50"), List.of("scalper")).optionTypes()).isEmpty();
+  }
 }

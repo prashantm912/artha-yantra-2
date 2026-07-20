@@ -111,7 +111,30 @@ Run in order; each answers one question. Canned SQL in §6.
     all healthy. Read the boot line the SAME day — the container's logs are lost on the next restart, which
     is exactly what made 07-17's cause unverifiable. Standing check from 2026-07-16 §6.3 applies: the honest
     health signal is `unresolved == 0`, never `loaded > 0`.
-11. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+11. **Interior coverage buckets** (added 2026-07-20) — NEVER certify "full session coverage" from
+    `min(bar_time)`/`max(bar_time)` alone. Bucket the session's rejections by 15 minutes and read the
+    interior: on 2026-07-20 the endpoints spanned 10:19–15:19 while the interior held a 64-minute hole
+    after the open and a full hour empty 11:45–12:45, with capture healthy (60–64 one-minute bars) in
+    both. Re-running the same query for 2026-07-17 exposed two interior holes there too — which means
+    that file's "FULL session, no eval stall, first clean coverage since 07-06" claim was **wrong**,
+    drawn from min/max only. Pair the buckets with `strategy.subscriber_health_events` for the same day.
+    **Honesty limit:** an empty bucket is NOT by itself proof of a dead engine — `recordRejection` sits
+    downstream of the chart-gate early return, so bars dying earlier in the gate write no row. Confirm a
+    stall against the eval counters (`ay_signal_eval_outcome_total`, actuator port 8082) and read them
+    BEFORE any post-close deploy recreates the container and resets them.
+12. **OI quadrant liveness** (added 2026-07-20) — count the share of rows whose
+    `context.oi.futuresQuadrant` / `underlyingQuadrant` is `NEUTRAL`. `OiInterpretation.classify` is a
+    **total** function over four states with no dead zone (`OiInterpretation.java:16-23`), so NEUTRAL is
+    NEVER a market outcome — the strategy-side mirror documents it as "data missing"
+    (`OiQuadrant.java:10-25`) and it is the declared fallback on every read failure. **A high
+    NEUTRAL share is a defect signal, never a flat-market artifact.** On 2026-07-20 it was 748/748,
+    killing `futures_oi` (w 1.5), `underlying_oi` (1.0) and `oi_spurt` (1.0) and dropping the composite
+    cap 0.816 → 0.7181. Worse than a dead IV dot: NEUTRAL dots are added with `absent=false`
+    (`ConnectTheDotsScorer.java:207-214`) so they stay in the denominator and score zero, actively
+    dragging the composite down, whereas null `iv_rank` is withheld from it. Cross-check
+    `marketdata.futures_oi_snapshots` cadence (distinct minutes vs ~375) — a gappy 1-minute capture
+    leaves a 3-minute `latestPair` read with no prior bucket, which yields a null interpretation.
+13. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -265,6 +288,26 @@ SELECT count(*) published_enabled FROM strategy.strategies
 WHERE enabled AND published_version_id IS NOT NULL;
 -- boot line (READ IT THE SAME DAY — a restart destroys it):
 --   docker logs ay-strategy-signal-service 2>&1 | grep -E "loaded [0-9]+ published"
+
+-- §3.11 interior coverage buckets (NEVER certify coverage from min/max alone)
+SELECT to_char(time_bucket('15 minutes', generated_at) AT TIME ZONE 'Asia/Kolkata','HH24:MI') ist,
+       count(*) n, count(DISTINCT strategy_slug) slugs
+FROM strategy.signal_rejections
+WHERE generated_at >= :d0915 AND generated_at < :d1540 GROUP BY 1 ORDER BY 1;
+-- pair with the canary telemetry for the same day:
+SELECT occurred_at AT TIME ZONE 'Asia/Kolkata' ist, kind, left(detail,140)
+FROM strategy.subscriber_health_events WHERE occurred_at >= :d0 ORDER BY occurred_at;
+
+-- §3.12 OI quadrant liveness (NEUTRAL share = defect signal, never regime)
+SELECT (generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
+       diagnostic->'context'->'oi'->>'futuresQuadrant' fq,
+       diagnostic->'context'->'oi'->>'underlyingQuadrant' uq, count(*)
+FROM strategy.signal_rejections WHERE generated_at >= :d0 GROUP BY 1,2,3 ORDER BY 1,4 DESC;
+-- and the capture cadence behind it (expect ~375 distinct minutes on a full session):
+SELECT (ts AT TIME ZONE 'Asia/Kolkata')::date d, count(*) snaps,
+       count(DISTINCT date_trunc('minute',ts)) minutes
+FROM marketdata.futures_oi_snapshots WHERE tradingsymbol=:front_fut AND ts >= :d0
+GROUP BY 1 ORDER BY 1;
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

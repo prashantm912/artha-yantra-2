@@ -1,11 +1,14 @@
 package in.arthayantra.strategysignal.signals;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.strategysignal.signals.SignalEngine.Outcome;
 import in.arthayantra.strategysignal.signals.SignalEngine.OutcomeSnapshot;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
@@ -29,9 +32,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /**
  * V043 {@code signal_eval_outcomes} against the REAL Flyway strategy lineage.
  *
- * <p>The load-bearing cases here are the two the cross-vendor review identified in the earlier
- * in-memory-checkpoint revision, because both are properties of the DURABLE checkpoint and cannot be
- * demonstrated without a database:
+ * <p>The load-bearing cases are the three cross-vendor review identified across two rounds, because
+ * all three are properties of the DURABLE checkpoint and cannot be shown without a database:
  *
  * <ul>
  *   <li>{@link #aLostAcknowledgementDoesNotDoubleCount()} — Postgres commits, the acknowledgement is
@@ -39,15 +41,18 @@ import org.springframework.jdbc.core.JdbcTemplate;
  *   <li>{@link #aFailedWriteFollowedByABaselineResetLosesNothing()} — a failed write, then the
  *       writer object dies and is rebuilt (the process-restart shape) while the counters keep their
  *       epoch. An in-memory baseline would take the unrecorded window down with it.
+ *   <li>{@link #aRecoverySpanningIstDatesIsNotCountedAsCurrentDayActivity()} — the weekend path,
+ *       where a recovered window would otherwise be attributed wholesale to the current date and
+ *       silently corrupt BOTH days' outcome mix.
  * </ul>
  *
  * <p>The engine is MOCKED so counter values and the epoch are explicit. (The real engine bean is
  * absent here anyway — it and the rollup job share the {@code artha.signals.engine-enabled} gate,
  * which the IT harness turns off.)
  *
- * <p>Shared singleton DB with NO per-method cleanup: every method uses its OWN random {@code boot_id}
- * and derives a private bucket window from {@code now}, so methods cannot collide with each other or
- * with a surefire rerun.
+ * <p>Shared singleton DB with NO per-method cleanup: every method uses its OWN random
+ * {@code boot_id} and derives a private time window from {@code now}, so methods cannot collide with
+ * each other or with a surefire rerun.
  */
 @SpringBootTest(properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
 class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTestBase {
@@ -101,6 +106,7 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
   }
 
   /** An engine whose counters return the given values in succession, all under one epoch. */
+  @SafeVarargs
   private static SignalEngine engineAt(UUID epoch, Map<Outcome, Long>... successiveReads) {
     SignalEngine engine = mock(SignalEngine.class);
     OutcomeSnapshot[] snapshots = new OutcomeSnapshot[successiveReads.length];
@@ -141,6 +147,126 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
             bootId,
             outcome);
     return count != null && count > 0;
+  }
+
+  /**
+   * The CANONICAL liveness query from the V043 header — its SELECT aggregates and its span-overlap
+   * WHERE verbatim — for one IST calendar date. The extra {@code boot_id}/{@code outcome} predicates
+   * are test isolation only (the shared singleton DB holds other methods' rows) and do not weaken
+   * the span logic under test.
+   */
+  private Map<String, Object> livenessFor(OffsetDateTime istDay, UUID bootId, String outcome) {
+    OffsetDateTime from =
+        istDay.withOffsetSameInstant(Ist.OFFSET).toLocalDate().atStartOfDay().atOffset(Ist.OFFSET);
+    OffsetDateTime to = from.plusDays(1);
+    List<Map<String, Object>> rows =
+        jdbc.queryForList(
+            "SELECT outcome,"
+                + " COALESCE(SUM(eval_count) FILTER (WHERE recovered_from IS NULL), 0)"
+                + "   AS evaluations,"
+                + " COALESCE(SUM(eval_count) FILTER (WHERE recovered_from IS NOT NULL), 0)"
+                + "   AS unattributable,"
+                + " COUNT(*) FILTER (WHERE recovered_from IS NULL) AS buckets_recorded"
+                + " FROM signal_eval_outcomes"
+                + " WHERE bucket_time >= ?"
+                + "   AND COALESCE(recovered_from, bucket_time) < ?"
+                + "   AND boot_id = ? AND outcome = ?"
+                + " GROUP BY outcome",
+            from,
+            to,
+            bootId,
+            outcome);
+    return rows.isEmpty() ? Map.of() : rows.get(0);
+  }
+
+  private static long asLong(Map<String, Object> row, String column) {
+    Object value = row.get(column);
+    return value == null ? 0 : ((Number) value).longValue();
+  }
+
+  @Test
+  void aRecoverySpanningIstDatesIsNotCountedAsCurrentDayActivity() {
+    // THE WEEKEND PATH. The process runs continuously (boot_id stable), writes succeed on date D at
+    // 15:00, then fail. No ticks fire until date D+3. Without the cross-date mark, D's final counts
+    // would be recorded as D+3 activity: D under-reports, D+3 over-reports, both mixes wrong.
+    // Ten days back keeps these rows well inside the 180d retention horizon.
+    OffsetDateTime dayD =
+        OffsetDateTime.now(Ist.OFFSET)
+            .minusDays(10)
+            .withHour(15)
+            .withMinute(0)
+            .withSecond(0)
+            .withNano(0);
+    OffsetDateTime dayD3 = dayD.plusDays(3).withHour(9).withMinute(0);
+    UUID boot = UUID.randomUUID();
+    MutableClock clock = new MutableClock(dayD.toInstant());
+
+    // Date D: 100 evaluations recorded normally.
+    assertThat(job(engineAt(boot, counters(100, 0)), repository, clock, 180).rollup())
+        .isEqualTo(100L);
+
+    // Date D+3: counters have grown to 130. Those 30 happened at an unknown point in the span.
+    clock.set(dayD3.toInstant());
+    assertThat(job(engineAt(boot, counters(130, 0)), repository, clock, 180).rollup())
+        .as("the 30 are recorded — never lost")
+        .isEqualTo(30L);
+
+    OffsetDateTime recoveryBucket = SignalEvalOutcomeRollupJob.bucketFor(dayD3.toInstant());
+    Long marked =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM signal_eval_outcomes"
+                + " WHERE bucket_time = ? AND boot_id = ? AND recovered_from IS NOT NULL",
+            Long.class,
+            recoveryBucket,
+            boot);
+    assertThat(marked)
+        .as("the cross-date recovery is marked on every outcome of that bucket")
+        .isEqualTo((long) Outcome.values().length);
+
+    // THE ASSERTION THE REVIEW ASKED FOR: the recovered evaluations do NOT land on D+3's total.
+    Map<String, Object> dayD3Liveness = livenessFor(dayD3, boot, "chart-gate-failed");
+    assertThat(asLong(dayD3Liveness, "evaluations"))
+        .as("D+3 attributable activity is ZERO — the 30 are not its own")
+        .isZero();
+    assertThat(asLong(dayD3Liveness, "unattributable"))
+        .as("D+3 surfaces them separately instead of absorbing them")
+        .isEqualTo(30L);
+
+    // And date D keeps its own 100 while ALSO surfacing the overlapping recovery, so a reader of D
+    // sees that its total may be understated rather than being quietly misled.
+    Map<String, Object> dayDLiveness = livenessFor(dayD, boot, "chart-gate-failed");
+    assertThat(asLong(dayDLiveness, "evaluations")).isEqualTo(100L);
+    assertThat(asLong(dayDLiveness, "unattributable"))
+        .as("the span overlaps D, so D is told about it too")
+        .isEqualTo(30L);
+
+    // Nothing was lost: 130 counters == 100 attributable + 30 unattributable.
+    assertThat(sumFor(boot, "chart-gate-failed")).isEqualTo(130L);
+  }
+
+  @Test
+  void aRecoveryWithinOneDayStaysAttributableToThatDay() {
+    // The contrast case: a failed stretch recovered on the SAME IST date is NOT marked, because the
+    // day total remains exact — only the 3m shape of that stretch is approximate.
+    OffsetDateTime morning =
+        OffsetDateTime.now(Ist.OFFSET)
+            .minusDays(9)
+            .withHour(9)
+            .withMinute(0)
+            .withSecond(0)
+            .withNano(0);
+    UUID boot = UUID.randomUUID();
+    MutableClock clock = new MutableClock(morning.toInstant());
+
+    job(engineAt(boot, counters(50, 0)), repository, clock, 180).rollup();
+    clock.set(morning.withHour(15).withMinute(57).toInstant());
+    job(engineAt(boot, counters(4000, 0)), repository, clock, 180).rollup();
+
+    Map<String, Object> liveness = livenessFor(morning, boot, "chart-gate-failed");
+    assertThat(asLong(liveness, "evaluations"))
+        .as("a same-day recovery keeps the day total exact")
+        .isEqualTo(4000L);
+    assertThat(asLong(liveness, "unattributable")).isZero();
   }
 
   @Test
@@ -208,11 +334,7 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
               throw new RuntimeException("acknowledgement lost after commit"); // ...ack never lands
             })
         .when(flaky)
-        .upsertBucket(
-            org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.eq(boot),
-            org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any());
+        .upsertBucket(any(), eq(boot), any(), any(), any());
 
     SignalEngine engine = engineAt(boot, counters(30, 0));
     assertThat(job(engine, flaky, clock, 180).rollup())
@@ -252,17 +374,14 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
               throw new RuntimeException("write failed");
             })
         .when(broken)
-        .upsertBucket(
-            org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.eq(boot),
-            org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.any());
+        .upsertBucket(any(), eq(boot), any(), any(), any());
     clock.set(t0.plus(Duration.ofMinutes(3)));
     assertThat(job(engineAt(boot, counters(40, 0)), broken, clock, 180).rollup()).isZero();
-    assertThat(rowExists(
-            SignalEvalOutcomeRollupJob.bucketFor(t0.plus(Duration.ofMinutes(3))),
-            boot,
-            "chart-gate-failed"))
+    assertThat(
+            rowExists(
+                SignalEvalOutcomeRollupJob.bucketFor(t0.plus(Duration.ofMinutes(3))),
+                boot,
+                "chart-gate-failed"))
         .as("the failed tick wrote no bucket")
         .isFalse();
 
@@ -303,8 +422,8 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
         SignalEvalOutcomeRollupJob.bucketFor(Instant.now().minus(Duration.ofHours(5)));
     UUID boot = UUID.randomUUID();
 
-    repository.upsertBucket(bucket, boot, Map.of("fired", 2L), Map.of("fired", 2L));
-    repository.upsertBucket(bucket, boot, Map.of("fired", 3L), Map.of("fired", 5L));
+    repository.upsertBucket(bucket, boot, Map.of("fired", 2L), Map.of("fired", 2L), null);
+    repository.upsertBucket(bucket, boot, Map.of("fired", 3L), Map.of("fired", 5L), null);
 
     // Safe because deltas are derived from the durable checkpoint, so a second write into the same
     // (bucket, boot) is always a genuine further increment.
@@ -320,17 +439,43 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
   }
 
   @Test
-  void theCheckpointReadIsScopedToOneBoot() {
+  void anUnattributableMarkIsNeverErasedByALaterWriteIntoTheSameBucket() {
+    OffsetDateTime bucket =
+        SignalEvalOutcomeRollupJob.bucketFor(Instant.now().minus(Duration.ofHours(8)));
+    OffsetDateTime origin = bucket.minusDays(3);
+    UUID boot = UUID.randomUUID();
+
+    repository.upsertBucket(bucket, boot, Map.of("fired", 5L), Map.of("fired", 5L), origin);
+    repository.upsertBucket(bucket, boot, Map.of("fired", 1L), Map.of("fired", 6L), null);
+
+    OffsetDateTime stored =
+        jdbc.queryForObject(
+            "SELECT recovered_from FROM signal_eval_outcomes"
+                + " WHERE bucket_time = ? AND boot_id = ? AND outcome = 'fired'",
+            OffsetDateTime.class,
+            bucket,
+            boot);
+    assertThat(stored)
+        .as("a bucket that once held an unattributable recovery stays marked")
+        .isEqualTo(origin);
+  }
+
+  @Test
+  void theCheckpointReadIsScopedToOneBootAndCarriesItsBucket() {
     OffsetDateTime bucket =
         SignalEvalOutcomeRollupJob.bucketFor(Instant.now().minus(Duration.ofHours(6)));
     UUID mine = UUID.randomUUID();
     UUID other = UUID.randomUUID();
-    repository.upsertBucket(bucket, other, Map.of("fired", 999L), Map.of("fired", 999L));
+    repository.upsertBucket(bucket, other, Map.of("fired", 999L), Map.of("fired", 999L), null);
 
-    assertThat(repository.lastCumulativeForBoot(mine))
+    assertThat(repository.lastCumulativeForBoot(mine).absent())
         .as("a fresh boot sees no checkpoint, so its first delta is everything since boot")
-        .isEmpty();
-    assertThat(repository.lastCumulativeForBoot(other)).containsEntry("fired", 999L);
+        .isTrue();
+    SignalEvalOutcomeRepository.Checkpoint checkpoint = repository.lastCumulativeForBoot(other);
+    assertThat(checkpoint.cumulative()).containsEntry("fired", 999L);
+    assertThat(checkpoint.bucketTime())
+        .as("the checkpoint carries WHEN it was taken — the cross-date test depends on it")
+        .isEqualTo(bucket);
   }
 
   @Test
@@ -340,25 +485,28 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
     UUID boot = UUID.randomUUID();
     Map<String, Long> values =
         Map.of("chart-gate-failed", 125L, "fired", 4L, "discipline-paused", 0L);
-    repository.upsertBucket(bucket, boot, values, values);
+    repository.upsertBucket(bucket, boot, values, values, null);
 
     List<Map<String, Object>> rows =
         jdbc.queryForList(
             "SELECT outcome,"
-                + " SUM(eval_count) AS evaluations,"
-                + " COUNT(*) AS buckets_recorded,"
-                + " COUNT(*) FILTER (WHERE eval_count > 0) AS buckets_active,"
+                + " SUM(eval_count) FILTER (WHERE recovered_from IS NULL) AS evaluations,"
+                + " COUNT(*) FILTER (WHERE recovered_from IS NULL) AS buckets_recorded,"
+                + " COUNT(*) FILTER (WHERE recovered_from IS NULL AND eval_count > 0)"
+                + "   AS buckets_active,"
                 + " COUNT(DISTINCT boot_id) AS boots"
                 + " FROM signal_eval_outcomes"
-                + " WHERE bucket_time >= ? AND bucket_time < ?"
+                + " WHERE bucket_time >= ? AND COALESCE(recovered_from, bucket_time) < ?"
+                + "   AND boot_id = ?"
                 + " GROUP BY outcome ORDER BY evaluations DESC",
             bucket,
-            bucket.plusMinutes(3));
+            bucket.plusMinutes(3),
+            boot);
 
     assertThat(rows).hasSize(3);
     assertThat(rows.get(0)).containsEntry("outcome", "chart-gate-failed");
-    assertThat(((Number) rows.get(0).get("evaluations")).longValue()).isEqualTo(125L);
-    assertThat(((Number) rows.get(0).get("boots")).longValue()).isEqualTo(1L);
+    assertThat(asLong(rows.get(0), "evaluations")).isEqualTo(125L);
+    assertThat(asLong(rows.get(0), "boots")).isEqualTo(1L);
 
     // The zero row is not noise: buckets_recorded proves the PROCESS was up even though this
     // outcome never occurred. Absence of rows is what would mean the process was down.
@@ -367,8 +515,8 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
             .filter(row -> "discipline-paused".equals(row.get("outcome")))
             .findFirst()
             .orElseThrow();
-    assertThat(((Number) paused.get("buckets_recorded")).longValue()).isEqualTo(1L);
-    assertThat(((Number) paused.get("buckets_active")).longValue()).isZero();
+    assertThat(asLong(paused, "buckets_recorded")).isEqualTo(1L);
+    assertThat(asLong(paused, "buckets_active")).isZero();
   }
 
   @Test
@@ -378,8 +526,8 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
     OffsetDateTime recent =
         SignalEvalOutcomeRollupJob.bucketFor(Instant.now().minus(Duration.ofDays(3)));
     UUID boot = UUID.randomUUID();
-    repository.upsertBucket(aged, boot, Map.of("fired", 1L), Map.of("fired", 1L));
-    repository.upsertBucket(recent, boot, Map.of("fired", 1L), Map.of("fired", 2L));
+    repository.upsertBucket(aged, boot, Map.of("fired", 1L), Map.of("fired", 1L), null);
+    repository.upsertBucket(recent, boot, Map.of("fired", 1L), Map.of("fired", 2L), null);
 
     int deleted = job(mock(SignalEngine.class), repository, Clock.systemUTC(), 180).prune();
 
@@ -393,7 +541,7 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
     OffsetDateTime ancient =
         SignalEvalOutcomeRollupJob.bucketFor(Instant.now().minus(Duration.ofDays(500)));
     UUID boot = UUID.randomUUID();
-    repository.upsertBucket(ancient, boot, Map.of("fired", 1L), Map.of("fired", 1L));
+    repository.upsertBucket(ancient, boot, Map.of("fired", 1L), Map.of("fired", 1L), null);
 
     // A 0-day horizon would otherwise delete every row — including every live boot's checkpoint.
     int deleted = job(mock(SignalEngine.class), repository, Clock.systemUTC(), 0).prune();

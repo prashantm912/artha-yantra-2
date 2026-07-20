@@ -52,30 +52,62 @@ public class SignalEvalOutcomeRepository {
   }
 
   /**
-   * The DURABLE delta checkpoint: the cumulative counter value of the newest persisted bucket for
-   * {@code bootId}, per outcome tag.
+   * The DURABLE delta checkpoint for one counter epoch: the cumulative value per outcome, and WHEN
+   * it was taken.
    *
-   * <p>Empty for a boot that has not yet written (its first tick therefore differences against 0 and
-   * records everything since boot — the correct restart semantics). {@code DISTINCT ON} takes one
-   * row per outcome, ordered by {@code bucket_time DESC}, served by
-   * {@code idx_signal_eval_outcomes_boot}.
+   * <p>{@code bucketTime} is load-bearing, not diagnostics. The delta a tick writes covers
+   * {@code (bucketTime, now]}, so if that span crosses an IST session date the evaluations inside it
+   * cannot be attributed to either date — see {@code SignalEvalOutcomeRollupJob.crossDateOrigin}.
+   * Without it the whole recovered window silently lands on today.
+   *
+   * @param bucketTime the newest persisted bucket for this boot, or {@code null} if it has none yet
+   * @param cumulative counter value per outcome tag at that bucket; empty alongside a null bucket
    */
-  public Map<String, Long> lastCumulativeForBoot(UUID bootId) {
+  public record Checkpoint(OffsetDateTime bucketTime, Map<String, Long> cumulative) {
+
+    /** True when this boot has never written — its first tick differences against zero. */
+    public boolean absent() {
+      return bucketTime == null;
+    }
+  }
+
+  /**
+   * The newest persisted checkpoint for {@code bootId}.
+   *
+   * <p>Absent for a boot that has not yet written (its first tick therefore differences against 0
+   * and records everything since boot — the correct restart semantics). {@code DISTINCT ON} takes
+   * one row per outcome ordered by {@code bucket_time DESC}, served by
+   * {@code idx_signal_eval_outcomes_boot}. All seven outcomes are written in ONE statement so they
+   * always share a bucket, but the max is taken rather than assumed.
+   */
+  public Checkpoint lastCumulativeForBoot(UUID bootId) {
     // A two-arg RowMapper, not a RowCallbackHandler lambda: the single-arg form is ambiguous
     // against JdbcTemplate's ResultSetExtractor overload and will not compile.
-    List<Map.Entry<String, Long>> rows =
+    List<Object[]> rows =
         jdbc.query(
             """
-            SELECT DISTINCT ON (outcome) outcome, cumulative_count
+            SELECT DISTINCT ON (outcome) outcome, cumulative_count, bucket_time
               FROM signal_eval_outcomes
              WHERE boot_id = ?
              ORDER BY outcome, bucket_time DESC
             """,
-            (rs, rowNum) -> Map.entry(rs.getString("outcome"), rs.getLong("cumulative_count")),
+            (rs, rowNum) ->
+                new Object[] {
+                  rs.getString("outcome"),
+                  rs.getLong("cumulative_count"),
+                  rs.getObject("bucket_time", OffsetDateTime.class)
+                },
             bootId);
-    Map<String, Long> checkpoint = new HashMap<>();
-    rows.forEach(entry -> checkpoint.put(entry.getKey(), entry.getValue()));
-    return checkpoint;
+    Map<String, Long> cumulative = new HashMap<>();
+    OffsetDateTime newest = null;
+    for (Object[] row : rows) {
+      cumulative.put((String) row[0], (Long) row[1]);
+      OffsetDateTime bucket = (OffsetDateTime) row[2];
+      if (newest == null || bucket.isAfter(newest)) {
+        newest = bucket;
+      }
+    }
+    return new Checkpoint(newest, cumulative);
   }
 
   /**
@@ -98,17 +130,21 @@ public class SignalEvalOutcomeRepository {
    * @param deltas per-outcome evaluations for the window ending at {@code bucketTime}; zeros are
    *     included on purpose (a zero row proves the process was alive)
    * @param cumulative per-outcome counter values at this snapshot — the next tick's checkpoint
+   * @param recoveredFrom non-null ONLY when this delta's window crosses an IST session date, in
+   *     which case it is the originating checkpoint's bucket and these counts are UNATTRIBUTABLE to
+   *     any single date (see the V043 header); null on every normal tick
    * @return the number of rows inserted or merged
    */
   public int upsertBucket(
       OffsetDateTime bucketTime,
       UUID bootId,
       Map<String, Long> deltas,
-      Map<String, Long> cumulative) {
+      Map<String, Long> cumulative,
+      OffsetDateTime recoveredFrom) {
     if (deltas.isEmpty()) {
       return 0;
     }
-    List<Object> args = new ArrayList<>(deltas.size() * 5);
+    List<Object> args = new ArrayList<>(deltas.size() * 6);
     deltas.forEach(
         (outcome, delta) -> {
           args.add(bucketTime);
@@ -116,15 +152,22 @@ public class SignalEvalOutcomeRepository {
           args.add(outcome);
           args.add(delta);
           args.add(cumulative.getOrDefault(outcome, 0L));
+          args.add(recoveredFrom);
         });
-    String values = String.join(",", Collections.nCopies(deltas.size(), "(?, ?, ?, ?, ?)"));
+    String values = String.join(",", Collections.nCopies(deltas.size(), "(?, ?, ?, ?, ?, ?)"));
     return jdbc.update(
         "INSERT INTO signal_eval_outcomes"
-            + " (bucket_time, boot_id, outcome, eval_count, cumulative_count) VALUES "
+            + " (bucket_time, boot_id, outcome, eval_count, cumulative_count, recovered_from)"
+            + " VALUES "
             + values
             + " ON CONFLICT (bucket_time, boot_id, outcome) DO UPDATE SET"
             + " eval_count = signal_eval_outcomes.eval_count + EXCLUDED.eval_count,"
-            + " cumulative_count = EXCLUDED.cumulative_count",
+            + " cumulative_count = EXCLUDED.cumulative_count,"
+            // Once a bucket holds an unattributable recovery it stays marked: COALESCE keeps the
+            // EARLIEST origin so the recorded span never silently narrows.
+            + " recovered_from = LEAST("
+            + "COALESCE(signal_eval_outcomes.recovered_from, EXCLUDED.recovered_from),"
+            + " COALESCE(EXCLUDED.recovered_from, signal_eval_outcomes.recovered_from))",
         args.toArray());
   }
 

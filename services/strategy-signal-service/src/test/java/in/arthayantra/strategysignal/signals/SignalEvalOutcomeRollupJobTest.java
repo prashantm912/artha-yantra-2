@@ -169,6 +169,53 @@ class SignalEvalOutcomeRollupJobTest {
   }
 
   @Test
+  void aRecoveryWithinOneIstDateIsAttributedNormally() {
+    // Same session date -> not marked. The counts land on a later bucket of the same day, so the
+    // DAY total stays exact and only the 3m shape of that stretch is approximate.
+    OffsetDateTime checkpoint = OffsetDateTime.parse("2026-07-20T09:00:00+05:30");
+    OffsetDateTime bucket = OffsetDateTime.parse("2026-07-20T15:57:00+05:30");
+
+    assertThat(SignalEvalOutcomeRollupJob.crossDateOrigin(checkpoint, bucket)).isNull();
+  }
+
+  @Test
+  void aRecoveryThatSpansIstDatesIsMarkedWithItsOrigin() {
+    // The weekend path: writes fail Friday 15:00, no ticks Sat/Sun, Monday 09:00 recovers. Without
+    // the mark, Friday's last half hour would be recorded as Monday activity.
+    OffsetDateTime fridayCheckpoint = OffsetDateTime.parse("2026-07-24T15:00:00+05:30");
+    OffsetDateTime mondayBucket = OffsetDateTime.parse("2026-07-27T09:00:00+05:30");
+
+    assertThat(SignalEvalOutcomeRollupJob.crossDateOrigin(fridayCheckpoint, mondayBucket))
+        .isEqualTo(fridayCheckpoint);
+  }
+
+  @Test
+  void aBootsFirstTickIsNeverMarkedUnattributable() {
+    // No prior date to span: the delta is "since boot", and boot is necessarily after the previous
+    // process ended.
+    assertThat(
+            SignalEvalOutcomeRollupJob.crossDateOrigin(
+                null, OffsetDateTime.parse("2026-07-27T09:00:00+05:30")))
+        .isNull();
+  }
+
+  @Test
+  void crossDateDetectionComparesIstDatesNotUtcOnes() {
+    // JDBC hands back bucket_time in the driver's offset (typically UTC). Both of these are the
+    // SAME IST date (2026-07-20) but DIFFERENT UTC dates, because 02:00 IST is the previous day in
+    // UTC — reachable via the shutdown flush, which can write at any wall-clock time. Comparing
+    // toLocalDate() without normalizing to IST would wrongly mark this as a cross-date recovery.
+    OffsetDateTime checkpointAsUtc = OffsetDateTime.parse("2026-07-19T20:30:00Z"); // = 02:00 IST
+    OffsetDateTime bucketAsUtc = OffsetDateTime.parse("2026-07-20T03:30:00Z"); // = 09:00 IST
+
+    assertThat(SignalEvalOutcomeRollupJob.istDate(checkpointAsUtc))
+        .isEqualTo(SignalEvalOutcomeRollupJob.istDate(bucketAsUtc));
+    assertThat(SignalEvalOutcomeRollupJob.crossDateOrigin(checkpointAsUtc, bucketAsUtc))
+        .as("same IST session date despite differing UTC dates")
+        .isNull();
+  }
+
+  @Test
   void bucketFloorsToAThreeMinuteBoundaryInIst() {
     OffsetDateTime bucket =
         SignalEvalOutcomeRollupJob.bucketFor(

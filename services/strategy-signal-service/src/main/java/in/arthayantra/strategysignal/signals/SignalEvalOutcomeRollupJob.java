@@ -6,6 +6,7 @@ import in.arthayantra.strategysignal.signals.SignalEngine.OutcomeSnapshot;
 import jakarta.annotation.PreDestroy;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -169,14 +170,24 @@ public class SignalEvalOutcomeRollupJob {
     try {
       OutcomeSnapshot snapshot = engine.outcomeSnapshot();
       Map<String, Long> cumulative = byTag(snapshot.counts());
-      Map<String, Long> checkpoint = repository.lastCumulativeForBoot(snapshot.epoch());
-      Map<String, Long> deltas = deltas(checkpoint, cumulative);
+      SignalEvalOutcomeRepository.Checkpoint checkpoint =
+          repository.lastCumulativeForBoot(snapshot.epoch());
+      Map<String, Long> deltas = deltas(checkpoint.cumulative(), cumulative);
       OffsetDateTime bucket = bucketFor(clock.instant());
-      repository.upsertBucket(bucket, snapshot.epoch(), deltas, cumulative);
+      OffsetDateTime recoveredFrom = crossDateOrigin(checkpoint.bucketTime(), bucket);
+      repository.upsertBucket(bucket, snapshot.epoch(), deltas, cumulative, recoveredFrom);
       long total = deltas.values().stream().mapToLong(Long::longValue).sum();
+      if (recoveredFrom != null) {
+        log.warn(
+            "signal_eval_outcomes: {} evaluation(s) recovered across an IST date boundary"
+                + " ({} -> {}) and recorded as UNATTRIBUTABLE — the counters carry no timing, so"
+                + " they cannot be split between the dates they span. Both dates' attributable"
+                + " totals exclude them; the canonical query surfaces them separately.",
+            total, recoveredFrom, bucket);
+      }
       log.debug(
-          "signal_eval_outcomes rollup: bucket={} boot={} evaluations={}",
-          bucket, snapshot.epoch(), total);
+          "signal_eval_outcomes rollup: bucket={} boot={} evaluations={} unattributable={}",
+          bucket, snapshot.epoch(), total, recoveredFrom != null);
       return total;
     } catch (RuntimeException e) {
       // Nothing to compensate: the checkpoint is durable, so the next tick differences against
@@ -216,6 +227,52 @@ public class SignalEvalOutcomeRollupJob {
     Map<String, Long> deltas = new LinkedHashMap<>();
     cumulative.forEach((tag, now) -> deltas.put(tag, now - checkpoint.getOrDefault(tag, 0L)));
     return deltas;
+  }
+
+  /**
+   * The originating checkpoint bucket IF this tick's delta window crosses an IST session date, else
+   * {@code null}.
+   *
+   * <p><b>Why this exists.</b> A delta covers {@code (checkpoint, bucket]}, and the recovery of a
+   * failed or skipped stretch makes that window arbitrarily long. Without this check the ENTIRE
+   * recovered window is attributed to the CURRENT bucket. The realistic path: the process runs
+   * continuously across a weekend (so {@code boot_id} is stable), writes start failing Friday 15:00,
+   * no ticks fire over the weekend, and Monday's first tick dumps Friday's final half hour into
+   * Monday 09:00 — Friday under-reports, Monday over-reports, and BOTH days' outcome mix is wrong.
+   * That is precisely the question this table exists to answer, silently wrong on two days at once.
+   *
+   * <p><b>Why it MARKS rather than re-attributes.</b> The counters carry no timing — only a total —
+   * so a span covering Wednesday through Friday genuinely mixes three sessions and cannot be split.
+   * Attributing it to the origin date would be exactly as wrong as attributing it to today, just
+   * less obviously. So a cross-date recovery is recorded in full (nothing is ever lost) and MARKED:
+   * the canonical query excludes marked rows from the attributable total and surfaces them as
+   * {@code unattributable}. Honest beats convenient, and no guessing is smuggled in.
+   *
+   * <p><b>IST normalization is load-bearing.</b> JDBC returns {@code bucket_time} in whatever offset
+   * the driver/session uses, typically UTC, so both sides are converted to the IST offset before
+   * comparing calendar dates. Skipping that would silently misjudge any bucket whose UTC date
+   * differs from its IST date — reachable via {@link #flushOnShutdown()}, which can write at any
+   * wall-clock time (a 02:00 IST restart is the previous calendar day in UTC).
+   *
+   * @param checkpoint the previous durable bucket, or null when this boot has none yet
+   * @param bucket the bucket being written now
+   */
+  static OffsetDateTime crossDateOrigin(OffsetDateTime checkpoint, OffsetDateTime bucket) {
+    if (checkpoint == null) {
+      // A boot's FIRST tick has no prior date to span. Its delta is "since boot", and boot is
+      // necessarily after the previous process ended, so there is nothing to mis-attribute.
+      return null;
+    }
+    return istDate(checkpoint).equals(istDate(bucket)) ? null : checkpoint;
+  }
+
+  /**
+   * The IST calendar date of an instant. Sessions run 09:15–15:30 IST and never cross IST midnight,
+   * so the IST calendar date IS the session date. Always normalize through {@link Ist#OFFSET} first
+   * — reading {@code toLocalDate()} off a UTC-offset value is the repo's standing off-by-one trap.
+   */
+  static LocalDate istDate(OffsetDateTime instant) {
+    return instant.withOffsetSameInstant(Ist.OFFSET).toLocalDate();
   }
 
   /**

@@ -54,14 +54,35 @@
 -- a genuine additional increment, never a replay of one already counted. Two INSTANCES overlapping
 -- during a blue/green restart do not collide at all -- different boot_id, different rows.
 --
+-- CROSS-DATE RECOVERY IS MARKED, NOT GUESSED. A delta covers (checkpoint, bucket], and recovering a
+-- failed or skipped stretch makes that window arbitrarily long. If it crosses an IST session date,
+-- the counts inside it CANNOT be attributed to either date: the counters carry a total and no
+-- timing. The realistic path is a weekend -- the process runs continuously (so boot_id is stable),
+-- writes start failing Friday 15:00, no ticks fire Sat/Sun, and Monday's first tick would otherwise
+-- dump Friday's last half hour into Monday 09:00, leaving BOTH days wrong. Attributing such a window
+-- to its ORIGIN date is no better: a Wednesday->Friday span genuinely mixes three sessions.
+-- So the row is written in full (nothing is ever lost) with recovered_from set to the originating
+-- bucket, and the canonical query below keeps it OUT of the attributable total and reports it
+-- separately. recovered_from IS NULL on every normal tick.
+--
 -- WHAT IS AND IS NOT GUARANTEED (stated plainly; this table's value is that it can be trusted when
 -- a health signal is in dispute):
 --   GUARANTEED  -- no double count, ever, on any failure path.
 --   GUARANTEED  -- no negative eval_count, ever.
 --   GUARANTEED  -- a failed or delayed tick loses nothing: the next successful tick's delta covers
 --                  every window since the last durable row. Only 3m resolution degrades.
---   GUARANTEED  -- SUM(eval_count) needs no boot-awareness. Deltas never span days, so a long-lived
---                  process cannot over-attribute the way a raw cumulative counter would.
+--   GUARANTEED  -- SUM(eval_count) needs no boot-awareness; boot_id scopes the checkpoint, not the
+--                  arithmetic.
+--   GUARANTEED  -- a recovery WITHIN one IST date is attributed to that date. Its counts land on a
+--                  later bucket of the same day, so the DAY total stays exact; only the 3m shape
+--                  of that stretch is approximate.
+--   NOT GUARANTEED -- a recovery SPANNING IST dates is not attributable to any single date, and is
+--                  deliberately not attributed to one. Such rows carry a non-null recovered_from,
+--                  are EXCLUDED from `evaluations` in the canonical query, and appear under
+--                  `unattributable` for every date their span touches. A date whose totals were
+--                  affected therefore under-reports in `evaluations` -- and says so, because the
+--                  same query surfaces the overlapping unattributable rows. It is never silently
+--                  folded into a day.
 --   NOT GUARANTEED -- evaluations between the last SUCCESSFUL write and process death are lost.
 --                  They exist only in JVM memory, so no protocol can persist them. On a GRACEFUL
 --                  shutdown a @PreDestroy flush closes this window (a planned restart or deploy
@@ -83,24 +104,35 @@
 -- (AT TIME ZONE '+05:30' INVERTS under the POSIX sign convention: it prints 14:20 IST as 03:20):
 --
 --   SELECT outcome,
---          SUM(eval_count)                              AS evaluations,
---          COUNT(*)                                     AS buckets_recorded,
---          COUNT(*) FILTER (WHERE eval_count > 0)       AS buckets_active,
---          COUNT(DISTINCT boot_id)                      AS boots,
---          MIN(bucket_time) AT TIME ZONE 'Asia/Kolkata' AS first_bucket_ist,
---          MAX(bucket_time) AT TIME ZONE 'Asia/Kolkata' AS last_bucket_ist
+--          SUM(eval_count) FILTER (WHERE recovered_from IS NULL)     AS evaluations,
+--          SUM(eval_count) FILTER (WHERE recovered_from IS NOT NULL) AS unattributable,
+--          COUNT(*)        FILTER (WHERE recovered_from IS NULL)     AS buckets_recorded,
+--          COUNT(*) FILTER (WHERE recovered_from IS NULL AND eval_count > 0) AS buckets_active,
+--          COUNT(DISTINCT boot_id)                                   AS boots,
+--          MIN(bucket_time) AT TIME ZONE 'Asia/Kolkata'              AS first_bucket_ist,
+--          MAX(bucket_time) AT TIME ZONE 'Asia/Kolkata'              AS last_bucket_ist
 --     FROM strategy.signal_eval_outcomes
 --    WHERE bucket_time >= timestamptz '2026-07-20T00:00:00+05:30'
---      AND bucket_time <  timestamptz '2026-07-21T00:00:00+05:30'
+--      AND COALESCE(recovered_from, bucket_time) < timestamptz '2026-07-21T00:00:00+05:30'
 --    GROUP BY outcome
 --    ORDER BY evaluations DESC;
 --
--- Reading it: buckets_recorded > 0 proves the PROCESS was up; SUM(evaluations) > 0 proves the EVAL
--- LOOP was running; boots counts how many times it restarted that day; the per-outcome split is the
--- mix (e.g. an all-`composite-below-threshold` day is a healthy engine on a directionless leg --
--- exactly the 2026-07-17 SuperTrend-DOWN shape -- NOT a starved one). `confluence-blocked` is the
--- only outcome that also writes a signal_rejections row, which is why an empty rejections table has
--- never meant a dead engine.
+-- The WHERE is a SPAN-OVERLAP test, which is why it uses COALESCE rather than a plain bucket_time
+-- range. Each row's delta covers (COALESCE(recovered_from, bucket_time), bucket_time]; for a normal
+-- row recovered_from is NULL and the predicate collapses to exactly the plain range. For a marked
+-- row it makes the recovery visible from EVERY date its span touches -- so querying Friday still
+-- shows the unattributable counts that a Monday tick recovered, instead of Friday quietly
+-- under-reporting with no trace. A marked row appearing under two dates' `unattributable` is
+-- correct, not double counting: the point of the column is that those counts belong to no single
+-- date. `evaluations` never includes them.
+--
+-- Reading it: buckets_recorded > 0 proves the PROCESS was up; evaluations > 0 proves the EVAL LOOP
+-- was running; boots counts how many times it restarted that day; unattributable is 0 in normal
+-- operation and non-zero only after a cross-date outage, where it bounds how far off `evaluations`
+-- could be. The per-outcome split is the mix (e.g. an all-`composite-below-threshold` day is a
+-- healthy engine on a directionless leg -- exactly the 2026-07-17 SuperTrend-DOWN shape -- NOT a
+-- starved one). `confluence-blocked` is the only outcome that also writes a signal_rejections row,
+-- which is why an empty rejections table has never meant a dead engine.
 --
 -- OBSERVABILITY ONLY. Nothing here is consulted by any trading decision. The rollup runs on its OWN
 -- dedicated single-thread scheduler (evalOutcomeTaskScheduler) -- never the eval thread, never the
@@ -131,6 +163,12 @@ CREATE TABLE signal_eval_outcomes (
   cumulative_count  BIGINT NOT NULL,      -- the counter's value at this snapshot, since THIS boot.
                                           -- The DURABLE CHECKPOINT the next delta differences
                                           -- against -- do not drop it as "redundant".
+  recovered_from    TIMESTAMPTZ,          -- NULL on every normal tick. Set to the originating
+                                          -- checkpoint bucket when this delta's window crosses an
+                                          -- IST session date, marking eval_count UNATTRIBUTABLE to
+                                          -- any single date (counters carry no timing, so the span
+                                          -- cannot be split). The canonical query keeps these out
+                                          -- of `evaluations` and reports them separately.
   PRIMARY KEY (bucket_time, boot_id, outcome)
 );
 

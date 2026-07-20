@@ -21,11 +21,15 @@ import org.junit.jupiter.api.Test;
  * Chip task_37ee83e0: the engine used to write NOTHING on a chart-stage no-entry, so four states
  * shared one DB signature (zero rejection rows) — engine dead / chart gate closed / indicators
  * warming / composite below threshold. These drive the REAL {@link EntryEvaluator} through the
- * REAL live scalper composite (verified against the live DB 2026-07-17: all 63 published+enabled
- * scalpers — of 69 enabled strategies, the other 6 being 1d swing funnels — group to a SINGLE
- * distinct composite, {@code rsi14} rsi_momentum w1 + {@code supertrend} direction w1 at
+ * REAL live scalper composite (every published+enabled scalper groups to a SINGLE distinct
+ * composite, {@code rsi14} rsi_momentum w1 + {@code supertrend} direction w1 at
  * {@code entry_rules.scoring.threshold: 0.2}, on one 3m NIFTY-future series) and assert that each
  * of those states now classifies to a DISTINCT outcome.
+ *
+ * <p>The scalper COUNT has moved twice — 63 when this was written (2026-07-17), 38 after the owner
+ * disabled 25 of them (all BTST, all straddle, all {@code -sensex-sensexoi}) on 2026-07-20. Only the
+ * shared-composite fact is load-bearing here, so the count is deliberately no longer stated inline
+ * where it would go stale again.
  */
 class SignalEngineOutcomeTest {
 
@@ -146,8 +150,9 @@ class SignalEngineOutcomeTest {
 
   @Test
   void anUnwarmedSeriesWarnsOncePerSessionNotOncePerStrategyPerBar() {
-    // All 63 published+enabled scalpers resolve to ONE 3m NIFTY-future series, so the fault is
-    // per-SERIES: without dedup an unwarmed series emits ~63 identical WARNs every bar (~1,260/h).
+    // Every published+enabled scalper resolves to ONE 3m NIFTY-future series, so the fault is
+    // per-SERIES: without dedup an unwarmed series emits one identical WARN per scalper every bar
+    // (~38 as of 2026-07-20, and it was 63 three days earlier — the dedup must not depend on it).
     Map<String, LocalDate> seen = new HashMap<>();
     LocalDate session = LocalDate.of(2026, 7, 17);
     String nifty = "NFO:NIFTY26JULFUT:3m";

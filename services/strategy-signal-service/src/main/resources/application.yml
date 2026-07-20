@@ -56,6 +56,20 @@ artha:
     strategy: ${ARTHA_OPENALGO_STRATEGY:ArthaYantra}
   signals:
     engine-enabled: ${ARTHA_SIGNAL_ENGINE_ENABLED:true}
+    # Persist one composite_rejections row (V044) per entry evaluation that ended
+    # COMPOSITE_BELOW_THRESHOLD, so the RSI/composite operand distribution is analysable. Everything
+    # written is already computed by EntryEvaluator — the engine used to discard it. ON by default;
+    # this is the KILL SWITCH if the added row rate (~192/session, ~141 KB/day) ever needs stopping
+    # without an image rebuild. CHART_GATE_FAILED is never recorded (~3.4x the volume, no signal).
+    # Env name MUST match the compose passthrough exactly (#653 trap: a mismatch swallows the override).
+    record-composite-rejections: ${ARTHA_SIGNALS_RECORD_COMPOSITE_REJECTIONS:true}
+    # composite_rejections retention prune (V044), mirroring the PF-03 risk_suppressions job below:
+    # a daily 02:30-IST off-market DELETE of rows older than this horizon (live-only; the mock DB is
+    # ephemeral). Generous by design — this is tuning history at ~141 KB/day, ~25 MB/year.
+    # 0/negative DISABLES the prune: it is a QUIET no-op (announced once at INFO on boot, silent on
+    # every tick, no ops alert — disabling a prune is a legitimate choice, not a fault) and it also
+    # guards the wipe, since a non-positive horizon would make the cutoff now() and delete every row.
+    composite-rejection-retention-days: ${ARTHA_SIGNALS_COMPOSITE_REJECTION_RETENTION_DAYS:180}
     # PF-03 risk_suppressions retention prune (task_f168c23c). The table is append-only with a low row
     # rate (most sessions zero; worst ~2-3k/day) — retained GENEROUSLY (180d). A daily 02:30-IST
     # off-market DELETE removes rows older than this horizon (live-only; mock DB is ephemeral).

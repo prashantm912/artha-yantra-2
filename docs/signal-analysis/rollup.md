@@ -28,18 +28,24 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 | 2026-07-16 | **0** (NULL SESSION — engine never evaluated a bar) | **0** of 39 published | 0 | — | — | — | — (dot-health: `rowsInspected 0`, every dot `alive:false`) | **F10 COLD-START STARVATION, 2nd occurrence (1st was 07-15, filed not fixed → recurred in a day). Stack cold-booted 08:57:04; engine `reload()` at 08:57:19–31 hit term-structure 403/DATA_STALE/breaker-open because market-data's IN-MEMORY `lastGood` cache is empty on a cold boot (a WARM container survives the same expired-token window off yesterday's cache — why only cold starts break); all 39 dropped → `loaded 0 published strategies` 08:57:31. Owner's Kite login landed 08:58:22 — **missed by 51s**. No reload path could recover (08:40 cron passed; 20s reconcile compares registry-vs-last-reload-SNAPSHOT so total failure ≡ steady state; no `kite.status` listener existed). CAPTURE WAS PERFECT throughout (375/375 1m bars, 373 OI snaps) — every health signal green while the engine did nothing. 18 paper positions unmanaged (28,441 `PaperStaleTickAlerter` WARNs) — supersedes 07-15's §6.2 "16/17 tickless" finding, SAME cause. **FIXED SAME NIGHT: [#874](https://github.com/prashantm912/artha-yantra-2/pull/874) @ d9f30a8f deployed + drill-proven live** (self-healed 0→39 from a `CONNECTED` alone). findings `2026-07-16-session-findings.md`** |
 | 2026-07-17 | 523 (09:24–15:18 — **FULL session, no eval stall**, first clean coverage since 07-06) | **17 of 63 published** ⚠ | **3** (straddle only; **0 paper positions opened**) | volume-floor 292/523 (55.8%); time-window 149 (28.5%) | 210 (all CE, 0 PE; **202 parked exactly in the 0.6 bucket**) | 11, 7W/11, +381.9 pts, **+₹23,946.92** (best session ever — but only **4 distinct entry events**, 6 rows are the same 24000CE @267.05 09:45 leg across 6 strategies; deduped **2 of 4 events won**) | **5**: iv_rank (ivRank NULL 523/523), iv_pair (gap 0.0004 ≪ 0.02 — recalibration #675/#676 did NOT revive it), vix (data alive, 0% = up-day direction), basis (**NEW — no operand visible in `context.macro`**), iv_abs_band (ATM IV 12.49% just outside the 10–12 band). Cap unchanged at 0.816; effective live-dot bar 0.735. **`vwap` supported 359/359 = the heaviest dot (w 2.5) discriminated NOTHING — new watch item** | **trend-up CE day, 24000CE 267→371.** volume-floor blocked the day's money (+₹22,345 / 6W-4L attributed); `vol-off`≡`vol-12k5` delta +₹4,475 2W/2, `composite-055` delta +₹2,063 2W/2L (bought the same winner **plus two losers**). ⚠ **NEW ALARM §6.1: coverage collapsed 35→33→17 of 63; 38 sensex CE variants emitted ZERO rows** while SENSEX chain (361 snaps, expiry rolled 07-16→07-23) + `SENSEX26JULFUT` (375/375 bars) + eval loop were all healthy — **cause UNVERIFIED, 07-17 container logs destroyed by the 07-20 restart** → promoted to README **§3.10** (log the boot line the SAME day). ⚠ **CARRIED: 18 paper positions still OPEN since 07-16 20:00 IST**, two sessions unmanaged. Shadow entry latency structural at p50 76s / p95 95s. findings `2026-07-17-session-findings.md` |
 
+| 2026-07-20 | **1,013** (10:19–15:19 endpoints, but **two interior holes** — nothing before 10:19, nothing 11:45–12:45, capture healthy through both) | **49 of 63 loaded** ✅ (07-17's collapse largely resolved; 31 sensex slugs vs 4) | **1** (straddle, comp 0.500; **0 paper positions**) | volume-floor 706/1013 (69.7%); time-window 201 (19.8%) | 230 (546 CE / **202 PE** — first real PE population, max 0.452, still never passes) | 17, 6W/17, −258.4 pts, **−₹5,881.86** (only **6 distinct entry events**, deduped **1 of 6 won**) | **7**: futures_oi (**NEW**, w1.5), underlying_oi (**NEW**), oi_spurt, volume, iv_rank (withheld from Σw), iv_pair, iv_abs_band. **basis REVIVED to 67.5% and vix to 54% — both 07-17 "dead" calls were REGIME.** Cap fell **0.816 → 0.7181** (reconciled exactly: 13.5/18.8 with iv_rank withheld; **30 rows sat on the ceiling**); effective live-dot bar 0.836 | **flat/rangebound day (+3.4 pts, 169-pt range, volume HALF of 07-17).** ⚠⚠ **TOP FINDING §6.2: all three OI dots dead session-wide — `futuresQuadrant`=`underlyingQuadrant`=NEUTRAL on 748/748, spurt pcts null 1013/1013. CODE-PROVEN NOT REGIME** (`OiInterpretation.classify` is total over 4 states, no dead zone; NEUTRAL means "data missing" only). Monthly-expiry suppression ruled out (Monday; weekly expiry is Tue). Chain capture clean (0 null OI over 34k/64k snaps) but **futures_oi_snapshots cadence −43% (208 of ~375 minutes)**; post-close probe: `/options/spurt` **400s**, `/futures/banks?name=NIFTY` **422s** while `name=NIFTY 50` 200s. Root cause UNPINNED — logs destroyed (§6.4). ✅ **§6.1a FIRST-EVER canary telemetry for the stall class** (#634 eval-stall 09:58 + #679 receive-stall/resubscribe 13:23, both recovered) — answers the rollup's "prove #634 CAN log a row"; but the largest hole (11:45–12:45) passed **unalarmed**. ⚠ **§6.1 CORRECTS the 07-17 file**: bucketing the interior shows 07-17 also had two holes — its "FULL session, no eval stall" was drawn from min/max only → new README **§3.11**. ⚠ **§6.3: 7 rows log a block with a POSITIVE margin** (composite 0.613–0.718 vs thr 0.600) — diagnostic self-contradiction. ⚠ **§2.1: SENSEX family still on the fixed 125k floor** (419 of 706 blocks) which is **above p95 (101,920)** of the signal series' own 3m distribution → new T11. volume-floor **SAVED money** today (11 blocked, 0 winners, −₹6,723) — T1 now **2-for/2-against**. New dimensions **§3.11 + §3.12**. findings `2026-07-20-session-findings.md` |
+
 ## Per-variant league (cumulative — refresh each rollup pass from the §6 league SQL)
 
-Refreshed 2026-07-20 (through the 2026-07-17 session). Note the challenger roster changed: the
+Refreshed 2026-07-20 (through the 2026-07-20 session). Note the challenger roster changed: the
 `composite-070` book was replaced by `composite-055`, so its all-time row is retired.
 
 | variant | closed | net wins | total net ₹ | total pts | verdict-so-far |
 |---|---|---|---|---|---|
-| champion | 77 | 26 | **−38,251.21** | −499.7 | still deeply NEGATIVE all-time despite 07-17 being its best day ever (+₹23,946.92). The would-have-fired class mostly loses ⇒ **the gate is correctly rejecting losers on balance**; 07-06 and 07-17 are the two trend-day outliers |
-| vol-12k5 | 6 | 2 | **+1,348.76** | +28.2 | best all-time net; 07-17 added +₹2,747 on 2W/2 entries. Small n |
-| composite-055 | 6 | 2 | +654.89 | +17.9 | 07-17 delta bought the same winner as vol-12k5 **plus two losers** — loosening the composite buys noise |
-| vol-off | 12 | 4 | −3,400.90 | −37.8 | fully-disabled floor is NET NEGATIVE all-time — the floor is doing real work; `vol-12k5` (relax, don't remove) is the better shape |
+| champion | 94 | 32 | **−44,133.07** | −758.1 | still deeply NEGATIVE all-time; 07-20 gave back ₹5.9k of 07-17's record +₹23.9k. The would-have-fired class mostly loses ⇒ **the gate is correctly rejecting losers on balance**; 07-06 and 07-17 remain the two trend-day outliers |
+| composite-055 | 8 | 2 | **−478.98** | +2.5 | **flipped negative on 07-20** (2 extra entries, both losers). Across both sessions it buys one winner and three losers — loosening the composite buys noise |
+| vol-12k5 | 10 | 2 | **−614.23** | −42.9 | **flipped negative on 07-20** (4 entries, 0 wins) after leading all-time on 07-17. Small n, now regime-split |
+| vol-off | 17 | 4 | −6,114.70 | −142.6 | fully-disabled floor stays the worst book all-time — the floor is doing real work; `vol-12k5` (relax, don't remove) is still the better shape |
 | composite-070 | 0 | — | — | — | RETIRED (never took a row; replaced by `composite-055`) |
+
+⚠ **Every challenger is now net-negative all-time.** On 07-17 the loosened books were the ones that
+made money; on 07-20 they lost most per position. No loosening proposal (T1, T7) has surviving
+positive evidence.
 
 ## Structural-vs-regime watchlist
 
@@ -54,6 +60,17 @@ Refreshed 2026-07-20 (through the 2026-07-17 session). Note the challenger roste
   PASSED `golden-crossover` + `connect-the-dots` CE (comp 0.688). Both lost small to afternoon whipsaw
   (−6.5% / −9.1%) — entries at 13:39 landed at a local top (24,229) before the future dipped then recovered.
   One session ≠ a k verdict; **watch entry-timing quality**, not just win/loss, over the tuning month.
+  **2026-07-20 update — the k evidence is now genuinely SPLIT (2-for / 2-against).** On a thin flat day the
+  floor blocked 11 shadow positions with **0 winners (−₹6,723)** and every challenger book lost too
+  (`vol-off` 0/5, `vol-12k5` 0/4) — the 07-03 signature, exactly inverting 07-17's +₹22,345. Both
+  loosening books are now net-negative all-time. **T1 should not be applied on current evidence.**
+  ⚠ **SEPARATE, NEWLY-MEASURABLE ITEM — the SENSEX family is still on the un-armed FIXED 125,000 floor**
+  (T11). 07-20 was the first session with enough sensex slugs emitting (31) to quantify it: **419 of 706**
+  volume-floor blocks carried threshold 125,000 flat, while the nifty family's relative floor ranged
+  12,188–53,138 against a session 3m median of 13,260. Per ADR-0003 the sensex variants signal on
+  `NIFTY26JULFUT`, so the right yardstick is that same distribution — where **125k sits above p95
+  (101,920)**, i.e. a README §3.8 *near-never*. This is a STRUCTURAL gap (the threshold is outside the
+  operand's practical range), distinct from the regime-split k question above.
 - **Dead dots capping composite** — cap **0.816 (4 structural-dead, all 5 sessions)**: iv_rank
   (honest-null), iv_pair (unit-gap), oi_spurt (price-floor 50), volume (relative floor / no-expansion days).
   These are now the **§Proposals P1–P3** (iv_pair, oi_spurt, iv_rank). breadth is LIVE (#486) — regime, not
@@ -113,7 +130,15 @@ Refreshed 2026-07-20 (through the 2026-07-17 session). Note the challenger roste
 - **Directional scalpers now fire (NEW 07-10)** — `golden-crossover` + `connect-the-dots` CE, first
   directional fires in analysis history, enabled by the relative floor. All small losers (whipsaw). The
   scalper family is now live-firing directionally, not just via the straddle path.
-- **⚠ STRATEGY-COVERAGE COLLAPSE (NEW 2026-07-17, UNRESOLVED — highest-priority open item).** Distinct
+- **STRATEGY-COVERAGE COLLAPSE — LARGELY RESOLVED 2026-07-20** (was the 07-17 highest-priority item).
+  Distinct emitting slugs recovered **17 → 49**, and the sensex family came back from 4 slugs to **31**.
+  The engine loaded **63 / 0 unresolved** at 08:36 IST after an F10-style cold boot self-healed (#874
+  working as designed). The 07-17 cause remains permanently unverifiable (logs destroyed), so this stays
+  on the watchlist one more session rather than being closed — but the alarm is eased and T9 is downgraded
+  from "highest priority". **Caveat:** today's `published+enabled` snapshot read 44 *after* a post-close
+  deploy, below the 49 that emitted — the denominator itself moved, so ratio-based alerting (T9) has to
+  read the registry at the same instant as the numerator.
+- **⚠ STRATEGY-COVERAGE COLLAPSE (2026-07-17 — superseded by the row above; retained for history).** Distinct
   slugs emitting rejections fell **35 (07-10) → 33 (07-15) → 17 (07-17)** against a registry that GREW to
   63 published+enabled. The 38 `%sensex%` CE variants emitted **zero rows all session**; the 4 surviving
   sensex slugs are all `-pe` and emitted exactly 2 rows each at the same two bars (10:48, 12:42 IST).
@@ -124,15 +149,62 @@ Refreshed 2026-07-20 (through the 2026-07-17 session). Note the challenger roste
   read the boot line the SAME day from now on (README §3.10). Leading hypothesis is a partial load, per the
   07-16 §6.3 standing check (`unresolved == 0`, never `loaded > 0`). Watch for two more sessions before
   treating as structural; if the ratio stays low, this is a bigger finding than any gate tune in this file.
-- **`vwap` dot supports 100% (NEW 07-17)** — 359/359 at the heaviest weight (2.5 = 12.8% of Σw). A
-  permanently-supporting dot is an unlabelled threshold reduction, the mirror image of a dead dot. Confirm
-  across 2 more sessions before proposing a weight/condition change (single session ⇒ could be regime).
-- **`basis` dot 0/359 with no visible operand (NEW 07-17)** — suspected dead-data, not regime: unlike `vix`
-  (alive at 13.15, 0% support because it rose against a CE day), no basis field surfaces in
-  `context.macro` at all. Needs a code read of the dot's input before it can be classified.
-- **18 paper positions OPEN since 2026-07-16 20:00 IST (CARRIED, worsening)** — created by the 07-16 F10
-  incident, still unsquared two sessions later. No longer an incident artefact; an open-position hygiene
-  problem in its own right. Owner decision.
+- **`vwap` dot supports 100% — CONFIRMED ACROSS 2 SESSIONS (07-17, 07-20).** 359/359 then 748/748 at the
+  heaviest weight (2.5 = 12.8% of Σw): **1,107 consecutive rows with zero discrimination.** A
+  permanently-supporting dot is an unlabelled threshold reduction, the mirror image of a dead dot. The
+  2-session confirmation this item asked for is now met ⇒ **T6 is promoted from watch to a live proposal**
+  (narrow the support condition or cut the weight).
+- **`basis` dot — RESOLVED, was REGIME not dead-data.** 07-17 read 0/359 and it was filed as suspected
+  dead-data; 07-20 read **505/748 = 67.5%**. Same story as `vix` (0% on 07-17, 54% on 07-20). **Carry the
+  lesson, not the item: a 0% dot on a single directional session is regime until a second session with the
+  opposite character disagrees.** T4 closed, no action.
+- **⚠⚠ OI QUADRANT COLLAPSE (NEW 2026-07-20, UNRESOLVED — now the highest-priority open item).**
+  `futuresQuadrant` = `underlyingQuadrant` = **NEUTRAL on 748/748** scored rows and `spurtOiPct`/
+  `spurtPricePct` NULL on 1,013/1,013, killing `futures_oi` (w 1.5), `underlying_oi` (1.0) and `oi_spurt`
+  (1.0) for the entire session and dropping the composite cap **0.816 → 0.7181**. **This is code-proven a
+  data-absence, not a flat-day artifact:** `OiInterpretation.classify` (`OiInterpretation.java:16-23`) is a
+  **total** function over four states with no dead zone — zeros included — so it can never emit NEUTRAL;
+  NEUTRAL exists only in the strategy-side mirror (`OiQuadrant.java:10-25`) as the documented "data
+  missing" sentinel and the declared fallback on read failure. Excluded: monthly-expiry suppression
+  (`MarketCalendar.java:259-263` needs a weekly-expiry day; 07-20 was a Monday), chain-capture failure
+  (0 null OI across 34k NIFTY / 64k SENSEX snapshots), and dead futures OI values (300 distinct values
+  14.37M–14.73M). Live post-close probes: `/options/spurt` **400s on every parameter shape**;
+  `/futures/banks?name=NIFTY%2050` **200s with real interpretations** while `name=NIFTY` **422s**.
+  Capture regression alongside: `futures_oi_snapshots` logged **208 of ~375 minutes** (vs 365 on 07-17),
+  and a gappy 1-minute capture leaves a 3-minute `latestPair` read with no prior bucket →
+  `interpretation=null` → NEUTRAL (`FuturesMoversService.java:142-151`). **Root cause NOT pinned — the
+  session's engine logs were destroyed by the 17:31 post-close deploy before the `scalper OI read …
+  unavailable` lines could be read.** ⚠ **Severity note:** NEUTRAL dots are added with `absent=false`
+  (`ConnectTheDotsScorer.java:207-214`) so they stay in the denominator and score zero — a dead OI
+  endpoint is strictly worse than a dead IV feed, which is withheld. Promoted to README **§3.12**.
+- **⚠ ENGINE-LOG DESTRUCTION IS NOW A RECURRING METHOD FAILURE (07-17, 07-20).** Both sessions lost their
+  `signal engine loaded N published` boot line — and with it the root cause of that session's headline
+  finding — because a container recreate landed before the analysis ran. The agent runs post-close, which
+  is exactly the window deploys land in, so it will keep losing this race. README §3.10's "read it the same
+  day" instruction is not sufficient on its own ⇒ **T15 proposes persisting the reload line to a table.**
+  Secondary trap from the same event: `published+enabled` read **44** post-deploy while the engine had
+  loaded **63** and **49** slugs had emitted — **a post-deploy registry count is not the session's
+  denominator.**
+- **17 paper positions OPEN since 2026-07-16 20:00 IST (CARRIED, 3rd session)** — created by the 07-16 F10
+  incident, still unsquared. One of the original 18 closed between 07-17 and 07-20; the rest remain. No
+  longer an incident artefact; an open-position hygiene problem in its own right. Owner decision (T10).
+- **Interior coverage holes on BOTH logged sessions (NEW 2026-07-20)** — 07-20 held a 64-minute hole after
+  the open and a full hour empty 11:45–12:45; re-bucketing 07-17 exposed two holes there too, which
+  **invalidates that file's "FULL session, no eval stall" claim** (it was drawn from min/max bar_time
+  only). Capture was healthy through all of them. ✅ **The canaries finally logged**: #634's `eval-stall`
+  (09:58, 213 s) and #679's `receive-stall` + `resubscribe` (13:23, 778 s) both fired and both recovered
+  — the rollup's standing question "prove #634 CAN log a row at all" is **answered YES**. **But not
+  sufficient:** the day's largest hole (11:45–12:45) triggered nothing, and the 13:23 receive-stall sits in
+  a window that *was* producing rows. Watch whether the alarms ever coincide with the holes. New README
+  dimension **§3.11**; note its honesty limit — an empty bucket alone is not proof of a dead engine
+  (`recordRejection` sits downstream of the chart-gate early return), so confirm against
+  `ay_signal_eval_outcome_total` **before** a post-close deploy resets the counters.
+- **`confluence-composite` rows logged with a POSITIVE blocking margin (NEW 2026-07-20)** — 7 rows record
+  "blocked" with composite 0.613–0.718 against a 0.600 threshold. Probably the optional-gate mechanic
+  (the row stores the FULL composite while the REQUIRED-ONLY sub-composite is what failed), which would
+  make the gate decision right and the diagnostic wrong — **unverified in code**. It also means every
+  §3.5 would-have-fired query in this folder mis-attributes these rows. Cheap fix proposed as T14 (assert
+  `blocking_margin < 0` on persist).
 - **Shadow entry latency is STRUCTURAL, not a flake** — p50 73–87 s / p95 85–170 s on every session logged
   (07-03, 07-06, 07-10, 07-15, 07-17). README flags p95 > ~5 s. Every shadow PnL in this file is computed
   off a fill stamped ~76 s after `bar_time`; bias direction unmeasured. Data-model fix belongs in README §7.

@@ -12,7 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * JDBC access to {@code strategy.signal_eval_outcomes} (V043) — the durable 3m rollup of the
+ * JDBC access to {@code strategy.signal_eval_outcomes} (V045) — the durable 3m rollup of the
  * SignalEngine entry-evaluation outcome counters. Those counters are in-memory Micrometer meters
  * that reset on every restart, so before this table "was the engine alive on date X?" was
  * unanswerable once the process bounced; that ambiguity produced two false starvation diagnoses
@@ -21,7 +21,7 @@ import org.springframework.stereotype.Repository;
  * <p><b>The checkpoint lives here, not in the JVM.</b> {@link #lastCumulativeForBoot} is what makes
  * the delta protocol idempotent: the writer differences the live counters against the newest
  * DURABLE row rather than against process memory, so a lost acknowledgement cannot double-count and
- * a failed write followed by a restart cannot lose. See the V043 header for the full protocol.
+ * a failed write followed by a restart cannot lose. See the V045 header for the full protocol.
  *
  * <p>Written ONLY by {@link SignalEvalOutcomeRollupJob}, on its own dedicated scheduler thread —
  * never from the signal-eval thread. OBSERVABILITY ONLY: no trading decision reads this table.
@@ -133,7 +133,7 @@ public class SignalEvalOutcomeRepository {
    * @param recoveredFrom per-outcome unattributable mark. An entry is non-null ONLY when that
    *     outcome's delta is NONZERO and its window crosses an IST session date, in which case it is
    *     the originating checkpoint's bucket and those counts are UNATTRIBUTABLE to any single date
-   *     (see the V043 header). Absent or null — the case on every normal tick, and on the
+   *     (see the V045 header). Absent or null — the case on every normal tick, and on the
    *     zero-delta outcomes of a genuine recovery — leaves the row an ordinary liveness row.
    * @return the number of rows inserted or merged
    */
@@ -178,7 +178,7 @@ public class SignalEvalOutcomeRepository {
    * SERVER-SIDE ({@code now() - make_interval}) on the {@code timestamptz} column, so it is
    * timezone-correct regardless of the container's UTC display clock — the UTC-vs-IST trap bites
    * {@code ::date} truncation and rendering, not interval arithmetic on an absolute instant. Runs as
-   * the {@code artha} owner, which may DELETE (the V043 grant gives {@code ay_strategy} SELECT only).
+   * the {@code artha} owner, which may DELETE (the V045 grant gives {@code ay_strategy} SELECT only).
    *
    * <p>Cannot orphan a running boot's checkpoint: a live boot rewrites a row every 3 minutes, so its
    * newest row — the only one {@link #lastCumulativeForBoot} reads — is always far inside a 180-day

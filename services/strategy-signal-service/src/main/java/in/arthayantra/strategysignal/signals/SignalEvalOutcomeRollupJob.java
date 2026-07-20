@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Makes engine liveness answerable RETROACTIVELY: snapshots the {@link SignalEngine.Outcome}
- * evaluation counters to {@code strategy.signal_eval_outcomes} (V043) every 3 minutes through the
+ * evaluation counters to {@code strategy.signal_eval_outcomes} (V045) every 3 minutes through the
  * session, and prunes that table daily.
  *
  * <p><b>Why.</b> {@code ay_signal_eval_outcome_total} is an in-memory Micrometer counter — it resets
@@ -46,7 +46,7 @@ import org.springframework.stereotype.Component;
  * commits but the acknowledgement is lost (the next tick re-covers evaluations the committed row
  * already holds), and loses everything since the last successful write if a failure is followed by a
  * restart. Differencing against durable state closes both. Full protocol + the precise guarantee
- * boundary: the {@code V043__signal_eval_outcomes.sql} header.
+ * boundary: the {@code V045__signal_eval_outcomes.sql} header.
  *
  * <p><b>What is and is not guaranteed.</b> No double count on any failure path; no negative delta; a
  * failed or delayed tick loses nothing (the next successful tick absorbs every skipped window

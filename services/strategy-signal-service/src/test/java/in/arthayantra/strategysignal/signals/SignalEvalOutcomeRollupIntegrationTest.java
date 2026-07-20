@@ -30,7 +30,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * V043 {@code signal_eval_outcomes} against the REAL Flyway strategy lineage.
+ * V045 {@code signal_eval_outcomes} against the REAL Flyway strategy lineage.
  *
  * <p>The load-bearing cases are the three cross-vendor review identified across two rounds, because
  * all three are properties of the DURABLE checkpoint and cannot be shown without a database:
@@ -150,7 +150,7 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
   }
 
   /**
-   * The CANONICAL liveness query from the V043 header — its SELECT aggregates and its span-overlap
+   * The CANONICAL liveness query from the V045 header — its SELECT aggregates and its span-overlap
    * WHERE verbatim — for one IST calendar date. The extra {@code boot_id}/{@code outcome} predicates
    * are test isolation only (the shared singleton DB holds other methods' rows) and do not weaken
    * the span logic under test.

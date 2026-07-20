@@ -78,7 +78,7 @@ class MonitorSchedulingConfigTest {
   }
 
   /**
-   * The V043 eval-outcome rollup makes a SYNCHRONOUS JDBC write, so it must own a third, expendable
+   * The V045 eval-outcome rollup makes a SYNCHRONOUS JDBC write, so it must own a third, expendable
    * pool. Both alternatives are unsafe and this pins it against a silent refactor back onto either:
    * the DEFAULT pool is a single thread that live logs show carrying {@code PaperStaleTickAlerter}
    * (paper SL/TP starvation alerting) plus {@code SignalEngine} reconcile — an observability write

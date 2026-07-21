@@ -134,7 +134,32 @@ Run in order; each answers one question. Canned SQL in §6.
     dragging the composite down, whereas null `iv_rank` is withheld from it. Cross-check
     `marketdata.futures_oi_snapshots` cadence (distinct minutes vs ~375) — a gappy 1-minute capture
     leaves a 3-minute `latestPair` read with no prior bucket, which yields a null interpretation.
-13. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+13. **Single-rail P&L attribution uses the would-have-fired set, NEVER the shadow book's
+    `blocking_rail` bucket** (added 2026-07-21) — the champion shadow book opens on ANY
+    composite-passing rejection regardless of how many rails failed, so grouping its positions by
+    `blocking_rail` answers "what happened to trades where X blocked *first*", not "what would
+    unblocking X alone have done". The two disagreed **in sign, on the same rail, on the same day**:
+    on 2026-07-21 `volume-floor` carried +₹2,872.77 in the champion per-rail bucket while the §3.5
+    would-have-fired set for the same rail resolved **6 losers out of 6**. To judge a knob, take the
+    §3.5 rows (composite ≥ threshold AND no failed check other than X), resolve each via its
+    challenger shadow row where one exists and by hand from `options_chain_snapshots` where dedup
+    suppressed it, and report that. Keep the per-rail bucket only as context.
+14. **Verify the armed knob in the PUBLISHED config, not just in the rejection rows** (added
+    2026-07-21) — tag-gated gates (`cfg.has("relative-volume-floor")`,
+    `ScalperConfluenceGate.java:422`) silently revert when a strategy is re-published from a stale
+    seeder draft. The rejection row shows the *effect* (a flat threshold where a banded one used to
+    be); only the registry shows the cause. Standing check each session:
+    ```sql
+    SELECT (v.config->'tags') ? 'relative-volume-floor' AS armed,
+           (v.created_at AT TIME ZONE 'Asia/Kolkata')::date pubdate, count(*),
+           string_agg(s.slug, ', ' ORDER BY s.slug)
+    FROM strategy.strategies s JOIN strategy.strategy_versions v ON v.id = s.published_version_id
+    WHERE s.enabled AND s.slug LIKE 'scalp-%' GROUP BY 1,2 ORDER BY 2,1;
+    ```
+    A publish stamp newer than the last findings file is the thing to look at. Pair it with a
+    per-slug `min(blocking_threshold)`/`max(blocking_threshold)` on the session's `volume-floor`
+    rows: `min = max` on a family that used to band is the fingerprint.
+15. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

@@ -30,25 +30,74 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 
 | 2026-07-20 | **1,013** (10:19–15:19 endpoints, but **two interior holes** — nothing before 10:19, nothing 11:45–12:45, capture healthy through both) | **49 of 63 loaded** ✅ (07-17's collapse largely resolved; 31 sensex slugs vs 4) | **1** (straddle, comp 0.500; **0 paper positions**) | volume-floor 706/1013 (69.7%); time-window 201 (19.8%) | 230 (546 CE / **202 PE** — first real PE population, max 0.452, still never passes) | 17, 6W/17, −258.4 pts, **−₹5,881.86** (only **6 distinct entry events**, deduped **1 of 6 won**) | **7**: futures_oi (**NEW**, w1.5), underlying_oi (**NEW**), oi_spurt, volume, iv_rank (withheld from Σw), iv_pair, iv_abs_band. **basis REVIVED to 67.5% and vix to 54% — both 07-17 "dead" calls were REGIME.** Cap fell **0.816 → 0.7181** (reconciled exactly: 13.5/18.8 with iv_rank withheld; **30 rows sat on the ceiling**); effective live-dot bar 0.836 | **flat/rangebound day (+3.4 pts, 169-pt range, volume HALF of 07-17).** ⚠⚠ **TOP FINDING §6.2: all three OI dots dead session-wide — `futuresQuadrant`=`underlyingQuadrant`=NEUTRAL on 748/748, spurt pcts null 1013/1013. CODE-PROVEN NOT REGIME** (`OiInterpretation.classify` is total over 4 states, no dead zone; NEUTRAL means "data missing" only). Monthly-expiry suppression ruled out (Monday; weekly expiry is Tue). Chain capture clean (0 null OI over 34k/64k snaps) but **futures_oi_snapshots cadence −43% (208 of ~375 minutes)**; post-close probe: `/options/spurt` **400s**, `/futures/banks?name=NIFTY` **422s** while `name=NIFTY 50` 200s. Root cause UNPINNED — logs destroyed (§6.4). ✅ **§6.1a FIRST-EVER canary telemetry for the stall class** (#634 eval-stall 09:58 + #679 receive-stall/resubscribe 13:23, both recovered) — answers the rollup's "prove #634 CAN log a row"; but the largest hole (11:45–12:45) passed **unalarmed**. ⚠ **§6.1 CORRECTS the 07-17 file**: bucketing the interior shows 07-17 also had two holes — its "FULL session, no eval stall" was drawn from min/max only → new README **§3.11**. ⚠ **§6.3: 7 rows log a block with a POSITIVE margin** (composite 0.613–0.718 vs thr 0.600) — diagnostic self-contradiction. ⚠ **§2.1: SENSEX family still on the fixed 125k floor** (419 of 706 blocks) which is **above p95 (101,920)** of the signal series' own 3m distribution → new T11. volume-floor **SAVED money** today (11 blocked, 0 winners, −₹6,723) — T1 now **2-for/2-against**. New dimensions **§3.11 + §3.12**. findings `2026-07-20-session-findings.md` |
 
+| 2026-07-21 | **1,372** (09:21–14:57, **interior fully covered — no hole, 0 `subscriber_health_events`**; tail after 14:57 empty, trade windows closing) | **22 of 38 loaded** (16 silent slugs are CE — tape, not load: `chart-gate-failed` counter 2,020) | **0** (0 paper positions) | volume-floor **1,069/1,372 (77.9%)**, every row at a flat **125,000**; time-window 256 (18.7%) | 218 (**216 PE** — max PE **0.7447**, max CE 0.6915) | 9, 7W/9, +177.5 pts, **+₹2,872.77** (only **5 distinct entry events**; deduped **2W/2L/1 flat ≈ −₹2,232**) | **4 structural**: iv_rank (withheld), iv_pair, iv_abs_band, volume (mechanically dead behind the 125k floor). **OI dots ALL RECOVERED** (futures_oi 57.6%, underlying_oi 63.9%, oi_spurt 3.0%); breadth 0.2% + vix 0.2% = REGIME. Cap recovered **0.7181 → 0.9043**; effective live-dot bar 0.664 | **mild-down NIFTY weekly expiry Tue (−35 pts, 145-pt range); PE-dominated tape (1,068 of 1,070 scored rows PE).** ⚠⚠ **TOP FINDING §2.1 — CONFIG REGRESSION: all 18 PE scalpers were re-published 2026-07-20 21:28:5x IST from seeder drafts missing the `relative-volume-floor` tag**, so every PE strategy reverted to the fixed 125,000 floor (`ScalperConfluenceGate.java:422` is `cfg.has(...)`-gated). Registry-proven: `scalp-connect-the-dots-nifty-pe` v1.0.1 (07-06) carries the tag, v1.0.3 (07-20 21:28:56, live today) does not; the same slug ran banded 12,188–32,370 **yesterday**. 125,000 sits above **p99 (117,455)** of the session's own 3m distribution — **1 passable bar in 125** → T16, highest priority. ✅ **§6.2 the 07-20 OI outage did NOT repeat** (0 NEUTRAL, 13 quadrant combos) **although `futures_oi_snapshots` cadence got WORSE (192/375 vs 208)** — refutes 07-20's cadence mechanism, leaves the `/options/spurt` 400 as the suspect. ✅ **§3 the PE-ceiling question is half-answered**: PE reached **0.7447 with 216 rows over threshold** — a PE composite passes fine; the volume rail, not the score, stopped them. ✅ **§6.1 first fully-covered interior since §3.11 was written**; ✅ **§6.4 first session whose boot line + eval counters survived** (`RestartCount=0`, no post-close deploy). ⚠ **§6.3 `supertrend` joined `vwap` at 100%** (vwap now 3 consecutive sessions / 2,177 rows). ⚠ **§4 `dot-health` reported ALL SIX dots dead at 16:58 including one it called alive at 09:44** — it samples the newest 40 rejections, which at EOD are `time-window` rows carrying no context at all (the 302 context-less rows = 256 time-window + 44 time-of-day + 2 option-side, exactly) → T17, a canary false-negative. ⚠ **§3 `breadth` is a one-constituent near-miss**, not dead: threshold `>32`, session max declines **31** → T18. §5.1: **6 of 6 would-have-fired rows WOULD-LOSE**; both loosened books 0-for-7 (−₹9,784) → **T1 now 2-for/3-against**. New dimensions **§3.13 + §3.14**. findings `2026-07-21-session-findings.md` |
+
 ## Per-variant league (cumulative — refresh each rollup pass from the §6 league SQL)
 
-Refreshed 2026-07-20 (through the 2026-07-20 session). Note the challenger roster changed: the
+Refreshed 2026-07-21 (through the 2026-07-21 session). Note the challenger roster changed: the
 `composite-070` book was replaced by `composite-055`, so its all-time row is retired.
 
 | variant | closed | net wins | total net ₹ | total pts | verdict-so-far |
 |---|---|---|---|---|---|
-| champion | 94 | 32 | **−44,133.07** | −758.1 | still deeply NEGATIVE all-time; 07-20 gave back ₹5.9k of 07-17's record +₹23.9k. The would-have-fired class mostly loses ⇒ **the gate is correctly rejecting losers on balance**; 07-06 and 07-17 remain the two trend-day outliers |
-| composite-055 | 8 | 2 | **−478.98** | +2.5 | **flipped negative on 07-20** (2 extra entries, both losers). Across both sessions it buys one winner and three losers — loosening the composite buys noise |
-| vol-12k5 | 10 | 2 | **−614.23** | −42.9 | **flipped negative on 07-20** (4 entries, 0 wins) after leading all-time on 07-17. Small n, now regime-split |
-| vol-off | 17 | 4 | −6,114.70 | −142.6 | fully-disabled floor stays the worst book all-time — the floor is doing real work; `vol-12k5` (relax, don't remove) is still the better shape |
+| champion | 103 | 38 | **−41,260.30** | −580.6 | still deeply NEGATIVE all-time; 07-21 clawed back ₹2.9k but that is **one idea ×5** (deduped ≈ −₹2.2k). The would-have-fired class mostly loses ⇒ **the gate is correctly rejecting losers on balance**; 07-06 and 07-17 remain the two trend-day outliers |
+| composite-055 | 8 | 2 | **−478.98** | +2.5 | unchanged — **took nothing on 07-21**. Across its logged sessions it buys one winner and three losers; loosening the composite buys noise |
+| vol-12k5 | 13 | 2 | **−5,285.67** | −265.7 | **worst single session yet on 07-21** (3 entries, 0 wins, −₹4,671). Its 07-17 all-time lead is fully erased |
+| vol-off | 21 | 4 | **−11,226.90** | −383.7 | fully-disabled floor stays the worst book all-time (4 entries, 0 wins, −₹5,112 on 07-21) — the floor is doing real work; `vol-12k5` (relax, don't remove) is still the better shape |
 | composite-070 | 0 | — | — | — | RETIRED (never took a row; replaced by `composite-055`) |
 
-⚠ **Every challenger is now net-negative all-time.** On 07-17 the loosened books were the ones that
-made money; on 07-20 they lost most per position. No loosening proposal (T1, T7) has surviving
-positive evidence.
+⚠ **Every challenger is net-negative all-time and the gap widened again on 07-21.** On 07-17 the
+loosened books were the ones that made money; on 07-20 and 07-21 they lost most per position, and
+07-21 added the cleanest evidence yet — the six rows the floor **alone** vetoed were **6 losers out
+of 6**. No loosening proposal (T1, T7) has surviving positive evidence.
 
 ## Structural-vs-regime watchlist
 
+- **⚠⚠ THE `relative-volume-floor` TAG WAS SILENTLY DISARMED ON ALL 18 PE SCALPERS (NEW 2026-07-21,
+  UNRESOLVED — now the highest-priority open item).** A single publish batch at **2026-07-20
+  21:28:55–21:28:56 IST** promoted seeder drafts whose tag list omits `relative-volume-floor`, and
+  the gate is tag-gated (`cfg.has("relative-volume-floor") ? relativeVolumeFloor(...) : fixed`,
+  `ScalperConfluenceGate.java:422-426`), so from the 07-21 open every PE strategy ran the **fixed
+  125,000** floor. Registry proof — `scalp-connect-the-dots-nifty-pe`: v1.0.1 (07-06) **has** the
+  tag, v1.0.2 (07-07 00:21, seeder `resyncConfig` draft) **lost** it, v1.0.3 (07-20 21:28:56,
+  published, live today) **lacks** it. Row proof — the same slug's `volume-floor` thresholds ran
+  12,187.5–32,370.0 on 07-20 and **min = max = 125,000.0** on 07-21. Impact: **1,069 of 1,372
+  rejections (77.9%)** died there, at a threshold above **p99 (117,455)** of the signal series' own
+  3m distribution (1 passable bar in 125). **This is a regression, not a tuning question** —
+  restoring the tag is a config action, but re-publishing changes live behaviour so it stays
+  owner-gated (**T16**, and it subsumes T11 since the 10 sensex CE slugs published 06-29/06-30 never
+  carried the tag either). **Standing method fix:** verify the armed knob in the *published config*
+  every session, not only in the rejection rows — promoted to README **§3.14** with the SQL.
+- **⚠ `dot-health` canary reports false deaths at end of day (NEW 2026-07-21).** At 16:58 it called
+  all six probed dots dead — including `oi_spurt_price`, which it had called **alive** at 09:44 the
+  same day — and emitted the session's only strategy-signal ERROR line (`required dot 'breadth'
+  input DEAD`). Cause: it inspects the **newest 40 rejections**, which after ~14:45 are all
+  `time-window` rows, and rows blocked at an early rail carry **no macro/OI context at all**. 07-21
+  quantified this exactly: 302 context-less rows = 256 `time-window` + 44
+  `time-of-day-preference` + 2 `option-side-constraint`. Any dot-health reading taken after the
+  trade windows close is meaningless as written (**T17**). Note this also explains the 07-20 file's
+  unexplained "265 null advances".
+- **⚠ 07-20's OI-outage mechanism is PARTLY REFUTED (2026-07-21).** The outage did not repeat — 0
+  NEUTRAL quadrants across 1,070 context-bearing rows, 13 distinct combinations, spurt pcts
+  populated — **while `futures_oi_snapshots` cadence got worse (192 of ~375 minutes vs 208 on
+  07-20)**. Since the cadence degraded and the quadrants recovered, "gappy 1-minute capture ⇒
+  `latestPair` has no prior bucket ⇒ NEUTRAL" cannot be the sole mechanism. The `/options/spurt`
+  HTTP 400 remains the better-supported suspect, and `oi_spurt` reviving to 3.0% is consistent with
+  that read having been transiently broken. T12 stays open with the diagnosis rewritten around the
+  endpoint; the cadence regression is a separate, real, lower-severity item.
+- **PE CAN score — the standing question is half-answered (2026-07-21).** On a mildly-down expiry
+  Tuesday PE reached a composite of **0.7447 with 216 rows over the 0.600 threshold** (07-20's PE
+  population capped at 0.452). The PE book was stopped by the §2.1 volume rail, not by the
+  confluence score. Still outstanding: the ceiling on a **clean trend-down** day, and whether a PE
+  fire is profitable.
+- **`supertrend` is now a second free dot (NEW 2026-07-21)** — 1,070/1,070 support, first recorded
+  100% session. Watch, not yet a candidate (today's population was 98% PE, and a one-sided tape
+  flatters any directional dot). `vwap` by contrast has now held 100% across a CE-heavy (07-17), a
+  mixed (07-20) and a PE-heavy (07-21) session — 2,177 rows, zero discrimination — which is the
+  harder standard and keeps **T6** live.
+- **`breadth` threshold sits one constituent outside the operand's realised range (NEW 2026-07-21)**
+  — the dot needs `advances/declines > 32` of 50; on 07-21 declines peaked at **31** all session
+  while advances reached 36, so the PE side missed by one. That is neither dead data (counts were
+  live all day, 0 zero-pairs) nor an ordinary regime miss. One session only ⇒ **T18**, collect more.
 - **volume-floor — RELATIVE floor ARMED #605 (from 2026-07-07).** Fixed 125k was unpassable all 3 prior
   sessions and regime-flipped in effect (07-03 grind veto SAVED 513 pts / 07-06 trend veto COST +₹19,274).
   Now `k×median(prior-20)`, k=1.5. **1st live session (07-07): behaved correctly** — on a no-expansion
@@ -64,6 +113,11 @@ positive evidence.
   floor blocked 11 shadow positions with **0 winners (−₹6,723)** and every challenger book lost too
   (`vol-off` 0/5, `vol-12k5` 0/4) — the 07-03 signature, exactly inverting 07-17's +₹22,345. Both
   loosening books are now net-negative all-time. **T1 should not be applied on current evidence.**
+  **2026-07-21 update — 2-for / 3-against.** The cleanest single-knob evidence yet: the six rows the
+  floor *alone* vetoed resolved **6 WOULD-LOSE / 0 WOULD-WIN**, and `vol-off` + `vol-12k5` went
+  0-for-7 for −₹9,784 between them. Read alongside the method fix in README §3.13 — the champion
+  book's per-rail bucket credited `volume-floor` with **+₹2,872.77** the same day, because that
+  bucket includes rows other rails also vetoed. **Use the would-have-fired set for knob decisions.**
   ⚠ **SEPARATE, NEWLY-MEASURABLE ITEM — the SENSEX family is still on the un-armed FIXED 125,000 floor**
   (T11). 07-20 was the first session with enough sensex slugs emitting (31) to quantify it: **419 of 706**
   volume-floor blocks carried threshold 125,000 flat, while the nifty family's relative floor ranged
@@ -182,6 +236,9 @@ positive evidence.
   finding — because a container recreate landed before the analysis ran. The agent runs post-close, which
   is exactly the window deploys land in, so it will keep losing this race. README §3.10's "read it the same
   day" instruction is not sufficient on its own ⇒ **T15 proposes persisting the reload line to a table.**
+  **2026-07-21 broke the streak — by luck, not design:** `RestartCount=0`, no post-close deploy
+  landed before the run, so the boot line, the full day's logs and the eval counters (Σ 3,570,
+  `failures_total = 0`) were all readable. That is exactly the outcome T15 asks to make reliable.
   Secondary trap from the same event: `published+enabled` read **44** post-deploy while the engine had
   loaded **63** and **49** slugs had emitted — **a post-deploy registry count is not the session's
   denominator.**
@@ -199,6 +256,23 @@ positive evidence.
   dimension **§3.11**; note its honesty limit — an empty bucket alone is not proof of a dead engine
   (`recordRejection` sits downstream of the chart-gate early return), so confirm against
   `ay_signal_eval_outcome_total` **before** a post-close deploy resets the counters.
+  **2026-07-21 was the first fully-covered interior** — every 15-minute bucket 09:15→14:57 non-empty,
+  **0 `subscriber_health_events`**, `failures_total = 0`, counters advancing at 09:47 / 13:17 / 16:54.
+  One residual: the last row is bar **14:57** where 07-17 and 07-20 both ran to ~15:18, and the
+  14:45–14:57 rows are 4 slugs all blocked by `time-window` (windows closing normally). Cumulative
+  counters cannot be time-sliced, so the empty tail is **flagged, not diagnosed** — watch it.
+- **17 → 15 paper positions OPEN, brackets starved all session (CARRIED, 4th session, 2026-07-21)** —
+  two more closed since 07-20, 15 remain (oldest 07-07, newest 07-20 20:05 IST). `PaperStaleTickAlerter`
+  WARNed once per position per cycle all day, worst **~9,988 s (2 h 46 m) un-evaluated**. These are NSE
+  cash equities on the `minervini`/`manas-arora` books and are **not on the live tick subscription**
+  (`tickedTokens = 25` = indices/futures/option legs), so a live intraday stop on the swing books
+  **would not fire**. Chronic, not a regression; owner call (T10): subscribe the open swing holdings or
+  accept EOD-only exit evaluation and downgrade the alert.
+- **`FINNIFTY26SEPFUT` bar-close canary noise (3 sessions running)** — 21 market-data ERROR lines on
+  2026-07-21, all the same far-month contract (`ticks flowing but no 1m bar closed for 886–910 s`).
+  Not a scalper signal series, absent from the health endpoint's `problems`, `status=GREEN` throughout.
+  It is now the only recurring noise in the ERROR channel ⇒ either exclude far-month FINNIFTY from the
+  divergence probe or scale its threshold by liquidity.
 - **`confluence-composite` rows logged with a POSITIVE blocking margin (NEW 2026-07-20)** — 7 rows record
   "blocked" with composite 0.613–0.718 against a 0.600 threshold. Probably the optional-gate mechanic
   (the row stores the FULL composite while the REQUIRED-ONLY sub-composite is what failed), which would

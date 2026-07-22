@@ -159,7 +159,21 @@ Run in order; each answers one question. Canned SQL in §6.
     A publish stamp newer than the last findings file is the thing to look at. Pair it with a
     per-slug `min(blocking_threshold)`/`max(blocking_threshold)` on the session's `volume-floor`
     rows: `min = max` on a family that used to band is the fingerprint.
-15. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+15. **Filter 1m candle queries to MINUTE-ALIGNED buckets, and count the misaligned rows** (added
+    2026-07-22) — the post-outage gap backfill writes 1m bars at the **tick-gap's second offset**
+    (`12:51:38`, `12:52:38`, …) instead of the minute boundary. `marketdata.candles` is keyed
+    `(exchange, tradingsymbol, interval, bucket)`, so those are **distinct phantom rows**, not
+    upserts: the backfill never replaces the bars it was meant to repair, and every
+    `time_bucket` rollup sums the phantom *and* the real bar for the same minute. Measured on
+    2026-07-22: **308 rows across 22 instruments** (12:51:38–13:04:39), and it recurs — 403 rows on
+    07-20, 887 on 07-15. Impact is not cosmetic: 3m reads are a read-time rollup over the 1m base
+    (`CandleRepository.rangeRolledFromOneMinute`), so the live **`volume-floor` operand**,
+    `volume-pump`, `rising-volume` and the `volume` dot all inflate after any feed outage (session
+    median 13,520 → 14,885 on 07-22, far larger inside the outage window). Only
+    `source='BACKFILL'` rows are ever misaligned. Every §3.8-class query must carry
+    `EXTRACT(second FROM bucket) = 0`, and the misaligned count is itself a per-session
+    data-integrity probe.
+16. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -333,6 +347,18 @@ SELECT (ts AT TIME ZONE 'Asia/Kolkata')::date d, count(*) snaps,
        count(DISTINCT date_trunc('minute',ts)) minutes
 FROM marketdata.futures_oi_snapshots WHERE tradingsymbol=:front_fut AND ts >= :d0
 GROUP BY 1 ORDER BY 1;
+
+-- §3.15 misaligned (phantom) 1m candles — expect ZERO; any row here inflates every 3m rollup
+SELECT source, count(*) rows, count(DISTINCT tradingsymbol) syms,
+       min(bucket AT TIME ZONE 'Asia/Kolkata') first, max(bucket AT TIME ZONE 'Asia/Kolkata') last
+FROM marketdata.candles WHERE interval='1m' AND bucket >= :d0915 AND bucket < :d1535
+  AND EXTRACT(second FROM bucket) <> 0 GROUP BY 1;
+-- and the aligned-only form of the §3.8 ground-truth query:
+WITH b AS (SELECT time_bucket('3 minutes', bucket) b3, sum(volume) vol FROM marketdata.candles
+  WHERE tradingsymbol=:front_fut AND exchange='NFO' AND interval='1m'
+    AND EXTRACT(second FROM bucket)=0 AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1)
+SELECT count(*), percentile_disc(0.5) WITHIN GROUP (ORDER BY vol) p50,
+       percentile_disc(0.99) WITHIN GROUP (ORDER BY vol) p99, max(vol) FROM b;
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

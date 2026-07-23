@@ -173,7 +173,28 @@ Run in order; each answers one question. Canned SQL in §6.
     `source='BACKFILL'` rows are ever misaligned. Every §3.8-class query must carry
     `EXTRACT(second FROM bucket) = 0`, and the misaligned count is itself a per-session
     data-integrity probe.
-16. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+16. **Check whether the slug actually configures a premium exit BEFORE resolving any counterfactual**
+    (added 2026-07-23) — §4.2 step 4 below says "+35% premium take-profit (E9 default)". **That default
+    does not exist for most live scalpers.** Only **21 of the 63** YAMLs under
+    `services/strategy-signal-service/src/main/resources/scalper-strategies/` carry a `premium_pct`
+    block — the `gap-theory`, `market-movers`, `hero-zero`, `btst-stbt` and `straddle` families. The
+    `golden-crossover`, `connect-the-dots`, `two-candle`, `trending-oi`, `trend-change` and
+    `open-high-low` families have **no take-profit and no premium stop**; they exit only on an
+    indicator signal-exit (which the shadow book does NOT replicate), a structural stop where the
+    config sets one, or the 15:12 square-off. The shadow book mirrors it exactly: those positions
+    carry `take_profit IS NULL` / `stop_loss IS NULL`, and **all 8 `TAKE_PROFIT` closes in the book's
+    entire history belong to `gap-theory` / `market-movers`. Standing check each session:
+    ```sql
+    SELECT strategy_slug, count(*) n, count(take_profit) tp_set, count(stop_loss) sl_set,
+           count(structural_stop) ss_set, count(*) FILTER (WHERE close_reason='TAKE_PROFIT') tp_hits
+    FROM strategy.shadow_positions GROUP BY 1 ORDER BY 3, 1;
+    ```
+    Applying a universal +35% TP inflates the win side: on 2026-07-23 it turned a true −451.2 pts
+    (6W/16L, square-off only) into −284.4 pts by scoring three phantom TP hits — falsified directly
+    by shadow position `id 209`, the same slug on the same leg at the same bar, which had no
+    take-profit and closed `SQUARE_OFF`. Earlier files in this folder that applied the +35% rule to
+    a bracket-less slug (07-22 §5.1 among them) carry that upward bias.
+17. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -195,8 +216,11 @@ v1 (approximate, works now, zero code):
    the side's option, front weekly expiry.
 3. Pull the premium path from `options_chain_snapshots` (3-min LTP series for that strike/side) from
    `bar_time` forward.
-4. Apply the strategy's exit grammar approximately: +35% premium take-profit (E9 default), the YAML
-   stop, 15:12 square-off — mark the row `WOULD-WIN / WOULD-LOSE / UNRESOLVED` + points.
+4. Apply **that slug's** exit grammar approximately — **first check §3.16**: a +35% premium
+   take-profit applies ONLY to a slug whose YAML carries a `premium_pct` block (gap-theory /
+   market-movers / hero-zero / btst-stbt / straddle). For every other slug the model is the
+   structural stop (where configured) and the 15:12 square-off, with **no take-profit**. Mark the
+   row `WOULD-WIN / WOULD-LOSE / UNRESOLVED` + points.
 5. Record per-row outcomes in the session findings file (§5 template has a table) — over sessions this
    becomes the gate-tuning evidence base.
 

@@ -34,29 +34,46 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 
 | 2026-07-22 | **1,042** (09:18–15:18, **interior fully covered — 2nd session running**; the 12:45/13:00 dip is the §6.1 outage, directly attributed) | **36 of 38 loaded** ✅ best on record (the 2 silent slugs are CE `golden-crossover` on a −0.60% day; `chart-gate-failed` 2,028) | **0** (0 paper positions) | volume-floor **816/1,042 (78.3%)**, every PE row at a flat **125,000**; time-window 160 (15.4%) | **568 (all PE)** — max **0.8511**, the highest ever recorded here | 27, 18W/9L, +1,712.8 pts, **+₹42,240.91** (only **14 distinct entry events**; deduped **8W/6L ≈ +₹18,080**) | **4 structural**: iv_rank (withheld), iv_pair, iv_abs_band, volume (mechanically dead behind the 125k floor). breadth **96.6%** and vix 96.6% (both were 0.2% on 07-21 — pure regime); OI dots alive 2nd session. Cap **0.9043**; observed max = **94.1% of cap**, closest yet | **clean trend-DOWN day (−144.3 pts, −0.60%, 192-pt range).** ⚠⚠ **T16 STILL UNRESOLVED, 2nd session** — the registry is unchanged since the 07-20 21:28 republish, so all 18 PE scalpers (+ the 10 never-armed sensex CE) still run the fixed 125,000 floor while the armed nifty CE slugs ran **7,069–17,940** the same day; 125,000 clears **2 of 125** 3m bars. **And this time it cost money:** the 86 rows the floor **alone** vetoed resolve **56 WOULD-WIN / 30 WOULD-LOSE, +2,547.6 pts** — the exact inverse of 07-21's 6-of-6 losers (morning 39W/4L, midday 17W/26L). Both loosened books went **4-for-4** and `vol-12k5` turned **net-positive all-time**. ⚠⚠ **NEW DEFECT §6.2 (T19): the gap backfill writes 1m candles on an UNALIGNED bucket** (`12:51:38`, …) — distinct PK rows, so the repair never lands and every `time_bucket` rollup **double-counts**; 308 rows / 22 instruments today, 403 on 07-20, 887 on 07-15. It inflates the **live** `volume-floor` operand (3m median 13,520 → 14,885) → new README **§3.15**. ✅ **§6.1 a ~14-min Kite connectivity outage 12:51–13:05 IST was detected and self-recovered end-to-end** (ws+REST+niftyindices all failing = host/DNS level; circuit opened, feed watchdog restarted ×2, subscriber watchdog logged a 743 s receive-stall + resubscribe, recovery at 13:06:20) — the first time the whole stall-detection stack is recorded working on a real event. ✅ **§3 the PE-ceiling question is CLOSED**: 0.8511 with **568 rows over threshold**; the volume rail, not the score, stopped every one. ✅ **T18 CLOSED as regime** — `breadth` supported 96.6% today (declines 36–45) after 0.2% on 07-21. ⚠ **`vwap` 100% for a 4th session (3,005 rows)** → T6 is the best-evidenced row in the ledger. ⚠ **T17 widened** — the false `breadth DEAD` ERROR fired at **08:56 pre-open**, off *yesterday's* context-less tail. ⚠ **T10 escalating: 19 OPEN paper positions (was 15), 4 NEW from the 07-21 batch, 31,730 starvation WARNs, worst ~25,184 s (7 h).** ⚠ `futures_oi_snapshots` cadence fell a 3rd time (**187**/375 after 192, 208). New dimension **§3.15**; new candidates **T19**, **T20**. findings `2026-07-22-session-findings.md` |
 
+| 2026-07-23 | **1,430** (09:19–15:19, **interior fully covered — 3rd session running; `subscriber_health_events` EMPTY**) | **38 of 38 loaded** ✅✅ **full coverage, a first** (set-difference against the registry returns the empty set) | **0** (0 paper positions; 6th consecutive fire-less session) | volume-floor **1,065/1,430 (74.5%)**, every PE/sensex-CE row at a flat **125,000**; time-window 268 (18.7%). **15 distinct first-block rails — widest tail recorded** | **634** — **416 PE / 218 CE, the first two-sided passing population**; max **0.8511** | 26, 8W/18L, −1,693.8 pts, **−₹30,946.11** (only **8 distinct entry events**; deduped **3W/5L**) | **5 structural**: iv_rank (withheld), iv_pair, iv_abs_band, volume (mechanically dead behind the 125k floor), **`oi_spurt` NEWLY DEAD** (3.0% → 0.2% → **0.0%**, input data present). breadth 22.1% = regime. Cap **0.8511** and **the session max IS the cap** — 48 rows sat on the ceiling | **flat/choppy day (+6.0 pts, +0.03%, 187-pt range) on a 2.7× thicker tape (3m median 36,595 vs 13,520).** ⚠⚠ **TOP FINDING §6.1 (T21): 30 of the 38 live scalpers have NO premium exit rule.** Only **21 of 63** YAMLs carry a `premium_pct` block (gap-theory / market-movers / hero-zero / btst-stbt / straddle); `golden-crossover`, `connect-the-dots`, `two-candle`, `trending-oi`, `trend-change`, `open-high-low` have **no take-profit and no premium stop** — their shadow rows carry `take_profit IS NULL` and **all 8 all-time `TAKE_PROFIT` closes belong to the 2 configured families**. This **invalidates the "+35% TP" assumption in every prior §4.2 counterfactual here**, 07-22's +2,547.6-pt headline included → new README **§3.16** + a rewrite of §4.2 step 4. Live exposure is real too: §5's SENSEX 76300CE rode **−88.4%** to the 15:12 square-off while the 2 positions on the identical leg that carried a structural stop lost 10.4%. ⚠⚠ **T16 UNRESOLVED, 3rd session** — registry byte-unchanged; **125,000 cleared 0 of 125 3m bars, above the session max (112,645)**, while armed CE slugs ran 45,971–65,032 on the same tape. **But today it SAVED money:** the 22 rows it alone vetoed are **6W/16L, −451.2 pts** (square-off-only model) — **3rd sign alternation in 3 sessions** ⇒ single-session PnL cannot decide T16; argue it as correctness. ✅ **T19 negative control: 0 misaligned 1m rows session-wide** (no outage ⇒ no backfill) — confirms the trigger. ✅ OI quadrants live a **3rd** session (0 NEUTRAL) while cadence plateaued at **198**/375 (after 187, 192, 208). ⚠ **T14 REFUTED AS SPECIFIED**: all 10 `vwap-distance` positive margins are semantically CORRECT (ceiling rail) — the invariant must be sign-aware; the one true self-contradiction is `id 7794` (composite 0.6373 ≥ thr 0.600, blocked by the composite rail). ⚠ **`vwap` 100% for a 5th session — 4,125 rows**. ⚠ **T17 3rd false `breadth DEAD`** ("across 10 rejections" while breadth supported 248/1,120). ⚠ **§6.4 `FINNIFTY26AUGFUT` is a GENUINE 34-minute bar hole** (341/375 bars), unlike the SEP thin-tape artifact → T20 respecified. ✅ §6.3 the 09:31–09:34 breaker burst cost exactly **one** chain capture cycle (09:30 bucket 1,290 vs 2,580–3,870), recovered. ✅ §6.5 the ~17-min host clock lag did not persist. T10 stable at 19 OPEN (0 new). New dimension **§3.16**; new candidates **T21**, **T22**. findings `2026-07-23-session-findings.md` |
+
 ## Per-variant league (cumulative — refresh each rollup pass from the §6 league SQL)
 
-Refreshed 2026-07-22 (through the 2026-07-22 session). Note the challenger roster changed: the
+Refreshed 2026-07-23 (through the 2026-07-23 session). Note the challenger roster changed: the
 `composite-070` book was replaced by `composite-055`, so its all-time row is retired.
 
 | variant | closed | net wins | total net ₹ | total pts | verdict-so-far |
 |---|---|---|---|---|---|
-| champion | 130 | 56 | **+980.61** | +1,132.2 | **flipped POSITIVE all-time on 07-22** (−41,260 → +981 in one session, +₹42,241). Deduped that session is ≈ +₹18,080 over 14 events (8W/6L). The book is now roughly break-even across 130 closes ⇒ the earlier "the gate rejects losers on balance" reading no longer holds unqualified — it rejects losers on chop days and winners on trend days (07-06, 07-17, 07-22) |
-| vol-12k5 | 17 | 6 | **+3,046.36** | +74.1 | **first challenger ever net-POSITIVE all-time** (4-for-4 on 07-22, +₹8,332). Relax-don't-remove keeps out-performing `vol-off` on every session where both traded |
-| vol-off | 25 | 8 | **−2,894.87** | −43.9 | still negative all-time, but 07-22 (+₹8,332, 4-for-4) recovered most of the deficit. It took the identical entries as `vol-12k5` — on this session there is no information separating them |
-| composite-055 | 8 | 2 | **−478.98** | +2.5 | unchanged — **took nothing on 07-21 or 07-22**. Loosening the composite buys noise; the composite was never the binding constraint |
+| champion | 156 | 64 | **−29,965.50** | −561.6 | **the 07-22 flip lasted one session**: +₹42,241 (07-22) then −₹30,946 (07-23) took the book from −41,260 → +981 → −29,966. Deduped, 07-23 is 3W/5L over 8 events and two morning CE events carry the whole loss. Reading unchanged and now better evidenced: the gate **rejects losers on chop/flat days and winners on trend days** |
+| vol-12k5 | 21 | 7 | **−6,183.20** | −250.8 | net-positive for exactly one session (+3,046 → −6,183 after 1-for-4 on 07-23). Still the **least-bad** challenger — the `vol-12k5 > vol-off` ordering has survived every session where both traded |
+| vol-off | 29 | 9 | **−12,124.43** | −368.8 | took the identical 4 entries as `vol-12k5` again on 07-23 and lost the same −₹9,230; nothing separates them on any single session, only the cumulative |
+| composite-055 | 9 | 2 | **−4,498.59** | −58.2 | took 1 row on 07-23 and lost it (−₹4,020). Loosening the composite buys noise; the composite was never the binding constraint |
 | composite-070 | 0 | — | — | — | RETIRED (never took a row; replaced by `composite-055`) |
 
-⚠ **The sign flipped on 07-22 and the honest reading is that this ledger is regime-driven, not
-converged.** On 07-17 and 07-22 (trend days) the loosened books made money; on 07-20 and 07-21
-(chop) they lost most per position. `vol-12k5` is now net-positive all-time and `vol-off` nearly
-so, which reverses the 07-21 entry above. **What has NOT changed:** every one of these sessions was
-measured against a PE book whose relative floor was **wrongly disarmed** (T16) — so the challenger
-books are partly measuring the regression, not the knob. **Resolve T16 first; only then is the k
-question (T1) measurable.**
+⚠ **Every book in the league is net-negative all-time again, and the sign has now flipped twice in
+two sessions.** That is the finding: this ledger is **regime-driven and not converged**. On trend
+days (07-06, 07-17, 07-22) the loosened books make money; on chop/flat days (07-20, 07-21, 07-23)
+they lose it. **Two things have NOT changed:** (a) every session was measured against a PE book whose
+relative floor was **wrongly disarmed** (T16), so the challengers are partly measuring the
+regression rather than the knob; and (b) **as of 07-23 we also know 30 of 38 slugs have no premium
+exit at all** (T21) — so the books' loss profile is partly an artifact of positions that can only
+exit at 15:12. **Resolve T16 and T21 first; only then is the k question (T1) measurable.**
 
 ## Structural-vs-regime watchlist
 
+- **⚠⚠ 30 OF 38 LIVE SCALPERS HAVE NO PREMIUM EXIT RULE (NEW 2026-07-23, UNRESOLVED — T21).**
+  Only **21 of the 63** scalper YAMLs carry a `premium_pct` block (`gap-theory`, `market-movers`,
+  `hero-zero`, `btst-stbt`, `straddle`). The `golden-crossover`, `connect-the-dots`, `two-candle`,
+  `trending-oi`, `trend-change` and `open-high-low` families have **no take-profit and no premium
+  stop** — they can exit only on an indicator signal-exit (which the shadow book does not
+  replicate), a structural stop where configured, or the 15:12 square-off. DB-confirmed: those
+  shadow rows carry `take_profit IS NULL` / `stop_loss IS NULL`, and **all 8 `TAKE_PROFIT` closes in
+  the book's history belong to `gap-theory` / `market-movers`**. Two consequences: **(1) analytical
+  —** every prior §4.2 counterfactual in this folder that applied "+35% (E9 default)" to a
+  bracket-less slug overstated the win side, 07-22 §5.1's +2,547.6 pts included; promoted to README
+  **§3.16** with §4.2 step 4 rewritten. **(2) live —** a long-premium position with neither bracket
+  rides to 15:12: on 07-23 the SENSEX 76300CE went 330.85 → 38.45 (**−88.4%**) while the two
+  positions on the identical leg that carried a structural stop lost 10.4%. Whether this is
+  intentional (indicator-exit-only design) or unfinished config is an **owner** question.
 - **⚠⚠ GAP-BACKFILL WRITES 1m CANDLES ON AN UNALIGNED BUCKET (NEW 2026-07-22, UNRESOLVED — T19).**
   After the 12:51–13:05 outage the backfill stored bars at the tick-gap's **second offset**
   (`12:51:38`, `12:52:38`, …). `marketdata.candles` is keyed
@@ -70,7 +87,14 @@ question (T1) measurable.**
   (`GapBackfillService.backfill` hands `CandleQueryService.backfillRange` the raw tick-gap instant)
   — the write site was not read. Every §3.8-class query now needs
   `EXTRACT(second FROM bucket) = 0` ⇒ promoted to README **§3.15**; earlier findings files in this
-  folder carry an unquantified upward bias on post-outage sessions.
+  folder carry an unquantified upward bias on post-outage sessions. **Negative control 2026-07-23:
+  zero misaligned rows session-wide on a day with no outage and therefore no backfill** — the
+  trigger is confirmed to be the gap-backfill path and nothing else.
+- **⚠ `oi_spurt` HAS DECAYED TO FULLY DEAD (NEW 2026-07-23, WATCH — T22).** Support ran 3.0%
+  (07-21) → 0.2% (07-22) → **0.0% of 1,120 rows** (07-23), a monotone decline, while the input data
+  stayed present (`spurtOiPct` non-null on every context-bearing row). So this is a
+  threshold-vs-operand question, not a feed outage — the same shape as `iv_pair` (T3), which the
+  #675/#676 recalibration failed to revive. One more session before proposing a number.
 - **✅ THE FULL STALL-DETECTION STACK WORKED ON A REAL EVENT (NEW 2026-07-22).** A ~14-minute
   host-level connectivity outage (12:51–13:05 IST: `ws.kite.trade` connect failures, `api.kite.trade`
   I/O errors **and** `liveindexsa.niftyindices.com` — so DNS/host, not Kite-specific) opened the

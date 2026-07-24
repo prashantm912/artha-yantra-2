@@ -194,7 +194,29 @@ Run in order; each answers one question. Canned SQL in §6.
     by shadow position `id 209`, the same slug on the same leg at the same bar, which had no
     take-profit and closed `SQUARE_OFF`. Earlier files in this folder that applied the +35% rule to
     a bracket-less slug (07-22 §5.1 among them) carry that upward bias.
-17. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+17. **Count `PartialBucketCanary` WARNs per session and bucket their magnitudes** (added 2026-07-24) —
+    the canary compares the live engine's last completed **3m** bar volume against the sum of the three
+    **1m** bars of the same bucket, **both read from `LiveSeriesStore` in memory** (no DB, no REST). It
+    was built to detect a frozen first-minute partial, whose signature is a persistent ~⅔ one-directional
+    shortfall. What 2026-07-24 measured instead is a different, live defect: **37 WARNs, every one on
+    `NFO:NIFTY26JULFUT@3m`** — the series every scalper signals off — with **every shortfall an exact
+    multiple of the NIFTY lot size 65** (65, 130, 195, 260, 325, 390, 455, 520, 845, 1,560, 1,820,
+    **6,110**) arriving in near-perfect **± pairs on consecutive buckets**. The 3m side agrees with the
+    database exactly (09:15 engine 131,300 = Σ of the aligned 1m bars 09:15+09:16+09:17), so it is the
+    in-memory 1m sum that differs ⇒ a **boundary-tick attribution race between the two in-memory
+    aggregations**, not the frozen partial. **It is not cosmetic:** `volume-floor`, `volume-pump`,
+    `rising-volume` and the `volume` dot all read that 3m series, and the 09:15 error was **4.7% of the
+    bar** on the only bar all session that cleared the fixed 125,000 floor. It also fired 48× on 07-23
+    unreported (that file enumerated ERROR lines only). Standing check each session:
+    ```bash
+    docker logs ay-strategy-signal-service --since <today>T03:40:00Z --until <today>T10:00:00Z 2>&1 \
+      | grep -oE "canary: [A-Z]+:[A-Z0-9]+@3m|shortfall -?[0-9]+" | paste - -
+    ```
+    Read the magnitudes, not just the count: lot-multiple ± pairs = the boundary race (small, benign
+    except at the open); a persistent one-directional ~⅔ shortfall = the frozen-partial regression the
+    canary exists to catch. **Do not raise `artha.signals.partial-bucket-canary.volume-tolerance` to
+    silence the former before the latter can still be distinguished.**
+18. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -383,6 +405,14 @@ WITH b AS (SELECT time_bucket('3 minutes', bucket) b3, sum(volume) vol FROM mark
     AND EXTRACT(second FROM bucket)=0 AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1)
 SELECT count(*), percentile_disc(0.5) WITHIN GROUP (ORDER BY vol) p50,
        percentile_disc(0.99) WITHIN GROUP (ORDER BY vol) p99, max(vol) FROM b;
+
+-- §3.17 the misaligned-vs-aligned check behind the PartialBucketCanary reading: the engine's 3m bar
+-- should equal the epoch-aligned 3m rollup of the store's own 1m bars for the same bucket.
+SELECT to_char(time_bucket('3 minutes', bucket) AT TIME ZONE 'Asia/Kolkata','HH24:MI') b3, sum(volume) vol
+FROM marketdata.candles WHERE exchange='NFO' AND interval='1m' AND tradingsymbol=:front_fut
+  AND EXTRACT(second FROM bucket)=0 AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1 ORDER BY 1;
+-- compare the flagged bucket's value against the canary's logged "3m bar volume" (they matched on
+-- 2026-07-24 — it was the in-memory 1m sum that diverged).
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

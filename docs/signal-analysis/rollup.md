@@ -36,29 +36,61 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 
 | 2026-07-23 | **1,430** (09:19–15:19, **interior fully covered — 3rd session running; `subscriber_health_events` EMPTY**) | **38 of 38 loaded** ✅✅ **full coverage, a first** (set-difference against the registry returns the empty set) | **0** (0 paper positions; 6th consecutive fire-less session) | volume-floor **1,065/1,430 (74.5%)**, every PE/sensex-CE row at a flat **125,000**; time-window 268 (18.7%). **15 distinct first-block rails — widest tail recorded** | **634** — **416 PE / 218 CE, the first two-sided passing population**; max **0.8511** | 26, 8W/18L, −1,693.8 pts, **−₹30,946.11** (only **8 distinct entry events**; deduped **3W/5L**) | **5 structural**: iv_rank (withheld), iv_pair, iv_abs_band, volume (mechanically dead behind the 125k floor), **`oi_spurt` NEWLY DEAD** (3.0% → 0.2% → **0.0%**, input data present). breadth 22.1% = regime. Cap **0.8511** and **the session max IS the cap** — 48 rows sat on the ceiling | **flat/choppy day (+6.0 pts, +0.03%, 187-pt range) on a 2.7× thicker tape (3m median 36,595 vs 13,520).** ⚠⚠ **TOP FINDING §6.1 (T21): 30 of the 38 live scalpers have NO premium exit rule.** Only **21 of 63** YAMLs carry a `premium_pct` block (gap-theory / market-movers / hero-zero / btst-stbt / straddle); `golden-crossover`, `connect-the-dots`, `two-candle`, `trending-oi`, `trend-change`, `open-high-low` have **no take-profit and no premium stop** — their shadow rows carry `take_profit IS NULL` and **all 8 all-time `TAKE_PROFIT` closes belong to the 2 configured families**. This **invalidates the "+35% TP" assumption in every prior §4.2 counterfactual here**, 07-22's +2,547.6-pt headline included → new README **§3.16** + a rewrite of §4.2 step 4. Live exposure is real too: §5's SENSEX 76300CE rode **−88.4%** to the 15:12 square-off while the 2 positions on the identical leg that carried a structural stop lost 10.4%. ⚠⚠ **T16 UNRESOLVED, 3rd session** — registry byte-unchanged; **125,000 cleared 0 of 125 3m bars, above the session max (112,645)**, while armed CE slugs ran 45,971–65,032 on the same tape. **But today it SAVED money:** the 22 rows it alone vetoed are **6W/16L, −451.2 pts** (square-off-only model) — **3rd sign alternation in 3 sessions** ⇒ single-session PnL cannot decide T16; argue it as correctness. ✅ **T19 negative control: 0 misaligned 1m rows session-wide** (no outage ⇒ no backfill) — confirms the trigger. ✅ OI quadrants live a **3rd** session (0 NEUTRAL) while cadence plateaued at **198**/375 (after 187, 192, 208). ⚠ **T14 REFUTED AS SPECIFIED**: all 10 `vwap-distance` positive margins are semantically CORRECT (ceiling rail) — the invariant must be sign-aware; the one true self-contradiction is `id 7794` (composite 0.6373 ≥ thr 0.600, blocked by the composite rail). ⚠ **`vwap` 100% for a 5th session — 4,125 rows**. ⚠ **T17 3rd false `breadth DEAD`** ("across 10 rejections" while breadth supported 248/1,120). ⚠ **§6.4 `FINNIFTY26AUGFUT` is a GENUINE 34-minute bar hole** (341/375 bars), unlike the SEP thin-tape artifact → T20 respecified. ✅ §6.3 the 09:31–09:34 breaker burst cost exactly **one** chain capture cycle (09:30 bucket 1,290 vs 2,580–3,870), recovered. ✅ §6.5 the ~17-min host clock lag did not persist. T10 stable at 19 OPEN (0 new). New dimension **§3.16**; new candidates **T21**, **T22**. findings `2026-07-23-session-findings.md` |
 
+| 2026-07-24 | **1,366** (bar times 09:18–**14:57**; interior fully covered 09:15→14:45, **4th session running; `subscriber_health_events` EMPTY**; the 15:00/15:15 buckets are empty — a chart-gate effect, ruled out as a stall by 375/375 eval cycles) | **36 of 38 loaded** (the 2 silent slugs are the `hero-zero` pair on a non-expiry Friday) | **0** (0 paper positions; 7th consecutive fire-less session) | volume-floor **998/1,366 (73.1%)**, every PE/sensex-CE row at a flat **125,000**; time-window 210 (15.4%); **14 distinct first-block rails** | **418** — 218 CE / 200 PE, two-sided a 2nd session; max **0.7447**, **no 0.8 bucket at all** | 22, 8W/14L, −191.3 pts, **−₹14,195.21** (only **11 distinct entry events**; deduped **3W/8L**) | **5 structural**: iv_rank (withheld), iv_pair, iv_abs_band, volume (mechanically dead behind the 125k floor), **`oi_spurt` dead a 2nd session** (0.0%). breadth 38.7% = regime; `trending_cross` collapsed 45.0% → **9.5%** (regime, watch). Cap **0.8511** but the session max is only **87.5% of it** — a market reading, not a ceiling | **quiet up-day (+130.0 pts, +0.55%, 214-pt range) on a THINNER tape (3m median 25,935 vs 36,595).** ⚠⚠ **TOP FINDING §6.1 (T23): the live engine's 3m signal series disagrees with its own in-memory 1m series — 37 `PartialBucketCanary` WARNs, ALL on `NFO:NIFTY26JULFUT@3m`, and EVERY shortfall is an exact multiple of the NIFTY lot size 65** (65…**6,110**), arriving in near-perfect **± pairs on consecutive buckets**. Both sides are in-memory (`LiveSeriesStore`), and the 3m side matches the DB rollup exactly (09:15: engine 131,300 = Σ aligned 1m) ⇒ a **boundary-tick attribution race**, NOT the frozen-first-minute partial the canary was built for (that signature is a persistent ~⅔ one-directional shortfall). Not cosmetic: `volume-floor`/`volume-pump`/`rising-volume`/`volume` all read that series, and **the 09:15 error was 4.7% of the bar — on the ONLY bar all session that cleared the 125,000 floor**. It also fired **48×** on 07-23, unreported (that file enumerated ERROR lines only) → new README **§3.17**. ⚠⚠ **T16 UNRESOLVED, 4th session** — registry byte-unchanged; **125,000 cleared 1 of 125 3m bars and that one is the 09:15 opener**, while armed CE slugs ran 29,396–53,284. **Protective again:** the 15 rows it alone vetoed are **0 economic winners in 15, −1,020.1 pts** (the 2 "wins" are +0.30 and +0.65 pts — same-bar structural stops) ⇒ **3 protective sessions in 4**; T1 now **3-for / 5-against**. ⚠ **T21 reproduces in BOTH directions on a 2nd session**: on the 09:48 PE leg the 5 bracket-less positions rode to −36.0% while the one with a structural stop lost −7.3%; on the 11:24 CE leg the one with a take-profit booked +37.5% vs +25.1% at square-off. ⚠ **T22 ESCALATED** — `oi_spurt` 0.0% a 2nd session with input data present; next step is the §3.8 `spurtOiPct` distribution, not a guessed number. ⚠ **T14 composite half confirmed 2nd time** (3 rows record a composite that passes its own threshold as blocked by the composite rail; 40 `vwap-distance` positive margins remain semantically CORRECT). ⚠ **T17 4th false reading** — at 15:58 all six dots called dead, `breadth` included, while breadth supported 426/1,100. ⚠ **`vwap` 100% for a 6th session — 5,225 rows**; `supertrend` hit 100% for the 2nd time. ✅ **T19 quiet a 2nd session** (0 misaligned rows, 0 kite-rest circuit-opens vs 93 on 07-23) — two clean negative controls. ✅ OI quadrants live a **4th** session while cadence **improved to 211**/375 (after 198, 187, 192, 208). ✅ **T20 respecification holds**: `FINNIFTY26AUGFUT` recovered to 375/375 (07-23's 34-min hole did not recur) while `FINNIFTY26SEPFUT` stayed thin-tape (35 bars, 14 of 14 ERRORs). ✅ **T10 IMPROVED for the first time — 19 → 17 OPEN** (the 07-23 20:00 swing batch closed CARYSIL −₹744 and ATHERENERG +₹429 on TRAILING_STOP; 0 new opens a 2nd session). ⚠ **`composite-055` had its first profitable session (+₹2,956) and is now the LEAST-BAD book all-time (−₹1,542 / 11 closes)** — T7's "reaffirmed by the challenger book" justification no longer holds. `strike-pick` fails rose 390 → **550**, 3rd-largest failing rail 2 sessions running, still un-bucketed. New dimension **§3.17**; new candidate **T23**. findings `2026-07-24-session-findings.md` |
+
 ## Per-variant league (cumulative — refresh each rollup pass from the §6 league SQL)
 
-Refreshed 2026-07-23 (through the 2026-07-23 session). Note the challenger roster changed: the
+Refreshed 2026-07-24 (through the 2026-07-24 session). Note the challenger roster changed: the
 `composite-070` book was replaced by `composite-055`, so its all-time row is retired.
 
 | variant | closed | net wins | total net ₹ | total pts | verdict-so-far |
 |---|---|---|---|---|---|
-| champion | 156 | 64 | **−29,965.50** | −561.6 | **the 07-22 flip lasted one session**: +₹42,241 (07-22) then −₹30,946 (07-23) took the book from −41,260 → +981 → −29,966. Deduped, 07-23 is 3W/5L over 8 events and two morning CE events carry the whole loss. Reading unchanged and now better evidenced: the gate **rejects losers on chop/flat days and winners on trend days** |
-| vol-12k5 | 21 | 7 | **−6,183.20** | −250.8 | net-positive for exactly one session (+3,046 → −6,183 after 1-for-4 on 07-23). Still the **least-bad** challenger — the `vol-12k5 > vol-off` ordering has survived every session where both traded |
-| vol-off | 29 | 9 | **−12,124.43** | −368.8 | took the identical 4 entries as `vol-12k5` again on 07-23 and lost the same −₹9,230; nothing separates them on any single session, only the cumulative |
-| composite-055 | 9 | 2 | **−4,498.59** | −58.2 | took 1 row on 07-23 and lost it (−₹4,020). Loosening the composite buys noise; the composite was never the binding constraint |
+| champion | 178 | 72 | **−44,160.71** | −752.9 | two straight losing sessions (−₹30,946 then −₹14,195) took the book −29,966 → −44,161. Deduped, 07-24 is 3W/8L over 11 events and two clusters (09:48 PE, 11:24 CE) carry the whole spread. Reading unchanged: the gate **rejects losers on chop/flat/quiet days and winners on trend days** |
+| composite-055 | 11 | 3 | **−1,542.15** | −10.2 | **now the least-bad book all-time**, after its first profitable session (+₹2,956 on 07-24: one +21.7% square-off, one −3.8% two-minute stop). 11 closes is not a verdict — but it does retire the "loosening the composite buys only noise" line that T7 leaned on |
+| vol-12k5 | 28 | 8 | **−13,390.05** | −353.1 | lost a 2nd straight session (1-for-7, −₹7,207). Still the **least-bad of the two volume books** — the `vol-12k5 > vol-off` ordering has survived every session where both traded |
+| vol-off | 36 | 10 | **−19,331.28** | −471.1 | took the identical 7 entries as `vol-12k5` again on 07-24 and lost the same −₹7,207; nothing separates them on any single session, only the cumulative |
 | composite-070 | 0 | — | — | — | RETIRED (never took a row; replaced by `composite-055`) |
 
-⚠ **Every book in the league is net-negative all-time again, and the sign has now flipped twice in
-two sessions.** That is the finding: this ledger is **regime-driven and not converged**. On trend
-days (07-06, 07-17, 07-22) the loosened books make money; on chop/flat days (07-20, 07-21, 07-23)
-they lose it. **Two things have NOT changed:** (a) every session was measured against a PE book whose
-relative floor was **wrongly disarmed** (T16), so the challengers are partly measuring the
-regression rather than the knob; and (b) **as of 07-23 we also know 30 of 38 slugs have no premium
-exit at all** (T21) — so the books' loss profile is partly an artifact of positions that can only
-exit at 15:12. **Resolve T16 and T21 first; only then is the k question (T1) measurable.**
+⚠ **Every book in the league is net-negative all-time, and the champion has now lost two sessions
+running.** That is the finding: this ledger is **regime-driven and not converged**. On trend days
+(07-06, 07-17, 07-22) the loosened books make money; on chop/flat/quiet days (07-20, 07-21, 07-23,
+07-24) they lose it. **Three things have NOT changed:** (a) every session was measured against a PE
+book whose relative floor was **wrongly disarmed** (T16), so the challengers are partly measuring the
+regression rather than the knob; (b) **30 of 38 slugs have no premium exit at all** (T21) — so the
+books' loss profile is partly an artifact of positions that can only exit at 15:12; and (c) as of
+07-24, **the operand the volume books are being tuned against is itself measurably wrong at the open**
+(T23). **Resolve T16, T21 and T23 first; only then is the k question (T1) measurable.**
 
 ## Structural-vs-regime watchlist
+
+- **⚠⚠ THE LIVE 3m SIGNAL SERIES DISAGREES WITH ITS OWN 1m SERIES, IN EXACT LOT MULTIPLES (NEW
+  2026-07-24, UNRESOLVED — T23).** `PartialBucketCanary` WARNed **37×** on 2026-07-24 and **48×** on
+  2026-07-23, **exclusively on `NFO:NIFTY26JULFUT@3m`** — the series every live scalper signals off.
+  Every shortfall is an exact multiple of the NIFTY lot size **65** (65, 130, 195, 260, 325, 390, 455,
+  520, 845, 1,560, 1,820, **6,110** = 1…94 lots) and they arrive in near-perfect **± pairs on
+  consecutive buckets**. Both sides of the comparison are **in-memory** (`LiveSeriesStore` 3m vs 1m —
+  the canary does no DB read and no REST call), and the 3m side agrees with the database exactly
+  (09:15 bucket: engine 131,300 = 72,995 + 28,340 + 29,965 from the store's own aligned 1m bars), so
+  it is the **in-memory 1m sum** that diverges ⇒ a **boundary-tick attribution race between the two
+  aggregation paths**, and specifically **NOT** the frozen-first-minute partial the canary exists to
+  detect (that signature is a persistent ~⅔ one-directional shortfall). **Impact is real, not
+  cosmetic:** `volume-floor`, `volume-pump`, `rising-volume` and the `volume` dot all read the 3m
+  series; 35 of the 37 errors are ≤ 8 lots (≤ 0.1% of a median 3m bar) but the **09:15 opening bar was
+  off by 94 lots = 4.7%** — and 09:15 was the **only** bar all session that cleared the fixed 125,000
+  floor. Two separable actions: **(a)** fix the boundary attribution (the write path was NOT read —
+  T23 needs a code read before a fix is designed), **(b)** only then raise
+  `artha.signals.partial-bucket-canary.volume-tolerance` above 0, which the canary's own javadoc
+  anticipates. **Do not do (b) first** — muting the benign residue before the mechanism is understood
+  also mutes the regression the canary exists to catch. Promoted to README **§3.17**. Sessions before
+  07-23 are unmeasured (logs gone).
+- **✅ PAPER-POSITION BACKLOG IS DRAINING (updated 2026-07-24, T10 de-escalated again).** 19 → **17**
+  OPEN: the 07-23 20:00/20:05 swing batch closed `CARYSIL` (−₹744) and `ATHERENERG` (+₹429) on
+  `TRAILING_STOP`, and **no new positions were opened for a second consecutive session**. The
+  mechanism is unchanged — these exited on the EOD batch's trailing stop, not on a live intraday
+  bracket, and `PaperStaleTickAlerter` still WARNs continuously because the equities are not on the
+  live tick subscription — so the owner question (subscribe the holdings, or accept EOD-only exit
+  evaluation and downgrade the alert) stands. But the population is no longer accumulating: **chronic,
+  draining.**
 
 - **⚠⚠ 30 OF 38 LIVE SCALPERS HAVE NO PREMIUM EXIT RULE (NEW 2026-07-23, UNRESOLVED — T21).**
   Only **21 of the 63** scalper YAMLs carry a `premium_pct` block (`gap-theory`, `market-movers`,

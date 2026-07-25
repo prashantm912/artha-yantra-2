@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener.minervini;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -18,7 +19,8 @@ import org.springframework.stereotype.Service;
 public class RegimeService {
 
   /** The regime verdict for a date + the trailing advance ratio it was derived from. */
-  public record Regime(String regime, BigDecimal advanceRatio, int sessions) {}
+  public record Regime(
+      String regime, @Schema(types = {"number", "null"}) BigDecimal advanceRatio, int sessions) {}
 
   private static final String SQL =
       """

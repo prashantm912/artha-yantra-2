@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.screener;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * The DEEP_SWING internal endpoint's response (research-fidelity audit P0-3): the deep-sim {@link
  * DeepSwingRunResult} plus THIS market-data jar's engine CODE identity — the git commit SHA + build
@@ -10,4 +12,7 @@ package in.arthayantra.marketdata.screener;
  * (mock / test), leaving the additive-nullable columns NULL — fail-soft, exactly like {@code
  * EngineIdentity}.
  */
-public record DeepSwingRunResponse(String engineSha, String engineImage, DeepSwingRunResult result) {}
+public record DeepSwingRunResponse(
+    @Schema(types = {"string", "null"}) String engineSha,
+    @Schema(types = {"string", "null"}) String engineImage,
+    DeepSwingRunResult result) {}

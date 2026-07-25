@@ -66,15 +66,49 @@ computed from construction call sites) and the slice plan.
   NON_NULL — converter already excludes all members; the audit's "members" rows are moot). FE:
   types.ts SpurtSummary fixed (spotDelta `| null`, added missing oiChangePct/priceChangePct) +
   OptionsSpurtPage null-guard.
-- **3d: market-data remainder — OPEN:** context digests' blocked() shells (OptionsDigest/
-  FuturesDigest/EquityDigest/FiiDigest/DayContext/ExpiryCompare + their sub-records), equity
-  families (Returns r1d..r1y, BreadthDay, Breadth/SectorHeatmap/SectorStats/StockChange),
-  Minervini Geometry/Row/CandidateAnalysis, IngestHealthBoard LastRun/SourceHealth,
-  CrossSourceOiCanary, KiteStatus, DeepSwingRunResponse engineSha/Image, plus the whole UNSURE
-  list below (resolve or skip-with-note per item). Same method: types-array annotation, twins
-  annotated together, $ref/JsonNode/NON_NULL skipped.
+- **3d: market-data remainder — SHIPPED (see the slice PR; closes the sweep):** 184 components
+  across 63 schemas, three read-only investigator tables (context digests / equity+minervini /
+  ops-status, 2026-07-25), every YES evidence-backed by construction call site or nullable DDL.
+  Context digests: the blocked() shells make every digest's `asOf` (+ EquityDigest.tradeDate/
+  returnsWindow) nullable; sub-records per their own folds (Pcr ×5, MaxPain.atOpen/drift,
+  Straddle ×4, AtmIv, AlignedPoint ×6, UnderlyingQuadrant ltp/pricePct/oiPct/interpretation —
+  a String, `.name()` upstream, NOT the enum — TermStructureState spot/calendarSpread/nearBasis,
+  AdvanceDecline ratios, AboveMa pcts, BreadthThrust.advRatioMa, SectorRotation rankPrior/Delta,
+  IndexConcentration, DiiDivergence, FiiFuturesLongShort, ParticipantPositioning,
+  FiiDerivativeAvailability, Vix change/changePct/asOf, GlobalCue name/ltp (wire-defensive),
+  IndexPriceAction gapOpenPct/rangeVsAvg/rangeState, HolidayProximity ×3, SourceTrust lastRun*).
+  Equity: ReturnsRow r1d..r1y, BreadthDay (V044 DDL), BreadthSummary/DeliveryRow, StockChange,
+  SectorAgg.avgChangePct, SectorIndexCard ×7 (`asText(null)`), DeliveryDay ×10 (V014 DDL),
+  ContribRow.points + IndexContribution indexLevel/advancePoints/declinePoints, ScanRow ×5
+  (V028), NewsItem ×5 (Upstox wire), EquityFundamentals ×11 (V032). Minervini/Manas: Geometry
+  ×10, SetupView ×4, Regime.advanceRatio, HorizonStat ×6, HitRateReport.from/to, and the
+  IDENTICAL twins annotated in pairs — Report (variant/fromDate/runAt/note), ScreenResponse
+  (screenDate), Funnel (screenDate). Ops: LastRun rowsWritten/finishedAt/error + BoardReport
+  fromDay/toDay (V040), CrossSourceOiCanary UnderlyingDivergence ×3, KiteStatus ×4,
+  DeepSwingRunResponse engineSha/engineImage, SyncStatus ×3, BackfillJobRow ×4 (V030),
+  ExportContract.strike (V025 "NULL for FUT"), CompletenessRow ×2 + CompletenessReport.date
+  (V047), BhavcopyCloseReport.tradeDate, CheckResult.since, NormalizedTick.openInterest,
+  ScreenDiff dates + DiffRow.rsRank (V031/V038).
+  **UNSUREs resolved NO:** CandlesResponse.asOf (sole construction `now(clock)`),
+  WarmStatus (all — throws/defaults/constants), MaxPain.now (fold only on non-empty buckets),
+  IndexPriceAction.avgRange20 + CoverageRow.minExpiry/maxExpiry (defensive branches dead —
+  DDL NOT NULL), CloseMismatch (SQL-filtered), CanaryReport, Movers OHLC (already 3c).
+  **SKIP-with-note (twin field-set mismatch — spec ALREADY scan-order-dependent, pre-existing):**
+  Row ×6 (3 response-reachable: MinerviniController 18c / ManasController 23c /
+  ScreenerService 8c), CandidateAnalysis ×2 (21c vs 24c), FunnelRow ×2, BacktestResult ×2
+  (minervini has sweep+rotation), backfill Status ×4 (8/11/13/14 fields, only 5 common) —
+  per-field null evidence archived in the investigator reports if a rename/`@Schema(name=)`
+  dedupe ever unblocks them. **SKIP not-a-response:** CanaryResult ×3 (no controller returns it).
+  **$ref real-null parking (constraint #2, un-annotatable):** Report.portfolio/
+  portfolioRsPriority/portfolioRsPriorityNet, BacktestResult.rotation, Funnel.regime,
+  SourceHealth.lastRun, FuturesDigest.banks/termStructure, the digest shells' record members,
+  DayContext options/vix/indexPriceAction. **Response-level nullability noted:**
+  FundamentalsController.get returns `orElse(null)` = empty-body 200 (not a component lie).
+  FE: zero changes needed — hand-written types verified null-honest for every 3d surface
+  (ingestHealth.ts, settings.ts KiteStatus/SyncStatus optional-loose, types.ts BreadthDay).
 
-Ledger row: task_79d12a4d. Full agent tables (evidence file:line per component) archived below.
+Ledger row: task_79d12a4d (slices 3a-3c) + task_0b14da09 (3d). Full agent tables (evidence
+file:line per component) archived below.
 
 ## strategy-signal YES table (agent 1, computed)
 

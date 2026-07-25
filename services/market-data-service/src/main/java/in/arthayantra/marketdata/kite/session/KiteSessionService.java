@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.kite.session;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.OffsetDateTime;
 
 /** The OAuth-ritual surface behind {@code /api/v1/auth/kite} (B-1 catalog rows, Phase 12). */
@@ -10,12 +11,12 @@ public interface KiteSessionService {
       boolean connected,
       String profile,
       String state,
-      String kiteUserId,
-      OffsetDateTime tokenValidUntil,
-      OffsetDateTime lastValidatedAt,
+      @Schema(types = {"string", "null"}) String kiteUserId,
+      @Schema(types = {"string", "null"}) OffsetDateTime tokenValidUntil,
+      @Schema(types = {"string", "null"}) OffsetDateTime lastValidatedAt,
       String tickerState,
       String circuitState,
-      OffsetDateTime lastContractCheck,
+      @Schema(types = {"string", "null"}) OffsetDateTime lastContractCheck,
       java.util.List<String> contractDrift) {}
 
   /** A completed exchange. */

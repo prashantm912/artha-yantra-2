@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.context;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.canary.IngestHealthBoard;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -39,26 +40,35 @@ public class FiiDigestService {
   public record FiiCash(LocalDate tradeDate, BigDecimal net, int streakDays, String streakSide, boolean flip) {}
 
   /** FII vs DII cash direction — divergent when their latest nets point opposite ways. */
-  public record DiiDivergence(BigDecimal fiiNet, BigDecimal diiNet, boolean divergent) {}
+  public record DiiDivergence(
+      @Schema(types = {"number", "null"}) BigDecimal fiiNet,
+      @Schema(types = {"number", "null"}) BigDecimal diiNet,
+      boolean divergent) {}
 
   /** FII index-futures long/short ratio + Δ vs prior + percentile over available history (§6.5). */
   public record FiiFuturesLongShort(
       LocalDate tradeDate,
       long indexLong,
       long indexShort,
-      BigDecimal ratio,
-      BigDecimal ratioDelta,
-      Integer percentile,
+      @Schema(types = {"number", "null"}) BigDecimal ratio,
+      @Schema(types = {"number", "null"}) BigDecimal ratioDelta,
+      @Schema(types = {"integer", "null"}) Integer percentile,
       int windowSessions,
       boolean lowConfidence) {}
 
   /** FII total net contracts and its day-over-day change (participant positioning). */
   public record ParticipantPositioning(
-      LocalDate tradeDate, long netContracts, Long netContractsPrior, Long netChange) {}
+      LocalDate tradeDate,
+      long netContracts,
+      @Schema(types = {"integer", "null"}) Long netContractsPrior,
+      @Schema(types = {"integer", "null"}) Long netChange) {}
 
   /** FII index-futures derivative-net availability (dead-by-default when Upstox analytics is off). */
   public record FiiDerivativeAvailability(
-      boolean available, LocalDate tradeDate, BigDecimal indexFuturesNet, String reason) {}
+      boolean available,
+      @Schema(types = {"string", "null"}) LocalDate tradeDate,
+      @Schema(types = {"number", "null"}) BigDecimal indexFuturesNet,
+      @Schema(types = {"string", "null"}) String reason) {}
 
   /** The FII/DII context digest. {@code dataTrust} = OK/DEGRADED/BLOCKED. */
   public record FiiDigest(
@@ -67,7 +77,7 @@ public class FiiDigestService {
       FiiFuturesLongShort futuresLongShort,
       ParticipantPositioning participant,
       FiiDerivativeAvailability derivative,
-      OffsetDateTime asOf,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       String dataTrust,
       List<String> trustReasons) {
 

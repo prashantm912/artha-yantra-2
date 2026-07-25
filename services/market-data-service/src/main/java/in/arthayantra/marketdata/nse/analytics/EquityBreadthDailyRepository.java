@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.nse.analytics;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.time.LocalDate;
@@ -23,11 +24,11 @@ public class EquityBreadthDailyRepository {
       int declines,
       int unchanged,
       int total,
-      BigDecimal avgDeliveryPct,
-      Integer aboveSma50,
-      Integer sma50Universe,
-      Integer aboveSma200,
-      Integer sma200Universe) {}
+      @Schema(types = {"number", "null"}) BigDecimal avgDeliveryPct,
+      @Schema(types = {"integer", "null"}) Integer aboveSma50,
+      @Schema(types = {"integer", "null"}) Integer sma50Universe,
+      @Schema(types = {"integer", "null"}) Integer aboveSma200,
+      @Schema(types = {"integer", "null"}) Integer sma200Universe) {}
 
   // SMA warm-up: how many calendar days before the earliest wanted date to scan so a 200-session SMA
   // has its window (≈ 200 trading days ≈ 290 calendar days; 400 is a comfortable margin over holidays).

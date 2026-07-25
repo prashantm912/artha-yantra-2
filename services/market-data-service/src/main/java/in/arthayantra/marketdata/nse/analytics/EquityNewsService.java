@@ -4,6 +4,7 @@ import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.marketdata.constituents.StockUpstoxKeyMap;
 import in.arthayantra.marketdata.feeds.NewsSource;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -31,7 +32,11 @@ public class EquityNewsService {
 
   /** One news article (Upstox), publishedTime = epoch-millis. */
   public record NewsItem(
-      String heading, String summary, String thumbnail, String articleLink, Long publishedTime) {}
+      @Schema(types = {"string", "null"}) String heading,
+      @Schema(types = {"string", "null"}) String summary,
+      @Schema(types = {"string", "null"}) String thumbnail,
+      @Schema(types = {"string", "null"}) String articleLink,
+      @Schema(types = {"integer", "null"}) Long publishedTime) {}
 
   /** A symbol's news; {@code available=false} when the Upstox news source isn't live. */
   public record News(String symbol, boolean available, List<NewsItem> items) {}

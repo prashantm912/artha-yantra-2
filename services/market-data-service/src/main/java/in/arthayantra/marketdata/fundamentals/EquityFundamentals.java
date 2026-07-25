@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.fundamentals;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -12,14 +13,14 @@ import java.time.LocalDate;
  */
 public record EquityFundamentals(
     String symbol,
-    String isin,
-    BigDecimal marketCapCr,
-    BigDecimal freeFloatMcapCr,
-    BigDecimal freeFloatPct,
-    BigDecimal promoterPct,
-    BigDecimal pe,
-    BigDecimal roe,
-    BigDecimal netProfitCr,
-    BigDecimal revenueCr,
-    BigDecimal revenuePrevCr,
-    LocalDate asOf) {}
+    @Schema(types = {"string", "null"}) String isin,
+    @Schema(types = {"number", "null"}) BigDecimal marketCapCr,
+    @Schema(types = {"number", "null"}) BigDecimal freeFloatMcapCr,
+    @Schema(types = {"number", "null"}) BigDecimal freeFloatPct,
+    @Schema(types = {"number", "null"}) BigDecimal promoterPct,
+    @Schema(types = {"number", "null"}) BigDecimal pe,
+    @Schema(types = {"number", "null"}) BigDecimal roe,
+    @Schema(types = {"number", "null"}) BigDecimal netProfitCr,
+    @Schema(types = {"number", "null"}) BigDecimal revenueCr,
+    @Schema(types = {"number", "null"}) BigDecimal revenuePrevCr,
+    @Schema(types = {"string", "null"}) LocalDate asOf) {}

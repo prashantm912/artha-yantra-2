@@ -8,6 +8,7 @@ import in.arthayantra.marketdata.screener.minervini.MinerviniSwingBacktest.BtTra
 import in.arthayantra.marketdata.screener.minervini.MinerviniSwingBacktest.Variant;
 import in.arthayantra.marketdata.screener.minervini.geometry.DailyBar;
 import in.arthayantra.marketdata.screener.minervini.geometry.VcpDetector;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -122,16 +123,16 @@ public class MinerviniBacktestService {
    */
   public record Report(
       String status,
-      String variant,
-      LocalDate fromDate,
-      String runAt,
+      @Schema(types = {"string", "null"}) String variant,
+      @Schema(types = {"string", "null"}) LocalDate fromDate,
+      @Schema(types = {"string", "null"}) String runAt,
       int symbolsScanned,
       int totalTrades,
       List<SetupStat> setups,
       PortfolioStat portfolio,
       PortfolioStat portfolioRsPriority,
       PortfolioStat portfolioRsPriorityNet,
-      String note) {}
+      @Schema(types = {"string", "null"}) String note) {}
 
   /**
    * One cell of the turnover-floor sweep: at a given {@code capital} (book) and {@code

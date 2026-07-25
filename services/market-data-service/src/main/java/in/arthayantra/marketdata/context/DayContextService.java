@@ -10,6 +10,7 @@ import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.options.OptionsDigestService;
 import in.arthayantra.marketdata.upstox.UpstoxGlobalInstrumentsClient;
 import in.arthayantra.marketdata.upstox.WorldIndex;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -49,29 +50,43 @@ public class DayContextService {
 
   /** INDIA VIX quote (level + change vs prev close + a coarse regime band). Null when unavailable. */
   public record Vix(
-      BigDecimal level, BigDecimal change, BigDecimal changePct, String band, OffsetDateTime asOf) {}
+      BigDecimal level,
+      @Schema(types = {"number", "null"}) BigDecimal change,
+      @Schema(types = {"number", "null"}) BigDecimal changePct,
+      String band,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   /** One overnight global-index cue (top mover by |%change|). */
-  public record GlobalCue(String name, BigDecimal ltp, BigDecimal changePct) {}
+  public record GlobalCue(
+      @Schema(types = {"string", "null"}) String name,
+      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      BigDecimal changePct) {}
 
   /** Primary-index price action off the daily candles — the intraday/overnight structure read. */
   public record IndexPriceAction(
       String symbol,
-      BigDecimal gapOpenPct,
+      @Schema(types = {"number", "null"}) BigDecimal gapOpenPct,
       BigDecimal dayRange,
       BigDecimal avgRange20,
-      BigDecimal rangeVsAvg,
+      @Schema(types = {"number", "null"}) BigDecimal rangeVsAvg,
       String direction,
-      String rangeState,
+      @Schema(types = {"string", "null"}) String rangeState,
       LocalDate asOfDate) {}
 
   /** Holiday proximity: whether today is a listed holiday and the next one (name + days away). */
   public record HolidayProximity(
-      boolean holidayToday, LocalDate nextHoliday, String nextHolidayName, Integer daysToNextHoliday) {}
+      boolean holidayToday,
+      @Schema(types = {"string", "null"}) LocalDate nextHoliday,
+      @Schema(types = {"string", "null"}) String nextHolidayName,
+      @Schema(types = {"integer", "null"}) Integer daysToNextHoliday) {}
 
   /** One batch source's trust cell (mapped from the ingest health board). */
   public record SourceTrust(
-      String source, String status, String lastRunStatus, OffsetDateTime lastRunAt, boolean stale) {}
+      String source,
+      String status,
+      @Schema(types = {"string", "null"}) String lastRunStatus,
+      @Schema(types = {"string", "null"}) OffsetDateTime lastRunAt,
+      boolean stale) {}
 
   /** The ingest-trust summary: worst-of overall + per-source cells (OK / DEGRADED / BLOCKED). */
   public record IngestTrust(String overall, List<SourceTrust> sources) {}

@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.OffsetDateTime;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -20,12 +21,12 @@ public class BackfillJobRepository {
   public record BackfillJobRow(
       long id,
       String kind,
-      String params,
+      @Schema(types = {"string", "null"}) String params,
       String status,
-      Long rowsWritten,
-      String error,
+      @Schema(types = {"integer", "null"}) Long rowsWritten,
+      @Schema(types = {"string", "null"}) String error,
       OffsetDateTime startedAt,
-      OffsetDateTime finishedAt) {}
+      @Schema(types = {"string", "null"}) OffsetDateTime finishedAt) {}
 
   /** Errors are stored verbatim but bounded — a stack-trace-laden message must not bloat the row. */
   private static final int MAX_ERROR_LEN = 2000;

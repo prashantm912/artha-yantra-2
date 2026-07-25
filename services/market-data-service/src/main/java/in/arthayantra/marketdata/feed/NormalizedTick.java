@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.feed;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
@@ -13,6 +14,6 @@ public record NormalizedTick(
     String tradingsymbol,
     BigDecimal lastPrice,
     long cumulativeDayVolume,
-    Long openInterest,
+    @Schema(types = {"integer", "null"}) Long openInterest,
     OffsetDateTime timestamp,
     long seq) {}

@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.nse.analytics;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.ResultSet;
@@ -31,16 +32,16 @@ public class EquityDeliveryService {
   /** One trading day's delivery row; {@code dayRange = high − low}, {@code dayRangePct = range/close}. */
   public record DeliveryDay(
       LocalDate date,
-      BigDecimal open,
-      BigDecimal high,
-      BigDecimal low,
-      BigDecimal close,
-      BigDecimal ltpChangePct,
-      BigDecimal deliveryPct,
-      BigDecimal dayRange,
-      BigDecimal dayRangePct,
-      Long deliveryQty,
-      Long totalTradedQty) {}
+      @Schema(types = {"number", "null"}) BigDecimal open,
+      @Schema(types = {"number", "null"}) BigDecimal high,
+      @Schema(types = {"number", "null"}) BigDecimal low,
+      @Schema(types = {"number", "null"}) BigDecimal close,
+      @Schema(types = {"number", "null"}) BigDecimal ltpChangePct,
+      @Schema(types = {"number", "null"}) BigDecimal deliveryPct,
+      @Schema(types = {"number", "null"}) BigDecimal dayRange,
+      @Schema(types = {"number", "null"}) BigDecimal dayRangePct,
+      @Schema(types = {"integer", "null"}) Long deliveryQty,
+      @Schema(types = {"integer", "null"}) Long totalTradedQty) {}
 
   /** A symbol's delivery series, newest first. */
   public record Delivery(String symbol, int days, List<DeliveryDay> items) {}

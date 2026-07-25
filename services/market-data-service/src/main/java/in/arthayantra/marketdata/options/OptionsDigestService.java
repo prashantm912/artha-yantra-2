@@ -8,6 +8,7 @@ import in.arthayantra.marketdata.options.analytics.MaxPainCalculator;
 import in.arthayantra.marketdata.options.analytics.OiPremiumService;
 import in.arthayantra.marketdata.options.analytics.OiSpurtService;
 import in.arthayantra.marketdata.options.analytics.OptionsSnapshotReader.StrikePoint;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -45,14 +46,17 @@ public class OptionsDigestService {
 
   /** PCR now, at session-open, and at prior-day EOD, plus the two intraday/day deltas. */
   public record Pcr(
-      BigDecimal now,
-      BigDecimal atOpen,
-      BigDecimal priorEod,
-      BigDecimal deltaVsOpen,
-      BigDecimal deltaVsPriorEod) {}
+      @Schema(types = {"number", "null"}) BigDecimal now,
+      @Schema(types = {"number", "null"}) BigDecimal atOpen,
+      @Schema(types = {"number", "null"}) BigDecimal priorEod,
+      @Schema(types = {"number", "null"}) BigDecimal deltaVsOpen,
+      @Schema(types = {"number", "null"}) BigDecimal deltaVsPriorEod) {}
 
   /** Max-pain now, at session-open, and the intraday drift (now − at-open, in index points). */
-  public record MaxPain(BigDecimal now, BigDecimal atOpen, BigDecimal drift) {}
+  public record MaxPain(
+      BigDecimal now,
+      @Schema(types = {"number", "null"}) BigDecimal atOpen,
+      @Schema(types = {"number", "null"}) BigDecimal drift) {}
 
   /** One top-mover strike (label {@code "57400 PE"}) with its ΔOI-since-open + 4-state read. */
   public record StrikeMove(String strike, long oiChange, OiInterpretation interpretation) {}
@@ -71,18 +75,24 @@ public class OptionsDigestService {
 
   /** ATM straddle premium now vs session-open (the §6.1.1 premium fold, window-anchored to 09:15). */
   public record Straddle(
-      BigDecimal atmStrike, BigDecimal now, BigDecimal atOpen, BigDecimal deltaPct) {}
+      @Schema(types = {"number", "null"}) BigDecimal atmStrike,
+      @Schema(types = {"number", "null"}) BigDecimal now,
+      @Schema(types = {"number", "null"}) BigDecimal atOpen,
+      @Schema(types = {"number", "null"}) BigDecimal deltaPct) {}
 
   /** ATM IV + its trailing-window rank/percentile ({@code insufficientHistory} true below the floor). */
   public record AtmIv(
-      BigDecimal iv,
-      BigDecimal rank,
-      Integer percentile,
+      @Schema(types = {"number", "null"}) BigDecimal iv,
+      @Schema(types = {"number", "null"}) BigDecimal rank,
+      @Schema(types = {"integer", "null"}) Integer percentile,
       int windowSessions,
       boolean insufficientHistory) {}
 
   /** The underlying 4-state OI-structure verdict (spot direction × total ΔOI direction, since open). */
-  public record OiStructure(OiInterpretation verdict, BigDecimal spotDelta, long oiChange) {}
+  public record OiStructure(
+      OiInterpretation verdict,
+      @Schema(types = {"number", "null"}) BigDecimal spotDelta,
+      long oiChange) {}
 
   /** The options context digest for one (underlying, expiry). {@code dataTrust} = OK/DEGRADED/BLOCKED. */
   public record OptionsDigest(
@@ -96,7 +106,7 @@ public class OptionsDigestService {
       Straddle atmStraddle,
       AtmIv atmIv,
       OiStructure oiStructure,
-      OffsetDateTime asOf,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       String dataTrust,
       List<String> trustReasons) {
 

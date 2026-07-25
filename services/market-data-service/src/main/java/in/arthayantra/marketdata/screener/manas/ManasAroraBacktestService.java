@@ -9,6 +9,7 @@ import in.arthayantra.marketdata.screener.manas.ManasAroraSwingBacktest.Variant;
 import in.arthayantra.marketdata.screener.minervini.SwingPortfolio;
 import in.arthayantra.marketdata.screener.minervini.geometry.DailyBar;
 import in.arthayantra.marketdata.screener.minervini.geometry.VcpDetector;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -121,16 +122,16 @@ public class ManasAroraBacktestService {
    */
   public record Report(
       String status,
-      String variant,
-      LocalDate fromDate,
-      String runAt,
+      @Schema(types = {"string", "null"}) String variant,
+      @Schema(types = {"string", "null"}) LocalDate fromDate,
+      @Schema(types = {"string", "null"}) String runAt,
       int symbolsScanned,
       int totalTrades,
       List<SetupStat> setups,
       PortfolioStat portfolio,
       PortfolioStat portfolioRsPriority,
       PortfolioStat portfolioRsPriorityNet,
-      String note) {}
+      @Schema(types = {"string", "null"}) String note) {}
 
   /** One slot-sweep row: the RS-priority portfolio at {@code slots} concurrent positions (v6). */
   public record SlotCell(

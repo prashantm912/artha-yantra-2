@@ -4,6 +4,7 @@ import in.arthayantra.marketdata.screener.ScreenerHistory;
 import in.arthayantra.marketdata.screener.ScreenerHistoryRepository;
 import in.arthayantra.marketdata.screener.ScreenerHistoryRepository.Family;
 import in.arthayantra.marketdata.screener.minervini.geometry.VcpFootprint;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -50,24 +51,28 @@ public class MinerviniController {
 
   /** The {items} envelope + as-of + coverage. */
   public record ScreenResponse(
-      List<Row> items, LocalDate screenDate, int coverage, int limit, int offset) {}
+      List<Row> items,
+      @Schema(types = {"string", "null"}) LocalDate screenDate,
+      int coverage,
+      int limit,
+      int offset) {}
 
   /** VCP / base geometry for one candidate (MV-5.5). Null-valued when the base is not a VCP. */
   public record Geometry(
       boolean isVcp,
-      String footprint,
-      BigDecimal pivot,
-      BigDecimal deepestPct,
-      BigDecimal tightestPct,
-      Integer contractionCount,
-      Integer baseWeeks,
-      Integer baseDurationDays,
+      @Schema(types = {"string", "null"}) String footprint,
+      @Schema(types = {"number", "null"}) BigDecimal pivot,
+      @Schema(types = {"number", "null"}) BigDecimal deepestPct,
+      @Schema(types = {"number", "null"}) BigDecimal tightestPct,
+      @Schema(types = {"integer", "null"}) Integer contractionCount,
+      @Schema(types = {"integer", "null"}) Integer baseWeeks,
+      @Schema(types = {"integer", "null"}) Integer baseDurationDays,
       boolean volumeDryUp,
       boolean shakeout,
-      Integer baseCount,
-      BigDecimal cheatPivot,
+      @Schema(types = {"integer", "null"}) Integer baseCount,
+      @Schema(types = {"number", "null"}) BigDecimal cheatPivot,
       boolean thrust,
-      String rejectReason) {}
+      @Schema(types = {"string", "null"}) String rejectReason) {}
 
   /**
    * The full analyzer payload for one candidate (MV-5.5): the 8 Trend-Template gates + Stage + the

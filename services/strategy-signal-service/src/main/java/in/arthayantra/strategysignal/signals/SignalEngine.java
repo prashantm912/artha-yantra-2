@@ -582,15 +582,11 @@ public class SignalEngine {
                     && "options_of_underlying".equals(config.path("universe").path("mode").asText())
                 ? ScalperConfig.from(config, configTags)
                 : null;
-        // §0B hard-stop rule (hardened, T21 #990 round-3): a scalper without an ENGINE-fireable
-        // bounding exit — a time_stop or an index-side stop_loss — could ride an unbounded losing
-        // option. A premium_pct stop does NOT count: it is enforced only by the paper bracket path,
-        // which does not run when a signal is not taken into paper. Refuse to load it rather than
-        // emit signals it can never safely exit.
+        // §0B hard-stop rule: a scalper without a fixed SL or a time-stop could ride an unbounded
+        // losing option — refuse to load it rather than emit signals it can never safely exit.
         if (scalper != null && !ScalperRisk.hasBoundingExit(definition.exitRules())) {
           log.warn(
-              "scalper {} has no engine-fireable bounding exit (time_stop / index-side stop_loss)"
-                  + " — not loaded (§0B hard-SL rule)",
+              "scalper {} has no hard stop / time-stop exit — not loaded (§0B hard-SL rule)",
               strategy.slug());
           continue;
         }

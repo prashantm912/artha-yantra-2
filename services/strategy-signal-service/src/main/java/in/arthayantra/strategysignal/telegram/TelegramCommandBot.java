@@ -84,8 +84,13 @@ public class TelegramCommandBot {
         chatId.isBlank() ? Set.of() : Set.of(chatId.split("\\s*,\\s*"));
   }
 
-  /** The 3 s command poll; dormant without token+flag+allowlist. */
-  @Scheduled(fixedDelay = 3_000, initialDelay = 15_000)
+  /**
+   * The 3 s command poll; dormant without token+flag+allowlist. Pinned to its OWN scheduler (S2):
+   * this is an outbound HTTPS call to a third party we neither run nor monitor, and on the default
+   * pool a Telegram stall delayed {@code PaperScheduler.bracketEvaluation}, the 15 s live SL/TP
+   * sweep. See {@code MonitorSchedulingConfig.telegramTaskScheduler}.
+   */
+  @Scheduled(fixedDelay = 3_000, initialDelay = 15_000, scheduler = "telegramTaskScheduler")
   public void poll() {
     if (!enabled || !api.configured() || allowedChats.isEmpty()) {
       return;

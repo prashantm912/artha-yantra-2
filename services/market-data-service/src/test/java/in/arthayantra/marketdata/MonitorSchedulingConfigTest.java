@@ -3,6 +3,7 @@ package in.arthayantra.marketdata;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.canary.DataHealthCanary;
+import in.arthayantra.marketdata.candles.CandlesConfig;
 import in.arthayantra.marketdata.feed.FeedWatchdog;
 import in.arthayantra.marketdata.kite.session.SessionHealthProbe;
 import java.util.concurrent.CountDownLatch;
@@ -16,12 +17,16 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
  * BEJ-01 (monitor-scheduler isolation): the pure liveness detectors ({@code FeedWatchdog.check},
  * {@code DataHealthCanary.sweep}, {@code SessionHealthProbe.scheduledProbe}) run on a dedicated
  * {@code monitorTaskScheduler}, isolated from the default single-thread pool, so a blocked sibling
  * job can never starve detection.
+ *
+ * <p>S1 (2026-07-25) adds the same guarantee for the 1 s bar-close sweep on its own
+ * {@code barFlushTaskScheduler}, for a different reason — see that test's javadoc.
  */
 class MonitorSchedulingConfigTest {
 
@@ -64,6 +69,67 @@ class MonitorSchedulingConfigTest {
     assertBoundToMonitorScheduler(SessionHealthProbe.class, "scheduledProbe");
   }
 
+  /**
+   * S1: the 1 s bar-close sweep owns its own pool. On the DEFAULT pool it queued behind
+   * {@code OptionsSnapshotService.scheduledSnapshot}, whose javadoc sizes one pass at ~70 s through
+   * the 1/s Kite quote limiter — so every 1m bar could close (and land in {@code candles}) that
+   * late, dragging the live engine's bar-close eval and receipt heartbeats with it. Also pinned OFF
+   * the monitor pool, which is fenced for pure detectors: {@code flushBars} writes (JDBC + Redis per
+   * closed bar) and would starve {@code FeedWatchdog.check}.
+   */
+  @Test
+  void theBarFlushSweepOwnsItsOwnPoolAndNeverTheDefaultOrMonitorOne() throws NoSuchMethodException {
+    Scheduled scheduled =
+        CandlesConfig.CandleHousekeeping.class
+            .getDeclaredMethod("flushBars")
+            .getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("CandleHousekeeping.flushBars is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler())
+        .as("flushBars must NOT share the default pool with the ~70 s options-snapshot pass")
+        .isEqualTo("barFlushTaskScheduler");
+    assertThat(scheduled.fixedDelay()).as("the 1 s cadence is unchanged").isEqualTo(1_000);
+  }
+
+  /** The bean the sweep names must exist, on its own single daemon thread, distinct from both siblings. */
+  @Test
+  void theBarFlushSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("barFlushTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the monitor detectors")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the default scheduling pool")
+              .isNotSameAs(context.getBean("taskScheduler"));
+        });
+  }
+
+  /** The sweep keeps firing on its own thread while the default pool is wedged — the S1 guarantee. */
+  @Test
+  void theBarFlushSweepFiresWhileTheDefaultPoolIsBlocked() {
+    runner.run(
+        context -> {
+          BlockingDefaultJob blocker = context.getBean(BlockingDefaultJob.class);
+          BarFlushProbeJob probe = context.getBean(BarFlushProbeJob.class);
+          try {
+            assertThat(blocker.entered.await(3, TimeUnit.SECONDS))
+                .as("default-pool job started and is holding its only thread")
+                .isTrue();
+            assertThat(probe.fired.await(3, TimeUnit.SECONDS))
+                .as("the bar-flush sweep fired while the default pool was blocked")
+                .isTrue();
+            assertThat(probe.threadName)
+                .as("the sweep ran on its own dedicated pool")
+                .startsWith("bar-flush-sched-");
+          } finally {
+            blocker.release.countDown();
+          }
+        });
+  }
+
   private static void assertBoundToMonitorScheduler(Class<?> type, String method)
       throws NoSuchMethodException {
     Scheduled scheduled = type.getDeclaredMethod(method).getAnnotation(Scheduled.class);
@@ -85,6 +151,11 @@ class MonitorSchedulingConfigTest {
     @Bean
     MonitorProbeJob monitorProbeJob() {
       return new MonitorProbeJob();
+    }
+
+    @Bean
+    BarFlushProbeJob barFlushProbeJob() {
+      return new BarFlushProbeJob();
     }
   }
 
@@ -108,6 +179,18 @@ class MonitorSchedulingConfigTest {
     volatile String threadName;
 
     @Scheduled(fixedDelay = 60_000, initialDelay = 0, scheduler = "monitorTaskScheduler")
+    public void run() {
+      threadName = Thread.currentThread().getName();
+      fired.countDown();
+    }
+  }
+
+  /** Stands in for {@code flushBars}: same binding, records that it fired and on which thread. */
+  static class BarFlushProbeJob {
+    final CountDownLatch fired = new CountDownLatch(1);
+    volatile String threadName;
+
+    @Scheduled(fixedDelay = 60_000, initialDelay = 0, scheduler = "barFlushTaskScheduler")
     public void run() {
       threadName = Thread.currentThread().getName();
       fired.countDown();

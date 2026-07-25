@@ -75,8 +75,13 @@ public class CandlesConfig {
       meterRegistry.gauge("ay_database_size_bytes", databaseBytes);
     }
 
-    /** 1 s sweep: close bars past minute+grace. */
-    @Scheduled(fixedDelay = 1_000)
+    /**
+     * 1 s sweep: close bars past minute+grace. Pinned to its OWN scheduler (S1): on the default pool
+     * it queued behind {@code OptionsSnapshotService.scheduledSnapshot}, a ~70 s pass, so bar closes
+     * — and every downstream bar-close eval — could run that late. See
+     * {@code MonitorSchedulingConfig.barFlushTaskScheduler}.
+     */
+    @Scheduled(fixedDelay = 1_000, scheduler = "barFlushTaskScheduler")
     public void flushBars() {
       builder.flush();
     }

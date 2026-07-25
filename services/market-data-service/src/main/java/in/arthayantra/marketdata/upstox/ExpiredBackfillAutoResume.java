@@ -67,8 +67,16 @@ public class ExpiredBackfillAutoResume {
     trigger("startup");
   }
 
-  /** Hourly self-heal: resume if the job is idle and there is work to do. */
-  @Scheduled(cron = "${artha.marketdata.expired-backfill.self-heal-cron}")
+  /**
+   * Hourly self-heal: resume if the job is idle and there is work to do.
+   *
+   * <p>S3 (2026-07-25): this was the ONLY cron in either service without an explicit {@code zone}, so
+   * it resolved against the JVM default — UTC, since the market-data container sets no {@code TZ}.
+   * The default expression {@code 0 17 * * * *} therefore fired at :47 past each IST hour instead of
+   * the :17 it reads as. Harmless while the expression has no hour field, a live trap the moment one
+   * is added, so it is pinned to IST like every sibling.
+   */
+  @Scheduled(cron = "${artha.marketdata.expired-backfill.self-heal-cron}", zone = "Asia/Kolkata")
   public void selfHeal() {
     if (!enabledAndAvailable()) {
       return;

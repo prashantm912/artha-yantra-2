@@ -20,6 +20,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.scheduling.annotation.Scheduled;
 
 /**
  * Unit test for {@link ExpiredBackfillAutoResume}: the boot event and the hourly self-heal each fire
@@ -42,6 +43,23 @@ class ExpiredBackfillAutoResumeTest {
 
   private void clientPresent() {
     when(provider.getIfAvailable()).thenReturn(mock(UpstoxExpiredInstrumentsClient.class));
+  }
+
+  /**
+   * S3 (2026-07-25): the self-heal cron must declare IST explicitly. Without {@code zone} it resolved
+   * against the JVM default — UTC, since the market-data container sets no {@code TZ} — so the
+   * default {@code 0 17 * * * *} fired at :47 past each IST hour, not the :17 it reads as. Harmless
+   * while the expression has no hour field; a silent 5h30m error the moment one is added. This was
+   * the last cron in either service without a zone, so it is pinned here.
+   */
+  @Test
+  void theSelfHealCronIsPinnedToIst() throws NoSuchMethodException {
+    Scheduled scheduled =
+        ExpiredBackfillAutoResume.class.getDeclaredMethod("selfHeal").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("selfHeal is @Scheduled").isNotNull();
+    assertThat(scheduled.zone())
+        .as("selfHeal resolves its cron in IST, never the container's UTC default")
+        .isEqualTo("Asia/Kolkata");
   }
 
   private static Status status(String state, Instant lastRun) {

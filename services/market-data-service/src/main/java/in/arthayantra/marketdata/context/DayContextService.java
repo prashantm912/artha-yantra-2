@@ -96,10 +96,10 @@ public class DayContextService {
       LocalDate tradeDate,
       String sessionPhase,
       HolidayProximity holiday,
-      OptionsDigestService.OptionsDigest options,
-      Vix vix,
+      @Schema(types = {"object", "null"}) OptionsDigestService.OptionsDigest options,
+      @Schema(types = {"object", "null"}) Vix vix,
       List<GlobalCue> overnightCues,
-      IndexPriceAction indexPriceAction,
+      @Schema(types = {"object", "null"}) IndexPriceAction indexPriceAction,
       IngestTrust ingestTrust,
       OffsetDateTime asOf,
       List<String> notes) {}

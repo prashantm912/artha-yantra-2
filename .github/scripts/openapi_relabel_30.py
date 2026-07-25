@@ -82,6 +82,36 @@ def downgrade_nullable_type_arrays(node):
             downgrade_nullable_type_arrays(value)
 
 
+def downgrade_nullable_ref_anyof(node):
+    """Strip the exact nullable-``$ref`` union for the throwaway 3.0 diff copy.
+
+    OpenAPI 3.0 has no spelling for a nullable ``$ref``. openapi-diff is blind to nullability in both
+    directions (measured with the pinned tool), so this copy legitimately drops only that fact and
+    remains byte-identical to the pre-annotation copy. Genuine unions and every other ``anyOf`` shape
+    still fall through to the validator/refusal path.
+    """
+    if isinstance(node, dict):
+        any_of = node.get("anyOf")
+        if set(node) == {"anyOf"} and isinstance(any_of, list) and len(any_of) == 2:
+            ref_branch, null_branch = any_of
+            if (
+                isinstance(ref_branch, dict)
+                and set(ref_branch) == {"$ref"}
+                and isinstance(ref_branch["$ref"], str)
+                and isinstance(null_branch, dict)
+                and set(null_branch) == {"type"}
+                and null_branch["type"] == "null"
+            ):
+                node.clear()
+                node["$ref"] = ref_branch["$ref"]
+                return
+        for value in node.values():
+            downgrade_nullable_ref_anyof(value)
+    elif isinstance(node, list):
+        for value in node:
+            downgrade_nullable_ref_anyof(value)
+
+
 def scan(node, path, found):
     if isinstance(node, dict):
         # A $ref with sibling keys is the ONE version-divergent shape the 3.0 SCHEMA validator
@@ -159,6 +189,8 @@ def main():
     # losslessly (nullability type arrays); anything the converter leaves behind still refuses.
     downgrade_nullable_type_arrays(spec.get("components"))
     downgrade_nullable_type_arrays(spec.get("paths"))
+    downgrade_nullable_ref_anyof(spec.get("components"))
+    downgrade_nullable_ref_anyof(spec.get("paths"))
 
     found = deny_list_hits(spec)
     if found:

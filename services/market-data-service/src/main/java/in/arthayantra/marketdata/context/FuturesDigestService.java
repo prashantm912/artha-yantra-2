@@ -85,8 +85,8 @@ public class FuturesDigestService {
   /** The futures context digest. {@code dataTrust} = OK/DEGRADED/BLOCKED. */
   public record FuturesDigest(
       List<UnderlyingQuadrant> underlyings,
-      BanksSummary banks,
-      TermStructureState termStructure,
+      @Schema(types = {"object", "null"}) BanksSummary banks,
+      @Schema(types = {"object", "null"}) TermStructureState termStructure,
       @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       String dataTrust,
       List<String> trustReasons) {

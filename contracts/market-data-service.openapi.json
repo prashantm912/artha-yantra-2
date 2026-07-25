@@ -5325,6 +5325,16 @@
               }
             }
           },
+          "404" : {
+            "description" : "Fundamentals not found for symbol",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EquityFundamentals"
+                }
+              }
+            }
+          },
           "default" : {
             "description" : "Error envelope (COMMON 8.3)",
             "content" : {
@@ -7343,13 +7353,25 @@
             }
           },
           "portfolio" : {
-            "$ref" : "#/components/schemas/PortfolioStat"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/PortfolioStat"
+            }, {
+              "type" : "null"
+            } ]
           },
           "portfolioRsPriority" : {
-            "$ref" : "#/components/schemas/PortfolioStat"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/PortfolioStat"
+            }, {
+              "type" : "null"
+            } ]
           },
           "portfolioRsPriorityNet" : {
-            "$ref" : "#/components/schemas/PortfolioStat"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/PortfolioStat"
+            }, {
+              "type" : "null"
+            } ]
           },
           "note" : {
             "type" : [ "string", "null" ]
@@ -8378,7 +8400,11 @@
             }
           },
           "rotation" : {
-            "$ref" : "#/components/schemas/RotationResult"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/RotationResult"
+            }, {
+              "type" : "null"
+            } ]
           },
           "note" : {
             "type" : "string"
@@ -8471,7 +8497,11 @@
             "format" : "date"
           },
           "regime" : {
-            "$ref" : "#/components/schemas/Regime"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/Regime"
+            }, {
+              "type" : "null"
+            } ]
           },
           "immediatelyBuyable" : {
             "type" : "array",
@@ -8839,7 +8869,11 @@
             "format" : "date"
           },
           "regime" : {
-            "$ref" : "#/components/schemas/Regime"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/Regime"
+            }, {
+              "type" : "null"
+            } ]
           },
           "immediatelyBuyable" : {
             "type" : "array",
@@ -9821,7 +9855,11 @@
             "$ref" : "#/components/schemas/Leg"
           },
           "deltas" : {
-            "$ref" : "#/components/schemas/LegDeltas"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/LegDeltas"
+            }, {
+              "type" : "null"
+            } ]
           }
         },
         "required" : [ "deltas", "leg" ]
@@ -10290,7 +10328,11 @@
             }
           },
           "lastRun" : {
-            "$ref" : "#/components/schemas/LastRun"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/LastRun"
+            }, {
+              "type" : "null"
+            } ]
           }
         },
         "required" : [ "days", "detail", "lastRun", "missingDays", "policy", "source", "status" ]
@@ -11427,10 +11469,18 @@
             "format" : "date"
           },
           "pcr" : {
-            "$ref" : "#/components/schemas/Pcr"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/Pcr"
+            }, {
+              "type" : "null"
+            } ]
           },
           "maxPain" : {
-            "$ref" : "#/components/schemas/MaxPain"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/MaxPain"
+            }, {
+              "type" : "null"
+            } ]
           },
           "oiGainers" : {
             "type" : "array",
@@ -11445,16 +11495,32 @@
             }
           },
           "activeStrikes" : {
-            "$ref" : "#/components/schemas/ActiveStrikeMigration"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/ActiveStrikeMigration"
+            }, {
+              "type" : "null"
+            } ]
           },
           "atmStraddle" : {
-            "$ref" : "#/components/schemas/Straddle"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/Straddle"
+            }, {
+              "type" : "null"
+            } ]
           },
           "atmIv" : {
-            "$ref" : "#/components/schemas/AtmIv"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/AtmIv"
+            }, {
+              "type" : "null"
+            } ]
           },
           "oiStructure" : {
-            "$ref" : "#/components/schemas/OiStructure"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/OiStructure"
+            }, {
+              "type" : "null"
+            } ]
           },
           "asOf" : {
             "type" : [ "string", "null" ],
@@ -11551,10 +11617,18 @@
             }
           },
           "banks" : {
-            "$ref" : "#/components/schemas/BanksSummary"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/BanksSummary"
+            }, {
+              "type" : "null"
+            } ]
           },
           "termStructure" : {
-            "$ref" : "#/components/schemas/TermStructureState"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/TermStructureState"
+            }, {
+              "type" : "null"
+            } ]
           },
           "asOf" : {
             "type" : [ "string", "null" ],
@@ -11697,19 +11771,39 @@
         "type" : "object",
         "properties" : {
           "cash" : {
-            "$ref" : "#/components/schemas/FiiCash"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/FiiCash"
+            }, {
+              "type" : "null"
+            } ]
           },
           "dii" : {
-            "$ref" : "#/components/schemas/DiiDivergence"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/DiiDivergence"
+            }, {
+              "type" : "null"
+            } ]
           },
           "futuresLongShort" : {
-            "$ref" : "#/components/schemas/FiiFuturesLongShort"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/FiiFuturesLongShort"
+            }, {
+              "type" : "null"
+            } ]
           },
           "participant" : {
-            "$ref" : "#/components/schemas/ParticipantPositioning"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/ParticipantPositioning"
+            }, {
+              "type" : "null"
+            } ]
           },
           "derivative" : {
-            "$ref" : "#/components/schemas/FiiDerivativeAvailability"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/FiiDerivativeAvailability"
+            }, {
+              "type" : "null"
+            } ]
           },
           "asOf" : {
             "type" : [ "string", "null" ],
@@ -12019,13 +12113,25 @@
             "format" : "date"
           },
           "advanceDecline" : {
-            "$ref" : "#/components/schemas/AdvanceDecline"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/AdvanceDecline"
+            }, {
+              "type" : "null"
+            } ]
           },
           "aboveMa" : {
-            "$ref" : "#/components/schemas/AboveMa"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/AboveMa"
+            }, {
+              "type" : "null"
+            } ]
           },
           "breadthThrust" : {
-            "$ref" : "#/components/schemas/BreadthThrust"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/BreadthThrust"
+            }, {
+              "type" : "null"
+            } ]
           },
           "topSectors" : {
             "type" : "array",
@@ -12061,7 +12167,11 @@
             }
           },
           "indexConcentration" : {
-            "$ref" : "#/components/schemas/IndexConcentration"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/IndexConcentration"
+            }, {
+              "type" : "null"
+            } ]
           },
           "asOf" : {
             "type" : [ "string", "null" ],
@@ -12155,10 +12265,18 @@
             "$ref" : "#/components/schemas/HolidayProximity"
           },
           "options" : {
-            "$ref" : "#/components/schemas/OptionsDigest"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/OptionsDigest"
+            }, {
+              "type" : "null"
+            } ]
           },
           "vix" : {
-            "$ref" : "#/components/schemas/Vix"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/Vix"
+            }, {
+              "type" : "null"
+            } ]
           },
           "overnightCues" : {
             "type" : "array",
@@ -12167,7 +12285,11 @@
             }
           },
           "indexPriceAction" : {
-            "$ref" : "#/components/schemas/IndexPriceAction"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/IndexPriceAction"
+            }, {
+              "type" : "null"
+            } ]
           },
           "ingestTrust" : {
             "$ref" : "#/components/schemas/IngestTrust"

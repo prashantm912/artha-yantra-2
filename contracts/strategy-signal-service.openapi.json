@@ -4521,7 +4521,11 @@
             "format" : "int64"
           },
           "openingSignal" : {
-            "$ref" : "#/components/schemas/OpeningSignal"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/OpeningSignal"
+            }, {
+              "type" : "null"
+            } ]
           },
           "orders" : {
             "type" : "array",

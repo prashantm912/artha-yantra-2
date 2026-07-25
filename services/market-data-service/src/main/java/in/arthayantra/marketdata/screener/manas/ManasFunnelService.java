@@ -69,7 +69,7 @@ public class ManasFunnelService {
   @Schema(name = "ManasFunnel")
   public record Funnel(
       @Schema(types = {"string", "null"}) LocalDate screenDate,
-      RegimeService.Regime regime,
+      @Schema(types = {"object", "null"}) RegimeService.Regime regime,
       List<FunnelRow> immediatelyBuyable,
       List<FunnelRow> onDeck,
       List<FunnelRow> watch) {}

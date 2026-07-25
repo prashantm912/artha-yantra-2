@@ -1,7 +1,9 @@
 package in.arthayantra.marketdata.fundamentals;
 
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.util.Arrays;
 import java.util.List;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -40,9 +42,11 @@ public class FundamentalsController {
     return new RefreshResponse(service.available(), r.requested(), r.written(), r.skipped());
   }
 
-  /** Reads one symbol's persisted snapshot (null body if none). */
+  /** Reads one symbol's persisted snapshot (404 if none). */
+  @ApiResponse(responseCode = "200", description = "OK")
+  @ApiResponse(responseCode = "404", description = "Fundamentals not found for symbol")
   @GetMapping("/{symbol}")
-  public EquityFundamentals get(@PathVariable String symbol) {
-    return repo.find(symbol.trim().toUpperCase()).orElse(null);
+  public ResponseEntity<EquityFundamentals> get(@PathVariable String symbol) {
+    return ResponseEntity.of(repo.find(symbol.trim().toUpperCase()));
   }
 }

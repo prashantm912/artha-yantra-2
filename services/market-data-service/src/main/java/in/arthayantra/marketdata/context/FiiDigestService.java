@@ -72,11 +72,11 @@ public class FiiDigestService {
 
   /** The FII/DII context digest. {@code dataTrust} = OK/DEGRADED/BLOCKED. */
   public record FiiDigest(
-      FiiCash cash,
-      DiiDivergence dii,
-      FiiFuturesLongShort futuresLongShort,
-      ParticipantPositioning participant,
-      FiiDerivativeAvailability derivative,
+      @Schema(types = {"object", "null"}) FiiCash cash,
+      @Schema(types = {"object", "null"}) DiiDivergence dii,
+      @Schema(types = {"object", "null"}) FiiFuturesLongShort futuresLongShort,
+      @Schema(types = {"object", "null"}) ParticipantPositioning participant,
+      @Schema(types = {"object", "null"}) FiiDerivativeAvailability derivative,
       @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       String dataTrust,
       List<String> trustReasons) {

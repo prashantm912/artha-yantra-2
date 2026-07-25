@@ -135,4 +135,107 @@ class DotHealthCanaryTest {
     canary.sweep();
     verifyNoInteractions(events); // iv_rank/dow dead but not required
   }
+
+  private static SignalRejectionRepository.RejectionRow contextlessRow() {
+    try {
+      return new SignalRejectionRepository.RejectionRow(
+          1, null, "slug", "NFO", "FUT", "3m", "CE", "time-window", null, null, null, "r",
+          null, null, MAPPER.readTree("{\"checks\":[{\"rail\":\"time-window\",\"pass\":false}]}"),
+          OffsetDateTime.now(), OffsetDateTime.now());
+    } catch (Exception e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  @Test
+  void contextlessTailIsUninformativeNotAllDead() {
+    // T17: after ~14:45 the newest rows are all early-rail blocks with NO context — 4 sessions of
+    // false all-dead readings (breadth called dead while it supported 426/1,100). An all-context-
+    // less window must read UNINFORMATIVE and never page.
+    stubRows(contextlessRow(), contextlessRow(), contextlessRow());
+    DotHealthCanary canary = canary("breadth");
+
+    DotHealthCanary.DotHealth health = canary.evaluate();
+    assertThat(health.rowsScanned()).isEqualTo(3);
+    assertThat(health.rowsInspected()).as("no context-bearing rows").isZero();
+    assertThat(health.dots()).allSatisfy(s -> assertThat(s.detail()).contains("UNINFORMATIVE"));
+
+    canary.sweep();
+    verifyNoInteractions(events);
+  }
+
+  @Test
+  void contextBearingRowsAreProbedEvenBehindAContextlessTail() {
+    // the newest rows are context-less but a live context-bearing row sits behind them — the
+    // probes must reach past the tail instead of sampling only the newest N of any shape.
+    stubRows(
+        contextlessRow(), contextlessRow(),
+        row("{\"macro\":{\"advances\":32,\"declines\":18}}"));
+    DotHealthCanary.DotHealth health = canary("breadth").evaluate();
+
+    assertThat(health.rowsInspected()).isEqualTo(1);
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("breadth"))
+        .allSatisfy(s -> assertThat(s.alive()).isTrue());
+  }
+
+  @Test
+  void allNeutralQuadrantsReadDeadAndPage() {
+    // T13: NEUTRAL is the data-missing sentinel (OiInterpretation.classify is total over 4 real
+    // states) — the 2026-07-20 outage was 748/748 NEUTRAL with every canary green. An all-NEUTRAL
+    // window must read the OI dots dead and page when they are required.
+    stubRows(
+        row("{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
+            + "\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("futures_oi,underlying_oi");
+
+    DotHealthCanary.DotHealth health = canary.evaluate();
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("futures_oi") || s.dot().equals("underlying_oi"))
+        .allSatisfy(s -> assertThat(s.alive()).isFalse());
+
+    canary.sweep();
+    verify(events, times(1)).publishEvent(alertContaining("futures_oi DEAD"));
+    verify(events, times(1)).publishEvent(alertContaining("underlying_oi DEAD"));
+  }
+
+  @Test
+  void expiryDayNeutralQuadrantsAreSuppressedNotDeadRequired() {
+    // codex round 2/3: MarketOiClient degrades the OI reads to NEUTRAL on a monthly index-expiry
+    // day BY DESIGN (S24) — the quadrant dots are then not "expected alive today": required must
+    // drop so paging, /status and the UI badge all agree it is not an outage. Date discovered from
+    // the bundled calendar so the test tracks the real CSV set.
+    java.time.LocalDate expiry = java.time.LocalDate.of(2026, 1, 1);
+    while (!in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(expiry)) {
+      expiry = expiry.plusDays(1);
+    }
+    now.set(expiry.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant());
+    stubRows(
+        row("{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
+            + "\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("futures_oi,underlying_oi");
+
+    DotHealthCanary.DotHealth health = canary.evaluate();
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("futures_oi") || s.dot().equals("underlying_oi"))
+        .allSatisfy(
+            s -> {
+              assertThat(s.required()).as("not expected alive on the suppression day").isFalse();
+              assertThat(s.detail()).contains("by design");
+            });
+
+    canary.sweep();
+    verifyNoInteractions(events);
+  }
+
+  @Test
+  void aLiveQuadrantReadsAlive() {
+    stubRows(
+        row("{\"oi\":{\"futuresQuadrant\":\"LONG_BUILDUP\",\"underlyingQuadrant\":\"SHORT_COVERING\"}}"));
+    DotHealthCanary.DotHealth health = canary("futures_oi").evaluate();
+
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("futures_oi") || s.dot().equals("underlying_oi"))
+        .allSatisfy(s -> assertThat(s.alive()).isTrue());
+  }
 }

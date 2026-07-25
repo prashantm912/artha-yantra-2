@@ -1679,6 +1679,8 @@ export interface components {
             asOf: string;
             session: boolean;
             /** Format: int32 */
+            rowsScanned: number;
+            /** Format: int32 */
             rowsInspected: number;
             dots: components["schemas"]["DotState"][];
         };

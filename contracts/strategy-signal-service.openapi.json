@@ -4899,6 +4899,10 @@
           "session" : {
             "type" : "boolean"
           },
+          "rowsScanned" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
           "rowsInspected" : {
             "type" : "integer",
             "format" : "int32"
@@ -4910,7 +4914,7 @@
             }
           }
         },
-        "required" : [ "asOf", "dots", "rowsInspected", "session" ]
+        "required" : [ "asOf", "dots", "rowsInspected", "rowsScanned", "session" ]
       },
       "DotState" : {
         "type" : "object",

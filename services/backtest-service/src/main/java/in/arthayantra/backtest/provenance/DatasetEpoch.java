@@ -1,5 +1,6 @@
 package in.arthayantra.backtest.provenance;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
@@ -12,12 +13,12 @@ import java.util.List;
 public record DatasetEpoch(
     long id,
     String reason,
-    List<String> symbols,
-    String exchange,
-    String windowStart,
-    String windowEnd,
-    String interval,
-    String jobLink,
-    String source,
-    String note,
+    @Schema(types = {"array", "null"}) List<String> symbols,
+    @Schema(types = {"string", "null"}) String exchange,
+    @Schema(types = {"string", "null"}) String windowStart,
+    @Schema(types = {"string", "null"}) String windowEnd,
+    @Schema(types = {"string", "null"}) String interval,
+    @Schema(types = {"string", "null"}) String jobLink,
+    @Schema(types = {"string", "null"}) String source,
+    @Schema(types = {"string", "null"}) String note,
     String createdAt) {}

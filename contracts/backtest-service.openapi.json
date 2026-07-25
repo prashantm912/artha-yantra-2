@@ -1666,31 +1666,31 @@
             "type" : "string"
           },
           "symbols" : {
-            "type" : "array",
+            "type" : [ "array", "null" ],
             "items" : {
               "type" : "string"
             }
           },
           "exchange" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "windowStart" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "windowEnd" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "interval" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "jobLink" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "source" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "note" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "createdAt" : {
             "type" : "string"
@@ -1816,7 +1816,7 @@
             }
           },
           "note" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "jobId", "note", "tags" ]
@@ -1890,10 +1890,10 @@
             "format" : "int32"
           },
           "maxComposite" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "sampleBucket" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "sampleBreakdown" : {
@@ -1918,44 +1918,44 @@
         "type" : "object",
         "properties" : {
           "engineSha" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "engineImage" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "configHash" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "dataHash" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "contentHash" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "datasetEpoch" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "evidencePolicy" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "universeChecksum" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "premiumSource" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "costClass" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "profile" : {
             "type" : "string"
           },
           "warmStatus" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "premiumContentUnverified" : {
-            "type" : "boolean"
+            "type" : [ "boolean", "null" ]
           }
         },
         "required" : [ "configHash", "contentHash", "costClass", "dataHash", "datasetEpoch", "engineImage", "engineSha", "evidencePolicy", "premiumContentUnverified", "premiumSource", "profile", "universeChecksum", "warmStatus" ]
@@ -1967,7 +1967,7 @@
             "type" : "string"
           },
           "datasetEpochAtRun" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "currentEpoch" : {
@@ -1978,13 +1978,13 @@
             "type" : "boolean"
           },
           "contentHash" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "engineSha" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "evidencePolicy" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "staleEpochs" : {
             "type" : "array",
@@ -2028,7 +2028,7 @@
             "type" : "string"
           },
           "parentJobId" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "strategyVersionId" : {
             "type" : "string"
@@ -2037,10 +2037,10 @@
             "type" : "string"
           },
           "strategyVersion" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "purpose" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "exchange" : {
             "type" : "string"
@@ -2058,13 +2058,13 @@
             "type" : "string"
           },
           "totalReturn" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "sharpe" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "maxDrawdown" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "tradeCount" : {
             "type" : "integer",
@@ -2074,16 +2074,16 @@
             "type" : "string"
           },
           "universeChecksum" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "engineSha" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "premiumSource" : {
             "type" : "string"
           },
           "createdBy" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "completedAt" : {
             "type" : "string"
@@ -2095,34 +2095,34 @@
         "type" : "object",
         "properties" : {
           "totalReturn" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "cagr" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "sharpe" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "sortino" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "maxDrawdown" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "winRate" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "profitFactor" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "alpha" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "beta" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "informationRatio" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "tradeCount" : {
             "type" : "integer",
@@ -2159,34 +2159,34 @@
             "type" : "string"
           },
           "strategyVersion" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "dataHash" : {
             "type" : "string"
           },
           "universeChecksum" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "engineSha" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "premiumSource" : {
             "type" : "string"
           },
           "contentHash" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "datasetEpoch" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "evidencePolicy" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "premiumContentUnverified" : {
-            "type" : "boolean"
+            "type" : [ "boolean", "null" ]
           },
           "createdBy" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "completedAt" : {
             "type" : "string"

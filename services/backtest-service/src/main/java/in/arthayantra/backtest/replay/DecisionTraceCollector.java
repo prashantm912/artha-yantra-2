@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.strategyengine.eval.ScoreBreakdown;
 import in.arthayantra.strategyengine.golden.TickwiseGoldenRunner.DecisionListener;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -80,8 +81,8 @@ public final class DecisionTraceCollector implements DecisionListener {
       LocalDate sessionDate,
       String reason,
       int bars,
-      BigDecimal maxComposite,
-      OffsetDateTime sampleBucket,
+      @Schema(types = {"number", "null"}) BigDecimal maxComposite,
+      @Schema(types = {"string", "null"}) OffsetDateTime sampleBucket,
       JsonNode sampleBreakdown) {}
 
   private record Key(LocalDate sessionDate, String reason) {}

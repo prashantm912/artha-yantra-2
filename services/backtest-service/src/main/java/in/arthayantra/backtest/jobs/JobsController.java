@@ -5,6 +5,7 @@ import in.arthayantra.backtest.provenance.ProvenanceBlock;
 import in.arthayantra.backtest.replay.RunRepository;
 import in.arthayantra.backtest.replay.counterfactual.CounterfactualRunRepository;
 import in.arthayantra.common.web.http.ArthaHeaders;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -227,7 +228,8 @@ public class JobsController {
   public record JobAnnotationRequest(List<String> tags, String note) {}
 
   /** Typed PATCH response so the new handler remains visible in the OpenAPI contract. */
-  public record JobAnnotationResponse(String jobId, List<String> tags, String note) {}
+  public record JobAnnotationResponse(
+      String jobId, List<String> tags, @Schema(types = {"string", "null"}) String note) {}
 
   /** POST body for one owner-scoped opaque filter set. */
   public record SavedViewRequest(String kind, String name, JsonNode filter) {}

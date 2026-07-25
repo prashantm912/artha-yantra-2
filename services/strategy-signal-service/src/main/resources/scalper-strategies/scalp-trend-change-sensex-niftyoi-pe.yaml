@@ -34,7 +34,7 @@ name: "Scalper · Trend Change · SENSEX PE (NIFTY-OI)"
 version: 1.0.0
 description: "Trend-change / reversal-capture scalp (Siva #12) on the NIFTY 3-min front future: a price swing-structure break + a >=50% Trending-OI momentum shift + the §3.1 2-candle 3rd-candle confirm, capped to the 09:45-14:30 window (no fresh down-reversal after ~14:30); broken-swing-pivot SL; long-premium PE only."
 author: owner
-tags: [scalper, options, intraday, sensex, trend-change, fii-bias, constituent-gate, rsi-s24-bands, delta-s24-floor, premium-s24-band, divergence-vol-gate, psar-durability, s24-trade-window, oi-confluence-exit, directional-vix-gate, rsi-cooloff, rsi-recovery]
+tags: [scalper, options, intraday, sensex, trend-change, fii-bias, constituent-gate, rsi-s24-bands, delta-s24-floor, premium-s24-band, divergence-vol-gate, psar-durability, s24-trade-window, oi-confluence-exit, directional-vix-gate, rsi-cooloff, rsi-recovery, relative-volume-floor]
 
 universe:
   mode: options_of_underlying

@@ -20,7 +20,7 @@ name: "Scalper · Trend Change · NIFTY PE"
 version: 1.0.0
 description: "PE-mirror of the trend-change / reversal-capture scalp (Siva #12) on the NIFTY 3-min front future: a price swing-LOW structure break + a >=50% Trending-OI shift to the PE side + the §3.1 2-candle confirm, capped to the 09:45-14:30 window; broken-swing-pivot SL; long-premium PE only (BUYS the nearest-weekly ATM-band PUT on a DOWN-reversal). The bearish counterpart of scalp-trend-change-nifty; CE strategy unchanged."
 author: owner
-tags: [scalper, options, intraday, nifty, trend-change, fii-bias, constituent-gate, rsi-s24-bands, delta-s24-floor, premium-s24-band, divergence-vol-gate, psar-durability, s24-trade-window, oi-confluence-exit, directional-vix-gate, rsi-cooloff, rsi-recovery]
+tags: [scalper, options, intraday, nifty, trend-change, fii-bias, constituent-gate, rsi-s24-bands, delta-s24-floor, premium-s24-band, divergence-vol-gate, psar-durability, s24-trade-window, oi-confluence-exit, directional-vix-gate, rsi-cooloff, rsi-recovery, relative-volume-floor]
 
 universe:
   mode: options_of_underlying

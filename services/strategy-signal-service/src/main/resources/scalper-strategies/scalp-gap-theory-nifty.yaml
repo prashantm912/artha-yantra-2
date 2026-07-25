@@ -18,7 +18,7 @@ name: "Scalper · Gap Theory · NIFTY CE"
 version: 1.0.0
 description: "Gap-fill scalp (Siva #4) on the NIFTY 3-min front future; wait for the >3 pt gap to fill, then trade WITH the prevailing trend; pre-gap candle SL; long-premium CE only. The counter-trend gap-fill variant (SL = day-high/low) is a DEFERRED manual-only play, not automated."
 author: owner
-tags: [scalper, options, intraday, nifty, gap-theory, volume-pump, rsi-s24-bands, delta-s24-floor, premium-s24-band, s24-trade-window, vwap-distance]
+tags: [scalper, options, intraday, nifty, gap-theory, volume-pump, rsi-s24-bands, delta-s24-floor, premium-s24-band, s24-trade-window, vwap-distance, relative-volume-floor]
 
 universe:
   mode: options_of_underlying

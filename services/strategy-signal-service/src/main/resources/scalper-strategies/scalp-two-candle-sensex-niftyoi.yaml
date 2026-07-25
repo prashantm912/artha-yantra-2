@@ -10,7 +10,7 @@ name: "Scalper · Two-Candle · SENSEX CE (NIFTY-OI)"
 version: 1.0.0
 description: "Two-candle scalp (Siva #1) on the NIFTY front future; 2-candle pattern + 1st-candle SL; long-premium CE only."
 author: owner
-tags: [scalper, options, intraday, sensex, two-candle-pattern, two-candle-substitution, rsi-s24-bands, delta-s24-floor, premium-s24-band, overbought-defer, rsi-cooloff, s24-trade-window]
+tags: [scalper, options, intraday, sensex, two-candle-pattern, two-candle-substitution, rsi-s24-bands, delta-s24-floor, premium-s24-band, overbought-defer, rsi-cooloff, s24-trade-window, relative-volume-floor]
 
 universe:
   mode: options_of_underlying

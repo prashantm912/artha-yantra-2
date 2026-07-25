@@ -15,7 +15,7 @@ name: "Scalper · Morning Trade · SENSEX CE (NIFTY-OI)"
 version: 1.0.0
 description: "Morning Trade opening-tick scalp (Siva #9) on the NIFTY front future at ~09:16; EOD-formed OI/sentiment/FII view carries the signal, VWAP is degraded (soft, not hard) before 10:30, SL = first session candle low; long-premium CE only; profits-only small size; global cues (Dow/Asian/USD) are a MANUAL checklist item."
 author: owner
-tags: [scalper, options, intraday, sensex, opening-tick, rsi-s24-bands, delta-s24-floor, premium-s24-band, gap-size-side-gate, prior-day-vwap-stop, morning-opening-formation, morning-eod-precondition]
+tags: [scalper, options, intraday, sensex, opening-tick, rsi-s24-bands, delta-s24-floor, premium-s24-band, gap-size-side-gate, prior-day-vwap-stop, morning-opening-formation, morning-eod-precondition, relative-volume-floor]
 
 universe:
   mode: options_of_underlying

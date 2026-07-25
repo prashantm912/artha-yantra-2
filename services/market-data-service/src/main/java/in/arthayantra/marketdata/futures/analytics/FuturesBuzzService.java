@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.futures.analytics;
 
 import in.arthayantra.marketdata.options.OiInterpretation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -17,11 +18,19 @@ import org.springframework.stereotype.Service;
 @Service
 public class FuturesBuzzService {
 
+  /**
+   * ⚠️ {@code cells} elements are genuinely nullable (the {@code row.add(null)} gap branch below),
+   * but element-level nullability of a DOUBLY-nested generic is not expressible with the swagger
+   * annotations: {@code @ArraySchema(schema=…)} collapses the inner array and drops the enum, and
+   * {@code @Schema(types=…)} pollutes the OUTER type to {@code ["array","string","null"]} (both
+   * measured against swagger-core 2.2.30). Left un-annotated deliberately — see the 3e section of
+   * {@code docs/superpowers/plans/2026-07-25-nullable-contract-sweep.md}.
+   */
   public record BuzzMatrix(
       List<String> contracts,
       List<OffsetDateTime> buckets,
       List<List<OiInterpretation>> cells,
-      OffsetDateTime asOf) {}
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   public BuzzMatrix buzz(List<FuturesSnapshotReader.FutPoint> series) {
     List<OffsetDateTime> buckets =

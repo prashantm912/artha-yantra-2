@@ -35,7 +35,7 @@ public class FuturesBankGridService {
       long oi,
       long oiChange,
       @Schema(types = {"number", "null"}) BigDecimal oiPct,
-      OiInterpretation interpretation) {}
+      @Schema(types = {"string", "null"}) OiInterpretation interpretation) {}
 
   public record BankGrid(
       List<BankGridRow> items,

@@ -60,7 +60,7 @@ public class FuturesMoversService {
       long oi,
       long oiChange,
       @Schema(types = {"number", "null"}) BigDecimal basis,
-      OiInterpretation interpretation) {}
+      @Schema(types = {"string", "null"}) OiInterpretation interpretation) {}
 
   public record Banks(
       List<BankRow> items,

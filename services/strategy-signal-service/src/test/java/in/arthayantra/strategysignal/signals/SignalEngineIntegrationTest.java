@@ -364,8 +364,14 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       assertThat(row.signalType()).isEqualTo("ENTRY");
       assertThat(row.side()).isEqualTo("BUY");
       assertThat(row.interval()).isEqualTo("1m");
-      assertThat(row.stopLoss()).isNotNull();
-      assertThat(row.target()).isNotNull();
+      // T21 (#990): this fixture's exit rules are premium_pct-only, and premium bands are
+      // OPTION-side — the engine never resolves them against the index entry price (the old
+      // resolution made a below-entry "stop" that force-exited held-PE positions in one bar), so
+      // the persisted index-side levels are null. The positive half of the doctrine — premium_pct
+      // rules DO become option-leg brackets resolved against the captured option premium — is
+      // pinned by PaperSignalListenerTest.aScalperTakeDerivesPremiumBasisBracketsFromTheYamlExitRules.
+      assertThat(row.stopLoss()).isNull();
+      assertThat(row.target()).isNull();
 
       Map<String, Object> latencyStamp =
           jdbc.queryForMap(

@@ -74,13 +74,16 @@ Follow README **§4.3** exactly (it owns the queries + the gate):
    canary that automated it was retired. On `0`, demand **POSITIVE** proof of life — never infer it
    from an absence. **The definitive read (shipped 2026-07-26, task_0bed1621):**
    `docker exec ay-strategy-signal-service sh -c 'wget -qO- http://127.0.0.1:8082/actuator/prometheus'
-   | grep ay_signal_bar_` — `ay_signal_bar_received_age_seconds` is the age of the engine's
-   receive heartbeat, stamped before ANY universe/window/position logic. Inside ~1–2 bar intervals ⇒
-   **PASS-QUIET** (alive, tape is bearish); growing past several intervals while capture is healthy ⇒
-   **FAIL** (receive-side stall, now observable rather than inferred). A MISSING series means the
-   process is down — the gauges are pre-registered and seeded at boot, so it never means "no data
-   yet". Corroborate with the LATEST `strategy.signal_eval_outcomes` bucket (never a session-wide
-   `sum()`, which stays positive forever once anything evaluated). ⚠️ A missing `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events` is
+   | grep ay_signal_bar_` — read **BOTH** gauges, received alone is not enough: bars can keep arriving
+   while `signal-eval` is wedged. received fresh (≲1–2 bar intervals) AND evaluated fresh ⇒
+   **PASS-QUIET**; received fresh + evaluated GROWING ⇒ **FAIL, eval stall**; received growing while
+   capture is healthy ⇒ **FAIL, receive-side stall**. ⚠️ A NEGATIVE value is NOT a small age: `-1` =
+   no bar ever received/evaluated this boot (the stamps are boot-seeded, so a plain age would read ~0
+   and look identical to a fresh bar), below `-1` = the clock stepped backwards — a clock fault,
+   deliberately surfaced rather than clamped. A MISSING series is **FAIL/unobservable**, not proof
+   the process is down (engine-enabled=false, an older artifact, or an unreachable actuator all look
+   the same) — inspect health, build and config. Corroborate with the LATEST
+   `strategy.signal_eval_outcomes` bucket (never a session-wide `sum()`). ⚠️ A missing `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events` is
    NOT a PASS — that table is write-only fail-soft forensics, so a disabled or failed sweep also
    leaves it empty; a row that IS there is strong FAIL evidence, its absence proves nothing. Never
    judge from `strategy.signals` (mixes the swing BATCH engine), and never ALARM on
@@ -115,7 +118,10 @@ track) and exit-band tunes (that track) land as ONE coordinated owner decision.
   — a fresh ALL-ZERO latest bucket only proves the rollup thread is alive, not the eval loop, so it
   is INCONCLUSIVE and merely NARROWED (not settled) by a thread dump: a thread parked on
   `queue.take()` stays INCONCLUSIVE, and one dump inside a legitimately-blocking `fetch` proves
-  nothing either. **On a fully quiet session liveness is currently UNPROVABLE** (chip task_0bed1621);
+  nothing either. **Quiet-session liveness IS now provable** — read BOTH `ay_signal_bar_*_age_seconds`
+  gauges (task_0bed1621): received fresh + evaluated fresh = alive; received fresh + evaluated GROWING
+  = eval stall; any NEGATIVE value is not a valid age (-1 = no bar ever this boot, below -1 = clock
+  fault) and must never be read as healthy;
   zero rows off-hours/holidays = normal (check `libs/market-calendar` holidays before alarming).
 - Single-session numbers never justify a tune by themselves UNLESS the threshold is outside the
   operand's physical range (structural) — say which class each candidate is.

@@ -79,33 +79,61 @@ class SignalEngineLivenessGaugeTest {
       assertThat(meters.find("ay_signal_bar_received_age_seconds").gauge()).isNotNull();
       assertThat(meters.find("ay_signal_bar_evaluated_age_seconds").gauge()).isNotNull();
 
-      // Both stamps are seeded in the constructor, so a fresh boot reads ~0 rather than an
-      // epoch-sized age that a threshold would instantly read as a dead engine.
-      assertThat(received(meters)).isZero();
-      assertThat(evaluated(meters)).isZero();
+      // NO bar has ever arrived, so the age is NOT 0 — it is the -1 sentinel. The stamps are
+      // seeded at construction for the canary's boot grace, so a plain age would read ~0 here and
+      // be indistinguishable from a bar that just landed. That ambiguity is the defect this
+      // sentinel removes; an earlier draft published 0 and would have read as healthy forever on
+      // an engine that never received anything.
+      assertThat(received(meters)).isEqualTo(-1.0);
+      assertThat(evaluated(meters)).isEqualTo(-1.0);
 
-      // The whole point: with no bar arriving, the age must GROW. A gauge that stayed at 0 would
-      // be as useless as the confounded signals it replaces.
+      // Still -1 after time passes: "never started" does not age into "stale".
       clock.advanceSeconds(185);
-      assertThat(received(meters)).isEqualTo(185.0);
-      assertThat(evaluated(meters)).isEqualTo(185.0);
+      assertThat(received(meters)).isEqualTo(-1.0);
     } finally {
       engine.stop();
       meters.close();
     }
   }
 
-  /** A backwards clock step must floor at 0 — never publish a negative age that reads as alive. */
+  /**
+   * A real bar makes the age valid and it must then GROW — the gauge is useless if it does not
+   * track staleness.
+   */
   @Test
-  void aBackwardsClockStepFloorsAtZeroRatherThanGoingNegative() {
+  void onceABarArrivesTheAgeBecomesValidAndTracksStaleness() {
     MutableClock clock = new MutableClock(Instant.ofEpochSecond(1_000_000));
     PrometheusMeterRegistry meters = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
     SignalEngine engine = engine(clock, meters);
     try {
+      engine.markBarReceivedForTest(clock.millis());
+      assertThat(received(meters)).isZero();
+
+      clock.advanceSeconds(185);
+      assertThat(received(meters)).isEqualTo(185.0);
+      // The evaluated side is independent: it has still never been stamped.
+      assertThat(evaluated(meters)).isEqualTo(-1.0);
+    } finally {
+      engine.stop();
+      meters.close();
+    }
+  }
+
+  /**
+   * A backwards clock step must NOT be clamped to 0. Clamping hid a genuine clock fault behind a
+   * value that reads as freshly alive — and an 87-minute host drift in July 2026 is exactly the
+   * fault an operator needs to see rather than have smoothed away.
+   */
+  @Test
+  void aBackwardsClockStepPublishesAnInvalidAgeRatherThanLookingFresh() {
+    MutableClock clock = new MutableClock(Instant.ofEpochSecond(1_000_000));
+    PrometheusMeterRegistry meters = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+    SignalEngine engine = engine(clock, meters);
+    try {
+      engine.markBarReceivedForTest(clock.millis());
       clock.rewindSeconds(600);
 
-      assertThat(received(meters)).isZero();
-      assertThat(evaluated(meters)).isZero();
+      assertThat(received(meters)).isLessThan(-1.0); // distinct from the -1 never-started sentinel
     } finally {
       engine.stop();
       meters.close();

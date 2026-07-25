@@ -352,11 +352,28 @@ Steps (all read-only — never restart/deploy/write mid-session):
        - `ay_signal_bar_evaluated_age_seconds` — its evaluation-side twin.
 
        **Verdict on an all-zero session:** received-age well inside the bar cadence (≲ 1–2 bar
-       intervals) ⇒ **PASS-QUIET**, the engine is demonstrably alive and the tape is simply bearish.
-       Received-age growing past several bar intervals while market-data capture is healthy ⇒
-       **FAIL** — that is a receive-side stall, and it is now directly observable rather than
-       inferred. Both gauges are pre-registered at boot and seeded, so a MISSING series means the
-       process is not up at all — never "no data yet".
+       **Verdict needs BOTH gauges — received alone is not enough.** Bars can keep arriving while
+       `signal-eval` is wedged, which holds received-age fresh while evaluated-age grows; reading
+       received only would call that PASS.
+
+       | received-age | evaluated-age | verdict |
+       |---|---|---|
+       | fresh (≲ 1–2 bar intervals) | fresh | **PASS-QUIET** — engine alive, tape simply bearish |
+       | fresh | **growing** | **FAIL — eval stall.** Bars arrive, evaluation does not keep up |
+       | **growing** (capture healthy) | any | **FAIL — receive-side stall** |
+       | **negative** | any | **NOT a valid age — never read as healthy** (see below) |
+
+       ⚠️ **A NEGATIVE age is not a small age.** `-1` means no bar has EVER been received or
+       evaluated on this boot — the stamps are seeded at construction for the canary's boot grace,
+       so a plain age would read ~0 there and look identical to a bar that just landed. Anything
+       **below** `-1` means the clock stepped BACKWARDS past the stamp — a clock fault, exactly the
+       class that produced an 87-minute host drift in July 2026, deliberately surfaced instead of
+       clamped away.
+
+       A MISSING series is **FAIL / unobservable**, not proof the process is down: the engine may be
+       running with `artha.signals.engine-enabled=false`, the container may be an older artifact
+       without these gauges, or the actuator may simply be unreachable. Inspect container health,
+       the deployed build and the config before concluding anything.
    - ⚠️ **Do NOT read "no `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events`"
      as PASS.** That table is write-only, fail-soft forensics — a disabled sweep, a failed sweep or
      a failed insert produces no row either, so absence there can silently pass a dead engine. A row
@@ -366,8 +383,9 @@ Steps (all read-only — never restart/deploy/write mid-session):
    - The underlying invariant: the only unconfounded oracles are `SignalEngine.lastBarReceivedAtMs`
      (stamped as the first line of `onCandleMessage`, before any universe/window/position/loaded
      logic) and `lastBarEvaluatedAtMs` — direction-, window- and position-independent, and what
-     `SubscriberHealthCanary` and `SessionLivenessHeartbeat` (#941) key on. Neither has a read
-     surface today, which is why the operator proxy is the 3-minute outcome row above.
+     `SubscriberHealthCanary` and `SessionLivenessHeartbeat` (#941) key on. **Both are now
+     readable** via the gauges above (task_0bed1621, 2026-07-26); the `signal_eval_outcomes` bucket
+     remains a useful corroborator, no longer the only proxy.
    - **Never** conclude starvation from `strategy.signals` (it mixes the swing BATCH engine, whose
      rows are stamped `00:00:00`, and will fake liveness on a dead tick engine) or from
      `ay_signal_eval_outcome_total` (window- AND position-dependent: it is structurally flat
@@ -382,7 +400,8 @@ Steps (all read-only — never restart/deploy/write mid-session):
    verdict available today (see step 4): every readable proxy admits a false PASS, and reporting one
    is how the 2026-07-17 false escalation and the 2026-07-20 needless restart both happened, in
    opposite directions. Fold a FAIL **or an INCONCLUSIVE** into that evening's `post` findings file —
-   a run of INCONCLUSIVEs is itself the evidence that chip task_0bed1621 needs building. **Never restart
+   an INCONCLUSIVE should now be RARE — the liveness gauges above answer the quiet-session case
+   directly; a run of them means the gauges are unreadable and that itself is the finding. **Never restart
    or redeploy to fix it mid-session** — propose; the owner/architect acts (a live fix waits for
    post-market or pre-open).
 

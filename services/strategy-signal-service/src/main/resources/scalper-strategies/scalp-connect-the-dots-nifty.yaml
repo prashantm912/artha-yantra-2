@@ -43,6 +43,8 @@ entry_rules:
     threshold: 0.2               # easy to clear → the seam runs; §0B + confluence then decide
 
 exit_rules:
+  - { type: take_profit, params: { basis: premium_pct, value: 35 } }   # T21 (owner 2026-07-25): +35% premium target for the bracket-less families
+  - { type: stop_loss, params: { basis: premium_pct, value: 25 } }     # T21: -25% premium stop on the OPTION leg (paper bracket path); index-side levels stay structural/index_points
   - { type: signal_exit, params: { rule: "close < vwap", min_volume: 125000 } }   # structural exit on the future
   - { type: stop_loss, params: { basis: index_points, value: 60 } }   # §2.4 scalp point-SL — all 2b scalpers signal on NIFTY-FUT-CONT, so this is 60 NIFTY-future points (≈ the ~250 SENSEX-native risk); a FALLBACK stop for this no-native-SL family + a cap on a too-wide structural stop
   - { type: trailing_stop, params: { basis: indicator, alias: supertrend_line } }   # E9 §3: trail with the Super Trend line as the move matures

@@ -1674,7 +1674,14 @@ public class SignalEngine {
       }
     }
     BigDecimal entryPrice = bar.close();
-    BigDecimal stopLoss = levelFromRules(strategy.definition(), entryPrice, "stop_loss");
+    // T21 review round 2 (Critical): premium_pct rules are OPTION-side bands — resolving them
+    // against the INDEX entry price here produced nonsense levels (25% of a 25,000 future = a
+    // 6,250-point "stop"), and for a held-PE (SHORT-direction) position that below-entry stop made
+    // structuralStopHit true on EVERY bar — a one-bar force-exit. Index-side levels come ONLY from
+    // the structural stop and the index_points rule below; the premium band is enforced on the
+    // option leg by the paper bracket path (PremiumBracketRules / PaperSignalListener), which
+    // filters by basis and resolves against the option LTP.
+    BigDecimal stopLoss = null;
     // §3.1/§3.6 structural stop: a scalper anchors its stop on the 1st-candle (Two-Candle) or
     // entry-candle (Golden-Cross) extreme of the index future, captured at entry. It overrides the
     // (absent) YAML rule level and is the price the bar-close structural-stop exit check fires on.
@@ -1693,7 +1700,10 @@ public class SignalEngine {
     if (pointStop != null) {
       stopLoss = (stopLoss == null) ? pointStop : closerToEntry(entryPrice, stopLoss, pointStop);
     }
-    BigDecimal target = levelFromRules(strategy.definition(), entryPrice, "take_profit");
+    // T21 round 2: the take_profit premium band is likewise option-side only. The old
+    // premium_pct→index resolution persisted entry×1.35 "targets" for the bracketed families —
+    // inert for exits but garbage in signals.target; null is the honest index-side value.
+    BigDecimal target = null;
     String side =
         strategy.definition().direction() == StrategyDefinition.Direction.SHORT ? "SELL" : "BUY";
     String breakdownJson = ScoreBreakdownJson.write(evaluation.breakdown());
@@ -2371,24 +2381,6 @@ public class SignalEngine {
     return dir == ExitEvaluator.Direction.LONG
         ? bar.low().compareTo(stop) <= 0
         : bar.high().compareTo(stop) >= 0;
-  }
-
-  private static BigDecimal levelFromRules(
-      StrategyDefinition definition, BigDecimal entryPrice, String type) {
-    for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
-      if (!rule.type().equals(type) || !"premium_pct".equals(rule.params().get("basis"))) {
-        continue;
-      }
-      Object value = rule.params().get("value");
-      if (value == null) {
-        continue;
-      }
-      BigDecimal pct = new BigDecimal(value.toString());
-      BigDecimal distance =
-          entryPrice.multiply(pct).divide(BigDecimal.valueOf(100), 4, java.math.RoundingMode.HALF_UP);
-      return type.equals("stop_loss") ? entryPrice.subtract(distance) : entryPrice.add(distance);
-    }
-    return null;
   }
 
   /**

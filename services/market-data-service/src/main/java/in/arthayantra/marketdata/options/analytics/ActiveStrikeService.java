@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.options.analytics;
 import in.arthayantra.black76.Black76;
 import in.arthayantra.black76.IvSolver;
 import in.arthayantra.marketdata.options.ExpiryClock;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -35,7 +36,9 @@ public class ActiveStrikeService {
    * ΔOI number is never changed.
    */
   public record SentimentPoint(
-      OffsetDateTime bucket, BigDecimal sentimentPct, BigDecimal levelPct) {}
+      OffsetDateTime bucket,
+      @Schema(types = {"number", "null"}) BigDecimal sentimentPct,
+      @Schema(types = {"number", "null"}) BigDecimal levelPct) {}
 
   /** One active-strike Call/Put OI point per snapshot bucket (newest-last) — the LEFT chart series. */
   public record ActiveStrikeOiPoint(OffsetDateTime bucket, long ceOi, long peOi) {}
@@ -46,7 +49,10 @@ public class ActiveStrikeService {
    * (not the top-N aggregate the OI series uses); {@code price} is that strike's underlying spot.
    */
   public record ActiveStrikeIvPoint(
-      OffsetDateTime bucket, BigDecimal ceIv, BigDecimal peIv, BigDecimal price) {}
+      OffsetDateTime bucket,
+      @Schema(types = {"number", "null"}) BigDecimal ceIv,
+      @Schema(types = {"number", "null"}) BigDecimal peIv,
+      @Schema(types = {"number", "null"}) BigDecimal price) {}
 
   public List<StrikeOiSnap> activeStrikes(List<StrikeOiSnap> chain) {
     return chain.stream()

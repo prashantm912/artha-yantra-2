@@ -12,6 +12,7 @@ import in.arthayantra.marketdata.kite.FuturesContractSource.FutContract;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.options.OiInterpretation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -75,7 +76,8 @@ public class OiBuzzService {
 
   /** The heatmap for one index: tiles (gainers first) + advance/decline counters + the feed time. */
   public record Heatmap(
-      String index, int advance, int decline, List<Tile> tiles, OffsetDateTime asOf) {}
+      String index, int advance, int decline, List<Tile> tiles,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   public Heatmap heatmap(String index) {
     return heatmap(index, null);

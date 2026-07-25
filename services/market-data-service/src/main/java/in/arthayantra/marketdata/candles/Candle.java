@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.candles;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
@@ -14,5 +15,5 @@ public record Candle(
     BigDecimal low,
     BigDecimal close,
     long volume,
-    Long oi,
+    @Schema(types = {"integer", "null"}) Long oi,
     String source) {}

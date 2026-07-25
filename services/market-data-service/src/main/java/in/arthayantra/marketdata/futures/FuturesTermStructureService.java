@@ -11,6 +11,7 @@ import in.arthayantra.marketdata.instruments.Instrument;
 import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
@@ -38,18 +39,18 @@ public class FuturesTermStructureService {
       String tradingsymbol,
       LocalDate expiry,
       long daysToExpiry,
-      BigDecimal ltp,
-      Long oi,
-      Long volume,
-      BigDecimal basisAbsolute,
-      BigDecimal basisAnnualized) {}
+      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(types = {"integer", "null"}) Long oi,
+      @Schema(types = {"integer", "null"}) Long volume,
+      @Schema(types = {"number", "null"}) BigDecimal basisAbsolute,
+      @Schema(types = {"number", "null"}) BigDecimal basisAnnualized) {}
 
   /** The term structure. */
   public record TermStructure(
       String underlying,
-      BigDecimal spot,
+      @Schema(types = {"number", "null"}) BigDecimal spot,
       String state,
-      BigDecimal calendarSpread,
+      @Schema(types = {"number", "null"}) BigDecimal calendarSpread,
       boolean stale,
       OffsetDateTime asOf,
       List<ContractLeg> contracts,

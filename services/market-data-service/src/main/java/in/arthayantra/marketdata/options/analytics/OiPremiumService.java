@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -17,20 +18,29 @@ import org.springframework.stereotype.Service;
 @Service
 public class OiPremiumService {
 
-  public record PremiumRow(BigDecimal strike, BigDecimal straddle, BigDecimal ce, BigDecimal pe) {}
+  public record PremiumRow(
+      BigDecimal strike,
+      @Schema(types = {"number", "null"}) BigDecimal straddle,
+      @Schema(types = {"number", "null"}) BigDecimal ce,
+      @Schema(types = {"number", "null"}) BigDecimal pe) {}
 
   public record PremiumChain(
       List<PremiumRow> items,
-      BigDecimal atmStrike,
-      BigDecimal atmStraddle,
-      BigDecimal spot,
-      OffsetDateTime asOf) {}
+      @Schema(types = {"number", "null"}) BigDecimal atmStrike,
+      @Schema(types = {"number", "null"}) BigDecimal atmStraddle,
+      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   /** One bucket's ATM straddle (the intraday decay/move curve point). */
   public record PremiumSeriesPoint(
-      OffsetDateTime bucket, BigDecimal atmStrike, BigDecimal atmStraddle, BigDecimal spot) {}
+      OffsetDateTime bucket,
+      @Schema(types = {"number", "null"}) BigDecimal atmStrike,
+      @Schema(types = {"number", "null"}) BigDecimal atmStraddle,
+      @Schema(types = {"number", "null"}) BigDecimal spot) {}
 
-  public record PremiumSeries(List<PremiumSeriesPoint> items, OffsetDateTime asOf) {}
+  public record PremiumSeries(
+      List<PremiumSeriesPoint> items,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   public PremiumChain premium(List<OptionsSnapshotReader.StrikePoint> latest) {
     Map<BigDecimal, BigDecimal[]> byStrike = new LinkedHashMap<>(); // [ceLtp, peLtp]

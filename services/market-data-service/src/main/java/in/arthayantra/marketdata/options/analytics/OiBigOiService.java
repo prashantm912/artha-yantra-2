@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
@@ -11,9 +12,12 @@ import org.springframework.stereotype.Service;
 public class OiBigOiService {
 
   public record BigOiRow(
-      BigDecimal strike, String optionType, long oi, long oiChange, BigDecimal ltp) {}
+      BigDecimal strike, String optionType, long oi, long oiChange,
+      @Schema(types = {"number", "null"}) BigDecimal ltp) {}
 
-  public record BigOi(List<BigOiRow> items, OffsetDateTime asOf) {}
+  public record BigOi(
+      List<BigOiRow> items,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   /** Top-{@code topN} legs by {@code |oiChange|}, descending; {@code asOf} = the latest bucket. */
   public BigOi bigOi(List<OptionsSnapshotReader.StrikePoint> latest, int topN) {

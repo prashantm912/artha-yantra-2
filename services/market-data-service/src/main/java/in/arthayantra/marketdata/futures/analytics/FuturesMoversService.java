@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.futures.analytics;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.options.OiInterpretation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -29,18 +30,18 @@ public class FuturesMoversService {
 
   public record MoverRow(
       String tradingsymbol,
-      BigDecimal ltp,
-      BigDecimal pricePct,
-      BigDecimal oiPct,
-      BigDecimal dayOpen,
-      BigDecimal dayHigh,
-      BigDecimal dayLow,
+      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(types = {"number", "null"}) BigDecimal pricePct,
+      @Schema(types = {"number", "null"}) BigDecimal oiPct,
+      @Schema(types = {"number", "null"}) BigDecimal dayOpen,
+      @Schema(types = {"number", "null"}) BigDecimal dayHigh,
+      @Schema(types = {"number", "null"}) BigDecimal dayLow,
       OiInterpretation interpretation) {}
 
   public record Movers(
       List<MoverRow> gainers,
       List<MoverRow> losers,
-      OffsetDateTime asOf,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
     public Movers(List<MoverRow> gainers, List<MoverRow> losers, OffsetDateTime asOf) {
       this(gainers, losers, asOf, null);
@@ -55,15 +56,15 @@ public class FuturesMoversService {
   public record BankRow(
       String tradingsymbol,
       LocalDate expiry,
-      BigDecimal ltp,
+      @Schema(types = {"number", "null"}) BigDecimal ltp,
       long oi,
       long oiChange,
-      BigDecimal basis,
+      @Schema(types = {"number", "null"}) BigDecimal basis,
       OiInterpretation interpretation) {}
 
   public record Banks(
       List<BankRow> items,
-      OffsetDateTime asOf,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
     public Banks(List<BankRow> items, OffsetDateTime asOf) {
       this(items, asOf, null);

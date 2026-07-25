@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 
 /**
@@ -8,4 +9,7 @@ import java.math.BigDecimal;
  * Upstox source so {@code /pcr-series} returns a uniform shape regardless of {@code
  * source.optionanalytics}.
  */
-public record PcrSeriesPoint(String time, BigDecimal pcr, BigDecimal spot) {}
+public record PcrSeriesPoint(
+    String time,
+    @Schema(types = {"number", "null"}) BigDecimal pcr,
+    @Schema(types = {"number", "null"}) BigDecimal spot) {}

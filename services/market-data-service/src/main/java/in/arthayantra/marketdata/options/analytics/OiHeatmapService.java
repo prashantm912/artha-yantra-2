@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.options.analytics;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.freshness.DataFreshness;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -29,15 +30,15 @@ import org.springframework.stereotype.Service;
 public class OiHeatmapService {
 
   /** One heatmap cell: column index {@code x} (bucket), row index {@code y} (strike), {@code value} = ΔOI. */
-  public record Cell(int x, int y, Long value) {}
+  public record Cell(int x, int y, @Schema(types = {"integer", "null"}) Long value) {}
 
   public record Heatmap(
       List<String> buckets,
       List<String> strikes,
       List<Cell> ce,
       List<Cell> pe,
-      Long maxAbs,
-      OffsetDateTime asOf,
+      @Schema(types = {"integer", "null"}) Long maxAbs,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
     public Heatmap(
         List<String> buckets,

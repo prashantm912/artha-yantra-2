@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.options.analytics;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.marketdata.freshness.DataFreshness;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -32,14 +33,14 @@ public class OiTrendingService {
       long totalOi,
       long ceOi,
       long peOi,
-      BigDecimal spot,
+      @Schema(types = {"number", "null"}) BigDecimal spot,
       Trend trend,
-      BigDecimal ceLtp,
-      BigDecimal peLtp) {}
+      @Schema(types = {"number", "null"}) BigDecimal ceLtp,
+      @Schema(types = {"number", "null"}) BigDecimal peLtp) {}
 
   public record TrendSeries(
       List<TrendPoint> items,
-      OffsetDateTime asOf,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
     public TrendSeries(List<TrendPoint> items, OffsetDateTime asOf) {
       this(items, asOf, null);

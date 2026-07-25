@@ -7,6 +7,7 @@ import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.kite.GlobalQuoteSource;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -52,7 +53,11 @@ public class MarketSurfaceController {
   }
 
   /** The Dow global-cue quote: LTP + prev close + signed direction (+1 up / −1 down / 0 flat). */
-  public record DowQuote(BigDecimal ltp, BigDecimal prevClose, BigDecimal change, Integer direction) {}
+  public record DowQuote(
+      BigDecimal ltp,
+      @Schema(types = {"number", "null"}) BigDecimal prevClose,
+      @Schema(types = {"number", "null"}) BigDecimal change,
+      @Schema(types = {"integer", "null"}) Integer direction) {}
 
   /**
    * GET /global/dow: the Dow Jones global cue (LTP-direction vs prev close). 422 DATA_GAP when the
@@ -76,12 +81,12 @@ public class MarketSurfaceController {
   /** INDIA VIX quote: LTP + day OHLC + change vs the previous close (the §20.7.4 header VIX). */
   public record VixQuote(
       BigDecimal ltp,
-      BigDecimal dayHigh,
-      BigDecimal dayLow,
-      BigDecimal dayOpen,
-      BigDecimal prevClose,
-      BigDecimal change,
-      BigDecimal changePct,
+      @Schema(types = {"number", "null"}) BigDecimal dayHigh,
+      @Schema(types = {"number", "null"}) BigDecimal dayLow,
+      @Schema(types = {"number", "null"}) BigDecimal dayOpen,
+      @Schema(types = {"number", "null"}) BigDecimal prevClose,
+      @Schema(types = {"number", "null"}) BigDecimal change,
+      @Schema(types = {"number", "null"}) BigDecimal changePct,
       OffsetDateTime asOf) {}
 
   /** GET /vix: the INDIA VIX quote (the pinned index); 422 DATA_GAP when no quote (off-hours / mock). */

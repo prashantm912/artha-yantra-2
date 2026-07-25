@@ -82,7 +82,7 @@ export function OptionsSpurtPage() {
             OI bias <OiBadge4 value={summary?.interpretation ?? null} />
           </span>
         </BeatItem>
-        {summary && (
+        {summary?.spotDelta != null && (
           <span className="tabular-nums">· spot Δ {formatDecimal(summary.spotDelta, 2)}</span>
         )}
         <span className="text-xs">· strength = %ΔLTP &gt; 50 AND %ΔOI &gt; 50 (bold rows)</span>

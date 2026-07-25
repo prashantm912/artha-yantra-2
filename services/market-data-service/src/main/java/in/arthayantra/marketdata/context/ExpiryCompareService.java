@@ -5,6 +5,7 @@ import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.options.OiInterval;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
@@ -40,10 +41,10 @@ public class ExpiryCompareService {
       long totalOi,
       long ceOi,
       long peOi,
-      BigDecimal pcr,
-      BigDecimal spot,
-      BigDecimal ceLtp,
-      BigDecimal peLtp) {}
+      @Schema(types = {"number", "null"}) BigDecimal pcr,
+      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(types = {"number", "null"}) BigDecimal ceLtp,
+      @Schema(types = {"number", "null"}) BigDecimal peLtp) {}
 
   /** One expiry's side of the compare (its trending series + its own trust). */
   public record ExpirySide(

@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.futures.analytics;
 
 import in.arthayantra.marketdata.options.OiInterpretation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -29,14 +30,16 @@ public class FuturesBankGridService {
       String underlying,
       String tradingsymbol,
       LocalDate expiry,
-      BigDecimal ltp,
-      BigDecimal pricePct,
+      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(types = {"number", "null"}) BigDecimal pricePct,
       long oi,
       long oiChange,
-      BigDecimal oiPct,
+      @Schema(types = {"number", "null"}) BigDecimal oiPct,
       OiInterpretation interpretation) {}
 
-  public record BankGrid(List<BankGridRow> items, OffsetDateTime asOf) {}
+  public record BankGrid(
+      List<BankGridRow> items,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   public BankGrid grid(List<FuturesSnapshotReader.FutPoint> pair) {
     OffsetDateTime newest =

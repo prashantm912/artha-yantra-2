@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.freshness.DataFreshness;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -33,10 +34,13 @@ public class BreadthService {
       int declines,
       int unchanged,
       int total,
-      BigDecimal avgDeliveryPct) {}
+      @Schema(types = {"number", "null"}) BigDecimal avgDeliveryPct) {}
 
   public record DeliveryRow(
-      String symbol, BigDecimal deliveryPct, BigDecimal close, BigDecimal pctChange) {}
+      String symbol,
+      BigDecimal deliveryPct,
+      @Schema(types = {"number", "null"}) BigDecimal close,
+      @Schema(types = {"number", "null"}) BigDecimal pctChange) {}
 
   public record Breadth(
       BreadthSummary summary,

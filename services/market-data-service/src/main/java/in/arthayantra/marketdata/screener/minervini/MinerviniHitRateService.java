@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener.minervini;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -41,17 +42,17 @@ public class MinerviniHitRateService {
   public record HorizonStat(
       int horizonSessions,
       int sampleCount,
-      BigDecimal winRatePct, // % of samples with a positive forward return
-      BigDecimal beatBenchmarkRatePct, // % of samples that beat NIFTY over the same window
-      BigDecimal meanReturnPct,
-      BigDecimal meanBenchmarkReturnPct,
-      BigDecimal meanExcessReturnPct,
-      BigDecimal medianReturnPct) {}
+      @Schema(types = {"number", "null"}) BigDecimal winRatePct, // % of samples with a positive forward return
+      @Schema(types = {"number", "null"}) BigDecimal beatBenchmarkRatePct, // % of samples that beat NIFTY over the same window
+      @Schema(types = {"number", "null"}) BigDecimal meanReturnPct,
+      @Schema(types = {"number", "null"}) BigDecimal meanBenchmarkReturnPct,
+      @Schema(types = {"number", "null"}) BigDecimal meanExcessReturnPct,
+      @Schema(types = {"number", "null"}) BigDecimal medianReturnPct) {}
 
   /** The full harness result: the range/cadence meta + one {@link HorizonStat} per forward horizon. */
   public record HitRateReport(
-      LocalDate from,
-      LocalDate to,
+      @Schema(types = {"string", "null"}) LocalDate from,
+      @Schema(types = {"string", "null"}) LocalDate to,
       int stepSessions,
       int asOfCount,
       int universeCount,

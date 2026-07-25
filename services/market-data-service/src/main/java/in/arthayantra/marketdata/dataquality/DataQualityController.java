@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.dataquality;
 
 import in.arthayantra.marketdata.dataquality.DataQualityRepository.DataQualityRow;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -21,13 +22,14 @@ public class DataQualityController {
       String symbol,
       long expected,
       long present,
-      BigDecimal coveragePct,
+      @Schema(types = {"number", "null"}) BigDecimal coveragePct,
       boolean ok,
-      String detail,
+      @Schema(types = {"string", "null"}) String detail,
       OffsetDateTime computedAt) {}
 
   /** One report day and its per-scope rows. */
-  public record CompletenessReport(LocalDate date, List<CompletenessRow> items) {}
+  public record CompletenessReport(
+      @Schema(types = {"string", "null"}) LocalDate date, List<CompletenessRow> items) {}
 
   private final DataQualityRepository repository;
 

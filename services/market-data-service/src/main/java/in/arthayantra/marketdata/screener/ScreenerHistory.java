@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -24,7 +25,7 @@ public final class ScreenerHistory {
   public record ScreenDatesResponse(List<ScreenDate> items) {}
 
   /** One name that entered or left the passers set between two screen dates (ranked by RS-rank). */
-  public record DiffRow(String symbol, BigDecimal rsRank) {}
+  public record DiffRow(String symbol, @Schema(types = {"number", "null"}) BigDecimal rsRank) {}
 
   /**
    * The day-over-day passer diff: names that PASS all gates on {@code screenDate} but did not on
@@ -32,8 +33,8 @@ public final class ScreenerHistory {
    * exists, so nothing to diff against (entered = all of the day's passers, left empty).
    */
   public record ScreenDiff(
-      LocalDate screenDate,
-      LocalDate priorDate,
+      @Schema(types = {"string", "null"}) LocalDate screenDate,
+      @Schema(types = {"string", "null"}) LocalDate priorDate,
       int enteredCount,
       int leftCount,
       List<DiffRow> entered,

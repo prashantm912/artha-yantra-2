@@ -4,6 +4,7 @@ import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Date;
@@ -38,11 +39,11 @@ public class PreOpenEquityScanService {
   /** One preserved scan row: the pre-open price vs prev close + the prev-day H/L break badge. */
   public record ScanRow(
       String symbol,
-      BigDecimal preOpenPrice,
-      BigDecimal prevClose,
-      BigDecimal change,
-      BigDecimal changePct,
-      String prevDayBreak) {}
+      @Schema(types = {"number", "null"}) BigDecimal preOpenPrice,
+      @Schema(types = {"number", "null"}) BigDecimal prevClose,
+      @Schema(types = {"number", "null"}) BigDecimal change,
+      @Schema(types = {"number", "null"}) BigDecimal changePct,
+      @Schema(types = {"string", "null"}) String prevDayBreak) {}
 
   /** The typed GET envelope: a day's rows + the captured-session list (history picker). */
   public record PreOpenScanView(LocalDate date, List<ScanRow> items, List<LocalDate> dates) {}

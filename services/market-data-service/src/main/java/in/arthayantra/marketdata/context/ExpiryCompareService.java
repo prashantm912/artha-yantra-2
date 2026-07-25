@@ -50,19 +50,19 @@ public class ExpiryCompareService {
   public record ExpirySide(
       LocalDate expiry,
       List<TrendPoint> series,
-      OffsetDateTime asOf,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       String dataTrust,
       List<String> trustReasons) {}
 
   /** One aligned bucket present in either side (nulls where a side has no bucket at that time). */
   public record AlignedPoint(
       OffsetDateTime bucket,
-      Long aTotalOi,
-      Long bTotalOi,
-      BigDecimal aPcr,
-      BigDecimal bPcr,
-      BigDecimal aSpot,
-      BigDecimal bSpot) {}
+      @Schema(types = {"integer", "null"}) Long aTotalOi,
+      @Schema(types = {"integer", "null"}) Long bTotalOi,
+      @Schema(types = {"number", "null"}) BigDecimal aPcr,
+      @Schema(types = {"number", "null"}) BigDecimal bPcr,
+      @Schema(types = {"number", "null"}) BigDecimal aSpot,
+      @Schema(types = {"number", "null"}) BigDecimal bSpot) {}
 
   /** The cross-expiry compare. {@code dataTrust} = OK/DEGRADED/BLOCKED. */
   public record ExpiryCompare(
@@ -70,7 +70,7 @@ public class ExpiryCompareService {
       ExpirySide a,
       ExpirySide b,
       List<AlignedPoint> aligned,
-      OffsetDateTime asOf,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       String dataTrust,
       List<String> trustReasons) {
 

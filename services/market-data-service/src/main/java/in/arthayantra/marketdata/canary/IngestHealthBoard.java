@@ -6,6 +6,7 @@ import in.arthayantra.marketdata.canary.IngestCoverageCanary.ExpectedSource;
 import in.arthayantra.marketdata.canary.IngestCoverageCanary.SourceCoverage;
 import java.time.Clock;
 import java.time.Duration;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -51,10 +52,10 @@ public class IngestHealthBoard {
   /** The most recent {@code ingest_runs} row for a source (raw status + a computed staleness flag). */
   public record LastRun(
       String status,
-      Long rowsWritten,
+      @Schema(types = {"integer", "null"}) Long rowsWritten,
       Instant startedAt,
-      Instant finishedAt,
-      String error,
+      @Schema(types = {"string", "null"}) Instant finishedAt,
+      @Schema(types = {"string", "null"}) String error,
       boolean stale) {}
 
   /** One trading day's verdict for a source (aligned to the board's {@code fromDay}..{@code toDay}). */
@@ -73,8 +74,8 @@ public class IngestHealthBoard {
   /** The whole board: the evaluated window plus one {@link SourceHealth} per expected source. */
   public record BoardReport(
       Instant generatedAt,
-      LocalDate fromDay,
-      LocalDate toDay,
+      @Schema(types = {"string", "null"}) LocalDate fromDay,
+      @Schema(types = {"string", "null"}) LocalDate toDay,
       int tradingDays,
       List<SourceHealth> sources) {}
 

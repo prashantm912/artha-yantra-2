@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.nse.analytics;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -35,13 +36,13 @@ public class SectorIndexWatch {
   /** One sector-index card — values are the feed's decimal strings; asOf is the feed timestamp. */
   public record SectorIndexCard(
       String name,
-      String last,
-      String changePct,
-      String open,
-      String high,
-      String low,
-      String prevClose,
-      String asOf) {}
+      @Schema(types = {"string", "null"}) String last,
+      @Schema(types = {"string", "null"}) String changePct,
+      @Schema(types = {"string", "null"}) String open,
+      @Schema(types = {"string", "null"}) String high,
+      @Schema(types = {"string", "null"}) String low,
+      @Schema(types = {"string", "null"}) String prevClose,
+      @Schema(types = {"string", "null"}) String asOf) {}
 
   private final RestClient restClient;
   private final ObjectMapper objectMapper;

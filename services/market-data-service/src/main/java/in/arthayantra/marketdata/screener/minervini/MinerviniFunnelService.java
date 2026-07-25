@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener.minervini;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -38,7 +39,7 @@ public class MinerviniFunnelService {
 
   /** The three-list for a screen date + the market regime (MV-6.9) the owner should buy WITH. */
   public record Funnel(
-      LocalDate screenDate,
+      @Schema(types = {"string", "null"}) LocalDate screenDate,
       RegimeService.Regime regime,
       List<FunnelRow> immediatelyBuyable,
       List<FunnelRow> onDeck,

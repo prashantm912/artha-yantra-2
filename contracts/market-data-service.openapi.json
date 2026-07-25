@@ -7319,14 +7319,14 @@
             "type" : "string"
           },
           "variant" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "fromDate" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "runAt" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "symbolsScanned" : {
             "type" : "integer",
@@ -7352,7 +7352,7 @@
             "$ref" : "#/components/schemas/PortfolioStat"
           },
           "note" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "fromDate", "note", "portfolio", "portfolioRsPriority", "portfolioRsPriorityNet", "runAt", "setups", "status", "symbolsScanned", "totalTrades", "variant" ]
@@ -7516,7 +7516,7 @@
             }
           },
           "screenDate" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "coverage" : {
@@ -7538,11 +7538,11 @@
         "type" : "object",
         "properties" : {
           "from" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "to" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "stepSessions" : {
@@ -7588,22 +7588,22 @@
             "format" : "int32"
           },
           "winRatePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "beatBenchmarkRatePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "meanReturnPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "meanBenchmarkReturnPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "meanExcessReturnPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "medianReturnPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "beatBenchmarkRatePct", "horizonSessions", "meanBenchmarkReturnPct", "meanExcessReturnPct", "meanReturnPct", "medianReturnPct", "sampleCount", "winRatePct" ]
@@ -7627,10 +7627,10 @@
         "type" : "object",
         "properties" : {
           "engineSha" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "engineImage" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "result" : {
             "$ref" : "#/components/schemas/DeepSwingRunResult"
@@ -8181,7 +8181,7 @@
             "format" : "int64"
           },
           "openInterest" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "timestamp" : {
@@ -8344,7 +8344,7 @@
         "type" : "object",
         "properties" : {
           "screenDate" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "regime" : {
@@ -8415,7 +8415,7 @@
             "type" : "string"
           },
           "advanceRatio" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "sessions" : {
             "type" : "integer",
@@ -8431,7 +8431,7 @@
             "type" : "string"
           },
           "rsRank" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "rsRank", "symbol" ]
@@ -8440,11 +8440,11 @@
         "type" : "object",
         "properties" : {
           "screenDate" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "priorDate" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "enteredCount" : {
@@ -8582,27 +8582,27 @@
             "type" : "boolean"
           },
           "footprint" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "pivot" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "deepestPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "tightestPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "contractionCount" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "baseWeeks" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "baseDurationDays" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "volumeDryUp" : {
@@ -8612,17 +8612,17 @@
             "type" : "boolean"
           },
           "baseCount" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "cheatPivot" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "thrust" : {
             "type" : "boolean"
           },
           "rejectReason" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "baseCount", "baseDurationDays", "baseWeeks", "cheatPivot", "contractionCount", "deepestPct", "footprint", "isVcp", "pivot", "rejectReason", "shakeout", "thrust", "tightestPct", "volumeDryUp" ]
@@ -9839,7 +9839,7 @@
             "type" : "string"
           },
           "expiry" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "status" : {
@@ -9853,10 +9853,10 @@
             "format" : "int32"
           },
           "meanDivergencePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "maxDivergencePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "bucketsCompared", "detail", "expiry", "maxDivergencePct", "meanDivergencePct", "status", "underlying" ]
@@ -9869,11 +9869,11 @@
             "format" : "date-time"
           },
           "fromDay" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "toDay" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "tradingDays" : {
@@ -9909,7 +9909,7 @@
             "type" : "string"
           },
           "rowsWritten" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "startedAt" : {
@@ -9917,11 +9917,11 @@
             "format" : "date-time"
           },
           "finishedAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "error" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "stale" : {
             "type" : "boolean"
@@ -10001,7 +10001,7 @@
             "type" : "string"
           },
           "since" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "check", "detail", "key", "since", "status" ]
@@ -10010,7 +10010,7 @@
         "type" : "object",
         "properties" : {
           "date" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "items" : {
@@ -10040,13 +10040,13 @@
             "format" : "int64"
           },
           "coveragePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "ok" : {
             "type" : "boolean"
           },
           "detail" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "computedAt" : {
             "type" : "string",
@@ -10059,7 +10059,7 @@
         "type" : "object",
         "properties" : {
           "tradeDate" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "status" : {
@@ -10441,37 +10441,37 @@
             "type" : "string"
           },
           "isin" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "marketCapCr" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "freeFloatMcapCr" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "freeFloatPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "promoterPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "pe" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "roe" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "netProfitCr" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "revenueCr" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "revenuePrevCr" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           }
         },
@@ -10521,7 +10521,7 @@
             "type" : "string"
           },
           "avgChangePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "positive" : {
             "type" : "integer",
@@ -10545,25 +10545,25 @@
             "type" : "string"
           },
           "last" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "changePct" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "open" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "high" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "low" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "prevClose" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "asOf" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "asOf", "changePct", "high", "last", "low", "name", "open", "prevClose" ]
@@ -10609,13 +10609,13 @@
             "type" : "string"
           },
           "changePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "close" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "prevClose" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "changePct", "close", "prevClose", "sector", "symbol" ]
@@ -10674,19 +10674,19 @@
             "type" : "number"
           },
           "r1d" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "r1w" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "r1m" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "r6m" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "r1y" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "industry", "ltp", "r1d", "r1m", "r1w", "r1y", "r6m", "symbol" ]
@@ -10721,19 +10721,19 @@
             "type" : "string"
           },
           "preOpenPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "prevClose" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "change" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "changePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "prevDayBreak" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "change", "changePct", "preOpenPrice", "prevClose", "prevDayBreak", "symbol" ]
@@ -10809,19 +10809,19 @@
         "type" : "object",
         "properties" : {
           "heading" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "summary" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "thumbnail" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "articleLink" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "publishedTime" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           }
         },
@@ -10847,7 +10847,7 @@
             "type" : "number"
           },
           "points" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "changePct", "close", "contribution", "points", "rank", "symbol" ]
@@ -10868,13 +10868,13 @@
             "type" : "number"
           },
           "indexLevel" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "advancePoints" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "declinePoints" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "advances" : {
             "type" : "array",
@@ -10925,35 +10925,35 @@
             "format" : "date"
           },
           "open" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "high" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "low" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "close" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "ltpChangePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "deliveryPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "dayRange" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "dayRangePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "deliveryQty" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "totalTradedQty" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           }
         },
@@ -11030,13 +11030,13 @@
         "type" : "object",
         "properties" : {
           "iv" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "rank" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "percentile" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "windowSessions" : {
@@ -11056,10 +11056,10 @@
             "type" : "number"
           },
           "atOpen" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "drift" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "atOpen", "drift", "now" ]
@@ -11072,7 +11072,7 @@
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           },
           "spotDelta" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "oiChange" : {
             "type" : "integer",
@@ -11122,7 +11122,7 @@
             "$ref" : "#/components/schemas/OiStructure"
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "dataTrust" : {
@@ -11141,19 +11141,19 @@
         "type" : "object",
         "properties" : {
           "now" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "atOpen" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "priorEod" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "deltaVsOpen" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "deltaVsPriorEod" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "atOpen", "deltaVsOpen", "deltaVsPriorEod", "now", "priorEod" ]
@@ -11162,16 +11162,16 @@
         "type" : "object",
         "properties" : {
           "atmStrike" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "now" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "atOpen" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "deltaPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "atOpen", "atmStrike", "deltaPct", "now" ]
@@ -11222,7 +11222,7 @@
             "$ref" : "#/components/schemas/TermStructureState"
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "dataTrust" : {
@@ -11244,16 +11244,16 @@
             "type" : "string"
           },
           "spot" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "state" : {
             "type" : "string"
           },
           "calendarSpread" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "nearBasis" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "stale" : {
             "type" : "boolean"
@@ -11279,10 +11279,10 @@
             "format" : "date"
           },
           "ltp" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "pricePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "oi" : {
             "type" : "integer",
@@ -11293,10 +11293,10 @@
             "format" : "int64"
           },
           "oiPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "interpretation" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "expiry", "interpretation", "ltp", "oi", "oiChange", "oiPct", "pricePct", "tradingsymbol", "underlying" ]
@@ -11305,10 +11305,10 @@
         "type" : "object",
         "properties" : {
           "fiiNet" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "diiNet" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "divergent" : {
             "type" : "boolean"
@@ -11346,14 +11346,14 @@
             "type" : "boolean"
           },
           "tradeDate" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "indexFuturesNet" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "reason" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "available", "indexFuturesNet", "reason", "tradeDate" ]
@@ -11377,7 +11377,7 @@
             "$ref" : "#/components/schemas/FiiDerivativeAvailability"
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "dataTrust" : {
@@ -11408,13 +11408,13 @@
             "format" : "int64"
           },
           "ratio" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "ratioDelta" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "percentile" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "windowSessions" : {
@@ -11439,11 +11439,11 @@
             "format" : "int64"
           },
           "netContractsPrior" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "netChange" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           }
         },
@@ -11457,24 +11457,24 @@
             "format" : "date-time"
           },
           "aTotalOi" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "bTotalOi" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "aPcr" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "bPcr" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "aSpot" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "bSpot" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "aPcr", "aSpot", "aTotalOi", "bPcr", "bSpot", "bTotalOi", "bucket" ]
@@ -11498,7 +11498,7 @@
             }
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "dataTrust" : {
@@ -11527,7 +11527,7 @@
             }
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "dataTrust" : {
@@ -11554,7 +11554,7 @@
             "format" : "int32"
           },
           "pctAbove20" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "universe50" : {
             "type" : "integer",
@@ -11565,7 +11565,7 @@
             "format" : "int32"
           },
           "pctAbove50" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "above20", "above50", "pctAbove20", "pctAbove50", "universe20", "universe50" ]
@@ -11594,13 +11594,13 @@
             "format" : "int32"
           },
           "adRatio" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "adRatioPrior" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "adRatioDelta" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "adRatio", "adRatioDelta", "adRatioPrior", "advances", "declines", "total", "tradeDate", "unchanged" ]
@@ -11613,7 +11613,7 @@
             "format" : "int32"
           },
           "advRatioMa" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "threshold" : {
             "type" : "number"
@@ -11646,7 +11646,7 @@
         "type" : "object",
         "properties" : {
           "tradeDate" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "advanceDecline" : {
@@ -11677,7 +11677,7 @@
             }
           },
           "returnsWindow" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "returnWinners" : {
             "type" : "array",
@@ -11695,7 +11695,7 @@
             "$ref" : "#/components/schemas/IndexConcentration"
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "dataTrust" : {
@@ -11717,14 +11717,14 @@
             "type" : "string"
           },
           "indexChangePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "topN" : {
             "type" : "integer",
             "format" : "int32"
           },
           "topShare" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "index", "indexChangePct", "topN", "topShare" ]
@@ -11762,11 +11762,11 @@
             "format" : "int32"
           },
           "rankPrior" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "rankDelta" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           }
         },
@@ -11820,10 +11820,10 @@
         "type" : "object",
         "properties" : {
           "name" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "ltp" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "changePct" : {
             "type" : "number"
@@ -11838,14 +11838,14 @@
             "type" : "boolean"
           },
           "nextHoliday" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "nextHolidayName" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "daysToNextHoliday" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           }
         },
@@ -11858,7 +11858,7 @@
             "type" : "string"
           },
           "gapOpenPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "dayRange" : {
             "type" : "number"
@@ -11867,13 +11867,13 @@
             "type" : "number"
           },
           "rangeVsAvg" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "direction" : {
             "type" : "string"
           },
           "rangeState" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "asOfDate" : {
             "type" : "string",
@@ -11907,10 +11907,10 @@
             "type" : "string"
           },
           "lastRunStatus" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "lastRunAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "stale" : {
@@ -11926,16 +11926,16 @@
             "type" : "number"
           },
           "change" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "changePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "band" : {
             "type" : "string"
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           }
         },
@@ -12142,7 +12142,7 @@
             "format" : "int32"
           },
           "avgDeliveryPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "advances", "avgDeliveryPct", "declines", "total", "tradeDate", "unchanged" ]
@@ -12157,10 +12157,10 @@
             "type" : "number"
           },
           "close" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "pctChange" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "close", "deliveryPct", "pctChange", "symbol" ]
@@ -12230,22 +12230,22 @@
             "format" : "int32"
           },
           "avgDeliveryPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "aboveSma50" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "sma50Universe" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "aboveSma200" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "sma200Universe" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           }
         },
@@ -12342,7 +12342,7 @@
             "type" : "string"
           },
           "strike" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "instrumentType" : {
             "type" : "string"
@@ -12409,24 +12409,24 @@
             "type" : "string"
           },
           "params" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "status" : {
             "type" : "string"
           },
           "rowsWritten" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "error" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "startedAt" : {
             "type" : "string",
             "format" : "date-time"
           },
           "finishedAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           }
         },
@@ -12532,13 +12532,13 @@
         "type" : "object",
         "properties" : {
           "jobId" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "state" : {
             "type" : "string"
           },
           "lastRun" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "perExchangeRows" : {
@@ -12553,7 +12553,7 @@
             "format" : "int64"
           },
           "error" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "durationMs", "error", "jobId", "lastRun", "perExchangeRows", "state" ]
@@ -12605,14 +12605,14 @@
             "type" : "string"
           },
           "kiteUserId" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "tokenValidUntil" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "lastValidatedAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "tickerState" : {
@@ -12622,7 +12622,7 @@
             "type" : "string"
           },
           "lastContractCheck" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "contractDrift" : {

@@ -7,6 +7,7 @@ import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.constituents.StaticIndexWeights;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -51,7 +52,7 @@ public class EquityIndexContributionService {
       BigDecimal contribution,
       BigDecimal changePct,
       BigDecimal close,
-      BigDecimal points) {}
+      @Schema(types = {"number", "null"}) BigDecimal points) {}
 
   /** Advances + declines, each ranked by |contribution|, with their summed contributions + points.
    * {@code live} marks an intraday quote-based fold (vs the EOD bhavcopy read). */
@@ -60,9 +61,9 @@ public class EquityIndexContributionService {
       BigDecimal indexChangePct,
       BigDecimal advanceTotal,
       BigDecimal declineTotal,
-      BigDecimal indexLevel,
-      BigDecimal advancePoints,
-      BigDecimal declinePoints,
+      @Schema(types = {"number", "null"}) BigDecimal indexLevel,
+      @Schema(types = {"number", "null"}) BigDecimal advancePoints,
+      @Schema(types = {"number", "null"}) BigDecimal declinePoints,
       List<ContribRow> advances,
       List<ContribRow> declines,
       LocalDate asOf,

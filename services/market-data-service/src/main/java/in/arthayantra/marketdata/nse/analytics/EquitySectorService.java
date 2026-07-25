@@ -7,6 +7,7 @@ import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
 import in.arthayantra.marketdata.constituents.StockSectorMap;
 import in.arthayantra.marketdata.freshness.DataFreshness;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -53,7 +54,11 @@ public class EquitySectorService {
 
   /** One stock's latest-session change + its sector. */
   public record StockChange(
-      String symbol, String sector, BigDecimal changePct, BigDecimal close, BigDecimal prevClose) {}
+      String symbol,
+      String sector,
+      @Schema(types = {"number", "null"}) BigDecimal changePct,
+      @Schema(types = {"number", "null"}) BigDecimal close,
+      @Schema(types = {"number", "null"}) BigDecimal prevClose) {}
 
   /** An index's constituent tiles grouped (client-side) by sector. */
   public record SectorHeatmap(
@@ -73,7 +78,11 @@ public class EquitySectorService {
 
   /** Per-sector roll-up of the constituents (avg change + advancer/decliner split). */
   public record SectorAgg(
-      String sector, BigDecimal avgChangePct, int positive, int negative, int total) {}
+      String sector,
+      @Schema(types = {"number", "null"}) BigDecimal avgChangePct,
+      int positive,
+      int negative,
+      int total) {}
 
   /** Sector overview: live sector-index cards + per-sector roll-up + the flat per-stock factor table. */
   public record SectorStats(

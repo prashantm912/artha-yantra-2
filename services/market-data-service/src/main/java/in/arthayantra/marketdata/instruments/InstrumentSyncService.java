@@ -6,6 +6,7 @@ import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.kite.InstrumentDumpGateway;
 import in.arthayantra.marketdata.kite.InstrumentDumpGateway.InstrumentRecord;
 import java.time.Duration;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -34,12 +35,12 @@ public class InstrumentSyncService {
 
   /** Audit of the last sync run (B-1 /instruments/sync/status). */
   public record SyncStatus(
-      String jobId,
+      @Schema(types = {"string", "null"}) String jobId,
       String state, // RUNNING / OK / FAILED / NEVER_RUN
-      Instant lastRun,
+      @Schema(types = {"string", "null"}) Instant lastRun,
       Map<String, Long> perExchangeRows,
       long durationMs,
-      String error) {}
+      @Schema(types = {"string", "null"}) String error) {}
 
   private final InstrumentDumpGateway dumpGateway;
   private final InstrumentRepository repository;

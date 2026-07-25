@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalDate;
@@ -41,7 +42,10 @@ public class ExpiredBackfillRepository {
 
   /** One registered contract for the B6 export picker (exchange + canonical symbol + strike/type). */
   public record ExportContract(
-      String exchange, String tradingsymbol, BigDecimal strike, String instrumentType) {}
+      String exchange,
+      String tradingsymbol,
+      @Schema(types = {"number", "null"}) BigDecimal strike,
+      String instrumentType) {}
 
   private static final String UPSERT =
       """

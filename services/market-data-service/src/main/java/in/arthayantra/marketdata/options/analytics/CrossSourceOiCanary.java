@@ -5,6 +5,7 @@ import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.options.OiInterval;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -52,12 +53,12 @@ public class CrossSourceOiCanary {
   /** One underlying's cross-source verdict for its most recent expired expiry. */
   public record UnderlyingDivergence(
       String underlying,
-      LocalDate expiry,
+      @Schema(types = {"string", "null"}) LocalDate expiry,
       String status,
       String detail,
       int bucketsCompared,
-      BigDecimal meanDivergencePct,
-      BigDecimal maxDivergencePct) {}
+      @Schema(types = {"number", "null"}) BigDecimal meanDivergencePct,
+      @Schema(types = {"number", "null"}) BigDecimal maxDivergencePct) {}
 
   /** The whole report: worst-of the per-underlying statuses. */
   public record CrossSourceReport(

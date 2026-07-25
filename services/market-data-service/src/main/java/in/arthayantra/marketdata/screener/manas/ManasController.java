@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.screener.manas;
 import in.arthayantra.marketdata.screener.ScreenerHistory;
 import in.arthayantra.marketdata.screener.ScreenerHistoryRepository;
 import in.arthayantra.marketdata.screener.ScreenerHistoryRepository.Family;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -59,12 +60,20 @@ public class ManasController {
 
   /** The {items} envelope + as-of + coverage. */
   public record ScreenResponse(
-      List<Row> items, LocalDate screenDate, int coverage, int limit, int offset) {}
+      List<Row> items,
+      @Schema(types = {"string", "null"}) LocalDate screenDate,
+      int coverage,
+      int limit,
+      int offset) {}
 
   /** One base geometry setup (vcp / breakout) for a candidate. */
   public record SetupView(
-      String setupType, boolean valid, String footprint, BigDecimal pivot, Integer baseWeeks,
-      String rejectReason) {}
+      String setupType,
+      boolean valid,
+      @Schema(types = {"string", "null"}) String footprint,
+      @Schema(types = {"number", "null"}) BigDecimal pivot,
+      @Schema(types = {"integer", "null"}) Integer baseWeeks,
+      @Schema(types = {"string", "null"}) String rejectReason) {}
 
   /**
    * The full analyzer payload for one candidate: the 6 selection gates + universe/liquidity/float

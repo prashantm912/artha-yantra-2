@@ -5,6 +5,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.constituents.StockSectorMap;
 import in.arthayantra.marketdata.freshness.DataFreshness;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -38,11 +39,11 @@ public class EquityReturnsService {
       String symbol,
       String industry,
       BigDecimal ltp,
-      BigDecimal r1d,
-      BigDecimal r1w,
-      BigDecimal r1m,
-      BigDecimal r6m,
-      BigDecimal r1y) {}
+      @Schema(types = {"number", "null"}) BigDecimal r1d,
+      @Schema(types = {"number", "null"}) BigDecimal r1w,
+      @Schema(types = {"number", "null"}) BigDecimal r1m,
+      @Schema(types = {"number", "null"}) BigDecimal r6m,
+      @Schema(types = {"number", "null"}) BigDecimal r1y) {}
 
   /** The whole screener for the latest accrued session. */
   public record Returns(

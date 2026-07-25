@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.canary;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -43,7 +44,7 @@ public class BhavcopyCloseCanary {
 
   /** The report for a trade date: compared count, divergent count, and the worst offenders. */
   public record BhavcopyCloseReport(
-      LocalDate tradeDate,
+      @Schema(types = {"string", "null"}) LocalDate tradeDate,
       String status,
       int compared,
       int divergent,

@@ -982,7 +982,7 @@ public class ScalperConfluenceGate {
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     diag.failsScore(
         "confluence-composite", valid, conf.aggregate(), cfg.confluenceThreshold(),
-        compositeReason(conf, cfg.confluenceThreshold()));
+        compositeReason(conf, cfg.confluenceThreshold(), vwapHardGate));
     BigDecimal stop = structuralStop;
     // #7 (section 7) Hero-Zero buys the option ONE STRIKE INSIDE the short-covering strike (a CALL one
     // strike below the max-CE-OI strike for a bullish break, a PUT one above the max-PE-OI strike for a
@@ -1045,14 +1045,16 @@ public class ScalperConfluenceGate {
   }
 
   /**
-   * A human reason for a blocked confluence composite: which of the decisive legs failed (VWAP side,
-   * 60m bias, the 40/40 stand-aside) or, when all held, the aggregate falling short of the threshold.
+   * A human reason for a blocked confluence composite: which of the decisive legs failed (VWAP side
+   * — decisive only while {@code vwapHardGate} holds; the #9 opening-tick path degrades it to a soft
+   * dot before 10:30, where naming it "decisive" would be the exact T14 contradiction — the 60m
+   * bias, the 40/40 stand-aside) or, when all held, the aggregate falling short of the threshold.
    */
-  private static String compositeReason(Confluence conf, BigDecimal threshold) {
+  static String compositeReason(Confluence conf, BigDecimal threshold, boolean vwapHardGate) {
     if (conf.standAside()) {
       return "stand-aside (both-IV-high 40/40 suppression)";
     }
-    if (!conf.vwapAligned()) {
+    if (vwapHardGate && !conf.vwapAligned()) {
       return "price on the wrong side of VWAP (decisive)";
     }
     if (!conf.biasAligned()) {

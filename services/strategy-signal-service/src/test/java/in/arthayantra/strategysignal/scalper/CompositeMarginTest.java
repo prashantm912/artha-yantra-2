@@ -40,4 +40,20 @@ class CompositeMarginTest {
     assertThat(ScalperConfluenceGate.compositeMargin(false, null, THRESHOLD)).isNull();
     assertThat(ScalperConfluenceGate.compositeMargin(false, new BigDecimal("0.5"), null)).isNull();
   }
+
+  @Test
+  void softVwapMissIsNeverReportedAsDecisive() {
+    // codex round 2: on the #9 opening-tick path vwapHardGate=false degrades VWAP to a soft dot —
+    // a soft VWAP miss overlapping a decisive bias failure must name the BIAS, not VWAP; naming
+    // VWAP "decisive" when it did not gate is the same class of contradiction T14 removes.
+    ConnectTheDotsScorer.Confluence conf =
+        new ConnectTheDotsScorer.Confluence(
+            new BigDecimal("0.65"), in.arthayantra.black76.Black76.OptionType.CE,
+            false, false, false, false, false, java.util.List.of());
+    assertThat(ScalperConfluenceGate.compositeReason(conf, THRESHOLD, false))
+        .contains("60m bias")
+        .doesNotContain("VWAP");
+    // with the hard gate held, the same shape correctly names VWAP as decisive
+    assertThat(ScalperConfluenceGate.compositeReason(conf, THRESHOLD, true)).contains("VWAP");
+  }
 }

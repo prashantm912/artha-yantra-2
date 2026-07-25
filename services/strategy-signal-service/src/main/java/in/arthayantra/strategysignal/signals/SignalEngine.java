@@ -218,6 +218,9 @@ public class SignalEngine {
   // under threshold (V044 composite_rejections). Bounded ASYNC writer so a DB stall can never park
   // the sole signal-eval thread (#866 class).
   private final CompositeRejectionWriter compositeRejections;
+  // T15: durable reload ledger (strategy.engine_reloads, V046) — null in harnesses that construct
+  // without it; the record call is skipped, never a substitute no-op bean.
+  private final EngineReloadLedger reloadLedger;
   // Kill switch for the above. Default ON — the row is the whole point of the change — but flipping
   // ARTHA_SIGNALS_RECORD_COMPOSITE_REJECTIONS=false in .env stops the writes without an image
   // rebuild, which is the escape hatch if the added row rate (~192/session) ever bites.
@@ -435,10 +438,12 @@ public class SignalEngine {
       RejectionWriter rejectionWriter,
       RiskSuppressionWriter riskSuppressions,
       CompositeRejectionWriter compositeRejections,
+      java.util.Optional<EngineReloadLedger> reloadLedger,
       org.springframework.transaction.PlatformTransactionManager transactionManager,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes,
       @Value("${artha.signals.record-composite-rejections:true}") boolean recordCompositeRejections) {
     this.compositeRejections = compositeRejections;
+    this.reloadLedger = reloadLedger.orElse(null);
     this.recordCompositeRejections = recordCompositeRejections;
     this.registry = registry;
     this.signals = signals;
@@ -704,6 +709,9 @@ public class SignalEngine {
           "signal engine reload unchanged ({} loaded, {} unresolved, {} load errors) — indicator "
               + "banks and subscriptions retained",
           fresh.size(), unresolvedDrops, loadErrors);
+      if (reloadLedger != null) {
+        reloadLedger.record(fresh.size(), unresolvedDrops, loadErrors, false);
+      }
       return outcome;
     }
     bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
@@ -717,6 +725,10 @@ public class SignalEngine {
         "signal engine loaded {} published strategies ({} dropped on an unresolved universe, {} "
             + "failed to load)",
         fresh.size(), unresolvedDrops, loadErrors);
+    // T15: the line above is the evidence every post-close deploy used to destroy — persist it.
+    if (reloadLedger != null) {
+      reloadLedger.record(fresh.size(), unresolvedDrops, loadErrors, true);
+    }
     return outcome;
   }
 

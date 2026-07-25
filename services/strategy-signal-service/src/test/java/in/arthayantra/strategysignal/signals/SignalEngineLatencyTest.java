@@ -127,6 +127,7 @@ class SignalEngineLatencyTest {
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
             mock(CompositeRejectionWriter.class),
+            java.util.Optional.empty(),
             mock(PlatformTransactionManager.class),
             60,
             true);

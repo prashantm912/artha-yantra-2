@@ -592,6 +592,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
             mock(CompositeRejectionWriter.class),
+            java.util.Optional.empty(),
             mock(org.springframework.transaction.PlatformTransactionManager.class),
             60,
             true);
@@ -1489,6 +1490,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         mock(RejectionWriter.class),
         mock(RiskSuppressionWriter.class),
         mock(CompositeRejectionWriter.class),
+        java.util.Optional.empty(),
         mock(org.springframework.transaction.PlatformTransactionManager.class),
         60,
         true);

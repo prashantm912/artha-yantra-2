@@ -64,7 +64,7 @@ class DataHealthCanaryTest {
       env.setActiveProfiles("live");
     }
     return new DataHealthCanary(
-        state, ntfy, jdbc, MarketCalendar.nse(), clock, env, true, false, 90, 240, 600, 900);
+        state, ntfy, jdbc, MarketCalendar.nse(), clock, env, true, false, 90, 240, 600, 900, 30);
   }
 
   private void tick(String exchange, String symbol) {
@@ -74,7 +74,10 @@ class DataHealthCanaryTest {
             OffsetDateTime.ofInstant(now.get(), ZoneOffset.ofHoursMinutes(5, 30)), now.get().toEpochMilli()));
   }
 
-  /** A token established well before "now", ticking fresh, with its last bar at {@code barAge} ago. */
+  /**
+   * A token established well before "now", ticking fresh on a DENSE tape (~40 ticks since its last
+   * bar — the real-stall shape the T20 density guard requires), with its last bar {@code barAge} ago.
+   */
   private void establishToken(String symbol, java.time.Duration barAge) {
     Instant t = now.get();
     now.set(t.minusSeconds(1200));
@@ -83,9 +86,32 @@ class DataHealthCanaryTest {
       now.set(t.minus(barAge));
       state.recordBar("NSE", symbol);
     }
-    now.set(t.minusSeconds(10));
-    tick("NSE", symbol);
+    for (int i = 40; i >= 1; i--) {
+      now.set(t.minusSeconds(10L * i));
+      tick("NSE", symbol);
+    }
     now.set(t);
+  }
+
+  @Test
+  void thinTapeFewTicksSinceLastCloseNeverFlags() {
+    // the FINNIFTY26SEPFUT shape (T20, bug queue B6): last bar 15 minutes old but only a handful
+    // of ticks since — the tape is thin, the pipeline is fine. Paged 5 sessions running before the
+    // density guard; must stay silent now.
+    Instant t = now.get();
+    now.set(t.minusSeconds(1200));
+    tick("NSE", "FINNIFTY26SEPFUT");
+    now.set(t.minusSeconds(900));
+    state.recordBar("NSE", "FINNIFTY26SEPFUT");
+    now.set(t.minusSeconds(300));
+    tick("NSE", "FINNIFTY26SEPFUT");
+    now.set(t.minusSeconds(30));
+    tick("NSE", "FINNIFTY26SEPFUT");
+    now.set(t);
+
+    CanaryReport report = canary(false).evaluate();
+    assertThat(report.problems()).isEmpty();
+    assertThat(report.status()).isEqualTo("GREEN");
   }
 
   @Test

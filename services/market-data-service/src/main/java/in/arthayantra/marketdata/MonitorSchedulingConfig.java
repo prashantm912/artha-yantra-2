@@ -18,6 +18,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * {@code @Scheduled(scheduler = "monitorTaskScheduler")} — {@code FeedWatchdog.check},
  * {@code DataHealthCanary.sweep}, {@code SessionHealthProbe.scheduledProbe}. Every other job keeps
  * the default pool (its serial single-thread assumption is load-bearing for the batch jobs).
+ *
+ * <p>A THIRD pool, {@link #barFlushTaskScheduler()}, carries the 1 s bar-close sweep. It is neither a
+ * detector nor a batch job — see that method's javadoc (S1, 2026-07-25).
  */
 @Configuration(proxyBeanMethods = false)
 public class MonitorSchedulingConfig {
@@ -55,6 +58,40 @@ public class MonitorSchedulingConfig {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     scheduler.setPoolSize(2);
     scheduler.setThreadNamePrefix("monitor-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
+   * A single daemon thread owned solely by {@code CandlesConfig.CandleHousekeeping.flushBars} — the
+   * 1 s sweep that closes every 1m bar past its minute+grace (S1, scheduler-binding sweep
+   * 2026-07-25). It was on the DEFAULT pool, which is one thread shared with
+   * {@code OptionsSnapshotService.scheduledSnapshot}, whose own javadoc sizes one full pass at
+   * "~70 batched calls ≈ 70 s at the 1/s limit". While that pass holds the thread NO bar closes: a
+   * 1m bar can land in {@code candles} up to ~70 s late, and the live engine's bar-close eval and
+   * receipt heartbeats drift toward their thresholds behind it. This is an AVAILABILITY fix — bar
+   * CONTENT is unchanged either way, only when it becomes readable.
+   *
+   * <p>Widening the default pool was rejected: more threads REDUCE the odds of the collision without
+   * removing it, and the batch jobs on that pool rely on its serial single-thread ordering. A
+   * dedicated thread removes the queueing entirely — the sweep can only ever wait on itself.
+   *
+   * <p><b>Why not {@link #monitorTaskScheduler()}.</b> Fenced (audit BEJ-01 / #919) for pure liveness
+   * DETECTORS. {@code flushBars} is a write path — per closed bar it does synchronous JDBC plus a
+   * Redis publish through {@code BarWriter} — so parking it there could starve
+   * {@code FeedWatchdog.check} and {@code DataHealthCanary.sweep}, i.e. it would trade a data-latency
+   * problem for a detection-blindness one.
+   *
+   * <p>No new concurrency: {@code CandleBuilder.flush()} already ran concurrently with the feed
+   * thread's {@code onNormalizedTick} and guards every accumulator with the same {@code
+   * synchronized (acc)} monitor, so which scheduler thread calls it is immaterial. Nothing on the
+   * default pool observes the sweep's ordering — it is a fire-and-forget sink write.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler barFlushTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("bar-flush-sched-");
     scheduler.setDaemon(true);
     return scheduler;
   }

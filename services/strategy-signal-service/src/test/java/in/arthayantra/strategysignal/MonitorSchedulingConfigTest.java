@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import in.arthayantra.strategysignal.paper.PaperScheduler;
 import in.arthayantra.strategysignal.signals.CompositeRejectionPruneJob;
 import in.arthayantra.strategysignal.signals.DotHealthCanary;
 import in.arthayantra.strategysignal.signals.PartialBucketCanary;
@@ -9,6 +10,7 @@ import in.arthayantra.strategysignal.signals.RiskSuppressionPruneJob;
 import in.arthayantra.strategysignal.signals.SignalEvalOutcomeRollupJob;
 import in.arthayantra.strategysignal.signals.SignalStarvationCanary;
 import in.arthayantra.strategysignal.signals.SubscriberHealthCanary;
+import in.arthayantra.strategysignal.telegram.TelegramCommandBot;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -166,6 +168,87 @@ class MonitorSchedulingConfigTest {
         });
   }
 
+  /**
+   * S2: the live-armed Telegram command poller owns its own pool. It is the only default-pool job
+   * that calls a THIRD PARTY ({@code api.telegram.org}) every 3 s, and it shared that single thread
+   * with {@code PaperScheduler.bracketEvaluation} — the 15 s live stop-loss/target sweep. One TLS or
+   * long-poll stall on Telegram's side therefore delayed SL/TP evaluation for as long as it lasted.
+   * Also pinned OFF the three other pools: the monitor pool is fenced for pure in-memory detectors,
+   * and the eval-outcome and maintenance pools exist precisely so nothing can forge or silence a
+   * liveness verdict by stalling on them.
+   */
+  @Test
+  void theTelegramPollerOwnsItsOwnPoolAndNeverAnySharedOne() throws NoSuchMethodException {
+    Scheduled scheduled =
+        TelegramCommandBot.class.getDeclaredMethod("poll").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("TelegramCommandBot.poll is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler())
+        .as("poll must NOT share the default pool with the live SL/TP bracket sweep")
+        .isEqualTo("telegramTaskScheduler");
+    assertThat(scheduled.fixedDelay()).as("the 3 s cadence is unchanged").isEqualTo(3_000);
+  }
+
+  /**
+   * The counterpart pin: {@code bracketEvaluation} deliberately STAYS on the default pool (its
+   * serial ordering with the 15:30/15:35/15:45 paper chain is load-bearing). S2 moves the job with
+   * the unbounded external dependency, not the money path.
+   */
+  @Test
+  void theBracketSweepStaysOnTheDefaultPool() throws NoSuchMethodException {
+    Scheduled scheduled =
+        PaperScheduler.class.getDeclaredMethod("bracketEvaluation").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("PaperScheduler.bracketEvaluation is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler())
+        .as("bracketEvaluation keeps Boot's default scheduler")
+        .isEqualTo("");
+  }
+
+  /** The bean the poller names must exist, distinct from all three siblings and the default pool. */
+  @Test
+  void theTelegramSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("telegramTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the default scheduling pool (paper SL/TP)")
+              .isNotSameAs(context.getBean("taskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the monitor detectors")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the eval-outcome liveness rollup")
+              .isNotSameAs(context.getBean("evalOutcomeTaskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the retention prunes")
+              .isNotSameAs(context.getBean("maintenanceTaskScheduler"));
+        });
+  }
+
+  /** The poller keeps firing on its own thread while the default pool is wedged — the S2 guarantee. */
+  @Test
+  void theTelegramPollerFiresWhileTheDefaultPoolIsBlocked() {
+    runner.run(
+        context -> {
+          BlockingDefaultJob blocker = context.getBean(BlockingDefaultJob.class);
+          TelegramProbeJob probe = context.getBean(TelegramProbeJob.class);
+          try {
+            assertThat(blocker.entered.await(3, TimeUnit.SECONDS))
+                .as("default-pool job started and is holding its only thread")
+                .isTrue();
+            assertThat(probe.fired.await(3, TimeUnit.SECONDS))
+                .as("the Telegram poller fired while the default pool was blocked")
+                .isTrue();
+            assertThat(probe.threadName)
+                .as("the poller ran on its own dedicated pool")
+                .startsWith("telegram-poll-sched-");
+          } finally {
+            blocker.release.countDown();
+          }
+        });
+  }
+
   @Configuration(proxyBeanMethods = false)
   @EnableScheduling
   @Import(MonitorSchedulingConfig.class)
@@ -178,6 +261,11 @@ class MonitorSchedulingConfigTest {
     @Bean
     MonitorProbeJob monitorProbeJob() {
       return new MonitorProbeJob();
+    }
+
+    @Bean
+    TelegramProbeJob telegramProbeJob() {
+      return new TelegramProbeJob();
     }
   }
 
@@ -201,6 +289,18 @@ class MonitorSchedulingConfigTest {
     volatile String threadName;
 
     @Scheduled(fixedDelay = 60_000, initialDelay = 0, scheduler = "monitorTaskScheduler")
+    public void run() {
+      threadName = Thread.currentThread().getName();
+      fired.countDown();
+    }
+  }
+
+  /** Stands in for the Telegram poller: same binding, records that it fired and on which thread. */
+  static class TelegramProbeJob {
+    final CountDownLatch fired = new CountDownLatch(1);
+    volatile String threadName;
+
+    @Scheduled(fixedDelay = 60_000, initialDelay = 0, scheduler = "telegramTaskScheduler")
     public void run() {
       threadName = Thread.currentThread().getName();
       fired.countDown();

@@ -26,6 +26,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * <p>A FOURTH, {@link #maintenanceTaskScheduler()}, carries the daily retention prunes. Same
  * reasoning as the third, applied to a different risk class — see that method's javadoc, including
  * why the prunes are NOT folded onto the eval-outcome pool.
+ *
+ * <p>A FIFTH, {@link #telegramTaskScheduler()}, carries the live-armed Telegram command poller — the
+ * only default-pool job that makes an outbound call to a THIRD PARTY. See that method's javadoc.
  */
 @Configuration(proxyBeanMethods = false)
 public class MonitorSchedulingConfig {
@@ -141,6 +144,52 @@ public class MonitorSchedulingConfig {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     scheduler.setPoolSize(1);
     scheduler.setThreadNamePrefix("maintenance-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
+   * A single daemon thread owned solely by {@code TelegramCommandBot.poll} (S2, scheduler-binding
+   * sweep 2026-07-25). The poller is LIVE-ARMED, fires every 3 s, and is the only default-pool job
+   * that makes an outbound HTTPS call to a THIRD PARTY ({@code api.telegram.org}) — a dependency we
+   * neither run nor monitor. It shared the single default thread with
+   * {@code PaperScheduler.bracketEvaluation}, the 15-second live stop-loss/target sweep: one
+   * long-poll or TLS stall on Telegram's side delays SL/TP evaluation for as long as it lasts. That
+   * is money-adjacent, and it is the wrong risk to take for a convenience surface — the bot's own
+   * javadoc already promises "the bot can never break the signal path", and this makes the schedule
+   * honour it too.
+   *
+   * <p><b>Why the poller moves and {@code bracketEvaluation} stays.</b> The paper jobs' serial
+   * single-thread ordering on the default pool is load-bearing (the 15:30/15:35/15:45 expiry →
+   * settle → mark-to-close chain runs in sequence there); the Telegram poller has no such
+   * relationship to anything. Moving the one job with an external, unbounded dependency off the pool
+   * is the minimum change that removes the coupling.
+   *
+   * <p><b>Why not the other pools.</b> {@code monitorTaskScheduler} is fenced (audit BEJ-01 / #919)
+   * for pure in-memory detectors — a Telegram stall there would starve
+   * {@code SubscriberHealthCanary} and {@code DotHealthCanary}. {@code evalOutcomeTaskScheduler}'s
+   * output is evidence whose ABSENCE is read as "the engine was dead", so a stalled poller there
+   * would forge a liveness verdict (the 2026-07-20 misdiagnosis). {@code maintenanceTaskScheduler}
+   * exists precisely so retention work cannot do that either.
+   *
+   * <p><b>Concurrency.</b> {@code poll()}'s own state is safe by construction: it is the sole writer
+   * of its two {@code volatile} offset/drain fields and of the {@code ConcurrentHashMap} of pending
+   * confirmations, and one thread still runs it serially. What DOES change is that the two levers
+   * {@code /confirm} pulls are no longer serialized against the default pool's paper jobs — but
+   * neither was single-threaded to begin with: {@code RiskSettingsRepository.upsert} is already
+   * driven concurrently by {@code PUT /api/v1/risk/settings} (RiskController → RiskService.update),
+   * and the close path behind {@code /flatten} is already driven concurrently by {@code POST
+   * /api/v1/paper/positions/{id}/close} (PaperController → PaperService.closePosition) on Tomcat
+   * worker threads. Both are guarded where it counts — the close is a compare-and-set
+   * ({@code UPDATE paper_positions SET status='CLOSED' ... WHERE id=? AND status='OPEN'}), so a
+   * duplicate settle updates zero rows. This adds a caller to an already-concurrent path rather than
+   * a new concurrency class.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler telegramTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("telegram-poll-sched-");
     scheduler.setDaemon(true);
     return scheduler;
   }

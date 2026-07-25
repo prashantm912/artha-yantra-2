@@ -82,7 +82,15 @@ books' loss profile is partly an artifact of positions that can only exit at 15:
   `artha.signals.partial-bucket-canary.volume-tolerance` above 0, which the canary's own javadoc
   anticipates. **Do not do (b) first** — muting the benign residue before the mechanism is understood
   also mutes the regression the canary exists to catch. Promoted to README **§3.17**. Sessions before
-  07-23 are unmeasured (logs gone).
+  07-23 are unmeasured (logs gone). **CORRECTED + FIXED 2026-07-25 (bug-queue B2, PR #981):** the
+  code read + DB probe overturned the two-in-memory-aggregations reading — the 3m side is a
+  REST-pulled rollup of DB 1m rows that the recency window replaces with broker-official Kite bars
+  (so the RAILS read corrected data and "the operand is measurably wrong at the open" is retracted);
+  the tick-agg 1m mirror is the diverging side. The real defects fixed: warm-process day-rollover
+  baselined at zero (pre-open auction folded into the 09:15 bar — the +94-lot outlier) and the
+  canary's zero tolerance against structurally noisy tick-agg (now 650 absolute AND ≤10% relative,
+  thin frozen bars still fire). See README §3.17 (rewritten) and
+  `2026-07-25-weekly-bug-queue.md` §B2.
 - **✅ PAPER-POSITION BACKLOG IS DRAINING (updated 2026-07-24, T10 de-escalated again).** 19 → **17**
   OPEN: the 07-23 20:00/20:05 swing batch closed `CARYSIL` (−₹744) and `ATHERENERG` (+₹429) on
   `TRAILING_STOP`, and **no new positions were opened for a second consecutive session**. The

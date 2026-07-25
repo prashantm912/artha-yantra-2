@@ -96,6 +96,23 @@ class PartialBucketCanaryTest {
   }
 
   @Test
+  void frozenPartialOnAThinBucketStillFiresDespiteASmallAbsoluteShortfall() {
+    // codex review (B2 round 2): 400+300+300 with the 3m bar frozen at its first minute (400) — the
+    // 600 shortfall sits UNDER the 650 absolute tolerance but is 60% of the expected sum; the
+    // relative gate (≤10% of expected) must keep the thin frozen bar firing.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 400));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 300));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 300));
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 400));
+    MeterRegistry registry = new SimpleMeterRegistry();
+
+    new PartialBucketCanary(store, CLOCK, registry, 650L).sweep();
+
+    assertThat(registry.counter(COUNTER).count()).as("thin frozen bar not masked").isEqualTo(1.0);
+  }
+
+  @Test
   void incompleteOneMinuteCoverageIsSkippedSilently() {
     LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
     store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 100));

@@ -38,10 +38,12 @@ import org.springframework.stereotype.Component;
  * never revised. A tick printing in the sub-second gap between the last ~1 Hz snapshot before a 3m
  * edge and the edge itself is credited to the earlier bucket by the broker and the later one by
  * tick-agg, so consecutive buckets carry equal-and-opposite lot-multiple skews (measured ≤8 lots =
- * 520 on 35 of 37 events, 2026-07-24). The default tolerance of 650 (10 NIFTY lots) absorbs that
- * benign boundary residue while staying far below the frozen-first-minute signature this canary
- * exists to catch (~2/3 of a median 13k–36k 3m bar). Override live via
- * {@code artha.signals.partial-bucket-canary.volume-tolerance}.
+ * 520 on 35 of 37 events, 2026-07-24). A mismatch is treated as benign only when it clears BOTH
+ * gates: at most the absolute tolerance (default 650 = 10 NIFTY lots) AND at most 10% of the
+ * expected 1m sum — the relative gate keeps a frozen partial on a genuinely THIN bucket (e.g. 400
+ * frozen of a true 1,000) firing even though its absolute shortfall is small. The frozen
+ * first-minute signature (~2/3 of the bucket missing) fails both gates on any bar. Override the
+ * absolute gate live via {@code artha.signals.partial-bucket-canary.volume-tolerance}.
  *
  * <p>Depends ONLY on {@link LiveSeriesStore} (never {@link SignalEngine}) and shares the engine's
  * on/off gate ({@code artha.signals.engine-enabled}, default on): the 3m series only exist when the
@@ -123,7 +125,11 @@ public class PartialBucketCanary {
       expected += oneMin.candle(index).volume();
     }
     long actual = last.volume();
-    if (Math.abs(actual - expected) <= volumeTolerance) {
+    long diff = Math.abs(actual - expected);
+    // benign needs BOTH gates: ≤ the absolute lot tolerance AND ≤ 10% of the expected sum — the
+    // relative gate keeps a frozen partial on a thin bucket firing (its absolute shortfall is small
+    // but its relative one is ~2/3); a zero-volume expected sum tolerates only an exact match.
+    if (diff <= volumeTolerance && diff * 10L <= expected) {
       flagged.remove(threeMinKey); // healthy for this series — allow the next bucket to re-flag
       return;
     }

@@ -562,7 +562,7 @@ number since 07-21. **Queue frozen in `docs/signal-analysis/2026-07-25-weekly-bu
 
 | # | id | item | tier | status |
 |---|---|---|---|---|
-| B1 | T16 | relative-volume-floor tag disarmed on 18 PE scalpers by the 07-20 republish; **root cause: 0/63 YAMLs carry the tag** (#605 armed registry-side only) — YAML tag + guard test + republish | clean | IN PROGRESS |
+| B1 | T16 | relative-volume-floor tag disarmed on 18 PE scalpers by the 07-20 republish; **root cause: 0/63 YAMLs carry the tag** (#605 armed registry-side only) — YAML tag + guard test + republish | clean | **DONE [#980](https://github.com/prashantm912/artha-yantra-2/pull/980) @ 0492cbba** — 63/63 YAMLs tagged + ScalperStrategyLoadTest guard; deployed 2026-07-25, all 38 enabled strategies republished, DB-verified `published` configs carry the tag (closes T11 too); engine loads them at Monday's Kite login, Monday open-gate §3.14 = standing verify |
 | B2 | T23 | live 3m series ≠ own 1m series in exact lot multiples (`LiveSeriesStore` boundary-tick race, code-read first) | clean | queued |
 | B3 | T19 | gap-backfill writes phantom 1m candles on unaligned buckets + historical cleanup | clean | queued |
 | B4 | T17+T13 | dot-health canary false all-dead sampling + missing OI NEUTRAL-share probes | clean | queued |

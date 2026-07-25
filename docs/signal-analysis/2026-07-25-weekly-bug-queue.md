@@ -33,3 +33,30 @@ conclusion stands: every PnL number since 07-21 is confounded by T16 (floor disa
 **Doc-hygiene note:** the 07-21/22/23 midday gates still carry "Timescale `non-Var pathkey`
 mitigation scheduled 15:40 IST" — stale boilerplate; #957 shipped 2026-07-20 and OI quadrants
 ran alive all four sessions. No action beyond this note.
+
+## B2 (T23) correction of record — 2026-07-25 code read + DB probe
+
+The 07-24 §6.1 / rollup hypothesis ("boundary-tick attribution race between two in-memory
+aggregation paths") is **wrong in one load-bearing way: the engine performs no 3m aggregation at
+all.** The 3m series is a REST-pulled SQL rollup of DB 1m rows
+(`CandleRepository.rangeRolledFromOneMinute`), and the 10-minute recency window authoritatively
+REPLACES those DB rows with broker-official Kite bars at every 3m boundary
+(`ensureCoverage` → `upsertAuthoritativeAll`; DB-probed: every 07-24 session minute is
+`source='KITE'` with `fetched_at` marching in exact 3-minute steps). The store's in-memory 1m
+stays tick-agg and is never revised — the canary compared unlike series, and **the tick-agg side
+was the wrong one.** Consequences:
+
+- **The rollup's "the volume operand is measurably wrong at the open" is OVERSTATED** — the rails
+  read the broker-corrected 3m rollup; the 09:15 +6,110 error lived in the tick-agg mirror, not in
+  the floor's operand. (Transient sub-3-minute revision noise on the newest bucket remains.)
+- The exact-lot ± pairs are the sub-second boundary-straddle between ~1 Hz cumulative-volume
+  snapshots and the broker's trade-timestamped attribution — structural residue, ≤8 lots on 35 of
+  37 measured events.
+- The unpaired opening +94-lot error was a REAL tick-agg defect: `CandleBuilder` zeroed its
+  baseline on day rollover, folding the pre-open auction quantity into the first bar a WARM
+  process built. Fixed in B2 (baseline = the rollover tick's own cumulative, cold-boot semantics)
+  together with a principled canary default tolerance of 650 (10 NIFTY lots), far below the
+  frozen-first-minute signature the canary exists to catch.
+- Open residual (not built): no divergence canary covers the 5m/15m/1h cagg rollups, and the
+  in-memory 1m series also feeds the intrabar exit-level pass — price-based, so unaffected by the
+  volume skew.

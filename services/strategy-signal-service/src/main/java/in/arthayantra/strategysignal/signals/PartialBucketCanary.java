@@ -30,9 +30,18 @@ import org.springframework.stereotype.Component;
  * <p>Purely observational: on a mismatch it increments {@code ay_signal_partial_bucket_mismatch_total}
  * and logs once per (series, bucket); it never blocks or mutates a series. It skips silently when the
  * three 1m bars are not all present (a coverage gap, not a freeze — {@code volume-tolerance} does not
- * apply to that case) or when the newest 3m bucket is still forming. The default tolerance is 0 (exact
- * sum expected); {@code artha.signals.partial-bucket-canary.volume-tolerance} can loosen it live if a
- * benign tick-agg-vs-persisted skew proves noisy.
+ * apply to that case) or when the newest 3m bucket is still forming.
+ *
+ * <p>The comparison is structurally UNLIKE-vs-UNLIKE (T23, 2026-07-25): the 3m side is a REST-pulled
+ * SQL rollup of DB 1m rows that the 10-minute recency window authoritatively REPLACES with
+ * broker-official Kite bars at every boundary, while the store's 1m side stays live tick-agg and is
+ * never revised. A tick printing in the sub-second gap between the last ~1 Hz snapshot before a 3m
+ * edge and the edge itself is credited to the earlier bucket by the broker and the later one by
+ * tick-agg, so consecutive buckets carry equal-and-opposite lot-multiple skews (measured ≤8 lots =
+ * 520 on 35 of 37 events, 2026-07-24). The default tolerance of 650 (10 NIFTY lots) absorbs that
+ * benign boundary residue while staying far below the frozen-first-minute signature this canary
+ * exists to catch (~2/3 of a median 13k–36k 3m bar). Override live via
+ * {@code artha.signals.partial-bucket-canary.volume-tolerance}.
  *
  * <p>Depends ONLY on {@link LiveSeriesStore} (never {@link SignalEngine}) and shares the engine's
  * on/off gate ({@code artha.signals.engine-enabled}, default on): the 3m series only exist when the
@@ -63,7 +72,7 @@ public class PartialBucketCanary {
       LiveSeriesStore store,
       Clock clock,
       MeterRegistry meterRegistry,
-      @Value("${artha.signals.partial-bucket-canary.volume-tolerance:0}") long volumeTolerance) {
+      @Value("${artha.signals.partial-bucket-canary.volume-tolerance:650}") long volumeTolerance) {
     this.store = store;
     this.clock = clock;
     this.mismatches = meterRegistry.counter("ay_signal_partial_bucket_mismatch_total");

@@ -148,19 +148,27 @@ class CandleBuilderTest {
   }
 
   @Test
-  void cumulativeVolumeResetRollsBaselineToZero() {
+  void cumulativeVolumeResetBaselinesAtTheRolloverTickNotZero() {
+    // T23 (2026-07-25): on a WARM process the first tick after the exchange resets the cumulative
+    // counter carries the pre-open auction quantity (400 here). A zero baseline folded that whole
+    // amount into the 09:15 bar (+94 lots live on 2026-07-24); the rollover tick's own cumulative
+    // is the correct baseline — the bar counts only increments observed AFTER it, exactly like the
+    // first-tick-ever case on a cold boot.
     now.set(Instant.parse("2026-06-10T09:59:30Z")); // 15:29:30 IST — wall clock at the close
     Run run = run();
     run.builder.onNormalizedTick(tick("2026-06-10T15:29:10", "100.00", 50_000, null, 1));
-    // next session day: cumulative reset by the exchange
+    // next session day: cumulative reset by the exchange; 400 = auction + this tick's own delta
     now.set(Instant.parse("2026-06-11T03:45:30Z")); // 09:15:30 IST next day
     run.builder.onNormalizedTick(tick("2026-06-11T09:15:05", "102.00", 400, null, 2));
+    run.builder.onNormalizedTick(tick("2026-06-11T09:15:40", "102.50", 550, null, 3));
 
     now.set(Instant.parse("2026-06-11T03:46:10Z")); // 09:16:10 IST next day
     run.builder.flush();
 
     assertThat(run.bars).hasSize(2);
-    assertThat(run.bars.get(1).volume()).as("reset detected — baseline restarts at 0").isEqualTo(400);
+    assertThat(run.bars.get(1).volume())
+        .as("rollover detected — baseline is the rollover tick's own cumulative (auction excluded)")
+        .isEqualTo(150);
   }
 
   @Test

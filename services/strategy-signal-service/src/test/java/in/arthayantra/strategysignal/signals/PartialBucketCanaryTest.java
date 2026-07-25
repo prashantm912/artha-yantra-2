@@ -68,6 +68,34 @@ class PartialBucketCanaryTest {
   }
 
   @Test
+  void boundaryStraddleResidueWithinToleranceDoesNotFireButAFrozenPartialStillDoes() {
+    // T23 (2026-07-25): the 3m side is broker-replaced DB data while the 1m side stays tick-agg, so
+    // a boundary-straddling tick leaves an equal-and-opposite lot-multiple skew on consecutive
+    // buckets (≤8 lots = 520 on 35 of 37 measured events). The shipped default tolerance (650 = 10
+    // NIFTY lots) must absorb that residue while a frozen first-minute partial (~2/3 of the bucket
+    // missing) must still fire.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 5_000));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 5_000));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 5_000));
+    // tick-agg sum 15,000 vs broker-official 14,480: a 520 (8-lot) boundary straddle — benign.
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 14_480));
+    MeterRegistry registry = new SimpleMeterRegistry();
+    new PartialBucketCanary(store, CLOCK, registry, 650L).sweep();
+    assertThat(registry.counter(COUNTER).count()).as("8-lot residue absorbed").isZero();
+
+    LiveSeriesStore frozen = new LiveSeriesStore(null, CLOCK);
+    frozen.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 5_000));
+    frozen.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 5_000));
+    frozen.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 5_000));
+    // the real regression: the 3m bar frozen at its first minute — shortfall 10,000 >> 650.
+    frozen.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 5_000));
+    MeterRegistry frozenRegistry = new SimpleMeterRegistry();
+    new PartialBucketCanary(frozen, CLOCK, frozenRegistry, 650L).sweep();
+    assertThat(frozenRegistry.counter(COUNTER).count()).as("frozen partial still fires").isEqualTo(1.0);
+  }
+
+  @Test
   void incompleteOneMinuteCoverageIsSkippedSilently() {
     LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
     store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 100));

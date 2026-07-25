@@ -582,11 +582,15 @@ public class SignalEngine {
                     && "options_of_underlying".equals(config.path("universe").path("mode").asText())
                 ? ScalperConfig.from(config, configTags)
                 : null;
-        // §0B hard-stop rule: a scalper without a fixed SL or a time-stop could ride an unbounded
-        // losing option — refuse to load it rather than emit signals it can never safely exit.
+        // §0B hard-stop rule (hardened, T21 #990 round-3): a scalper without an ENGINE-fireable
+        // bounding exit — a time_stop or an index-side stop_loss — could ride an unbounded losing
+        // option. A premium_pct stop does NOT count: it is enforced only by the paper bracket path,
+        // which does not run when a signal is not taken into paper. Refuse to load it rather than
+        // emit signals it can never safely exit.
         if (scalper != null && !ScalperRisk.hasBoundingExit(definition.exitRules())) {
           log.warn(
-              "scalper {} has no hard stop / time-stop exit — not loaded (§0B hard-SL rule)",
+              "scalper {} has no engine-fireable bounding exit (time_stop / index-side stop_loss)"
+                  + " — not loaded (§0B hard-SL rule)",
               strategy.slug());
           continue;
         }
@@ -1691,10 +1695,12 @@ public class SignalEngine {
     // W3 PR-4 (S24 ratification D36/D37/D30/D46, additive fallback/cap): an index_points stop_loss
     // rule bounds the stop to a fixed point distance (BN ~100 / N ~50-60 / SENSEX ~200-250) — the
     // FALLBACK when no other stop is set, and a CAP that clamps a too-wide structural stop to that
-    // distance (the tighter of the two wins). Default-OFF: no YAML carries an index_points rule
-    // today, so stopLoss is unchanged for every existing strategy.
+    // distance (the tighter of the two wins). Carried today by the connect-the-dots and trending-oi
+    // families (12 YAMLs). The stop side follows the HELD option exposure, not the definition
+    // direction — see entryExposureIsShort.
     boolean shortDir =
-        strategy.definition().direction() == StrategyDefinition.Direction.SHORT;
+        entryExposureIsShort(
+            decision == null ? null : decision.side(), strategy.definition().direction());
     BigDecimal pointStop =
         indexPointStopLevel(strategy.definition().exitRules(), shortDir, entryPrice);
     if (pointStop != null) {
@@ -2407,6 +2413,24 @@ public class SignalEngine {
   /** PR-4 additive cap: the stop level closer to entry (the tighter of two) wins. */
   static BigDecimal closerToEntry(BigDecimal entryPrice, BigDecimal a, BigDecimal b) {
     return entryPrice.subtract(a).abs().compareTo(entryPrice.subtract(b).abs()) <= 0 ? a : b;
+  }
+
+  /**
+   * The direction the persisted index-side stop must protect — the entry-time counterpart of
+   * {@link #scalperPositionDirection}. A scalper take holding a PE has SHORT index exposure
+   * regardless of the definition's direction: the seam derives CE/PE per entry from price vs VWAP
+   * and every {@code -pe} mirror YAML declares {@code direction: long}, so keying the stop side off
+   * {@code definition.direction()} put every PE-side point stop BELOW entry — which
+   * {@code structuralStopHit(SHORT, ...)} ({@code bar.high >= stop}) trips on the very next bar: a
+   * one-bar force-exit (same defect class as the T21/#990 premium_pct resolution). The held option
+   * side wins; a neutral straddle ({@code side} null) and a non-scalper entry fall back to the
+   * definition direction, matching {@link #scalperPositionDirection}'s fallback.
+   */
+  static boolean entryExposureIsShort(
+      OptionType heldSide, StrategyDefinition.Direction definitionDirection) {
+    return heldSide != null
+        ? heldSide == OptionType.PE
+        : definitionDirection == StrategyDefinition.Direction.SHORT;
   }
 
   /** The coarse primaries the live engine can roll off the 1m stream (reload() enforces this). */

@@ -10,9 +10,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -74,6 +76,26 @@ public class GlobalExceptionHandler {
   public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException ex) {
     return ResponseEntity.badRequest()
         .body(ErrorResponse.of(ErrorCodes.VALIDATION_FAILED, "Malformed request body"));
+  }
+
+  /**
+   * A body whose {@code Content-Type} the endpoint does not consume: 415, not the catch-all 500.
+   *
+   * <p>Spring raises this BEFORE any argument resolution, so the body was never parsed and there is
+   * no field-level detail to report — {@code details} carries the offending type and the supported
+   * ones instead. {@code contentType} is nullable (a body with no {@code Content-Type} at all also
+   * lands here), hence the null-safe rendering.
+   */
+  @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+  public ResponseEntity<ErrorResponse> handleUnsupportedMediaType(
+      HttpMediaTypeNotSupportedException ex) {
+    Map<String, Object> details = new LinkedHashMap<>();
+    details.put("contentType", ex.getContentType() == null ? "(absent)" : ex.getContentType().toString());
+    details.put("supported", ex.getSupportedMediaTypes().stream().map(MediaType::toString).toList());
+    return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+        .body(
+            new ErrorResponse(
+                ErrorCodes.MEDIA_TYPE_UNSUPPORTED, "Unsupported request Content-Type", details));
   }
 
   /** Unknown paths/static resources: 404 envelope, never the container error page. */

@@ -2840,7 +2840,7 @@ export interface components {
         MinerviniFunnel: {
             /** Format: date */
             screenDate: string | null;
-            regime: components["schemas"]["Regime"] | null;
+            regime: components["schemas"]["Regime"];
             immediatelyBuyable: components["schemas"]["MinerviniFunnelRow"][];
             onDeck: components["schemas"]["MinerviniFunnelRow"][];
             watch: components["schemas"]["MinerviniFunnelRow"][];
@@ -2970,7 +2970,7 @@ export interface components {
         ManasFunnel: {
             /** Format: date */
             screenDate: string | null;
-            regime: components["schemas"]["Regime"] | null;
+            regime: components["schemas"]["Regime"];
             immediatelyBuyable: components["schemas"]["ManasFunnelRow"][];
             onDeck: components["schemas"]["ManasFunnelRow"][];
             watch: components["schemas"]["ManasFunnelRow"][];

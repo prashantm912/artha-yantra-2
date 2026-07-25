@@ -8490,11 +8490,7 @@
             "format" : "date"
           },
           "regime" : {
-            "anyOf" : [ {
-              "$ref" : "#/components/schemas/Regime"
-            }, {
-              "type" : "null"
-            } ]
+            "$ref" : "#/components/schemas/Regime"
           },
           "immediatelyBuyable" : {
             "type" : "array",
@@ -8862,11 +8858,7 @@
             "format" : "date"
           },
           "regime" : {
-            "anyOf" : [ {
-              "$ref" : "#/components/schemas/Regime"
-            }, {
-              "type" : "null"
-            } ]
+            "$ref" : "#/components/schemas/Regime"
           },
           "immediatelyBuyable" : {
             "type" : "array",

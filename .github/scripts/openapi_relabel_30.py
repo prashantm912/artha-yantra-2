@@ -83,7 +83,7 @@ def downgrade_nullable_type_arrays(node):
 
 
 # Composition keywords this pass must never recurse INTO — see downgrade_nullable_ref_anyof.
-COMPOSITION_KEYS = frozenset({"anyOf", "oneOf", "allOf"})
+COMPOSITION_KEYS = frozenset({"anyOf", "oneOf", "allOf", "not"})
 
 
 def downgrade_nullable_ref_anyof(node):

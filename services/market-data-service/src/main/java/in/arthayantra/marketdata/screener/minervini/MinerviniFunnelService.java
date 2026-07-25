@@ -58,7 +58,8 @@ public class MinerviniFunnelService {
   @Schema(name = "MinerviniFunnel")
   public record Funnel(
       @Schema(types = {"string", "null"}) LocalDate screenDate,
-      @Schema(types = {"object", "null"}) RegimeService.Regime regime,
+      // NOT nullable: regime() returns neutral() or a value, never null (single call site below).
+      RegimeService.Regime regime,
       List<FunnelRow> immediatelyBuyable,
       List<FunnelRow> onDeck,
       List<FunnelRow> watch) {}

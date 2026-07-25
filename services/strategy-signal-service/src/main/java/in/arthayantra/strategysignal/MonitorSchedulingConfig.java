@@ -16,8 +16,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  *
  * <p>Scope-fenced: ONLY pure detectors move onto {@link #monitorTaskScheduler()} via
  * {@code @Scheduled(scheduler = "monitorTaskScheduler")} — {@code SubscriberHealthCanary.sweep},
- * {@code PartialBucketCanary.sweep}, {@code SignalStarvationCanary.sweep} (dormant),
- * {@code DotHealthCanary.sweep}. The engine reload trio, PaperScheduler, and every EOD/batch job
+ * {@code PartialBucketCanary.sweep}, {@code DotHealthCanary.sweep}. The engine reload trio, PaperScheduler, and every EOD/batch job
  * keep the default pool (their serial single-thread assumption is load-bearing).
  *
  * <p>A THIRD pool, {@link #evalOutcomeTaskScheduler()}, carries the V045 eval-outcome rollup. It

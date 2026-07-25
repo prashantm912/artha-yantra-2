@@ -49,6 +49,18 @@ config changes, no `ay` verbs that touch containers. SELECTs + `docker logs` onl
 1. README §4.1 data-health pass: rejections flowing this session (rows + max generated_at vs wall
    clock), context nulls/zeros on TODAY's rows (compare against the findings ledger — flag anything
    newly-dead the same day), capture liveness (1m candle max bucket, snapshot counts).
+   ⚠️ **Zero rejections is INCONCLUSIVE, never "starvation"** (corrected 2026-07-26):
+   `recordRejection` runs only PAST the chart gate, and every scalper shares two required scorers on
+   one 3m series, so a SuperTrend-DOWN leg silences all of them on ordinary bearish tape. Judge
+   liveness POSITIVELY, never from an absence: in `strategy.signal_eval_outcomes` read the LATEST
+   bucket only (a session-wide `sum()` stays positive forever once anything evaluated) — latest
+   bucket `eval_count > 0` proves the eval loop ran. A fresh ALL-ZERO latest bucket is INCONCLUSIVE,
+   not healthy. A thread dump narrows but does not settle it: `LinkedBlockingQueue.take()` means the
+   eval thread is unstuck, NOT that bars are arriving. On a fully quiet session liveness is currently
+   UNPROVABLE — say INCONCLUSIVE (chip task_0bed1621 closes this). ⚠️ A missing `receive-stall`/`eval-stall` row in
+   `strategy.subscriber_health_events` is NOT proof of health — that table is write-only fail-soft
+   forensics, so a disabled or failed sweep leaves it empty too; a row that IS present is strong
+   evidence of a fault. See README §4.3 step 4.
 2. README §4.2 live counterfactual watch: intraday would-have-fired rows → resolve leg → premium
    path so far → provisional WOULD-WIN/LOSE. Keep results in the scratchpad during the session.
 3. Report anomalies immediately (that is the point of live mode); fold the counterfactual outcomes
@@ -69,8 +81,15 @@ track) and exit-band tunes (that track) land as ONE coordinated owner decision.
 
 ## Shared guardrails
 
-- Rejections are LIVE-only rows; zero rows during market hours = a real problem, zero rows
-  off-hours/holidays = normal (check `libs/market-calendar` holidays before alarming).
+- Rejections are LIVE-only rows; **zero rows during market hours is INCONCLUSIVE, not a problem**
+  (corrected 2026-07-26 — this line used to say it was a real problem). `recordRejection` runs only
+  PAST the chart gate, so an ordinary SuperTrend-DOWN leg silences every scalper at once. Prove
+  liveness POSITIVELY from the LATEST `strategy.signal_eval_outcomes` bucket having `eval_count > 0`
+  — a fresh ALL-ZERO latest bucket only proves the rollup thread is alive, not the eval loop, so it
+  is INCONCLUSIVE and merely NARROWED (not settled) by a thread dump: a thread parked on
+  `queue.take()` stays INCONCLUSIVE, and one dump inside a legitimately-blocking `fetch` proves
+  nothing either. **On a fully quiet session liveness is currently UNPROVABLE** (chip task_0bed1621);
+  zero rows off-hours/holidays = normal (check `libs/market-calendar` holidays before alarming).
 - Single-session numbers never justify a tune by themselves UNLESS the threshold is outside the
   operand's physical range (structural) — say which class each candidate is.
 - Findings files are immutable; the ledger (§7 table) is the only thing that changes status.

@@ -229,8 +229,11 @@ restart services, or write during market hours.
 
 ### 4.1 Data-health watch (any time mid-session)
 - Rejections flowing? `SELECT count(*), max(generated_at) FROM strategy.signal_rejections WHERE
-  generated_at > <today 09:15 IST>` — 16 strategies × ~every 3m bar in-window ⇒ tens of rows/hour.
-  Zero mid-session = engine or feed problem, check `docker logs ay-strategy-signal-service`.
+  generated_at > <today 09:15 IST>` — tens of rows/hour when the chart gate is passing.
+  ⚠️ **Zero mid-session is NOT an engine-or-feed problem by itself** (corrected 2026-07-26 — the old
+  text here said it was): `recordRejection` runs only PAST the chart gate, so an ordinary
+  SuperTrend-DOWN leg silences every scalper at once. Confirm liveness POSITIVELY via a fresh
+  `strategy.signal_eval_outcomes` row (§4.3 step 4) before calling anything a problem.
 - Context nulls (dimension §3.7) on TODAY's rows — catches a dead feed the same day it dies, not at EOD.
 - Capture liveness: `max(bucket)` on 1m candles + snapshot counts vs wall clock.
 
@@ -258,7 +261,7 @@ and mechanical (see §7 improvement list).
 
 ### 4.3 Market-open signal-liveness gate (the `open` routine)
 
-A fast, read-only PASS/FAIL check run ~15–20 min after the open (or anytime in-session) that catches the
+A fast, read-only **PASS / FAIL / INCONCLUSIVE** check run ~15–20 min after the open (or anytime in-session) that catches the
 **silent starvation class** — capture healthy but the engine emitting nothing (the 2026-07-14 incident:
 zero signals/rejections all session while candles captured fine, because the single-threaded eval loop
 was parked on an unbounded market-data fetch; fixed #866). No canary alarmed on "healthy feed + zero
@@ -279,21 +282,108 @@ Steps (all read-only — never restart/deploy/write mid-session):
 4. **THE GATE — rejections flowing?**
    `SELECT count(*), max(generated_at AT TIME ZONE 'Asia/Kolkata') FROM strategy.signal_rejections
     WHERE generated_at >= <today 09:15 +05:30>;`
-   - **>0 and max within a few min of now ⇒ PASS** (the strict ~30-rail gate blocking every bar is
-     normal; zero *fires* is fine, zero *rejections* is not).
-   - **0 while step 3 shows healthy capture ⇒ FAIL = STARVATION.** Alert the owner immediately.
+   - **>0 and max within a few min of now ⇒ PASS.** Rejections are sufficient evidence of a live
+     engine — their presence proves the gate ran.
+   - **0 ⇒ INCONCLUSIVE, *not* FAIL.** ⚠️ **CORRECTED 2026-07-26 — the old rule here ("0 while
+     capture is healthy ⇒ FAIL = STARVATION") is WRONG and cost a false live-starvation escalation
+     on 2026-07-17 plus a needless restart on 07-20.** `recordRejection`'s call sites both sit
+     inside the chart-gate-passed branch, so a chart-stage no-entry writes NOTHING. Every published
+     scalper shares the same two required scorers on one 3m NIFTY-future series, so **SuperTrend
+     DOWN + RSI < 58 silences every scalper simultaneously on ordinary bearish tape.** An 84-minute
+     hole was escalated as starvation and the engine was healthy the whole time — a thread dump
+     taken during it showed `signal-eval` parked on its own empty queue (an idle worker, not a
+     stall). The `SignalStarvationCanary` that automated this exact rule was **retired** on
+     2026-07-26 for the same reason.
+   - **On 0, demand POSITIVE proof of life — never infer it from an absence.** Inspect the **LATEST
+     BUCKET ONLY**, never a session-wide sum:
+     ```sql
+     SELECT bucket_time AT TIME ZONE 'Asia/Kolkata' AS ist, sum(eval_count) AS evals
+       FROM strategy.signal_eval_outcomes
+      WHERE bucket_time >= <today 09:15 +05:30>
+      GROUP BY bucket_time ORDER BY bucket_time DESC LIMIT 3;
+     ```
+     ⚠️ **`sum()` over the whole session is WRONG** and was the first version of this query: once any
+     evaluation happens the running total stays positive while later all-zero buckets keep advancing
+     `max(bucket_time)`, so **an engine that died at 10:00 would PASS all afternoon.** Read the top
+     row only. If the PREVIOUS bucket is missing or late, stay INCONCLUSIVE — a recovered delta can
+     span several windows, so one bucket's number is not attributable to one window.
+     `SignalEvalOutcomeRollupJob` writes a row every **3 minutes** in-session
+     (cron `0 */3 9-15 * * MON-FRI` IST) **unconditionally — an idle bucket writes zeros**, and
+     V045's own note says so: *"Zero is meaningful — it proves the process was alive."*
+     - **A fresh bucket with `sum(eval_count) > 0` ⇒ PASS-QUIET.** A non-zero delta is *positive*
+       proof the eval loop ran in that window. (Zero is not proof of the opposite — it is legitimate
+       when every strategy is out-of-window or in-position — which is why this is asserted one-way
+       only.)
+     - **A fresh bucket that is ALL ZEROS ⇒ still INCONCLUSIVE — "process alive, evaluation
+       unproven".** ⚠️ Freshness alone does NOT prove the engine is evaluating: the rollup runs on
+       its own dedicated scheduler thread and merely *snapshots counters*
+       (`SignalEvalOutcomeRollupJob:135-140`, and its repository is by design never written from the
+       `signal-eval` thread). **A stuck eval thread or a dropped subscriber keeps producing fresh
+       all-zero buckets forever.** Escalate — do not PASS.
+     - **No fresh row while capture is healthy ⇒ FAIL — escalate.** (The job is fail-soft and
+       `@ConditionalOnProperty`, so absence is "engine dead **or** the writer is down/disabled" —
+       both warrant a look; unlike a missing stall row, it is never routine.)
+     - **What a thread dump does and does not settle.** `docker exec ay-strategy-signal-service sh -c
+       'kill -3 1'` → read `docker logs`.
+       - `signal-eval` inside `MarketDataCandlesClient.fetch` / `LiveSeriesStore.refreshFromRest`, or
+         showing CPU activity, is **NOT by itself a stall** — `refreshFromRest` is ordinary
+         coarse-bucket work and its HTTP fetch is *deliberately* allowed to block for up to ~10 s, so
+         a perfectly healthy evaluation can be caught in that exact frame. **Take REPEATED dumps
+         (≥2, spaced past that timeout) and compare:** no forward progress across them ⇒ **real
+         stall, FAIL**; different frames, or the same frame within the timeout ⇒ still
+         **INCONCLUSIVE**. (One dump in `fetch` was called an immediate FAIL in an earlier version of
+         this text — wrong for the same reason the rest of this section was wrong: a single sample of
+         a legitimately-blocking call is not evidence.)
+       - `signal-eval` parked on `LinkedBlockingQueue.take()` with low cumulative CPU ⇒ **the eval
+         thread is unstuck, but receipt liveness is UNPROVEN — still INCONCLUSIVE.** ⚠️ It is *candle
+         receipt* that submits the drain onto that single-thread executor, so **a dropped Redis
+         listener submits nothing and leaves the thread parked in exactly the same stack as a healthy
+         idle worker.** Quiet tape and a dead subscriber are indistinguishable here. (An earlier
+         version of this runbook called this stack "healthy" and "definitive". It is neither.)
+     - ⚠️ **Bottom line, stated plainly: on a fully quiet session there is currently NO way to prove
+       the engine is alive.** There is no operator-readable surface for `lastBarReceivedAtMs` /
+       `lastBarEvaluatedAtMs` — no metric, no endpoint (grepped 2026-07-26) — and every available
+       proxy has been shown to admit a false PASS. The gate must return INCONCLUSIVE and say so,
+       rather than manufacture confidence. Closing this needs chip **task_0bed1621** (expose the two
+       heartbeats); see its row in ledger §4b.
+   - ⚠️ **Do NOT read "no `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events`"
+     as PASS.** That table is write-only, fail-soft forensics — a disabled sweep, a failed sweep or
+     a failed insert produces no row either, so absence there can silently pass a dead engine. A row
+     that IS present is strong evidence of FAIL; its absence proves nothing. (This correction was
+     itself caught in cross-vendor review of the retirement PR — the first replacement doctrine
+     traded one absence-based inference for another.)
+   - The underlying invariant: the only unconfounded oracles are `SignalEngine.lastBarReceivedAtMs`
+     (stamped as the first line of `onCandleMessage`, before any universe/window/position/loaded
+     logic) and `lastBarEvaluatedAtMs` — direction-, window- and position-independent, and what
+     `SubscriberHealthCanary` and `SessionLivenessHeartbeat` (#941) key on. Neither has a read
+     surface today, which is why the operator proxy is the 3-minute outcome row above.
+   - **Never** conclude starvation from `strategy.signals` (it mixes the swing BATCH engine, whose
+     rows are stamped `00:00:00`, and will fake liveness on a dead tick engine) or from
+     `ay_signal_eval_outcome_total` (window- AND position-dependent: it is structurally flat
+     15:00–15:30 IST every non-expiry day — an ATTRIBUTION primitive, never a liveness one).
 5. **On FAIL, localize (read-only):** `strategy.subscriber_health_events` for an `eval-stall` today; the
    eval-thread dump in `docker logs ay-strategy-signal-service` (look for a frame parked in
    `MarketDataCandlesClient.fetch` / `LiveSeriesStore.refreshFromRest`); `GET
    /api/v1/signal-rejections/dot-health`. **Snapshot `docker logs` to a file BEFORE proposing any
    recreate** (a post-incident recreate destroys the evidence — burned us twice).
-6. **Report PASS/FAIL + evidence.** A FAIL fold into that evening's `post` findings file. **Never restart
+6. **Report PASS / FAIL / INCONCLUSIVE + evidence.** ⚠️ **INCONCLUSIVE is a first-class result and
+   must be reported AS SUCH — never rounded to PASS.** On a fully quiet session it is the only honest
+   verdict available today (see step 4): every readable proxy admits a false PASS, and reporting one
+   is how the 2026-07-17 false escalation and the 2026-07-20 needless restart both happened, in
+   opposite directions. Fold a FAIL **or an INCONCLUSIVE** into that evening's `post` findings file —
+   a run of INCONCLUSIVEs is itself the evidence that chip task_0bed1621 needs building. **Never restart
    or redeploy to fix it mid-session** — propose; the owner/architect acts (a live fix waits for
    post-market or pre-open).
 
-Durable follow-up (owner-gated code): a `SignalStarvationCanary` (FeedWatchdog pattern) that auto-alarms
-on "session open + capture fresh + zero rejections for >N min" would make this gate automatic — this
-routine is the interim manual/scheduled version.
+⚠️ **Do NOT propose a canary that auto-alarms on "session open + capture fresh + zero rejections for
+>N min".** That was proposed here, built as `SignalStarvationCanary` (#868) — and **RETIRED on
+2026-07-26 without ever being armed**, because the predicate fires on ordinary bearish tape (see the
+step-4 correction above). The 2026-07-17 false alarm was that canary's exact signature, executed by
+hand. Automation of this gate must key on the receipt/evaluation heartbeats, which is what
+`SubscriberHealthCanary` and `SessionLivenessHeartbeat` (#941) already do. The remaining coverage gap
+— *which* strategies are dark, as opposed to *is the engine alive* — is a LOAD-time question tracked
+as ledger row **G2** (`T9-strategy-coverage-watchdog`) in
+[`../superpowers/plans/2026-07-02-remaining-items.md`](../superpowers/plans/2026-07-02-remaining-items.md).
 
 ## 5. Findings-file template
 

@@ -178,6 +178,15 @@ class ScalperStrategyLoadTest {
       StrategyDefinition def = StrategyCompiler.compile(config);
       assertThat(def.primaryTimeframe()).as(id + " scalps on 3m").isEqualTo("3m");
 
+      // §0B hardened bounding-exit rule (T21 #990 round-3): every scalper must carry an exit the
+      // ENGINE can fire — a time_stop or an index-side stop_loss (index_points/percent/atr_multiple).
+      // A premium_pct stop is option-leg-only (paper bracket path) and does not count; a future
+      // family declaring premium_pct-only exits with no time_stop must fail HERE, at load shape,
+      // not ship with no live engine-side floor.
+      assertThat(ScalperRisk.hasBoundingExit(def.exitRules()))
+          .as(id + " must carry an engine-fireable bounding exit (time_stop or index-side stop_loss)")
+          .isTrue();
+
       ScalperConfig cfg = ScalperConfig.from(config, tags);
       assertThat(cfg.underlying()).as(id + " underlying").isEqualTo(UNDERLYING.get(id));
       // S24 arming: a strategy that carries the ratified delta-s24-floor tag resolves the >=0.7 band

@@ -7,12 +7,24 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** §0B hard-stop rule — a scalper must carry a fixed SL or a time-stop, not just a structural exit. */
+/**
+ * §0B hard-stop rule, hardened post-T21 (#990 round-3): a scalper must carry a bounding exit the
+ * ENGINE can fire — a time_stop or an index-side stop_loss. A premium_pct stop is an option-leg
+ * band (paper bracket path only) and does NOT count on its own.
+ */
 class ScalperRiskTest {
 
   private static final ExitRuleSpec TIME = new ExitRuleSpec("time_stop", Map.of("max_bars", 10));
-  private static final ExitRuleSpec STOP =
+  private static final ExitRuleSpec PREMIUM_STOP =
       new ExitRuleSpec("stop_loss", Map.of("basis", "premium_pct", "value", 30));
+  private static final ExitRuleSpec POINT_STOP =
+      new ExitRuleSpec("stop_loss", Map.of("basis", "index_points", "value", 60));
+  private static final ExitRuleSpec PERCENT_STOP =
+      new ExitRuleSpec("stop_loss", Map.of("basis", "percent", "value", 1));
+  private static final ExitRuleSpec ATR_STOP =
+      new ExitRuleSpec("stop_loss", Map.of("basis", "atr_multiple", "value", 2));
+  private static final ExitRuleSpec BASISLESS_STOP =
+      new ExitRuleSpec("stop_loss", Map.of("value", 30));
   private static final ExitRuleSpec SIGNAL =
       new ExitRuleSpec("signal_exit", Map.of("rule", "close < vwap"));
 
@@ -22,8 +34,26 @@ class ScalperRiskTest {
   }
 
   @Test
-  void aFixedStopLossSatisfiesIt() {
-    assertThat(ScalperRisk.hasBoundingExit(List.of(STOP))).isTrue();
+  void anEngineSideStopLossSatisfiesIt() {
+    assertThat(ScalperRisk.hasBoundingExit(List.of(POINT_STOP))).isTrue();
+    assertThat(ScalperRisk.hasBoundingExit(List.of(PERCENT_STOP))).isTrue();
+    assertThat(ScalperRisk.hasBoundingExit(List.of(ATR_STOP))).isTrue();
+  }
+
+  @Test
+  void aPremiumPctOnlyStopDoesNot() {
+    // T21: premium_pct is enforced on the OPTION leg by the paper bracket path, which does not run
+    // when a signal is not taken into paper — no engine-side floor, so it cannot bound on its own.
+    assertThat(ScalperRisk.hasBoundingExit(List.of(PREMIUM_STOP))).isFalse();
+    assertThat(ScalperRisk.hasBoundingExit(List.of(PREMIUM_STOP, SIGNAL))).isFalse();
+    assertThat(ScalperRisk.hasBoundingExit(List.of(PREMIUM_STOP, TIME))).isTrue();
+    assertThat(ScalperRisk.hasBoundingExit(List.of(PREMIUM_STOP, POINT_STOP))).isTrue();
+  }
+
+  @Test
+  void anUnknownOrAbsentBasisStopDoesNot() {
+    // ExitEvaluator.levelDistance nulls the distance for an unrecognized basis — the rule is inert.
+    assertThat(ScalperRisk.hasBoundingExit(List.of(BASISLESS_STOP))).isFalse();
   }
 
   @Test

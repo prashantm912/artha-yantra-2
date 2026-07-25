@@ -157,6 +157,17 @@ class ScalperStrategyLoadTest {
       config.path("tags").forEach(t -> tags.add(t.asText()));
       assertThat(tags).as(id + " must be tagged scalper (engine detection)").contains("scalper");
 
+      // T16 (signal-analysis 2026-07-25 bug queue B1): the relative volume floor (#605) was armed
+      // REGISTRY-side only, so every seeder draft was tagless and the 2026-07-20 republish silently
+      // reverted all 18 PE scalpers to the fixed 125k floor (above p99 of the signal series' own 3m
+      // volume distribution — 73-78% of all rejections died there for four sessions). The YAML is the
+      // seeder's source of truth: the tag must live HERE, on every scalper, or any republish disarms
+      // the rail again. Uniform arming is deliberate — every variant reads the SAME NIFTY-future
+      // signal series (ADR-0003), so a fixed floor is structurally unpassable for all of them alike.
+      assertThat(tags)
+          .as(id + " must carry relative-volume-floor (T16: a seeder draft without it disarms the rail on republish)")
+          .contains("relative-volume-floor");
+
       // Each derived strategy carries the tag that arms its §12.3 gate (gap-theory / trend-change /
       // open-high-low / opening-tick); the seeder reads the same tag onto the registry draft.
       String expectedTag = EXPECTED_TAG.get(id);

@@ -48,7 +48,7 @@ name: "Scalper · Straddle (Long) · SENSEX (NIFTY-OI)"
 version: 1.0.0
 description: "Long-straddle volatility scalp (Siva #11) on the NIFTY 3-min front future: direction-NEUTRAL, BUYS both legs of the ATM strike (Call + Put, same strike/expiry, delta ~0.5 each) on the section-0B time + volume rails; profit when the move exceeds the combined premium. Combined-premium-vs-VWAP entry timing + the low-IV gate + one-leg management are LIVE-managed (ASSUMED); the short straddle (SELL legs) is SPAN-deferred. Defined risk = the combined premium."
 author: owner
-tags: [scalper, options, intraday, sensex, straddle, low-iv-straddle]
+tags: [scalper, options, intraday, sensex, straddle, low-iv-straddle, relative-volume-floor]
 
 universe:
   mode: options_of_underlying

@@ -13,7 +13,7 @@ name: "Scalper · Trending-OI Crossover · NIFTY PE"
 version: 1.0.0
 description: "Trending-OI crossover scalp (Siva #5) on the NIFTY front future; long-premium PE, OI-led via the confluence."
 author: owner
-tags: [scalper, options, intraday, nifty, oi-cross-filter, oi-cross-required, oi-slope-agree, oi-divergence-magnitude, oi-interval-and-60m-trend, rsi-s24-bands, delta-s24-floor, premium-s24-band, s24-trade-window, oi-confluence-exit, time-of-day-preference]
+tags: [scalper, options, intraday, nifty, oi-cross-filter, oi-cross-required, oi-slope-agree, oi-divergence-magnitude, oi-interval-and-60m-trend, rsi-s24-bands, delta-s24-floor, premium-s24-band, s24-trade-window, oi-confluence-exit, time-of-day-preference, relative-volume-floor]
 
 universe:
   mode: options_of_underlying

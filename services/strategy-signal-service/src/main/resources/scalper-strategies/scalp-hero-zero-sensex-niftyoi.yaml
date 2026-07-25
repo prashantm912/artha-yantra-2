@@ -38,7 +38,7 @@ name: "Scalper · Hero Zero · SENSEX (NIFTY-OI)"
 version: 1.0.0
 description: "Hero-Zero expiry-day end-of-day scalp (Siva #7) on the NIFTY 3-min front future: index weekly-expiry day only (OI ignored on monthly expiry), after 14:30 in the 14:30-15:20 window, a >50% OI+price range break confirmed by short-covering on the side, RSI not overbought/oversold, closing toward the day extreme; long-premium BUY side only (CE toward the day high / PE toward the day low), SL = 50% of premium + 15:20 square-off, one strike inside the SC strike."
 author: owner
-tags: [scalper, options, intraday, sensex, hero-zero, herozero-side-oi, hero-zero-iv-flat, premium-skew]
+tags: [scalper, options, intraday, sensex, hero-zero, herozero-side-oi, hero-zero-iv-flat, premium-skew, relative-volume-floor]
 
 universe:
   mode: options_of_underlying

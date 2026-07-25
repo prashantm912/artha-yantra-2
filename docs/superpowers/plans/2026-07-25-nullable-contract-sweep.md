@@ -30,9 +30,18 @@ computed from construction call sites) and the slice plan.
 4. **Request-body records are OUT of scope** — the converter applies `required` to responses only;
    annotating request records changes client-facing semantics. (Inventory kept below for a
    possible later pass.)
-5. **Framework leaks, not annotatable:** edge-gateway `WebSession` (Spring type leaked by the
-   `logout(WebSession)` parameter — fix is hiding the param from springdoc), `PageInstrument`
-   (Spring Data `Page<Instrument>` — annotate `Instrument` instead).
+5. **Framework leaks, not annotatable:** edge-gateway `WebSession` — **FIXED (task_98984789)**:
+   springdoc does not recognise `WebSession` as an injected WebFlux type (it does recognise
+   `ServerWebExchange`), so it published the `logout(WebSession)` argument as a **required QUERY
+   parameter** carrying a serialized session object — a request shape the gateway never accepted
+   (the FE has always called `POST /auth/logout` with no params, `session.store.ts:67`).
+   `@Parameter(hidden = true)` removes both the param and the schema. ⚠️ The breaking gate reports
+   this as incompatible (`Delete session in query` — openapi-diff cannot know the param was
+   fiction), so it ships with the `Contract break: APPROVED` line; that is the escape hatch working
+   as designed, not a bypass. **`PageInstrument` was a FALSE ALARM** — it is NOT Spring Data's
+   `Page`; it is the repo's own generic record `Page<T>(items,total,limit,offset)`
+   (`InstrumentsController.java:26`), and `PageInstrument` is just springdoc's name for the
+   generic instantiation. The schema is clean and correctly `required`-ed. No action.
 
 ## Slices
 

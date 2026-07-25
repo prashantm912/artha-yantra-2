@@ -10,14 +10,6 @@
       "post" : {
         "tags" : [ "auth-controller" ],
         "operationId" : "logout",
-        "parameters" : [ {
-          "name" : "session",
-          "in" : "query",
-          "required" : true,
-          "schema" : {
-            "$ref" : "#/components/schemas/WebSession"
-          }
-        } ],
         "responses" : {
           "200" : {
             "description" : "OK"
@@ -124,35 +116,6 @@
   },
   "components" : {
     "schemas" : {
-      "WebSession" : {
-        "type" : "object",
-        "properties" : {
-          "id" : {
-            "type" : "string"
-          },
-          "started" : {
-            "type" : "boolean"
-          },
-          "attributes" : {
-            "type" : "object",
-            "additionalProperties" : { }
-          },
-          "lastAccessTime" : {
-            "type" : "string",
-            "format" : "date-time"
-          },
-          "creationTime" : {
-            "type" : "string",
-            "format" : "date-time"
-          },
-          "maxIdleTime" : {
-            "type" : "string"
-          },
-          "expired" : {
-            "type" : "boolean"
-          }
-        }
-      },
       "ErrorResponse" : {
         "type" : "object",
         "properties" : {

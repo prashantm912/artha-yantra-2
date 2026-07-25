@@ -29,8 +29,19 @@ class InstrumentSyncSchedulerTest {
   private static final Clock TRADING_DAY =
       Clock.fixed(Instant.parse("2026-07-27T03:35:00Z"), ZoneOffset.UTC); // Mon 09:05 IST
 
-  private static InstrumentSyncService.SyncStatus status(String state) {
-    return new InstrumentSyncService.SyncStatus("job", state, Instant.EPOCH, Map.of(), 1L, null);
+  /** Ended {@code state} TODAY (2026-07-27 IST). */
+  private static InstrumentSyncService.SyncStatus today(String state) {
+    return new InstrumentSyncService.SyncStatus(
+        "job", state, Instant.parse("2026-07-27T03:00:00Z"), Map.of(), 1L, null);
+  }
+
+  /**
+   * The shape production actually produces after a restart: {@code status()} SYNTHESIZES an OK from
+   * the DB's `last_seen_at`, so a container booted today reports OK carrying YESTERDAY's timestamp.
+   */
+  private static InstrumentSyncService.SyncStatus okFromYesterday() {
+    return new InstrumentSyncService.SyncStatus(
+        null, "OK", Instant.parse("2026-07-24T03:05:00Z"), Map.of(), 0L, null);
   }
 
   private static InstrumentSyncScheduler scheduler(InstrumentSyncService svc) {
@@ -42,8 +53,8 @@ class InstrumentSyncSchedulerTest {
   @Test
   void catchUpRerunsTheSyncWhenTheMorningPassFailed() {
     InstrumentSyncService svc = mock(InstrumentSyncService.class);
-    when(svc.status()).thenReturn(status("FAILED"));
-    when(svc.runSync()).thenReturn(status("OK"));
+    when(svc.status()).thenReturn(today("FAILED"));
+    when(svc.runSync()).thenReturn(today("OK"));
 
     scheduler(svc).morningSyncCatchUp();
 
@@ -53,7 +64,7 @@ class InstrumentSyncSchedulerTest {
   @Test
   void catchUpIsInertWhenTheMorningPassSucceeded() {
     InstrumentSyncService svc = mock(InstrumentSyncService.class);
-    when(svc.status()).thenReturn(status("OK"));
+    when(svc.status()).thenReturn(today("OK"));
 
     scheduler(svc).morningSyncCatchUp();
 
@@ -64,19 +75,37 @@ class InstrumentSyncSchedulerTest {
   @Test
   void catchUpNeverDoubleStartsAnInFlightSync() {
     InstrumentSyncService svc = mock(InstrumentSyncService.class);
-    when(svc.status()).thenReturn(status("RUNNING"));
+    when(svc.status()).thenReturn(today("RUNNING"));
 
     scheduler(svc).morningSyncCatchUp();
 
     verify(svc, never()).runSync();
   }
 
-  /** NEVER_RUN (a boot after 08:30) is a legitimate catch-up trigger, not a skip. */
+  /** NEVER_RUN (a boot with an empty instruments table) is a catch-up trigger, not a skip. */
   @Test
   void catchUpRunsWhenTheMorningPassNeverHappened() {
     InstrumentSyncService svc = mock(InstrumentSyncService.class);
-    when(svc.status()).thenReturn(status("NEVER_RUN"));
-    when(svc.runSync()).thenReturn(status("OK"));
+    when(svc.status()).thenReturn(today("NEVER_RUN"));
+    when(svc.runSync()).thenReturn(today("OK"));
+
+    scheduler(svc).morningSyncCatchUp();
+
+    verify(svc).runSync();
+  }
+
+  /**
+   * THE case the first version of this test faked away. A boot after 08:30 leaves the in-memory
+   * status NEVER_RUN, but {@code InstrumentSyncService.status()} SYNTHESIZES an OK from the DB's
+   * `last_seen_at` — yesterday's. Mocking NEVER_RUN therefore asserted a state production cannot
+   * present here, while the real service would report OK and SKIP the catch-up on a day with no
+   * successful sync at all. Skipping must key on the DATE, never on the word "OK".
+   */
+  @Test
+  void catchUpRunsWhenTheOnlySuccessIsYesterdays() {
+    InstrumentSyncService svc = mock(InstrumentSyncService.class);
+    when(svc.status()).thenReturn(okFromYesterday());
+    when(svc.runSync()).thenReturn(today("OK"));
 
     scheduler(svc).morningSyncCatchUp();
 

@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.futures;
 
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.kite.FuturesContractSource;
@@ -42,6 +44,8 @@ public class FuturesOiSnapshotService {
   private final Clock clock;
   private final List<String> underlyings;
   private final Counter rows;
+  private final Counter retries;
+  private final Counter skips;
   private final Map<String, Long> previousOi = new ConcurrentHashMap<>();
 
   public FuturesOiSnapshotService(
@@ -60,6 +64,11 @@ public class FuturesOiSnapshotService {
     this.clock = clock;
     this.underlyings = underlyings;
     this.rows = meterRegistry.counter("ay_futures_oi_snapshot_rows_total");
+    // T12/G5 observability: `retries` advancing with `skips` flat is the fix working (the pass now
+    // waits out the options-chain window instead of abandoning the minute); `skips` advancing means
+    // contention outgrew the patience and the cadence is degrading again.
+    this.retries = meterRegistry.counter("ay_futures_oi_snapshot_quote_retries_total");
+    this.skips = meterRegistry.counter("ay_futures_oi_snapshot_skips_total");
   }
 
   /** The cron cadence; the gate shifts back by this much (see OptionsSnapshotService.CAPTURE_CADENCE). */
@@ -70,12 +79,93 @@ public class FuturesOiSnapshotService {
    * the boot-phase fixedDelay. One batched quotes() call per pass (~2 s), so every minute is
    * affordable; the shifted gate skips the 09:15:00 fire and keeps the 15:30:00 EOD fire.
    */
-  @Scheduled(cron = "${artha.futures.oi-snapshot-cron:0 * * * * *}", zone = "Asia/Kolkata")
+  /**
+   * Bounded patience for the one batched {@code quotes()} permit (T12 / ledger G5). The
+   * {@code kite-quote} limiter is 1/s with a 5 s acquisition timeout, and
+   * {@code OptionsSnapshotService} takes a permit every second for ~70 consecutive seconds every 2
+   * minutes; resilience4j's limiter is not FIFO-fair, so a 5 s waiter can be starved straight
+   * through that window and abandon the whole minute. Retrying the acquisition is what closes the
+   * ~2-min effective cadence — it does NOT widen the rate budget (still one call, still 1/s).
+   *
+   * <p>This is the SECONDARY half of the T12 fix. The primary cause was scheduler starvation — see
+   * {@code MonitorSchedulingConfig.oiCaptureTaskScheduler}. Limiter contention only becomes reachable
+   * once this cron has its own thread, because before that the options pass simply blocked it.
+   *
+   * <p><b>Worst-case wall time is ~29 s, not the ~9 s of sleeping</b>: four 5 s limiter acquisitions
+   * plus three 3 s backoffs. That still cannot overlap the next fire or starve anything else — this
+   * method owns its scheduler thread and nothing else targets it — but a slow acquired HTTP call on
+   * top can still cause one cron fire to be missed, which is counted.
+   */
+  private static final int QUOTE_ACQUIRE_ATTEMPTS = 4;
+
+  private static final Duration QUOTE_ACQUIRE_BACKOFF = Duration.ofSeconds(3);
+
+  /**
+   * Runs on its OWN single-thread scheduler, not the default pool. The retry above parks this
+   * thread for up to ~24 s; the default {@code taskScheduler} is pool size 1 shared by ~32 scheduled
+   * methods, so waiting there would stall the whole service (the S1–S3 failure mode, #1016). See
+   * {@code MonitorSchedulingConfig.oiCaptureTaskScheduler}.
+   */
+  @Scheduled(
+      cron = "${artha.futures.oi-snapshot-cron:0 * * * * *}",
+      zone = "Asia/Kolkata",
+      scheduler = "oiCaptureTaskScheduler")
   public void scheduledSnapshot() {
     if (!isOpenSafe(clock.instant().minus(CAPTURE_CADENCE))) {
       return;
     }
     snapshotNow();
+  }
+
+  /**
+   * The batched quote fetch, retried across the {@code kite-quote} limiter's non-FIFO starvation
+   * window (see {@link #QUOTE_ACQUIRE_ATTEMPTS}). Returns {@code null} when every attempt lost the
+   * race, so the caller can record a genuine skip instead of persisting a partial pass.
+   *
+   * <p>Only LOCAL limiter saturation is retried. A Kite-side 429, an open breaker, an auth failure
+   * or any other error propagates unchanged — retrying those would spend budget on a call that
+   * cannot succeed.
+   */
+  private Map<InstrumentKey, QuoteGateway.Quote> quotesWithPatience(List<InstrumentKey> keys) {
+    for (int attempt = 1; attempt <= QUOTE_ACQUIRE_ATTEMPTS; attempt++) {
+      try {
+        return quoteGateway.quotes(keys);
+      } catch (ApiException e) {
+        boolean localSaturation =
+            e.httpStatus() == 429 && ErrorCodes.RATE_LIMIT_LOCAL.equals(e.code());
+        if (!localSaturation || attempt == QUOTE_ACQUIRE_ATTEMPTS) {
+          if (localSaturation) {
+            skips.increment();
+            log.warn(
+                "futures OI snapshot skipped: quote permit lost {} times (kite-quote is 1/s and"
+                    + " shared with the options-chain pass)",
+                QUOTE_ACQUIRE_ATTEMPTS);
+            return null;
+          }
+          throw e;
+        }
+        retries.increment();
+        if (!pauseBeforeRetry()) {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Waits one backoff interval between permit attempts; returns {@code false} if interrupted (the
+   * pass then abandons the minute rather than swallowing the interrupt). Overridable so unit tests
+   * exercise the retry ladder without sleeping real seconds — the ONLY reason it is not inlined.
+   */
+  boolean pauseBeforeRetry() {
+    try {
+      Thread.sleep(QUOTE_ACQUIRE_BACKOFF.toMillis());
+      return true;
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
   }
 
   /** One pass across every configured underlying's front/next/far contracts. */
@@ -107,7 +197,10 @@ public class FuturesOiSnapshotService {
     }
 
     List<InstrumentKey> keys = pinned.stream().map(p -> p.contract().key()).toList();
-    Map<InstrumentKey, QuoteGateway.Quote> quotes = quoteGateway.quotes(keys);
+    Map<InstrumentKey, QuoteGateway.Quote> quotes = quotesWithPatience(keys);
+    if (quotes == null) {
+      return; // every attempt lost the permit race — the minute is genuinely skipped, and counted
+    }
 
     List<FuturesOiSnapshotRepository.Row> out = new ArrayList<>();
     for (Pinned p : pinned) {

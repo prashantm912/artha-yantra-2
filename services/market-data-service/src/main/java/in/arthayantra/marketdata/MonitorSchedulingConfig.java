@@ -95,4 +95,44 @@ public class MonitorSchedulingConfig {
     scheduler.setDaemon(true);
     return scheduler;
   }
+
+  /**
+   * A single daemon thread owned solely by {@code FuturesOiSnapshotService.scheduledSnapshot} (T12 /
+   * ledger G5). Its per-minute pass needs exactly ONE batched {@code quotes()} permit, but it was
+   * losing roughly every other minute — 161 single-minute skips — and the cause is neither the
+   * budget nor the cron.
+   *
+   * <p><b>The primary cause is SCHEDULER STARVATION, not the rate limiter.</b> Both snapshot jobs sat
+   * on the single default {@code taskScheduler} (pool size 1, ~32 scheduled methods). While
+   * {@code OptionsSnapshotService}'s pass held that one thread — {@link #barFlushTaskScheduler}
+   * already sizes it at "~70 batched calls ≈ 70 s at the 1/s limit" — this cron could not even be
+   * INVOKED, so its fires were dropped before any permit was requested. Moving it to its own thread
+   * is therefore the fix; the patience ladder in {@code FuturesOiSnapshotService} is the secondary
+   * half, and it only becomes relevant AFTER this isolation, because only then can the two passes
+   * contend at the limiter concurrently rather than one simply blocking the other.
+   *
+   * <p><b>Budget.</b> Kite documents the quote endpoint at 1 req/second, exactly what the
+   * {@code kite-quote} limiter is configured to — so any SECOND dedicated limiter would put us at
+   * 2/s, over Kite's published budget. That is why the row's literal "dedicated quote limiter"
+   * framing is NOT what was built. Nominal scheduled demand is close to the ceiling, not comfortably
+   * under it: ~35/min from the options snapshot pass, up to ~24/min from
+   * {@code OptionsSnapshotService.scheduledBroadcast} (six configured underlyings × two quote calls
+   * through the default chain), plus 1/min here — roughly 60 of 60 permits/min. Completion-based
+   * {@code fixedDelay} keeps ACTUAL throughput below that, so the budget is not proven to be
+   * exceeded, but it is not "well inside" either. If {@code ay_futures_oi_snapshot_skips_total}
+   * starts advancing, capacity — not patience — is the thing to look at.
+   *
+   * <p><b>Why not {@link #monitorTaskScheduler()}.</b> Same fence as {@code barFlushTaskScheduler}:
+   * that pool is reserved for pure liveness DETECTORS, and this is a write path (batched quote fetch
+   * + JDBC insert). Parking it there could starve {@code FeedWatchdog.check} and
+   * {@code DataHealthCanary.sweep}.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler oiCaptureTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("oi-capture-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
 }

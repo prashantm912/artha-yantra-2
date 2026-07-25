@@ -33,12 +33,19 @@ Tier legend: **clean** = ship on CI-green; **HOLD/owner** = build/present, owner
   price made a one-bar force-exit for held-PE; `levelFromRules` deleted, index-side levels now
   persist NULL for premium_pct-only strategies). Sibling defect fixed separately: **#993**
   (`indexPointStopLevel` keyed on `definition.direction()` — wrong side for every PE-side take
-  across the 12 `index_points` YAMLs, 8 enabled live). NEEDS deploy + republish.
+  across the 12 `index_points` YAMLs, 8 enabled live). **DEPLOYED + REPUBLISHED 2026-07-25 ~23:00
+  IST** — 28 enabled scalpers republished, 38/38 now publish a config carrying the bands (and still
+  carrying the armed `relative-volume-floor` tag); deployed `SignalEngine.class` carries
+  `entryExposureIsShort`.
 - **T6 → (b)**: vwap dot support requires ≥15 bps distance — **#991**. Deploy-effective, no republish.
+  **LIVE** — deployed jar's `application.yml` carries `vwap-min-distance-bps: 15`.
 - **T10 → (b)**: EOD-only exits accepted; `PaperStaleTickAlerter` downgraded for the
-  `minervini`/`manas-arora` books — **#992**. Deploy-effective.
+  `minervini`/`manas-arora` books — **#992**. Deploy-effective. **LIVE.**
 - **T22 → (15,3)**: oi_spurt floors — **#991**. Deploy-effective; judge combined T22+T6 over 2
-  forward sessions.
+  forward sessions. **LIVE** — deployed `spurt-oi-pct: 15` / `spurt-price-pct: 3`.
+- **S1–S3 scheduler isolation → #1016** (dedicated bar-flush + Telegram pools, IST cron zone,
+  bounded registry-reload query). **DEPLOYED + LIVE-VERIFIED** — thread dumps show
+  `bar-flush-sched-1` and `telegram-poll-sched-1`.
 - Still open from this pack: **T12 accept** (no build), **B8 host clock = OWNER before Monday**,
   item 7's blocked tunes (wait for post-fix forward sessions).
 

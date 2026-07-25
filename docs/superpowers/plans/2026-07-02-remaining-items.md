@@ -575,11 +575,11 @@ number since 07-21. **Queue frozen in `docs/signal-analysis/2026-07-25-weekly-bu
 | B11 | T21/T6/T10 | owner-decision pack | OWNER | **DELIVERED 2026-07-25** — full pack in `docs/signal-analysis/2026-07-25-weekly-bug-queue.md` (premium exits rec=(b) add bands; vwap rec=narrow ≥15 bps [measured p50=16.3]; paper backlog rec=EOD-only+downgrade alert; +T22 floors, T12 cadence, B8 clock) |
 | S1 | — | `flushBars` (1-s live bar-close sweep) on market-data's default pool-1 behind the ~70-s options-snapshot pass — bars close up to ~70 s late; also refines B9 (even-minute options pass eats the odd futures tick, 2:1 = the observed skip pattern) | clean (scheduler isolation) | **NEW from the task_a2ae20ed sweep (closes that chip)** — verify Monday via `ay_options_snapshot_duration_seconds` first; details in the bug-queue doc §scheduler-sweep |
 | S2 | — | live-armed Telegram poll (3-s outbound HTTPS) shares strategy-signal's pool-1 with the SL/TP bracket sweep + straddle exit monitor | clean (scheduler isolation, money-adjacent) | **NEW from the sweep** — owner picks S1/S2 order |
-| S3 | — | `selfHeal` cron missing IST zone; ShadowVariantRegistry 5-min JDBC without verified query timeout on the SL/TP pool | clean (small hygiene) | NEW from the sweep — **S1+S2+S3 build delegated to an Opus worktree builder 2026-07-25 (in flight)** |
+| S3 | — | `selfHeal` cron missing IST zone; ShadowVariantRegistry 5-min JDBC without verified query timeout on the SL/TP pool | clean (small hygiene) | **DONE [#1016](https://github.com/prashantm912/artha-yantra-2/pull/1016) @ 28860acd — S1+S2+S3 in one PR, MERGED + DEPLOYED + LIVE-VERIFIED 2026-07-25** (Opus worktree builder; codex `APPROVED` round 1, no findings). S1 `barFlushTaskScheduler` / S2 `telegramTaskScheduler` = dedicated single-thread daemon pools in each service's existing `MonitorSchedulingConfig`, each keeping the explicit default `taskScheduler` bean (BEJ-01/#919 precedent — declaring any `TaskScheduler` bean otherwise hijacks the default); S3a `zone="Asia/Kolkata"` on `ExpiredBackfillAutoResume`; S3b private `JdbcTemplate` w/ `setQueryTimeout(5)` on the registry reload. Annotation/config only — no method body, no new knob. **Live proof: thread dumps show `bar-flush-sched-1` (market-data) + `telegram-poll-sched-1` (strategy-signal) alongside the default `scheduling-1`.** |
 | D1 | T21 | premium bands SL −25% / TP +35% on the 42 bracket-less YAMLs (owner picked rec (b)) | clean (owner-approved) | **DONE [#990](https://github.com/prashantm912/artha-yantra-2/pull/990)** (3 review rounds, Opus fallback — codex 503; round 2 caught a live Critical: `premium_pct` resolved vs the INDEX entry = one-bar force-exit for held-PE; `levelFromRules` DELETED, index-side levels persist NULL for premium_pct-only strategies; round 3 flipped the IT assertion that encoded the old semantics). **Needs deploy + seeder resync + republish** |
 | D2+D3 | T22+T6 | oi_spurt floors (50,8)→(15,3) + vwap dot ≥15 bps distance (owner picked recs) | clean (owner-approved) | **DONE [#991](https://github.com/prashantm912/artha-yantra-2/pull/991)** (2 rounds) — Spring props, deploy-effective, NO republish; judge combined effect over 2 forward sessions |
 | D4 | T10 | EOD-managed swing books stop paging PaperStaleTickAlerter (owner picked rec (b)) | clean (owner-approved) | **DONE [#992](https://github.com/prashantm912/artha-yantra-2/pull/992)** (2 rounds) — `artha.paper.eod-managed-books=minervini,manas-arora`; metric still counts, settle-side alerts NOT exempted; deploy-effective |
-| D8 | — | **NEW money defect found by the #990 review:** `indexPointStopLevel` keys the stop side on `definition.direction()` — the seam derives CE/PE per entry, so EVERY PE-side take across the 12 `index_points` YAMLs (connect-the-dots ×6, trending-oi ×6; 8 enabled+published live) persisted a below-entry stop = same one-bar force-exit shape (pre-existing since #336, unobserved only because no PE fired) | clean (correctness) | **BUILT [#993](https://github.com/prashantm912/artha-yantra-2/pull/993)** — `entryExposureIsShort` (held option side wins, straddle/non-scalper fall back to definition), 6/6 + 22/22 green; codex review in flight (codex back up) |
+| D8 | — | **NEW money defect found by the #990 review:** `indexPointStopLevel` keys the stop side on `definition.direction()` — the seam derives CE/PE per entry, so EVERY PE-side take across the 12 `index_points` YAMLs (connect-the-dots ×6, trending-oi ×6; 8 enabled+published live) persisted a below-entry stop = same one-bar force-exit shape (pre-existing since #336, unobserved only because no PE fired) | clean (correctness) | **DONE [#993](https://github.com/prashantm912/artha-yantra-2/pull/993) @ 0d00e5b0, MERGED + DEPLOYED + LIVE-VERIFIED 2026-07-25** — `entryExposureIsShort` (held option side wins, straddle/non-scalper fall back to definition), 6/6 + 22/22 green; codex `APPROVED` (true cross-vendor — codex back up). Deployed class carries `entryExposureIsShort`. Trap this cost: `git add -A` swallowed another session's in-flight `ScalperRisk` chip edits into the first commit, and the split left one foreign hunk in the SAME file that codex round 2 caught as contradicting the branch's own invariant — stage by explicit path (see the concurrent-session memory topic) |
 
 Tunes T1/T7/T3/T5/T2 stay BLOCKED on B1/B2/B11a (rollup verdict: challengers currently measure
 the regressions, not the knobs).
@@ -590,13 +590,40 @@ strategy-signal + frontend-react rebuilt off main `f110c26b`; dot-health endpoin
 Kite login (#874 self-heals). Monday verifies: §3.14 floor tags live, PartialBucketCanary quiet
 (≤650/10% residue absorbed), dot-health no false all-dead at EOD.
 
-**Deploy state 2026-07-25 ~16:15 IST (D-wave):** #990/#991/#992 MERGED (main `64f9caaa`) —
-**NOT yet deployed**; strategy-signal deploy + republish batch pending #993 (+S1–S3 if ready) so
-one deploy carries the wave. After deploy: T22/T6/T10 effective immediately; T21 + D8 need the
-seeder resync + `POST /strategies/{id}/publish` of the enabled scalpers, then verify the published
-configs carry the `premium_pct` bands. Chips filed from the #990 round-3 review: OpenAPI
-non-null stopLoss/target on 3 DTOs (task_392b3672); `hasBoundingExit` reachability hardening
-(task_85543821). **OWNER before Monday: B8 host clock resync (commands in the bug-queue doc).**
+**Deploy state 2026-07-25 ~23:00 IST (D-wave) — SHIPPED + DEPLOYED + VERIFIED.** The whole
+D-wave is live off main `28860acd`: #990 (T21) · #991 (T22+T6) · #992 (T10) · #993 (D8) ·
+#994 (docs) · #1016 (S1–S3). market-data + strategy-signal rebuilt (full reactor `-am`) and
+recreated; **no migration in the wave** — V046 was already applied 09:18 UTC, so a plain
+`up -d` was correct (no flyway force-recreate needed).
+
+Live verification, each claim computed this session:
+- **Engine:** `strategy.engine_reloads` id=4 @ 17:19:06 UTC — `loaded=38 / unresolved=0 /
+  load_errors=0` (the `unresolved==0` health signal, not `loaded>0`).
+- **S1/S2:** `kill -3 1` thread dumps show `bar-flush-sched-1` (market-data) and
+  `telegram-poll-sched-1` (strategy-signal) live beside the default `scheduling-1`.
+- **T21 + D8 republish:** 28 enabled scalpers republished through the gateway
+  (`POST /strategies/{id}/publish`); **38/38 enabled scalpers now publish a config carrying
+  `premium_pct` AND keeping the `relative-volume-floor` tag**; 0 strategies left with an
+  unpublished newer version. The 6 swing books (minervini ×4, manas ×2) were untouched, as intended.
+- **T22/T6:** the deployed jar's `application.yml` carries `spurt-oi-pct:15` /
+  `spurt-price-pct:3` / `vwap-min-distance-bps:15` (defaults, no `.env` override) — deploy-effective,
+  no republish. **#993:** the deployed `SignalEngine.class` contains `entryExposureIsShort`.
+
+**Republish trap worth keeping:** "latest DRAFT vs published" is the WRONG divergence test — the
+seeder's `resyncConfig` dedupes against `latestVersion(strategyId)` *of any status*, so an
+already-current strategy keeps a months-old leftover draft that the naive query flags. It flagged
+all 38 and would have *reverted* `scalp-gap-theory-nifty` to a 07-06 draft missing the armed
+`relative-volume-floor` tag. Correct test: **latest version row ≠ `published_version_id`** (28 hits,
+all verified to gain the bands and lose nothing before publishing). Also: `Invoke-WebRequest -Method
+Post` with no `-ContentType` sends `x-www-form-urlencoded` and the publish endpoint answers **500**
+(not 415) — pass `-ContentType 'application/json' -Body '{}'`; the unmapped
+`HttpMediaTypeNotSupportedException` is a small error-handling gap (chip-worthy, not filed).
+
+Chips filed from the #990 round-3 review: OpenAPI non-null stopLoss/target on 3 DTOs
+(task_392b3672); `hasBoundingExit` reachability hardening (task_85543821) — both ran in separate
+sessions. **OWNER before Monday: B8 host clock resync (commands in the bug-queue doc).** Monday
+verifies: §3.14 floor tags live, PartialBucketCanary quiet, dot-health no false all-dead, and the
+combined T22+T6 dot effect judged over 2 forward sessions.
 
 ---
 

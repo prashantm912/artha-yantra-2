@@ -228,28 +228,54 @@ public class CandleQueryService {
   /**
    * Phase-13 gap backfill: re-fetch 1m bars for a silent-through-reconnect window, async on the
    * refresh executor, stored with {@code source='BACKFILL'} (B-6 — replayed vs streamed bars).
+   *
+   * <p>T19 (2026-07-25): {@code LiveTickerFeed} hands the RAW tick-gap instants (last tick seen,
+   * e.g. {@code 12:51:38}), and a sub-minute {@code from} produced bars keyed OFF the 1m grid —
+   * distinct phantom PK rows the repair never replaced, double-counted by every {@code time_bucket}
+   * rollup (887/403/308 rows on 2026-07-15/20/22, 23k historical). This is the only entry that
+   * bypasses {@link GapDetector}'s aligned bucket grid, so the window is snapped HERE: floor
+   * {@code from}, ceil {@code to} — the superset is safe ({@code upsertAuthoritativeAll} replaces
+   * value-changed bars only) and the grid is what the rollups and the recency re-fetch assume.
    */
   @SuppressWarnings("FutureReturnValueIgnored")
   public void backfillRange(
-      String exchange, String tradingsymbol, OffsetDateTime from, OffsetDateTime to) {
+      String exchange, String tradingsymbol, OffsetDateTime rawFrom, OffsetDateTime rawTo) {
+    GapDetector.Gap window = alignBackfillWindow(rawFrom, rawTo);
     refreshExecutor.submit(
         () -> {
           try {
-            fetchAndStore(exchange, tradingsymbol, "1m", from, to, "BACKFILL");
-            log.info("gap backfill done for {}:{} [{}, {})", exchange, tradingsymbol, from, to);
+            fetchAndStore(exchange, tradingsymbol, "1m", window.from(), window.to(), "BACKFILL");
+            log.info(
+                "gap backfill done for {}:{} [{}, {})",
+                exchange, tradingsymbol, window.from(), window.to());
           } catch (Exception e) {
             log.error("gap backfill failed for {}:{}", exchange, tradingsymbol, e);
           }
         });
   }
 
+  /** T19: floor {@code from} / ceil {@code to} onto the 1m grid (already-aligned bounds pass through). */
+  static GapDetector.Gap alignBackfillWindow(OffsetDateTime rawFrom, OffsetDateTime rawTo) {
+    OffsetDateTime from = rawFrom.truncatedTo(java.time.temporal.ChronoUnit.MINUTES);
+    OffsetDateTime flooredTo = rawTo.truncatedTo(java.time.temporal.ChronoUnit.MINUTES);
+    return new GapDetector.Gap(from, flooredTo.equals(rawTo) ? rawTo : flooredTo.plusMinutes(1));
+  }
+
   private void fetchAndStore(
       String exchange,
       String tradingsymbol,
       String baseInterval,
-      OffsetDateTime from,
-      OffsetDateTime to,
+      OffsetDateTime rawFrom,
+      OffsetDateTime rawTo,
       String source) {
+    // T19 choke-point normalization (codex round 1): backfillRange snaps its window above, but
+    // refreshAsync forwards CALLER-controlled bounds from the public 202 endpoint straight here —
+    // an off-grid request would persist the same phantom keys. Snapping at the single fetch/store
+    // funnel covers every current and future caller; a no-op for already-aligned windows, and
+    // harmless for 1d (date-bounded fetches are minute-aligned by construction).
+    GapDetector.Gap window = alignBackfillWindow(rawFrom, rawTo);
+    OffsetDateTime from = window.from();
+    OffsetDateTime to = window.to();
     InstrumentKey key = new InstrumentKey(exchange, tradingsymbol);
     for (GapDetector.Gap page : GapDetector.pages(new GapDetector.Gap(from, to))) {
       List<HistoricalCandleGateway.Candle> fetched =

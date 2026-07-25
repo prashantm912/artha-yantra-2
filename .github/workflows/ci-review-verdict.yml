@@ -35,9 +35,12 @@
 #         The owner APPROVED the design — see notes (2026-07-25)   (unrelated prose)
 #
 #     So: optional `*`/`**` emphasis around the token, free prose between the token and the
-#     em-dash and after the vendor parenthetical — but a reviewer `— <model> (<Vendor>)` is
+#     dash and after the vendor parenthetical — but a reviewer `— <model> (<Vendor>)` is
 #     still MANDATORY for the three real verdicts, and REQUEST_CHANGES / NEEDS_REWORK still
 #     need their `(resolved)` marker. SKIPPED takes `(<reason>)` instead of a reviewer.
+#     The dash may be an em-dash, an en-dash, or plain ASCII `-`/`--` — insisting on U+2014
+#     would reject an honest verdict for exactly the cosmetic reason this gate stopped doing
+#     that, and an ASCII hyphen is what most keyboards actually type.
 #
 # (2) A rerun could not see a corrected body. The step read
 #     `${{ github.event.pull_request.body }}` — the EVENT PAYLOAD — so `gh run rerun` replayed
@@ -83,9 +86,13 @@ jobs:
           PR_BODY="$(gh api "repos/${PR_REPO}/pulls/${PR_NUMBER}" --jq '.body // ""')"
 
           LABEL='Cross-vendor review:[[:space:]]*[*_]*'
-          # `— <model> (<Vendor>)`: an em-dash, then at least one non-space model char, then a
-          # non-empty parenthetical. Prose after the parenthetical is free (grep is unanchored).
-          REVIEWER='—[[:space:]]*[^()[:space:]][^()]*\([^)]+\)'
+          # `— <model> (<Vendor>)`: a dash separator, then at least one non-space model char, then
+          # a non-empty parenthetical. Prose after the parenthetical is free (grep is unanchored).
+          # The separator accepts an em-dash, en-dash, or plain ASCII `-`/`--`: requiring exactly
+          # U+2014 would reject an honest verdict on the same cosmetic grounds this gate was
+          # loosened to stop rejecting (task_d142795f audit).
+          DASH='(—|–|--?)'
+          REVIEWER="${DASH}[[:space:]]*[^()[:space:]][^()]*\([^)]+\)"
 
           # APPROVED needs a reviewer; REQUEST_CHANGES / NEEDS_REWORK also need `(resolved)`;
           # SKIPPED needs a non-empty parenthesised reason instead of a reviewer.

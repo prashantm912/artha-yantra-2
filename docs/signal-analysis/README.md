@@ -351,7 +351,6 @@ Steps (all read-only — never restart/deploy/write mid-session):
          position / loaded logic, so it is direction-, window- and position-independent.
        - `ay_signal_bar_evaluated_age_seconds` — its evaluation-side twin.
 
-       **Verdict on an all-zero session:** received-age well inside the bar cadence (≲ 1–2 bar
        **Verdict needs BOTH gauges — received alone is not enough.** Bars can keep arriving while
        `signal-eval` is wedged, which holds received-age fresh while evaluated-age grows; reading
        received only would call that PASS.
@@ -396,10 +395,11 @@ Steps (all read-only — never restart/deploy/write mid-session):
    /api/v1/signal-rejections/dot-health`. **Snapshot `docker logs` to a file BEFORE proposing any
    recreate** (a post-incident recreate destroys the evidence — burned us twice).
 6. **Report PASS / FAIL / INCONCLUSIVE + evidence.** ⚠️ **INCONCLUSIVE is a first-class result and
-   must be reported AS SUCH — never rounded to PASS.** On a fully quiet session it is the only honest
-   verdict available today (see step 4): every readable proxy admits a false PASS, and reporting one
-   is how the 2026-07-17 false escalation and the 2026-07-20 needless restart both happened, in
-   opposite directions. Fold a FAIL **or an INCONCLUSIVE** into that evening's `post` findings file —
+   must be reported AS SUCH — never rounded to PASS.** Since the liveness gauges landed
+   (task_0bed1621) a fully quiet session is normally decidable at step 4, so INCONCLUSIVE should be
+   RARE — it now means the gauges themselves were unreadable, which is its own finding. It remains a
+   legal verdict precisely because rounding an unproven case up to PASS is how the 2026-07-17 false
+   escalation and the 2026-07-20 needless restart both happened, in opposite directions. Fold a FAIL **or an INCONCLUSIVE** into that evening's `post` findings file —
    an INCONCLUSIVE should now be RARE — the liveness gauges above answer the quiet-session case
    directly; a run of them means the gauges are unreadable and that itself is the finding. **Never restart
    or redeploy to fix it mid-session** — propose; the owner/architect acts (a live fix waits for

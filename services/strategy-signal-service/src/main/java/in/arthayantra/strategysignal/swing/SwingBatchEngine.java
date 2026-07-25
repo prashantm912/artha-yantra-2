@@ -174,10 +174,36 @@ public class SwingBatchEngine {
    * {@code true}.
    */
   public SwingRun runDaily(SwingDoctrine doctrine, LocalDate requiredBarDate, boolean entriesEnabled) {
+    if (!doctrine.enabled()) {
+      return new SwingRun(0, 0, 0, 0, 0, AdmissionProbe.empty());
+    }
+    Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot =
+        entriesEnabled
+            ? Optional.of(new SwingDoctrine.CandidateSnapshot(null, doctrine.candidates()))
+            : Optional.empty();
+    return runDaily(doctrine, requiredBarDate, entriesEnabled, candidateSnapshot);
+  }
+
+  /** Runs a batch from one already-fetched funnel snapshot; an empty Optional means the fetch failed. */
+  public SwingRun runDaily(
+      SwingDoctrine doctrine,
+      LocalDate requiredBarDate,
+      boolean entriesEnabled,
+      Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot) {
+    return runDaily(doctrine, requiredBarDate, entriesEnabled, candidateSnapshot, doctrine.enabled());
+  }
+
+  /** Runs from a snapshot while explicitly supplying the schedule-time arming state. */
+  public SwingRun runDaily(
+      SwingDoctrine doctrine,
+      LocalDate requiredBarDate,
+      boolean entriesEnabled,
+      Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
+      boolean executionArmed) {
     // The single arming gate for BOTH the scheduler AND the on-demand POST /run: with the family flag
     // off the batch is a NO-OP whoever calls it (audit P9 — else a curious authenticated POST /run
     // fires entries + auto-paper before the owner has armed the flag).
-    if (!doctrine.enabled()) {
+    if (!executionArmed) {
       log.debug("{} swing batch disabled — skipping", doctrine.batchName());
       return new SwingRun(0, 0, 0, 0, 0, AdmissionProbe.empty());
     }
@@ -187,12 +213,14 @@ public class SwingBatchEngine {
     }
     Map<String, List<EngineCandle>> seriesCache = new HashMap<>();
     AnchorResolution resolution = new AnchorResolution(doctrine, swings);
-    // Fetch the funnel ONCE and share it with both the entry pass and the F3 probe — a second
-    // doctrine.candidates() call is a fresh (time-sensitive) network read that could diverge from what
-    // the entry pass actually admitted. Snapshot the held set BEFORE the entry pass mutates it (the
-    // probe partitions would-be entrants into admitted/dropped by diffing against the held-AFTER set).
-    // Entries suppressed → no funnel fetch, no probe (a catch-up whose screen is not the session's).
-    List<SwingCandidate> candidates = entriesEnabled ? doctrine.candidates() : List.of();
+    // Consume the caller-owned funnel snapshot for both the entry pass and the F3 probe. Snapshot the
+    // held set BEFORE the entry pass mutates it (the probe partitions would-be entrants into
+    // admitted/dropped by diffing against the held-AFTER set). Entries suppressed → no probe (a
+    // catch-up whose screen is not the session's).
+    List<SwingCandidate> candidates =
+        entriesEnabled
+            ? candidateSnapshot.map(SwingDoctrine.CandidateSnapshot::candidates).orElse(List.of())
+            : List.of();
     java.util.Set<String> heldBefore =
         new java.util.HashSet<>(openLotsBySymbol(resolution).keySet());
     EntryResult entry =
@@ -576,7 +604,24 @@ public class SwingBatchEngine {
     int closed = 0;
     int skipped = 0;
     for (Map.Entry<String, List<SignalRepository.SignalRow>> e : bySymbol.entrySet()) {
-      List<SignalRepository.SignalRow> lots = e.getValue();
+      List<SignalRepository.SignalRow> allLots = e.getValue();
+      List<SignalRepository.SignalRow> lots = lotsAsOf(allLots, requiredBarDate);
+      if (lots.isEmpty()) {
+        if (requiredBarDate != null) {
+          log.info(
+              "{} swing exit: all active lots for {} opened after pinned session {} â€” not evaluated",
+              doctrine.batchName(), e.getKey(), requiredBarDate);
+        }
+        continue;
+      }
+      if (requiredBarDate != null && lots.size() != allLots.size()) {
+        log.error(
+            "{} swing exit: {} has mixed pre/post-session lots for pinned session {} â€” refusing"
+                + " approximate evaluation",
+            doctrine.batchName(), e.getKey(), requiredBarDate);
+        skipped++;
+        continue;
+      }
       SignalRepository.SignalRow primary = oldestLot(lots);
       SwingStrategy strat = resolution.resolve(primary.strategyVersionId()).orElse(null);
       if (strat == null) {
@@ -626,6 +671,17 @@ public class SwingBatchEngine {
       }
     }
     return new ExitResult(closed, skipped);
+  }
+
+  /** Returns only lots that existed at the pinned session; an unpinned run keeps the live set intact. */
+  private static List<SignalRepository.SignalRow> lotsAsOf(
+      List<SignalRepository.SignalRow> lots, LocalDate requiredBarDate) {
+    if (requiredBarDate == null) {
+      return lots;
+    }
+    return lots.stream()
+        .filter(lot -> !lot.generatedAt().withOffsetSameInstant(IST).toLocalDate().isAfter(requiredBarDate))
+        .toList();
   }
 
   /**

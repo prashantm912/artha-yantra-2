@@ -106,4 +106,32 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
     // A fresh RUNNING claim right after is again blocked (the reclaim reset claimed_at to now).
     assertThat(state.claim(batch, SESSION, 30)).isEmpty();
   }
+
+  @Test
+  void retryableSessionsIncludesPendingAndStaleRunningRows() {
+    String batch = "cu-it-retryable-" + System.nanoTime();
+    LocalDate pending = SESSION.minusDays(2);
+    LocalDate stale = SESSION.minusDays(1);
+    assertThat(state.claim(batch, pending, 30)).isPresent();
+    state.markPending(batch, pending);
+    assertThat(state.claim(batch, stale, 30)).isPresent();
+    jdbc.update(
+        "UPDATE swing_catchup_runs SET claimed_at = now() - interval '2 hours'"
+            + " WHERE batch = ? AND session_date = ?",
+        batch, java.sql.Date.valueOf(stale));
+
+    assertThat(state.retryableSessions(batch, 30)).containsExactly(pending, stale);
+  }
+
+  @Test
+  void abandonedStatePersistsTheReason() {
+    String batch = "cu-it-abandon-reason-" + System.nanoTime();
+    state.markAbandoned(batch, SESSION, "ATTEMPT_BUDGET_EXHAUSTED");
+
+    String reason =
+        jdbc.queryForObject(
+            "SELECT reason FROM swing_catchup_runs WHERE batch = ? AND session_date = ?",
+            String.class, batch, java.sql.Date.valueOf(SESSION));
+    assertThat(reason).isEqualTo("ATTEMPT_BUDGET_EXHAUSTED");
+  }
 }

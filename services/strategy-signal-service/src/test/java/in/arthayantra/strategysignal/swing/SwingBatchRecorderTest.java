@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -104,6 +105,26 @@ class SwingBatchRecorderTest {
   }
 
   @Test
+  void disarmedScheduledRunRecordsNoMarkerAndDoesNotReadTheFunnel() {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(doctrine.enabled()).thenReturn(false);
+    when(engine.runDaily(doctrine, null, true))
+        .thenReturn(new SwingBatchEngine.SwingRun(0, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty()));
+
+    SwingBatchRecorder recorder =
+        new SwingBatchRecorder(
+            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class),
+            mock(FlagSnapshotService.class), new SwingRunMutex(), mock(ApplicationEventPublisher.class),
+            Clock.systemUTC());
+
+    recorder.runScheduled(doctrine);
+
+    verify(doctrine, never()).candidateSnapshot();
+    verify(engine).runDaily(doctrine, null, true);
+  }
+
+  @Test
   void runAndRecordForwardsTheAdmissionProbeToTheMarkerAndPersistsSellDecisions() {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);
@@ -153,5 +174,43 @@ class SwingBatchRecorderTest {
         .record(
             eq("manas-arora"), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
             anyInt(), anyInt(), anyInt(), anyBoolean(), any());
+  }
+
+  @Test
+  void failedFunnelSnapshotCannotCompleteButAValidEmptyScreenCan() {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingBatchEngine.SwingRun result =
+        new SwingBatchEngine.SwingRun(1, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty());
+    when(engine.runDaily(
+            eq(doctrine), eq(LocalDate.of(2026, 7, 17)), eq(true),
+            org.mockito.ArgumentMatchers.<Optional<SwingDoctrine.CandidateSnapshot>>any(),
+            anyBoolean()))
+        .thenReturn(result);
+    when(runs.record(
+            any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
+            anyInt(), anyInt(), anyBoolean(), any()))
+        .thenReturn(true);
+
+    SwingBatchRecorder recorder =
+        new SwingBatchRecorder(
+            engine, runs, mock(SwingSellDecisionService.class), mock(FlagSnapshotService.class),
+            new SwingRunMutex(), events, Clock.systemUTC());
+    SwingBatchRecorder.RunOutcome failed =
+        recorder.runAndRecord(
+            doctrine, LocalDate.of(2026, 7, 17), true, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            Optional.empty());
+    SwingBatchRecorder.RunOutcome emptyScreen =
+        recorder.runAndRecord(
+            doctrine, LocalDate.of(2026, 7, 17), true, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            Optional.of(new SwingDoctrine.CandidateSnapshot(LocalDate.of(2026, 7, 17), List.of())));
+
+    assertThat(failed.markerRecorded()).isFalse();
+    assertThat(emptyScreen.markerRecorded()).isTrue();
+    verify(runs).record(
+        any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
+        anyInt(), anyBoolean(), any());
   }
 }

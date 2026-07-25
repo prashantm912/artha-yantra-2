@@ -7,6 +7,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
@@ -106,17 +107,54 @@ public class SwingBatchRecorder {
     ReentrantLock lock = mutex.lockFor(doctrine.batchName());
     lock.lock();
     try {
-      return runLocked(doctrine, sessionDate, entriesEnabled, markerPolicy);
+      if (!doctrine.enabled()) {
+        return runLocked(
+            doctrine, sessionDate, entriesEnabled, markerPolicy, null, false);
+      }
+      SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
+      return runLocked(
+          doctrine,
+          sessionDate,
+          entriesEnabled,
+          markerPolicy,
+          read == null ? null : read.snapshot(),
+          doctrine.enabled());
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  /** Runs from the exact funnel snapshot already read by the catch-up readiness gate. */
+  public RunOutcome runAndRecord(
+      SwingDoctrine doctrine,
+      LocalDate sessionDate,
+      boolean entriesEnabled,
+      MarkerPolicy markerPolicy,
+      Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot) {
+    ReentrantLock lock = mutex.lockFor(doctrine.batchName());
+    lock.lock();
+    try {
+      // This overload is used by catch-up after it has read the historical schedule intent. The
+      // current doctrine flag may have changed since that session, so it is deliberately not the gate.
+      return runLocked(doctrine, sessionDate, entriesEnabled, markerPolicy, candidateSnapshot, true);
     } finally {
       lock.unlock();
     }
   }
 
   private RunOutcome runLocked(
-      SwingDoctrine doctrine, LocalDate sessionDate, boolean entriesEnabled, MarkerPolicy markerPolicy) {
+      SwingDoctrine doctrine,
+      LocalDate sessionDate,
+      boolean entriesEnabled,
+      MarkerPolicy markerPolicy,
+      Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
+      boolean executionArmed) {
     LocalDate runDate = sessionDate != null ? sessionDate : LocalDate.now(clock.withZone(IST));
-    SwingBatchEngine.SwingRun result = engine.runDaily(doctrine, sessionDate, entriesEnabled);
-    if (!doctrine.enabled()) {
+    SwingBatchEngine.SwingRun result =
+        candidateSnapshot == null
+            ? engine.runDaily(doctrine, sessionDate, entriesEnabled)
+            : engine.runDaily(doctrine, sessionDate, entriesEnabled, candidateSnapshot, executionArmed);
+    if (!executionArmed) {
       return new RunOutcome(result, false); // disarmed no-op — nothing ran, nothing recorded
     }
     // P1-7: snapshot the out-of-YAML flag regime that governed THIS run (the pyramiding env flags) keyed to
@@ -128,7 +166,8 @@ public class SwingBatchRecorder {
     flagSnapshots.capture(
         FlagSnapshotService.SWING_BATCH, doctrine.batchName() + ":" + runDate, doctrine.book(), flags);
     boolean markerRecorded = false;
-    if (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0) {
+    boolean snapshotAvailable = candidateSnapshot == null || candidateSnapshot.isPresent();
+    if (snapshotAvailable && (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0)) {
       try {
         SwingBatchEngine.AdmissionProbe probe = result.admission();
         markerRecorded =

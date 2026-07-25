@@ -3,8 +3,10 @@ package in.arthayantra.strategysignal.minervini;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +38,14 @@ public class MinerviniFunnelClient {
       Integer stage,
       String footprint,
       boolean onDeck) {}
+
+  /** The screen date and candidates returned by one funnel HTTP response. */
+  public record Snapshot(LocalDate screenDate, List<Candidate> candidates) {
+
+    public Snapshot {
+      candidates = List.copyOf(candidates);
+    }
+  }
 
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
@@ -79,6 +89,25 @@ public class MinerviniFunnelClient {
     } catch (java.io.IOException | RuntimeException e) {
       log.warn("minervini funnel screen-date read failed: {}", e.getMessage());
       return java.util.Optional.empty();
+    }
+  }
+
+  /** Reads the date and both candidate buckets from exactly one HTTP response. */
+  public Optional<Snapshot> snapshot() {
+    try {
+      JsonNode root = objectMapper.readTree(fetchFunnel());
+      JsonNode date = root.path("screenDate");
+      if (date.isMissingNode() || date.isNull()) {
+        log.warn("minervini funnel response has no screen date");
+        return Optional.empty();
+      }
+      List<Candidate> out = new ArrayList<>();
+      collect(root.path("immediatelyBuyable"), out, false);
+      collect(root.path("onDeck"), out, true);
+      return Optional.of(new Snapshot(LocalDate.parse(date.asText()), out));
+    } catch (java.io.IOException | RuntimeException e) {
+      log.warn("minervini funnel snapshot fetch failed: {}", e.getMessage());
+      return Optional.empty();
     }
   }
 

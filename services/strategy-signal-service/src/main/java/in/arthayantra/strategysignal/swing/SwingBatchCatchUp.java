@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,10 +41,10 @@ import org.springframework.stereotype.Component;
  *
  * <h2>What it catches up, and how far back</h2>
  *
- * <p>It sweeps a bounded window of recent sessions (the {@code max-attempts + 2} most-recent trading
- * days), OLDEST first, so a multi-day outage catches up every missed session — each pinned + TRUNCATED
- * to its OWN daily bar ({@code SwingBatchEngine.truncateToSession}), so a stop settles at the session's
- * close whether the catch-up runs that night or days later. Per session:
+ * <p>It sweeps the {@code max-attempts + 2} most-recent trading days plus every retryable ledger row,
+ * OLDEST first, so a multi-day outage cannot scroll an unfinished session out of the sweep. Each run
+ * is pinned + TRUNCATED to its OWN daily bar ({@code SwingBatchEngine.truncateToSession}), so a stop
+ * settles at the session's close whether the catch-up runs that night or days later. Per session:
  *
  * <ul>
  *   <li>Already recorded in {@code swing_batch_runs} (on-time OR a prior complete catch-up)? Skip.
@@ -71,6 +73,7 @@ public class SwingBatchCatchUp {
   private final SwingBatchRecorder recorder;
   private final SwingBatchRunRepository runs;
   private final SwingCatchUpStateRepository state;
+  private final SwingBatchIntentRepository intents;
   private final SwingRunMutex mutex;
   private final List<SwingDoctrine> doctrines;
   private final ApplicationEventPublisher events;
@@ -84,6 +87,7 @@ public class SwingBatchCatchUp {
       SwingBatchRecorder recorder,
       SwingBatchRunRepository runs,
       SwingCatchUpStateRepository state,
+      SwingBatchIntentRepository intents,
       SwingRunMutex mutex,
       List<SwingDoctrine> doctrines,
       ApplicationEventPublisher events,
@@ -93,6 +97,7 @@ public class SwingBatchCatchUp {
     this.recorder = recorder;
     this.runs = runs;
     this.state = state;
+    this.intents = intents;
     this.mutex = mutex;
     this.doctrines = doctrines;
     this.events = events;
@@ -104,17 +109,14 @@ public class SwingBatchCatchUp {
   /**
    * The morning sweep (08:35 IST weekdays — after the 08:30 canary alert, before the open).
    *
-   * <p>Two responsibilities, deliberately split by the arm flags:
+   * <p>Recovery is gated by the catch-up feature flag. The family arming decision is not read here:
+   * schedulers persist it in {@code swing_batch_schedule_intents}, and each replay uses that
+   * session-time row.
    *
    * <ul>
-   *   <li><b>Intentional-skip bookkeeping</b> runs UNCONDITIONALLY (even with the catch-up flag off):
-   *       for a family that is currently OFF, record a terminal DISARMED marker for each un-marked
-   *       window session. A disabled scheduled run writes no {@code swing_batch_runs} marker, so
-   *       without this a later re-arm cannot tell "the owner had it off" from "an outage" and would
-   *       replay the disarmed backlog — running real entries/exits the owner deliberately skipped
-   *       (2026-07-17 review, Critical). This is a benign, money-free row; making it independent of the
-   *       catch-up flag is what lets arming the feature AFTER a disarm still be safe.
    *   <li><b>Recovery</b> (the money path — real entries/exits) runs only when the catch-up flag is ON.
+   *       Schedule-time intent is checked before the atomic claim; missing intent refuses replay and
+   *       records an explicit terminal reason.
    * </ul>
    */
   @Scheduled(cron = "${artha.swing.catchup-cron:0 35 8 * * MON-FRI}", zone = "Asia/Kolkata")
@@ -137,12 +139,8 @@ public class SwingBatchCatchUp {
       return;
     }
     for (SwingDoctrine doctrine : doctrines) {
-      if (!doctrine.enabled()) {
-        recordDisarmedSessions(doctrine, window); // always-on bookkeeping (independent of the flag)
-        continue;
-      }
       if (!enabled) {
-        continue; // family armed, but the recovery feature is off — do nothing (no DISARMED needed)
+        continue; // recovery feature is off; leave all ledger rows for a later enabled sweep
       }
       // Hold the family run lock across its whole sweep so a manual POST /run cannot interleave and
       // double a fill. tryLock (not lock): a run already in flight means we simply retry next sweep,
@@ -162,24 +160,6 @@ public class SwingBatchCatchUp {
     }
   }
 
-  /**
-   * Records a terminal DISARMED marker for every un-recorded window session of a currently-OFF family,
-   * so a later re-arm never replays a session the owner deliberately skipped. Idempotent (INSERT-if-
-   * absent) and money-free; skips sessions that already carry a real run marker.
-   */
-  private void recordDisarmedSessions(SwingDoctrine doctrine, List<LocalDate> window) {
-    String batch = doctrine.batchName();
-    for (LocalDate session : window) {
-      try {
-        if (!runs.hasRun(batch, session)) {
-          state.recordDisarmed(batch, session);
-        }
-      } catch (RuntimeException e) {
-        log.warn("swing catch-up: DISARMED bookkeeping for {} {} failed: {}", batch, session, e.getMessage());
-      }
-    }
-  }
-
   /** The {@code max-attempts + 2} most-recent NSE trading sessions before {@code today}, OLDEST first. */
   private List<LocalDate> sessionWindow(LocalDate today) {
     List<LocalDate> out = new ArrayList<>();
@@ -193,21 +173,49 @@ public class SwingBatchCatchUp {
   }
 
   private void catchUpFamily(SwingDoctrine doctrine, List<LocalDate> window) {
-    if (runs.lastRunDate(doctrine.batchName()).isEmpty()) {
+    String batch = doctrine.batchName();
+    List<LocalDate> retryable = state.retryableSessions(batch, STALE_LEASE_MINUTES);
+    if (retryable == null) {
+      retryable = List.of();
+    }
+    Set<LocalDate> sessions = new TreeSet<>(window);
+    sessions.addAll(retryable);
+    if (runs.lastRunDate(batch).isEmpty() && retryable.isEmpty()) {
       // Fresh marker table (fresh deploy) — no watermark means no evidence anything was MISSED, and a
       // catch-up on a blank slate would fire a full pass off an unowned history. (Same posture as the canary.)
       log.info("swing catch-up: {} has never recorded — skipping (fresh marker table)", doctrine.batchName());
       return;
     }
-    for (LocalDate session : window) {
-      catchUpSession(doctrine, session);
+    for (LocalDate session : sessions) {
+      catchUpSession(doctrine, session, retryable.contains(session));
     }
   }
 
-  private void catchUpSession(SwingDoctrine doctrine, LocalDate session) {
+  private void catchUpSession(SwingDoctrine doctrine, LocalDate session, boolean retryable) {
     String batch = doctrine.batchName();
     if (runs.hasRun(batch, session)) {
+      // A crash can leave the canonical marker committed while the catch-up ledger is still
+      // RUNNING/PENDING. Reconcile that active row to terminal DONE; terminal rows are guarded by the
+      // repository and remain ABANDONED/DISARMED.
+      if (retryable) {
+        state.markDone(batch, session);
+      }
       return; // the on-time batch (or a prior complete catch-up) already ran this session
+    }
+    Optional<SwingBatchIntentRepository.Intent> intent = intents.find(batch, session);
+    if (intent.isEmpty()) {
+      state.markAbandoned(batch, session, "NO_SCHEDULE_INTENT");
+      log.error("swing catch-up: {} {} refused â€” no schedule-time arming row", batch, session);
+      alert(
+          doctrine, "catch-up REFUSED for " + session,
+          "The " + session + " batch has no schedule-time arming row (pre-V048 or capture failure);"
+              + " refusing replay rather than inferring today's flag.");
+      return;
+    }
+    if (!intent.get().armed()) {
+      state.recordDisarmed(batch, session);
+      log.info("swing catch-up: {} {} was DISARMED at schedule time â€” not replaying", batch, session);
+      return;
     }
     // ATOMIC claim BEFORE any emission. Lost = another caller holds a fresh RUNNING claim, or the
     // session is terminal (DONE / ABANDONED). This is the durable idempotency gate the JVM mutex alone
@@ -217,7 +225,8 @@ public class SwingBatchCatchUp {
       return;
     }
     if (claim.get().attempts() > maxAttempts) {
-      state.markAbandoned(batch, session);
+      String reason = "ATTEMPT_BUDGET_EXHAUSTED after " + maxAttempts + " attempts";
+      state.markAbandoned(batch, session, reason);
       log.error("swing catch-up: {} exhausted {} attempts for {} — abandoning", batch, maxAttempts, session);
       alert(
           doctrine, "catch-up ABANDONED for " + session,
@@ -227,9 +236,19 @@ public class SwingBatchCatchUp {
               + batch + "-swing/run if still needed.");
       return;
     }
-    boolean entriesReady = doctrine.inputsAsOf().map(session::equals).orElse(false);
+    Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot = readCandidateSnapshot(doctrine);
+    boolean entriesReady =
+        candidateSnapshot.map(snapshot -> session.equals(snapshot.screenDate())).orElse(false);
     SwingBatchRecorder.RunOutcome outcome =
-        recorder.runAndRecord(doctrine, session, entriesReady, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE);
+        recorder.runAndRecord(
+            doctrine, session, entriesReady, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            candidateSnapshot);
+    if (outcome == null) {
+      // Compatibility for pre-snapshot test doubles. The real recorder always returns an outcome from
+      // the snapshot-aware overload above.
+      outcome =
+          recorder.runAndRecord(doctrine, session, entriesReady, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE);
+    }
     SwingBatchEngine.SwingRun run = outcome.run();
     String summary =
         run.candidates() + " candidates, " + run.entries() + " entries, " + run.exits() + " exits, "
@@ -238,7 +257,17 @@ public class SwingBatchCatchUp {
     // written. A marker-write failure (fail-soft-swallowed in the recorder) leaves hasRun false, so a
     // DONE claim here would strand the session forever (hasRun false → looks un-run, claim DONE → never
     // re-claimed). Keeping it PENDING lets the next sweep retry it (2026-07-17 review, Major).
-    if (run.exitSkipped() == 0 && outcome.markerRecorded()) {
+    if (candidateSnapshot.isEmpty()) {
+      state.markPending(batch, session);
+      log.error(
+          "swing catch-up: {} funnel snapshot failed for {} â€” exits may run, but the session stays"
+              + " retryable and cannot be marked complete",
+          batch, session);
+      alert(
+          doctrine, "catch-up INPUTS UNAVAILABLE for " + session,
+          "The " + session + " batch could not read one immutable funnel snapshot. " + summary
+              + "; the session stays retryable and will be attempted again.");
+    } else if (run.exitSkipped() == 0 && outcome.markerRecorded()) {
       state.markDone(batch, session);
       log.warn("swing catch-up: {} caught up {} — {}", batch, session, summary);
       alert(
@@ -271,6 +300,17 @@ public class SwingBatchCatchUp {
   }
 
   /** True while the NSE cash session is open (09:15–15:30 IST, both edges inclusive). */
+  private Optional<SwingDoctrine.CandidateSnapshot> readCandidateSnapshot(SwingDoctrine doctrine) {
+    SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
+    if (read != null) {
+      return read.snapshot();
+    }
+    // Compatibility for pre-snapshot test doubles. Concrete doctrines always return a non-null Optional.
+    Optional<LocalDate> screenDate = doctrine.inputsAsOf();
+    return Optional.of(
+        new SwingDoctrine.CandidateSnapshot(screenDate == null ? null : screenDate.orElse(null), List.of()));
+  }
+
   private static boolean withinSession(LocalTime t) {
     return !t.isBefore(MarketCalendar.SESSION_OPEN) && !t.isAfter(MarketCalendar.SESSION_CLOSE);
   }

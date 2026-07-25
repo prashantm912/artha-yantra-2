@@ -25,6 +25,8 @@ import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
 import in.arthayantra.strategysignal.signals.SignalPublisher;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchEngine;
+import in.arthayantra.strategysignal.swing.SwingCandidate;
+import in.arthayantra.strategysignal.swing.SwingDoctrine;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -242,6 +244,59 @@ class MinerviniSwingEngineTest {
   }
 
   @Test
+  void aLotOpenedAfterThePinnedSessionIsNotEvaluated() throws IOException {
+    ExitHarness h = new ExitHarness();
+    when(h.signals.activeEntries())
+        .thenReturn(
+            List.of(
+                anchorAt(
+                    42L, h.versionId, new BigDecimal("152"), LAST_BAR_DATE.plusDays(1))));
+
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(), LAST_BAR_DATE);
+
+    assertThat(run.exits()).isZero();
+    assertThat(run.exitSkipped()).as("post-session lots are outside the pinned position").isZero();
+    verify(h.candles, org.mockito.Mockito.never()).fetch(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void aMixedPreAndPostSessionPositionIsRefusedRatherThanEvaluatedApproximately()
+      throws IOException {
+    ExitHarness h = new ExitHarness();
+    when(h.signals.activeEntries())
+        .thenReturn(
+            List.of(
+                anchorAt(42L, h.versionId, new BigDecimal("152"), LAST_BAR_DATE),
+                anchorAt(43L, h.versionId, new BigDecimal("155"), LAST_BAR_DATE.plusDays(1))));
+
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(), LAST_BAR_DATE);
+
+    assertThat(run.exits()).isZero();
+    assertThat(run.exitSkipped()).as("mixed lots are a recorded refusal").isEqualTo(1);
+    verify(h.signals, org.mockito.Mockito.never()).transition(any(Long.class), any());
+    verify(h.candles, org.mockito.Mockito.never()).fetch(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void oneSnapshotFeedsTheEngineWithoutASecondFunnelRead() throws IOException {
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
+        .thenReturn(h.series);
+    SwingCandidate candidate =
+        new SwingCandidate(
+            "TESTCO", seeds(PIVOT, BigDecimal.ZERO, false), null,
+            new ObjectMapper().createObjectNode(), false);
+    SwingDoctrine.CandidateSnapshot snapshot =
+        new SwingDoctrine.CandidateSnapshot(LAST_BAR_DATE, List.of(candidate));
+
+    SwingBatchEngine.SwingRun run =
+        h.engine().runDaily(h.doctrine(), LAST_BAR_DATE, true, Optional.of(snapshot));
+
+    assertThat(run.candidates()).isEqualTo(1);
+    org.mockito.Mockito.verifyNoInteractions(h.funnel);
+  }
+
+  @Test
   void unpinnedRunsAreUnaffectedByTheCatchUpBarGuard() throws IOException {
     // The scheduled/on-demand path passes no session, so nothing is ever dropped — the guard is inert
     // unless a catch-up explicitly pins a date.
@@ -381,16 +436,17 @@ class MinerviniSwingEngineTest {
     final MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
     final MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
     final List<EngineCandle> series = craftDecline();
+    final UUID versionId;
 
     ExitHarness() throws IOException {
       UUID strategyId = UUID.randomUUID();
-      UUID publishedVersion = UUID.randomUUID();
+      versionId = UUID.randomUUID();
       JsonNode config = vcpConfig();
-      when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
-      when(registry.findVersionById(publishedVersion))
-          .thenReturn(Optional.of(version(publishedVersion, strategyId, "1", config)));
+      when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, versionId)));
+      when(registry.findVersionById(versionId))
+          .thenReturn(Optional.of(version(versionId, strategyId, "1", config)));
       when(signals.activeEntries())
-          .thenReturn(List.of(anchor(42L, publishedVersion, new BigDecimal("152"), series)));
+          .thenReturn(List.of(anchor(42L, versionId, new BigDecimal("152"), series)));
       stubInsert(signals, 43L);
       when(funnel.buyableAndOnDeck()).thenReturn(List.of());
     }
@@ -442,6 +498,15 @@ class MinerviniSwingEngineTest {
         id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
         new ObjectMapper().createObjectNode(), "TAKEN", series.get(0).bucketStart(),
         series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null);
+  }
+
+  private static SignalRepository.SignalRow anchorAt(
+      long id, UUID versionId, BigDecimal entryPrice, java.time.LocalDate date) {
+    OffsetDateTime generatedAt = date.atStartOfDay(IST).toOffsetDateTime();
+    return new SignalRepository.SignalRow(
+        id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null,
+        BigDecimal.ONE, new ObjectMapper().createObjectNode(), "TAKEN", generatedAt,
+        generatedAt.plusDays(1), null, null, null, null, null, null);
   }
 
   private static StrategyDefinition vcp() throws IOException {

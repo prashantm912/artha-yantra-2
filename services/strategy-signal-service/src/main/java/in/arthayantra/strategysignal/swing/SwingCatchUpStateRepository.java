@@ -62,6 +62,22 @@ public class SwingCatchUpStateRepository {
         .findFirst();
   }
 
+  /** Returns every retryable row, including rows older than the ordinary rolling session window. */
+  public java.util.List<LocalDate> retryableSessions(String batch, int staleLeaseMinutes) {
+    return jdbc.query(
+        """
+        SELECT session_date
+        FROM swing_catchup_runs
+        WHERE batch = ?
+          AND (status = 'PENDING'
+               OR (status = 'RUNNING'
+                   AND claimed_at IS NOT NULL
+                   AND claimed_at < now() - make_interval(mins => ?)))
+        ORDER BY session_date
+        """,
+        (rs, n) -> rs.getObject("session_date", LocalDate.class), batch, staleLeaseMinutes);
+  }
+
   /**
    * Records a terminal DISARMED marker for a session the family was intentionally OFF for — so a later
    * re-arm cannot replay it as a phantom outage (a disabled scheduled run writes NO {@code
@@ -71,13 +87,18 @@ public class SwingCatchUpStateRepository {
    * stale RUNNING wins), so a DISARMED session is never recovered.
    */
   public void recordDisarmed(String batch, LocalDate session) {
+    recordDisarmed(batch, session, "DISARMED_AT_SCHEDULE_TIME");
+  }
+
+  /** Records the historical reason for an intentional schedule-time disarm. */
+  public void recordDisarmed(String batch, LocalDate session, String reason) {
     jdbc.update(
         """
-        INSERT INTO swing_catchup_runs (batch, session_date, status, attempts, updated_at)
-        VALUES (?, ?, 'DISARMED', 0, now())
+        INSERT INTO swing_catchup_runs (batch, session_date, status, attempts, reason, updated_at)
+        VALUES (?, ?, 'DISARMED', 0, ?, now())
         ON CONFLICT (batch, session_date) DO NOTHING
         """,
-        batch, java.sql.Date.valueOf(session));
+        batch, java.sql.Date.valueOf(session), reason);
   }
 
   /** Terminal success — the exit pass fully evaluated (V025 also carries the completeness marker). */
@@ -92,12 +113,27 @@ public class SwingCatchUpStateRepository {
 
   /** Terminal give-up — the session exhausted its attempt budget without completing. */
   public void markAbandoned(String batch, LocalDate session) {
-    setStatus(batch, session, "ABANDONED");
+    markAbandoned(batch, session, "ATTEMPT_BUDGET_EXHAUSTED");
+  }
+
+  /** Records a terminal refusal/abandonment, creating the ledger row when no claim exists yet. */
+  public void markAbandoned(String batch, LocalDate session, String reason) {
+    jdbc.update(
+        """
+        INSERT INTO swing_catchup_runs (batch, session_date, status, attempts, reason, updated_at)
+        VALUES (?, ?, 'ABANDONED', 0, ?, now())
+        ON CONFLICT (batch, session_date) DO UPDATE
+          SET status = 'ABANDONED', reason = EXCLUDED.reason, updated_at = now()
+          WHERE swing_catchup_runs.status NOT IN ('DONE', 'ABANDONED', 'DISARMED')
+        """,
+        batch, java.sql.Date.valueOf(session), reason);
   }
 
   private void setStatus(String batch, LocalDate session, String status) {
     jdbc.update(
-        "UPDATE swing_catchup_runs SET status = ?, updated_at = now() WHERE batch = ? AND session_date = ?",
+        "UPDATE swing_catchup_runs SET status = ?, reason = NULL, updated_at = now()"
+            + " WHERE batch = ? AND session_date = ?"
+            + " AND status IN ('RUNNING', 'PENDING')",
         status, batch, java.sql.Date.valueOf(session));
   }
 }

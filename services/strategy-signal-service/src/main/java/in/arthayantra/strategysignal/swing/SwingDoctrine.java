@@ -22,6 +22,28 @@ import java.util.Optional;
 public interface SwingDoctrine {
 
   /**
+   * One immutable read of a family's funnel. A present snapshot with zero candidates is a valid empty
+   * screen; the {@link CandidateSnapshotRead#snapshot()} Optional being empty means the fetch failed or
+   * the screen date was unavailable.
+   */
+  record CandidateSnapshot(LocalDate screenDate, List<SwingCandidate> candidates) {
+
+    public CandidateSnapshot {
+      candidates = List.copyOf(candidates);
+    }
+  }
+
+  /** The result of one funnel read; an empty snapshot Optional means the HTTP read failed. */
+  record CandidateSnapshotRead(Optional<CandidateSnapshot> snapshot) {
+
+    public CandidateSnapshotRead {
+      if (snapshot == null) {
+        throw new IllegalArgumentException("snapshot result must not be null");
+      }
+    }
+  }
+
+  /**
    * The paper book this family trades (its own capital / risk / positions) — one of the {@code Books}
    * string constants, as the {@code EmissionGuard} SPI takes the book as a String.
    */
@@ -60,6 +82,12 @@ public interface SwingDoctrine {
 
   /** The day's family-neutral funnel candidates (buyable + on-deck), normalized from the family funnel. */
   List<SwingCandidate> candidates();
+
+  /**
+   * Fetches the screen date and its candidates together. The engine must consume this exact snapshot for
+   * a run rather than asking the funnel for either value again.
+   */
+  CandidateSnapshotRead candidateSnapshot();
 
   /**
    * WHICH session's screen {@link #candidates()} would serve right now — the catch-up's input-readiness

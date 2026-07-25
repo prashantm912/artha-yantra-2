@@ -65,6 +65,7 @@ public class DataHealthCanary {
   private final Duration barStale;
   private final Duration captureStale;
   private final Duration alertCooldown;
+  private final long minDivergenceTicks;
 
   private final Map<String, Instant> lastAlertAt = new ConcurrentHashMap<>();
   private final Set<String> activeReds = ConcurrentHashMap.newKeySet();
@@ -82,7 +83,8 @@ public class DataHealthCanary {
       @Value("${artha.canary.tick-fresh-seconds:90}") long tickFreshSeconds,
       @Value("${artha.canary.bar-stale-seconds:240}") long barStaleSeconds,
       @Value("${artha.canary.capture-stale-seconds:600}") long captureStaleSeconds,
-      @Value("${artha.canary.alert-cooldown-seconds:900}") long alertCooldownSeconds) {
+      @Value("${artha.canary.alert-cooldown-seconds:900}") long alertCooldownSeconds,
+      @Value("${artha.canary.min-divergence-ticks:30}") long minDivergenceTicks) {
     this.state = state;
     this.ntfy = ntfy;
     this.jdbc = jdbc;
@@ -95,6 +97,7 @@ public class DataHealthCanary {
     this.barStale = Duration.ofSeconds(barStaleSeconds);
     this.captureStale = Duration.ofSeconds(captureStaleSeconds);
     this.alertCooldown = Duration.ofSeconds(alertCooldownSeconds);
+    this.minDivergenceTicks = minDivergenceTicks;
   }
 
   /** One full evaluation; cheap (in-memory maps + two bounded SQL probes), safe to call per GET. */
@@ -142,13 +145,23 @@ public class DataHealthCanary {
       }
       Instant bar = state.lastBar(key);
       if (bar == null || Duration.between(bar, now).compareTo(barStale) > 0) {
+        // T20 density guard (2026-07-25 bug queue B6): a REAL bar stall accumulates ticks with no
+        // close (~1 Hz tape → hundreds), while a thin far-month tape accrues a handful between its
+        // rare closes — the shape that paged 5 sessions running on FINNIFTY26SEPFUT (35 bars/day)
+        // while never being a defect. Below the floor the silence is the tape, not the pipeline;
+        // the fault drill keeps counting ticks (recordBar skipped), so it still fires end-to-end.
+        long ticksSinceBar = state.ticksSinceBar(key);
+        if (ticksSinceBar < minDivergenceTicks) {
+          continue;
+        }
         problems.add(
             new CheckResult(
                 DIVERGENCE,
                 key,
                 "RED",
                 "ticks flowing but no 1m bar closed for "
-                    + (bar == null ? "this run" : Duration.between(bar, now).toSeconds() + "s"),
+                    + (bar == null ? "this run" : Duration.between(bar, now).toSeconds() + "s")
+                    + " (" + ticksSinceBar + " ticks since the last close)",
                 bar == null ? null : bar.toString()));
       }
     }

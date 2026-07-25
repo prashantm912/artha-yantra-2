@@ -552,6 +552,33 @@ Secret ROTATION (Kite/Upstox/owner-password/master-key) = owner-gated residual o
 
 ---
 
+**STATE 2026-07-25 (Saturday — weekly routine-docs analysis → bug queue).** Analyzed the full
+week's routine output (PRs #964–#978: 4 forensics + 4 open-gates + 3 midday-gates + 4
+live-watches + rollup). Reliability's best week on record (all gates PASS, 4/4 clean interiors,
+38/38 coverage reached, F10 auto-recovery 3-for-3 pre-open, stall stack proven on a real
+07-22 Kite outage) — but 0 fires ×7 sessions and 3 structural defects confound every PnL
+number since 07-21. **Queue frozen in `docs/signal-analysis/2026-07-25-weekly-bug-queue.md`**
+(owner-approved order 2026-07-25, "fix one by one"):
+
+| # | id | item | tier | status |
+|---|---|---|---|---|
+| B1 | T16 | relative-volume-floor tag disarmed on 18 PE scalpers by the 07-20 republish; **root cause: 0/63 YAMLs carry the tag** (#605 armed registry-side only) — YAML tag + guard test + republish | clean | IN PROGRESS |
+| B2 | T23 | live 3m series ≠ own 1m series in exact lot multiples (`LiveSeriesStore` boundary-tick race, code-read first) | clean | queued |
+| B3 | T19 | gap-backfill writes phantom 1m candles on unaligned buckets + historical cleanup | clean | queued |
+| B4 | T17+T13 | dot-health canary false all-dead sampling + missing OI NEUTRAL-share probes | clean | queued |
+| B5 | T14 | composite rejection rows record self-contradictory margins (optional-gate mechanic) | clean | queued |
+| B6 | T20 | far-month FINNIFTY thin-tape canary noise (5 sessions) | clean | queued |
+| B7 | T15 | persist engine boot line (loaded/unresolved/dropped) to a table | clean | queued |
+| B8 | — | 07-24 scheduler misfire (open gate 11:02, midday gate never ran) + 07-23 ~17-min host clock lag; folds chip task_a2ae20ed | investigate | queued |
+| B9 | T12 | `/options/spurt` 400 + futures-OI capture cadence ~200/375 | investigate | queued |
+| B10 | T22 | oi_spurt dead — ground-truth `spurtOiPct` distribution, then owner tune | analysis | queued |
+| B11 | T21/T6/T10 | owner-decision pack: 30/38 scalpers no premium exit · vwap free dot at w2.5 · 17 stale paper positions | OWNER | queued |
+
+Tunes T1/T7/T3/T5/T2 stay BLOCKED on B1/B2/B11a (rollup verdict: challengers currently measure
+the regressions, not the knobs).
+
+---
+
 ## 1. Net-new code
 
 | id | item | authority | state |

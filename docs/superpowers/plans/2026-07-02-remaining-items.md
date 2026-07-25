@@ -562,10 +562,10 @@ number since 07-21. **Queue frozen in `docs/signal-analysis/2026-07-25-weekly-bu
 
 | # | id | item | tier | status |
 |---|---|---|---|---|
-| B1 | T16 | relative-volume-floor tag disarmed on 18 PE scalpers by the 07-20 republish; **root cause: 0/63 YAMLs carry the tag** (#605 armed registry-side only) — YAML tag + guard test + republish | clean | IN PROGRESS |
-| B2 | T23 | live 3m series ≠ own 1m series in exact lot multiples (`LiveSeriesStore` boundary-tick race, code-read first) | clean | queued |
-| B3 | T19 | gap-backfill writes phantom 1m candles on unaligned buckets + historical cleanup | clean | queued |
-| B4 | T17+T13 | dot-health canary false all-dead sampling + missing OI NEUTRAL-share probes | clean | queued |
+| B1 | T16 | relative-volume-floor tag disarmed on 18 PE scalpers by the 07-20 republish; **root cause: 0/63 YAMLs carry the tag** (#605 armed registry-side only) — YAML tag + guard test + republish | clean | **DONE [#980](https://github.com/prashantm912/artha-yantra-2/pull/980)** — 63/63 tagged + guard; deployed, 38 republished, DB-verified (closes T11); Monday open-gate §3.14 = standing verify |
+| B2 | T23 | live 3m series ≠ own 1m series in exact lot multiples — **mechanism CORRECTED by code read + DB probe** (no aggregation race: 3m = broker-replaced DB rollup, rails read the GOOD side; tick-agg mirror was the wrong one) | clean | **DONE [#981](https://github.com/prashantm912/artha-yantra-2/pull/981)** (2 codex rounds) — CandleBuilder rollover baseline excludes pre-open auction; canary tolerance 650 abs AND ≤10% rel (thin frozen bars still fire); README §3.17 + rollup corrected |
+| B3 | T19 | gap-backfill writes phantom 1m candles on unaligned buckets + historical cleanup | clean | **DONE [#982](https://github.com/prashantm912/artha-yantra-2/pull/982)** (2 rounds — round 2 normalized at the fetchAndStore choke point covering the public refresh endpoint) + live cleanup 2026-07-25: 1,682 July phantoms DELETED, caggs refreshed per-day, 0 remain; 26k 2015-era twinless misaligned rows LEFT (only copy — separate repair if ever needed) |
+| B4 | T17+T13 | dot-health canary false all-dead sampling + missing OI NEUTRAL-share probes | clean | **DONE [#983](https://github.com/prashantm912/artha-yantra-2/pull/983)** (3 rounds — round 2 expiry-day S24 exemption + uninformative consumers + contract recapture; round 3 required-flag drops at source so paging//status/UI agree) — context-bearing sampling, rowsScanned field, futures_oi/underlying_oi REQUIRED by default |
 | B5 | T14 | composite rejection rows record self-contradictory margins (optional-gate mechanic) | clean | queued |
 | B6 | T20 | far-month FINNIFTY thin-tape canary noise (5 sessions) | clean | queued |
 | B7 | T15 | persist engine boot line (loaded/unresolved/dropped) to a table | clean | queued |
@@ -576,6 +576,12 @@ number since 07-21. **Queue frozen in `docs/signal-analysis/2026-07-25-weekly-bu
 
 Tunes T1/T7/T3/T5/T2 stay BLOCKED on B1/B2/B11a (rollup verdict: challengers currently measure
 the regressions, not the knobs).
+
+**Deploy state 2026-07-25 ~14:00 IST:** B1–B4 all MERGED + DEPLOYED LIVE (market-data +
+strategy-signal + frontend-react rebuilt off main `f110c26b`; dot-health endpoint live-probed —
+`rowsScanned` serving, `futures_oi`/`underlying_oi` required=true). Engine 0/38 pending Monday's
+Kite login (#874 self-heals). Monday verifies: §3.14 floor tags live, PartialBucketCanary quiet
+(≤650/10% residue absorbed), dot-health no false all-dead at EOD.
 
 ---
 

@@ -31,6 +31,7 @@ import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
 import in.arthayantra.strategysignal.scalper.ScalperRisk;
 import in.arthayantra.strategysignal.scalper.StrikePicker;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.math.BigDecimal;
@@ -391,6 +392,12 @@ public class SignalEngine {
   // received−evaluated (NOT wall-clock, so a quiet market that freezes both does not false-alarm) to
   // catch bars-arriving-but-not-processed. Sole writer is the eval thread (single-threaded → no race).
   private volatile long lastBarEvaluatedAtMs;
+
+  // Gauge sentinels ONLY — never read by the canaries. The stamps above are SEEDED at construction
+  // (boot grace), so age alone cannot tell "a bar just arrived" from "no bar has EVER arrived": both
+  // read ~0 and both would satisfy a freshness threshold. These make that distinction observable.
+  private volatile boolean barEverReceived;
+  private volatile boolean barEverEvaluated;
   /**
    * The registry's published+enabled version-id set AS OF the last {@link #reload()} — the reconcile
    * baseline. Comparing the CURRENT published set against this (not against the LOADED subset) is what
@@ -464,6 +471,35 @@ public class SignalEngine {
             .register(meterRegistry);
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
     this.evalFailures = meterRegistry.counter("ay_signal_eval_failures_total");
+    // ---- Engine-liveness read surface (chip task_0bed1621) --------------------------------------
+    // AGE IN SECONDS, not the raw epoch stamp: an age is directly comparable to a threshold by an
+    // operator, a scrape or a dashboard, and it needs no clock-skew reconciliation between the
+    // container and the reader.
+    //
+    // These two are the ONLY unconfounded engine-liveness oracles, and until now NOTHING outside the
+    // process could read them. `lastBarReceivedAtMs` is stamped as the FIRST line of
+    // onCandleMessage, before any universe / session-window / position / loaded logic, so it is
+    // direction-, window- and position-independent; `lastBarEvaluatedAtMs` is its evaluation-side
+    // twin. Everything else an operator can reach admits a FALSE PASS: rejections are
+    // direction-dependent (recordRejection runs only past the chart gate), `strategy.signals` mixes
+    // the swing BATCH engine, `subscriber_health_events` is write-only fail-soft so its emptiness
+    // proves nothing, and `signal_eval_outcomes` freshness only proves the ROLLUP thread is alive
+    // because that job runs on its own scheduler and never writes from signal-eval.
+    //
+    // READ SURFACE ONLY — deliberately no alarm here. SignalStarvationCanary was retired on
+    // 2026-07-26 for keying on a confounded signal; any new detector is a separate owner decision.
+    Gauge.builder(
+            "ay_signal_bar_received_age_seconds",
+            this,
+            e -> ageSeconds(e.barEverReceived, e.lastBarReceivedAtMs))
+        .description("Seconds since the engine last RECEIVED a closed bar; NEGATIVE = not a valid age")
+        .register(meterRegistry);
+    Gauge.builder(
+            "ay_signal_bar_evaluated_age_seconds",
+            this,
+            e -> ageSeconds(e.barEverEvaluated, e.lastBarEvaluatedAtMs))
+        .description("Seconds since the engine last EVALUATED a closed bar; NEGATIVE = not a valid age")
+        .register(meterRegistry);
     // Pre-register EVERY tag at boot so an outcome that has not happened yet still scrapes as 0.
     // Lazily created series would reintroduce exactly the ambiguity this closes: a MISSING
     // outcome="fired" series would again be indistinguishable from an engine that never evaluated.
@@ -922,6 +958,37 @@ public class SignalEngine {
   }
 
   /** Wall-clock millis of the last candle message received — the subscriber-liveness heartbeat. */
+  /**
+   * Age of a heartbeat stamp in seconds, for the liveness gauges (chip task_0bed1621).
+   *
+   * <p><b>Any NEGATIVE value means "this is not a valid age" and must never be read as healthy.</b>
+   * Two distinct causes, deliberately given distinct values so an operator can tell them apart:
+   *
+   * <ul>
+   *   <li>{@code -1} — no bar has EVER been received/evaluated on this boot. The stamps are SEEDED
+   *       at construction (boot grace for {@code SubscriberHealthCanary}), so a plain age would read
+   *       ~0 here and be indistinguishable from a bar that just arrived. An earlier draft of this
+   *       method did exactly that, and it is the same defect class as the detector this replaced: a
+   *       number that cannot tell healthy from never-started.
+   *   <li>{@code < -1} — the clock stepped BACKWARDS past the stamp. Also not floored: clamping hid
+   *       a genuine clock fault (the very thing that produced an 87-minute drift on this host in
+   *       July 2026) behind a value that reads as freshly alive.
+   * </ul>
+   */
+  private double ageSeconds(boolean everStamped, long stampMs) {
+    if (!everStamped) {
+      return -1.0;
+    }
+    long deltaMs = clock.millis() - stampMs;
+    return deltaMs < 0 ? Math.min(-1.001, deltaMs / 1000.0) : deltaMs / 1000.0;
+  }
+
+  /** Test seam: stamps the receive heartbeat so gauge behaviour can be driven without Redis. */
+  void markBarReceivedForTest(long atMs) {
+    lastBarReceivedAtMs = atMs;
+    barEverReceived = true;
+  }
+
   long lastBarReceivedAtMs() {
     return lastBarReceivedAtMs;
   }
@@ -1025,6 +1092,7 @@ public class SignalEngine {
   void onCandleMessage(String json) {
     long receivedAtMs = clock.millis();
     lastBarReceivedAtMs = receivedAtMs; // subscriber-liveness heartbeat (SubscriberHealthCanary)
+    barEverReceived = true; // gauge sentinel: distinguishes "fresh" from "never started"
     try {
       JsonNode node = objectMapper.readTree(json);
       EngineCandle candle =
@@ -1063,6 +1131,7 @@ public class SignalEngine {
     // fully drained, so a stall INSIDE onClosedBar freezes it while bars keep being received — the
     // signature SubscriberHealthCanary alarms on. See lastBarEvaluatedAtMs.
     lastBarEvaluatedAtMs = clock.millis();
+    barEverEvaluated = true;
   }
 
   private void onClosedBar(String exchange, String tradingsymbol, EngineCandle bar) {

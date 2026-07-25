@@ -52,12 +52,12 @@ config changes, no `ay` verbs that touch containers. SELECTs + `docker logs` onl
    ⚠️ **Zero rejections is INCONCLUSIVE, never "starvation"** (corrected 2026-07-26):
    `recordRejection` runs only PAST the chart gate, and every scalper shares two required scorers on
    one 3m series, so a SuperTrend-DOWN leg silences all of them on ordinary bearish tape. Judge
-   liveness POSITIVELY, never from an absence: in `strategy.signal_eval_outcomes` read the LATEST
-   bucket only (a session-wide `sum()` stays positive forever once anything evaluated) — latest
-   bucket `eval_count > 0` proves the eval loop ran. A fresh ALL-ZERO latest bucket is INCONCLUSIVE,
-   not healthy. A thread dump narrows but does not settle it: `LinkedBlockingQueue.take()` means the
-   eval thread is unstuck, NOT that bars are arriving. On a fully quiet session liveness is currently
-   UNPROVABLE — say INCONCLUSIVE (chip task_0bed1621 closes this). ⚠️ A missing `receive-stall`/`eval-stall` row in
+   liveness POSITIVELY from the read surface shipped 2026-07-26 (task_0bed1621):
+   `docker exec ay-strategy-signal-service sh -c 'wget -qO- http://127.0.0.1:8082/actuator/prometheus'
+   | grep ay_signal_bar_`. Read BOTH: received AND evaluated fresh ⇒ alive; received fresh +
+   evaluated growing ⇒ eval stall; received growing while capture is healthy ⇒ receive-side stall.
+   NEGATIVE is not a small age (-1 = no bar ever this boot, below -1 = clock fault). A missing series
+   is FAIL/unobservable — check engine-enabled, the deployed build and the actuator. ⚠️ A missing `receive-stall`/`eval-stall` row in
    `strategy.subscriber_health_events` is NOT proof of health — that table is write-only fail-soft
    forensics, so a disabled or failed sweep leaves it empty too; a row that IS present is strong
    evidence of a fault. See README §4.3 step 4.
@@ -88,7 +88,10 @@ track) and exit-band tunes (that track) land as ONE coordinated owner decision.
   — a fresh ALL-ZERO latest bucket only proves the rollup thread is alive, not the eval loop, so it
   is INCONCLUSIVE and merely NARROWED (not settled) by a thread dump: a thread parked on
   `queue.take()` stays INCONCLUSIVE, and one dump inside a legitimately-blocking `fetch` proves
-  nothing either. **On a fully quiet session liveness is currently UNPROVABLE** (chip task_0bed1621);
+  nothing either. **Quiet-session liveness IS now provable** — read BOTH `ay_signal_bar_*_age_seconds`
+  gauges (task_0bed1621): received fresh + evaluated fresh = alive; received fresh + evaluated GROWING
+  = eval stall; any NEGATIVE value is not a valid age (-1 = no bar ever this boot, below -1 = clock
+  fault) and must never be read as healthy;
   zero rows off-hours/holidays = normal (check `libs/market-calendar` holidays before alarming).
 - Single-session numbers never justify a tune by themselves UNLESS the threshold is outside the
   operand's physical range (structural) — say which class each candidate is.

@@ -340,12 +340,39 @@ Steps (all read-only — never restart/deploy/write mid-session):
          listener submits nothing and leaves the thread parked in exactly the same stack as a healthy
          idle worker.** Quiet tape and a dead subscriber are indistinguishable here. (An earlier
          version of this runbook called this stack "healthy" and "definitive". It is neither.)
-     - ⚠️ **Bottom line, stated plainly: on a fully quiet session there is currently NO way to prove
-       the engine is alive.** There is no operator-readable surface for `lastBarReceivedAtMs` /
-       `lastBarEvaluatedAtMs` — no metric, no endpoint (grepped 2026-07-26) — and every available
-       proxy has been shown to admit a false PASS. The gate must return INCONCLUSIVE and say so,
-       rather than manufacture confidence. Closing this needs chip **task_0bed1621** (expose the two
-       heartbeats); see its row in ledger §4b.
+     - ✅ **The definitive read (task_0bed1621, shipped 2026-07-26): two Micrometer gauges on the
+       strategy-signal actuator.** These publish the ages of the ONLY two unconfounded oracles, so a
+       quiet session is no longer unprovable:
+       ```bash
+       docker exec ay-strategy-signal-service sh -c          'wget -qO- http://127.0.0.1:8082/actuator/prometheus' | grep ay_signal_bar_
+       ```
+       - `ay_signal_bar_received_age_seconds` — seconds since the engine last RECEIVED a closed bar.
+         Stamped as the FIRST line of `onCandleMessage`, before any universe / session-window /
+         position / loaded logic, so it is direction-, window- and position-independent.
+       - `ay_signal_bar_evaluated_age_seconds` — its evaluation-side twin.
+
+       **Verdict needs BOTH gauges — received alone is not enough.** Bars can keep arriving while
+       `signal-eval` is wedged, which holds received-age fresh while evaluated-age grows; reading
+       received only would call that PASS.
+
+       | received-age | evaluated-age | verdict |
+       |---|---|---|
+       | fresh (≲ 1–2 bar intervals) | fresh | **PASS-QUIET** — engine alive, tape simply bearish |
+       | fresh | **growing** | **FAIL — eval stall.** Bars arrive, evaluation does not keep up |
+       | **growing** (capture healthy) | any | **FAIL — receive-side stall** |
+       | **negative** | any | **NOT a valid age — never read as healthy** (see below) |
+
+       ⚠️ **A NEGATIVE age is not a small age.** `-1` means no bar has EVER been received or
+       evaluated on this boot — the stamps are seeded at construction for the canary's boot grace,
+       so a plain age would read ~0 there and look identical to a bar that just landed. Anything
+       **below** `-1` means the clock stepped BACKWARDS past the stamp — a clock fault, exactly the
+       class that produced an 87-minute host drift in July 2026, deliberately surfaced instead of
+       clamped away.
+
+       A MISSING series is **FAIL / unobservable**, not proof the process is down: the engine may be
+       running with `artha.signals.engine-enabled=false`, the container may be an older artifact
+       without these gauges, or the actuator may simply be unreachable. Inspect container health,
+       the deployed build and the config before concluding anything.
    - ⚠️ **Do NOT read "no `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events`"
      as PASS.** That table is write-only, fail-soft forensics — a disabled sweep, a failed sweep or
      a failed insert produces no row either, so absence there can silently pass a dead engine. A row
@@ -355,8 +382,9 @@ Steps (all read-only — never restart/deploy/write mid-session):
    - The underlying invariant: the only unconfounded oracles are `SignalEngine.lastBarReceivedAtMs`
      (stamped as the first line of `onCandleMessage`, before any universe/window/position/loaded
      logic) and `lastBarEvaluatedAtMs` — direction-, window- and position-independent, and what
-     `SubscriberHealthCanary` and `SessionLivenessHeartbeat` (#941) key on. Neither has a read
-     surface today, which is why the operator proxy is the 3-minute outcome row above.
+     `SubscriberHealthCanary` and `SessionLivenessHeartbeat` (#941) key on. **Both are now
+     readable** via the gauges above (task_0bed1621, 2026-07-26); the `signal_eval_outcomes` bucket
+     remains a useful corroborator, no longer the only proxy.
    - **Never** conclude starvation from `strategy.signals` (it mixes the swing BATCH engine, whose
      rows are stamped `00:00:00`, and will fake liveness on a dead tick engine) or from
      `ay_signal_eval_outcome_total` (window- AND position-dependent: it is structurally flat
@@ -367,11 +395,13 @@ Steps (all read-only — never restart/deploy/write mid-session):
    /api/v1/signal-rejections/dot-health`. **Snapshot `docker logs` to a file BEFORE proposing any
    recreate** (a post-incident recreate destroys the evidence — burned us twice).
 6. **Report PASS / FAIL / INCONCLUSIVE + evidence.** ⚠️ **INCONCLUSIVE is a first-class result and
-   must be reported AS SUCH — never rounded to PASS.** On a fully quiet session it is the only honest
-   verdict available today (see step 4): every readable proxy admits a false PASS, and reporting one
-   is how the 2026-07-17 false escalation and the 2026-07-20 needless restart both happened, in
-   opposite directions. Fold a FAIL **or an INCONCLUSIVE** into that evening's `post` findings file —
-   a run of INCONCLUSIVEs is itself the evidence that chip task_0bed1621 needs building. **Never restart
+   must be reported AS SUCH — never rounded to PASS.** Since the liveness gauges landed
+   (task_0bed1621) a fully quiet session is normally decidable at step 4, so INCONCLUSIVE should be
+   RARE — it now means the gauges themselves were unreadable, which is its own finding. It remains a
+   legal verdict precisely because rounding an unproven case up to PASS is how the 2026-07-17 false
+   escalation and the 2026-07-20 needless restart both happened, in opposite directions. Fold a FAIL **or an INCONCLUSIVE** into that evening's `post` findings file —
+   an INCONCLUSIVE should now be RARE — the liveness gauges above answer the quiet-session case
+   directly; a run of them means the gauges are unreadable and that itself is the finding. **Never restart
    or redeploy to fix it mid-session** — propose; the owner/architect acts (a live fix waits for
    post-market or pre-open).
 

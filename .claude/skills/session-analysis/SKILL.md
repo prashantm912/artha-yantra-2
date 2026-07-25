@@ -72,18 +72,18 @@ Follow README **§4.3** exactly (it owns the queries + the gate):
    two required scorers on one 3m series, so SuperTrend-DOWN silences all of them on ordinary bearish
    tape — this rule cost a false starvation escalation (07-17) and a needless restart (07-20), and the
    canary that automated it was retired. On `0`, demand **POSITIVE** proof of life — never infer it
-   from an absence. In `strategy.signal_eval_outcomes`, read the **LATEST BUCKET ONLY** (`GROUP BY
-   bucket_time ORDER BY bucket_time DESC LIMIT 3`) — a session-wide `sum()` stays positive forever
-   once anything evaluated, so an engine that died at 10:00 would PASS all afternoon. Latest bucket
-   `eval_count > 0` ⇒ **PASS-QUIET**; latest bucket all zeros, or its predecessor missing/late, ⇒
-   **INCONCLUSIVE**; no fresh row at all while capture is healthy ⇒ **FAIL**. A thread dump
-   (`kill -3 1`) narrows but does NOT settle it: only REPEATED dumps (>=2, spaced past
-   the ~10s fetch timeout) showing no forward progress are a real stall (FAIL) — a single dump inside
-   `MarketDataCandlesClient.fetch`/`LiveSeriesStore.refreshFromRest` is ordinary blocking work;
-   parked on `LinkedBlockingQueue.take()` = eval thread unstuck but **receipt liveness unproven** — candle receipt is what submits the drain, so a dropped Redis listener parks the
-   thread in the identical stack. **On a fully quiet session liveness is currently UNPROVABLE** (no
-   read surface for `lastBarReceivedAtMs`/`lastBarEvaluatedAtMs`); report INCONCLUSIVE — chip
-   task_0bed1621 closes this. ⚠️ A missing `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events` is
+   from an absence. **The definitive read (shipped 2026-07-26, task_0bed1621):**
+   `docker exec ay-strategy-signal-service sh -c 'wget -qO- http://127.0.0.1:8082/actuator/prometheus'
+   | grep ay_signal_bar_` — read **BOTH** gauges, received alone is not enough: bars can keep arriving
+   while `signal-eval` is wedged. received fresh (≲1–2 bar intervals) AND evaluated fresh ⇒
+   **PASS-QUIET**; received fresh + evaluated GROWING ⇒ **FAIL, eval stall**; received growing while
+   capture is healthy ⇒ **FAIL, receive-side stall**. ⚠️ A NEGATIVE value is NOT a small age: `-1` =
+   no bar ever received/evaluated this boot (the stamps are boot-seeded, so a plain age would read ~0
+   and look identical to a fresh bar), below `-1` = the clock stepped backwards — a clock fault,
+   deliberately surfaced rather than clamped. A MISSING series is **FAIL/unobservable**, not proof
+   the process is down (engine-enabled=false, an older artifact, or an unreachable actuator all look
+   the same) — inspect health, build and config. Corroborate with the LATEST
+   `strategy.signal_eval_outcomes` bucket (never a session-wide `sum()`). ⚠️ A missing `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events` is
    NOT a PASS — that table is write-only fail-soft forensics, so a disabled or failed sweep also
    leaves it empty; a row that IS there is strong FAIL evidence, its absence proves nothing. Never
    judge from `strategy.signals` (mixes the swing BATCH engine), and never ALARM on
@@ -118,7 +118,10 @@ track) and exit-band tunes (that track) land as ONE coordinated owner decision.
   — a fresh ALL-ZERO latest bucket only proves the rollup thread is alive, not the eval loop, so it
   is INCONCLUSIVE and merely NARROWED (not settled) by a thread dump: a thread parked on
   `queue.take()` stays INCONCLUSIVE, and one dump inside a legitimately-blocking `fetch` proves
-  nothing either. **On a fully quiet session liveness is currently UNPROVABLE** (chip task_0bed1621);
+  nothing either. **Quiet-session liveness IS now provable** — read BOTH `ay_signal_bar_*_age_seconds`
+  gauges (task_0bed1621): received fresh + evaluated fresh = alive; received fresh + evaluated GROWING
+  = eval stall; any NEGATIVE value is not a valid age (-1 = no bar ever this boot, below -1 = clock
+  fault) and must never be read as healthy;
   zero rows off-hours/holidays = normal (check `libs/market-calendar` holidays before alarming).
 - Single-session numbers never justify a tune by themselves UNLESS the threshold is outside the
   operand's physical range (structural) — say which class each candidate is.

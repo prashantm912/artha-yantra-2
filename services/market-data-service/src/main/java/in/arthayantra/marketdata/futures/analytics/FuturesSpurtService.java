@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.futures.analytics;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.options.OiInterpretation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
@@ -24,17 +25,17 @@ public class FuturesSpurtService {
 
   public record FutSpurt(
       String tradingsymbol,
-      BigDecimal ltp,
-      BigDecimal prevClose,
-      BigDecimal pricePct,
+      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(types = {"number", "null"}) BigDecimal prevClose,
+      @Schema(types = {"number", "null"}) BigDecimal pricePct,
       long oi,
       long oiChange,
-      BigDecimal spurtPct,
+      @Schema(types = {"number", "null"}) BigDecimal spurtPct,
       OiInterpretation interpretation) {}
 
   public record FutSpurtChain(
       List<FutSpurt> items,
-      OffsetDateTime asOf,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {
     public FutSpurtChain(List<FutSpurt> items, OffsetDateTime asOf) {
       this(items, asOf, null);

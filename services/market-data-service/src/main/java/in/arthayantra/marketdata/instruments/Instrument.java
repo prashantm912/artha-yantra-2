@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.instruments;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -7,14 +8,14 @@ import java.time.LocalDate;
 public record Instrument(
     String exchange,
     String tradingsymbol,
-    Long instrumentToken,
-    String name,
-    String segment,
-    String instrumentType,
-    String underlyingExchange,
-    String underlyingTradingsymbol,
-    LocalDate expiry,
-    BigDecimal strike,
-    BigDecimal tickSize,
-    Integer lotSize,
+    @Schema(types = {"integer", "null"}) Long instrumentToken,
+    @Schema(types = {"string", "null"}) String name,
+    @Schema(types = {"string", "null"}) String segment,
+    @Schema(types = {"string", "null"}) String instrumentType,
+    @Schema(types = {"string", "null"}) String underlyingExchange,
+    @Schema(types = {"string", "null"}) String underlyingTradingsymbol,
+    @Schema(types = {"string", "null"}) LocalDate expiry,
+    @Schema(types = {"number", "null"}) BigDecimal strike,
+    @Schema(types = {"number", "null"}) BigDecimal tickSize,
+    @Schema(types = {"integer", "null"}) Integer lotSize,
     boolean active) {}

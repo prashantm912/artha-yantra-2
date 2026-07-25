@@ -10,6 +10,7 @@ import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.options.OptionsChainService;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -79,12 +80,12 @@ public class StraddleChartService {
       BigDecimal callStrike,
       BigDecimal putStrike,
       String interval,
-      BigDecimal underlyingLtp,
-      BigDecimal underlyingDayOpen,
+      @Schema(types = {"number", "null"}) BigDecimal underlyingLtp,
+      @Schema(types = {"number", "null"}) BigDecimal underlyingDayOpen,
       OffsetDateTime asOf,
-      BigDecimal combinedVwap,
+      @Schema(types = {"number", "null"}) BigDecimal combinedVwap,
       BigDecimal slBufferPoints,
-      BigDecimal slLevel,
+      @Schema(types = {"number", "null"}) BigDecimal slLevel,
       List<StraddleCandle> items) {}
 
   private final InstrumentRepository instruments;

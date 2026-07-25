@@ -5,6 +5,7 @@ import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.upstox.UpstoxFnoMasterClient;
 import in.arthayantra.marketdata.upstox.UpstoxMarginClient;
 import in.arthayantra.marketdata.upstox.UpstoxMarginClient.MarginQuote;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -67,15 +68,15 @@ public class MarginController {
   /** The margin response — {@code priced=false} carries a human reason (never a 5xx). */
   public record MarginResponse(
       boolean priced,
-      String unpricedReason,
-      BigDecimal spanMargin,
-      BigDecimal exposureMargin,
-      BigDecimal equityMargin,
-      BigDecimal netBuyPremium,
-      BigDecimal additionalMargin,
-      BigDecimal totalMargin,
-      BigDecimal requiredMargin,
-      BigDecimal finalMargin) {
+      @Schema(types = {"string", "null"}) String unpricedReason,
+      @Schema(types = {"number", "null"}) BigDecimal spanMargin,
+      @Schema(types = {"number", "null"}) BigDecimal exposureMargin,
+      @Schema(types = {"number", "null"}) BigDecimal equityMargin,
+      @Schema(types = {"number", "null"}) BigDecimal netBuyPremium,
+      @Schema(types = {"number", "null"}) BigDecimal additionalMargin,
+      @Schema(types = {"number", "null"}) BigDecimal totalMargin,
+      @Schema(types = {"number", "null"}) BigDecimal requiredMargin,
+      @Schema(types = {"number", "null"}) BigDecimal finalMargin) {
 
     static MarginResponse unpriced(String reason) {
       return new MarginResponse(false, reason, null, null, null, null, null, null, null, null);

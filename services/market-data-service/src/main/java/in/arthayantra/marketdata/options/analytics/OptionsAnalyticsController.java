@@ -10,6 +10,7 @@ import in.arthayantra.marketdata.options.OiInterpretation;
 import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OiQuery;
 import in.arthayantra.marketdata.options.OptionsChainService;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -136,15 +137,15 @@ public class OptionsAnalyticsController {
   }
 
   public record OiStats(
-      BigDecimal pcr,
-      BigDecimal maxPain,
+      @Schema(types = {"number", "null"}) BigDecimal pcr,
+      @Schema(types = {"number", "null"}) BigDecimal maxPain,
       long ceOi,
       long peOi,
       OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {}
 
   public record ActiveStrikesResponse(
-      BigDecimal sentimentPct,
+      @Schema(types = {"number", "null"}) BigDecimal sentimentPct,
       // §18.6: the oipulse LEVEL-based sentiment beside the ΔOI-flow number, for the live compare.
       @JsonInclude(JsonInclude.Include.NON_NULL) BigDecimal sentimentLevelPct,
       List<StrikeView> items,
@@ -168,10 +169,10 @@ public class OptionsAnalyticsController {
    * All-null when there is no prior snapshot bucket for this (strike, side).
    */
   public record LegDeltas(
-      Long oiChange,
-      BigDecimal oiChangePct,
-      BigDecimal ltpChange,
-      BigDecimal ltpChangePct,
+      @Schema(types = {"integer", "null"}) Long oiChange,
+      @Schema(types = {"number", "null"}) BigDecimal oiChangePct,
+      @Schema(types = {"number", "null"}) BigDecimal ltpChange,
+      @Schema(types = {"number", "null"}) BigDecimal ltpChangePct,
       OiInterpretation interpretation) {}
 
   /** A live chain leg (greeks/IV/OI/LTP from {@code /chain}) plus its interval deltas (or null). */
@@ -184,11 +185,11 @@ public class OptionsAnalyticsController {
   public record ChainTable(
       String underlying,
       LocalDate expiry,
-      BigDecimal spot,
-      BigDecimal forward,
+      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(types = {"number", "null"}) BigDecimal forward,
       String forwardSource,
       BigDecimal riskFreeRate,
-      BigDecimal pcr,
+      @Schema(types = {"number", "null"}) BigDecimal pcr,
       boolean stale,
       OffsetDateTime asOf,
       String interval,

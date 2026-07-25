@@ -208,11 +208,16 @@ export interface SpurtRow {
   interpretation: OiInterpretation;
 }
 
-/** GET /api/v1/market/options/spurt summary: spot-dir × total-OI-dir → the 4-state badge. */
+/**
+ * GET /api/v1/market/options/spurt summary: spot-dir × total-OI-dir → the 4-state badge.
+ * spotDelta and the two representative-spurt pcts are null when no strike has a spurt.
+ */
 export interface SpurtSummary {
   interpretation: OiInterpretation;
-  spotDelta: string;
+  spotDelta: string | null;
   oiChange: number;
+  oiChangePct: string | null;
+  priceChangePct: string | null;
 }
 
 /** GET /api/v1/market/options/spurt — per-strike buildup + the underlying rollup; 422 on no snapshot. */

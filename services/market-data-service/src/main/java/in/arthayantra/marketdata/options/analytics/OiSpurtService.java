@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.options.analytics;
 
 import in.arthayantra.marketdata.options.OiInterpretation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
@@ -16,7 +17,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class OiSpurtService {
 
-  public record SpurtRow(OiInterpretation interpretation, BigDecimal spurtPct) {}
+  public record SpurtRow(
+      OiInterpretation interpretation,
+      @Schema(types = {"number", "null"}) BigDecimal spurtPct) {}
 
   /**
    * One spurt row per (strike, optionType): interval LTP/OI deltas + 4-state classification.
@@ -26,14 +29,14 @@ public class OiSpurtService {
   public record StrikeSpurt(
       BigDecimal strike,
       String optionType,
-      BigDecimal ltp,
-      BigDecimal prevLtp,
-      Long oi,
+      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(types = {"number", "null"}) BigDecimal prevLtp,
+      @Schema(types = {"integer", "null"}) Long oi,
       long oiChange,
-      BigDecimal spurtPct,
-      BigDecimal ltpChange,
-      BigDecimal ltpChangePct,
-      Long volume,
+      @Schema(types = {"number", "null"}) BigDecimal spurtPct,
+      @Schema(types = {"number", "null"}) BigDecimal ltpChange,
+      @Schema(types = {"number", "null"}) BigDecimal ltpChangePct,
+      @Schema(types = {"integer", "null"}) Long volume,
       OiInterpretation interpretation) {}
 
   /**
@@ -44,12 +47,15 @@ public class OiSpurtService {
    */
   public record SpurtSummary(
       OiInterpretation interpretation,
-      BigDecimal spotDelta,
+      @Schema(types = {"number", "null"}) BigDecimal spotDelta,
       long oiChange,
-      BigDecimal oiChangePct,
-      BigDecimal priceChangePct) {}
+      @Schema(types = {"number", "null"}) BigDecimal oiChangePct,
+      @Schema(types = {"number", "null"}) BigDecimal priceChangePct) {}
 
-  public record SpurtChain(List<StrikeSpurt> items, SpurtSummary summary, OffsetDateTime asOf) {}
+  public record SpurtChain(
+      List<StrikeSpurt> items,
+      SpurtSummary summary,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   /** priorOi = oi before this interval's change (= currentOi - oiChange). */
   public SpurtRow classify(BigDecimal ltpDelta, long oiChange, long priorOi) {

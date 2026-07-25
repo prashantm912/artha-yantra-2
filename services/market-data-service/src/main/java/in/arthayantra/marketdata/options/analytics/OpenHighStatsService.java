@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options.analytics;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -31,26 +32,26 @@ public class OpenHighStatsService {
   public record StrikeSessionStat(
       BigDecimal strike,
       String optionType,
-      BigDecimal open,
-      BigDecimal high,
-      BigDecimal low,
-      BigDecimal last,
-      Long dayVolume,
-      Long declineVolume,
-      BigDecimal prevClose,
+      @Schema(types = {"number", "null"}) BigDecimal open,
+      @Schema(types = {"number", "null"}) BigDecimal high,
+      @Schema(types = {"number", "null"}) BigDecimal low,
+      @Schema(types = {"number", "null"}) BigDecimal last,
+      @Schema(types = {"integer", "null"}) Long dayVolume,
+      @Schema(types = {"integer", "null"}) Long declineVolume,
+      @Schema(types = {"number", "null"}) BigDecimal prevClose,
       boolean ohMark,
       boolean olMark,
-      BigDecimal fallPctFromOpen,
-      BigDecimal fallPctFromPrevClose,
+      @Schema(types = {"number", "null"}) BigDecimal fallPctFromOpen,
+      @Schema(types = {"number", "null"}) BigDecimal fallPctFromPrevClose,
       // W3 PR-6: per-strike session change-in-OI % (for the Day-14 p20 AVOID veto).
-      BigDecimal oiChangePct) {}
+      @Schema(types = {"number", "null"}) BigDecimal oiChangePct) {}
 
   public record StrikeSessionStats(
       OffsetDateTime asOf,
       String underlying,
       LocalDate expiry,
-      BigDecimal spot,
-      BigDecimal atmStrike,
+      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(types = {"number", "null"}) BigDecimal atmStrike,
       int interval,
       List<StrikeSessionStat> items) {}
 

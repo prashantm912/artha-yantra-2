@@ -53,16 +53,26 @@ computed from construction call sites) and the slice plan.
   four specs — revisit only with production evidence. **edge-gateway: nothing annotatable**; the
   `WebSession` framework-type leak (AuthController.logout parameter) is a separate spec-hygiene
   fix, deliberately not bundled here. No FE counterparts (experiments surface unconsumed by FE).
-- **3c: market-data** — the high-confidence YES set (Leg iv/greeks/prevOi/quote fields, StrikeRow/
-  Chain pcr+spot, OiStats pcr/maxPain, ActiveStrikes sentimentPct, LegDeltas all, PcrSeriesPoint,
-  Spurt family, BigOi family, Heatmap.Cell.value/maxAbs/asOf, Trend/Premium families,
-  StraddleChart, OpenHighStats, digests' blocked() shells (Options/Futures/Equity/Fii +
-  DayContext.Vix etc.), DataFreshness members, TermStructure, FutSpurt, Movers/Banks asOf,
-  BankGrid, Dow/VixQuote, Candle.oi, MarginResponse unpriced(), Instrument derivatives fields,
-  Returns r1d..r1y, BreadthDay, sector families, Minervini Geometry/Row/CandidateAnalysis,
-  IngestHealthBoard, CrossSourceOiCanary, KiteStatus, DeepSwingRunResponse engineSha/Image) +
-  FE fix `types.ts:212-216` (SpurtSummary.spotDelta non-null + missing oiChangePct/priceChangePct)
-  + the UNSURE list (resolve or skip-with-note per item during the slice).
+- **3c: market-data, OI/futures/market-surface core — SHIPPED (see the slice PR):** Leg (20:
+  ltp/bid/ask/volume/oi/prevOi/iv/9 greeks incl. 2nd+3rd order/ivReason/priceSource), Chain +
+  ChainTable spot/forward/pcr, OiStats pcr/maxPain, ActiveStrikesResponse.sentimentPct, LegDeltas
+  (4 of 5 — `interpretation` SKIPPED: a types-array annotation risks clobbering the inline string
+  enum; nullable-enum stays a known gap), PcrSeriesPoint, Spurt family (SpurtRow/StrikeSpurt/
+  SpurtSummary/SpurtChain.asOf), BigOi + BigOiLog families, Heatmap Cell.value/maxAbs/asOf,
+  Trend + Premium families, StraddleChart, CalendarSpreadChart, OpenHighStats (2 records),
+  ActiveStrike SentimentPoint/ActiveStrikeIvPoint, TermStructure + ContractLeg, FutSpurt(Chain),
+  Movers/MoverRow/Banks/BankRow, BankGrid(Row), Dow/VixQuote, Candle.oi, MarginResponse (9),
+  Instrument (11 derivative-optional fields). **DataFreshness needs NOTHING** (class-level
+  NON_NULL — converter already excludes all members; the audit's "members" rows are moot). FE:
+  types.ts SpurtSummary fixed (spotDelta `| null`, added missing oiChangePct/priceChangePct) +
+  OptionsSpurtPage null-guard.
+- **3d: market-data remainder — OPEN:** context digests' blocked() shells (OptionsDigest/
+  FuturesDigest/EquityDigest/FiiDigest/DayContext/ExpiryCompare + their sub-records), equity
+  families (Returns r1d..r1y, BreadthDay, Breadth/SectorHeatmap/SectorStats/StockChange),
+  Minervini Geometry/Row/CandidateAnalysis, IngestHealthBoard LastRun/SourceHealth,
+  CrossSourceOiCanary, KiteStatus, DeepSwingRunResponse engineSha/Image, plus the whole UNSURE
+  list below (resolve or skip-with-note per item). Same method: types-array annotation, twins
+  annotated together, $ref/JsonNode/NON_NULL skipped.
 
 Ledger row: task_79d12a4d. Full agent tables (evidence file:line per component) archived below.
 

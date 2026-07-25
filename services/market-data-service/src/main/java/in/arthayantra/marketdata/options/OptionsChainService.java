@@ -10,6 +10,7 @@ import in.arthayantra.marketdata.instruments.Instrument;
 import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
@@ -43,26 +44,26 @@ public class OptionsChainService {
    */
   public record Leg(
       String tradingsymbol,
-      BigDecimal ltp,
-      BigDecimal bid,
-      BigDecimal ask,
-      Long volume,
-      Long oi,
-      Long prevOi,
-      BigDecimal iv,
-      BigDecimal delta,
-      BigDecimal gamma,
-      BigDecimal theta,
-      BigDecimal vega,
-      BigDecimal rho,
-      BigDecimal vanna,
-      BigDecimal charm,
-      BigDecimal vomma,
-      BigDecimal speed,
-      BigDecimal zomma,
-      BigDecimal color,
-      String ivReason,
-      String priceSource) {}
+      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(types = {"number", "null"}) BigDecimal bid,
+      @Schema(types = {"number", "null"}) BigDecimal ask,
+      @Schema(types = {"integer", "null"}) Long volume,
+      @Schema(types = {"integer", "null"}) Long oi,
+      @Schema(types = {"integer", "null"}) Long prevOi,
+      @Schema(types = {"number", "null"}) BigDecimal iv,
+      @Schema(types = {"number", "null"}) BigDecimal delta,
+      @Schema(types = {"number", "null"}) BigDecimal gamma,
+      @Schema(types = {"number", "null"}) BigDecimal theta,
+      @Schema(types = {"number", "null"}) BigDecimal vega,
+      @Schema(types = {"number", "null"}) BigDecimal rho,
+      @Schema(types = {"number", "null"}) BigDecimal vanna,
+      @Schema(types = {"number", "null"}) BigDecimal charm,
+      @Schema(types = {"number", "null"}) BigDecimal vomma,
+      @Schema(types = {"number", "null"}) BigDecimal speed,
+      @Schema(types = {"number", "null"}) BigDecimal zomma,
+      @Schema(types = {"number", "null"}) BigDecimal color,
+      @Schema(types = {"string", "null"}) String ivReason,
+      @Schema(types = {"string", "null"}) String priceSource) {}
 
   /** One chain row. */
   public record StrikeRow(BigDecimal strike, Leg ce, Leg pe) {}
@@ -71,11 +72,11 @@ public class OptionsChainService {
   public record Chain(
       String underlying,
       LocalDate expiry,
-      BigDecimal spot,
-      BigDecimal forward,
+      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(types = {"number", "null"}) BigDecimal forward,
       String forwardSource,
       BigDecimal riskFreeRate,
-      BigDecimal pcr,
+      @Schema(types = {"number", "null"}) BigDecimal pcr,
       boolean stale,
       OffsetDateTime asOf,
       List<StrikeRow> rows) {}

@@ -14,7 +14,9 @@ class ErrorCodesTaxonomyTest {
       List.of(
           "VALIDATION_", "AUTH_", "KITE_", "OPENALGO_", "NOT_FOUND_", "CONFLICT_", "STRATEGY_",
           "DATA_", "SIGNAL_", "INTERNAL_", "NOT_CONFIGURED", "UPSTREAM_", "RATE_", "INVALID_",
-          "WINDOW_", "RISK_");
+          // MEDIA_* (415) added 2026-07-26 with MEDIA_TYPE_UNSUPPORTED: its own family because the
+          // taxonomy fixes VALIDATION_* at 400 and this code must carry 415 (task_9ffe390d).
+          "WINDOW_", "RISK_", "MEDIA_");
 
   @Test
   void everyCodeIsScreamingSnakeMatchingItsConstantName() throws Exception {

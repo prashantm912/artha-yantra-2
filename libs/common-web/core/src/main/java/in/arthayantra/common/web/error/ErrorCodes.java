@@ -8,13 +8,21 @@ package in.arthayantra.common.web.error;
  * VALIDATION_*  400      AUTH_*      401/403   KITE_*    401/429/502/503
  * NOT_FOUND_*   404      CONFLICT_*  409       STRATEGY_* 400/422
  * DATA_*        422/503  INTERNAL_*  500       WINDOW_*  422
- * RISK_*        422      SIGNAL_*    422
+ * RISK_*        422      SIGNAL_*    422       MEDIA_*   415
  * </pre>
  *
  * <p>Canonical-spelling pins (COMMON §3): {@code KITE_TOKEN_EXPIRED} wins over the plan's
  * {@code KITE_SESSION_EXPIRED}; {@code DATA_GAP} wins over {@code INSUFFICIENT_DATA}.
  */
 public final class ErrorCodes {
+
+  // ---- MEDIA_* (415) — the request body's Content-Type is not one this endpoint consumes. Its own
+  // family because the taxonomy fixes VALIDATION_* at 400, and 415 is the correct status: the body
+  // was never parsed, so there is no field-level detail to report. Before this existed the
+  // unmapped HttpMediaTypeNotSupportedException fell through to the catch-all and answered 500
+  // (task_9ffe390d — hit live on 2026-07-25 when a bodyless PowerShell POST defaulted to
+  // application/x-www-form-urlencoded against the publish endpoint). ----
+  public static final String MEDIA_TYPE_UNSUPPORTED = "MEDIA_TYPE_UNSUPPORTED";
 
   // ---- VALIDATION_* (400) ----
   public static final String VALIDATION_FAILED = "VALIDATION_FAILED";

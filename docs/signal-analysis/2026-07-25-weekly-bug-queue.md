@@ -52,6 +52,37 @@ Tier legend: **clean** = ship on CI-green; **HOLD/owner** = build/present, owner
    the routine-drift recurs. Command in the B8 row above; system settings = owner-only.
 7. **Blocked tunes stay blocked:** T1 (k) / T7 (composite) / T3 (iv_pair) / T5 (iv_abs_band) /
    T2 (iv_rank) wait for post-fix forward sessions — the week's PnL measured the regressions.
+8. **T6 concrete number (measured 2026-07-25, 4,118 rows):** the dot is free BECAUSE the entry
+   gate already enforces the VWAP side — the dot re-measures the same condition. Distance
+   distribution \|close−vwap\|/close: p25=11.8 / p50=16.3 / p75=23.4 / p90=38.6 bps. **Proposal:
+   support iff right side AND ≥15 bps** (median split ≈ 50% support, restores discrimination).
+
+## Scheduler-binding sweep — 2026-07-25 (closes chip task_a2ae20ed; successor items S1–S3)
+
+Full sweep: 69 `@Scheduled` methods across both services, every binding verified (default pool-1 /
+monitorTaskScheduler / evalOutcomeTaskScheduler / maintenanceTaskScheduler). Three findings beyond
+what BEJ-01 (#919) fenced — all NEW, owner picks which to build:
+
+- **S1 (HIGH, live data path): `CandleHousekeeping.flushBars` (`CandlesConfig:79`, 1-second bar-close
+  sweep) rides market-data's DEFAULT pool-1** alongside the options-snapshot pass, whose own javadoc
+  sizes one pass at ~70 s through the 1/s kite-quote limiter. While that pass holds the thread no
+  bar closes — every 1m bar can close up to ~70 s LATE (availability, not content), pushing the
+  engine's bar-close eval + receipt heartbeats toward their thresholds. `flushBars` is also itself
+  a hog (per-bar sync JDBC + Redis publish inline). **Fix shape: dedicated scheduler (or async sink)
+  for flushBars.** This also REFINES B9: the futures-OI alternate-minute skip is the even-minute
+  options pass (cron `0 */2`) eating the odd-minute futures tick on the same thread — 2:1 exactly
+  matches the observed 161 skip-1 pattern; the limiter is the secondary axis. Verify Monday via the
+  `ay_options_snapshot_duration_seconds` histogram before building.
+- **S2 (HIGH, money-adjacent): `TelegramCommandBot.poll` (3 s cadence, outbound HTTPS to
+  api.telegram.org, LIVE-ARMED) shares strategy-signal's pool-1 with `PaperScheduler.bracketEvaluation`
+  (the 15 s live SL/TP sweep)** + the straddle exit monitor + the insight sweeps (30 s-read HTTP
+  each). One Telegram stall delays ten SL/TP sweeps. **Fix shape: move the poller (and/or the exit
+  paths) off the default pool.**
+- **S3 (MED): `ExpiredBackfillAutoResume.selfHeal` cron carries no `zone`** (only cron in either
+  service missing explicit IST — harmless today, a trap if the expression ever gains an hour field);
+  `ShadowVariantRegistry.reload`'s 5-min JDBC read has no verified query timeout on the SL/TP pool.
+
+Off-session jobs (the 19:xx EOD block, 02:30 prunes, swing batches) are pool-1 by design and fine.
 
 **Deferred by construction (not bugs — tunes blocked on data):** T1 (k), T7 (composite
 threshold), T3 (iv_pair), T5 (iv_abs_band), T2 (iv_rank sourcing) — the rollup's own

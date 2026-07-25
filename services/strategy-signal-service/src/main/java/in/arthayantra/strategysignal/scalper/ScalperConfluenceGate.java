@@ -220,11 +220,10 @@ public class ScalperConfluenceGate {
 
     /** Records the confluence-composite rail (operand=aggregate vs threshold); true when INVALID. */
     boolean failsScore(String rail, boolean valid, BigDecimal aggregate, BigDecimal threshold, String reason) {
-      BigDecimal margin =
-          aggregate != null && threshold != null ? aggregate.subtract(threshold) : null;
       return !record(
               new RailCheck(
-                  rail, valid, aggregate, threshold, margin, reason, RailPolicies.of(rail)))
+                  rail, valid, aggregate, threshold,
+                  compositeMargin(valid, aggregate, threshold), reason, RailPolicies.of(rail)))
           .pass();
     }
 
@@ -983,7 +982,7 @@ public class ScalperConfluenceGate {
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     diag.failsScore(
         "confluence-composite", valid, conf.aggregate(), cfg.confluenceThreshold(),
-        compositeReason(conf, cfg.confluenceThreshold()));
+        compositeReason(conf, cfg.confluenceThreshold(), vwapHardGate));
     BigDecimal stop = structuralStop;
     // #7 (section 7) Hero-Zero buys the option ONE STRIKE INSIDE the short-covering strike (a CALL one
     // strike below the max-CE-OI strike for a bullish break, a PUT one above the max-PE-OI strike for a
@@ -1025,14 +1024,37 @@ public class ScalperConfluenceGate {
   }
 
   /**
-   * A human reason for a blocked confluence composite: which of the decisive legs failed (VWAP side,
-   * 60m bias, the 40/40 stand-aside) or, when all held, the aggregate falling short of the threshold.
+   * T14 (signal-analysis 2026-07-25 bug queue B5): the composite verdict is decisive-legs AND
+   * scalar ({@code ConnectTheDotsScorer:222} — VWAP side, 60m bias, stand-aside, aggregate ≥
+   * threshold). Recording {@code aggregate − threshold} unconditionally logged a blocked row with a
+   * POSITIVE margin whenever a decisive leg failed while the aggregate cleared the threshold (3
+   * rows on 2026-07-24, 1 on 07-23) — a self-contradiction that also mis-attributes every §3.5
+   * would-have-fired query. The margin is a SCALAR-shortfall diagnostic, so it is recorded only
+   * when it is the thing that decided: passing rows keep the positive slack (informative), scalar
+   * blocks keep the negative shortfall, and a decisive-leg block carries NO scalar margin — the
+   * reason string ({@link #compositeReason}) already names the failed leg.
    */
-  private static String compositeReason(Confluence conf, BigDecimal threshold) {
+  static BigDecimal compositeMargin(boolean valid, BigDecimal aggregate, BigDecimal threshold) {
+    if (aggregate == null || threshold == null) {
+      return null;
+    }
+    if (!valid && aggregate.compareTo(threshold) >= 0) {
+      return null; // blocked by a decisive leg, not the scalar — a positive "margin" would lie
+    }
+    return aggregate.subtract(threshold);
+  }
+
+  /**
+   * A human reason for a blocked confluence composite: which of the decisive legs failed (VWAP side
+   * — decisive only while {@code vwapHardGate} holds; the #9 opening-tick path degrades it to a soft
+   * dot before 10:30, where naming it "decisive" would be the exact T14 contradiction — the 60m
+   * bias, the 40/40 stand-aside) or, when all held, the aggregate falling short of the threshold.
+   */
+  static String compositeReason(Confluence conf, BigDecimal threshold, boolean vwapHardGate) {
     if (conf.standAside()) {
       return "stand-aside (both-IV-high 40/40 suppression)";
     }
-    if (!conf.vwapAligned()) {
+    if (vwapHardGate && !conf.vwapAligned()) {
       return "price on the wrong side of VWAP (decisive)";
     }
     if (!conf.biasAligned()) {

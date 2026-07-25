@@ -33,6 +33,13 @@
 #         Cross-vendor review:                      (no verdict token)
 #         Cross-vendor review: APPROVED             (no reviewer model + vendor)
 #         The owner APPROVED the design — see notes (2026-07-25)   (unrelated prose)
+#         Cross-vendor review: APPROVED round-1 (zero findings)     (an unspaced ASCII dash let
+#           `-1` pose as the model and `(zero findings)` as the vendor — a false ACCEPT with no
+#           reviewer at all; found by the cross-vendor review of this very change, round 1)
+#         No Cross-vendor review: APPROVED - not reviewed (OpenAI)  (a NEGATED mention; the label
+#           used to float anywhere in the line, so denying a review satisfied the gate — same
+#           review, same round)
+#         Cross-vendor review: APPROVED — Opus (SomeRandomVendor)   (vendor outside the routed set)
 #
 #     So: optional `*`/`**` emphasis around the token, free prose between the token and the
 #     dash and after the vendor parenthetical — but a reviewer `— <model> (<Vendor>)` is
@@ -85,14 +92,19 @@ jobs:
           # original payload, so a payload read can never see a corrected body (task_d142795f).
           PR_BODY="$(gh api "repos/${PR_REPO}/pulls/${PR_NUMBER}" --jq '.body // ""')"
 
-          LABEL='Cross-vendor review:[[:space:]]*[*_]*'
-          # `— <model> (<Vendor>)`: a dash separator, then at least one non-space model char, then
-          # a non-empty parenthetical. Prose after the parenthetical is free (grep is unanchored).
-          # The separator accepts an em-dash, en-dash, or plain ASCII `-`/`--`: requiring exactly
-          # U+2014 would reject an honest verdict on the same cosmetic grounds this gate was
-          # loosened to stop rejecting (task_d142795f audit).
-          DASH='(—|–|--?)'
-          REVIEWER="${DASH}[[:space:]]*[^()[:space:]][^()]*\([^)]+\)"
+          # ANCHORED to the start of a line (optionally a markdown bullet / emphasis) so a NEGATED
+          # mention cannot satisfy the gate: `No Cross-vendor review: APPROVED - not reviewed
+          # (OpenAI)` used to pass while the label floated mid-line (cross-vendor review, round 1).
+          LABEL='^[[:space:]]*([-*+][[:space:]]+)?[*_]*Cross-vendor review:[[:space:]]*[*_]*'
+          # `— <model> (<Vendor>)`. The separator accepts an em-dash, en-dash, or ASCII `-`/`--`,
+          # because insisting on U+2014 rejects an honest verdict on cosmetics — but an ASCII dash
+          # MUST be surrounded by whitespace, else `APPROVED round-1 (zero findings)` parses `-1`
+          # as the model and `(zero findings)` as the vendor and passes with no reviewer at all
+          # (cross-vendor review, round 1). The model needs a LETTER, not just any non-space char,
+          # and the vendor is the routed set: adding a third reviewer vendor means editing here.
+          DASH='(—|–|[[:space:]]--?[[:space:]])'
+          MODEL='[^()]*[A-Za-z][^()]*'
+          REVIEWER="${DASH}[[:space:]]*${MODEL}\((OpenAI|Anthropic)\)"
 
           # APPROVED needs a reviewer; REQUEST_CHANGES / NEEDS_REWORK also need `(resolved)`;
           # SKIPPED needs a non-empty parenthesised reason instead of a reviewer.

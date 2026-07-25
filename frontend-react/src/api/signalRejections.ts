@@ -164,13 +164,15 @@ export interface DotState {
 }
 
 /**
- * Per-DOT gate-input liveness over TODAY's newest rejections (roadmap F4 v2). `asOf` is the evaluation
- * time (IST offset), `session` whether the market is open, `rowsInspected` the sample size (0 = the gate
- * hasn't evaluated any bar yet today, so no dot can be judged).
+ * Per-DOT gate-input liveness over TODAY's newest CONTEXT-BEARING rejections (roadmap F4 v2; T17).
+ * `asOf` is the evaluation time (IST offset), `session` whether the market is open, `rowsScanned` the
+ * raw page depth, `rowsInspected` the context-bearing rows the probes actually read (0 with
+ * rowsScanned > 0 = only early-rail blocks so far — UNINFORMATIVE, not an all-dead verdict).
  */
 export interface DotHealth {
   asOf: string;
   session: boolean;
+  rowsScanned: number;
   rowsInspected: number;
   dots: DotState[];
 }

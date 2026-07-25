@@ -73,7 +73,10 @@ type _VariantSummary = AssertKeys<
 >;
 
 // --- dot-health canary (09:42 agent / health surfaces) ----------------------------------------
-type _DotHealth = AssertKeys<Schemas['DotHealth'], 'asOf' | 'session' | 'rowsInspected' | 'dots'>;
+type _DotHealth = AssertKeys<
+  Schemas['DotHealth'],
+  'asOf' | 'session' | 'rowsScanned' | 'rowsInspected' | 'dots'
+>;
 type _DotState = AssertKeys<Schemas['DotState'], 'dot' | 'alive' | 'required' | 'detail'>;
 
 // --- insights decision-support (INT-I1 feed / Focus / explain drawer) --------------------------

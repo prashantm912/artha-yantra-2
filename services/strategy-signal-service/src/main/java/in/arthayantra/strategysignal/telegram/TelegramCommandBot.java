@@ -194,11 +194,19 @@ public class TelegramCommandBot {
     StringBuilder out = new StringBuilder();
     out.append("data canary: ").append(dataCanaryLine()).append('\n');
     DotHealthCanary.DotHealth dots = dotHealth.evaluate();
-    long dead =
-        dots.dots().stream().filter(d -> d.required() && !d.alive()).count();
-    out.append("dot canary: ")
-        .append(dead == 0 ? "required dots alive" : dead + " REQUIRED dot(s) DEAD")
-        .append(" (").append(dots.rowsInspected()).append(" rejections inspected)\n");
+    // T17: an all-context-less window leaves every DotState dead-looking — that is UNINFORMATIVE,
+    // not an outage; counting those states here recreated the false owner report the canary fix
+    // exists to eliminate.
+    if (dots.rowsInspected() == 0) {
+      out.append("dot canary: uninformative (")
+          .append(dots.rowsScanned())
+          .append(" rejections scanned, 0 carry context)\n");
+    } else {
+      long dead = dots.dots().stream().filter(d -> d.required() && !d.alive()).count();
+      out.append("dot canary: ")
+          .append(dead == 0 ? "required dots alive" : dead + " REQUIRED dot(s) DEAD")
+          .append(" (").append(dots.rowsInspected()).append(" context-bearing rejections inspected)\n");
+    }
     out.append("entries: ")
         .append(
             risk.entryAllowed(in.arthayantra.strategysignal.signals.Books.SCALPER)

@@ -97,10 +97,18 @@ public class DotHealthCanary {
    */
   public record DotInputAlert(String title, String message) {}
 
+  // The two OI-quadrant probes are exempt from paging on a monthly index-expiry day: MarketOiClient
+  // deliberately degrades the OI reads to NEUTRAL then (S24 — chain OI is corrupted by the expiring
+  // series' unwind), so an all-NEUTRAL window is by-design, not an outage. Keyed per root exactly
+  // like the suppression itself (NSE monthly for NIFTY, BSE Thursday monthly for SENSEX) — the
+  // window mixes both roots, so either root's suppression day exempts the pair.
+  private static final Set<String> OI_QUADRANT_DOTS = Set.of("futures_oi", "underlying_oi");
+
   private final SignalRejectionRepository rejections;
   private final ApplicationEventPublisher events;
   private final Clock clock;
   private final MarketCalendar calendar = MarketCalendar.nse();
+  private final MarketCalendar bseCalendar = MarketCalendar.bse();
   private final Set<String> required;
   private final Map<String, LocalDate> alertedDeadOn = new ConcurrentHashMap<>();
   private final Set<String> deadNow = ConcurrentHashMap.newKeySet();
@@ -154,6 +162,9 @@ public class DotHealthCanary {
                 ? "no rejections yet today"
                 : "UNINFORMATIVE — " + scanned.size() + " rejections scanned, none carry context"
                     + " (early-rail blocks only)";
+      } else if (OI_QUADRANT_DOTS.contains(p.dot()) && expirySuppressed(now.toLocalDate())) {
+        detail =
+            "NEUTRAL by design — monthly index-expiry day, OI reads S24-suppressed (not an outage)";
       } else {
         detail = "input dead across " + contextRows.size() + " context-bearing rejections";
       }
@@ -179,10 +190,14 @@ public class DotHealthCanary {
       LocalDate today = now.toLocalDate();
       Map<String, DotState> byDot = new LinkedHashMap<>();
       health.dots().forEach(s -> byDot.put(s.dot(), s));
+      boolean expiryDay = expirySuppressed(today);
       for (String dot : required) {
         DotState state = byDot.get(dot);
         if (state == null) {
           continue;
+        }
+        if (expiryDay && OI_QUADRANT_DOTS.contains(dot)) {
+          continue; // S24 suppression: NEUTRAL quadrants are by-design today, never an outage page
         }
         if (!state.alive()) {
           if (!today.equals(alertedDeadOn.get(dot))) {
@@ -207,6 +222,14 @@ public class DotHealthCanary {
       events.publishEvent(new DotInputAlert(title, message));
     } catch (RuntimeException e) {
       log.warn("dot canary alert failed: {}", e.getMessage());
+    }
+  }
+
+  private boolean expirySuppressed(LocalDate today) {
+    try {
+      return calendar.isMonthlyIndexExpiryDay(today) || bseCalendar.isMonthlyIndexExpiryDay(today);
+    } catch (IllegalArgumentException uncoveredYear) {
+      return false; // the calendar cliff has its own canary
     }
   }
 

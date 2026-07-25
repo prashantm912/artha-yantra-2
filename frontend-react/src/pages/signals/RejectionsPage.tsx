@@ -133,7 +133,9 @@ function DotHealthPanel() {
       {q.isError && <p className="text-caption text-ay-muted">Dot health unavailable right now.</p>}
       {health && health.rowsInspected === 0 && (
         <p className="text-caption text-ay-muted">
-          No rejections yet today — dot liveness can&apos;t be judged until the gate has evaluated a bar.
+          {health.rowsScanned > 0
+            ? `No context-bearing rejections yet — ${health.rowsScanned} scanned, all blocked at an early rail; dot liveness can't be judged from them.`
+            : "No rejections yet today — dot liveness can't be judged until the gate has evaluated a bar."}
         </p>
       )}
       {health && health.rowsInspected > 0 && (

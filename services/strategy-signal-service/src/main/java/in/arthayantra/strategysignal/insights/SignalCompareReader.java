@@ -272,7 +272,7 @@ public class SignalCompareReader {
   public record CompareResult(
       LocalDate session,
       boolean booksDiffer,
-      String differsMost,
+      @Schema(types = {"string", "null"}) String differsMost,
       List<CompareColumn> columns,
       List<String> notes) {}
 
@@ -283,13 +283,13 @@ public class SignalCompareReader {
       String side,
       String family,
       String book,
-      BigDecimal priority,
-      String band,
+      @Schema(types = {"number", "null"}) BigDecimal priority,
+      @Schema(types = {"string", "null"}) String band,
       List<ComponentPoint> components,
-      BigDecimal optionLegCost,
+      @Schema(types = {"number", "null"}) BigDecimal optionLegCost,
       String marginEstimate,
       @Schema(types = {"number", "null"}) BigDecimal riskReward,
-      BigDecimal entryPrice,
+      @Schema(types = {"number", "null"}) BigDecimal entryPrice,
       @Schema(types = {"number", "null"}) BigDecimal stopLoss,
       @Schema(types = {"number", "null"}) BigDecimal target,
       String dataTrust,
@@ -297,7 +297,10 @@ public class SignalCompareReader {
       String scored) {}
 
   /** One priority component's contribution in a compare column (§3.4 render). */
-  public record ComponentPoint(String key, BigDecimal points, BigDecimal c) {}
+  public record ComponentPoint(
+      String key,
+      @Schema(types = {"number", "null"}) BigDecimal points,
+      @Schema(types = {"number", "null"}) BigDecimal c) {}
 
   /**
    * A ticket prefill (§11.4) — the owner's browser posts {@code {signalId, qty}} to the existing
@@ -305,7 +308,8 @@ public class SignalCompareReader {
    * opens from the signal). The leg/side/qty/SL/TP are here for the review render.
    */
   public record TicketPrefill(
-      long signalId, String exchange, String tradingsymbol, String side, Long qty,
+      long signalId, String exchange, String tradingsymbol, String side,
+      @Schema(types = {"integer", "null"}) Long qty,
       @Schema(types = {"number", "null"}) BigDecimal stopLoss,
       @Schema(types = {"number", "null"}) BigDecimal target) {}
 }

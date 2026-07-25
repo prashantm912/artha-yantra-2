@@ -4,6 +4,7 @@ import in.arthayantra.common.web.csv.CsvExport;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategysignal.paper.PaperEventRepository.PaperEventRow;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -69,8 +70,8 @@ public class PaperController {
       String tradingsymbol,
       String side,
       long qty,
-      String reason,
-      String realizedPnl,
+      @Schema(types = {"string", "null"}) String reason,
+      @Schema(types = {"string", "null"}) String realizedPnl,
       OffsetDateTime createdAt) {}
 
   /** The {@code items} envelope for {@code GET /events} — a typed record, never a Map (contract gate). */

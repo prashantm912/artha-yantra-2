@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.journal;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.sql.PreparedStatement;
 import java.sql.Types;
 import java.time.OffsetDateTime;
@@ -23,14 +24,14 @@ public class JournalRepository {
   /** One journal entry. */
   public record Entry(
       long id,
-      Long signalId,
-      Long paperPositionId,
-      UUID backtestRunId,
-      Long backtestTradeId,
+      @Schema(types = {"integer", "null"}) Long signalId,
+      @Schema(types = {"integer", "null"}) Long paperPositionId,
+      @Schema(types = {"string", "null"}) UUID backtestRunId,
+      @Schema(types = {"integer", "null"}) Long backtestTradeId,
       String note,
       List<String> tags,
-      Integer disciplineRating,
-      Integer emotionRating,
+      @Schema(types = {"integer", "null"}) Integer disciplineRating,
+      @Schema(types = {"integer", "null"}) Integer emotionRating,
       OffsetDateTime createdAt,
       OffsetDateTime updatedAt) {}
 

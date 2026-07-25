@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.execution;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -85,11 +86,11 @@ public interface OrderGateway {
   /** The funds/margin snapshot. {@code status} is {@code OK} or {@code NOT_CONFIGURED} (sentinel). */
   record Funds(
       String status,
-      BigDecimal availableCash,
-      BigDecimal collateral,
-      BigDecimal m2mRealized,
-      BigDecimal m2mUnrealized,
-      BigDecimal utilisedDebits) {
+      @Schema(types = {"number", "null"}) BigDecimal availableCash,
+      @Schema(types = {"number", "null"}) BigDecimal collateral,
+      @Schema(types = {"number", "null"}) BigDecimal m2mRealized,
+      @Schema(types = {"number", "null"}) BigDecimal m2mUnrealized,
+      @Schema(types = {"number", "null"}) BigDecimal utilisedDebits) {
 
     /** The fail-safe row a disabled gateway returns — all-null amounts, {@code NOT_CONFIGURED}. */
     public static Funds notConfigured() {

@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.paper;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -47,8 +48,8 @@ public class GraduationController {
       String stage,
       int trades,
       BigDecimal netRealized,
-      BigDecimal winRate,
-      BigDecimal profitFactor,
+      @Schema(types = {"number", "null"}) BigDecimal winRate,
+      @Schema(types = {"number", "null"}) BigDecimal profitFactor,
       BigDecimal expectancy,
       BigDecimal maxDrawdownPct,
       List<Criterion> criteria) {}
@@ -92,9 +93,9 @@ public class GraduationController {
       UUID strategyId,
       OffsetDateTime graduatedAt,
       int trades,
-      BigDecimal expectancy,
-      BigDecimal sharpe,
-      BigDecimal maxDrawdownPct) {}
+      @Schema(types = {"number", "null"}) BigDecimal expectancy,
+      @Schema(types = {"number", "null"}) BigDecimal sharpe,
+      @Schema(types = {"number", "null"}) BigDecimal maxDrawdownPct) {}
 
   /** The strategies the F7 evaluator has marked GRADUATED, newest first (measurement only). */
   @GetMapping("/graduation/promotions")

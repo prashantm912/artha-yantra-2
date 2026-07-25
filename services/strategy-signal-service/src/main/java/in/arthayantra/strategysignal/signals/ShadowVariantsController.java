@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategysignal.signals.ShadowVariantRegistryRepository.RegistryRow;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -31,21 +32,27 @@ import org.springframework.web.bind.annotation.RestController;
 public class ShadowVariantsController {
 
   /** One rail override in the response (echoes the stored vocabulary body). */
-  public record RailOverrideView(String rail, boolean disable, BigDecimal threshold, String passWhen) {}
+  public record RailOverrideView(
+      String rail,
+      boolean disable,
+      @Schema(types = {"number", "null"}) BigDecimal threshold,
+      @Schema(types = {"string", "null"}) String passWhen) {}
 
   /** The variant vocabulary body (the {@code spec} column), typed for the contract. */
-  public record VariantSpecView(List<RailOverrideView> rails, BigDecimal compositeThreshold) {}
+  public record VariantSpecView(
+      @Schema(types = {"array", "null"}) List<RailOverrideView> rails,
+      @Schema(types = {"number", "null"}) BigDecimal compositeThreshold) {}
 
   /** One registered variant. */
   public record ShadowVariantView(
       UUID id,
       String name,
-      UUID campaignId,
+      @Schema(types = {"string", "null"}) UUID campaignId,
       VariantSpecView spec,
       boolean enabled,
-      String createdBy,
+      @Schema(types = {"string", "null"}) String createdBy,
       OffsetDateTime createdAt,
-      OffsetDateTime disabledAt) {}
+      @Schema(types = {"string", "null"}) OffsetDateTime disabledAt) {}
 
   /** The list envelope ({items} — the repo-wide list convention). */
   public record ShadowVariantListResponse(List<ShadowVariantView> items) {}

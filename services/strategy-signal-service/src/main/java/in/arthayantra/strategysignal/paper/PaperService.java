@@ -111,14 +111,14 @@ public class PaperService {
       String side,
       long qty,
       BigDecimal avgEntryPrice,
-      BigDecimal markPrice,
-      BigDecimal unrealizedPnl,
+      @Schema(types = {"number", "null"}) BigDecimal markPrice,
+      @Schema(types = {"number", "null"}) BigDecimal unrealizedPnl,
       BigDecimal realizedPnl,
       String status,
       OffsetDateTime openedAt,
-      BigDecimal stopLoss,
-      BigDecimal takeProfit,
-      String buyingPowerWarning) {
+      @Schema(types = {"number", "null"}) BigDecimal stopLoss,
+      @Schema(types = {"number", "null"}) BigDecimal takeProfit,
+      @Schema(types = {"string", "null"}) String buyingPowerWarning) {
 
     /** A copy carrying the non-blocking buying-power warning (A12). */
     PositionDto withWarning(String warning) {
@@ -138,7 +138,7 @@ public class PaperService {
       BigDecimal avgEntryPrice,
       BigDecimal realizedPnl,
       OffsetDateTime openedAt,
-      OffsetDateTime closedAt) {}
+      @Schema(types = {"string", "null"}) OffsetDateTime closedAt) {}
 
   /** The itemized statutory cost legs of one fill (recomputed for display; {@link PaperFillService#costs}). */
   public record FeeBreakdown(
@@ -153,15 +153,15 @@ public class PaperService {
   /** One order leg of a position (entry / averaged add / exit) with its fill-audit + recomputed fees. */
   public record OrderLeg(
       long orderId,
-      Long signalId,
+      @Schema(types = {"integer", "null"}) Long signalId,
       String side,
       long qty,
       String status,
       OffsetDateTime placedAt,
-      OffsetDateTime filledAt,
-      BigDecimal fillPrice,
-      String fillSimulator,
-      BigDecimal slippageApplied,
+      @Schema(types = {"string", "null"}) OffsetDateTime filledAt,
+      @Schema(types = {"number", "null"}) BigDecimal fillPrice,
+      @Schema(types = {"string", "null"}) String fillSimulator,
+      @Schema(types = {"number", "null"}) BigDecimal slippageApplied,
       FeeBreakdown fees) {}
 
   /** The signal that opened a position (audit H5), with its family enrichment side-channels. */
@@ -169,7 +169,7 @@ public class PaperService {
       long signalId,
       String status,
       String side,
-      BigDecimal entryPrice,
+      @Schema(types = {"number", "null"}) BigDecimal entryPrice,
       @Schema(types = {"number", "null"}) BigDecimal stopLoss,
       @Schema(types = {"number", "null"}) BigDecimal target,
       BigDecimal compositeScore,
@@ -192,20 +192,20 @@ public class PaperService {
       String side,
       long qty,
       BigDecimal avgEntryPrice,
-      BigDecimal markPrice,
-      BigDecimal unrealizedPnl,
+      @Schema(types = {"number", "null"}) BigDecimal markPrice,
+      @Schema(types = {"number", "null"}) BigDecimal unrealizedPnl,
       BigDecimal realizedPnl,
       String status,
       OffsetDateTime openedAt,
-      OffsetDateTime closedAt,
-      String closeReason,
-      BigDecimal stopLoss,
-      BigDecimal takeProfit,
-      Long advisedLots,
-      BigDecimal marginSnapshot,
-      BigDecimal marginPct,
-      Integer subaccountIdx,
-      Long openingSignalId,
+      @Schema(types = {"string", "null"}) OffsetDateTime closedAt,
+      @Schema(types = {"string", "null"}) String closeReason,
+      @Schema(types = {"number", "null"}) BigDecimal stopLoss,
+      @Schema(types = {"number", "null"}) BigDecimal takeProfit,
+      @Schema(types = {"integer", "null"}) Long advisedLots,
+      @Schema(types = {"number", "null"}) BigDecimal marginSnapshot,
+      @Schema(types = {"number", "null"}) BigDecimal marginPct,
+      @Schema(types = {"integer", "null"}) Integer subaccountIdx,
+      @Schema(types = {"integer", "null"}) Long openingSignalId,
       OpeningSignal openingSignal,
       List<OrderLeg> orders) {}
 

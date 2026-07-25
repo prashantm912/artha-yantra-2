@@ -587,10 +587,43 @@ public final class TickwiseGoldenRunner {
         first.open(), high, low, last.close(), volume);
   }
 
-  private static Instant bucketFloor(OffsetDateTime bucketStart, Duration interval) {
+  /** IST is UTC+05:30; a raw-epoch floor is therefore an IST floor only for intervals dividing this. */
+  private static final long IST_OFFSET_SECONDS = 19_800L;
+
+  /**
+   * Floors a bar onto its primary bucket, anchored on the IST wall clock for INTRADAY intervals
+   * (task_1b85c64f).
+   *
+   * <p><b>The bug this fixes.</b> The floor was taken on the raw UTC epoch. IST is UTC+05:30, so a
+   * UTC-hour boundary lands at **:30 IST** — sim 1h bars ran 09:30–10:30 IST while the LIVE 1h series
+   * runs on IST clock hours. `V029__candles_1h_ist_reanchor.sql` re-anchored the live
+   * {@code candles_1h} cagg to {@code time_bucket(INTERVAL '1 hour', bucket, 'Asia/Kolkata')} on
+   * 2026-07-04 and its own comment records the pre-fix behaviour as splitting "at :30 IST" — the
+   * identical defect, fixed on the live side only. Sim and live 1h were 30 minutes out of phase, so
+   * no 1h backtest was ever like-for-like with the 1h series that actually trades. The owner's call
+   * was to move the SIM to match live, since live is the side that trades and the cagg is already
+   * correct.
+   *
+   * <p><b>Why only intra-day, and why 3m/5m/15m are untouched.</b> The shift is a pure no-op wherever
+   * the interval divides 19800 s: 3m (÷180 = 110), 5m (÷300 = 66) and 15m (÷900 = 22) all divide
+   * exactly, so their floors are bit-for-bit what they were. Only 1h leaves a remainder
+   * (19800 mod 3600 = 1800), which is precisely the 30-minute phase error.
+   *
+   * <p><b>1d is deliberately left on the raw epoch floor.</b> Shifting it would change only the bar's
+   * LABEL, not its contents — a 05:30-IST-anchored day and a 00:00-IST-anchored day both wholly
+   * contain one 09:15–15:30 session, so every 1d bar groups the same bars either way. But goldens
+   * compare byte-strings, so a label-only change would still rewrite the frozen vectors of the eight
+   * strategies running a 1d primary for zero behavioural gain. If 1d is ever re-anchored it must be
+   * its own decision with its own golden regeneration, not a side effect of the 1h fix.
+   */
+  // Package-private ONLY so PrimaryBucketAnchorTest can pin the anchoring directly. This is a
+  // parity-critical function and a test that asserts it through 375 bars of a synthetic session
+  // would prove less, more slowly.
+  static Instant bucketFloor(OffsetDateTime bucketStart, Duration interval) {
     long seconds = interval.toSeconds();
-    long epoch = bucketStart.toEpochSecond();
-    return Instant.ofEpochSecond(epoch - Math.floorMod(epoch, seconds));
+    long shift = seconds < Duration.ofDays(1).toSeconds() ? IST_OFFSET_SECONDS : 0L;
+    long epoch = bucketStart.toEpochSecond() + shift;
+    return Instant.ofEpochSecond(epoch - Math.floorMod(epoch, seconds) - shift);
   }
 
   private static Duration intervalDuration(String interval) {

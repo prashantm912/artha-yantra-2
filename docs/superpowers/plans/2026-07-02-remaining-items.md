@@ -566,13 +566,13 @@ number since 07-21. **Queue frozen in `docs/signal-analysis/2026-07-25-weekly-bu
 | B2 | T23 | live 3m series ≠ own 1m series in exact lot multiples — **mechanism CORRECTED by code read + DB probe** (no aggregation race: 3m = broker-replaced DB rollup, rails read the GOOD side; tick-agg mirror was the wrong one) | clean | **DONE [#981](https://github.com/prashantm912/artha-yantra-2/pull/981)** (2 codex rounds) — CandleBuilder rollover baseline excludes pre-open auction; canary tolerance 650 abs AND ≤10% rel (thin frozen bars still fire); README §3.17 + rollup corrected |
 | B3 | T19 | gap-backfill writes phantom 1m candles on unaligned buckets + historical cleanup | clean | **DONE [#982](https://github.com/prashantm912/artha-yantra-2/pull/982)** (2 rounds — round 2 normalized at the fetchAndStore choke point covering the public refresh endpoint) + live cleanup 2026-07-25: 1,682 July phantoms DELETED, caggs refreshed per-day, 0 remain; 26k 2015-era twinless misaligned rows LEFT (only copy — separate repair if ever needed) |
 | B4 | T17+T13 | dot-health canary false all-dead sampling + missing OI NEUTRAL-share probes | clean | **DONE [#983](https://github.com/prashantm912/artha-yantra-2/pull/983)** (3 rounds — round 2 expiry-day S24 exemption + uninformative consumers + contract recapture; round 3 required-flag drops at source so paging//status/UI agree) — context-bearing sampling, rowsScanned field, futures_oi/underlying_oi REQUIRED by default |
-| B5 | T14 | composite rejection rows record self-contradictory margins (optional-gate mechanic) | clean | queued |
-| B6 | T20 | far-month FINNIFTY thin-tape canary noise (5 sessions) | clean | queued |
-| B7 | T15 | persist engine boot line (loaded/unresolved/dropped) to a table | clean | queued |
-| B8 | — | 07-24 scheduler misfire (open gate 11:02, midday gate never ran) + 07-23 ~17-min host clock lag; folds chip task_a2ae20ed | investigate | queued |
-| B9 | T12 | `/options/spurt` 400 + futures-OI capture cadence ~200/375 | investigate | queued |
-| B10 | T22 | oi_spurt dead — ground-truth `spurtOiPct` distribution, then owner tune | analysis | queued |
-| B11 | T21/T6/T10 | owner-decision pack: 30/38 scalpers no premium exit · vwap free dot at w2.5 · 17 stale paper positions | OWNER | queued |
+| B5 | T14 | composite rows recorded self-contradictory positive margins (decisive-leg vs scalar) | clean | **DONE [#985](https://github.com/prashantm912/artha-yantra-2/pull/985)** (2 rounds) |
+| B6 | T20 | far-month FINNIFTY thin-tape canary noise (5 sessions) | clean | **DONE [#986](https://github.com/prashantm912/artha-yantra-2/pull/986)** — tick-density guard, min-divergence-ticks 30 |
+| B7 | T15 | persist engine boot line to a table | clean (V046) | **DONE #987** (2 rounds — V046 [parked swing branch renumbers at rebase], BoundedAsyncWriter) |
+| B8 | — | 07-24 "scheduler misfire" + clock lag | investigate | **CLOSED — host Windows time service DEAD (CMOS free-run, ~87-min drift by 07-24); crons fine. OWNER: re-enable time sync before Monday** (command in the bug-queue doc). Chip task_a2ae20ed separate scope, stays open |
+| B9 | T12 | `/options/spurt` 400 + futures-OI cadence | investigate | **CLOSED** — endpoint fine since #957 (probe shape error); cadence = alternate-minute skips from shared kite-quote limiter queueing, consumers tolerate, dedicated-limiter fix parked as owner proposal |
+| B10 | T22 | oi_spurt ground-truth distribution | analysis | **DONE** — OI floor still 50 = p95 of its own operand (only the price floor was recalibrated in #675); joint pass (50,8)=1.26% / (15,3)=15.5%; owner picks floors |
+| B11 | T21/T6/T10 | owner-decision pack | OWNER | **DELIVERED 2026-07-25** — full pack in `docs/signal-analysis/2026-07-25-weekly-bug-queue.md` (premium exits rec=(b) add bands; vwap rec=narrow condition; paper backlog rec=EOD-only+downgrade alert; +T22 floors, T12 cadence, B8 clock) |
 
 Tunes T1/T7/T3/T5/T2 stay BLOCKED on B1/B2/B11a (rollup verdict: challengers currently measure
 the regressions, not the knobs).

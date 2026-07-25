@@ -218,7 +218,7 @@ public class SignalEngine {
   // under threshold (V044 composite_rejections). Bounded ASYNC writer so a DB stall can never park
   // the sole signal-eval thread (#866 class).
   private final CompositeRejectionWriter compositeRejections;
-  // T15: durable reload ledger (strategy.engine_reloads, V047) — null in harnesses that construct
+  // T15: durable reload ledger (strategy.engine_reloads, V046) — null in harnesses that construct
   // without it; the record call is skipped, never a substitute no-op bean.
   private final EngineReloadLedger reloadLedger;
   // Kill switch for the above. Default ON — the row is the whole point of the change — but flipping

@@ -64,22 +64,7 @@ public class ResponseRequiredCustomizer implements GlobalOpenApiCustomizer, Orde
       return;
     }
 
-    Set<String> fromResponses = new HashSet<>();
-    Set<String> fromRequests = new HashSet<>();
-    openApi
-        .getPaths()
-        .values()
-        .forEach(
-            path ->
-                path.readOperations()
-                    .forEach(
-                        operation -> {
-                          collectResponseSeeds(operation, fromResponses);
-                          collectRequestSeeds(operation, fromRequests);
-                        }));
-
-    Set<String> responseOnly = new TreeSet<>(closure(fromResponses, schemas));
-    responseOnly.removeAll(closure(fromRequests, schemas));
+    Set<String> responseOnly = responseOnlyNames(openApi, schemas);
 
     Map<String, Set<String>> alwaysEmitted = facts.alwaysEmittedProperties();
     for (String name : responseOnly) {
@@ -100,6 +85,33 @@ public class ResponseRequiredCustomizer implements GlobalOpenApiCustomizer, Orde
         schema.setRequired(present);
       }
     }
+  }
+
+  /**
+   * Component names reachable from a RESPONSE and from no request body or parameter.
+   *
+   * <p>Shared with {@link NullableRefCustomizer}: both must touch response-only schemas and nothing
+   * else. On a request body, asserting a response-side fact about a key the server accepts as absent
+   * is a lie in the other direction, and a schema reachable from BOTH positions is left alone —
+   * correctness beats coverage.
+   */
+  static Set<String> responseOnlyNames(OpenAPI openApi, Map<String, Schema> schemas) {
+    Set<String> fromResponses = new HashSet<>();
+    Set<String> fromRequests = new HashSet<>();
+    openApi
+        .getPaths()
+        .values()
+        .forEach(
+            path ->
+                path.readOperations()
+                    .forEach(
+                        operation -> {
+                          collectResponseSeeds(operation, fromResponses);
+                          collectRequestSeeds(operation, fromRequests);
+                        }));
+    Set<String> responseOnly = new TreeSet<>(closure(fromResponses, schemas));
+    responseOnly.removeAll(closure(fromRequests, schemas));
+    return responseOnly;
   }
 
   private static void collectResponseSeeds(Operation operation, Set<String> seeds) {

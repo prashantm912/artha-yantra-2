@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.fundamentals;
 
+import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import java.util.Arrays;
 import java.util.List;
@@ -44,7 +45,13 @@ public class FundamentalsController {
 
   /** Reads one symbol's persisted snapshot (404 if none). */
   @ApiResponse(responseCode = "200", description = "OK")
-  @ApiResponse(responseCode = "404", description = "Fundamentals not found for symbol")
+  // The 404 body is EMPTY (ResponseEntity.of on an empty Optional). Without content = @Content
+  // springdoc inherits the 200 schema and the spec — and the generated TypeScript — declare an
+  // EquityFundamentals body on 404 that never arrives.
+  @ApiResponse(
+      responseCode = "404",
+      description = "Fundamentals not found for symbol",
+      content = @Content)
   @GetMapping("/{symbol}")
   public ResponseEntity<EquityFundamentals> get(@PathVariable String symbol) {
     return ResponseEntity.of(repo.find(symbol.trim().toUpperCase()));

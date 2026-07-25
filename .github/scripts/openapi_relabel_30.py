@@ -82,6 +82,10 @@ def downgrade_nullable_type_arrays(node):
             downgrade_nullable_type_arrays(value)
 
 
+# Composition keywords this pass must never recurse INTO — see downgrade_nullable_ref_anyof.
+COMPOSITION_KEYS = frozenset({"anyOf", "oneOf", "allOf"})
+
+
 def downgrade_nullable_ref_anyof(node):
     """Strip the exact nullable-``$ref`` union for the throwaway 3.0 diff copy.
 
@@ -89,6 +93,14 @@ def downgrade_nullable_ref_anyof(node):
     directions (measured with the pinned tool), so this copy legitimately drops only that fact and
     remains byte-identical to the pre-annotation copy. Genuine unions and every other ``anyOf`` shape
     still fall through to the validator/refusal path.
+
+    **Never descends INTO a composition branch** (``anyOf`` / ``oneOf`` / ``allOf``). Recursing into
+    one was a real hole, caught in review: ``oneOf: [anyOf: [$ref, null], string]`` got rewritten to
+    ``oneOf: [$ref, string]`` — a silent semantic change that is VALID 3.0, so the validator backstop
+    could never refuse it. The whole point of this pass is that it either performs the one exact
+    substitution or leaves the document for the validator to reject; anything it can quietly mangle
+    defeats that. A nullable ``$ref`` nested inside another composition is therefore left alone and
+    correctly refused downstream.
     """
     if isinstance(node, dict):
         any_of = node.get("anyOf")
@@ -105,7 +117,9 @@ def downgrade_nullable_ref_anyof(node):
                 node.clear()
                 node["$ref"] = ref_branch["$ref"]
                 return
-        for value in node.values():
+        for key, value in node.items():
+            if key in COMPOSITION_KEYS:
+                continue  # see the docstring: descending here can silently mangle a nested union
             downgrade_nullable_ref_anyof(value)
     elif isinstance(node, list):
         for value in node:

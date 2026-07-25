@@ -5326,14 +5326,7 @@
             }
           },
           "404" : {
-            "description" : "Fundamentals not found for symbol",
-            "content" : {
-              "*/*" : {
-                "schema" : {
-                  "$ref" : "#/components/schemas/EquityFundamentals"
-                }
-              }
-            }
+            "description" : "Fundamentals not found for symbol"
           },
           "default" : {
             "description" : "Error envelope (COMMON 8.3)",

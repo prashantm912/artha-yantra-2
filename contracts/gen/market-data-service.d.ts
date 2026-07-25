@@ -8215,9 +8215,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "*/*": components["schemas"]["EquityFundamentals"];
-                };
+                content?: never;
             };
             /** @description Error envelope (COMMON 8.3) */
             default: {

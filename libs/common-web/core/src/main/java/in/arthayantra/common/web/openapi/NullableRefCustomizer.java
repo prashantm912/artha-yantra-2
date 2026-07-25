@@ -5,8 +5,6 @@ import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.headers.Header;
 import io.swagger.v3.oas.models.media.Content;
 import io.swagger.v3.oas.models.media.Schema;
-import io.swagger.v3.oas.models.parameters.Parameter;
-import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import java.util.List;
 import java.util.Map;
@@ -36,11 +34,19 @@ public class NullableRefCustomizer implements GlobalOpenApiCustomizer, Ordered {
     }
     Map<String, Schema> schemas =
         openApi.getComponents() == null ? null : openApi.getComponents().getSchemas();
-    if (schemas != null) {
-      schemas.replaceAll((name, schema) -> rewriteSchema(schema));
-    }
-    if (openApi.getPaths() == null) {
+    if (schemas == null || schemas.isEmpty() || openApi.getPaths() == null) {
       return;
+    }
+    // RESPONSE-ONLY, same doctrine as ResponseRequiredCustomizer (whose reachability walk this
+    // reuses). Rewriting every component globally — and walking request bodies and parameters —
+    // published request-side nullability the endpoint contract never asserted. A schema reachable
+    // from BOTH a response and a request is left alone: correctness beats coverage.
+    Set<String> responseOnly = ResponseRequiredCustomizer.responseOnlyNames(openApi, schemas);
+    for (String name : responseOnly) {
+      Schema<?> schema = schemas.get(name);
+      if (schema != null) {
+        schemas.put(name, rewriteSchema(schema));
+      }
     }
     openApi
         .getPaths()
@@ -48,13 +54,10 @@ public class NullableRefCustomizer implements GlobalOpenApiCustomizer, Ordered {
         .forEach(path -> path.readOperations().forEach(NullableRefCustomizer::rewriteOperation));
   }
 
+  /** Responses only — a request body or parameter must never be rewritten (see {@link #customise}). */
   private static void rewriteOperation(Operation operation) {
     if (operation.getResponses() != null) {
       operation.getResponses().values().forEach(NullableRefCustomizer::rewriteResponse);
-    }
-    rewriteRequestBody(operation.getRequestBody());
-    if (operation.getParameters() != null) {
-      operation.getParameters().forEach(NullableRefCustomizer::rewriteParameter);
     }
   }
 
@@ -68,19 +71,7 @@ public class NullableRefCustomizer implements GlobalOpenApiCustomizer, Ordered {
     }
   }
 
-  private static void rewriteRequestBody(RequestBody requestBody) {
-    if (requestBody != null) {
-      rewriteContent(requestBody.getContent());
-    }
-  }
 
-  private static void rewriteParameter(Parameter parameter) {
-    if (parameter == null) {
-      return;
-    }
-    parameter.setSchema(rewriteSchema(parameter.getSchema()));
-    rewriteContent(parameter.getContent());
-  }
 
   private static void rewriteHeader(Header header) {
     if (header == null) {

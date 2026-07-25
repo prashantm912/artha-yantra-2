@@ -46,16 +46,17 @@
 # response (no such record exists today — ItemRequest is request-only, and JsonNode, which does
 # appear in both, is not a record so it never carries `required` anyway), and any request-body
 # property rename. Do not broaden this comment past what is measured.
+# task_db8bdf1e - `contracts` is a REQUIRED status check, so it must never be skipped at the
+# WORKFLOW level. GitHub reports a job skipped by an `if:` as Success, but a workflow skipped
+# by `paths:` stays Pending forever and blocks the PR ("You should not use path or branch
+# filtering to skip workflow runs if the workflow is required" - GitHub docs). The old
+# `paths:` filter here is therefore replaced by a `changes` classifier + an `if:` gate; the
+# job name is unchanged so the required context still resolves. See ci-java.yml's header for
+# the full rationale.
 name: ci-contracts
 
 on:
   pull_request:
-    paths:
-      - "services/**"
-      - "libs/**"
-      - "contracts/**"
-      - ".github/workflows/ci-contracts.yml"
-      - ".github/scripts/openapi_relabel_30.py"
   push:
     branches: [main]
 
@@ -64,7 +65,50 @@ permissions:
   pull-requests: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      contracts: ${{ steps.classify.outputs.contracts }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: classify
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # FAIL SAFE = RUN (see ci-java.yml): an unresolvable base must capture the specs,
+          # never silently declare the contract unchanged.
+          base=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+            base="$(git merge-base HEAD "origin/$BASE_REF" 2>/dev/null || true)"
+          elif [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null && base="$BEFORE_SHA" || base=""
+          fi
+
+          if [ -z "$base" ]; then
+            echo "::notice::change base did not resolve — running the contract gate (fail-safe)"
+            echo "contracts=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "diff base: $base"
+          files="$(git diff --name-only "$base" HEAD)"
+          echo "$files"
+
+          if echo "$files" | grep -Eq '^(services/|libs/|contracts/|\.github/workflows/ci-contracts\.yml$|\.github/scripts/openapi_relabel_30\.py$)'; then
+            echo "contracts=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "contracts=false" >> "$GITHUB_OUTPUT"
+          fi
+
   contracts:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

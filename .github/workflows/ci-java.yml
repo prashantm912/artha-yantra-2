@@ -1,44 +1,94 @@
-# ci-java (A.10): the mechanical reviewer for JVM code. Path-filtered so a
-# frontend commit never rebuilds the JVM images. Stages: gitleaks ->
+# ci-java (A.10): the mechanical reviewer for JVM code. Stages: gitleaks ->
 # checkstyle/Error Prone + unit + Testcontainers IT (pinned production
 # images) + Modulith verify + JaCoCo (services >= 60% line) -> image build
 # -> GHCR push on main only.
+#
+# task_db8bdf1e - WHY THE `paths:` FILTER IS GONE AND THE FILTERING MOVED INTO A JOB.
+#
+# `gitleaks` and the three `build-test` shards are REQUIRED status checks on main. A
+# workflow-level `paths:` filter made them unsatisfiable on any PR that touched none of
+# those paths: GitHub's own docs are explicit that the two skip mechanisms are NOT
+# equivalent —
+#
+#   "If a job within a workflow is skipped due to a conditional, it will report its status
+#    as 'Success'. [...] if a workflow is skipped due to path filtering, branch filtering or
+#    a commit message, then checks associated with that workflow will remain in a 'Pending'
+#    state [and] a pull request that requires those checks to be successful will be blocked
+#    from merging. [...] You should not use path or branch filtering to skip workflow runs if
+#    the workflow is required."
+#
+# So every docs-only PR sat BLOCKED and got merged with `--admin`, which bypasses ALL
+# required checks including a genuinely red one. The workflow now always triggers; a cheap
+# `changes` job decides what actually needs to run, and the heavy jobs are `if:`-gated so
+# they report Success-by-skip instead of never reporting. Job NAMES are unchanged, so the
+# six required contexts on main keep resolving.
+#
+# `gitleaks` is deliberately NOT gated: a secret can land in any file type, so a docs-only
+# PR is exactly when you still want the scan. It costs ~30s.
 name: ci-java
 
 on:
   push:
     branches: [main]
-    paths:
-      - "services/**"
-      - "libs/**"
-      - "tools/**"
-      - "pom.xml"
-      - ".mvn/**"
-      - "config/checkstyle/**"
-      # deploy/flyway: the ITs migrate the REAL lineages into Testcontainers, so a
-      # migration-only PR must run them (audit P2) — else a column rename/type change
-      # merges green and breaks every service IT on the NEXT unrelated PR.
-      - "deploy/flyway/**"
-      - ".github/workflows/ci-java.yml"
   pull_request:
-    paths:
-      - "services/**"
-      - "libs/**"
-      - "tools/**"
-      - "pom.xml"
-      - ".mvn/**"
-      - "config/checkstyle/**"
-      # deploy/flyway: the ITs migrate the REAL lineages into Testcontainers, so a
-      # migration-only PR must run them (audit P2) — else a column rename/type change
-      # merges green and breaks every service IT on the NEXT unrelated PR.
-      - "deploy/flyway/**"
-      - ".github/workflows/ci-java.yml"
 
 concurrency:
   group: ci-java-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Cheap path classifier. Replaces the workflow-level `paths:` filter (see the header):
+  # this ALWAYS runs, so the jobs downstream of it always report a conclusion.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      java: ${{ steps.classify.outputs.java }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # The diff needs the merge base (PR) or the pushed range (main); the default
+          # shallow fetch contains neither.
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: classify
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # FAIL SAFE = RUN. Any doubt about what changed (unresolvable base, first push on
+          # a branch, an event shape we did not anticipate) must run the full suite; the
+          # failure mode of guessing "true" is a wasted 8 minutes, and of guessing "false"
+          # is an untested merge.
+          base=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+            base="$(git merge-base HEAD "origin/$BASE_REF" 2>/dev/null || true)"
+          elif [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            # A force-push or a squash-merge can leave `before` unreachable in this checkout.
+            git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null && base="$BEFORE_SHA" || base=""
+          fi
+
+          if [ -z "$base" ]; then
+            echo "::notice::change base did not resolve — running the full JVM suite (fail-safe)"
+            echo "java=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "diff base: $base"
+          files="$(git diff --name-only "$base" HEAD)"
+          echo "$files"
+
+          # Same path set the workflow-level `paths:` filter used to carry. deploy/flyway is
+          # in it because the ITs migrate the REAL lineages into Testcontainers (audit P2) —
+          # else a column rename/type change merges green and breaks every service IT on the
+          # NEXT unrelated PR.
+          if echo "$files" | grep -Eq '^(services/|libs/|tools/|\.mvn/|config/checkstyle/|deploy/flyway/|pom\.xml$|\.github/workflows/ci-java\.yml$)'; then
+            echo "java=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "java=false" >> "$GITHUB_OUTPUT"
+          fi
+
   gitleaks:
     runs-on: ubuntu-latest
     steps:
@@ -70,6 +120,10 @@ jobs:
           fi
 
   build-test:
+    needs: changes
+    # Skip-as-Success (see the header): on a PR that touches no JVM path the three shards
+    # report skipped, which branch protection accepts, instead of never reporting at all.
+    if: needs.changes.outputs.java == 'true'
     runs-on: ubuntu-latest
     # Shard the reactor by service so the Testcontainers ITs (the 2-core
     # bottleneck — a single serial `verify` is ~23 min) run on parallel

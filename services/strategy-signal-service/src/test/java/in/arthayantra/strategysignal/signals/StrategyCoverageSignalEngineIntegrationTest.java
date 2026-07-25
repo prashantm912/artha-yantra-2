@@ -88,7 +88,7 @@ class StrategyCoverageSignalEngineIntegrationTest extends StrategySignalIntegrat
 
     StrategyRepository registry = mock(StrategyRepository.class);
     when(registry.listAll()).thenReturn(rows);
-    when(registry.countEnabledPublished()).thenReturn(2L);
+    when(registry.countEnabledWithPublishedPointer()).thenReturn(2L);
     when(registry.findVersionById(org.mockito.ArgumentMatchers.any(UUID.class))).thenAnswer(invocation ->
         Optional.ofNullable(versions.get(invocation.getArgument(0))));
 
@@ -136,7 +136,7 @@ class StrategyCoverageSignalEngineIntegrationTest extends StrategySignalIntegrat
 
     StrategyRepository registry = mock(StrategyRepository.class);
     when(registry.listAll()).thenReturn(rows);
-    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(registry.countEnabledWithPublishedPointer()).thenReturn(1L);
     when(registry.findVersionById(org.mockito.ArgumentMatchers.any(UUID.class))).thenAnswer(invocation ->
         Optional.ofNullable(versions.get(invocation.getArgument(0))));
     FuturesUniverseResolver resolver = mock(FuturesUniverseResolver.class);

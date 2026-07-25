@@ -384,7 +384,7 @@ class StrategyCoverageWatchdogTest {
 
   private static StrategyRepository registryWithEnabledPublished() {
     StrategyRepository registry = mock(StrategyRepository.class);
-    when(registry.countEnabledPublished()).thenReturn(1L);
+    when(registry.countEnabledWithPublishedPointer()).thenReturn(1L);
     return registry;
   }
 

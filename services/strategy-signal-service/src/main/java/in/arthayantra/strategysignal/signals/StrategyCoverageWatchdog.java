@@ -96,6 +96,20 @@ public class StrategyCoverageWatchdog {
     Set<EpisodeKey> activeEpisodes = activeEpisodes(snapshot);
     emittedEpisodes.retainAll(activeEpisodes);
     observedEpisodes.retainAll(activeEpisodes);
+    // Re-arm the daily NOT_LIVE_RESOLVABLE guard too. It is keyed by slug and was never cleared, so
+    // a slug that RECOVERED or moved to a different classification stayed suppressed for the rest of
+    // the IST day — a second, genuinely new NLR episode later that day would have been swallowed.
+    // The once-per-(slug, day) rule is meant to stop a permanent config error re-paging every
+    // reload, not to mute the slug outright.
+    Set<String> stillNotLive =
+        activeEpisodes.stream()
+            .filter(
+                e ->
+                    e.classification()
+                        == StrategyCoverageSnapshot.Classification.NOT_LIVE_RESOLVABLE)
+            .map(EpisodeKey::slug)
+            .collect(java.util.stream.Collectors.toSet());
+    lastNotLivePage.keySet().retainAll(stillNotLive);
 
     if (snapshot.terminalState() != StrategyCoverageSnapshot.TerminalState.DEGRADED_TERMINAL
         || !hasEnabledPublished()) {
@@ -158,22 +172,23 @@ public class StrategyCoverageWatchdog {
             snapshot.completedGeneration(),
             snapshot.reloadTimestamp(),
             snapshot.terminalState());
-    if (mode == Mode.OBSERVE_ONLY) {
-      if (observedEpisodes.add(key)) {
-        log.info("strategy coverage would-page: {} {}", slug, classification);
-      }
-      return;
-    }
+    // ONE decision function for both modes. OBSERVE_ONLY used to short-circuit on its own
+    // `observedEpisodes` set, which bypassed the daily NOT_LIVE_RESOLVABLE rule entirely — so the
+    // week of would-page evidence the owner arms on UNDERSTATED what ARMED would actually emit,
+    // which is the one thing that evidence has to get right.
     boolean dailyNotLive =
         classification == StrategyCoverageSnapshot.Classification.NOT_LIVE_RESOLVABLE;
-    if ((!dailyNotLive && emittedEpisodes.contains(key))
+    Set<EpisodeKey> seen = mode == Mode.OBSERVE_ONLY ? observedEpisodes : emittedEpisodes;
+    if ((!dailyNotLive && seen.contains(key))
         || (dailyNotLive && today.equals(lastNotLivePage.get(slug)))) {
       return;
     }
-    if (!publish(alert)) {
+    if (mode == Mode.OBSERVE_ONLY) {
+      log.info("strategy coverage would-page: {} {}", slug, classification);
+    } else if (!publish(alert)) {
       return;
     }
-    emittedEpisodes.add(key);
+    seen.add(key);
     if (dailyNotLive) {
       lastNotLivePage.put(slug, today);
     }
@@ -194,7 +209,9 @@ public class StrategyCoverageWatchdog {
 
   private boolean hasEnabledPublished() {
     try {
-      return registry.countEnabledPublished() > 0;
+      // NOT countEnabledPublished(): its join drops a strategy whose published_version_id points
+      // at a missing version row — the very slug MISSING_VERSION_ROW exists to surface.
+      return registry.countEnabledWithPublishedPointer() > 0;
     } catch (RuntimeException e) {
       log.warn("strategy coverage registry count failed: {}", e.toString());
       return false;

@@ -40,7 +40,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
     properties = {
       "spring.profiles.active=mock",
       "artha.feed.autostart=false",
-      "artha.instruments.bootstrap-sync=false"
+      "artha.instruments.bootstrap-sync=false",
+      // The context's own startup catch-up is FIRE-AND-FORGET (BhavcopyBackfillService.runIfFree
+      // submits to its own executor and returns), so its write to nse_eod_bhavcopy outlives
+      // ApplicationReadyEvent and raced this class's whole-table DELETE — deadlock detected, and
+      // ONLY on the 2-core CI runner, which is why it passed every PR shard while turning
+      // push:main red from #1016 onward. Same switch-off precedent as bootstrap-sync above.
+      "artha.bhavcopy.startup-catchup=false"
     })
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {

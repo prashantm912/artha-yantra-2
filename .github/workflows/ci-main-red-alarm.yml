@@ -1,0 +1,81 @@
+# Pages when ci-java goes RED on main.
+#
+# WHY THIS EXISTS: main was red from #1016 (2026-07-25) through #1021 and #1022 and nobody noticed
+# for three merges, because every PR's own shards passed — only the push:main run failed. CLAUDE.md
+# already documents the trap ("a red push:main run is the signal — PR shards can pass a race the
+# merge commit then fails"), but the process relied on a human remembering to run
+# `gh run list --workflow ci-java.yml --branch main` after each merge. Nobody did.
+#
+# It files (or updates) ONE GitHub issue rather than pushing to ntfy: Actions cannot reach the
+# loopback notifier, an issue needs no secret, and it is visible from `gh issue list` — which is
+# already in the daily-ops reach. The issue auto-closes when main goes green again, so a stale
+# alarm cannot accumulate.
+name: ci-main-red-alarm
+
+on:
+  workflow_run:
+    workflows: ["ci-java"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  issues: write
+
+jobs:
+  alarm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open or close the red-main issue
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const TITLE = 'ci-java is RED on main';
+            const { data: found } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'red-main',
+            });
+            const existing = found.find(i => i.title === TITLE);
+
+            if (run.conclusion === 'success') {
+              if (existing) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number,
+                  body: `Green again on ${run.head_sha.substring(0, 8)} — ${run.html_url}`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: existing.number, state: 'closed',
+                });
+              }
+              return;
+            }
+
+            // Only a genuine failure alarms; a cancelled or skipped run is not a red main.
+            if (run.conclusion !== 'failure') return;
+
+            const body = [
+              `**ci-java ${run.conclusion} on main.**`,
+              '',
+              `- commit: ${run.head_sha.substring(0, 8)} — ${run.head_commit?.message?.split('\n')[0] ?? ''}`,
+              `- run: ${run.html_url}`,
+              '',
+              'A PR whose own shards pass can still turn the merge commit red, which is exactly how',
+              'this went unnoticed for three merges in July 2026. **Do not merge on top of a red main**',
+              'without first understanding whether the failure is inherited or new — a red shard on a',
+              'later PR may have nothing to do with its diff.',
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: TITLE, body, labels: ['red-main'],
+              });
+            }

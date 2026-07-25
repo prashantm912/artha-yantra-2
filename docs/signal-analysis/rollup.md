@@ -91,7 +91,12 @@ books' loss profile is partly an artifact of positions that can only exit at 15:
   canary's zero tolerance against structurally noisy tick-agg (now 650 absolute AND ≤10% relative,
   thin frozen bars still fire). See README §3.17 (rewritten) and
   `2026-07-25-weekly-bug-queue.md` §B2.
-- **✅ PAPER-POSITION BACKLOG IS DRAINING (updated 2026-07-24, T10 de-escalated again).** 19 → **17**
+- **✅ PAPER-POSITION BACKLOG IS DRAINING (updated 2026-07-24; T10 CLOSED 2026-07-25 — owner
+  decision (b): EOD-only exits accepted + alert downgraded, #992).** Swing-book bracket-starvation
+  WARNs/pages are **suppressed BY DESIGN since #992** for the `minervini`/`manas-arora` books
+  (`artha.paper.eod-managed-books`) — the `ay_paper_bracket_starved_total` metric still counts, and
+  the settle-side alerts (settleRefused / staleSettleUsed) are NOT exempted. Do not re-flag the
+  absent WARNs as a regression in future session forensics. 19 → **17**
   OPEN: the 07-23 20:00/20:05 swing batch closed `CARYSIL` (−₹744) and `ATHERENERG` (+₹429) on
   `TRAILING_STOP`, and **no new positions were opened for a second consecutive session**. The
   mechanism is unchanged — these exited on the EOD batch's trailing stop, not on a live intraday
@@ -100,7 +105,16 @@ books' loss profile is partly an artifact of positions that can only exit at 15:
   evaluation and downgrade the alert) stands. But the population is no longer accumulating: **chronic,
   draining.**
 
-- **⚠⚠ 30 OF 38 LIVE SCALPERS HAVE NO PREMIUM EXIT RULE (NEW 2026-07-23, UNRESOLVED — T21).**
+- **~~30 OF 38 LIVE SCALPERS HAVE NO PREMIUM EXIT RULE~~ (NEW 2026-07-23, RESOLVED 2026-07-25 — T21).**
+  **Owner decision (b): premium bands SL −25% / TP +35% added to all 42 bracket-less YAMLs (#990).**
+  The build surfaced and fixed a live one-bar force-exit defect on the way: the engine resolved
+  `premium_pct` rules against the INDEX entry price (a below-entry "stop" that
+  `structuralStopHit(SHORT)` trips immediately for held-PE) — `levelFromRules` is deleted, the
+  engine persists NULL index-side levels for premium_pct-only strategies, and the band is enforced
+  on the option leg by the paper bracket path. A sibling defect of the same class
+  (`indexPointStopLevel` keyed on `definition.direction()`, wrong side for every PE-side take across
+  the 12 `index_points` YAMLs) shipped separately as #993. **Takes effect only after deploy +
+  republish** of the affected strategies; judge on forward sessions.
   Only **21 of the 63** scalper YAMLs carry a `premium_pct` block (`gap-theory`, `market-movers`,
   `hero-zero`, `btst-stbt`, `straddle`). The `golden-crossover`, `connect-the-dots`, `two-candle`,
   `trending-oi`, `trend-change` and `open-high-low` families have **no take-profit and no premium
@@ -130,7 +144,11 @@ books' loss profile is partly an artifact of positions that can only exit at 15:
   folder carry an unquantified upward bias on post-outage sessions. **Negative control 2026-07-23:
   zero misaligned rows session-wide on a day with no outage and therefore no backfill** — the
   trigger is confirmed to be the gap-backfill path and nothing else.
-- **⚠ `oi_spurt` HAS DECAYED TO FULLY DEAD (NEW 2026-07-23, WATCH — T22).** Support ran 3.0%
+- **~~`oi_spurt` HAS DECAYED TO FULLY DEAD~~ (NEW 2026-07-23, RESOLVED 2026-07-25 — T22).**
+  **Owner decision: floors recalibrated (50,8) → (15,3) (#991), ≈15.5% joint pre-quadrant pass on
+  the B10 ground truth (4,118 rows).** Spring props, live at the next deploy with NO republish.
+  Per the iv_pair lesson: verify the revival over 2 forward sessions, never assume it — and judge
+  the COMBINED effect with the T6 vwap change below (they push composites in opposite directions). Support ran 3.0%
   (07-21) → 0.2% (07-22) → **0.0% of 1,120 rows** (07-23), a monotone decline, while the input data
   stayed present (`spurtOiPct` non-null on every context-bearing row). So this is a
   threshold-vs-operand question, not a feed outage — the same shape as `iv_pair` (T3), which the
@@ -321,7 +339,10 @@ books' loss profile is partly an artifact of positions that can only exit at 15:
   heaviest weight (2.5 = 12.8% of Σw): **1,107 consecutive rows with zero discrimination.** A
   permanently-supporting dot is an unlabelled threshold reduction, the mirror image of a dead dot. The
   2-session confirmation this item asked for is now met ⇒ **T6 is promoted from watch to a live proposal**
-  (narrow the support condition or cut the weight).
+  (narrow the support condition or cut the weight). **RESOLVED 2026-07-25 — owner decision (b):
+  support now requires the right side AND ≥15 bps |close−vwap|/close distance (#991, the measured
+  median split ≈ 50% support). Spring prop, live at the next deploy, no republish; judge the
+  combined T22+T6 composite effect over 2 forward sessions.**
 - **`basis` dot — RESOLVED, was REGIME not dead-data.** 07-17 read 0/359 and it was filed as suspected
   dead-data; 07-20 read **505/748 = 67.5%**. Same story as `vix` (0% on 07-17, 54% on 07-20). **Carry the
   lesson, not the item: a 0% dot on a single directional session is regime until a second session with the

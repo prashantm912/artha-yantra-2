@@ -27,6 +27,21 @@ Tier legend: **clean** = ship on CI-green; **HOLD/owner** = build/present, owner
 
 ## Owner-decision pack — 2026-07-25 (B11; decide any subset, each lands as its own PR)
 
+**DECIDED 2026-07-25 (owner picked the recommended option on all four) — ALL SHIPPED:**
+- **T21 → (b)**: premium bands SL −25% / TP +35% on all 42 bracket-less YAMLs — **#990** (3 review
+  rounds; round 2 caught + fixed a live Critical: `premium_pct` resolved against the INDEX entry
+  price made a one-bar force-exit for held-PE; `levelFromRules` deleted, index-side levels now
+  persist NULL for premium_pct-only strategies). Sibling defect fixed separately: **#993**
+  (`indexPointStopLevel` keyed on `definition.direction()` — wrong side for every PE-side take
+  across the 12 `index_points` YAMLs, 8 enabled live). NEEDS deploy + republish.
+- **T6 → (b)**: vwap dot support requires ≥15 bps distance — **#991**. Deploy-effective, no republish.
+- **T10 → (b)**: EOD-only exits accepted; `PaperStaleTickAlerter` downgraded for the
+  `minervini`/`manas-arora` books — **#992**. Deploy-effective.
+- **T22 → (15,3)**: oi_spurt floors — **#991**. Deploy-effective; judge combined T22+T6 over 2
+  forward sessions.
+- Still open from this pack: **T12 accept** (no build), **B8 host clock = OWNER before Monday**,
+  item 7's blocked tunes (wait for post-fix forward sessions).
+
 1. **T21 — premium exits on the 30 bracket-less scalpers.** (a) declare indicator-exit-only
    intentional and accept square-off rides (document it, done); (b) add a `premium_pct` band to the
    6 bracket-less families (HOLD build — owner supplies the numbers, e.g. the E9-style SL −25% /

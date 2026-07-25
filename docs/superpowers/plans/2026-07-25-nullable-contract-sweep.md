@@ -240,3 +240,44 @@ between two records with DIFFERENT shapes — `OiTrendingService`'s (has `trend`
 `ExpiryCompareService`'s (has `pcr`). One schema wins; the expiry-compare response is therefore
 documented with a `trend` field it never sends and without the `pcr` it does. Constraint 3 above
 covers identical twins; this is the worse, uncovered case.
+
+## Final state (2026-07-25, end of the wave)
+
+**Shipped — 8 PRs.** #996 machinery + first 7 fields · #998 CLAUDE.md stale gate claim ·
+#999 strategy-signal 104 · #1000 backtest 54 · #1001 market-data core 149 · #1003 market-data
+remainder 184 (+ its own findings doc, `2026-07-25-nullable-ref-downgrade-findings.md`) ·
+#1005 edge-gateway WebSession hygiene · #1008 the enum carve-out. Ledger rows: task_79d12a4d,
+task_0b14da09, task_98984789, task_5187d6d6 — all DONE. **~500 response components that could be
+null at runtime no longer claim otherwise**, across all four services, with per-component
+construction-site evidence rather than blanket annotation.
+
+**What the wave proved about the tooling** (each cost a probe, none was in any doc before):
+`@Schema(nullable = true)` is a silent no-op at OpenAPI 3.1 — `types = {"X", "null"}` is the only
+working spelling; it preserves `format`, `items` and inline `enum` lists; the relabel script
+downgrades it losslessly for the 3.0 breaking gate; `openapi-typescript@7` renders it `| null`;
+and `required` is orthogonal (key-present ≠ value-non-null), so it correctly stays.
+
+**Known gaps, deliberate and evidence-backed:**
+
+| Gap | Why it stands | Tracked |
+|---|---|---|
+| `BuzzMatrix.cells` elements | Doubly-nested generic — `@ArraySchema` collapses the inner array and drops the enum; `@Schema` pollutes the outer type. Both mangle. Needs an `OpenApiCustomizer`. | §3e above; owner call |
+| Nullable `$ref` components (record/JsonNode-typed) | Constraint 2 — the relabel refuses `$ref`-with-siblings; 3.0 cannot express ref-or-null | task_bd871971 (researched) |
+| Duplicate simple-name collapse | springdoc keys by SIMPLE name; twins with DIFFERENT field sets silently lose the loser's fields (`TrendPoint` = the proven instance) | task_1c04803f (+task_1023f3bb) |
+| Request-body records | Out of scope by construction — `required` is response-only | inventory above |
+| Strict-validator nullability of enums | `enum` lists lack `null`, so a strict JSON-Schema validator would still reject null. Nothing here validates responses against the spec; codegen/diff/readers all read the type array correctly | §3e above |
+
+**Two chip premises were WRONG and are corrected here so they are not re-litigated:**
+`PageInstrument` is the repo's own generic record `Page<T>`, not Spring Data's (constraint 5);
+`LegDeltas.interpretation` is not nullable — the loop drops the whole object (§3e).
+
+**Method lessons worth reusing:** survey schemas RECURSIVELY (a top-level-only scan cannot see
+`items/items` — that is how `BuzzMatrix.cells` was missed, and a cross-vendor reviewer caught it);
+resolve every UNSURE by DDL or call site, never annotate speculatively (three UNSUREs in 3b turned
+out non-nullable); and re-capture is not proof — diff the captured spec structurally, because the
+first `nullable = true` attempt produced a byte-identical spec and would have shipped as a no-op.
+
+**DEPLOY STATUS — nothing from this wave is live.** Every JAR delta is annotation/metadata-only
+(it changes `/v3/api-docs`, not behaviour), so restarting the live engine for it would be a
+needless restart. Five artifacts carry changes: market-data, strategy-signal, backtest,
+edge-gateway, plus the FE type fixes. They ride the next substantive deploy of each service.

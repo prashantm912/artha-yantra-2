@@ -42,6 +42,14 @@ public class PaperStaleTickAlerter {
   private final NotifierClient notifier;
   private final Clock clock;
   private final Duration bracketAlertThreshold;
+  // T10 (owner decision 2026-07-25): the swing books are EOD-managed BY DESIGN — their cash-equity
+  // holdings are not on the live tick subscription, so every session every open swing position
+  // "starves" all day (31,730 WARNs on 2026-07-22) while its real exit path is the 20:00/20:05
+  // batch's trailing stop. For books in this set observeBracket still COUNTS the metric (continuity)
+  // but neither log-warns per pass nor pages — starvation there is the design, not a fault. The
+  // settle-side alerts (settleRefused / staleSettleUsed) are NOT exempted: a swing settle off a
+  // dead price is still worth seeing.
+  private final java.util.Set<String> eodManagedBooks;
 
   /** Every bracket-eval pass that could not freshly evaluate a position's stop/target. */
   private final Counter bracketStarvedTotal;
@@ -65,10 +73,15 @@ public class PaperStaleTickAlerter {
       NotifierClient notifier,
       Clock clock,
       MeterRegistry meterRegistry,
-      @Value("${artha.paper.bracket-starvation-alert-minutes:2}") long bracketAlertMinutes) {
+      @Value("${artha.paper.bracket-starvation-alert-minutes:2}") long bracketAlertMinutes,
+      @Value("${artha.paper.eod-managed-books:minervini,manas-arora}") String eodManagedBooks) {
     this.notifier = notifier;
     this.clock = clock;
     this.bracketAlertThreshold = Duration.ofMinutes(bracketAlertMinutes);
+    this.eodManagedBooks =
+        eodManagedBooks.isBlank()
+            ? java.util.Set.of()
+            : java.util.Set.of(eodManagedBooks.split("\\s*,\\s*"));
     this.bracketStarvedTotal = meterRegistry.counter("ay_paper_bracket_starved_total");
     this.settleRefusedTotal = meterRegistry.counter("ay_paper_settle_refused_total");
     this.staleSettleTotal = meterRegistry.counter("ay_paper_stale_settle_total");
@@ -97,6 +110,9 @@ public class PaperStaleTickAlerter {
     } else {
       Instant since = starvedSince.computeIfAbsent(pos.id(), k -> clock.instant());
       starvedFor = Duration.between(since, clock.instant());
+    }
+    if (eodManagedBooks.contains(pos.book())) {
+      return; // T10: EOD-managed swing book — starvation is the design; counted above, never paged
     }
     if (starvedFor.compareTo(bracketAlertThreshold) >= 0) {
       String detail =

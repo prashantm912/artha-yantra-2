@@ -19,6 +19,7 @@ import in.arthayantra.marketdata.nse.BhavcopyFetcher.BhavcopyRow;
 import in.arthayantra.marketdata.nse.NseCorporateActionFetcher;
 import in.arthayantra.marketdata.nse.NseCorporateActionFetcher.CaRecord;
 import in.arthayantra.marketdata.nse.NseEodBhavcopyRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Instant;
@@ -557,23 +558,42 @@ public class BhavcopyBackfillService {
   /** The targeted single-day re-fetch tally, returned by {@code POST .../eod-backfill/refetch}. */
   public record RefetchResult(String date, ExchangeResult nse, ExchangeResult bse) {}
 
-  /** Per-exchange catch-up tally (raw rows upserted + candles newly inserted across the span). */
+  /**
+   * Per-exchange catch-up tally (raw rows upserted + candles newly inserted across the span).
+   *
+   * <p>{@code @Schema(name)} is load-bearing: {@code KiteSessionService.ExchangeResult} shares this
+   * simple name with a COMPLETELY different field set, and springdoc keys components by simple name.
+   * This twin won the scan, so the Kite-session endpoint published THESE three int fields. All-int,
+   * so nothing here is nullable.
+   */
+  @Schema(name = "BhavcopyExchangeResult")
   public record ExchangeResult(int days, int bhavRows, int candleRows) {
     static ExchangeResult none() {
       return new ExchangeResult(0, 0, 0);
     }
   }
 
-  /** Last-run audit, surfaced by {@code GET /api/v1/market/eod-backfill/status}. */
+  /**
+   * Last-run audit, surfaced by {@code GET /api/v1/market/eod-backfill/status}.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: three sibling backfill services declare their own
+   * {@code Status} record with a DIFFERENT field set, and springdoc keys components by simple name —
+   * without the explicit name all four collapse to one spec schema (scan-order-dependent).
+   *
+   * <p>{@code jobId}/{@code lastRun}/{@code error} are null on the never-run shell (:591) and
+   * {@code error} again while running (:595). {@code nse}/{@code bse} are {@code $ref}s and are never
+   * null (every factory passes {@link ExchangeResult#none()} at minimum).
+   */
+  @Schema(name = "BhavcopyBackfillStatus")
   public record Status(
-      String jobId,
+      @Schema(types = {"string", "null"}) String jobId,
       String state, // NEVER_RUN | RUNNING | OK | FAILED
-      Instant lastRun,
+      @Schema(types = {"string", "null"}) Instant lastRun,
       long durationMs,
       ExchangeResult nse,
       ExchangeResult bse,
       int ratiosDetected,
-      String error) {
+      @Schema(types = {"string", "null"}) String error) {
 
     static Status neverRun() {
       return new Status(null, "NEVER_RUN", null, 0, ExchangeResult.none(), ExchangeResult.none(), 0, null);

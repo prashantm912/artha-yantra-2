@@ -164,11 +164,22 @@ public class MinerviniBacktestService {
    */
   public record RotationResult(int slots, BigDecimal marginPct, int rotations, PortfolioStat net) {}
 
-  /** The full multi-variant result: technical / rs-only / turnover-only / rs+turnover, side by side. */
+  /**
+   * The full multi-variant result: technical / rs-only / turnover-only / rs+turnover, side by side.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: the sibling
+   * {@code ManasAroraBacktestService.BacktestResult} shares this simple name but LACKS
+   * {@code sweep}+{@code rotation}, and springdoc keys components by simple name.
+   *
+   * <p>{@code fromDate}/{@code runAt} are null on the idle shell (MinerviniController:366-367) and
+   * {@code runAt} again while running / on failure (:295, :334). {@code rotation} is a {@code $ref}
+   * and cannot carry a 3.1 type array — its real nullability stays parked (sweep doc constraint #2).
+   */
+  @Schema(name = "MinerviniBacktestResult")
   public record BacktestResult(
       String status,
-      LocalDate fromDate,
-      String runAt,
+      @Schema(types = {"string", "null"}) LocalDate fromDate,
+      @Schema(types = {"string", "null"}) String runAt,
       List<Report> variants,
       List<SweepCell> sweep,
       List<SlotCell> slotSweep,

@@ -6,6 +6,7 @@ import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Bar;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -70,20 +71,29 @@ public class EquityDailyBackfillService {
    * Live + last-run audit, surfaced by {@code GET /api/v1/market/admin/equity-daily-backfill/status}.
    * Mirrors the {@link ExpiredBackfillService.Status} state machine (NEVER_RUN→RUNNING→OK|FAILED);
    * {@code written} = symbols with ≥1 candle upserted, {@code skipped} = no Upstox key / no candles.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: three sibling backfill services declare their own
+   * {@code Status} record with a DIFFERENT field set, and springdoc keys components by simple name.
+   *
+   * <p>{@code jobId}/{@code startedAt}/{@code lastRun}/{@code currentSymbol}/{@code error} are null on
+   * the never-run shell (:100); {@code snapshot} additionally leaves {@code currentSymbol} null before
+   * the first symbol is picked up and {@code lastRun}/{@code error} null while RUNNING (:137-142).
+   * {@code recentLogs} is never null ({@code List.of()} / {@code List.copyOf}).
    */
+  @Schema(name = "EquityDailyBackfillStatus")
   public record Status(
-      String jobId,
+      @Schema(types = {"string", "null"}) String jobId,
       String state, // NEVER_RUN | RUNNING | OK | FAILED
-      Instant startedAt,
-      Instant lastRun,
+      @Schema(types = {"string", "null"}) Instant startedAt,
+      @Schema(types = {"string", "null"}) Instant lastRun,
       long durationMs,
       int symbols,
       int written,
       int skipped,
       int failed,
       long candleRows,
-      String currentSymbol,
-      String error,
+      @Schema(types = {"string", "null"}) String currentSymbol,
+      @Schema(types = {"string", "null"}) String error,
       List<String> recentLogs) {
 
     static Status neverRun() {

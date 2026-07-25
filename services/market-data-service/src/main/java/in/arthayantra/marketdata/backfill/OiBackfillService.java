@@ -12,6 +12,7 @@ import in.arthayantra.marketdata.kite.OiHistorySource;
 import in.arthayantra.marketdata.options.OptionsSnapshotRepository;
 import in.arthayantra.marketdata.options.OptionsSnapshotRepository.SnapshotRow;
 import in.arthayantra.marketdata.upstox.BackfillJobRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -75,19 +76,26 @@ public class OiBackfillService {
   /**
    * Live + last-run audit, surfaced by {@code GET /api/v1/market/admin/oi-backfill/status} (B1).
    * Mirrors the {@code BhavcopyBackfillService.Status} state machine (NEVER_RUN→RUNNING→OK|FAILED).
+   *
+   * <p>{@code @Schema(name)} is load-bearing: three sibling backfill services declare their own
+   * {@code Status} record with a DIFFERENT field set, and springdoc keys components by simple name.
+   *
+   * <p>Every non-primitive is null on the never-run shell (:101); {@code lastRun}/{@code error} are
+   * additionally null while RUNNING (:152-153) and {@code error} on the OK terminal (:165-168).
    */
+  @Schema(name = "OiBackfillStatus")
   public record Status(
-      String jobId,
+      @Schema(types = {"string", "null"}) String jobId,
       String state, // NEVER_RUN | RUNNING | OK | FAILED
-      String underlying,
-      LocalDate expiry,
-      LocalDate session,
-      Instant startedAt,
-      Instant lastRun,
+      @Schema(types = {"string", "null"}) String underlying,
+      @Schema(types = {"string", "null"}) LocalDate expiry,
+      @Schema(types = {"string", "null"}) LocalDate session,
+      @Schema(types = {"string", "null"}) Instant startedAt,
+      @Schema(types = {"string", "null"}) Instant lastRun,
       long durationMs,
       int optionRows,
       int futuresRows,
-      String error) {
+      @Schema(types = {"string", "null"}) String error) {
 
     static Status neverRun() {
       return new Status(null, "NEVER_RUN", null, null, null, null, null, 0, 0, 0, null);

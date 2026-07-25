@@ -495,7 +495,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ScreenResponse"
+                  "$ref" : "#/components/schemas/MinerviniScreenResponse"
                 }
               }
             }
@@ -665,7 +665,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ScreenResponse"
+                  "$ref" : "#/components/schemas/ManasScreenResponse"
                 }
               }
             }
@@ -1490,7 +1490,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ExchangeResult"
+                  "$ref" : "#/components/schemas/KiteSessionExchangeResult"
                 }
               }
             }
@@ -1817,7 +1817,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ScreenResponse"
+                  "$ref" : "#/components/schemas/MinerviniScreenResponse"
                 }
               }
             }
@@ -1845,7 +1845,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/BacktestResult"
+                  "$ref" : "#/components/schemas/MinerviniBacktestResult"
                 }
               }
             }
@@ -1882,7 +1882,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Funnel"
+                  "$ref" : "#/components/schemas/MinerviniFunnel"
                 }
               }
             }
@@ -2062,7 +2062,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/CandidateAnalysis"
+                  "$ref" : "#/components/schemas/MinerviniCandidateAnalysis"
                 }
               }
             }
@@ -2162,7 +2162,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/ScreenResponse"
+                  "$ref" : "#/components/schemas/ManasScreenResponse"
                 }
               }
             }
@@ -2190,7 +2190,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/BacktestResult"
+                  "$ref" : "#/components/schemas/ManasBacktestResult"
                 }
               }
             }
@@ -2227,7 +2227,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Funnel"
+                  "$ref" : "#/components/schemas/ManasFunnel"
                 }
               }
             }
@@ -2400,7 +2400,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/CandidateAnalysis"
+                  "$ref" : "#/components/schemas/ManasCandidateAnalysis"
                 }
               }
             }
@@ -5899,7 +5899,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Status"
+                  "$ref" : "#/components/schemas/BhavcopyBackfillStatus"
                 }
               }
             }
@@ -6524,7 +6524,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Status"
+                  "$ref" : "#/components/schemas/OiBackfillStatus"
                 }
               }
             }
@@ -6632,7 +6632,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Status"
+                  "$ref" : "#/components/schemas/ExpiredBackfillStatus"
                 }
               }
             }
@@ -6660,7 +6660,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/Status"
+                  "$ref" : "#/components/schemas/EquityDailyBackfillStatus"
                 }
               }
             }
@@ -7441,7 +7441,7 @@
         },
         "required" : [ "returnPct", "trades", "year" ]
       },
-      "Row" : {
+      "MinerviniRow" : {
         "type" : "object",
         "properties" : {
           "symbol" : {
@@ -7454,37 +7454,37 @@
             "type" : "number"
           },
           "sma50" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "sma150" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "sma200" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "high52w" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "low52w" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "pctFromHigh" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "pctAboveLow" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "rsRank" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "avgTurnover50" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "freeFloatMcapCr" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "freeFloatPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "gates" : {
             "type" : "array",
@@ -7500,19 +7500,19 @@
             "type" : "boolean"
           },
           "stage" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           }
         },
-        "required" : [ "close", "exchange", "freeFloatMcapCr", "freeFloatPct", "gates", "gatesPassed", "high52w", "low52w", "passesAll", "rsRank", "sma200", "sma50", "symbol" ]
+        "required" : [ "avgTurnover50", "close", "exchange", "freeFloatMcapCr", "freeFloatPct", "gates", "gatesPassed", "high52w", "low52w", "passesAll", "pctAboveLow", "pctFromHigh", "rsRank", "sma150", "sma200", "sma50", "stage", "symbol" ]
       },
-      "ScreenResponse" : {
+      "MinerviniScreenResponse" : {
         "type" : "object",
         "properties" : {
           "items" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/Row"
+              "$ref" : "#/components/schemas/MinerviniRow"
             }
           },
           "screenDate" : {
@@ -7607,6 +7607,113 @@
           }
         },
         "required" : [ "beatBenchmarkRatePct", "horizonSessions", "meanBenchmarkReturnPct", "meanExcessReturnPct", "meanReturnPct", "medianReturnPct", "sampleCount", "winRatePct" ]
+      },
+      "ManasRow" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "sma50" : {
+            "type" : [ "number", "null" ]
+          },
+          "sma200" : {
+            "type" : [ "number", "null" ]
+          },
+          "high52w" : {
+            "type" : [ "number", "null" ]
+          },
+          "low52w" : {
+            "type" : [ "number", "null" ]
+          },
+          "avgVol20" : {
+            "type" : [ "number", "null" ]
+          },
+          "avgVol50" : {
+            "type" : [ "number", "null" ]
+          },
+          "turnover50" : {
+            "type" : [ "number", "null" ]
+          },
+          "withinHighPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "aboveLowPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "withinHigh" : {
+            "type" : "boolean"
+          },
+          "aboveSma50" : {
+            "type" : "boolean"
+          },
+          "liquidVolume" : {
+            "type" : "boolean"
+          },
+          "liquidDepth" : {
+            "type" : "boolean"
+          },
+          "lowCap" : {
+            "type" : "boolean"
+          },
+          "freeFloatMcapCr" : {
+            "type" : [ "number", "null" ]
+          },
+          "freeFloatPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "gates" : {
+            "type" : "array",
+            "items" : {
+              "type" : "boolean"
+            }
+          },
+          "gatesPassed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "passesAll" : {
+            "type" : "boolean"
+          },
+          "rsRank" : {
+            "type" : [ "number", "null" ]
+          }
+        },
+        "required" : [ "aboveLowPct", "aboveSma50", "avgVol20", "avgVol50", "close", "exchange", "freeFloatMcapCr", "freeFloatPct", "gates", "gatesPassed", "high52w", "liquidDepth", "liquidVolume", "low52w", "lowCap", "passesAll", "rsRank", "sma200", "sma50", "symbol", "turnover50", "withinHigh", "withinHighPct" ]
+      },
+      "ManasScreenResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ManasRow"
+            }
+          },
+          "screenDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "coverage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "coverage", "items", "limit", "offset", "screenDate" ]
       },
       "DeepSwingRunRequest" : {
         "type" : "object",
@@ -7915,7 +8022,7 @@
         },
         "required" : [ "captured", "date" ]
       },
-      "ExchangeResult" : {
+      "BhavcopyExchangeResult" : {
         "type" : "object",
         "properties" : {
           "days" : {
@@ -7940,10 +8047,10 @@
             "type" : "string"
           },
           "nse" : {
-            "$ref" : "#/components/schemas/ExchangeResult"
+            "$ref" : "#/components/schemas/BhavcopyExchangeResult"
           },
           "bse" : {
-            "$ref" : "#/components/schemas/ExchangeResult"
+            "$ref" : "#/components/schemas/BhavcopyExchangeResult"
           }
         },
         "required" : [ "bse", "date", "nse" ]
@@ -8133,6 +8240,22 @@
           }
         }
       },
+      "KiteSessionExchangeResult" : {
+        "type" : "object",
+        "properties" : {
+          "connected" : {
+            "type" : "boolean"
+          },
+          "kiteUserId" : {
+            "type" : [ "string", "null" ]
+          },
+          "tokenValidUntil" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "connected", "kiteUserId", "tokenValidUntil" ]
+      },
       "VixQuote" : {
         "type" : "object",
         "properties" : {
@@ -8223,18 +8346,18 @@
         },
         "required" : [ "exchange", "instrumentToken", "mode", "priority", "subscribers", "tradingsymbol" ]
       },
-      "BacktestResult" : {
+      "MinerviniBacktestResult" : {
         "type" : "object",
         "properties" : {
           "status" : {
             "type" : "string"
           },
           "fromDate" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date"
           },
           "runAt" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "variants" : {
             "type" : "array",
@@ -8261,7 +8384,7 @@
             "type" : "string"
           }
         },
-        "required" : [ "fromDate", "note", "runAt", "slotSweep", "status", "variants" ]
+        "required" : [ "fromDate", "note", "rotation", "runAt", "slotSweep", "status", "sweep", "variants" ]
       },
       "RotationResult" : {
         "type" : "object",
@@ -8340,7 +8463,7 @@
         },
         "required" : [ "capital", "floorTurnover", "netCagrPct", "netDrawdownPct", "netSharpe", "trades" ]
       },
-      "Funnel" : {
+      "MinerviniFunnel" : {
         "type" : "object",
         "properties" : {
           "screenDate" : {
@@ -8353,25 +8476,25 @@
           "immediatelyBuyable" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/FunnelRow"
+              "$ref" : "#/components/schemas/MinerviniFunnelRow"
             }
           },
           "onDeck" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/FunnelRow"
+              "$ref" : "#/components/schemas/MinerviniFunnelRow"
             }
           },
           "watch" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/FunnelRow"
+              "$ref" : "#/components/schemas/MinerviniFunnelRow"
             }
           }
         },
         "required" : [ "immediatelyBuyable", "onDeck", "regime", "screenDate", "watch" ]
       },
-      "FunnelRow" : {
+      "MinerviniFunnelRow" : {
         "type" : "object",
         "properties" : {
           "symbol" : {
@@ -8381,32 +8504,32 @@
             "type" : "number"
           },
           "rsRank" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "stage" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "isVcp" : {
             "type" : "boolean"
           },
           "pivot" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "cheatPivot" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "thrust" : {
             "type" : "boolean"
           },
           "footprint" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "pctToPivot" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
-        "required" : [ "close", "footprint", "pctToPivot", "pivot", "rsRank", "symbol" ]
+        "required" : [ "cheatPivot", "close", "footprint", "isVcp", "pctToPivot", "pivot", "rsRank", "stage", "symbol", "thrust" ]
       },
       "Regime" : {
         "type" : "object",
@@ -8500,81 +8623,6 @@
         },
         "required" : [ "items" ]
       },
-      "CandidateAnalysis" : {
-        "type" : "object",
-        "properties" : {
-          "symbol" : {
-            "type" : "string"
-          },
-          "exchange" : {
-            "type" : "string"
-          },
-          "screenDate" : {
-            "type" : "string",
-            "format" : "date"
-          },
-          "scanned" : {
-            "type" : "boolean"
-          },
-          "close" : {
-            "type" : "number"
-          },
-          "sma50" : {
-            "type" : "number"
-          },
-          "sma150" : {
-            "type" : "number"
-          },
-          "sma200" : {
-            "type" : "number"
-          },
-          "high52w" : {
-            "type" : "number"
-          },
-          "low52w" : {
-            "type" : "number"
-          },
-          "pctFromHigh" : {
-            "type" : "number"
-          },
-          "pctAboveLow" : {
-            "type" : "number"
-          },
-          "rsRank" : {
-            "type" : "number"
-          },
-          "avgTurnover50" : {
-            "type" : "number"
-          },
-          "freeFloatMcapCr" : {
-            "type" : "number"
-          },
-          "freeFloatPct" : {
-            "type" : "number"
-          },
-          "gates" : {
-            "type" : "array",
-            "items" : {
-              "type" : "boolean"
-            }
-          },
-          "gatesPassed" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "passesAll" : {
-            "type" : "boolean"
-          },
-          "stage" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "geometry" : {
-            "$ref" : "#/components/schemas/Geometry"
-          }
-        },
-        "required" : [ "close", "exchange", "freeFloatMcapCr", "freeFloatPct", "gates", "gatesPassed", "high52w", "low52w", "passesAll", "scanned", "screenDate", "sma200", "sma50", "symbol" ]
-      },
       "Geometry" : {
         "type" : "object",
         "properties" : {
@@ -8627,6 +8675,81 @@
         },
         "required" : [ "baseCount", "baseDurationDays", "baseWeeks", "cheatPivot", "contractionCount", "deepestPct", "footprint", "isVcp", "pivot", "rejectReason", "shakeout", "thrust", "tightestPct", "volumeDryUp" ]
       },
+      "MinerviniCandidateAnalysis" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "screenDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "scanned" : {
+            "type" : "boolean"
+          },
+          "close" : {
+            "type" : [ "number", "null" ]
+          },
+          "sma50" : {
+            "type" : [ "number", "null" ]
+          },
+          "sma150" : {
+            "type" : [ "number", "null" ]
+          },
+          "sma200" : {
+            "type" : [ "number", "null" ]
+          },
+          "high52w" : {
+            "type" : [ "number", "null" ]
+          },
+          "low52w" : {
+            "type" : [ "number", "null" ]
+          },
+          "pctFromHigh" : {
+            "type" : [ "number", "null" ]
+          },
+          "pctAboveLow" : {
+            "type" : [ "number", "null" ]
+          },
+          "rsRank" : {
+            "type" : [ "number", "null" ]
+          },
+          "avgTurnover50" : {
+            "type" : [ "number", "null" ]
+          },
+          "freeFloatMcapCr" : {
+            "type" : [ "number", "null" ]
+          },
+          "freeFloatPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "gates" : {
+            "type" : "array",
+            "items" : {
+              "type" : "boolean"
+            }
+          },
+          "gatesPassed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "passesAll" : {
+            "type" : "boolean"
+          },
+          "stage" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "geometry" : {
+            "$ref" : "#/components/schemas/Geometry"
+          }
+        },
+        "required" : [ "avgTurnover50", "close", "exchange", "freeFloatMcapCr", "freeFloatPct", "gates", "gatesPassed", "geometry", "high52w", "low52w", "passesAll", "pctAboveLow", "pctFromHigh", "rsRank", "scanned", "screenDate", "sma150", "sma200", "sma50", "stage", "symbol" ]
+      },
       "FunnelAttrition" : {
         "type" : "object",
         "properties" : {
@@ -8677,6 +8800,218 @@
         },
         "required" : [ "gate", "passed" ]
       },
+      "ManasBacktestResult" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "fromDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "runAt" : {
+            "type" : [ "string", "null" ]
+          },
+          "variants" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Report"
+            }
+          },
+          "slotSweep" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SlotCell"
+            }
+          },
+          "note" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "fromDate", "note", "runAt", "slotSweep", "status", "variants" ]
+      },
+      "ManasFunnel" : {
+        "type" : "object",
+        "properties" : {
+          "screenDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "regime" : {
+            "$ref" : "#/components/schemas/Regime"
+          },
+          "immediatelyBuyable" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ManasFunnelRow"
+            }
+          },
+          "onDeck" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ManasFunnelRow"
+            }
+          },
+          "watch" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ManasFunnelRow"
+            }
+          }
+        },
+        "required" : [ "immediatelyBuyable", "onDeck", "regime", "screenDate", "watch" ]
+      },
+      "ManasFunnelRow" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "aboveLowPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "setupType" : {
+            "type" : [ "string", "null" ]
+          },
+          "pivot" : {
+            "type" : [ "number", "null" ]
+          },
+          "footprint" : {
+            "type" : [ "string", "null" ]
+          },
+          "pctToPivot" : {
+            "type" : [ "number", "null" ]
+          },
+          "breakoutPivot" : {
+            "type" : [ "number", "null" ]
+          },
+          "vcpPivot" : {
+            "type" : [ "number", "null" ]
+          },
+          "rsRank" : {
+            "type" : [ "number", "null" ]
+          }
+        },
+        "required" : [ "aboveLowPct", "breakoutPivot", "close", "footprint", "pctToPivot", "pivot", "rsRank", "setupType", "symbol", "vcpPivot" ]
+      },
+      "ManasCandidateAnalysis" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "screenDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "scanned" : {
+            "type" : "boolean"
+          },
+          "close" : {
+            "type" : [ "number", "null" ]
+          },
+          "sma50" : {
+            "type" : [ "number", "null" ]
+          },
+          "sma200" : {
+            "type" : [ "number", "null" ]
+          },
+          "high52w" : {
+            "type" : [ "number", "null" ]
+          },
+          "low52w" : {
+            "type" : [ "number", "null" ]
+          },
+          "withinHighPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "aboveLowPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "avgVol20" : {
+            "type" : [ "number", "null" ]
+          },
+          "avgVol50" : {
+            "type" : [ "number", "null" ]
+          },
+          "turnover50" : {
+            "type" : [ "number", "null" ]
+          },
+          "withinHigh" : {
+            "type" : "boolean"
+          },
+          "aboveSma50" : {
+            "type" : "boolean"
+          },
+          "liquidVolume" : {
+            "type" : "boolean"
+          },
+          "liquidDepth" : {
+            "type" : "boolean"
+          },
+          "lowCap" : {
+            "type" : "boolean"
+          },
+          "freeFloatMcapCr" : {
+            "type" : [ "number", "null" ]
+          },
+          "freeFloatPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "gates" : {
+            "type" : "array",
+            "items" : {
+              "type" : "boolean"
+            }
+          },
+          "gatesPassed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "passesAll" : {
+            "type" : "boolean"
+          },
+          "setups" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SetupView"
+            }
+          }
+        },
+        "required" : [ "aboveLowPct", "aboveSma50", "avgVol20", "avgVol50", "close", "exchange", "freeFloatMcapCr", "freeFloatPct", "gates", "gatesPassed", "high52w", "liquidDepth", "liquidVolume", "low52w", "lowCap", "passesAll", "scanned", "screenDate", "setups", "sma200", "sma50", "symbol", "turnover50", "withinHigh", "withinHighPct" ]
+      },
+      "SetupView" : {
+        "type" : "object",
+        "properties" : {
+          "setupType" : {
+            "type" : "string"
+          },
+          "valid" : {
+            "type" : "boolean"
+          },
+          "footprint" : {
+            "type" : [ "string", "null" ]
+          },
+          "pivot" : {
+            "type" : [ "number", "null" ]
+          },
+          "baseWeeks" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "rejectReason" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "baseWeeks", "footprint", "pivot", "rejectReason", "setupType", "valid" ]
+      },
       "DataFreshness" : {
         "type" : "object",
         "properties" : {
@@ -8703,7 +9038,7 @@
           }
         }
       },
-      "TrendPoint" : {
+      "OiTrendPoint" : {
         "type" : "object",
         "properties" : {
           "bucket" : {
@@ -8736,7 +9071,7 @@
             "type" : [ "number", "null" ]
           }
         },
-        "required" : [ "bucket", "ceLtp", "ceOi", "peLtp", "peOi", "spot", "totalOi" ]
+        "required" : [ "bucket", "ceLtp", "ceOi", "peLtp", "peOi", "spot", "totalOi", "trend" ]
       },
       "TrendSeries" : {
         "type" : "object",
@@ -8744,7 +9079,7 @@
           "items" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/TrendPoint"
+              "$ref" : "#/components/schemas/OiTrendPoint"
             }
           },
           "asOf" : {
@@ -10959,17 +11294,17 @@
         },
         "required" : [ "close", "date", "dayRange", "dayRangePct", "deliveryPct", "deliveryQty", "high", "low", "ltpChangePct", "open", "totalTradedQty" ]
       },
-      "Status" : {
+      "BhavcopyBackfillStatus" : {
         "type" : "object",
         "properties" : {
           "jobId" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "state" : {
             "type" : "string"
           },
           "lastRun" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "durationMs" : {
@@ -10977,20 +11312,20 @@
             "format" : "int64"
           },
           "nse" : {
-            "$ref" : "#/components/schemas/ExchangeResult"
+            "$ref" : "#/components/schemas/BhavcopyExchangeResult"
           },
           "bse" : {
-            "$ref" : "#/components/schemas/ExchangeResult"
+            "$ref" : "#/components/schemas/BhavcopyExchangeResult"
           },
           "ratiosDetected" : {
             "type" : "integer",
             "format" : "int32"
           },
           "error" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
-        "required" : [ "durationMs", "error", "jobId", "lastRun", "state" ]
+        "required" : [ "bse", "durationMs", "error", "jobId", "lastRun", "nse", "ratiosDetected", "state" ]
       },
       "ActiveStrikeMigration" : {
         "type" : "object",
@@ -11513,6 +11848,40 @@
         },
         "required" : [ "a", "aligned", "asOf", "b", "dataTrust", "trustReasons", "underlying" ]
       },
+      "ExpiryCompareTrendPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "totalOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "ceOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "peOi" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "pcr" : {
+            "type" : [ "number", "null" ]
+          },
+          "spot" : {
+            "type" : [ "number", "null" ]
+          },
+          "ceLtp" : {
+            "type" : [ "number", "null" ]
+          },
+          "peLtp" : {
+            "type" : [ "number", "null" ]
+          }
+        },
+        "required" : [ "bucket", "ceLtp", "ceOi", "pcr", "peLtp", "peOi", "spot", "totalOi" ]
+      },
       "ExpirySide" : {
         "type" : "object",
         "properties" : {
@@ -11523,7 +11892,7 @@
           "series" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/TrendPoint"
+              "$ref" : "#/components/schemas/ExpiryCompareTrendPoint"
             }
           },
           "asOf" : {
@@ -12307,6 +12676,52 @@
         },
         "required" : [ "max", "remaining", "used", "window" ]
       },
+      "OiBackfillStatus" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : [ "string", "null" ]
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "underlying" : {
+            "type" : [ "string", "null" ]
+          },
+          "expiry" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "session" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "startedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "lastRun" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "futuresRows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "error" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "durationMs", "error", "expiry", "futuresRows", "jobId", "lastRun", "optionRows", "session", "startedAt", "state", "underlying" ]
+      },
       "ExpiriesResponse" : {
         "type" : "object",
         "properties" : {
@@ -12349,6 +12764,122 @@
           }
         },
         "required" : [ "exchange", "instrumentType", "strike", "tradingsymbol" ]
+      },
+      "ExpiredBackfillStatus" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : [ "string", "null" ]
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "startedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "lastRun" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "expiries" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "contracts" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "legsWritten" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "legsSkipped" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "legsFailed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "candleRows" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "currentExpiry" : {
+            "type" : [ "string", "null" ]
+          },
+          "error" : {
+            "type" : [ "string", "null" ]
+          },
+          "recentLogs" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "candleRows", "contracts", "currentExpiry", "durationMs", "error", "expiries", "jobId", "lastRun", "legsFailed", "legsSkipped", "legsWritten", "recentLogs", "startedAt", "state" ]
+      },
+      "EquityDailyBackfillStatus" : {
+        "type" : "object",
+        "properties" : {
+          "jobId" : {
+            "type" : [ "string", "null" ]
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "startedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "lastRun" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "symbols" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "written" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "skipped" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "failed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "candleRows" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "currentSymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "error" : {
+            "type" : [ "string", "null" ]
+          },
+          "recentLogs" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "candleRows", "currentSymbol", "durationMs", "error", "failed", "jobId", "lastRun", "recentLogs", "skipped", "startedAt", "state", "symbols", "written" ]
       },
       "CoverageRow" : {
         "type" : "object",

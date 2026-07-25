@@ -2454,30 +2454,30 @@ export interface components {
             /** Format: int32 */
             trades: number;
         };
-        Row: {
+        MinerviniRow: {
             symbol: string;
             exchange: string;
             close: number;
-            sma50: number;
-            sma150?: number;
-            sma200: number;
-            high52w: number;
-            low52w: number;
-            pctFromHigh?: number;
-            pctAboveLow?: number;
-            rsRank: number;
-            avgTurnover50?: number;
-            freeFloatMcapCr: number;
-            freeFloatPct: number;
+            sma50: number | null;
+            sma150: number | null;
+            sma200: number | null;
+            high52w: number | null;
+            low52w: number | null;
+            pctFromHigh: number | null;
+            pctAboveLow: number | null;
+            rsRank: number | null;
+            avgTurnover50: number | null;
+            freeFloatMcapCr: number | null;
+            freeFloatPct: number | null;
             gates: boolean[];
             /** Format: int32 */
             gatesPassed: number;
             passesAll: boolean;
             /** Format: int32 */
-            stage?: number;
+            stage: number | null;
         };
-        ScreenResponse: {
-            items: components["schemas"]["Row"][];
+        MinerviniScreenResponse: {
+            items: components["schemas"]["MinerviniRow"][];
             /** Format: date */
             screenDate: string | null;
             /** Format: int32 */
@@ -2515,6 +2515,43 @@ export interface components {
             meanBenchmarkReturnPct: number | null;
             meanExcessReturnPct: number | null;
             medianReturnPct: number | null;
+        };
+        ManasRow: {
+            symbol: string;
+            exchange: string;
+            close: number;
+            sma50: number | null;
+            sma200: number | null;
+            high52w: number | null;
+            low52w: number | null;
+            avgVol20: number | null;
+            avgVol50: number | null;
+            turnover50: number | null;
+            withinHighPct: number | null;
+            aboveLowPct: number | null;
+            withinHigh: boolean;
+            aboveSma50: boolean;
+            liquidVolume: boolean;
+            liquidDepth: boolean;
+            lowCap: boolean;
+            freeFloatMcapCr: number | null;
+            freeFloatPct: number | null;
+            gates: boolean[];
+            /** Format: int32 */
+            gatesPassed: number;
+            passesAll: boolean;
+            rsRank: number | null;
+        };
+        ManasScreenResponse: {
+            items: components["schemas"]["ManasRow"][];
+            /** Format: date */
+            screenDate: string | null;
+            /** Format: int32 */
+            coverage: number;
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
         };
         DeepSwingRunRequest: {
             family?: string;
@@ -2634,7 +2671,7 @@ export interface components {
             /** Format: int32 */
             captured: number;
         };
-        ExchangeResult: {
+        BhavcopyExchangeResult: {
             /** Format: int32 */
             days: number;
             /** Format: int32 */
@@ -2644,8 +2681,8 @@ export interface components {
         };
         RefetchResult: {
             date: string;
-            nse: components["schemas"]["ExchangeResult"];
-            bse: components["schemas"]["ExchangeResult"];
+            nse: components["schemas"]["BhavcopyExchangeResult"];
+            bse: components["schemas"]["BhavcopyExchangeResult"];
         };
         RefreshRequest: {
             exchange?: string;
@@ -2716,6 +2753,12 @@ export interface components {
         SessionRequest: {
             requestToken?: string;
         };
+        KiteSessionExchangeResult: {
+            connected: boolean;
+            kiteUserId: string | null;
+            /** Format: date-time */
+            tokenValidUntil: string;
+        };
         VixQuote: {
             ltp: number;
             dayHigh: number | null;
@@ -2752,15 +2795,15 @@ export interface components {
             /** Format: int32 */
             subscribers: number;
         };
-        BacktestResult: {
+        MinerviniBacktestResult: {
             status: string;
             /** Format: date */
-            fromDate: string;
-            runAt: string;
+            fromDate: string | null;
+            runAt: string | null;
             variants: components["schemas"]["Report"][];
-            sweep?: components["schemas"]["SweepCell"][];
+            sweep: components["schemas"]["SweepCell"][];
             slotSweep: components["schemas"]["SlotCell"][];
-            rotation?: components["schemas"]["RotationResult"];
+            rotation: components["schemas"]["RotationResult"];
             note: string;
         };
         RotationResult: {
@@ -2794,26 +2837,26 @@ export interface components {
             netDrawdownPct: number;
             netSharpe: number;
         };
-        Funnel: {
+        MinerviniFunnel: {
             /** Format: date */
             screenDate: string | null;
             regime: components["schemas"]["Regime"];
-            immediatelyBuyable: components["schemas"]["FunnelRow"][];
-            onDeck: components["schemas"]["FunnelRow"][];
-            watch: components["schemas"]["FunnelRow"][];
+            immediatelyBuyable: components["schemas"]["MinerviniFunnelRow"][];
+            onDeck: components["schemas"]["MinerviniFunnelRow"][];
+            watch: components["schemas"]["MinerviniFunnelRow"][];
         };
-        FunnelRow: {
+        MinerviniFunnelRow: {
             symbol: string;
             close: number;
-            rsRank: number;
+            rsRank: number | null;
             /** Format: int32 */
-            stage?: number;
-            isVcp?: boolean;
-            pivot: number;
-            cheatPivot?: number;
-            thrust?: boolean;
-            footprint: string;
-            pctToPivot: number;
+            stage: number | null;
+            isVcp: boolean;
+            pivot: number | null;
+            cheatPivot: number | null;
+            thrust: boolean;
+            footprint: string | null;
+            pctToPivot: number | null;
         };
         Regime: {
             regime: string;
@@ -2848,32 +2891,6 @@ export interface components {
         ScreenDatesResponse: {
             items: components["schemas"]["ScreenDate"][];
         };
-        CandidateAnalysis: {
-            symbol: string;
-            exchange: string;
-            /** Format: date */
-            screenDate: string;
-            scanned: boolean;
-            close: number;
-            sma50: number;
-            sma150?: number;
-            sma200: number;
-            high52w: number;
-            low52w: number;
-            pctFromHigh?: number;
-            pctAboveLow?: number;
-            rsRank?: number;
-            avgTurnover50?: number;
-            freeFloatMcapCr: number;
-            freeFloatPct: number;
-            gates: boolean[];
-            /** Format: int32 */
-            gatesPassed: number;
-            passesAll: boolean;
-            /** Format: int32 */
-            stage?: number;
-            geometry?: components["schemas"]["Geometry"];
-        };
         Geometry: {
             isVcp: boolean;
             footprint: string | null;
@@ -2893,6 +2910,32 @@ export interface components {
             cheatPivot: number | null;
             thrust: boolean;
             rejectReason: string | null;
+        };
+        MinerviniCandidateAnalysis: {
+            symbol: string;
+            exchange: string;
+            /** Format: date */
+            screenDate: string | null;
+            scanned: boolean;
+            close: number | null;
+            sma50: number | null;
+            sma150: number | null;
+            sma200: number | null;
+            high52w: number | null;
+            low52w: number | null;
+            pctFromHigh: number | null;
+            pctAboveLow: number | null;
+            rsRank: number | null;
+            avgTurnover50: number | null;
+            freeFloatMcapCr: number | null;
+            freeFloatPct: number | null;
+            gates: boolean[];
+            /** Format: int32 */
+            gatesPassed: number;
+            passesAll: boolean;
+            /** Format: int32 */
+            stage: number | null;
+            geometry: components["schemas"]["Geometry"];
         };
         FunnelAttrition: {
             /** Format: date */
@@ -2915,6 +2958,73 @@ export interface components {
             /** Format: int64 */
             passed: number;
         };
+        ManasBacktestResult: {
+            status: string;
+            /** Format: date */
+            fromDate: string | null;
+            runAt: string | null;
+            variants: components["schemas"]["Report"][];
+            slotSweep: components["schemas"]["SlotCell"][];
+            note: string;
+        };
+        ManasFunnel: {
+            /** Format: date */
+            screenDate: string | null;
+            regime: components["schemas"]["Regime"];
+            immediatelyBuyable: components["schemas"]["ManasFunnelRow"][];
+            onDeck: components["schemas"]["ManasFunnelRow"][];
+            watch: components["schemas"]["ManasFunnelRow"][];
+        };
+        ManasFunnelRow: {
+            symbol: string;
+            close: number;
+            aboveLowPct: number | null;
+            setupType: string | null;
+            pivot: number | null;
+            footprint: string | null;
+            pctToPivot: number | null;
+            breakoutPivot: number | null;
+            vcpPivot: number | null;
+            rsRank: number | null;
+        };
+        ManasCandidateAnalysis: {
+            symbol: string;
+            exchange: string;
+            /** Format: date */
+            screenDate: string | null;
+            scanned: boolean;
+            close: number | null;
+            sma50: number | null;
+            sma200: number | null;
+            high52w: number | null;
+            low52w: number | null;
+            withinHighPct: number | null;
+            aboveLowPct: number | null;
+            avgVol20: number | null;
+            avgVol50: number | null;
+            turnover50: number | null;
+            withinHigh: boolean;
+            aboveSma50: boolean;
+            liquidVolume: boolean;
+            liquidDepth: boolean;
+            lowCap: boolean;
+            freeFloatMcapCr: number | null;
+            freeFloatPct: number | null;
+            gates: boolean[];
+            /** Format: int32 */
+            gatesPassed: number;
+            passesAll: boolean;
+            setups: components["schemas"]["SetupView"][];
+        };
+        SetupView: {
+            setupType: string;
+            valid: boolean;
+            footprint: string | null;
+            pivot: number | null;
+            /** Format: int32 */
+            baseWeeks: number | null;
+            rejectReason: string | null;
+        };
         DataFreshness: {
             /** Format: date-time */
             asOf?: string;
@@ -2926,7 +3036,7 @@ export interface components {
             complete?: boolean;
             provenance?: string;
         };
-        TrendPoint: {
+        OiTrendPoint: {
             /** Format: date-time */
             bucket: string;
             /** Format: int64 */
@@ -2937,12 +3047,12 @@ export interface components {
             peOi: number;
             spot: number | null;
             /** @enum {string} */
-            trend?: "UP" | "DOWN" | "FLAT";
+            trend: "UP" | "DOWN" | "FLAT";
             ceLtp: number | null;
             peLtp: number | null;
         };
         TrendSeries: {
-            items: components["schemas"]["TrendPoint"][];
+            items: components["schemas"]["OiTrendPoint"][];
             /** Format: date-time */
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
@@ -3709,18 +3819,18 @@ export interface components {
             /** Format: int64 */
             totalTradedQty: number | null;
         };
-        Status: {
-            jobId: string;
+        BhavcopyBackfillStatus: {
+            jobId: string | null;
             state: string;
             /** Format: date-time */
-            lastRun: string;
+            lastRun: string | null;
             /** Format: int64 */
             durationMs: number;
-            nse?: components["schemas"]["ExchangeResult"];
-            bse?: components["schemas"]["ExchangeResult"];
+            nse: components["schemas"]["BhavcopyExchangeResult"];
+            bse: components["schemas"]["BhavcopyExchangeResult"];
             /** Format: int32 */
-            ratiosDetected?: number;
-            error: string;
+            ratiosDetected: number;
+            error: string | null;
         };
         ActiveStrikeMigration: {
             nowTop: string[];
@@ -3907,10 +4017,24 @@ export interface components {
             dataTrust: string;
             trustReasons: string[];
         };
+        ExpiryCompareTrendPoint: {
+            /** Format: date-time */
+            bucket: string;
+            /** Format: int64 */
+            totalOi: number;
+            /** Format: int64 */
+            ceOi: number;
+            /** Format: int64 */
+            peOi: number;
+            pcr: number | null;
+            spot: number | null;
+            ceLtp: number | null;
+            peLtp: number | null;
+        };
         ExpirySide: {
             /** Format: date */
             expiry: string;
-            series: components["schemas"]["TrendPoint"][];
+            series: components["schemas"]["ExpiryCompareTrendPoint"][];
             /** Format: date-time */
             asOf: string | null;
             dataTrust: string;
@@ -4203,6 +4327,26 @@ export interface components {
             /** Format: int32 */
             remaining: number;
         };
+        OiBackfillStatus: {
+            jobId: string | null;
+            state: string;
+            underlying: string | null;
+            /** Format: date */
+            expiry: string | null;
+            /** Format: date */
+            session: string | null;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            lastRun: string | null;
+            /** Format: int64 */
+            durationMs: number;
+            /** Format: int32 */
+            optionRows: number;
+            /** Format: int32 */
+            futuresRows: number;
+            error: string | null;
+        };
         ExpiriesResponse: {
             items: string[];
         };
@@ -4214,6 +4358,54 @@ export interface components {
             tradingsymbol: string;
             strike: number | null;
             instrumentType: string;
+        };
+        ExpiredBackfillStatus: {
+            jobId: string | null;
+            state: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            lastRun: string | null;
+            /** Format: int64 */
+            durationMs: number;
+            /** Format: int32 */
+            expiries: number;
+            /** Format: int32 */
+            contracts: number;
+            /** Format: int32 */
+            legsWritten: number;
+            /** Format: int32 */
+            legsSkipped: number;
+            /** Format: int32 */
+            legsFailed: number;
+            /** Format: int64 */
+            candleRows: number;
+            currentExpiry: string | null;
+            error: string | null;
+            recentLogs: string[];
+        };
+        EquityDailyBackfillStatus: {
+            jobId: string | null;
+            state: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            lastRun: string | null;
+            /** Format: int64 */
+            durationMs: number;
+            /** Format: int32 */
+            symbols: number;
+            /** Format: int32 */
+            written: number;
+            /** Format: int32 */
+            skipped: number;
+            /** Format: int32 */
+            failed: number;
+            /** Format: int64 */
+            candleRows: number;
+            currentSymbol: string | null;
+            error: string | null;
+            recentLogs: string[];
         };
         CoverageRow: {
             underlying: string;
@@ -4739,7 +4931,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ScreenResponse"];
+                    "*/*": components["schemas"]["MinerviniScreenResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4865,7 +5057,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ScreenResponse"];
+                    "*/*": components["schemas"]["ManasScreenResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5560,7 +5752,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ExchangeResult"];
+                    "*/*": components["schemas"]["KiteSessionExchangeResult"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5789,7 +5981,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ScreenResponse"];
+                    "*/*": components["schemas"]["MinerviniScreenResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5818,7 +6010,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["BacktestResult"];
+                    "*/*": components["schemas"]["MinerviniBacktestResult"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5849,7 +6041,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Funnel"];
+                    "*/*": components["schemas"]["MinerviniFunnel"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5978,7 +6170,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["CandidateAnalysis"];
+                    "*/*": components["schemas"]["MinerviniCandidateAnalysis"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6043,7 +6235,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ScreenResponse"];
+                    "*/*": components["schemas"]["ManasScreenResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6072,7 +6264,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["BacktestResult"];
+                    "*/*": components["schemas"]["ManasBacktestResult"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6103,7 +6295,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Funnel"];
+                    "*/*": components["schemas"]["ManasFunnel"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6231,7 +6423,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["CandidateAnalysis"];
+                    "*/*": components["schemas"]["ManasCandidateAnalysis"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8492,7 +8684,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Status"];
+                    "*/*": components["schemas"]["BhavcopyBackfillStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8940,7 +9132,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Status"];
+                    "*/*": components["schemas"]["OiBackfillStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -9032,7 +9224,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Status"];
+                    "*/*": components["schemas"]["ExpiredBackfillStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -9061,7 +9253,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Status"];
+                    "*/*": components["schemas"]["EquityDailyBackfillStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

@@ -7,6 +7,7 @@ import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.openalgo.OpenAlgoSymbols;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Bar;
 import in.arthayantra.marketdata.upstox.UpstoxExpiredInstrumentsClient.Leg;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -144,12 +145,21 @@ public class ExpiredBackfillService {
    * While {@code RUNNING} the counters + {@code currentExpiry} climb in real time; {@code recentLogs}
    * carries the last per-expiry/error lines for the UI log feed. Mirrors the {@code BhavcopyBackfillService.Status}
    * precedent (state machine NEVER_RUN→RUNNING→OK|FAILED).
+   *
+   * <p>{@code @Schema(name)} is load-bearing: three sibling backfill services declare their own
+   * {@code Status} record with a DIFFERENT field set, and springdoc keys components by simple name.
+   *
+   * <p>{@code jobId}/{@code startedAt}/{@code lastRun}/{@code currentExpiry}/{@code error} are null on
+   * the never-run shell (:175-176); {@code snapshot} additionally leaves {@code currentExpiry} null
+   * before the first expiry is picked up and {@code lastRun}/{@code error} null while RUNNING
+   * (:214-219). {@code recentLogs} is never null ({@code List.of()} / {@code List.copyOf}).
    */
+  @Schema(name = "ExpiredBackfillStatus")
   public record Status(
-      String jobId,
+      @Schema(types = {"string", "null"}) String jobId,
       String state, // NEVER_RUN | RUNNING | OK | FAILED
-      Instant startedAt,
-      Instant lastRun,
+      @Schema(types = {"string", "null"}) Instant startedAt,
+      @Schema(types = {"string", "null"}) Instant lastRun,
       long durationMs,
       int expiries,
       int contracts,
@@ -157,8 +167,8 @@ public class ExpiredBackfillService {
       int legsSkipped,
       int legsFailed,
       long candleRows,
-      String currentExpiry,
-      String error,
+      @Schema(types = {"string", "null"}) String currentExpiry,
+      @Schema(types = {"string", "null"}) String error,
       List<String> recentLogs) {
 
     static Status neverRun() {

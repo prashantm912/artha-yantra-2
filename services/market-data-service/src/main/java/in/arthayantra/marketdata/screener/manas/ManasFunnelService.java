@@ -34,20 +34,39 @@ public class ManasFunnelService {
    * breakoutPivot}/{@code vcpPivot} carry the valid pivot of each setup_type (null when that setup is
    * invalid/absent) so the breakout strategy fires off the §3.2 breakout pivot and the VCP strategy
    * off the §3.3 VCP pivot.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: the sibling {@code MinerviniFunnelService.FunnelRow}
+   * shares this simple name with a DIFFERENT field set, and springdoc keys components by simple name.
+   *
+   * <p>Nullability comes from the SQL: {@code close_price} is {@code NOT NULL} (V036:14), but
+   * {@code above_low_pct}/{@code rs_rank} are nullable columns (V036:23, V038) and
+   * {@code setup_type}/{@code pivot}/{@code footprint}/{@code breakout_pivot}/{@code vcp_pivot} come
+   * from LEFT JOINs that miss whenever that setup is invalid/absent (:87-102);
+   * {@code pctToPivot} is explicitly null when there is no pivot (:146-149).
    */
+  @Schema(name = "ManasFunnelRow")
   public record FunnelRow(
       String symbol,
       BigDecimal close,
-      BigDecimal aboveLowPct,
-      String setupType,
-      BigDecimal pivot,
-      String footprint,
-      BigDecimal pctToPivot, // (close - pivot) / pivot, null when no pivot
-      BigDecimal breakoutPivot, // §3.2 consolidation-breakout pivot, null when that setup is invalid
-      BigDecimal vcpPivot, // §3.3 VCP-contraction pivot, null when that setup is invalid
-      BigDecimal rsRank) {} // §4.1/§4.10 cross-sectional RS-rank (the admission sort key), null pre-rank
+      @Schema(types = {"number", "null"}) BigDecimal aboveLowPct,
+      @Schema(types = {"string", "null"}) String setupType,
+      @Schema(types = {"number", "null"}) BigDecimal pivot,
+      @Schema(types = {"string", "null"}) String footprint,
+      // (close - pivot) / pivot, null when no pivot
+      @Schema(types = {"number", "null"}) BigDecimal pctToPivot,
+      // §3.2 consolidation-breakout pivot, null when that setup is invalid
+      @Schema(types = {"number", "null"}) BigDecimal breakoutPivot,
+      // §3.3 VCP-contraction pivot, null when that setup is invalid
+      @Schema(types = {"number", "null"}) BigDecimal vcpPivot,
+      // §4.1/§4.10 cross-sectional RS-rank (the admission sort key), null pre-rank
+      @Schema(types = {"number", "null"}) BigDecimal rsRank) {}
 
-  /** The three-list for a screen date + the market regime (§4.9) the owner should buy WITH. */
+  /**
+   * The three-list for a screen date + the market regime (§4.9) the owner should buy WITH.
+   * Explicitly named for the same reason as {@link FunnelRow} — the three lists now ref a different
+   * row schema than the Minervini twin's, so the two funnels are no longer interchangeable.
+   */
+  @Schema(name = "ManasFunnel")
   public record Funnel(
       @Schema(types = {"string", "null"}) LocalDate screenDate,
       RegimeService.Regime regime,

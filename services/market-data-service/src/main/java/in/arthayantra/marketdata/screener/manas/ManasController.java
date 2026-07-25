@@ -32,33 +32,47 @@ public class ManasController {
    * One screener row (the 6 selection gates + universe/liquidity/float flags). {@code rsRank} is the
    * §4.1/§4.10 cross-sectional RS-rank percentile (0..100) as persisted; {@code null} when a row has
    * no rank (pre-rank rows / edge) — never fabricated.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: the sibling {@code MinerviniController.Row} shares this
+   * simple name with a DIFFERENT field set, and springdoc keys components by simple name — without
+   * the explicit name the two collapse to one spec schema (scan-order-dependent).
+   *
+   * <p>Every numeric except {@code close} is nullable: the persisted columns are nullable
+   * (V036:15-31, {@code rs_rank} V038) and the mapper reads them with {@code rs.getBigDecimal}
+   * (ManasScreenRepository:125-133).
    */
+  @Schema(name = "ManasRow")
   public record Row(
       String symbol,
       String exchange,
       BigDecimal close,
-      BigDecimal sma50,
-      BigDecimal sma200,
-      BigDecimal high52w,
-      BigDecimal low52w,
-      BigDecimal avgVol20,
-      BigDecimal avgVol50,
-      BigDecimal turnover50,
-      BigDecimal withinHighPct,
-      BigDecimal aboveLowPct,
+      @Schema(types = {"number", "null"}) BigDecimal sma50,
+      @Schema(types = {"number", "null"}) BigDecimal sma200,
+      @Schema(types = {"number", "null"}) BigDecimal high52w,
+      @Schema(types = {"number", "null"}) BigDecimal low52w,
+      @Schema(types = {"number", "null"}) BigDecimal avgVol20,
+      @Schema(types = {"number", "null"}) BigDecimal avgVol50,
+      @Schema(types = {"number", "null"}) BigDecimal turnover50,
+      @Schema(types = {"number", "null"}) BigDecimal withinHighPct,
+      @Schema(types = {"number", "null"}) BigDecimal aboveLowPct,
       boolean withinHigh,
       boolean aboveSma50,
       boolean liquidVolume,
       boolean liquidDepth,
       boolean lowCap,
-      BigDecimal freeFloatMcapCr,
-      BigDecimal freeFloatPct,
+      @Schema(types = {"number", "null"}) BigDecimal freeFloatMcapCr,
+      @Schema(types = {"number", "null"}) BigDecimal freeFloatPct,
       boolean[] gates,
       int gatesPassed,
       boolean passesAll,
-      BigDecimal rsRank) {}
+      @Schema(types = {"number", "null"}) BigDecimal rsRank) {}
 
-  /** The {items} envelope + as-of + coverage. */
+  /**
+   * The {items} envelope + as-of + coverage. Explicitly named for the same reason as {@link Row} —
+   * the Minervini twin's {@code items} now refs a different row schema, so the two envelopes are no
+   * longer interchangeable.
+   */
+  @Schema(name = "ManasScreenResponse")
   public record ScreenResponse(
       List<Row> items,
       @Schema(types = {"string", "null"}) LocalDate screenDate,
@@ -79,29 +93,35 @@ public class ManasController {
    * The full analyzer payload for one candidate: the 6 selection gates + universe/liquidity/float
    * flags (from the persisted screen row — {@code scanned=false} when the symbol was not in the
    * screen), the low-cap fundamentals, and the live vcp + breakout geometry.
+   *
+   * <p>{@code @Schema(name)} disambiguates from the sibling
+   * {@code MinerviniController.CandidateAnalysis} (same simple name, different field set). Every
+   * {@code BigDecimal} plus {@code screenDate} is nullable — the two not-scanned shells pass explicit
+   * nulls for all of them (:286-288, :297-299).
    */
+  @Schema(name = "ManasCandidateAnalysis")
   public record CandidateAnalysis(
       String symbol,
       String exchange,
-      LocalDate screenDate,
+      @Schema(types = {"string", "null"}) LocalDate screenDate,
       boolean scanned,
-      BigDecimal close,
-      BigDecimal sma50,
-      BigDecimal sma200,
-      BigDecimal high52w,
-      BigDecimal low52w,
-      BigDecimal withinHighPct,
-      BigDecimal aboveLowPct,
-      BigDecimal avgVol20,
-      BigDecimal avgVol50,
-      BigDecimal turnover50,
+      @Schema(types = {"number", "null"}) BigDecimal close,
+      @Schema(types = {"number", "null"}) BigDecimal sma50,
+      @Schema(types = {"number", "null"}) BigDecimal sma200,
+      @Schema(types = {"number", "null"}) BigDecimal high52w,
+      @Schema(types = {"number", "null"}) BigDecimal low52w,
+      @Schema(types = {"number", "null"}) BigDecimal withinHighPct,
+      @Schema(types = {"number", "null"}) BigDecimal aboveLowPct,
+      @Schema(types = {"number", "null"}) BigDecimal avgVol20,
+      @Schema(types = {"number", "null"}) BigDecimal avgVol50,
+      @Schema(types = {"number", "null"}) BigDecimal turnover50,
       boolean withinHigh,
       boolean aboveSma50,
       boolean liquidVolume,
       boolean liquidDepth,
       boolean lowCap,
-      BigDecimal freeFloatMcapCr,
-      BigDecimal freeFloatPct,
+      @Schema(types = {"number", "null"}) BigDecimal freeFloatMcapCr,
+      @Schema(types = {"number", "null"}) BigDecimal freeFloatPct,
       boolean[] gates,
       int gatesPassed,
       boolean passesAll,

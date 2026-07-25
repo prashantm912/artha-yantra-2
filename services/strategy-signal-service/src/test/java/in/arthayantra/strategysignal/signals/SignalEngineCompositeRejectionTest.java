@@ -155,6 +155,7 @@ class SignalEngineCompositeRejectionTest {
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
             writer,
+            java.util.Optional.empty(),
             mock(PlatformTransactionManager.class),
             60,
             flagOn);

@@ -575,7 +575,11 @@ number since 07-21. **Queue frozen in `docs/signal-analysis/2026-07-25-weekly-bu
 | B11 | T21/T6/T10 | owner-decision pack | OWNER | **DELIVERED 2026-07-25** — full pack in `docs/signal-analysis/2026-07-25-weekly-bug-queue.md` (premium exits rec=(b) add bands; vwap rec=narrow ≥15 bps [measured p50=16.3]; paper backlog rec=EOD-only+downgrade alert; +T22 floors, T12 cadence, B8 clock) |
 | S1 | — | `flushBars` (1-s live bar-close sweep) on market-data's default pool-1 behind the ~70-s options-snapshot pass — bars close up to ~70 s late; also refines B9 (even-minute options pass eats the odd futures tick, 2:1 = the observed skip pattern) | clean (scheduler isolation) | **NEW from the task_a2ae20ed sweep (closes that chip)** — verify Monday via `ay_options_snapshot_duration_seconds` first; details in the bug-queue doc §scheduler-sweep |
 | S2 | — | live-armed Telegram poll (3-s outbound HTTPS) shares strategy-signal's pool-1 with the SL/TP bracket sweep + straddle exit monitor | clean (scheduler isolation, money-adjacent) | **NEW from the sweep** — owner picks S1/S2 order |
-| S3 | — | `selfHeal` cron missing IST zone; ShadowVariantRegistry 5-min JDBC without verified query timeout on the SL/TP pool | clean (small hygiene) | NEW from the sweep |
+| S3 | — | `selfHeal` cron missing IST zone; ShadowVariantRegistry 5-min JDBC without verified query timeout on the SL/TP pool | clean (small hygiene) | NEW from the sweep — **S1+S2+S3 build delegated to an Opus worktree builder 2026-07-25 (in flight)** |
+| D1 | T21 | premium bands SL −25% / TP +35% on the 42 bracket-less YAMLs (owner picked rec (b)) | clean (owner-approved) | **DONE [#990](https://github.com/prashantm912/artha-yantra-2/pull/990)** (3 review rounds, Opus fallback — codex 503; round 2 caught a live Critical: `premium_pct` resolved vs the INDEX entry = one-bar force-exit for held-PE; `levelFromRules` DELETED, index-side levels persist NULL for premium_pct-only strategies; round 3 flipped the IT assertion that encoded the old semantics). **Needs deploy + seeder resync + republish** |
+| D2+D3 | T22+T6 | oi_spurt floors (50,8)→(15,3) + vwap dot ≥15 bps distance (owner picked recs) | clean (owner-approved) | **DONE [#991](https://github.com/prashantm912/artha-yantra-2/pull/991)** (2 rounds) — Spring props, deploy-effective, NO republish; judge combined effect over 2 forward sessions |
+| D4 | T10 | EOD-managed swing books stop paging PaperStaleTickAlerter (owner picked rec (b)) | clean (owner-approved) | **DONE [#992](https://github.com/prashantm912/artha-yantra-2/pull/992)** (2 rounds) — `artha.paper.eod-managed-books=minervini,manas-arora`; metric still counts, settle-side alerts NOT exempted; deploy-effective |
+| D8 | — | **NEW money defect found by the #990 review:** `indexPointStopLevel` keys the stop side on `definition.direction()` — the seam derives CE/PE per entry, so EVERY PE-side take across the 12 `index_points` YAMLs (connect-the-dots ×6, trending-oi ×6; 8 enabled+published live) persisted a below-entry stop = same one-bar force-exit shape (pre-existing since #336, unobserved only because no PE fired) | clean (correctness) | **BUILT [#993](https://github.com/prashantm912/artha-yantra-2/pull/993)** — `entryExposureIsShort` (held option side wins, straddle/non-scalper fall back to definition), 6/6 + 22/22 green; codex review in flight (codex back up) |
 
 Tunes T1/T7/T3/T5/T2 stay BLOCKED on B1/B2/B11a (rollup verdict: challengers currently measure
 the regressions, not the knobs).
@@ -585,6 +589,14 @@ strategy-signal + frontend-react rebuilt off main `f110c26b`; dot-health endpoin
 `rowsScanned` serving, `futures_oi`/`underlying_oi` required=true). Engine 0/38 pending Monday's
 Kite login (#874 self-heals). Monday verifies: §3.14 floor tags live, PartialBucketCanary quiet
 (≤650/10% residue absorbed), dot-health no false all-dead at EOD.
+
+**Deploy state 2026-07-25 ~16:15 IST (D-wave):** #990/#991/#992 MERGED (main `64f9caaa`) —
+**NOT yet deployed**; strategy-signal deploy + republish batch pending #993 (+S1–S3 if ready) so
+one deploy carries the wave. After deploy: T22/T6/T10 effective immediately; T21 + D8 need the
+seeder resync + `POST /strategies/{id}/publish` of the enabled scalpers, then verify the published
+configs carry the `premium_pct` bands. Chips filed from the #990 round-3 review: OpenAPI
+non-null stopLoss/target on 3 DTOs (task_392b3672); `hasBoundingExit` reachability hardening
+(task_85543821). **OWNER before Monday: B8 host clock resync (commands in the bug-queue doc).**
 
 ---
 

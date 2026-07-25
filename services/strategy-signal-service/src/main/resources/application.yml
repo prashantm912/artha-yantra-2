@@ -151,6 +151,11 @@ artha:
     # counted + alerted, never refused). Env-tunable via the matching compose passthroughs (.env override).
     tick-max-age-seconds: ${ARTHA_PAPER_TICK_MAX_AGE_SECONDS:15}
     bracket-starvation-alert-minutes: ${ARTHA_PAPER_BRACKET_STARVATION_ALERT_MINUTES:2}
+    # T10 (owner 2026-07-25): books whose bracket starvation is BY DESIGN (EOD-managed swing —
+    # equities not on the live tick subscription; the 20:00/20:05 batch is the real exit path).
+    # Metric still counts; WARN+page suppressed. Env name MUST match the compose passthrough
+    # exactly (#653 placeholder trap).
+    eod-managed-books: ${ARTHA_PAPER_EOD_MANAGED_BOOKS:minervini,manas-arora}
     # HOLD (task_94f40cf6) signal-freshness gate on the MANUAL take path (POST /api/v1/paper/orders):
     # a signal-linked hand ticket whose SIGNAL is older than this on a NON-swing book is rejected
     # SIGNAL_STALE (the setup's thesis is gone even though the fill prices fresh). Swing books

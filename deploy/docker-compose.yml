@@ -545,6 +545,7 @@ services:
       # alerted, never refused). Defaults MIRROR the application.yml @Value defaults.
       ARTHA_PAPER_TICK_MAX_AGE_SECONDS: ${ARTHA_PAPER_TICK_MAX_AGE_SECONDS:-15}
       ARTHA_PAPER_BRACKET_STARVATION_ALERT_MINUTES: ${ARTHA_PAPER_BRACKET_STARVATION_ALERT_MINUTES:-2}
+      ARTHA_PAPER_EOD_MANAGED_BOOKS: ${ARTHA_PAPER_EOD_MANAGED_BOOKS:-minervini,manas-arora}
       # HOLD (task_94f40cf6) signal-freshness gate on the MANUAL take path: a signal-linked hand ticket
       # whose SIGNAL is older than this (minutes) on a NON-swing book is rejected SIGNAL_STALE. Swing
       # books (minervini / manas-arora) are exempt; 0/negative disables. Default MIRRORS application.yml.

@@ -80,7 +80,25 @@ class PaperStaleTickAlerterTest {
     notifier = Mockito.mock(NotifierClient.class);
     when(notifier.configured("NTFY")).thenReturn(true);
     meters = new SimpleMeterRegistry();
-    alerter = new PaperStaleTickAlerter(notifier, clock, meters, 2); // 2-minute alert threshold
+    alerter = new PaperStaleTickAlerter(notifier, clock, meters, 2, "minervini,manas-arora"); // 2-minute alert threshold
+  }
+
+  @Test
+  void eodManagedSwingBookCountsButNeverPages() {
+    // T10 (owner 2026-07-25): the swing books are EOD-managed by design — their equities are not on
+    // the live tick subscription, so intraday starvation is the DESIGN (31,730 WARNs on 07-22).
+    // The metric keeps counting (continuity) but no ntfy ever fires for those books.
+    PositionRow swing =
+        new PositionRow(
+            9L, "NSE", "CARYSIL", "BUY", 10, new BigDecimal("800"), BigDecimal.ZERO, "OPEN",
+            null, null, null, new BigDecimal("760"), null, "minervini");
+
+    alerter.observeBracket(swing, Optional.empty());
+    clock.advance(Duration.ofMinutes(10));
+    alerter.observeBracket(swing, Optional.empty());
+
+    assertThat(bracketCount()).isEqualTo(2.0);
+    verify(notifier, never()).send(Mockito.anyString(), Mockito.anyString(), Mockito.anyString());
   }
 
   @Test

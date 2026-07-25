@@ -82,7 +82,7 @@ class PaperBracketStarvationTest {
     when(notifier.configured("NTFY")).thenReturn(true);
     meters = new SimpleMeterRegistry();
     clock = new TickingClock(Instant.parse("2026-07-11T05:00:00Z"));
-    alerter = new PaperStaleTickAlerter(notifier, clock, meters, 2);
+    alerter = new PaperStaleTickAlerter(notifier, clock, meters, 2, "minervini,manas-arora");
     evaluator = new PaperBracketEvaluator(positions, lastTick, paper, alerter);
   }
 

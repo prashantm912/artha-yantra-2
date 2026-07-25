@@ -418,7 +418,7 @@ Triggered by an owner "both morning routines show issues" report at market-open.
 - Docs earlier same day: [#949] session closeout, [#950] 07-17 session findings (scheduled agent), [#951] corrected a false cron finding in #950.
 
 **PARKED — HOLD-tier, money-path, NOT armed (owner decision, chip task_e263cfb0):**
-- **Swing-batch catch-up** — pushed `origin/worktree-agent-abb02bf43adbb895d` @ `a7ea8810` (base `3c6ae589`, **needs rebase onto main + ONE final cross-vendor review + owner arm decision; V046 unmerged so main stays deployable**). Gives the Manas/Minervini swing batch a catch-up path (the gap that cost `paper_positions id=28` OMAXAUTO a missed stop for 3 days after the 07-17 stack outage). Canary-window (08:35 IST) default-OFF trigger, atomic durable claim (V046 `swing_catchup_runs` + `DISARMED` status) + in-process mutex, oldest-first bounded sweep. **5 real findings across 3 review rounds, ALL closed** (double-fill via `PaperService` averaging; partial-run-stamps-complete; no-retry; re-arm-replays-disarmed-sessions; failed-marker-becomes-DONE) — 991 tests, the double-fill IT asserts ONE position not two, Golden/Parity 9/9. Owner-approved "merge+arm" but the Architect HELD the arm (won't arm a money path that found a bug every round without a clean final pass). **Arms nothing tomorrow regardless — tonight's 20:00 batch ran clean, no session to catch up.** OMAXAUTO itself was manually closed live at the 07-17 NSE daily close 228.38 (−₹1,613.71, `MANUAL`), and the `POST /positions/{id}/close` no-audit-row gap is fixed inside this branch.
+- **Swing-batch catch-up** — pushed `origin/worktree-agent-abb02bf43adbb895d` @ `a7ea8810` (base `3c6ae589`, **needs rebase onto main + ONE final cross-vendor review + owner arm decision**). ⚠️ **MIGRATION NUMBER NOW COLLIDES (verified 2026-07-25):** the branch carries `V046__swing_catchup_runs.sql`, but main shipped `V046__engine_reloads.sql` and it is APPLIED LIVE (`strategy.flyway_schema_history`, 2026-07-25 09:18 UTC). Reviving this branch **must renumber its migration to `V047`** — never `outOfOrder=true`, and never re-use 046, or flyway-init fails *validation* and blocks every future migration. (The old note "V046 unmerged so main stays deployable" is stale — main is deployable because 046 is engine_reloads, not because the number is free.) This is the ONLY non-`main` branch left on the remote after the 2026-07-25 cleanup; every other branch was verified shipped and deleted. Gives the Manas/Minervini swing batch a catch-up path (the gap that cost `paper_positions id=28` OMAXAUTO a missed stop for 3 days after the 07-17 stack outage). Canary-window (08:35 IST) default-OFF trigger, atomic durable claim (V046 `swing_catchup_runs` + `DISARMED` status) + in-process mutex, oldest-first bounded sweep. **5 real findings across 3 review rounds, ALL closed** (double-fill via `PaperService` averaging; partial-run-stamps-complete; no-retry; re-arm-replays-disarmed-sessions; failed-marker-becomes-DONE) — 991 tests, the double-fill IT asserts ONE position not two, Golden/Parity 9/9. Owner-approved "merge+arm" but the Architect HELD the arm (won't arm a money path that found a bug every round without a clean final pass). **Arms nothing tomorrow regardless — tonight's 20:00 batch ran clean, no session to catch up.** OMAXAUTO itself was manually closed live at the 07-17 NSE daily close 228.38 (−₹1,613.71, `MANUAL`), and the `POST /positions/{id}/close` no-audit-row gap is fixed inside this branch.
 
 **RESOLVED — investigation, NOT a bug:** the batch-verify agent's "NFO option 1m capture DEAD (0 rows today)" RED was a **misread** (and the Architect's own subscription-death hypothesis was ALSO wrong). Root cause (Opus-investigated, Architect-DB-confirmed): **there has NEVER been live per-contract option-premium streaming — ZERO option `TICK_AGG` rows on ANY day.** Option premium 1m is populated RETROACTIVELY post-expiry from Upstox (`ExpiredBackfillService`), landing 1–2 days AFTER each weekly expiry; the "334→0 decline" was a `fetched_at` illusion (only futures + indices are WS-pinned; no option pinner exists). "0 today" is EXPECTED — the current 21JUL week hasn't expired. Nothing to fix. If LIVE intraday option premium is ever wanted, it's a NEW `OptionAtmPinner` feature (~160 tokens « 3000 cap), not a repair — **ledger item F-OPT below**, not a chip.
 
@@ -621,9 +621,27 @@ Post` with no `-ContentType` sends `x-www-form-urlencoded` and the publish endpo
 
 Chips filed from the #990 round-3 review: OpenAPI non-null stopLoss/target on 3 DTOs
 (task_392b3672); `hasBoundingExit` reachability hardening (task_85543821) — both ran in separate
-sessions. **OWNER before Monday: B8 host clock resync (commands in the bug-queue doc).** Monday
+sessions. New chip from the republish pass: **task_9ffe390d** (a wrong `Content-Type` returns 500,
+not 415 — unmapped `HttpMediaTypeNotSupportedException` in the shared `GlobalExceptionHandler`).
+**OWNER before Monday: B8 host clock resync (commands in the bug-queue doc).** Monday
 verifies: §3.14 floor tags live, PartialBucketCanary quiet, dot-health no false all-dead, and the
 combined T22+T6 dot effect judged over 2 forward sessions.
+
+**REPO CLEANUP 2026-07-25 (session close).** Tree is back to a clean baseline: **zero worktrees**,
+**one local branch (`main`)**, and on the remote only `origin/main` +
+`origin/worktree-agent-abb02bf43adbb895d` (the parked swing catch-up above). 12 worktrees and 23
+local / 16 remote branches were removed. **Nothing was archived because nothing needed it** — every
+worktree was verified `git status --porcelain` CLEAN, and every deleted branch's work was matched to
+its squash-merge commit on `main` by subject before deletion (squash-merge makes the original SHAs
+"not in main", so ancestry alone would have said "unmerged" for all of them — match by content/subject,
+not by `git branch --merged`). Two branches needed a closer look and both resolved: the eval-outcome
+rollup branch (`a990625…`, 4 commits) is the PRE-RENUMBER ancestor of #954 — it still carried
+`V043__signal_eval_outcomes.sql` where main has V045, fully superseded; the swing-catch-up branch is
+genuinely unmerged and was KEPT on the remote. Contrast with the 2026-07-16 cleanup, which had to
+archive ~9.2k lines of dirty uncommitted work to `C:/Trading/artha-wip-archive/2026-07-16/` — that
+archive plus `C:/Trading/artha-wip-archive/2026-07-25/` (the foreign `ScalperRisk` chip changeset
+that rode into #993's first commit) remain the only WIP archives; both are reference-only, based on
+long-stale mains.
 
 ---
 

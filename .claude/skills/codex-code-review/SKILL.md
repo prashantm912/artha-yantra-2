@@ -74,6 +74,18 @@ returns nothing in the sandbox, pass the diff inline as extra context:
 `DIFF="$(git -C <worktree> diff --stat HEAD; echo '---'; git -C <worktree> diff HEAD)"` and append it
 to the start/resume prompt text.
 
+⚠️ **Inline only works for SMALL diffs — the whole prompt is ONE argv (Windows ~32K cap).** A 29 KB
+diff killed the wrapper with `error: codex exec failed (rc=126)` /
+`node: Argument list too long` (#1016, 2026-07-25). For anything bigger, **write the diff to a file
+under `state/` and reference it BY PATH** in the prompt ("the full diff is in
+`.claude/skills/codex-code-review/state/<key>.diff` — read that file"); Codex reads it in-sandbox.
+
+⚠️ **Reviewing a COMMITTED branch:** Codex reads the WORKING TREE, so `git diff HEAD` is empty and
+proves nothing — worse, if the checkout sits on a different branch Codex will review whatever
+unrelated edits are lying there and report confident findings about code that is not in the PR (it
+raised a false Critical this way on #993). Say so explicitly in the prompt: state the tree is clean,
+name the branch, and point at `git diff origin/main...<branch>` (or the state-file diff above).
+
 ## Notes
 
 - `--sandbox read-only`. Safe to invoke autonomously (no writes, no commits).

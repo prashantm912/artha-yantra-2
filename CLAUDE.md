@@ -51,7 +51,9 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   (`-pl services/<svc> -am package -DskipTests`), never a bare `-pl` on a leaf lib —
   a `-pl` install skips parent POMs and nested lib submodules
   (`libs/common-web/servlet`, `libs/black76-math`), so the compose fat JAR silently
-  embeds a stale lib.
+  embeds a stale lib. In **PowerShell**, a `-D` property containing dots must be QUOTED
+  (`'-Dspotless.check.skip=true'`) — unquoted, PS hands Maven a split token and it dies with
+  `Unknown lifecycle phase ".check.skip=true"`.
 - **CI `build-test` is sharded per-service** (`.github/workflows/ci-java.yml`): a 3-leg
   matrix (`market-data` / `backtest` / `strategy-gateway` = strategy-signal + edge-gateway),
   each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the
@@ -210,8 +212,11 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `e2e-owner-password`, so override it to match your hash.
 - **Drive the gateway API from PowerShell** (live/mock verification): `Invoke-WebRequest
   -UseBasicParsing` (PS5.1's IE engine prompts otherwise); POST `/api/v1/auth/login`
-  `{"password":...}`, then a GET to seed the `XSRF-TOKEN` cookie, echoed as the
-  `X-XSRF-TOKEN` header on mutating calls. In-container SQL: DB is `artha`/`artha_mock`
+  `{"password":...}` (it answers **204**, not 200 — check `-notin 200,204`), then a GET to seed the
+  `XSRF-TOKEN` cookie, echoed as the `X-XSRF-TOKEN` header on mutating calls. **A bodyless
+  `-Method Post` defaults to `application/x-www-form-urlencoded` and the endpoint answers 500** (the
+  unmapped `HttpMediaTypeNotSupportedException` should be a 415 — chip task_9ffe390d): always pass
+  `-ContentType 'application/json' -Body '{}'`. In-container SQL: DB is `artha`/`artha_mock`
   (not `arthayantra`).
 - **optimizer-service is Python (FastAPI), not Java** — `/api/v1/optimizations/*` lives there
   (backtest-service owns `/api/v1/backtests/*`). Tests: `(cd services/optimizer-service && python -m
@@ -266,7 +271,13 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   fresh DRAFT on boot (`resyncConfig`→`update`), never publishes; the live engine runs the *published*
   version. After deploying a config change, `POST /api/v1/strategies/{id}/publish` each affected strategy
   (reconcile keys on published version-id, hot-swaps at the next bar) and verify the published config carries
-  the change before trusting it.
+  the change before trusting it. ⚠️ **Pick WHICH to republish by "latest version row ≠ `published_version_id`",
+  never "latest DRAFT ≠ published"** (#1016 wave, 2026-07-25): `resyncConfig`→`update` dedupes against
+  `latestVersion(strategyId)` of **ANY status**, so a strategy already current with its YAML mints nothing and
+  keeps a months-old leftover draft — the draft-based query flagged all 38 enabled scalpers and would have
+  *reverted* `scalp-gap-theory-nifty` to a 07-06 draft **missing the armed `relative-volume-floor` tag**.
+  Before publishing a batch, diff what each republish GAINS vs LOSES (tags + exit_rules), not just that it
+  differs.
 - **A 2nd `PaperService.openPosition` on the same `(book,exchange,tradingsymbol,side)` AVERAGES into the open
   position** (pyramiding, `newQty = qty + qty`), it does NOT reject — `uq_paper_positions_open` guards the
   ROW, never the qty. Idempotency for anything that opens positions must claim BEFORE the open (atomic
@@ -409,6 +420,12 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   mergeCommit BEFORE building/deploying. And **never pipe a git command whose failure must stop a
   chain** (`git rebase 2>&1 | tail` exits with tail's 0 — a conflicted rebase then push ships a
   mid-rebase branch); check `git status -sb` for `## HEAD (no branch)` after any scripted rebase.
+- **`gh pr merge --delete-branch` can fail its LOCAL step while the merge SUCCEEDS** — with a
+  concurrent session holding `main` in a worktree it aborts with `fatal: 'main' is already used by
+  worktree at …` and no other output. The squash-merge already landed server-side, so **never re-run
+  the merge**: confirm with `gh pr view <n> --json state,mergeCommit`, then
+  `git push origin --delete <branch>` by hand. Same cause blocks `git checkout main` in the primary
+  checkout — cut new branches from `origin/main` directly instead.
 - The **Bash tool is bash, not PowerShell** — PS here-strings (`@'…'@`) are taken
   literally and corrupt commit subjects; pass multi-line commit messages via
   `git commit -F -` with a heredoc.

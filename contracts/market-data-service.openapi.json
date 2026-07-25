@@ -10325,7 +10325,7 @@
             }
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           }
         },
@@ -10356,7 +10356,7 @@
             "type" : [ "number", "null" ]
           },
           "interpretation" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           }
         },
@@ -10428,7 +10428,7 @@
             "type" : [ "number", "null" ]
           },
           "interpretation" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
           }
         },

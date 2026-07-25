@@ -3493,7 +3493,7 @@ export interface components {
             buckets: string[];
             cells: ("LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING")[][];
             /** Format: date-time */
-            asOf: string;
+            asOf: string | null;
         };
         BankRow: {
             tradingsymbol: string;
@@ -3505,8 +3505,8 @@ export interface components {
             /** Format: int64 */
             oiChange: number;
             basis: number | null;
-            /** @enum {string} */
-            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            /** @enum {string|null} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING" | null;
         };
         Banks: {
             items: components["schemas"]["BankRow"][];
@@ -3531,8 +3531,8 @@ export interface components {
             /** Format: int64 */
             oiChange: number;
             oiPct: number | null;
-            /** @enum {string} */
-            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            /** @enum {string|null} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING" | null;
         };
         EquityFundamentals: {
             symbol: string;

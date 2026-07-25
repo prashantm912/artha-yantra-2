@@ -65,8 +65,8 @@ computed from construction call sites) and the slice plan.
 - **3c: market-data, OI/futures/market-surface core — SHIPPED (see the slice PR):** Leg (20:
   ltp/bid/ask/volume/oi/prevOi/iv/9 greeks incl. 2nd+3rd order/ivReason/priceSource), Chain +
   ChainTable spot/forward/pcr, OiStats pcr/maxPain, ActiveStrikesResponse.sentimentPct, LegDeltas
-  (4 of 5 — `interpretation` SKIPPED: a types-array annotation risks clobbering the inline string
-  enum; nullable-enum stays a known gap), PcrSeriesPoint, Spurt family (SpurtRow/StrikeSpurt/
+  (4 of 5 — `interpretation` skipped here pending the enum probe; **resolved in 3e: it is NOT
+  nullable, see below**), PcrSeriesPoint, Spurt family (SpurtRow/StrikeSpurt/
   SpurtSummary/SpurtChain.asOf), BigOi + BigOiLog families, Heatmap Cell.value/maxAbs/asOf,
   Trend + Premium families, StraddleChart, CalendarSpreadChart, OpenHighStats (2 records),
   ActiveStrike SentimentPoint/ActiveStrikeIvPoint, TermStructure + ContractLeg, FutSpurt(Chain),
@@ -180,3 +180,63 @@ DeepSwingRunRequest, MarginRequest/MarginLeg.
 FE notes: `graduation.ts:53-55` = hard mismatch (fix in 3a). `types.ts:212-216` SpurtSummary =
 mismatch (fix in 3c). journal.ts links optional-without-null (loose, runtime-safe — leave).
 Everything else hand-written is already `| null`-honest; the spec, not the FE, was the liar.
+
+## 3e — the nullable-ENUM carve-out, resolved (chip task_5187d6d6, 2026-07-25)
+
+Slices 3a–3d skipped every enum-typed component on the assumption that
+`@Schema(types = {"string","null"})` would clobber springdoc's inline `enum: [...]`. **Probed
+empirically (swagger-core 2.2.30 ModelConverters, openapi31 mode) — the assumption was wrong:**
+
+- the type array AND the full enum list both survive: `{"type":["string","null"],"enum":[...]}`;
+- `openapi-typescript@7` renders it `"LONG_BUILDUP" | … | null` — exactly right;
+- `openapi_relabel_30.py` downgrades it cleanly to `{"type":"string","enum":[...],"nullable":true}`
+  (valid 3.0, script rc=0) and openapi-diff reports **backward compatible** — no script change needed;
+- `@Schema(nullable = true)` on an enum is the same silent no-op it is everywhere else at 3.1.
+
+Caveat, recorded deliberately: the `enum` list does not itself contain `null`, so a STRICT
+JSON-Schema validator would still reject a null (enum is an exhaustive value list). Nothing in this
+repo validates responses against the spec — the consumers are codegen, openapi-diff and human
+readers, and all three read the type array correctly. Documented rather than worked around.
+
+⚠️ **`BuzzMatrix.cells` is a genuinely nullable enum that CANNOT be annotated — the one permanent
+gap.** Its elements are null on the first bucket and on capture gaps (`FuturesBuzzService.java`
+`row.add(null)`), but element nullability of a DOUBLY-nested generic (`List<List<OiInterpretation>>`)
+is not expressible: measured against swagger-core 2.2.30, `@ArraySchema(schema = @Schema(types=…))`
+collapses the inner array and DROPS the enum (`items: {type:["string","null"]}`), and
+`@Schema(types=…)` pollutes the OUTER type to `["array","string","null"]`. Both mangle the schema, so
+neither ships — the record carries a javadoc saying so instead. Closing it would need an
+`OpenApiCustomizer` patching `cells.items.items` post-generation; that machinery is not worth one
+schema today. **This is the only known remaining nullable-contract lie in the platform.**
+(`BuzzMatrix.asOf` — null on an empty series — IS expressible and was annotated here.)
+
+**A methodological note worth keeping:** the first enum survey scanned only top-level
+`properties[].type == "string" && enum`, which is why `cells` was missed; the cross-vendor reviewer
+caught it. Survey nested schemas RECURSIVELY (`items`/`items`/`additionalProperties`), not just the
+property level. The corrected recursive scan finds **exactly 12 bare-enum sites remaining = 11
+verified non-nullable + `BuzzMatrix.cells`** (nullable but inexpressible, above). The 11:
+SubscriptionView.mode/.priority, TrendPoint.trend, SpurtSummary/StrikeSpurt/StrikeMove/LegDeltas/
+LogEvent/FutSpurt/MoverRow `.interpretation`, OiStructure.verdict. Separately, the 2 annotated
+nullable enums are BankRow/BankGridRow `.interpretation` — so 14 enum sites in market-data total.
+
+**Only 2 of the 15 enum sites across all four specs are both genuinely nullable and fixable**
+(evidence pass,
+2026-07-25, verdicts from construction call sites): `BankRow.interpretation`
+(`FuturesMoversService.java:144-163` — `interp = null` then `if (p.old() != null)`, no else) and
+`BankGridRow.interpretation` (`FuturesBankGridService.java:80-104`, identical shape). Both
+annotated. The other 12 are fed directly or transitively by `OiInterpretation.classify`, which is a
+total function over two booleans and **cannot return null** (`OiInterpretation.java:16-23`), or by a
+total assignment (`TrendPoint.trend`), or are seeded non-null (`SubscriptionView.mode/priority`).
+`FamilyTrust.state` (strategy-signal, the only enum outside market-data) is non-null at every
+construction site — the fallbacks pass `DataTrust.DEGRADED`.
+
+⚠️ **`LegDeltas.interpretation` — the chip's own headline example — is NOT nullable, and its javadoc
+is wrong.** The javadoc claims "All-null when there is no prior snapshot bucket", but
+`OptionsAnalyticsController.java:1294-1296` does `if (old == null) continue;`, so the whole
+`LegDeltas` object is absent (`ChainTableLeg.deltas` is null) rather than present-with-null-members.
+Its other four members remain individually nullable (annotated in 3c).
+
+**Found in passing, chipped as task_1023f3bb:** `TrendPoint` is a springdoc simple-name COLLISION
+between two records with DIFFERENT shapes — `OiTrendingService`'s (has `trend`) and
+`ExpiryCompareService`'s (has `pcr`). One schema wins; the expiry-compare response is therefore
+documented with a `trend` field it never sends and without the `pcr` it does. Constraint 3 above
+covers identical twins; this is the worse, uncovered case.

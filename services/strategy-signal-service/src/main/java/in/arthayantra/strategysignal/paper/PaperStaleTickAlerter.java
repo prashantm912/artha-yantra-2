@@ -48,7 +48,8 @@ public class PaperStaleTickAlerter {
   // batch's trailing stop. For books in this set observeBracket still COUNTS the metric (continuity)
   // but neither log-warns per pass nor pages — starvation there is the design, not a fault. The
   // settle-side alerts (settleRefused / staleSettleUsed) are NOT exempted: a swing settle off a
-  // dead price is still worth seeing.
+  // dead price is still worth seeing. Keep this set in step with PaperService.isSwingBook (the
+  // other "which books are swing" authority) — a new swing family must land in BOTH.
   private final java.util.Set<String> eodManagedBooks;
 
   /** Every bracket-eval pass that could not freshly evaluate a position's stop/target. */
@@ -78,10 +79,13 @@ public class PaperStaleTickAlerter {
     this.notifier = notifier;
     this.clock = clock;
     this.bracketAlertThreshold = Duration.ofMinutes(bracketAlertMinutes);
+    // duplicate-tolerant + trimmed (Set.of throws on duplicates, which would fail boot on a sloppy
+    // .env value); blank disables the exemption entirely.
     this.eodManagedBooks =
         eodManagedBooks.isBlank()
             ? java.util.Set.of()
-            : java.util.Set.of(eodManagedBooks.split("\\s*,\\s*"));
+            : java.util.Arrays.stream(eodManagedBooks.trim().split("\\s*,\\s*"))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     this.bracketStarvedTotal = meterRegistry.counter("ay_paper_bracket_starved_total");
     this.settleRefusedTotal = meterRegistry.counter("ay_paper_settle_refused_total");
     this.staleSettleTotal = meterRegistry.counter("ay_paper_stale_settle_total");

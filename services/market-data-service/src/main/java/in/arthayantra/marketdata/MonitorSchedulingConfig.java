@@ -95,4 +95,40 @@ public class MonitorSchedulingConfig {
     scheduler.setDaemon(true);
     return scheduler;
   }
+
+  /**
+   * A single daemon thread owned solely by {@code FuturesOiSnapshotService.scheduledSnapshot} (T12 /
+   * ledger G5). Its per-minute pass needs exactly ONE batched {@code quotes()} permit, but it was
+   * losing roughly every other minute — 161 single-minute skips — and the cause is neither the
+   * budget nor the cron.
+   *
+   * <p><b>The measured picture.</b> Kite documents the quote endpoint at 1 req/second, which is
+   * exactly what the {@code kite-quote} limiter is configured to (any SECOND dedicated limiter would
+   * put us at 2/s, i.e. over Kite's published budget — that is why the row's literal "dedicated quote
+   * limiter" framing is NOT what was built). Demand is well inside the budget:
+   * {@link #barFlushTaskScheduler} already records that one {@code OptionsSnapshotService} pass is
+   * "~70 batched calls ≈ 70 s at the 1/s limit", and it runs every 2 minutes — ~35 permits/min —
+   * while this pass wants 1/min, against 60 permits/min available. The loss is FAIRNESS, not
+   * capacity: resilience4j's {@code AtomicRateLimiter} is not FIFO, so while the options pass is
+   * taking a permit every second for 70 consecutive seconds, a competitor that waits only the
+   * configured 5 s can be starved straight through its window and abandon the minute.
+   *
+   * <p>So the fix is patience, and patience is only safe off the default pool. The default
+   * {@code taskScheduler} is pool size 1 shared by ~32 scheduled methods; waiting there would trade
+   * one capture gap for a service-wide scheduler stall — the S1–S3 failure mode (#1016) this class
+   * already exists to prevent. On its own thread the pass can wait for its turn and block nothing.
+   *
+   * <p><b>Why not {@link #monitorTaskScheduler()}.</b> Same fence as {@code barFlushTaskScheduler}:
+   * that pool is reserved for pure liveness DETECTORS, and this is a write path (batched quote fetch
+   * + JDBC insert). Parking it there could starve {@code FeedWatchdog.check} and
+   * {@code DataHealthCanary.sweep}.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler oiCaptureTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("oi-capture-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
 }

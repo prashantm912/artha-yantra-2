@@ -1,7 +1,10 @@
 package in.arthayantra.marketdata.futures;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import in.arthayantra.common.web.error.ApiException;
+import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.kite.FuturesContractSource;
 import in.arthayantra.marketdata.kite.FuturesContractSource.FutContract;
@@ -246,5 +249,131 @@ class FuturesOiSnapshotServiceTest {
     List<FuturesOiSnapshotRepository.Row> closed = new ArrayList<>();
     serviceAt("2026-06-16T15:31:00+05:30", closed).scheduledSnapshot();
     assertThat(closed).isEmpty();
+  }
+
+  /**
+   * T12 / ledger G5: the pass used to abandon the whole minute the first time it lost the
+   * {@code kite-quote} permit — the ~2-min effective cadence and 161 single-minute skips. Kite
+   * documents the quote endpoint at 1 req/s and the limiter already matches it, so the fix could not
+   * be a second limiter (that would spend 2/s); it is patience across the options-chain pass's
+   * ~70-consecutive-second permit run.
+   */
+  @Test
+  void retriesThroughLocalLimiterSaturationInsteadOfSkippingTheMinute() {
+    List<FuturesOiSnapshotRepository.Row> captured = new ArrayList<>();
+    FuturesOiSnapshotRepository repo =
+        new FuturesOiSnapshotRepository(null) {
+          @Override
+          public void insertAll(List<Row> rows) {
+            captured.addAll(rows);
+          }
+        };
+    FuturesContractSource contracts =
+        (underlying, onOrAfter) ->
+            List.of(new FutContract(NIFTY_FUT, LocalDate.parse("2026-06-25")));
+
+    int[] calls = {0};
+    QuoteGateway quotes =
+        keys -> {
+          if (++calls[0] < 3) {
+            throw new ApiException(
+                429, ErrorCodes.RATE_LIMIT_LOCAL, "local broker QUOTE budget saturated");
+          }
+          return Map.of(
+              NIFTY_FUT,
+              new QuoteGateway.Quote(
+                  NIFTY_FUT,
+                  new BigDecimal("23950"),
+                  null,
+                  null,
+                  1000L,
+                  7_000L,
+                  OffsetDateTime.now(CLOCK)));
+        };
+
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    FuturesOiSnapshotService svc = noSleep(contracts, quotes, repo, meters);
+
+    svc.snapshotNow();
+
+    assertThat(calls[0]).isEqualTo(3); // two saturated attempts, third won the permit
+    assertThat(captured).hasSize(1);
+    assertThat(captured.get(0).oi()).isEqualTo(7_000L);
+    assertThat(meters.counter("ay_futures_oi_snapshot_quote_retries_total").count()).isEqualTo(2.0);
+    assertThat(meters.counter("ay_futures_oi_snapshot_skips_total").count()).isZero();
+  }
+
+  @Test
+  void countsAGenuineSkipWhenEveryAttemptLosesThePermit() {
+    List<FuturesOiSnapshotRepository.Row> captured = new ArrayList<>();
+    FuturesOiSnapshotRepository repo =
+        new FuturesOiSnapshotRepository(null) {
+          @Override
+          public void insertAll(List<Row> rows) {
+            captured.addAll(rows);
+          }
+        };
+    FuturesContractSource contracts =
+        (underlying, onOrAfter) ->
+            List.of(new FutContract(NIFTY_FUT, LocalDate.parse("2026-06-25")));
+    int[] calls = {0};
+    QuoteGateway quotes =
+        keys -> {
+          calls[0]++;
+          throw new ApiException(
+              429, ErrorCodes.RATE_LIMIT_LOCAL, "local broker QUOTE budget saturated");
+        };
+
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    noSleep(contracts, quotes, repo, meters).snapshotNow();
+
+    assertThat(calls[0]).isEqualTo(4); // the bounded ladder, not an unbounded spin
+    assertThat(captured).isEmpty(); // no partial pass persisted
+    assertThat(meters.counter("ay_futures_oi_snapshot_skips_total").count()).isEqualTo(1.0);
+  }
+
+  /**
+   * The paired positive for the retry: only LOCAL limiter saturation is patient. Anything else —
+   * Kite's own 429, an open breaker, an auth failure — must propagate on the first attempt, because
+   * retrying it spends budget on a call that cannot succeed.
+   */
+  @Test
+  void doesNotRetryANonSaturationFailure() {
+    FuturesContractSource contracts =
+        (underlying, onOrAfter) ->
+            List.of(new FutContract(NIFTY_FUT, LocalDate.parse("2026-06-25")));
+    int[] calls = {0};
+    QuoteGateway quotes =
+        keys -> {
+          calls[0]++;
+          throw new ApiException(503, ErrorCodes.KITE_CIRCUIT_OPEN, "kite-rest circuit open");
+        };
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    FuturesOiSnapshotService svc =
+        noSleep(contracts, quotes, new FuturesOiSnapshotRepository(null) {
+          @Override
+          public void insertAll(List<Row> rows) {
+            // never reached
+          }
+        }, meters);
+
+    assertThatThrownBy(svc::snapshotNow).isInstanceOf(ApiException.class);
+    assertThat(calls[0]).isEqualTo(1);
+    assertThat(meters.counter("ay_futures_oi_snapshot_quote_retries_total").count()).isZero();
+  }
+
+  /** The service with its retry backoff removed, so the ladder runs at test speed. */
+  private static FuturesOiSnapshotService noSleep(
+      FuturesContractSource contracts,
+      QuoteGateway quotes,
+      FuturesOiSnapshotRepository repo,
+      SimpleMeterRegistry meters) {
+    return new FuturesOiSnapshotService(
+        contracts, quotes, repo, MarketCalendar.nse(), CLOCK, List.of("NIFTY 50"), meters) {
+      @Override
+      boolean pauseBeforeRetry() {
+        return true;
+      }
+    };
   }
 }

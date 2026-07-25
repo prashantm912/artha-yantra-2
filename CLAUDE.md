@@ -96,6 +96,11 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   only `incompatible.response.required.decreased`). So a renamed response key still reaches live
   un-caught — the `UniverseResolver` wire-read class of break. Intentional breaks: a
   `Contract break: APPROVED (<reason>)` line in the PR body; `hotfix/*` exempt.
+  **Nullable response fields: `@Schema(nullable = true)` is a SILENT NO-OP at 3.1** (swagger-core's
+  3.1 serializer drops `nullable`) — spell it `@Schema(types = {"number", "null"})`, which emits the
+  3.1 type array; the breaking gate's relabel step downgrades exactly that shape to 3.0's
+  `nullable: true` for the diff (genuine unions still refuse), and openapi-typescript renders it
+  `number | null`.
 - **EVERY new endpoint returns a typed record, never `Map<String,Object>`** — edge-gateway's
   `MapReturnRatchetTest` freezes the Map-returning handler COUNT per service (Maps are invisible
   to the contract gate); a new Map endpoint fails the strategy-gateway CI shard. Cost 2 CI cycles

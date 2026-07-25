@@ -4305,10 +4305,10 @@
             "format" : "int64"
           },
           "stopLoss" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "target" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "exchange", "qty", "side", "signalId", "stopLoss", "target", "tradingsymbol" ]
@@ -4379,10 +4379,10 @@
             "type" : "number"
           },
           "stopLoss" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "target" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "compositeScore" : {
             "type" : "number"
@@ -5574,16 +5574,16 @@
             "type" : "string"
           },
           "riskReward" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "entryPrice" : {
             "type" : "number"
           },
           "stopLoss" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "target" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "dataTrust" : {
             "type" : "string"

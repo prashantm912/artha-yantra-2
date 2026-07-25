@@ -13,8 +13,15 @@ The SAME BYTES labelled 3.0.1 diff correctly and report `Missing property: items
 (string)`. So the gate relabels both sides before handing them to openapi-diff. The COMMITTED specs
 stay 3.1.0 — this is a transform on throwaway copies.
 
-The relabel is lossless ONLY while the specs use no 3.1-only construct, and this GUARANTEES that
-rather than assuming it — with an ALLOW-LIST, not a deny-list. After relabeling, it VALIDATES the
+ONE 3.1 construct converts instead of refusing: the nullability type array. `type: ["number",
+"null"]` and 3.0's `type: number, nullable: true` state the same fact (a canonical, lossless
+two-way mapping), and it is the only way springdoc can express a nullable response field at 3.1 —
+swagger-core's 3.1 serializer silently DROPS `nullable`, so `@Schema(types = {"number","null"})`
+is the source-side spelling (strategy-signal's stopLoss/target carry it). Genuine unions
+(`type: ["string","integer"]`) have no 3.0 equivalent and still refuse.
+
+The relabel is lossless ONLY while the specs use no OTHER 3.1-only construct, and this GUARANTEES
+that rather than assuming it — with an ALLOW-LIST, not a deny-list. After relabeling, it VALIDATES the
 document against the official OpenAPI 3.0 schema (openapi-spec-validator) and refuses (exit 2) on
 ANY validation error. A deny-list is incomplete by construction — the earlier one silently accepted
 `if`/`then`/`else`, `$id`, bare `type: "null"` (only the LIST form was caught), schema-level
@@ -54,6 +61,27 @@ SCHEMA_31_ONLY = {
 DOC_31_ONLY = {"webhooks", "jsonSchemaDialect"}
 
 
+def downgrade_nullable_type_arrays(node):
+    """`type: ["number","null"]` is 3.1's ONLY nullability spelling (swagger-core's 3.1 serializer
+    silently drops `nullable`), and 3.0 spells the same fact `type: number, nullable: true` — a
+    canonical, LOSSLESS two-way mapping, so converting it is a sound relabel, not a mangle. Only
+    the exactly-two-entries-one-of-them-"null" shape converts; every other type array still falls
+    through to scan()'s refusal (3.0 has no spelling for a genuine union, so converting one WOULD
+    mangle)."""
+    if isinstance(node, dict):
+        t = node.get("type")
+        if isinstance(t, list) and len(t) == 2 and "null" in t:
+            other = t[0] if t[1] == "null" else t[1]
+            if isinstance(other, str) and other != "null":
+                node["type"] = other
+                node["nullable"] = True
+        for value in node.values():
+            downgrade_nullable_type_arrays(value)
+    elif isinstance(node, list):
+        for value in node:
+            downgrade_nullable_type_arrays(value)
+
+
 def scan(node, path, found):
     if isinstance(node, dict):
         # A $ref with sibling keys is the ONE version-divergent shape the 3.0 SCHEMA validator
@@ -67,7 +95,8 @@ def scan(node, path, found):
             here = "%s/%s" % (path, key)
             if key in SCHEMA_31_ONLY:
                 found.append((here, "3.1-only schema keyword: %s" % key))
-            # `type: ["string","null"]` is 3.1's nullability; 3.0 wants `nullable: true`.
+            # A type array that survived downgrade_nullable_type_arrays is a genuine union —
+            # 3.0 cannot express it, so refuse rather than mangle.
             if key == "type" and isinstance(value, list):
                 found.append((here, "3.1-only type array: %r" % (value,)))
             # 3.0 spells these as booleans; 3.1 as numbers.
@@ -125,6 +154,11 @@ def main():
 
     with open(src, encoding="utf-8") as handle:
         spec = json.load(handle)
+
+    # BEFORE the deny-list: the one 3.1 construct with an exact 3.0 equivalent converts
+    # losslessly (nullability type arrays); anything the converter leaves behind still refuses.
+    downgrade_nullable_type_arrays(spec.get("components"))
+    downgrade_nullable_type_arrays(spec.get("paths"))
 
     found = deny_list_hits(spec)
     if found:

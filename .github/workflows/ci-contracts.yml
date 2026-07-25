@@ -28,7 +28,10 @@
 #      checksum (object -> object)", because the parser never resolves `type: string` at 3.1.
 #      So the gate now relabels BOTH sides to 3.0.1 for the DIFF STEP ONLY (the committed specs
 #      stay 3.1.0). openapi_relabel_30.py REFUSES to relabel a spec using a 3.1-only construct
-#      rather than mangle it silently; all four specs contain zero such constructs today.
+#      rather than mangle it silently — EXCEPT the nullability type array (`type: ["number","null"]`),
+#      which converts losslessly to 3.0's `type: number, nullable: true` (the only way springdoc can
+#      express a nullable response field at 3.1: swagger-core's 3.1 serializer drops `nullable`, so
+#      sources spell it `@Schema(types = {"number","null"})`). Genuine unions still refuse.
 #   2. springdoc emitted no `required` array for record-backed schemas, so every property was
 #      optional - and openapi-diff has no "response property removed" rule at all (its enum has
 #      only incompatible.response.required.decreased). A renamed OPTIONAL response property was

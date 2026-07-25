@@ -46,16 +46,17 @@
 # response (no such record exists today — ItemRequest is request-only, and JsonNode, which does
 # appear in both, is not a record so it never carries `required` anyway), and any request-body
 # property rename. Do not broaden this comment past what is measured.
+# task_db8bdf1e - `contracts` is a REQUIRED status check, so it must never be skipped at the
+# WORKFLOW level. GitHub reports a job skipped by an `if:` as Success, but a workflow skipped
+# by `paths:` stays Pending forever and blocks the PR ("You should not use path or branch
+# filtering to skip workflow runs if the workflow is required" - GitHub docs). The old
+# `paths:` filter here is therefore replaced by a `changes` classifier + an `if:` gate; the
+# job name is unchanged so the required context still resolves. See ci-java.yml's header for
+# the full rationale.
 name: ci-contracts
 
 on:
   pull_request:
-    paths:
-      - "services/**"
-      - "libs/**"
-      - "contracts/**"
-      - ".github/workflows/ci-contracts.yml"
-      - ".github/scripts/openapi_relabel_30.py"
   push:
     branches: [main]
 
@@ -64,17 +65,74 @@ permissions:
   pull-requests: read
 
 jobs:
-  contracts:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      contracts: ${{ steps.classify.outputs.contracts }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: classify
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # FAIL SAFE = RUN (see ci-java.yml): an unresolvable base must capture the specs,
+          # never silently declare the contract unchanged.
+          base=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+            base="$(git merge-base HEAD "origin/$BASE_REF" 2>/dev/null || true)"
+          elif [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null && base="$BEFORE_SHA" || base=""
+          fi
+
+          if [ -z "$base" ]; then
+            echo "::notice::change base did not resolve — running the contract gate (fail-safe)"
+            echo "contracts=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "diff base: $base"
+          files="$(git diff --name-only "$base" HEAD)"
+          echo "$files"
+
+          if echo "$files" | grep -Eq '^(services/|libs/|contracts/|\.github/workflows/ci-contracts\.yml$|\.github/scripts/openapi_relabel_30\.py$)'; then
+            echo "contracts=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "contracts=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  contracts:
+    needs: changes
+    # ALWAYS materialise, gate the STEPS — never the job. Two reasons, both load-bearing:
+    # (1) a job skipped via `if:` because its dependency failed or was cancelled still reports as
+    #     SKIPPED, and branch protection counts a skipped required check as satisfied — so a broken
+    #     classifier would let contract-changing code merge with the gate never having run. `changes`
+    #     is not itself a required context, so nothing else would have caught it.
+    # (2) symmetry with ci-java's build-test, where a job-level `if` would additionally prevent the
+    #     check name from ever being created.
+    # The first step below turns a non-successful classifier into an explicit RED.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Classifier must have succeeded
+        if: needs.changes.result != 'success'
+        run: |
+          echo "::error::the changes classifier did not succeed (${{ needs.changes.result }}) — refusing to report the contract gate green without knowing what changed"
+          exit 1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: needs.changes.outputs.contracts == 'true'
         with:
           # The breaking gate diffs against the merge base; the default shallow
           # fetch does not contain it.
           fetch-depth: 0
 
       - name: Resolve the merge base (fail loudly if it does not)
-        if: github.event_name == 'pull_request'
+        if: needs.changes.outputs.contracts == 'true' && github.event_name == 'pull_request'
         id: mergebase
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -93,12 +151,14 @@ jobs:
           echo "sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        if: needs.changes.outputs.contracts == 'true'
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
 
       - name: Regenerate specs from code (capture tests, mock profile)
+        if: needs.changes.outputs.contracts == 'true'
         # -am builds the three services PLUS every upstream module and the parent POMs in one
         # reactor (a -pl install of leaf libs alone never installs the common-web / parent POMs).
         # Upstream modules run zero tests (no ContractCaptureTest + failIfNoSpecifiedTests=false).
@@ -108,7 +168,7 @@ jobs:
 
       - name: Breaking-change gate (merge base vs this branch's code)
         # Skipped on push:main - the PR already merged; there is nothing left to gate.
-        if: github.event_name == 'pull_request'
+        if: needs.changes.outputs.contracts == 'true' && github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ steps.mergebase.outputs.sha }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
@@ -221,6 +281,7 @@ jobs:
           exit 1
 
       - name: Warn - committed spec vs code (did you forget to re-capture?)
+        if: needs.changes.outputs.contracts == 'true'
         # A DIFFERENT question from the gate above: that one asks "does this PR break a
         # consumer on main?", this one asks "is contracts/*.json stale vs the code in this
         # PR?". Warn-only by design - the answer is a missing chore, not a broken consumer.
@@ -233,10 +294,12 @@ jobs:
           done
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: needs.changes.outputs.contracts == 'true'
         with:
           node-version: "22"
 
       - name: Generated TS client compiles under tsc --strict
+        if: needs.changes.outputs.contracts == 'true'
         run: |
           mkdir -p /tmp/tscheck
           for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do

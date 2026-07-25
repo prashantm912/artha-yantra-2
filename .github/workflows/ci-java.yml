@@ -1,44 +1,106 @@
-# ci-java (A.10): the mechanical reviewer for JVM code. Path-filtered so a
-# frontend commit never rebuilds the JVM images. Stages: gitleaks ->
+# ci-java (A.10): the mechanical reviewer for JVM code. Stages: gitleaks ->
 # checkstyle/Error Prone + unit + Testcontainers IT (pinned production
 # images) + Modulith verify + JaCoCo (services >= 60% line) -> image build
 # -> GHCR push on main only.
+#
+# task_db8bdf1e - WHY THE `paths:` FILTER IS GONE AND THE FILTERING MOVED INTO A JOB.
+#
+# `gitleaks` and the three `build-test` shards are REQUIRED status checks on main. A
+# workflow-level `paths:` filter made them unsatisfiable on any PR that touched none of
+# those paths: GitHub's own docs are explicit that the two skip mechanisms are NOT
+# equivalent —
+#
+#   "If a job within a workflow is skipped due to a conditional, it will report its status
+#    as 'Success'. [...] if a workflow is skipped due to path filtering, branch filtering or
+#    a commit message, then checks associated with that workflow will remain in a 'Pending'
+#    state [and] a pull request that requires those checks to be successful will be blocked
+#    from merging. [...] You should not use path or branch filtering to skip workflow runs if
+#    the workflow is required."
+#
+# So every docs-only PR sat BLOCKED and got merged with `--admin`, which bypasses ALL
+# required checks including a genuinely red one. The workflow now always triggers and a cheap
+# `changes` job decides what actually needs to run.
+#
+# GATE THE STEPS, NEVER THE JOB — the second trap, and it is subtler than the first. It is
+# tempting to put `if: needs.changes.outputs.java == 'true'` on `build-test` and lean on
+# "skipped jobs report Success". That does not work here, for two independent reasons:
+#   1. `jobs.<id>.if` is evaluated BEFORE `strategy.matrix` is expanded. With the job-level `if`
+#      false, the three `build-test (<shard>)` check runs are never CREATED — and a Success rule
+#      cannot rescue a check name that does not exist. It would have rebuilt the exact
+#      never-reports trap this file exists to remove. (Caught in cross-vendor review, 2026-07-26.)
+#   2. A job skipped because its dependency failed also reports SKIPPED, which branch protection
+#      COUNTS AS SATISFIED. Since `changes` is not itself a required context, a broken classifier
+#      would have silently waved code through with no gate having run.
+# So every gated job carries `if: always()`, a first step that FAILS CLOSED when the classifier
+# did not succeed, and per-step `if:` on the expensive work. Job NAMES are unchanged, so the six
+# required contexts on main keep resolving.
+#
+# `gitleaks` is deliberately NOT gated: a secret can land in any file type, so a docs-only
+# PR is exactly when you still want the scan. It costs ~30s.
 name: ci-java
 
 on:
   push:
     branches: [main]
-    paths:
-      - "services/**"
-      - "libs/**"
-      - "tools/**"
-      - "pom.xml"
-      - ".mvn/**"
-      - "config/checkstyle/**"
-      # deploy/flyway: the ITs migrate the REAL lineages into Testcontainers, so a
-      # migration-only PR must run them (audit P2) — else a column rename/type change
-      # merges green and breaks every service IT on the NEXT unrelated PR.
-      - "deploy/flyway/**"
-      - ".github/workflows/ci-java.yml"
   pull_request:
-    paths:
-      - "services/**"
-      - "libs/**"
-      - "tools/**"
-      - "pom.xml"
-      - ".mvn/**"
-      - "config/checkstyle/**"
-      # deploy/flyway: the ITs migrate the REAL lineages into Testcontainers, so a
-      # migration-only PR must run them (audit P2) — else a column rename/type change
-      # merges green and breaks every service IT on the NEXT unrelated PR.
-      - "deploy/flyway/**"
-      - ".github/workflows/ci-java.yml"
 
 concurrency:
   group: ci-java-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Cheap path classifier. Replaces the workflow-level `paths:` filter (see the header):
+  # this ALWAYS runs, so the jobs downstream of it always report a conclusion.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      java: ${{ steps.classify.outputs.java }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # The diff needs the merge base (PR) or the pushed range (main); the default
+          # shallow fetch contains neither.
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: classify
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # FAIL SAFE = RUN. Any doubt about what changed (unresolvable base, first push on
+          # a branch, an event shape we did not anticipate) must run the full suite; the
+          # failure mode of guessing "true" is a wasted 8 minutes, and of guessing "false"
+          # is an untested merge.
+          base=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+            base="$(git merge-base HEAD "origin/$BASE_REF" 2>/dev/null || true)"
+          elif [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            # A force-push or a squash-merge can leave `before` unreachable in this checkout.
+            git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null && base="$BEFORE_SHA" || base=""
+          fi
+
+          if [ -z "$base" ]; then
+            echo "::notice::change base did not resolve — running the full JVM suite (fail-safe)"
+            echo "java=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "diff base: $base"
+          files="$(git diff --name-only "$base" HEAD)"
+          echo "$files"
+
+          # Same path set the workflow-level `paths:` filter used to carry. deploy/flyway is
+          # in it because the ITs migrate the REAL lineages into Testcontainers (audit P2) —
+          # else a column rename/type change merges green and breaks every service IT on the
+          # NEXT unrelated PR.
+          if echo "$files" | grep -Eq '^(services/|libs/|tools/|\.mvn/|config/checkstyle/|deploy/flyway/|pom\.xml$|\.github/workflows/ci-java\.yml$)'; then
+            echo "java=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "java=false" >> "$GITHUB_OUTPUT"
+          fi
+
   gitleaks:
     runs-on: ubuntu-latest
     steps:
@@ -70,6 +132,15 @@ jobs:
           fi
 
   build-test:
+    needs: changes
+    # ALWAYS materialise, gate the STEPS — never the job. `jobs.<id>.if` is evaluated BEFORE
+    # `strategy.matrix` is expanded, so a false job-level `if` means the three
+    # `build-test (<shard>)` check runs are never created at all. "Skipped jobs report Success"
+    # cannot rescue a check name that does not exist, so gating the job here would have rebuilt
+    # the exact never-reports trap this PR exists to remove (caught in cross-vendor review).
+    # `always()` also keeps the contexts reporting when the classifier itself fails — the first
+    # step below turns that into an explicit RED rather than a silent pass.
+    if: always()
     runs-on: ubuntu-latest
     # Shard the reactor by service so the Testcontainers ITs (the 2-core
     # bottleneck — a single serial `verify` is ~23 min) run on parallel
@@ -93,8 +164,18 @@ jobs:
             modules: services/strategy-signal-service,services/edge-gateway
     name: build-test (${{ matrix.shard }})
     steps:
+      # FAIL CLOSED. A classifier that errored or was cancelled must not read as "nothing to
+      # build" — without this, `always()` would turn a broken classifier into three green
+      # required checks.
+      - name: Classifier must have succeeded
+        if: needs.changes.result != 'success'
+        run: |
+          echo "::error::the changes classifier did not succeed (${{ needs.changes.result }}) — refusing to report this shard green without knowing what changed"
+          exit 1
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: needs.changes.outputs.java == 'true'
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        if: needs.changes.outputs.java == 'true'
         with:
           distribution: temurin
           java-version: "21"
@@ -103,6 +184,7 @@ jobs:
       # Testcontainers ITs on the pinned production tags (redis:7.4-alpine)
       # + ApplicationModules.verify() + JaCoCo >= 60% line on services
       - name: Build, lint, test, coverage
+        if: needs.changes.outputs.java == 'true'
         # rerunFailingTestsCount retries a flaky test in-run (the Testcontainers/awaitility ITs
         # occasionally time out on the 2-core runner); a genuinely failing test still fails after
         # the retries, so this hides flakes without hiding real breakage.
@@ -110,7 +192,7 @@ jobs:
       # surefire records rerun results as <flakyFailure>/<flakyError> in TEST-*.xml; without this
       # a retried-green test vanishes — surface it so flake accumulation stays visible.
       - name: Flaky-test paper trail (retried-green markers)
-        if: always()
+        if: always() && needs.changes.outputs.java == 'true'
         run: |
           flaky=$(grep -rl -e '<flakyFailure' -e '<flakyError' --include 'TEST-*.xml' . || true)
           if [ -n "$flaky" ]; then
@@ -122,13 +204,17 @@ jobs:
           fi
 
   build-images:
-    needs: build-test
+    needs: [changes, build-test]
     # PR wall-clock: on a pull_request this job only VALIDATES that the Dockerfiles build (the
     # login/push steps below are already gated main+push-only), yet `needs: build-test` makes it
     # wait out the ~8m market-data shard first — ~2.5m of pure serial tail on every PR. Skip it on
     # PRs; the Dockerfile build is still validated on the main-push run, before any deploy. On push
     # (main only, per the trigger) the job is UNCHANGED: needs build-test, then build + push.
-    if: github.event_name == 'push'
+    # `build-test` now always SUCCEEDS (it materialises the required contexts and no-ops when no
+    # JVM path changed), so it can no longer act as this job's implicit "was there Java work?"
+    # gate — without the classifier clause a docs-only push to main would package and build
+    # images for an unchanged tree. This job is not a required context, so gating the JOB is fine.
+    if: github.event_name == 'push' && needs.changes.outputs.java == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

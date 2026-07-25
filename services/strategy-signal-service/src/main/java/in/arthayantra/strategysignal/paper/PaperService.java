@@ -9,6 +9,7 @@ import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
 import in.arthayantra.strategysignal.signals.SignalRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
@@ -169,8 +170,8 @@ public class PaperService {
       String status,
       String side,
       BigDecimal entryPrice,
-      BigDecimal stopLoss,
-      BigDecimal target,
+      @Schema(types = {"number", "null"}) BigDecimal stopLoss,
+      @Schema(types = {"number", "null"}) BigDecimal target,
       BigDecimal compositeScore,
       OffsetDateTime generatedAt,
       JsonNode scalperDetail,

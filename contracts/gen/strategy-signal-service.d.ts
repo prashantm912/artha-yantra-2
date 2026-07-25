@@ -1462,8 +1462,8 @@ export interface components {
             side: string;
             /** Format: int64 */
             qty: number;
-            stopLoss: number;
-            target: number;
+            stopLoss: number | null;
+            target: number | null;
         };
         NotificationRequest: {
             enabled?: boolean;
@@ -1488,8 +1488,8 @@ export interface components {
             status: string;
             side: string;
             entryPrice: number;
-            stopLoss: number;
-            target: number;
+            stopLoss: number | null;
+            target: number | null;
             compositeScore: number;
             /** Format: date-time */
             generatedAt: string;
@@ -1912,10 +1912,10 @@ export interface components {
             components: components["schemas"]["ComponentPoint"][];
             optionLegCost: number;
             marginEstimate: string;
-            riskReward: number;
+            riskReward: number | null;
             entryPrice: number;
-            stopLoss: number;
-            target: number;
+            stopLoss: number | null;
+            target: number | null;
             dataTrust: string;
             trustReasons: string[];
             scored: string;

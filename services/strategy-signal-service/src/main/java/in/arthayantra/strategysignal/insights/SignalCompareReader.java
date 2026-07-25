@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -287,10 +288,10 @@ public class SignalCompareReader {
       List<ComponentPoint> components,
       BigDecimal optionLegCost,
       String marginEstimate,
-      BigDecimal riskReward,
+      @Schema(types = {"number", "null"}) BigDecimal riskReward,
       BigDecimal entryPrice,
-      BigDecimal stopLoss,
-      BigDecimal target,
+      @Schema(types = {"number", "null"}) BigDecimal stopLoss,
+      @Schema(types = {"number", "null"}) BigDecimal target,
       String dataTrust,
       List<String> trustReasons,
       String scored) {}
@@ -304,6 +305,7 @@ public class SignalCompareReader {
    * opens from the signal). The leg/side/qty/SL/TP are here for the review render.
    */
   public record TicketPrefill(
-      long signalId, String exchange, String tradingsymbol, String side, Long qty, BigDecimal stopLoss,
-      BigDecimal target) {}
+      long signalId, String exchange, String tradingsymbol, String side, Long qty,
+      @Schema(types = {"number", "null"}) BigDecimal stopLoss,
+      @Schema(types = {"number", "null"}) BigDecimal target) {}
 }

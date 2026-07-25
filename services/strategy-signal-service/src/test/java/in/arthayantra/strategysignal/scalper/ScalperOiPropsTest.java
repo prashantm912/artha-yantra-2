@@ -31,10 +31,12 @@ class ScalperOiPropsTest {
           // 0.02 (rollup §Proposals P1 — the dead 10-IV-pt gap never occurs on NIFTY weeklies).
           assertThat(p.ivPairMinGap()).isEqualByComparingTo("0.02");
           assertThat(p.ivBothHighFloor()).isEqualByComparingTo("0.40");
-          // OI-spurt: OI floor stays 50; price floor recalibrated to 8 (rollup §Proposals P2 — the dead
-          // 50% 3m-bar move is unreachable).
-          assertThat(p.spurtOiPct()).isEqualByComparingTo("50");
-          assertThat(p.spurtPricePct()).isEqualByComparingTo("8");
+          // OI-spurt: (50,8) -> (15,3) per T22 (owner 2026-07-25) — the OI floor 50 sat at the p95
+          // of its own operand and the joint pass rate was 1.26%; (15,3) measures 15.5%.
+          assertThat(p.spurtOiPct()).isEqualByComparingTo("15");
+          assertThat(p.spurtPricePct()).isEqualByComparingTo("3");
+          // T6 (owner 2026-07-25): the vwap DOT's min |close-vwap|/close distance in bps.
+          assertThat(p.vwapMinDistanceBps()).isEqualByComparingTo("15");
           // E4: the absolute ATM-IV "trend-play" band on the 0..1 fraction scale = 0.10-0.12.
           assertThat(p.ivAbsBandLow()).isEqualByComparingTo("0.10");
           assertThat(p.ivAbsBandHigh()).isEqualByComparingTo("0.12");

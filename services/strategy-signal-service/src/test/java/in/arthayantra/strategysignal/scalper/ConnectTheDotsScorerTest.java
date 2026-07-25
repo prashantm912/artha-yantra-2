@@ -330,13 +330,27 @@ class ConnectTheDotsScorerTest {
   }
 
   @Test
+  void vwapDotNeedsARealDistanceNotJustTheSide() {
+    // T6 (owner 2026-07-25): the entry gate already enforces the VWAP side, so a side-only dot was
+    // free (100% support, 5,225 rows). The dot now needs >=15 bps of |close-vwap|/close.
+    Chart tenBps = new Chart(bd("100"), bd("99.90"), bd("98"), bd("97"), 1, bd("65"), bd("130000"));
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(tenBps, BULL_OI, BULL_MACRO), CE, 1, T, P, true), "vwap"))
+        .as("right side but only 10 bps out — no support")
+        .isFalse();
+    Chart twentyBps = new Chart(bd("100"), bd("99.80"), bd("98"), bd("97"), 1, bd("65"), bd("130000"));
+    assertThat(dot(ConnectTheDotsScorer.score(ctx(twentyBps, BULL_OI, BULL_MACRO), CE, 1, T, P, true), "vwap"))
+        .as("right side and 20 bps out — supports")
+        .isTrue();
+  }
+
+  @Test
   void oiSpurtNeedsQuadrantAndMagnitudeAndDegradesOnNull() {
-    // bullish quadrant + both magnitudes >= 50 -> CE oi_spurt supports
+    // bullish quadrant + both magnitudes over the (15, 3) floors (T22, owner 2026-07-25) -> supports
     Oi spurt = oiWithSpurt(OiQuadrant.LONG_BUILDUP, bd("60"), bd("60"));
     assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, spurt, BULL_MACRO), CE, 1, T, P, true), "oi_spurt"))
         .isTrue();
-    // magnitude below the floor -> no support
-    Oi weak = oiWithSpurt(OiQuadrant.LONG_BUILDUP, bd("40"), bd("60"));
+    // OI magnitude below the 15 floor -> no support
+    Oi weak = oiWithSpurt(OiQuadrant.LONG_BUILDUP, bd("10"), bd("60"));
     assertThat(dot(ConnectTheDotsScorer.score(ctx(BULL_CHART, weak, BULL_MACRO), CE, 1, T, P, true), "oi_spurt"))
         .isFalse();
     // bearish quadrant for a CE side -> no support even with magnitude

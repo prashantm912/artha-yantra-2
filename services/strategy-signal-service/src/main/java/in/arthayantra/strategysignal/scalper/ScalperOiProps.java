@@ -39,7 +39,8 @@ public record ScalperOiProps(
     BigDecimal rsiRecoveryLookback,
     BigDecimal relativeVolumeMultiplier,
     BigDecimal relativeVolumeWindow,
-    BigDecimal relativeVolumeMinBars) {
+    BigDecimal relativeVolumeMinBars,
+    BigDecimal vwapMinDistanceBps) {
 
   // T2.1: the #5 call-put delta-imbalance HARD pre-gate floor (>= 50% of the larger leg).
   private static final BigDecimal DEFAULT_CROSS_FILTER_PCT = new BigDecimal("50");
@@ -54,13 +55,16 @@ public record ScalperOiProps(
   private static final BigDecimal DEFAULT_IV_PAIR_MIN_GAP = new BigDecimal("0.02");
   // T2.8: the "40/40 both-high" stand-aside level on the 0..1 fraction scale = 0.40.
   private static final BigDecimal DEFAULT_IV_BOTH_HIGH_FLOOR = new BigDecimal("0.40");
-  // T2.7: the OI-spurt magnitudes (% change) the spurt dot needs on BOTH legs. The OI floor stays 50;
-  // the PRICE floor was recalibrated 50 -> 8 (signal-analysis rollup §Proposals P2, owner-approved
-  // 2026-07-10): a 50% price move on a 3m scalper bar is unreachable (observed abs p90 ~10 over 2,104
-  // bars), so the 1.0-weight oi_spurt dot was permanently dead; 8 is selective-but-alive (>=8 on 17%).
-  // Ops-tunable via ARTHA_SCALPER_OI_SPURT_PRICE_PCT (application.yml default mirrors this).
-  private static final BigDecimal DEFAULT_SPURT_OI_PCT = new BigDecimal("50");
-  private static final BigDecimal DEFAULT_SPURT_PRICE_PCT = new BigDecimal("8");
+  // T2.7: the OI-spurt magnitudes (% change) the spurt dot needs on BOTH legs. Recalibrated
+  // (50,8) -> (15,3) per T22 (owner-approved 2026-07-25): the 2026-07-10 pass lowered only the
+  // PRICE floor, but the OI floor 50 sat at the p95 of its own operand (|spurtOiPct| p50=11 /
+  // p80=20 / p95=50 over 4,118 context rows, 07-21..24), so the joint pass rate was 1.26%
+  // pre-quadrant and the dot decayed to fully dead. (15,3) measures 15.5% joint — the
+  // selective-but-alive target. Ops-tunable via ARTHA_SCALPER_OI_SPURT_OI_PCT /
+  // ARTHA_SCALPER_OI_SPURT_PRICE_PCT (application.yml defaults mirror these). Judge the revival on
+  // 2 forward sessions — the iv_pair lesson: verify, never assume.
+  private static final BigDecimal DEFAULT_SPURT_OI_PCT = new BigDecimal("15");
+  private static final BigDecimal DEFAULT_SPURT_PRICE_PCT = new BigDecimal("3");
   // #2 (section 3.2) Table-1: the per-side OH-strike count that makes the footprint a HIGH (>=3).
   private static final BigDecimal DEFAULT_OPEN_HIGH_MIN_STRIKES = new BigDecimal("3");
   // #2 Table-2: the declineVolume floor on the representative OH strike that downgrades a fall to LOW
@@ -98,6 +102,13 @@ public record ScalperOiProps(
   private static final BigDecimal DEFAULT_RELATIVE_VOLUME_MULTIPLIER = new BigDecimal("1.5");
   private static final BigDecimal DEFAULT_RELATIVE_VOLUME_WINDOW = new BigDecimal("20");
   private static final BigDecimal DEFAULT_RELATIVE_VOLUME_MIN_BARS = new BigDecimal("10");
+  // T6 (owner-approved 2026-07-25): the vwap DOT's minimum |close−vwap|/close distance in bps. The
+  // entry gate already enforces the VWAP SIDE, so a side-only dot supported 100% of 5,225 rows over
+  // six sessions — a free 2.5-weight dot is an unlabelled −12.8% threshold cut. 15 bps ≈ the
+  // measured distance median (16.3 over 4,118 rows) restores ~50/50 discrimination. The DECISIVE
+  // hard gate (Confluence.vwapAligned) is untouched — this floors the DOT only. Ops-tunable via
+  // ARTHA_SCALPER_OI_VWAP_MIN_DISTANCE_BPS.
+  private static final BigDecimal DEFAULT_VWAP_MIN_DISTANCE_BPS = new BigDecimal("15");
 
   /** Fills any unset field with its documented default (so a partial yaml override is honoured). */
   public ScalperOiProps {
@@ -132,12 +143,14 @@ public record ScalperOiProps(
         relativeVolumeWindow == null ? DEFAULT_RELATIVE_VOLUME_WINDOW : relativeVolumeWindow;
     relativeVolumeMinBars =
         relativeVolumeMinBars == null ? DEFAULT_RELATIVE_VOLUME_MIN_BARS : relativeVolumeMinBars;
+    vwapMinDistanceBps =
+        vwapMinDistanceBps == null ? DEFAULT_VWAP_MIN_DISTANCE_BPS : vwapMinDistanceBps;
   }
 
   /** The all-defaults instance (used where config is absent — tests, the pure-scorer fallback). */
   public static ScalperOiProps defaults() {
     return new ScalperOiProps(
         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-        null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null);
   }
 }

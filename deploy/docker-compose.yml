@@ -590,7 +590,9 @@ services:
       # MUST equal the code/application.yml default (an unset `${VAR:-}` empty string would override the
       # Spring default; the name must match the application.yml ${ENV} placeholder exactly — #653 trap).
       ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP: ${ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP:-0.02}
-      ARTHA_SCALPER_OI_SPURT_PRICE_PCT: ${ARTHA_SCALPER_OI_SPURT_PRICE_PCT:-8}
+      ARTHA_SCALPER_OI_SPURT_OI_PCT: ${ARTHA_SCALPER_OI_SPURT_OI_PCT:-15}
+      ARTHA_SCALPER_OI_SPURT_PRICE_PCT: ${ARTHA_SCALPER_OI_SPURT_PRICE_PCT:-3}
+      ARTHA_SCALPER_OI_VWAP_MIN_DISTANCE_BPS: ${ARTHA_SCALPER_OI_VWAP_MIN_DISTANCE_BPS:-15}
       # Shadow book (signal-analysis §7.1/§7.2): open composite-passing REJECTED entries as virtual
       # 1-lot positions so the exit sweep labels them with a real PnL (entry-gate tuning evidence).
       # Code default is false; ON for the stack — separate shadow_positions table, never touches

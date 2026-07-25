@@ -38,9 +38,7 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -149,12 +147,6 @@ public class BhavcopyBackfillService {
   }
 
   // ---- run control -------------------------------------------------------------------------
-
-  /** Pull once on startup so a long downtime self-heals immediately and the fetch path is exercised. */
-  @EventListener(ApplicationReadyEvent.class)
-  public void onStartup() {
-    runIfFree();
-  }
 
   /** Daily after both exchanges publish (NSE ~19:00, BSE ~18:00 IST); default 19:30 IST. */
   @Scheduled(cron = "${artha.bhavcopy.eod-cron:0 30 19 * * MON-FRI}", zone = "Asia/Kolkata")

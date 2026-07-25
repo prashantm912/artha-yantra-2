@@ -237,6 +237,26 @@ Within grace, both are silent; past grace, B is exactly the predicate that speak
 10. **Live:** ship `DISABLED`, flip to `OBSERVE_ONLY` in the same deploy window, read one week, then
     arm. Do not arm in the PR that builds it (#941 precedent).
 
+## 7b. Corrections folded in from the build (2026-07-26)
+
+- **There are FIVE pre-classification skip paths, not four.** The builder verified this against
+  `SignalEngine.java:604-659` while implementing §3.1; the design's count was wrong and the line
+  citations had drifted. §7's totality test (item 4) covers all five.
+- The missing-version branch (`:604-608`) **does not currently log** anything, so a slug lost there is
+  invisible today — which is exactly the hole `MISSING_VERSION_ROW` closes.
+
+## 8b. Owner questions — SETTLED 2026-07-26 (Architect, on the design's own recommendations)
+
+All three were pre-arming decisions, so none blocked the build:
+
+1. **Alert channel = ntfy.** This is a named-detail alarm about a live process; the external
+   dead-man's-switch is an absence-is-the-alarm mechanism and does not fit.
+2. **`NOT_LIVE_RESOLVABLE` re-pages once per (slug, IST day)** — a deliberate, commented exception to
+   the §3.5 episode latch, because it is a permanent config error that will otherwise recur silently
+   every reload until someone fixes it.
+3. **OBSERVE_ONLY runs one full trading week before arming.** The build ships `DISABLED` and does not
+   arm anything; arming stays the owner's call (#941 precedent).
+
 ## 8. Open questions for the owner
 
 1. **Alert channel** — ntfy (per-slug detail) vs the external dead-man's-switch. Recommendation:

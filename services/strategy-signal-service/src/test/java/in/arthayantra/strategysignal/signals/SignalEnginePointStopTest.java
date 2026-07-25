@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.signals;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import in.arthayantra.black76.Black76.OptionType;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import java.math.BigDecimal;
 import java.util.List;
@@ -41,6 +42,37 @@ class SignalEnginePointStopTest {
                 false,
                 entry))
         .isNull();
+  }
+
+  @Test
+  void entryExposureFollowsTheHeldOptionSideNotTheDefinitionDirection() {
+    // a PE take is SHORT index exposure even on a direction:long definition (every -pe mirror
+    // declares long; the seam derives CE/PE per entry) — the old definition-direction keying put
+    // the PE stop below entry, which structuralStopHit(SHORT) trips on the next bar.
+    assertThat(
+            SignalEngine.entryExposureIsShort(
+                OptionType.PE, StrategyDefinition.Direction.LONG))
+        .isTrue();
+    assertThat(
+            SignalEngine.entryExposureIsShort(
+                OptionType.CE, StrategyDefinition.Direction.SHORT))
+        .isFalse();
+    // neutral straddle (no side) / non-scalper: the definition direction decides, matching
+    // scalperPositionDirection's fallback.
+    assertThat(SignalEngine.entryExposureIsShort(null, StrategyDefinition.Direction.LONG))
+        .isFalse();
+    assertThat(SignalEngine.entryExposureIsShort(null, StrategyDefinition.Direction.SHORT))
+        .isTrue();
+  }
+
+  @Test
+  void aPeSideEntryPersistsItsPointStopOnTheProtectiveSide() {
+    BigDecimal entry = new BigDecimal("25000");
+    boolean shortDir =
+        SignalEngine.entryExposureIsShort(OptionType.PE, StrategyDefinition.Direction.LONG);
+    // protective side for short index exposure: the stop sits ABOVE entry
+    assertThat(SignalEngine.indexPointStopLevel(List.of(pointStop(60)), shortDir, entry))
+        .isEqualByComparingTo("25060");
   }
 
   @Test

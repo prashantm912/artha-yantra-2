@@ -194,28 +194,32 @@ Run in order; each answers one question. Canned SQL in §6.
     by shadow position `id 209`, the same slug on the same leg at the same bar, which had no
     take-profit and closed `SQUARE_OFF`. Earlier files in this folder that applied the +35% rule to
     a bracket-less slug (07-22 §5.1 among them) carry that upward bias.
-17. **Count `PartialBucketCanary` WARNs per session and bucket their magnitudes** (added 2026-07-24) —
-    the canary compares the live engine's last completed **3m** bar volume against the sum of the three
-    **1m** bars of the same bucket, **both read from `LiveSeriesStore` in memory** (no DB, no REST). It
-    was built to detect a frozen first-minute partial, whose signature is a persistent ~⅔ one-directional
-    shortfall. What 2026-07-24 measured instead is a different, live defect: **37 WARNs, every one on
-    `NFO:NIFTY26JULFUT@3m`** — the series every scalper signals off — with **every shortfall an exact
-    multiple of the NIFTY lot size 65** (65, 130, 195, 260, 325, 390, 455, 520, 845, 1,560, 1,820,
-    **6,110**) arriving in near-perfect **± pairs on consecutive buckets**. The 3m side agrees with the
-    database exactly (09:15 engine 131,300 = Σ of the aligned 1m bars 09:15+09:16+09:17), so it is the
-    in-memory 1m sum that differs ⇒ a **boundary-tick attribution race between the two in-memory
-    aggregations**, not the frozen partial. **It is not cosmetic:** `volume-floor`, `volume-pump`,
-    `rising-volume` and the `volume` dot all read that 3m series, and the 09:15 error was **4.7% of the
-    bar** on the only bar all session that cleared the fixed 125,000 floor. It also fired 48× on 07-23
-    unreported (that file enumerated ERROR lines only). Standing check each session:
+17. **Count `PartialBucketCanary` WARNs per session and bucket their magnitudes** (added 2026-07-24;
+    **mechanism CORRECTED 2026-07-25** — see `2026-07-25-weekly-bug-queue.md` §B2) — the canary
+    compares the live engine's last completed **3m** bar volume against the sum of the three **1m**
+    bars of the same bucket. Both objects live in `LiveSeriesStore`, but their provenance differs —
+    the 07-24 "both in-memory, two-aggregation race" reading was WRONG: **the 3m side is a
+    REST-pulled SQL rollup of DB 1m rows that the 10-minute recency window authoritatively replaces
+    with broker-official Kite bars at every boundary** (DB-probed: session minutes are
+    `source='KITE'`, `fetched_at` in exact 3-minute steps), while the 1m side is live tick-agg and
+    is never revised. So the comparison is tick-agg vs broker-official, and **the tick-agg side is
+    the diverging one** — the rails (`volume-floor`, `volume-pump`, `rising-volume`, the `volume`
+    dot) read the broker-corrected 3m rollup, so the 07-24 "4.7% operand error at the open" was in
+    the tick-agg mirror, not in the floor's operand. The exact-lot ± pairs (65…6,110, consecutive
+    buckets) are the sub-second boundary straddle between ~1 Hz cumulative-volume snapshots and the
+    broker's trade-timestamped attribution — structural residue, ≤8 lots on 35 of 37 measured
+    events. The unpaired opening +94-lot error was a real tick-agg defect (warm-process day-rollover
+    baselined at zero, folding the pre-open auction into the 09:15 bar) — FIXED with the same B2
+    change that set the shipped tolerance default to **650** (10 NIFTY lots). Standing check each
+    session:
     ```bash
     docker logs ay-strategy-signal-service --since <today>T03:40:00Z --until <today>T10:00:00Z 2>&1 \
       | grep -oE "canary: [A-Z]+:[A-Z0-9]+@3m|shortfall -?[0-9]+" | paste - -
     ```
-    Read the magnitudes, not just the count: lot-multiple ± pairs = the boundary race (small, benign
-    except at the open); a persistent one-directional ~⅔ shortfall = the frozen-partial regression the
-    canary exists to catch. **Do not raise `artha.signals.partial-bucket-canary.volume-tolerance` to
-    silence the former before the latter can still be distinguished.**
+    Post-B2, any WARN is signal: the benign ≤10-lot residue is absorbed by the default tolerance
+    (650 absolute AND ≤10% of the expected sum — a thin frozen bar still fires), so a surviving WARN
+    means either the frozen-partial regression (persistent one-directional ~⅔ shortfall) or a new
+    attribution defect. Investigate, don't tolerate-away.
 18. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis

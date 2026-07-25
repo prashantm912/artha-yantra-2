@@ -118,13 +118,17 @@ public class CandleBuilder implements NormalizedTickListener {
   }
 
   private void startBar(Accumulator acc, NormalizedTick tick, OffsetDateTime bucket) {
-    // cumulative-delta baseline: previous bar's end; a DROP means the exchange
-    // day rolled (Kite resets cumulative volume) — baseline restarts at zero.
-    // The very first tick ever seen baselines at its own cumulative (volume
-    // counts increments observed after it).
+    // cumulative-delta baseline: previous bar's end. A DROP means the exchange day rolled (Kite
+    // resets cumulative volume) — baseline at the tick's OWN cumulative, the same semantics as the
+    // very first tick ever seen (volume counts increments observed after it). T23 (2026-07-25):
+    // the old zero baseline folded the entire pre-open auction quantity into the first bar a WARM
+    // process built after rollover (a cold boot never did — accumulators start empty), inflating
+    // the 09:15 tick-agg bar by the auction volume (+94 lots on 2026-07-24) and tripping the
+    // partial-bucket canary every warm morning. Cost: the rollover tick's own intra-minute delta
+    // is unobservable and uncounted — identical to the cold-boot case, bounded to one tick.
     long baseline = acc.lastSeq == Long.MIN_VALUE ? tick.cumulativeDayVolume() : acc.cumVolumeLatest;
     if (tick.cumulativeDayVolume() < baseline) {
-      baseline = 0;
+      baseline = tick.cumulativeDayVolume();
     }
     acc.bucket = bucket;
     acc.open = tick.lastPrice();

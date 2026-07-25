@@ -143,11 +143,21 @@ public class ManasAroraBacktestService {
       BigDecimal netDrawdownPct,
       BigDecimal netSharpe) {}
 
-  /** The full multi-variant result: technical / rs / turnover / float / pyramiding A/B, side by side. */
+  /**
+   * The full multi-variant result: technical / rs / turnover / float / pyramiding A/B, side by side.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: the sibling
+   * {@code MinerviniBacktestService.BacktestResult} shares this simple name but ALSO carries
+   * {@code sweep}+{@code rotation}, and springdoc keys components by simple name.
+   *
+   * <p>{@code fromDate}/{@code runAt} are null on the idle shell (ManasController:342-344) and
+   * {@code runAt} again while running / on failure (:292, :328).
+   */
+  @Schema(name = "ManasBacktestResult")
   public record BacktestResult(
       String status,
-      LocalDate fromDate,
-      String runAt,
+      @Schema(types = {"string", "null"}) LocalDate fromDate,
+      @Schema(types = {"string", "null"}) String runAt,
       List<Report> variants,
       List<SlotCell> slotSweep,
       String note) {}

@@ -24,20 +24,38 @@ import org.springframework.stereotype.Service;
 @Service
 public class MinerviniFunnelService {
 
-  /** One funnel candidate: the screen numbers + the geometry + its distance to the pivot. */
+  /**
+   * One funnel candidate: the screen numbers + the geometry + its distance to the pivot.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: the sibling {@code ManasFunnelService.FunnelRow} shares
+   * this simple name with a DIFFERENT field set, and springdoc keys components by simple name.
+   *
+   * <p>Nullability comes from the SQL: {@code close_price} is {@code NOT NULL} (V031:11) and
+   * {@code is_vcp}/{@code thrust} are {@code COALESCE}d, but {@code rs_rank}/{@code stage} are
+   * nullable columns (V031:19,29) and {@code pivot}/{@code cheat_pivot}/{@code footprint} come from a
+   * LEFT JOIN that misses whenever the passer has no persisted setup (:72-73, :110-116);
+   * {@code pctToPivot} is explicitly null when there is no pivot (:106-109).
+   */
+  @Schema(name = "MinerviniFunnelRow")
   public record FunnelRow(
       String symbol,
       BigDecimal close,
-      BigDecimal rsRank,
-      Integer stage,
+      @Schema(types = {"number", "null"}) BigDecimal rsRank,
+      @Schema(types = {"integer", "null"}) Integer stage,
       boolean isVcp,
-      BigDecimal pivot,
-      BigDecimal cheatPivot,
+      @Schema(types = {"number", "null"}) BigDecimal pivot,
+      @Schema(types = {"number", "null"}) BigDecimal cheatPivot,
       boolean thrust,
-      String footprint,
-      BigDecimal pctToPivot) {} // (close - pivot) / pivot, null when no pivot
+      @Schema(types = {"string", "null"}) String footprint,
+      @Schema(types = {"number", "null"}) BigDecimal pctToPivot) {}
+  // pctToPivot = (close - pivot) / pivot, null when no pivot
 
-  /** The three-list for a screen date + the market regime (MV-6.9) the owner should buy WITH. */
+  /**
+   * The three-list for a screen date + the market regime (MV-6.9) the owner should buy WITH.
+   * Explicitly named for the same reason as {@link FunnelRow} — the three lists now ref a different
+   * row schema than the Manas twin's, so the two funnels are no longer interchangeable.
+   */
+  @Schema(name = "MinerviniFunnel")
   public record Funnel(
       @Schema(types = {"string", "null"}) LocalDate screenDate,
       RegimeService.Regime regime,

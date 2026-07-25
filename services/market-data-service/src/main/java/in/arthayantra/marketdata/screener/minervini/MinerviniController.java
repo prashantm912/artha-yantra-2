@@ -28,28 +28,43 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/market/screener/minervini")
 public class MinerviniController {
 
-  /** One screener row (the 8 gates + RS-rank + Stage + low-cap inputs). */
+  /**
+   * One screener row (the 8 gates + RS-rank + Stage + low-cap inputs). {@code @Schema(name)} is
+   * load-bearing: the sibling {@code ManasController.Row} shares this simple name with a DIFFERENT
+   * field set, and springdoc keys components by simple name — without the explicit name the two
+   * collapse to one spec schema and whichever the classpath scan reaches first wins.
+   *
+   * <p>Every numeric here except {@code close} is nullable: the persisted columns are nullable
+   * (V031:12-23, {@code stage} V031:29) and the mapper reads them with {@code rs.getBigDecimal} /
+   * {@code rs.getObject} (MinerviniScreenRepository:97-102, :94).
+   */
+  @Schema(name = "MinerviniRow")
   public record Row(
       String symbol,
       String exchange,
       BigDecimal close,
-      BigDecimal sma50,
-      BigDecimal sma150,
-      BigDecimal sma200,
-      BigDecimal high52w,
-      BigDecimal low52w,
-      BigDecimal pctFromHigh,
-      BigDecimal pctAboveLow,
-      BigDecimal rsRank,
-      BigDecimal avgTurnover50,
-      BigDecimal freeFloatMcapCr,
-      BigDecimal freeFloatPct,
+      @Schema(types = {"number", "null"}) BigDecimal sma50,
+      @Schema(types = {"number", "null"}) BigDecimal sma150,
+      @Schema(types = {"number", "null"}) BigDecimal sma200,
+      @Schema(types = {"number", "null"}) BigDecimal high52w,
+      @Schema(types = {"number", "null"}) BigDecimal low52w,
+      @Schema(types = {"number", "null"}) BigDecimal pctFromHigh,
+      @Schema(types = {"number", "null"}) BigDecimal pctAboveLow,
+      @Schema(types = {"number", "null"}) BigDecimal rsRank,
+      @Schema(types = {"number", "null"}) BigDecimal avgTurnover50,
+      @Schema(types = {"number", "null"}) BigDecimal freeFloatMcapCr,
+      @Schema(types = {"number", "null"}) BigDecimal freeFloatPct,
       boolean[] gates,
       int gatesPassed,
       boolean passesAll,
-      Integer stage) {}
+      @Schema(types = {"integer", "null"}) Integer stage) {}
 
-  /** The {items} envelope + as-of + coverage. */
+  /**
+   * The {items} envelope + as-of + coverage. Explicitly named for the same reason as {@link Row} —
+   * the Manas twin's {@code items} now refs a different row schema, so the two envelopes are no
+   * longer interchangeable.
+   */
+  @Schema(name = "MinerviniScreenResponse")
   public record ScreenResponse(
       List<Row> items,
       @Schema(types = {"string", "null"}) LocalDate screenDate,
@@ -78,28 +93,33 @@ public class MinerviniController {
    * The full analyzer payload for one candidate (MV-5.5): the 8 Trend-Template gates + Stage + the
    * screen numerics (from the persisted screen row — {@code scanned=false} when the symbol was not
    * in the screen), the low-cap fundamentals, and the live VCP geometry.
+   *
+   * <p>{@code @Schema(name)} disambiguates from the sibling {@code ManasController.CandidateAnalysis}
+   * (same simple name, different field set). Every non-primitive except the {@code geometry} ref is
+   * nullable — the two not-scanned shells pass explicit nulls for all of them (:227-229, :238-240).
    */
+  @Schema(name = "MinerviniCandidateAnalysis")
   public record CandidateAnalysis(
       String symbol,
       String exchange,
-      LocalDate screenDate,
+      @Schema(types = {"string", "null"}) LocalDate screenDate,
       boolean scanned,
-      BigDecimal close,
-      BigDecimal sma50,
-      BigDecimal sma150,
-      BigDecimal sma200,
-      BigDecimal high52w,
-      BigDecimal low52w,
-      BigDecimal pctFromHigh,
-      BigDecimal pctAboveLow,
-      BigDecimal rsRank,
-      BigDecimal avgTurnover50,
-      BigDecimal freeFloatMcapCr,
-      BigDecimal freeFloatPct,
+      @Schema(types = {"number", "null"}) BigDecimal close,
+      @Schema(types = {"number", "null"}) BigDecimal sma50,
+      @Schema(types = {"number", "null"}) BigDecimal sma150,
+      @Schema(types = {"number", "null"}) BigDecimal sma200,
+      @Schema(types = {"number", "null"}) BigDecimal high52w,
+      @Schema(types = {"number", "null"}) BigDecimal low52w,
+      @Schema(types = {"number", "null"}) BigDecimal pctFromHigh,
+      @Schema(types = {"number", "null"}) BigDecimal pctAboveLow,
+      @Schema(types = {"number", "null"}) BigDecimal rsRank,
+      @Schema(types = {"number", "null"}) BigDecimal avgTurnover50,
+      @Schema(types = {"number", "null"}) BigDecimal freeFloatMcapCr,
+      @Schema(types = {"number", "null"}) BigDecimal freeFloatPct,
       boolean[] gates,
       int gatesPassed,
       boolean passesAll,
-      Integer stage,
+      @Schema(types = {"integer", "null"}) Integer stage,
       Geometry geometry) {}
 
   private final TrendTemplateService screener;

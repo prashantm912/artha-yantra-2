@@ -27,7 +27,14 @@ public class OiTrendingService {
   /**
    * One bucket's aggregates. {@code ceLtp}/{@code peLtp} are the SUMMED CE/PE premium (option ltp) across
    * the captured chain — the Price-Action columns the "Trending OI - PA" page adds on top of the OI trend.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: {@code ExpiryCompareService.TrendPoint} shares this
+   * simple name but carries {@code pcr} instead of {@code trend}, and springdoc keys components by
+   * simple name. This twin won the scan, so the expiry-compare response was documented with THIS
+   * record's {@code trend} (which it never sends) and without its own {@code pcr} (which it always
+   * does).
    */
+  @Schema(name = "OiTrendPoint")
   public record TrendPoint(
       OffsetDateTime bucket,
       long totalOi,

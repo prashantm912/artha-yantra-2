@@ -27,6 +27,21 @@ computed from construction call sites) and the slice plan.
    Status ×4 (backfill services), Heatmap ×2, Row ×3, TrendPoint ×2, StrikeMove ×2,
    Report/SetupStat/YearReturn/SlotCell/PortfolioStat/BacktestResult (minervini vs manas twins),
    ExchangeResult ×2, CanaryResult ×3, PremiumRow/Setup/Candle collisions.
+   **Update (slice 3f, task_1c04803f): the twins whose field sets DIFFER are no longer collapsed** —
+   `@Schema(name = "...")` gives each its own component key (springdoc honours it for the key AND
+   every `$ref`; the `required` converter follows since it maps off the resolved `$ref` name). Fixed:
+   Row, ScreenResponse, CandidateAnalysis, FunnelRow, Funnel, BacktestResult, backfill Status ×4,
+   ExchangeResult ×2, TrendPoint ×2. ⚠️ **`ExchangeResult` was mis-listed above as field-identical and was in fact the
+   WORST case in the whole inventory** (caught by the cross-vendor review, not by this doc's own
+   audit): `KiteSessionService.ExchangeResult(connected, kiteUserId, tokenValidUntil)` vs
+   `BhavcopyBackfillService.ExchangeResult(days, bhavRows, candleRows)` — ZERO fields in common, and
+   the bhavcopy twin won the scan, so `POST /api/v1/auth/kite/session` published three bhavcopy int
+   counters and none of its own three fields. Now `KiteSessionExchangeResult` / `BhavcopyExchangeResult`.
+   Still collapsed BY DESIGN (genuinely field-identical, annotated identically, so the collapse is
+   harmless): Report, SetupStat, YearReturn, SlotCell, PortfolioStat — leave them alone unless one
+   side's fields diverge, at which point they need the same treatment. **Lesson: "field-identical" must
+   be verified field-by-field against BOTH declarations, not assumed from a shared name + shared
+   neighbourhood.**
 4. **Request-body records are OUT of scope** — the converter applies `required` to responses only;
    annotating request records changes client-facing semantics. (Inventory kept below for a
    possible later pass.)
@@ -102,12 +117,8 @@ computed from construction call sites) and the slice plan.
   WarmStatus (all — throws/defaults/constants), MaxPain.now (fold only on non-empty buckets),
   IndexPriceAction.avgRange20 + CoverageRow.minExpiry/maxExpiry (defensive branches dead —
   DDL NOT NULL), CloseMismatch (SQL-filtered), CanaryReport, Movers OHLC (already 3c).
-  **SKIP-with-note (twin field-set mismatch — spec ALREADY scan-order-dependent, pre-existing):**
-  Row ×6 (3 response-reachable: MinerviniController 18c / ManasController 23c /
-  ScreenerService 8c), CandidateAnalysis ×2 (21c vs 24c), FunnelRow ×2, BacktestResult ×2
-  (minervini has sweep+rotation), backfill Status ×4 (8/11/13/14 fields, only 5 common) —
-  per-field null evidence archived in the investigator reports if a rename/`@Schema(name=)`
-  dedupe ever unblocks them. **SKIP not-a-response:** CanaryResult ×3 (no controller returns it).
+  **~~SKIP-with-note (twin field-set mismatch)~~ — UNBLOCKED + SHIPPED in slice 3f (chip
+  task_1c04803f), see below.** **SKIP not-a-response:** CanaryResult ×3 (no controller returns it).
   **$ref real-null parking (constraint #2, un-annotatable):** Report.portfolio/
   portfolioRsPriority/portfolioRsPriorityNet, BacktestResult.rotation, Funnel.regime,
   SourceHealth.lastRun, FuturesDigest.banks/termStructure, the digest shells' record members,
@@ -116,8 +127,57 @@ computed from construction call sites) and the slice plan.
   FE: zero changes needed — hand-written types verified null-honest for every 3d surface
   (ingestHealth.ts, settings.ts KiteStatus/SyncStatus optional-loose, types.ts BreadthDay).
 
-Ledger row: task_79d12a4d (slices 3a-3c) + task_0b14da09 (3d). Full agent tables (evidence
-file:line per component) archived below.
+- **3f: market-data twin-collision dedupe + the fields it unblocked — SHIPPED (chip
+  task_1c04803f).** Constraint #3 said "annotate ALL twins identically or the spec depends on scan
+  order"; for the twins whose field sets DIFFER there is no identical annotation to write, so 3d
+  parked them. The fix is `@Schema(name = "...")`, which springdoc honours for the component KEY and
+  every `$ref` (verified by capture) — and the `RecordRequiredModelConverter` keys its
+  always-emitted map off the resolved `$ref` name, so the `required` arrays follow for free.
+  **Renamed (20 spec components out of 9 collapsed names; Java record names UNCHANGED, wire keys
+  UNCHANGED):**
+  `Row` → `MinerviniRow`/`ManasRow`, `CandidateAnalysis` → `Minervini`/`ManasCandidateAnalysis`,
+  `FunnelRow` → `Minervini`/`ManasFunnelRow`, `BacktestResult` → `Minervini`/`ManasBacktestResult`,
+  backfill `Status` ×4 → `BhavcopyBackfillStatus`/`OiBackfillStatus`/`ExpiredBackfillStatus`/
+  `EquityDailyBackfillStatus`, `ExchangeResult` → `KiteSessionExchangeResult`/`BhavcopyExchangeResult`
+  (found by the cross-vendor review — see constraint #3's warning; it was the only collision where the
+  two twins shared NO field at all, so `POST /api/v1/auth/kite/session` published a wholly foreign
+  schema), `TrendPoint` → `OiTrendPoint`/`ExpiryCompareTrendPoint` (the instance filed independently
+  as task_1023f3bb and merged into this chip's ledger row: `OiTrendingService.TrendPoint` has
+  `trend`, `ExpiryCompareService.TrendPoint` has `pcr`, the OI twin won, so the expiry-compare
+  response was documented with a `trend` it never sends and without the `pcr` it always does).
+  **Also renamed, NOT in the original chip scope but forced by it:**
+  `ScreenResponse` and `Funnel` — 3d correctly called them field-identical twins, but that identity
+  was only skin-deep (`items`/the three lists `$ref` the row schema), so once the rows split the
+  parents stopped being interchangeable and had to split too.
+  **Nullable annotations then landed — 90 NEW `@Schema(types=…)`; 105 nullable properties published
+  across the 20 affected schemas once the 15 pre-existing #1003 annotations are counted (4×
+  `screenDate`, 4 on the newly-surfaced `SetupView`, and the 7 already on the two `TrendPoint`
+  twins):**
+  MinerviniRow 12 + ManasRow 12 (nullable DDL V031:12-23,29 / V036:15-31 + V038, read via
+  `rs.getBigDecimal`/`getObject` — MinerviniScreenRepository:94,97-102,
+  ManasScreenRepository:126-133; `close` NOT NULL both, left alone), MinerviniCandidateAnalysis 14 +
+  ManasCandidateAnalysis 13 (the two not-scanned shells pass explicit nulls —
+  MinerviniController:227-229,238-240, ManasController:286-288,297-299), MinerviniFunnelRow 6 +
+  ManasFunnelRow 8 (LEFT-JOIN misses + the explicit `pctToPivot` ternary), Minervini/Manas
+  BacktestResult `fromDate`+`runAt` ×2 (idle/running/failed shells), the 4 Statuses 3/7/5/5
+  (never-run shells + the RUNNING snapshots). **`ScreenerService.Row` (8c) was a FALSE ENTRY in 3d's
+  list** — `ScreenerController.screen` returns `Map<String, Object>` (:23), so springdoc never
+  resolves that record at all; it is not in the spec and cannot collide. No rename, no annotation.
+  **Two hidden schemas surfaced as a side effect:** `ManasController.SetupView` (already annotated by
+  3d but UNREACHABLE while the Manas `CandidateAnalysis` was the losing twin) now publishes, and
+  every renamed schema's `required` array grew from the old cross-twin intersection to its own true
+  set (the old arrays were the WINNER's properties ∩ the LAST-resolved twin's always-emitted set —
+  `Status` published 8 properties but only 5 required). **The breaking gate reports exactly ONE
+  incompatibility, and it is the point of the change:** `POST /api/v1/auth/kite/session` →
+  `Missing property: days / bhavRows / candleRows`, i.e. the three bhavcopy counters that endpoint
+  never emitted. Ships with a `Contract break: APPROVED (…)` line. Every other renamed endpoint reads
+  `Backward compatible` — openapi-diff resolves `$ref`s inline, so a rename with the same resolved
+  shape is invisible to it, and response `required` only widened (an increase is compatible; only
+  `required.decreased` breaks).
+
+Ledger row: task_79d12a4d (slices 3a-3c) + task_0b14da09 (3d) + task_5187d6d6 (3e, the nullable-ENUM
+carve-out) + task_1c04803f (3f, the twin-collision dedupe). Full agent
+tables (evidence file:line per component) archived below.
 
 ## strategy-signal YES table (agent 1, computed)
 

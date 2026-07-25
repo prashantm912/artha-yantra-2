@@ -35,7 +35,15 @@ import org.springframework.stereotype.Service;
 @Service
 public class ExpiryCompareService {
 
-  /** One trending bucket for one expiry. */
+  /**
+   * One trending bucket for one expiry.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: {@code OiTrendingService.TrendPoint} shares this simple
+   * name but carries {@code trend} instead of {@code pcr}, and springdoc keys components by simple
+   * name. That twin won the scan, so this endpoint's response was published with a {@code trend} it
+   * never sends and without the {@code pcr} it always does.
+   */
+  @Schema(name = "ExpiryCompareTrendPoint")
   public record TrendPoint(
       OffsetDateTime bucket,
       long totalOi,

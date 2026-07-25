@@ -52,12 +52,11 @@ config changes, no `ay` verbs that touch containers. SELECTs + `docker logs` onl
    ⚠️ **Zero rejections is INCONCLUSIVE, never "starvation"** (corrected 2026-07-26):
    `recordRejection` runs only PAST the chart gate, and every scalper shares two required scorers on
    one 3m series, so a SuperTrend-DOWN leg silences all of them on ordinary bearish tape. Judge
-   liveness POSITIVELY, never from an absence: in `strategy.signal_eval_outcomes` read the LATEST
-   bucket only (a session-wide `sum()` stays positive forever once anything evaluated) — latest
-   bucket `eval_count > 0` proves the eval loop ran. A fresh ALL-ZERO latest bucket is INCONCLUSIVE,
-   not healthy. A thread dump narrows but does not settle it: `LinkedBlockingQueue.take()` means the
-   eval thread is unstuck, NOT that bars are arriving. On a fully quiet session liveness is currently
-   UNPROVABLE — say INCONCLUSIVE (chip task_0bed1621 closes this). ⚠️ A missing `receive-stall`/`eval-stall` row in
+   liveness POSITIVELY from the read surface shipped 2026-07-26 (task_0bed1621):
+   `docker exec ay-strategy-signal-service sh -c 'wget -qO- http://127.0.0.1:8082/actuator/prometheus'
+   | grep ay_signal_bar_`. `ay_signal_bar_received_age_seconds` inside ~1–2 bar intervals ⇒ alive;
+   growing while capture is healthy ⇒ receive-side stall. A missing series means the process is down,
+   not "no data yet". ⚠️ A missing `receive-stall`/`eval-stall` row in
    `strategy.subscriber_health_events` is NOT proof of health — that table is write-only fail-soft
    forensics, so a disabled or failed sweep leaves it empty too; a row that IS present is strong
    evidence of a fault. See README §4.3 step 4.

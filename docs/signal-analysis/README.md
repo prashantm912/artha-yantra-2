@@ -340,12 +340,23 @@ Steps (all read-only — never restart/deploy/write mid-session):
          listener submits nothing and leaves the thread parked in exactly the same stack as a healthy
          idle worker.** Quiet tape and a dead subscriber are indistinguishable here. (An earlier
          version of this runbook called this stack "healthy" and "definitive". It is neither.)
-     - ⚠️ **Bottom line, stated plainly: on a fully quiet session there is currently NO way to prove
-       the engine is alive.** There is no operator-readable surface for `lastBarReceivedAtMs` /
-       `lastBarEvaluatedAtMs` — no metric, no endpoint (grepped 2026-07-26) — and every available
-       proxy has been shown to admit a false PASS. The gate must return INCONCLUSIVE and say so,
-       rather than manufacture confidence. Closing this needs chip **task_0bed1621** (expose the two
-       heartbeats); see its row in ledger §4b.
+     - ✅ **The definitive read (task_0bed1621, shipped 2026-07-26): two Micrometer gauges on the
+       strategy-signal actuator.** These publish the ages of the ONLY two unconfounded oracles, so a
+       quiet session is no longer unprovable:
+       ```bash
+       docker exec ay-strategy-signal-service sh -c          'wget -qO- http://127.0.0.1:8082/actuator/prometheus' | grep ay_signal_bar_
+       ```
+       - `ay_signal_bar_received_age_seconds` — seconds since the engine last RECEIVED a closed bar.
+         Stamped as the FIRST line of `onCandleMessage`, before any universe / session-window /
+         position / loaded logic, so it is direction-, window- and position-independent.
+       - `ay_signal_bar_evaluated_age_seconds` — its evaluation-side twin.
+
+       **Verdict on an all-zero session:** received-age well inside the bar cadence (≲ 1–2 bar
+       intervals) ⇒ **PASS-QUIET**, the engine is demonstrably alive and the tape is simply bearish.
+       Received-age growing past several bar intervals while market-data capture is healthy ⇒
+       **FAIL** — that is a receive-side stall, and it is now directly observable rather than
+       inferred. Both gauges are pre-registered at boot and seeded, so a MISSING series means the
+       process is not up at all — never "no data yet".
    - ⚠️ **Do NOT read "no `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events`"
      as PASS.** That table is write-only, fail-soft forensics — a disabled sweep, a failed sweep or
      a failed insert produces no row either, so absence there can silently pass a dead engine. A row

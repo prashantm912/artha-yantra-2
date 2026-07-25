@@ -72,18 +72,15 @@ Follow README **§4.3** exactly (it owns the queries + the gate):
    two required scorers on one 3m series, so SuperTrend-DOWN silences all of them on ordinary bearish
    tape — this rule cost a false starvation escalation (07-17) and a needless restart (07-20), and the
    canary that automated it was retired. On `0`, demand **POSITIVE** proof of life — never infer it
-   from an absence. In `strategy.signal_eval_outcomes`, read the **LATEST BUCKET ONLY** (`GROUP BY
-   bucket_time ORDER BY bucket_time DESC LIMIT 3`) — a session-wide `sum()` stays positive forever
-   once anything evaluated, so an engine that died at 10:00 would PASS all afternoon. Latest bucket
-   `eval_count > 0` ⇒ **PASS-QUIET**; latest bucket all zeros, or its predecessor missing/late, ⇒
-   **INCONCLUSIVE**; no fresh row at all while capture is healthy ⇒ **FAIL**. A thread dump
-   (`kill -3 1`) narrows but does NOT settle it: only REPEATED dumps (>=2, spaced past
-   the ~10s fetch timeout) showing no forward progress are a real stall (FAIL) — a single dump inside
-   `MarketDataCandlesClient.fetch`/`LiveSeriesStore.refreshFromRest` is ordinary blocking work;
-   parked on `LinkedBlockingQueue.take()` = eval thread unstuck but **receipt liveness unproven** — candle receipt is what submits the drain, so a dropped Redis listener parks the
-   thread in the identical stack. **On a fully quiet session liveness is currently UNPROVABLE** (no
-   read surface for `lastBarReceivedAtMs`/`lastBarEvaluatedAtMs`); report INCONCLUSIVE — chip
-   task_0bed1621 closes this. ⚠️ A missing `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events` is
+   from an absence. **The definitive read (shipped 2026-07-26, task_0bed1621):**
+   `docker exec ay-strategy-signal-service sh -c 'wget -qO- http://127.0.0.1:8082/actuator/prometheus'
+   | grep ay_signal_bar_` — `ay_signal_bar_received_age_seconds` is the age of the engine's
+   receive heartbeat, stamped before ANY universe/window/position logic. Inside ~1–2 bar intervals ⇒
+   **PASS-QUIET** (alive, tape is bearish); growing past several intervals while capture is healthy ⇒
+   **FAIL** (receive-side stall, now observable rather than inferred). A MISSING series means the
+   process is down — the gauges are pre-registered and seeded at boot, so it never means "no data
+   yet". Corroborate with the LATEST `strategy.signal_eval_outcomes` bucket (never a session-wide
+   `sum()`, which stays positive forever once anything evaluated). ⚠️ A missing `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events` is
    NOT a PASS — that table is write-only fail-soft forensics, so a disabled or failed sweep also
    leaves it empty; a row that IS there is strong FAIL evidence, its absence proves nothing. Never
    judge from `strategy.signals` (mixes the swing BATCH engine), and never ALARM on

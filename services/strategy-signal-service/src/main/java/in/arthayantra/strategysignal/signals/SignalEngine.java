@@ -31,6 +31,7 @@ import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
 import in.arthayantra.strategysignal.scalper.ScalperRisk;
 import in.arthayantra.strategysignal.scalper.StrikePicker;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.math.BigDecimal;
@@ -464,6 +465,30 @@ public class SignalEngine {
             .register(meterRegistry);
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
     this.evalFailures = meterRegistry.counter("ay_signal_eval_failures_total");
+    // ---- Engine-liveness read surface (chip task_0bed1621) --------------------------------------
+    // AGE IN SECONDS, not the raw epoch stamp: an age is directly comparable to a threshold by an
+    // operator, a scrape or a dashboard, and it needs no clock-skew reconciliation between the
+    // container and the reader.
+    //
+    // These two are the ONLY unconfounded engine-liveness oracles, and until now NOTHING outside the
+    // process could read them. `lastBarReceivedAtMs` is stamped as the FIRST line of
+    // onCandleMessage, before any universe / session-window / position / loaded logic, so it is
+    // direction-, window- and position-independent; `lastBarEvaluatedAtMs` is its evaluation-side
+    // twin. Everything else an operator can reach admits a FALSE PASS: rejections are
+    // direction-dependent (recordRejection runs only past the chart gate), `strategy.signals` mixes
+    // the swing BATCH engine, `subscriber_health_events` is write-only fail-soft so its emptiness
+    // proves nothing, and `signal_eval_outcomes` freshness only proves the ROLLUP thread is alive
+    // because that job runs on its own scheduler and never writes from signal-eval.
+    //
+    // READ SURFACE ONLY — deliberately no alarm here. SignalStarvationCanary was retired on
+    // 2026-07-26 for keying on a confounded signal; any new detector is a separate owner decision.
+    Gauge.builder("ay_signal_bar_received_age_seconds", this, e -> ageSeconds(e.lastBarReceivedAtMs))
+        .description("Seconds since the engine last RECEIVED a closed bar (boot-seeded, never unset)")
+        .register(meterRegistry);
+    Gauge.builder(
+            "ay_signal_bar_evaluated_age_seconds", this, e -> ageSeconds(e.lastBarEvaluatedAtMs))
+        .description("Seconds since the engine last EVALUATED a closed bar (boot-seeded, never unset)")
+        .register(meterRegistry);
     // Pre-register EVERY tag at boot so an outcome that has not happened yet still scrapes as 0.
     // Lazily created series would reintroduce exactly the ambiguity this closes: a MISSING
     // outcome="fired" series would again be indistinguishable from an engine that never evaluated.
@@ -922,6 +947,17 @@ public class SignalEngine {
   }
 
   /** Wall-clock millis of the last candle message received — the subscriber-liveness heartbeat. */
+  /**
+   * Age of a heartbeat stamp in seconds, for the liveness gauges (chip task_0bed1621).
+   *
+   * <p>Both stamps are seeded at construction, so this is never "unset" and never negative-by-
+   * surprise; a clock that steps backwards is floored at 0 rather than publishing a negative age
+   * that a threshold comparison would read as freshly alive.
+   */
+  private double ageSeconds(long stampMs) {
+    return Math.max(0L, clock.millis() - stampMs) / 1000.0;
+  }
+
   long lastBarReceivedAtMs() {
     return lastBarReceivedAtMs;
   }

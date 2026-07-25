@@ -108,17 +108,31 @@ jobs:
 
   contracts:
     needs: changes
-    if: needs.changes.outputs.contracts == 'true'
+    # ALWAYS materialise, gate the STEPS — never the job. Two reasons, both load-bearing:
+    # (1) a job skipped via `if:` because its dependency failed or was cancelled still reports as
+    #     SKIPPED, and branch protection counts a skipped required check as satisfied — so a broken
+    #     classifier would let contract-changing code merge with the gate never having run. `changes`
+    #     is not itself a required context, so nothing else would have caught it.
+    # (2) symmetry with ci-java's build-test, where a job-level `if` would additionally prevent the
+    #     check name from ever being created.
+    # The first step below turns a non-successful classifier into an explicit RED.
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Classifier must have succeeded
+        if: needs.changes.result != 'success'
+        run: |
+          echo "::error::the changes classifier did not succeed (${{ needs.changes.result }}) — refusing to report the contract gate green without knowing what changed"
+          exit 1
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: needs.changes.outputs.contracts == 'true'
         with:
           # The breaking gate diffs against the merge base; the default shallow
           # fetch does not contain it.
           fetch-depth: 0
 
       - name: Resolve the merge base (fail loudly if it does not)
-        if: github.event_name == 'pull_request'
+        if: needs.changes.outputs.contracts == 'true' && github.event_name == 'pull_request'
         id: mergebase
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -137,12 +151,14 @@ jobs:
           echo "sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        if: needs.changes.outputs.contracts == 'true'
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
 
       - name: Regenerate specs from code (capture tests, mock profile)
+        if: needs.changes.outputs.contracts == 'true'
         # -am builds the three services PLUS every upstream module and the parent POMs in one
         # reactor (a -pl install of leaf libs alone never installs the common-web / parent POMs).
         # Upstream modules run zero tests (no ContractCaptureTest + failIfNoSpecifiedTests=false).
@@ -152,7 +168,7 @@ jobs:
 
       - name: Breaking-change gate (merge base vs this branch's code)
         # Skipped on push:main - the PR already merged; there is nothing left to gate.
-        if: github.event_name == 'pull_request'
+        if: needs.changes.outputs.contracts == 'true' && github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ steps.mergebase.outputs.sha }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
@@ -265,6 +281,7 @@ jobs:
           exit 1
 
       - name: Warn - committed spec vs code (did you forget to re-capture?)
+        if: needs.changes.outputs.contracts == 'true'
         # A DIFFERENT question from the gate above: that one asks "does this PR break a
         # consumer on main?", this one asks "is contracts/*.json stale vs the code in this
         # PR?". Warn-only by design - the answer is a missing chore, not a broken consumer.
@@ -277,10 +294,12 @@ jobs:
           done
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: needs.changes.outputs.contracts == 'true'
         with:
           node-version: "22"
 
       - name: Generated TS client compiles under tsc --strict
+        if: needs.changes.outputs.contracts == 'true'
         run: |
           mkdir -p /tmp/tscheck
           for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do

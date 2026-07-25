@@ -18,10 +18,22 @@
 #    the workflow is required."
 #
 # So every docs-only PR sat BLOCKED and got merged with `--admin`, which bypasses ALL
-# required checks including a genuinely red one. The workflow now always triggers; a cheap
-# `changes` job decides what actually needs to run, and the heavy jobs are `if:`-gated so
-# they report Success-by-skip instead of never reporting. Job NAMES are unchanged, so the
-# six required contexts on main keep resolving.
+# required checks including a genuinely red one. The workflow now always triggers and a cheap
+# `changes` job decides what actually needs to run.
+#
+# GATE THE STEPS, NEVER THE JOB — the second trap, and it is subtler than the first. It is
+# tempting to put `if: needs.changes.outputs.java == 'true'` on `build-test` and lean on
+# "skipped jobs report Success". That does not work here, for two independent reasons:
+#   1. `jobs.<id>.if` is evaluated BEFORE `strategy.matrix` is expanded. With the job-level `if`
+#      false, the three `build-test (<shard>)` check runs are never CREATED — and a Success rule
+#      cannot rescue a check name that does not exist. It would have rebuilt the exact
+#      never-reports trap this file exists to remove. (Caught in cross-vendor review, 2026-07-26.)
+#   2. A job skipped because its dependency failed also reports SKIPPED, which branch protection
+#      COUNTS AS SATISFIED. Since `changes` is not itself a required context, a broken classifier
+#      would have silently waved code through with no gate having run.
+# So every gated job carries `if: always()`, a first step that FAILS CLOSED when the classifier
+# did not succeed, and per-step `if:` on the expensive work. Job NAMES are unchanged, so the six
+# required contexts on main keep resolving.
 #
 # `gitleaks` is deliberately NOT gated: a secret can land in any file type, so a docs-only
 # PR is exactly when you still want the scan. It costs ~30s.
@@ -121,9 +133,14 @@ jobs:
 
   build-test:
     needs: changes
-    # Skip-as-Success (see the header): on a PR that touches no JVM path the three shards
-    # report skipped, which branch protection accepts, instead of never reporting at all.
-    if: needs.changes.outputs.java == 'true'
+    # ALWAYS materialise, gate the STEPS — never the job. `jobs.<id>.if` is evaluated BEFORE
+    # `strategy.matrix` is expanded, so a false job-level `if` means the three
+    # `build-test (<shard>)` check runs are never created at all. "Skipped jobs report Success"
+    # cannot rescue a check name that does not exist, so gating the job here would have rebuilt
+    # the exact never-reports trap this PR exists to remove (caught in cross-vendor review).
+    # `always()` also keeps the contexts reporting when the classifier itself fails — the first
+    # step below turns that into an explicit RED rather than a silent pass.
+    if: always()
     runs-on: ubuntu-latest
     # Shard the reactor by service so the Testcontainers ITs (the 2-core
     # bottleneck — a single serial `verify` is ~23 min) run on parallel
@@ -147,8 +164,18 @@ jobs:
             modules: services/strategy-signal-service,services/edge-gateway
     name: build-test (${{ matrix.shard }})
     steps:
+      # FAIL CLOSED. A classifier that errored or was cancelled must not read as "nothing to
+      # build" — without this, `always()` would turn a broken classifier into three green
+      # required checks.
+      - name: Classifier must have succeeded
+        if: needs.changes.result != 'success'
+        run: |
+          echo "::error::the changes classifier did not succeed (${{ needs.changes.result }}) — refusing to report this shard green without knowing what changed"
+          exit 1
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: needs.changes.outputs.java == 'true'
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        if: needs.changes.outputs.java == 'true'
         with:
           distribution: temurin
           java-version: "21"
@@ -157,6 +184,7 @@ jobs:
       # Testcontainers ITs on the pinned production tags (redis:7.4-alpine)
       # + ApplicationModules.verify() + JaCoCo >= 60% line on services
       - name: Build, lint, test, coverage
+        if: needs.changes.outputs.java == 'true'
         # rerunFailingTestsCount retries a flaky test in-run (the Testcontainers/awaitility ITs
         # occasionally time out on the 2-core runner); a genuinely failing test still fails after
         # the retries, so this hides flakes without hiding real breakage.
@@ -164,7 +192,7 @@ jobs:
       # surefire records rerun results as <flakyFailure>/<flakyError> in TEST-*.xml; without this
       # a retried-green test vanishes — surface it so flake accumulation stays visible.
       - name: Flaky-test paper trail (retried-green markers)
-        if: always()
+        if: always() && needs.changes.outputs.java == 'true'
         run: |
           flaky=$(grep -rl -e '<flakyFailure' -e '<flakyError' --include 'TEST-*.xml' . || true)
           if [ -n "$flaky" ]; then
@@ -176,13 +204,17 @@ jobs:
           fi
 
   build-images:
-    needs: build-test
+    needs: [changes, build-test]
     # PR wall-clock: on a pull_request this job only VALIDATES that the Dockerfiles build (the
     # login/push steps below are already gated main+push-only), yet `needs: build-test` makes it
     # wait out the ~8m market-data shard first — ~2.5m of pure serial tail on every PR. Skip it on
     # PRs; the Dockerfile build is still validated on the main-push run, before any deploy. On push
     # (main only, per the trigger) the job is UNCHANGED: needs build-test, then build + push.
-    if: github.event_name == 'push'
+    # `build-test` now always SUCCEEDS (it materialises the required contexts and no-ops when no
+    # JVM path changed), so it can no longer act as this job's implicit "was there Java work?"
+    # gate — without the classifier clause a docs-only push to main would package and build
+    # images for an unchanged tree. This job is not a required context, so gating the JOB is fine.
+    if: github.event_name == 'push' && needs.changes.outputs.java == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -14,6 +14,58 @@
 #     ignored in the illegitimate one.
 #   - It is not a required check: `--admin` merges past it. That is intentional — the point
 #     is to make an omission VISIBLE, not to hold the repo hostage to a regex.
+#
+# task_d142795f (2026-07-25): two usability defects, both hit live on PR #1003, each cost a
+# CI cycle.
+#
+# (1) The matcher was format-brittle. It wanted the token verbatim and immediately followed
+#     by the em-dash, so an HONEST verdict recording the round count inline, in bold, FAILED:
+#
+#       ACCEPTED now (all of these):
+#         Cross-vendor review: APPROVED — Opus (Anthropic)
+#         Cross-vendor review: **APPROVED round 1, zero findings** — gpt-5.6-sol (OpenAI) confirmed …
+#         Cross-vendor review: REQUEST_CHANGES (resolved) — gpt-5.6-sol (OpenAI)
+#         Cross-vendor review: *NEEDS_REWORK* (resolved) — Opus (Anthropic) after 2 rounds
+#         Cross-vendor review: SKIPPED (docs-only)
+#
+#       STILL REJECTED (deliberately — these are not a durable record):
+#         <no such line at all>
+#         Cross-vendor review:                      (no verdict token)
+#         Cross-vendor review: APPROVED             (no reviewer model + vendor)
+#         The owner APPROVED the design — see notes (2026-07-25)   (unrelated prose)
+#         Cross-vendor review: APPROVED round-1 (zero findings)     (an unspaced ASCII dash let
+#           `-1` pose as the model and `(zero findings)` as the vendor — a false ACCEPT with no
+#           reviewer at all; found by the cross-vendor review of this very change, round 1)
+#         No Cross-vendor review: APPROVED - not reviewed (OpenAI)  (a NEGATED mention; the label
+#           used to float anywhere in the line, so denying a review satisfied the gate — same
+#           review, same round)
+#         Cross-vendor review: APPROVED — Opus (SomeRandomVendor)   (vendor outside the routed set)
+#         Cross-vendor review: APPROVED - no reviewer (OpenAI)      (prose posing as a model name —
+#           "any text with a letter" was still too loose; round 2 of the same review)
+#         Cross-vendor review: APPROVED - Opus (OpenAI)             (MIS-PAIRED: Opus is Anthropic;
+#           model family and vendor are now validated as a PAIR, not independently)
+#
+#     Accepted line containers: plain, a `-`/`*`/`+` bullet, a `1.` numbered item, a `>` blockquote,
+#     or a `#`..`######` heading. A model family outside the routed lists fails BY DESIGN — add it
+#     here and in ROUTING.md in the same commit that starts using it.
+#
+#     So: optional `*`/`**` emphasis around the token, free prose between the token and the
+#     dash and after the vendor parenthetical — but a reviewer `— <model> (<Vendor>)` is
+#     still MANDATORY for the three real verdicts, and REQUEST_CHANGES / NEEDS_REWORK still
+#     need their `(resolved)` marker. SKIPPED takes `(<reason>)` instead of a reviewer.
+#     The dash may be an em-dash, an en-dash, or plain ASCII `-`/`--` — insisting on U+2014
+#     would reject an honest verdict for exactly the cosmetic reason this gate stopped doing
+#     that, and an ASCII hyphen is what most keyboards actually type.
+#
+# (2) A rerun could not see a corrected body. The step read
+#     `${{ github.event.pull_request.body }}` — the EVENT PAYLOAD — so `gh run rerun` replayed
+#     the ORIGINAL body and re-failed even after the body was fixed. It now fetches the body
+#     LIVE via `gh api` (using the `pull-requests: read` permission), so a rerun re-reads the
+#     current body. Related traps:
+#       - `gh pr checks` reports the NEWEST run per check NAME, so a stale failed run keeps
+#         reading red until a newer run exists: after fixing the body, either rerun the failed
+#         run (now works) or produce an `edited` event.
+#       - `gh pr edit --body-file` with IDENTICAL content fires NO event at all — no new run.
 name: ci-review-verdict
 
 on:
@@ -30,7 +82,9 @@ jobs:
     steps:
       - name: Assert the PR body records a cross-vendor review verdict
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
@@ -42,24 +96,67 @@ jobs:
               ;;
           esac
 
-          # One line, verbatim keyword. SKIPPED needs a non-empty parenthesised reason.
-          PATTERN='Cross-vendor review:[[:space:]]*(APPROVED|REQUEST_CHANGES \(resolved\)|NEEDS_REWORK \(resolved\)|SKIPPED \(.+\))'
+          # Read the body LIVE, not from the event payload: a `gh run rerun` replays the
+          # original payload, so a payload read can never see a corrected body (task_d142795f).
+          PR_BODY="$(gh api "repos/${PR_REPO}/pulls/${PR_NUMBER}" --jq '.body // ""')"
+
+          # ANCHORED to the start of a line (optionally a markdown bullet / emphasis) so a NEGATED
+          # mention cannot satisfy the gate: `No Cross-vendor review: APPROVED - not reviewed
+          # (OpenAI)` used to pass while the label floated mid-line (cross-vendor review, round 1).
+          # A markdown bullet, numbered item, blockquote or heading prefix is fine; `No …` is not.
+          LABEL='^[[:space:]]*(>[[:space:]]*)*([-*+][[:space:]]+|[0-9]+[.)][[:space:]]+|#{1,6}[[:space:]]+)?[*_]*Cross-vendor review:[[:space:]]*[*_]*'
+          # `— <model> (<Vendor>)`. The separator accepts an em-dash, en-dash, or ASCII `-`/`--`,
+          # because insisting on U+2014 rejects an honest verdict on cosmetics — but an ASCII dash
+          # MUST be surrounded by whitespace, else `APPROVED round-1 (zero findings)` parses `-1`
+          # as the model and `(zero findings)` as the vendor (cross-vendor review, round 1).
+          DASH='(—|–|[[:space:]]--?[[:space:]])'
+          # The model must NAME A ROUTED MODEL FAMILY, PAIRED with its own vendor. "any text with a
+          # letter" let `- no reviewer (OpenAI)` and a mis-paired `- Opus (OpenAI)` through
+          # (cross-vendor review, round 2). Reviewing with a model family not listed here fails the
+          # gate BY DESIGN — add it (and ROUTING.md) in the same commit that starts using it.
+          # Every letter is case-insensitive: an honest `OPUS (Anthropic)` / `CODEX (OpenAI)`
+          # must not fail on capitalisation (cross-vendor review, round 3).
+          OPENAI_MODEL='([Gg][Pp][Tt]|[Cc][Oo][Dd][Ee][Xx]|[Oo][0-9])[^()]*'
+          ANTHROPIC_MODEL='([Oo][Pp][Uu][Ss]|[Ss][Oo][Nn][Nn][Ee][Tt]|[Hh][Aa][Ii][Kk][Uu]|[Cc][Ll][Aa][Uu][Dd][Ee]|[Ff][Aa][Bb][Ll][Ee]|[Mm][Yy][Tt][Hh][Oo][Ss])[^()]*'
+          REVIEWER="${DASH}[[:space:]]*(${OPENAI_MODEL}\(OpenAI\)|${ANTHROPIC_MODEL}\(Anthropic\))"
+
+          # APPROVED needs a reviewer; REQUEST_CHANGES / NEEDS_REWORK also need `(resolved)`;
+          # SKIPPED needs a non-empty parenthesised reason instead of a reviewer.
+          PATTERN="${LABEL}APPROVED.*${REVIEWER}"
+          PATTERN="${PATTERN}|${LABEL}(REQUEST_CHANGES|NEEDS_REWORK).*\(resolved\).*${REVIEWER}"
+          PATTERN="${PATTERN}|${LABEL}SKIPPED[^()]*\([^)]+\)"
 
           if printf '%s' "$PR_BODY" | grep -qE "$PATTERN"; then
             echo "Found:"
-            printf '%s' "$PR_BODY" | grep -oE "$PATTERN" | head -1
+            printf '%s' "$PR_BODY" | grep -E "$PATTERN" | head -1
             exit 0
           fi
 
+          echo "What the PR body actually has on a 'Cross-vendor review:' line:" >&2
+          if printf '%s' "$PR_BODY" | grep -nE 'Cross-vendor review:' >&2; then
+            echo "  ^ that line does not carry a verdict token AND a reviewer model + vendor." >&2
+          else
+            echo "  (no line containing 'Cross-vendor review:' at all)" >&2
+          fi
+
           cat >&2 <<'MSG'
+
           The PR body carries no cross-vendor review verdict.
 
-          Add ONE line, verbatim, plus the reviewer's vendor/model:
+          Expected shape — one line, one of four tokens, plus the reviewer's model/vendor:
 
             Cross-vendor review: APPROVED — Opus (Anthropic)
             Cross-vendor review: REQUEST_CHANGES (resolved) — gpt-5.6-sol (OpenAI)
             Cross-vendor review: NEEDS_REWORK (resolved) — Opus (Anthropic)
             Cross-vendor review: SKIPPED (docs-only)
+
+          Markdown emphasis and inline prose are fine — this passes:
+
+            Cross-vendor review: **APPROVED round 1, zero findings** — gpt-5.6-sol (OpenAI) confirmed the fix
+
+          What is NOT accepted: a token with no `— <model> (<Vendor>)`; a bare
+          `Cross-vendor review:` with no token; REQUEST_CHANGES / NEEDS_REWORK without their
+          `(resolved)` marker.
 
           SKIPPED (<reason>) is a first-class, correct answer — ROUTING.md allows skipping
           trivial/docs-only changes. Do NOT invent a review to satisfy this check; state
@@ -68,6 +165,10 @@ jobs:
           Why this exists: the verdict lives only in .claude/skills/*/state/*.review.txt,
           which is gitignored and dies with the worktree. The PR body is the ONLY durable
           record. On 2026-07-17 a real review was lost exactly this way (PR #879).
+
+          After fixing the body, rerun this run (it re-reads the body live) — `gh pr checks`
+          shows only the NEWEST run per check name, so a stale failure keeps reading red until
+          a newer run exists. Note `gh pr edit --body-file` with IDENTICAL content fires no event.
 
           Exempt: hotfix/* branches. Bypass: an --admin merge (deliberately possible).
           MSG

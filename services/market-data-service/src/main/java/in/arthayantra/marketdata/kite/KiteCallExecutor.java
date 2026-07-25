@@ -142,7 +142,16 @@ public class KiteCallExecutor {
    *
    * <p>This order is also what resilience4j itself recommends (Retry → CircuitBreaker →
    * RateLimiter → … ). With the breaker CLOSED the behaviour is identical; with it OPEN the permit
-   * survives for the retry once the breaker half-opens.
+   * is left intact for the NEXT attempt.
+   *
+   * <p><b>Two consequences of the swap that are handled elsewhere — do not undo either.</b>
+   * (1) {@code RequestNotPermitted} now propagates from the inner limiter THROUGH the outer breaker,
+   * which would record a purely LOCAL pacing rejection as an upstream failure and could open the
+   * shared breaker while Kite is healthy; both {@code kite-rest} and {@code openalgo-rest} therefore
+   * list it under {@code ignore-exceptions} in {@code application.yml}. (2) Preserving the permit
+   * does NOT by itself make the daily sync recover — {@code CallNotPermittedException} is
+   * deliberately non-retryable and the 08:30 job runs once — so
+   * {@code InstrumentSyncScheduler.morningSyncCatchUp} is the pass that actually spends it.
    */
   public <T> T execute(Family family, Supplier<T> call) {
     RateLimiter limiter = rateLimiters.rateLimiter(family.limiterName);

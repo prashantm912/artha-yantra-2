@@ -127,7 +127,13 @@ public final class ConnectTheDotsScorer {
     boolean vwapSide = ce ? gt(c.close(), c.vwap()) : gt(c.vwap(), c.close());
 
     List<DotScore> dots = new ArrayList<>();
-    add(dots, "vwap", W_VWAP, vwapSide, "price vs VWAP (decisive)");
+    // T6 (owner 2026-07-25): the DOT needs a real distance, not just the side — the entry gate
+    // already enforces the side, so a side-only dot supported 100% of 5,225 rows across six
+    // sessions (an unlabelled −12.8% threshold cut at the heaviest weight). The DECISIVE hard-gate
+    // leg below (`valid`, via vwapSide) is untouched.
+    add(dots, "vwap", W_VWAP,
+        vwapSide && vwapDistanceAtLeast(c.close(), c.vwap(), props.vwapMinDistanceBps()),
+        "price vs VWAP (side + >=" + props.vwapMinDistanceBps() + " bps)");
     add(dots, "supertrend", W, ce ? c.supertrendDir() > 0 : c.supertrendDir() < 0, "supertrend direction");
     add(dots, "vwma", W, ce ? gt(c.close(), c.vwma20()) : gt(c.vwma20(), c.close()), "price vs VWMA20");
     add(dots, "psar", W, ce ? gt(c.close(), c.psar()) : gt(c.psar(), c.close()), "price vs PSAR");
@@ -346,5 +352,15 @@ public final class ConnectTheDotsScorer {
 
   private static boolean gt(BigDecimal a, BigDecimal b) {
     return a != null && b != null && a.compareTo(b) > 0;
+  }
+
+  // T6: |close − vwap| / close ≥ minBps/10000. Null/zero-close ⇒ false (the side check already
+  // failed on null; a zero close is not a real bar).
+  private static boolean vwapDistanceAtLeast(BigDecimal close, BigDecimal vwap, BigDecimal minBps) {
+    if (close == null || vwap == null || minBps == null || close.signum() == 0) {
+      return false;
+    }
+    // cross-multiplied to avoid division: |close − vwap| * 10000 >= minBps * |close|
+    return close.subtract(vwap).abs().movePointRight(4).compareTo(minBps.multiply(close.abs())) >= 0;
   }
 }

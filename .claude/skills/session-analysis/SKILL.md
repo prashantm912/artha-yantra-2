@@ -56,21 +56,45 @@ config changes, no `ay` verbs that touch containers. SELECTs + `docker logs` onl
 
 ## Mode: open — market-open signal-liveness gate
 
-A fast, read-only PASS/FAIL run ~15–20 min after the open (or on ask) that catches the silent
-**starvation class**: capture healthy but the engine emitting nothing (the 2026-07-14 zero-signals
-incident — no canary alarmed on "healthy feed + zero rejections"). **HARD guardrails: read-only** — no
+A fast, read-only PASS / FAIL / **INCONCLUSIVE** run ~15–20 min after the open (or on ask) that catches the silent
+**starvation class**: capture healthy but the engine genuinely not evaluating. ⚠️ Note the gate below
+does **not** equate that with "zero rejections" — that equation is what produced a false escalation
+(07-17) and a needless restart (07-20); the run decides on a positive liveness read. **HARD
+guardrails: read-only** — no
 deploys, no restarts, no writes; SELECTs + `docker logs` + in-container health GETs only.
 
 Follow README **§4.3** exactly (it owns the queries + the gate):
 1. Confirm it's a trading day + inside 09:15–15:30 IST (clock trap: containers are UTC).
 2. Stack healthy + today's Kite login + market-data canary GREEN.
 3. Capture fresh — the signal future's 1m series tracks minutes-since-open.
-4. **THE GATE:** rejections flowing? `>0` recent ⇒ **PASS**; `0` while capture is healthy ⇒
-   **FAIL = starvation** — alert the owner immediately.
+4. **THE GATE** (three outcomes, not two — INCONCLUSIVE is a legitimate result): rejections flowing? `>0` recent ⇒ **PASS**. ⚠️ **`0` is INCONCLUSIVE, NOT a FAIL**
+   (corrected 2026-07-26): `recordRejection` only runs PAST the chart gate, and every scalper shares
+   two required scorers on one 3m series, so SuperTrend-DOWN silences all of them on ordinary bearish
+   tape — this rule cost a false starvation escalation (07-17) and a needless restart (07-20), and the
+   canary that automated it was retired. On `0`, demand **POSITIVE** proof of life — never infer it
+   from an absence. In `strategy.signal_eval_outcomes`, read the **LATEST BUCKET ONLY** (`GROUP BY
+   bucket_time ORDER BY bucket_time DESC LIMIT 3`) — a session-wide `sum()` stays positive forever
+   once anything evaluated, so an engine that died at 10:00 would PASS all afternoon. Latest bucket
+   `eval_count > 0` ⇒ **PASS-QUIET**; latest bucket all zeros, or its predecessor missing/late, ⇒
+   **INCONCLUSIVE**; no fresh row at all while capture is healthy ⇒ **FAIL**. A thread dump
+   (`kill -3 1`) narrows but does NOT settle it: only REPEATED dumps (>=2, spaced past
+   the ~10s fetch timeout) showing no forward progress are a real stall (FAIL) — a single dump inside
+   `MarketDataCandlesClient.fetch`/`LiveSeriesStore.refreshFromRest` is ordinary blocking work;
+   parked on `LinkedBlockingQueue.take()` = eval thread unstuck but **receipt liveness unproven** — candle receipt is what submits the drain, so a dropped Redis listener parks the
+   thread in the identical stack. **On a fully quiet session liveness is currently UNPROVABLE** (no
+   read surface for `lastBarReceivedAtMs`/`lastBarEvaluatedAtMs`); report INCONCLUSIVE — chip
+   task_0bed1621 closes this. ⚠️ A missing `receive-stall`/`eval-stall` row in `strategy.subscriber_health_events` is
+   NOT a PASS — that table is write-only fail-soft forensics, so a disabled or failed sweep also
+   leaves it empty; a row that IS there is strong FAIL evidence, its absence proves nothing. Never
+   judge from `strategy.signals` (mixes the swing BATCH engine), and never ALARM on
+   `ay_signal_eval_outcome_total` being flat (window- and position-dependent — legitimately zero when
+   every strategy is out-of-window or in-position). A NON-ZERO value is positive evidence; a zero one
+   is not evidence of anything.
 5. On FAIL: localize read-only (`subscriber_health_events` eval-stall, the eval-thread dump, dot-health);
    **snapshot `docker logs` to a file BEFORE proposing any recreate**. Propose a fix; NEVER restart/
    redeploy mid-session — the owner/architect acts (post-market or pre-open).
-6. Report PASS/FAIL + evidence; fold a FAIL into that evening's `post` findings file.
+6. Report **PASS / FAIL / INCONCLUSIVE** + evidence — INCONCLUSIVE is a first-class result, never
+   round it to PASS; fold a FAIL **or an INCONCLUSIVE** into that evening's `post` findings file.
 
 ## Mode: rollup — multi-session consolidation
 
@@ -87,8 +111,15 @@ track) and exit-band tunes (that track) land as ONE coordinated owner decision.
 
 ## Shared guardrails
 
-- Rejections are LIVE-only rows; zero rows during market hours = a real problem, zero rows
-  off-hours/holidays = normal (check `libs/market-calendar` holidays before alarming).
+- Rejections are LIVE-only rows; **zero rows during market hours is INCONCLUSIVE, not a problem**
+  (corrected 2026-07-26 — this line used to say it was a real problem). `recordRejection` runs only
+  PAST the chart gate, so an ordinary SuperTrend-DOWN leg silences every scalper at once. Prove
+  liveness POSITIVELY from the LATEST `strategy.signal_eval_outcomes` bucket having `eval_count > 0`
+  — a fresh ALL-ZERO latest bucket only proves the rollup thread is alive, not the eval loop, so it
+  is INCONCLUSIVE and merely NARROWED (not settled) by a thread dump: a thread parked on
+  `queue.take()` stays INCONCLUSIVE, and one dump inside a legitimately-blocking `fetch` proves
+  nothing either. **On a fully quiet session liveness is currently UNPROVABLE** (chip task_0bed1621);
+  zero rows off-hours/holidays = normal (check `libs/market-calendar` holidays before alarming).
 - Single-session numbers never justify a tune by themselves UNLESS the threshold is outside the
   operand's physical range (structural) — say which class each candidate is.
 - Findings files are immutable; the ledger (§7 table) is the only thing that changes status.

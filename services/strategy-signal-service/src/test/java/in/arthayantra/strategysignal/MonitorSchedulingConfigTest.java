@@ -8,7 +8,6 @@ import in.arthayantra.strategysignal.signals.DotHealthCanary;
 import in.arthayantra.strategysignal.signals.PartialBucketCanary;
 import in.arthayantra.strategysignal.signals.RiskSuppressionPruneJob;
 import in.arthayantra.strategysignal.signals.SignalEvalOutcomeRollupJob;
-import in.arthayantra.strategysignal.signals.SignalStarvationCanary;
 import in.arthayantra.strategysignal.signals.SubscriberHealthCanary;
 import in.arthayantra.strategysignal.telegram.TelegramCommandBot;
 import java.util.concurrent.CountDownLatch;
@@ -26,7 +25,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
  * BEJ-01 (monitor-scheduler isolation): the pure liveness detectors ({@code SubscriberHealthCanary},
- * {@code PartialBucketCanary}, {@code SignalStarvationCanary}, {@code DotHealthCanary} sweeps) run on
+ * {@code PartialBucketCanary}, {@code DotHealthCanary} sweeps) run on
  * a dedicated {@code monitorTaskScheduler}, isolated from the default single-thread pool that the
  * synchronous swing batch and every EOD job share, so a blocked sibling can never starve detection.
  */
@@ -68,7 +67,6 @@ class MonitorSchedulingConfigTest {
   void productionDetectorsTargetTheMonitorScheduler() throws NoSuchMethodException {
     assertBoundToMonitorScheduler(SubscriberHealthCanary.class, "sweep");
     assertBoundToMonitorScheduler(PartialBucketCanary.class, "sweep");
-    assertBoundToMonitorScheduler(SignalStarvationCanary.class, "sweep");
     assertBoundToMonitorScheduler(DotHealthCanary.class, "sweep");
   }
 

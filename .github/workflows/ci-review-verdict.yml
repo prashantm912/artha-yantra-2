@@ -114,8 +114,10 @@ jobs:
           # letter" let `- no reviewer (OpenAI)` and a mis-paired `- Opus (OpenAI)` through
           # (cross-vendor review, round 2). Reviewing with a model family not listed here fails the
           # gate BY DESIGN — add it (and ROUTING.md) in the same commit that starts using it.
-          OPENAI_MODEL='([Gg][Pp][Tt]|[Cc]odex|[Oo][0-9])[^()]*'
-          ANTHROPIC_MODEL='([Oo]pus|[Ss]onnet|[Hh]aiku|[Cc]laude|[Ff]able|[Mm]ythos)[^()]*'
+          # Every letter is case-insensitive: an honest `OPUS (Anthropic)` / `CODEX (OpenAI)`
+          # must not fail on capitalisation (cross-vendor review, round 3).
+          OPENAI_MODEL='([Gg][Pp][Tt]|[Cc][Oo][Dd][Ee][Xx]|[Oo][0-9])[^()]*'
+          ANTHROPIC_MODEL='([Oo][Pp][Uu][Ss]|[Ss][Oo][Nn][Nn][Ee][Tt]|[Hh][Aa][Ii][Kk][Uu]|[Cc][Ll][Aa][Uu][Dd][Ee]|[Ff][Aa][Bb][Ll][Ee]|[Mm][Yy][Tt][Hh][Oo][Ss])[^()]*'
           REVIEWER="${DASH}[[:space:]]*(${OPENAI_MODEL}\(OpenAI\)|${ANTHROPIC_MODEL}\(Anthropic\))"
 
           # APPROVED needs a reviewer; REQUEST_CHANGES / NEEDS_REWORK also need `(resolved)`;

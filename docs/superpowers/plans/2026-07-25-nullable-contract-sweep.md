@@ -39,12 +39,20 @@ computed from construction call sites) and the slice plan.
 - **3a (this branch): strategy-signal** — full YES table below + TradeDto.closedAt (UNSURE →
   annotate, cheap) + FE fix `graduation.ts:53-55` (Promotion.expectancy/sharpe/maxDrawdownPct
   typed non-null while V024 columns are nullable — the one hard FE mismatch).
-- **3b: backtest-service + edge-gateway** — CompareMetrics (all 10), ExperimentSummary,
-  ExperimentCompareRun, ProvenanceBlock (11 of 13), RunComparability (4), DatasetEpoch, Trace (3),
-  JobAnnotationResponse.note; resolve UNSUREs (CounterfactualResult window/ranAt, SavedView
-  createdAt, ErrorResponse.details/message — details normalized at the ApiException path but a
-  direct `new ErrorResponse(code,msg,null)` is legal). No FE counterparts (experiments surface
-  unconsumed by FE).
+- **3b: backtest-service + edge-gateway** — SHIPPED (see the slice PR): CompareMetrics (all 10),
+  ExperimentSummary (9), ExperimentCompareRun (8), ProvenanceBlock (12 of 13 — direct read of
+  JobsController.submissionProvenance corrected the agent's "11"; `profile` is the only
+  always-set component), RunComparability (4), DatasetEpoch (8 — V015 DDL: symbols/exchange/
+  window_start/window_end/interval/job_link/source/note all nullable), Trace
+  (maxComposite/sampleBucket; sampleBreakdown = JsonNode, skip), JobAnnotationResponse.note.
+  **UNSUREs resolved NO (DDL evidence):** CounterfactualResult.windowFrom/To/ranAt (V013
+  NOT NULL), SavedView.createdAt (NOT NULL DEFAULT now()), JobAnnotationResponse.tags (V020
+  `TEXT[] NOT NULL DEFAULT '{}'`). **ErrorResponse: NO CHANGE** — the compact constructor
+  normalizes a null details map to Map.of() (never null on the wire); message's null-capability
+  is unproven (only a test exercises a raw null) and annotating it would force re-capturing all
+  four specs — revisit only with production evidence. **edge-gateway: nothing annotatable**; the
+  `WebSession` framework-type leak (AuthController.logout parameter) is a separate spec-hygiene
+  fix, deliberately not bundled here. No FE counterparts (experiments surface unconsumed by FE).
 - **3c: market-data** — the high-confidence YES set (Leg iv/greeks/prevOi/quote fields, StrikeRow/
   Chain pcr+spot, OiStats pcr/maxPain, ActiveStrikes sentimentPct, LegDeltas all, PcrSeriesPoint,
   Spurt family, BigOi family, Heatmap.Cell.value/maxAbs/asOf, Trend/Premium families,

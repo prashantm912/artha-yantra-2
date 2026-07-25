@@ -1,5 +1,7 @@
 package in.arthayantra.backtest.provenance;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * The run/submission provenance block (audit §11.1, roadmap #22a) — one TYPED record answering "what
  * exactly produced these numbers", surfaced on a job submission response (the as-submitted, partial
@@ -28,16 +30,16 @@ package in.arthayantra.backtest.provenance;
  * </ul>
  */
 public record ProvenanceBlock(
-    String engineSha,
-    String engineImage,
-    String configHash,
-    String dataHash,
-    String contentHash,
-    Long datasetEpoch,
-    String evidencePolicy,
-    String universeChecksum,
-    String premiumSource,
-    String costClass,
+    @Schema(types = {"string", "null"}) String engineSha,
+    @Schema(types = {"string", "null"}) String engineImage,
+    @Schema(types = {"string", "null"}) String configHash,
+    @Schema(types = {"string", "null"}) String dataHash,
+    @Schema(types = {"string", "null"}) String contentHash,
+    @Schema(types = {"integer", "null"}) Long datasetEpoch,
+    @Schema(types = {"string", "null"}) String evidencePolicy,
+    @Schema(types = {"string", "null"}) String universeChecksum,
+    @Schema(types = {"string", "null"}) String premiumSource,
+    @Schema(types = {"string", "null"}) String costClass,
     String profile,
-    String warmStatus,
-    Boolean premiumContentUnverified) {}
+    @Schema(types = {"string", "null"}) String warmStatus,
+    @Schema(types = {"boolean", "null"}) Boolean premiumContentUnverified) {}

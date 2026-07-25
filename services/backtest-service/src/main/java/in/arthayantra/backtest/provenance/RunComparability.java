@@ -1,5 +1,6 @@
 package in.arthayantra.backtest.provenance;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 
 /**
@@ -13,10 +14,10 @@ import java.util.List;
  */
 public record RunComparability(
     String runId,
-    Long datasetEpochAtRun,
+    @Schema(types = {"integer", "null"}) Long datasetEpochAtRun,
     long currentEpoch,
     boolean stale,
-    String contentHash,
-    String engineSha,
-    String evidencePolicy,
+    @Schema(types = {"string", "null"}) String contentHash,
+    @Schema(types = {"string", "null"}) String engineSha,
+    @Schema(types = {"string", "null"}) String evidencePolicy,
     List<DatasetEpoch> staleEpochs) {}

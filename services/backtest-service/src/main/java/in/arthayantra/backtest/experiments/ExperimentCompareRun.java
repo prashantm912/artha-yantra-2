@@ -1,5 +1,7 @@
 package in.arthayantra.backtest.experiments;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * One run's row in the compare matrix (audit §13 #11): its identity + the provenance axes the
  * like-for-like flags are computed over ({@code dataHash}, {@code universeChecksum}, {@code engineSha},
@@ -15,15 +17,15 @@ public record ExperimentCompareRun(
     String runId,
     String strategyVersionId,
     String strategyId,
-    String strategyVersion,
+    @Schema(types = {"string", "null"}) String strategyVersion,
     String dataHash,
-    String universeChecksum,
-    String engineSha,
+    @Schema(types = {"string", "null"}) String universeChecksum,
+    @Schema(types = {"string", "null"}) String engineSha,
     String premiumSource,
-    String contentHash,
-    String datasetEpoch,
-    String evidencePolicy,
-    Boolean premiumContentUnverified,
-    String createdBy,
+    @Schema(types = {"string", "null"}) String contentHash,
+    @Schema(types = {"string", "null"}) String datasetEpoch,
+    @Schema(types = {"string", "null"}) String evidencePolicy,
+    @Schema(types = {"boolean", "null"}) Boolean premiumContentUnverified,
+    @Schema(types = {"string", "null"}) String createdBy,
     String completedAt,
     CompareMetrics metrics) {}

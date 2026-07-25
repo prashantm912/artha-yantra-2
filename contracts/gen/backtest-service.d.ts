@@ -549,14 +549,14 @@ export interface components {
             /** Format: int64 */
             id: number;
             reason: string;
-            symbols: string[];
-            exchange: string;
-            windowStart: string;
-            windowEnd: string;
-            interval: string;
-            jobLink: string;
-            source: string;
-            note: string;
+            symbols: string[] | null;
+            exchange: string | null;
+            windowStart: string | null;
+            windowEnd: string | null;
+            interval: string | null;
+            jobLink: string | null;
+            source: string | null;
+            note: string | null;
             createdAt: string;
         };
         CounterfactualRunRequest: {
@@ -597,7 +597,7 @@ export interface components {
         JobAnnotationResponse: {
             jobId: string;
             tags: string[];
-            note: string;
+            note: string | null;
         };
         SwingReportCard: {
             /** Format: int32 */
@@ -624,40 +624,40 @@ export interface components {
             reason: string;
             /** Format: int32 */
             bars: number;
-            maxComposite: number;
+            maxComposite: number | null;
             /** Format: date-time */
-            sampleBucket: string;
+            sampleBucket: string | null;
             sampleBreakdown: components["schemas"]["JsonNode"];
         };
         SavedViewsResponse: {
             items: components["schemas"]["SavedView"][];
         };
         ProvenanceBlock: {
-            engineSha: string;
-            engineImage: string;
-            configHash: string;
-            dataHash: string;
-            contentHash: string;
+            engineSha: string | null;
+            engineImage: string | null;
+            configHash: string | null;
+            dataHash: string | null;
+            contentHash: string | null;
             /** Format: int64 */
-            datasetEpoch: number;
-            evidencePolicy: string;
-            universeChecksum: string;
-            premiumSource: string;
-            costClass: string;
+            datasetEpoch: number | null;
+            evidencePolicy: string | null;
+            universeChecksum: string | null;
+            premiumSource: string | null;
+            costClass: string | null;
             profile: string;
-            warmStatus: string;
-            premiumContentUnverified: boolean;
+            warmStatus: string | null;
+            premiumContentUnverified: boolean | null;
         };
         RunComparability: {
             runId: string;
             /** Format: int64 */
-            datasetEpochAtRun: number;
+            datasetEpochAtRun: number | null;
             /** Format: int64 */
             currentEpoch: number;
             stale: boolean;
-            contentHash: string;
-            engineSha: string;
-            evidencePolicy: string;
+            contentHash: string | null;
+            engineSha: string | null;
+            evidencePolicy: string | null;
             staleEpochs: components["schemas"]["DatasetEpoch"][];
         };
         ExperimentListResponse: {
@@ -671,39 +671,39 @@ export interface components {
             runId: string;
             jobId: string;
             kind: string;
-            parentJobId: string;
+            parentJobId: string | null;
             strategyVersionId: string;
             strategyId: string;
-            strategyVersion: string;
-            purpose: string;
+            strategyVersion: string | null;
+            purpose: string | null;
             exchange: string;
             tradingsymbol: string;
             interval: string;
             startTs: string;
             endTs: string;
-            totalReturn: string;
-            sharpe: string;
-            maxDrawdown: string;
+            totalReturn: string | null;
+            sharpe: string | null;
+            maxDrawdown: string | null;
             /** Format: int32 */
             tradeCount: number;
             dataHash: string;
-            universeChecksum: string;
-            engineSha: string;
+            universeChecksum: string | null;
+            engineSha: string | null;
             premiumSource: string;
-            createdBy: string;
+            createdBy: string | null;
             completedAt: string;
         };
         CompareMetrics: {
-            totalReturn: string;
-            cagr: string;
-            sharpe: string;
-            sortino: string;
-            maxDrawdown: string;
-            winRate: string;
-            profitFactor: string;
-            alpha: string;
-            beta: string;
-            informationRatio: string;
+            totalReturn: string | null;
+            cagr: string | null;
+            sharpe: string | null;
+            sortino: string | null;
+            maxDrawdown: string | null;
+            winRate: string | null;
+            profitFactor: string | null;
+            alpha: string | null;
+            beta: string | null;
+            informationRatio: string | null;
             /** Format: int32 */
             tradeCount: number;
         };
@@ -715,16 +715,16 @@ export interface components {
             runId: string;
             strategyVersionId: string;
             strategyId: string;
-            strategyVersion: string;
+            strategyVersion: string | null;
             dataHash: string;
-            universeChecksum: string;
-            engineSha: string;
+            universeChecksum: string | null;
+            engineSha: string | null;
             premiumSource: string;
-            contentHash: string;
-            datasetEpoch: string;
-            evidencePolicy: string;
-            premiumContentUnverified: boolean;
-            createdBy: string;
+            contentHash: string | null;
+            datasetEpoch: string | null;
+            evidencePolicy: string | null;
+            premiumContentUnverified: boolean | null;
+            createdBy: string | null;
             completedAt: string;
             metrics: components["schemas"]["CompareMetrics"];
         };

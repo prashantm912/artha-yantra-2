@@ -1,5 +1,7 @@
 package in.arthayantra.backtest.experiments;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * One experiment instance in the {@code GET /api/v1/backtests/experiments} list (audit §11.4 /
  * §13 #8): a completed engine replay (one {@code backtest_runs} row) enriched with its originating
@@ -14,23 +16,23 @@ public record ExperimentSummary(
     String runId,
     String jobId,
     String kind,
-    String parentJobId,
+    @Schema(types = {"string", "null"}) String parentJobId,
     String strategyVersionId,
     String strategyId,
-    String strategyVersion,
-    String purpose,
+    @Schema(types = {"string", "null"}) String strategyVersion,
+    @Schema(types = {"string", "null"}) String purpose,
     String exchange,
     String tradingsymbol,
     String interval,
     String startTs,
     String endTs,
-    String totalReturn,
-    String sharpe,
-    String maxDrawdown,
+    @Schema(types = {"string", "null"}) String totalReturn,
+    @Schema(types = {"string", "null"}) String sharpe,
+    @Schema(types = {"string", "null"}) String maxDrawdown,
     int tradeCount,
     String dataHash,
-    String universeChecksum,
-    String engineSha,
+    @Schema(types = {"string", "null"}) String universeChecksum,
+    @Schema(types = {"string", "null"}) String engineSha,
     String premiumSource,
-    String createdBy,
+    @Schema(types = {"string", "null"}) String createdBy,
     String completedAt) {}

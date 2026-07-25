@@ -87,14 +87,17 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   ci-contracts warns on gen drift and requires `tsc --strict`. Its breaking gate diffs the
   **MERGE BASE**'s committed spec vs THIS branch's code spec (task_b3b59719 — it used to diff the
   branch against itself, so re-capturing the spec, which we mandate, silently blinded it; both
-  sides were the branch and it never saw main). Re-capturing no longer silences it. **It catches
-  only removed endpoints / removed response codes / newly-required request params** — NOT any
-  schema-shape change: openapi-diff 2.1.7 does not diff `openapi: 3.1.0` schemas (a response field
-  retyped string→integer reads "No differences"; the same bytes relabelled 3.0.1 correctly fail),
-  and springdoc emits no `required` for record responses, so a removed/renamed OPTIONAL response
-  key is "backward compatible" by construction (openapi-diff has no response-property-removed rule,
-  only `incompatible.response.required.decreased`). So a renamed response key still reaches live
-  un-caught — the `UniverseResolver` wire-read class of break. Intentional breaks: a
+  sides were the branch and it never saw main). Re-capturing no longer silences it. **A removed or
+  RENAMED response key in a record-backed schema IS caught** (task_ade97df8): openapi-diff 2.1.7
+  cannot diff `openapi: 3.1.0` schemas (a retype reads "No differences"), so the gate relabels both
+  sides to 3.0.1 for the diff step; and bare springdoc emits no `required` for record responses, so
+  common-web-core's `RecordRequiredModelConverter` + `ResponseRequiredCustomizer` emit `required`
+  for the record components Jackson always writes (RESPONSE schemas only — on a request body it
+  would falsely claim the client must send every key). With both, a renamed response key reports
+  "Missing property" and fails the gate — the `UniverseResolver` wire-read class of break is
+  covered. STILL blind, deliberately: request-body property renames, and a rename inside a record
+  reachable from BOTH a request and a response (none exists today) — the ci-contracts.yml header
+  is the authority on what is and isn't caught. Intentional breaks: a
   `Contract break: APPROVED (<reason>)` line in the PR body; `hotfix/*` exempt.
   **Nullable response fields: `@Schema(nullable = true)` is a SILENT NO-OP at 3.1** (swagger-core's
   3.1 serializer drops `nullable`) — spell it `@Schema(types = {"number", "null"})`, which emits the

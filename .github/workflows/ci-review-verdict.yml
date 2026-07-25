@@ -14,6 +14,40 @@
 #     ignored in the illegitimate one.
 #   - It is not a required check: `--admin` merges past it. That is intentional — the point
 #     is to make an omission VISIBLE, not to hold the repo hostage to a regex.
+#
+# task_d142795f (2026-07-25): two usability defects, both hit live on PR #1003, each cost a
+# CI cycle.
+#
+# (1) The matcher was format-brittle. It wanted the token verbatim and immediately followed
+#     by the em-dash, so an HONEST verdict recording the round count inline, in bold, FAILED:
+#
+#       ACCEPTED now (all of these):
+#         Cross-vendor review: APPROVED — Opus (Anthropic)
+#         Cross-vendor review: **APPROVED round 1, zero findings** — gpt-5.6-sol (OpenAI) confirmed …
+#         Cross-vendor review: REQUEST_CHANGES (resolved) — gpt-5.6-sol (OpenAI)
+#         Cross-vendor review: *NEEDS_REWORK* (resolved) — Opus (Anthropic) after 2 rounds
+#         Cross-vendor review: SKIPPED (docs-only)
+#
+#       STILL REJECTED (deliberately — these are not a durable record):
+#         <no such line at all>
+#         Cross-vendor review:                      (no verdict token)
+#         Cross-vendor review: APPROVED             (no reviewer model + vendor)
+#         The owner APPROVED the design — see notes (2026-07-25)   (unrelated prose)
+#
+#     So: optional `*`/`**` emphasis around the token, free prose between the token and the
+#     em-dash and after the vendor parenthetical — but a reviewer `— <model> (<Vendor>)` is
+#     still MANDATORY for the three real verdicts, and REQUEST_CHANGES / NEEDS_REWORK still
+#     need their `(resolved)` marker. SKIPPED takes `(<reason>)` instead of a reviewer.
+#
+# (2) A rerun could not see a corrected body. The step read
+#     `${{ github.event.pull_request.body }}` — the EVENT PAYLOAD — so `gh run rerun` replayed
+#     the ORIGINAL body and re-failed even after the body was fixed. It now fetches the body
+#     LIVE via `gh api` (using the `pull-requests: read` permission), so a rerun re-reads the
+#     current body. Related traps:
+#       - `gh pr checks` reports the NEWEST run per check NAME, so a stale failed run keeps
+#         reading red until a newer run exists: after fixing the body, either rerun the failed
+#         run (now works) or produce an `edited` event.
+#       - `gh pr edit --body-file` with IDENTICAL content fires NO event at all — no new run.
 name: ci-review-verdict
 
 on:
@@ -30,7 +64,9 @@ jobs:
     steps:
       - name: Assert the PR body records a cross-vendor review verdict
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
@@ -42,24 +78,52 @@ jobs:
               ;;
           esac
 
-          # One line, verbatim keyword. SKIPPED needs a non-empty parenthesised reason.
-          PATTERN='Cross-vendor review:[[:space:]]*(APPROVED|REQUEST_CHANGES \(resolved\)|NEEDS_REWORK \(resolved\)|SKIPPED \(.+\))'
+          # Read the body LIVE, not from the event payload: a `gh run rerun` replays the
+          # original payload, so a payload read can never see a corrected body (task_d142795f).
+          PR_BODY="$(gh api "repos/${PR_REPO}/pulls/${PR_NUMBER}" --jq '.body // ""')"
+
+          LABEL='Cross-vendor review:[[:space:]]*[*_]*'
+          # `— <model> (<Vendor>)`: an em-dash, then at least one non-space model char, then a
+          # non-empty parenthetical. Prose after the parenthetical is free (grep is unanchored).
+          REVIEWER='—[[:space:]]*[^()[:space:]][^()]*\([^)]+\)'
+
+          # APPROVED needs a reviewer; REQUEST_CHANGES / NEEDS_REWORK also need `(resolved)`;
+          # SKIPPED needs a non-empty parenthesised reason instead of a reviewer.
+          PATTERN="${LABEL}APPROVED.*${REVIEWER}"
+          PATTERN="${PATTERN}|${LABEL}(REQUEST_CHANGES|NEEDS_REWORK).*\(resolved\).*${REVIEWER}"
+          PATTERN="${PATTERN}|${LABEL}SKIPPED[^()]*\([^)]+\)"
 
           if printf '%s' "$PR_BODY" | grep -qE "$PATTERN"; then
             echo "Found:"
-            printf '%s' "$PR_BODY" | grep -oE "$PATTERN" | head -1
+            printf '%s' "$PR_BODY" | grep -E "$PATTERN" | head -1
             exit 0
           fi
 
+          echo "What the PR body actually has on a 'Cross-vendor review:' line:" >&2
+          if printf '%s' "$PR_BODY" | grep -nE 'Cross-vendor review:' >&2; then
+            echo "  ^ that line does not carry a verdict token AND a reviewer model + vendor." >&2
+          else
+            echo "  (no line containing 'Cross-vendor review:' at all)" >&2
+          fi
+
           cat >&2 <<'MSG'
+
           The PR body carries no cross-vendor review verdict.
 
-          Add ONE line, verbatim, plus the reviewer's vendor/model:
+          Expected shape — one line, one of four tokens, plus the reviewer's model/vendor:
 
             Cross-vendor review: APPROVED — Opus (Anthropic)
             Cross-vendor review: REQUEST_CHANGES (resolved) — gpt-5.6-sol (OpenAI)
             Cross-vendor review: NEEDS_REWORK (resolved) — Opus (Anthropic)
             Cross-vendor review: SKIPPED (docs-only)
+
+          Markdown emphasis and inline prose are fine — this passes:
+
+            Cross-vendor review: **APPROVED round 1, zero findings** — gpt-5.6-sol (OpenAI) confirmed the fix
+
+          What is NOT accepted: a token with no `— <model> (<Vendor>)`; a bare
+          `Cross-vendor review:` with no token; REQUEST_CHANGES / NEEDS_REWORK without their
+          `(resolved)` marker.
 
           SKIPPED (<reason>) is a first-class, correct answer — ROUTING.md allows skipping
           trivial/docs-only changes. Do NOT invent a review to satisfy this check; state
@@ -68,6 +132,10 @@ jobs:
           Why this exists: the verdict lives only in .claude/skills/*/state/*.review.txt,
           which is gitignored and dies with the worktree. The PR body is the ONLY durable
           record. On 2026-07-17 a real review was lost exactly this way (PR #879).
+
+          After fixing the body, rerun this run (it re-reads the body live) — `gh pr checks`
+          shows only the NEWEST run per check name, so a stale failure keeps reading red until
+          a newer run exists. Note `gh pr edit --body-file` with IDENTICAL content fires no event.
 
           Exempt: hotfix/* branches. Bypass: an --admin merge (deliberately possible).
           MSG

@@ -220,11 +220,10 @@ public class ScalperConfluenceGate {
 
     /** Records the confluence-composite rail (operand=aggregate vs threshold); true when INVALID. */
     boolean failsScore(String rail, boolean valid, BigDecimal aggregate, BigDecimal threshold, String reason) {
-      BigDecimal margin =
-          aggregate != null && threshold != null ? aggregate.subtract(threshold) : null;
       return !record(
               new RailCheck(
-                  rail, valid, aggregate, threshold, margin, reason, RailPolicies.of(rail)))
+                  rail, valid, aggregate, threshold,
+                  compositeMargin(valid, aggregate, threshold), reason, RailPolicies.of(rail)))
           .pass();
     }
 
@@ -1022,6 +1021,27 @@ public class ScalperConfluenceGate {
         new Decision(
             decided, List.of(new Leg(decided, pick.get())), conf, chain.expiry(), stop, decidedTier,
             ctx.oi().callPutDeltaImbalancePct(), ctx.macro().vixLevel()));
+  }
+
+  /**
+   * T14 (signal-analysis 2026-07-25 bug queue B5): the composite verdict is decisive-legs AND
+   * scalar ({@code ConnectTheDotsScorer:222} — VWAP side, 60m bias, stand-aside, aggregate ≥
+   * threshold). Recording {@code aggregate − threshold} unconditionally logged a blocked row with a
+   * POSITIVE margin whenever a decisive leg failed while the aggregate cleared the threshold (3
+   * rows on 2026-07-24, 1 on 07-23) — a self-contradiction that also mis-attributes every §3.5
+   * would-have-fired query. The margin is a SCALAR-shortfall diagnostic, so it is recorded only
+   * when it is the thing that decided: passing rows keep the positive slack (informative), scalar
+   * blocks keep the negative shortfall, and a decisive-leg block carries NO scalar margin — the
+   * reason string ({@link #compositeReason}) already names the failed leg.
+   */
+  static BigDecimal compositeMargin(boolean valid, BigDecimal aggregate, BigDecimal threshold) {
+    if (aggregate == null || threshold == null) {
+      return null;
+    }
+    if (!valid && aggregate.compareTo(threshold) >= 0) {
+      return null; // blocked by a decisive leg, not the scalar — a positive "margin" would lie
+    }
+    return aggregate.subtract(threshold);
   }
 
   /**

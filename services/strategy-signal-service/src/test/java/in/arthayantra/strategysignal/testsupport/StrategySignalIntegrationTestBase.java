@@ -89,4 +89,14 @@ public abstract class StrategySignalIntegrationTestBase {
   protected static String dbPassword() {
     return TIMESCALE.getPassword();
   }
+
+  /** Test-only Redis endpoint for direct engine integration fixtures. */
+  protected static String redisHost() {
+    return REDIS.getHost();
+  }
+
+  /** Test-only Redis endpoint for direct engine integration fixtures. */
+  protected static int redisPort() {
+    return REDIS.getMappedPort(6379);
+  }
 }

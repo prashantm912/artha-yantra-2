@@ -91,6 +91,12 @@ artha:
       enabled: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_ENABLED:true}
       bar-gap-ms: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_BAR_GAP_MS:180000}
       feed-fresh-ms: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_FEED_FRESH_MS:90000}
+    # T9 load-coverage watchdog. DISABLED ships the bean with no detector work; OBSERVE_ONLY
+    # logs would-page episodes; ARMED publishes named per-slug ntfy alerts through notifier.
+    # Names MUST match the compose passthroughs exactly (#653).
+    strategy-coverage-watchdog:
+      mode: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE:DISABLED}
+      grace-ms: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS:180000}
     # NOTE (2026-07-26): the `starvation-watchdog` block is GONE — SignalStarvationCanary was
     # RETIRED, not merely left dormant. It keyed on the gate-output heartbeat, which stops on any
     # SuperTrend-DOWN leg while bars keep arriving and evaluation keeps up, so arming it would have

@@ -43,6 +43,12 @@ public class DotHealthCanary {
   private static final LocalTime ARMED_FROM = LocalTime.of(9, 45); // rejections need to accrue
   private static final LocalTime SESSION_END = LocalTime.of(15, 30);
   static final int WINDOW = 40;
+  // T17 (2026-07-25): rows blocked at an early rail (time-window / time-of-day / option-side)
+  // carry NO context at all, and after ~14:45 the newest rows are ALL that shape — sampling them
+  // read every dot dead 4 sessions running (breadth included, while it supported 426/1,100).
+  // Fetch a deeper page and keep only context-bearing rows; an all-context-less window is
+  // UNINFORMATIVE, never an all-dead verdict.
+  static final int FETCH_DEPTH = 200;
 
   /** One dot's input-liveness probe over a rejection's diagnostic JSON. */
   private record Probe(String dot, Predicate<JsonNode> alive) {}
@@ -58,7 +64,17 @@ public class DotHealthCanary {
               && !d.at("/context/macro/fiiLongPct").isNull()),
           new Probe("oi_spurt_price", d -> d.at("/context/oi/spurtPricePct").asDouble(0) != 0),
           new Probe("vix", d -> !d.at("/context/macro/vixLevel").isMissingNode()
-              && !d.at("/context/macro/vixLevel").isNull()));
+              && !d.at("/context/macro/vixLevel").isNull()),
+          // T13: NEUTRAL is the strategy-side "data missing" sentinel — OiInterpretation.classify is
+          // a total function over four real states, so an all-NEUTRAL window means the OI read is
+          // broken (the 2026-07-20 outage: 748/748 NEUTRAL, three dots dead, canary green all day).
+          new Probe("futures_oi", d -> quadrantLive(d, "futuresQuadrant")),
+          new Probe("underlying_oi", d -> quadrantLive(d, "underlyingQuadrant")));
+
+  private static boolean quadrantLive(JsonNode d, String field) {
+    JsonNode q = d.at("/context/oi/" + field);
+    return !q.isMissingNode() && !q.isNull() && !"NEUTRAL".equals(q.asText());
+  }
 
   private static int macroInt(JsonNode d, String field) {
     return d.at("/context/macro/" + field).asInt(0);
@@ -67,8 +83,13 @@ public class DotHealthCanary {
   /** One dot's current verdict. */
   public record DotState(String dot, boolean alive, boolean required, String detail) {}
 
-  /** The endpoint payload. */
-  public record DotHealth(String asOf, boolean session, int rowsInspected, List<DotState> dots) {}
+  /**
+   * The endpoint payload. {@code rowsInspected} counts the CONTEXT-BEARING rows the probes actually
+   * read (T17 — the old any-row count let an all-context-less tail read as an all-dead verdict);
+   * {@code rowsScanned} is the raw page depth for transparency.
+   */
+  public record DotHealth(
+      String asOf, boolean session, int rowsScanned, int rowsInspected, List<DotState> dots) {}
 
   /**
    * In-process alert event — the notifier module listens (same direction as {@link SignalEmitted};
@@ -89,39 +110,58 @@ public class DotHealthCanary {
       SignalRejectionRepository rejections,
       ApplicationEventPublisher events,
       Clock clock,
-      @Value("${artha.canary.required-dots:breadth}") String requiredDots) {
+      @Value("${artha.canary.required-dots:breadth,futures_oi,underlying_oi}") String requiredDots) {
     this.rejections = rejections;
     this.events = events;
     this.clock = clock;
     this.required = Set.of(requiredDots.isBlank() ? new String[0] : requiredDots.split("\\s*,\\s*"));
   }
 
-  /** One evaluation over today's newest rejections (cheap; the controller calls it per GET). */
+  /** One evaluation over today's newest CONTEXT-BEARING rejections (T17; controller calls per GET). */
   public DotHealth evaluate() {
     ZonedDateTime now = clock.instant().atZone(Ist.ZONE);
     boolean session = inSession(now);
-    List<SignalRejectionRepository.RejectionRow> rows =
+    List<SignalRejectionRepository.RejectionRow> scanned =
         rejections.list(
             null, null, null, null,
             now.toLocalDate().atTime(LocalTime.of(9, 15)).atZone(Ist.ZONE).toOffsetDateTime(),
-            null, WINDOW, 0);
+            null, FETCH_DEPTH, 0);
+    List<JsonNode> contextRows = new ArrayList<>(WINDOW);
+    for (SignalRejectionRepository.RejectionRow row : scanned) {
+      JsonNode d = row.diagnostic();
+      if (d != null && !d.at("/context").isMissingNode() && d.at("/context").size() > 0) {
+        contextRows.add(d);
+        if (contextRows.size() == WINDOW) {
+          break;
+        }
+      }
+    }
     List<DotState> dots = new ArrayList<>(PROBES.size());
     for (Probe p : PROBES) {
       boolean alive = false;
-      for (SignalRejectionRepository.RejectionRow row : rows) {
-        JsonNode d = row.diagnostic();
-        if (d != null && p.alive().test(d)) {
+      for (JsonNode d : contextRows) {
+        if (p.alive().test(d)) {
           alive = true;
           break;
         }
       }
-      dots.add(
-          new DotState(
-              p.dot(), alive, required.contains(p.dot()),
-              alive ? "input live in the last " + rows.size() + " rejections"
-                  : rows.isEmpty() ? "no rejections yet today" : "input dead across " + rows.size() + " rejections"));
+      String detail;
+      if (alive) {
+        detail = "input live in the last " + contextRows.size() + " context-bearing rejections";
+      } else if (contextRows.isEmpty()) {
+        detail =
+            scanned.isEmpty()
+                ? "no rejections yet today"
+                : "UNINFORMATIVE — " + scanned.size() + " rejections scanned, none carry context"
+                    + " (early-rail blocks only)";
+      } else {
+        detail = "input dead across " + contextRows.size() + " context-bearing rejections";
+      }
+      dots.add(new DotState(p.dot(), alive, required.contains(p.dot()), detail));
     }
-    return new DotHealth(now.toOffsetDateTime().toString(), session, rows.size(), List.copyOf(dots));
+    return new DotHealth(
+        now.toOffsetDateTime().toString(), session, scanned.size(), contextRows.size(),
+        List.copyOf(dots));
   }
 
   /** The 5-min alerting sweep; only REQUIRED dots page, once per day per transition. */

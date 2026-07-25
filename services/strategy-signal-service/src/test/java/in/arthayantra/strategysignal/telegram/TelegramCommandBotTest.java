@@ -136,7 +136,7 @@ class TelegramCommandBotTest {
     when(dotHealth.evaluate())
         .thenReturn(
             new DotHealthCanary.DotHealth(
-                "t", true, 40,
+                "t", true, 40, 40,
                 List.of(new DotHealthCanary.DotState("breadth", true, true, "ok"))));
     when(risk.entryAllowed(anyString())).thenReturn(true);
     when(paper.openPositions(null)).thenReturn(List.of());
@@ -165,7 +165,7 @@ class TelegramCommandBotTest {
         .thenReturn(List.of(update(10, OWNER_CHAT, "/flatten")))
         .thenReturn(List.of(update(11, OWNER_CHAT, "/status")));
     when(dotHealth.evaluate())
-        .thenReturn(new DotHealthCanary.DotHealth("t", true, 0, List.of()));
+        .thenReturn(new DotHealthCanary.DotHealth("t", true, 0, 0, List.of()));
     when(paper.openPositions(null)).thenReturn(List.of());
 
     TelegramCommandBot bot = bot(true);

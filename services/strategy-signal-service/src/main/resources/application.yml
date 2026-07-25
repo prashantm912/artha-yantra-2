@@ -123,11 +123,12 @@ artha:
     oi:
       cross-filter-pct: 50
       drastic-floor: 50000
-      # dead-dot recalibration (signal-analysis rollup §Proposals P1/P2, owner-approved 2026-07-10):
-      # a >=0.10 (10-IV-pt) gap never occurs on NIFTY weeklies and a 50% 3m-bar price move is
-      # unreachable, so both dots were permanently dead. 0.02 / 8 make them reachable-but-selective.
-      # Ops-tunable via .env WITHOUT an image rebuild (compose passthrough mirrors the relative-volume
-      # knobs); the ${ENV} names MUST match the compose passthroughs exactly (#653 placeholder trap).
+      # dead-dot recalibration (P1/P2 2026-07-10; T22+T6 2026-07-25): iv-pair 0.10->0.02 (a 10-IV-pt
+      # gap never occurs on NIFTY weeklies); spurt floors (50,8)->(15,3) — the OI floor 50 sat at the
+      # p95 of its own operand, joint pass 1.26% -> 15.5% measured; vwap-min-distance-bps 15 makes
+      # the vwap DOT need a real distance (the entry gate already enforces the side; the dot was free
+      # at 100% support over six sessions). Ops-tunable via .env WITHOUT an image rebuild; the ${ENV}
+      # names MUST match the compose passthroughs exactly (#653 placeholder trap).
       iv-pair-min-gap: ${ARTHA_SCALPER_OI_IV_PAIR_MIN_GAP:0.02}
       iv-both-high-floor: 0.40
       spurt-oi-pct: ${ARTHA_SCALPER_OI_SPURT_OI_PCT:15}

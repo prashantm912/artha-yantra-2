@@ -477,6 +477,15 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   OpenAlgo-ecosystem + React-migration + strategy re-platform authority is
   `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` —
   read §17 (Errata) + §18 (Gap Addendum) FIRST; they override §1–§16 on conflict.
+- **"What's left to build?" — do NOT answer from the §0 tables alone.** Open items live in
+  SIX places and a top-down §0 read has already produced a wrong "queue is empty" answer
+  (2026-07-25: five blocked tunes + T9 + F-OPT + F-SYNC were all open with no §0 row). The
+  enumeration recipe — six locations, the exact grep for each, the single-status rule and the
+  promotion rule — is the block at the **top of §0** in
+  `docs/superpowers/plans/2026-07-02-remaining-items.md`. Follow it every time. Two traps it
+  encodes: `awk`, not `grep`, finds OPEN chips in §4b (the huge DONE cells swallow the match),
+  and the whole **`T`-namespace** (tune/build proposals T1…T23) exists ONLY in the newest
+  `docs/signal-analysis/*-session-findings.md` table unless someone promoted it to §0 group G.
 - `.claude/skills/` = executable runbooks. **Start every non-trivial task with
   `fable-method`** (orient / decompose / classify / **§2a plan gate** / verify / decide-next),
   then the matching routine skill —

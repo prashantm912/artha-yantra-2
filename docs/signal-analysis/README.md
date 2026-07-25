@@ -314,6 +314,17 @@ Session character: <VIX level, index range/trend, expiry day?, notable events>.
 Keep every session file immutable after write (append a dated addendum if corrected). The rollup
 reads them all.
 
+⚠️ **The §7 tune table (the `T`-namespace) is regenerated in every session file and has NO durable
+register of its own** — so a `PROPOSED` tune is invisible to any session that reads only the forward
+ledger, and one has already been reported as "queue empty" while five tunes sat open (2026-07-25).
+**Rule:** when a tune survives a rollup as STRUCTURAL, or a `T`-row proposes a BUILD rather than a
+knob turn (e.g. T8 latency stamping, T9 coverage watchdog), give it a row in
+[`../superpowers/plans/2026-07-02-remaining-items.md`](../superpowers/plans/2026-07-02-remaining-items.md)
+**§0 group G** in the same PR. The ledger row is the authoritative status; this table stays the
+evidence. Tunes blocked on forward sessions are tier `data` there, **not** `OWNER` — the distinction
+matters, because an `OWNER` row is skipped forever by autonomous sessions while a `data` row tells
+them to re-check the gate.
+
 ## 6. SQL toolkit (copy-paste; adjust dates)
 
 ```sql

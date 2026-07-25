@@ -378,6 +378,16 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   flyway-init migrates only the active `${ARTHA_DB_NAME}`. ALWAYS switch profiles via `ay`
   (raw compose leaves the vars unset → mock writes to `artha`); `ay reset-db` wipes BOTH
   (one shared volume).
+- **NEVER `docker compose up` from a git worktree — it CRASHES the live container.** A worktree has no
+  `deploy/secrets/*` (gitignored), so docker bind-mounts a non-existent path and **creates a DIRECTORY**
+  there; flyway-init dies `cat: /run/secrets/postgres_password: Is a directory` and the service inherits
+  the poisoned mount (`SecretFilePasswordPostProcessor` → `IOException: Is a directory`, crash-loop).
+  Cost a live strategy-signal outage 2026-07-25 while deploying #995 from a worktree (used to avoid a
+  concurrent session's checkout). `docker compose **build**` from a worktree IS safe — the image tag is
+  global and `name: arthayantra` + `container_name:` are pinned in the compose file — so split it: build
+  in the worktree, then `up -d --force-recreate <svc>` **from the real checkout**. Plain `up -d` is not
+  enough: it STARTS the already-`Created` poisoned container instead of replacing it. Confirm the fix with
+  `docker inspect <c> | ConvertFrom-Json | %{$_.Mounts}` — the secret `Source` must be the real repo path.
 - **Image build context differs per service** — `market-data-service` and
   `optimizer-service` Dockerfiles COPY repo-root paths (`deploy/dev-certs/`,
   `services/*/target/`) so they build with **repo-root context + `-f <dockerfile>`**

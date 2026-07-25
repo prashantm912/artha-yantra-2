@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.registry;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
@@ -40,9 +41,9 @@ public class StrategyRepository {
   public record AuditRow(
       long id,
       String action,
-      String fromVersion,
-      String toVersion,
-      String diffSummary,
+      @Schema(types = {"string", "null"}) String fromVersion,
+      @Schema(types = {"string", "null"}) String toVersion,
+      @Schema(types = {"string", "null"}) String diffSummary,
       String actor,
       OffsetDateTime createdAt) {}
 

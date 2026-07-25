@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.swing;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -127,20 +128,20 @@ public class SellDecisionRepository {
       long signalId,
       String exchange,
       String symbol,
-      String setup,
-      Integer stage,
-      String setupType,
-      String footprint,
-      BigDecimal entryPrice,
-      BigDecimal currentPrice,
-      BigDecimal unrealizedPct,
-      BigDecimal stopLevel,
-      BigDecimal trailLevel,
+      @Schema(types = {"string", "null"}) String setup,
+      @Schema(types = {"integer", "null"}) Integer stage,
+      @Schema(types = {"string", "null"}) String setupType,
+      @Schema(types = {"string", "null"}) String footprint,
+      @Schema(types = {"number", "null"}) BigDecimal entryPrice,
+      @Schema(types = {"number", "null"}) BigDecimal currentPrice,
+      @Schema(types = {"number", "null"}) BigDecimal unrealizedPct,
+      @Schema(types = {"number", "null"}) BigDecimal stopLevel,
+      @Schema(types = {"number", "null"}) BigDecimal trailLevel,
       boolean stillBuyable,
       boolean sellingNow,
-      String sellReason,
+      @Schema(types = {"string", "null"}) String sellReason,
       String verdict,
-      OffsetDateTime acknowledgedAt) {}
+      @Schema(types = {"string", "null"}) OffsetDateTime acknowledgedAt) {}
 
   /** The {items} envelope for the recorded-decisions read endpoint. */
   public record SellDecisions(List<SellDecisionRow> items) {}

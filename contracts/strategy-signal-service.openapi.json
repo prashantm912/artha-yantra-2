@@ -3652,19 +3652,19 @@
             "format" : "int64"
           },
           "signalId" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "paperPositionId" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "backtestRunId" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "uuid"
           },
           "backtestTradeId" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "note" : {
@@ -3677,11 +3677,11 @@
             }
           },
           "disciplineRating" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "emotionRating" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "createdAt" : {
@@ -3841,32 +3841,32 @@
             "type" : "string"
           },
           "setup" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "stage" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "setupType" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "footprint" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "entryPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "currentPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "unrealizedPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "stopLevel" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "trailLevel" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "stillBuyable" : {
             "type" : "boolean"
@@ -3875,13 +3875,13 @@
             "type" : "boolean"
           },
           "sellReason" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "verdict" : {
             "type" : "string"
           },
           "acknowledgedAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           }
         },
@@ -3988,10 +3988,10 @@
             "type" : "boolean"
           },
           "threshold" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "passWhen" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "disable", "passWhen", "rail", "threshold" ]
@@ -4007,7 +4007,7 @@
             "type" : "string"
           },
           "campaignId" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "uuid"
           },
           "spec" : {
@@ -4017,14 +4017,14 @@
             "type" : "boolean"
           },
           "createdBy" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "createdAt" : {
             "type" : "string",
             "format" : "date-time"
           },
           "disabledAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           }
         },
@@ -4034,13 +4034,13 @@
         "type" : "object",
         "properties" : {
           "rails" : {
-            "type" : "array",
+            "type" : [ "array", "null" ],
             "items" : {
               "$ref" : "#/components/schemas/RailOverrideView"
             }
           },
           "compositeThreshold" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "compositeThreshold", "rails" ]
@@ -4095,7 +4095,7 @@
             "format" : "date-time"
           },
           "closedAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           }
         },
@@ -4162,10 +4162,10 @@
             "type" : "number"
           },
           "markPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "unrealizedPnl" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "realizedPnl" : {
             "type" : "number"
@@ -4178,13 +4178,13 @@
             "format" : "date-time"
           },
           "stopLoss" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "takeProfit" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "buyingPowerWarning" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "avgEntryPrice", "buyingPowerWarning", "exchange", "id", "markPrice", "openedAt", "qty", "realizedPnl", "side", "status", "stopLoss", "takeProfit", "tradingsymbol", "unrealizedPnl" ]
@@ -4301,7 +4301,7 @@
             "type" : "string"
           },
           "qty" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "stopLoss" : {
@@ -4376,7 +4376,7 @@
             "type" : "string"
           },
           "entryPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "stopLoss" : {
             "type" : [ "number", "null" ]
@@ -4411,7 +4411,7 @@
             "format" : "int64"
           },
           "signalId" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "side" : {
@@ -4429,17 +4429,17 @@
             "format" : "date-time"
           },
           "filledAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "fillPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "fillSimulator" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "slippageApplied" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "fees" : {
             "$ref" : "#/components/schemas/FeeBreakdown"
@@ -4474,10 +4474,10 @@
             "type" : "number"
           },
           "markPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "unrealizedPnl" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "realizedPnl" : {
             "type" : "number"
@@ -4490,34 +4490,34 @@
             "format" : "date-time"
           },
           "closedAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "closeReason" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "stopLoss" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "takeProfit" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "advisedLots" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "marginSnapshot" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "marginPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "subaccountIdx" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "openingSignalId" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "openingSignal" : {
@@ -4555,13 +4555,13 @@
             "type" : "string"
           },
           "fromVersion" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "toVersion" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "diffSummary" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "actor" : {
             "type" : "string"
@@ -4634,10 +4634,10 @@
             "type" : "number"
           },
           "winRate" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "profitFactor" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "expectancy" : {
             "type" : "number"
@@ -4689,13 +4689,13 @@
             "format" : "int32"
           },
           "expectancy" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "sharpe" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "maxDrawdownPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "expectancy", "graduatedAt", "maxDrawdownPct", "sharpe", "strategyId", "trades" ]
@@ -4723,32 +4723,32 @@
             "type" : "string"
           },
           "setup" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "stage" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int32"
           },
           "setupType" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "footprint" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "entryPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "currentPrice" : {
             "type" : "number"
           },
           "unrealizedPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "stopLevel" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "trailLevel" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "stillBuyable" : {
             "type" : "boolean"
@@ -4757,7 +4757,7 @@
             "type" : "boolean"
           },
           "sellReason" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "verdict" : {
             "type" : "string"
@@ -4881,7 +4881,7 @@
             "type" : "number"
           },
           "pnlNet" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "unpriced" : {
             "type" : "integer",
@@ -4953,22 +4953,22 @@
             "type" : "boolean"
           },
           "unpricedReason" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "spanMargin" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "exposureMargin" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "totalMargin" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "requiredMargin" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "finalMargin" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "openPositions" : {
             "type" : "integer",
@@ -5016,10 +5016,10 @@
             "format" : "int64"
           },
           "reason" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "realizedPnl" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "createdAt" : {
             "type" : "string",
@@ -5047,19 +5047,19 @@
             "type" : "string"
           },
           "availableCash" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "collateral" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "m2mRealized" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "m2mUnrealized" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "utilisedDebits" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "availableCash", "collateral", "m2mRealized", "m2mUnrealized", "status", "utilisedDebits" ]
@@ -5094,7 +5094,7 @@
             "$ref" : "#/components/schemas/JsonNode"
           },
           "priority" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "priorityDetail" : {
             "$ref" : "#/components/schemas/JsonNode"
@@ -5112,7 +5112,7 @@
             "type" : "string"
           },
           "cooldownUntil" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "suppressed" : {
@@ -5122,7 +5122,7 @@
             "type" : "string"
           },
           "expiresAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "engineVersion" : {
@@ -5250,10 +5250,10 @@
             "format" : "uuid"
           },
           "slug" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "name" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "enabled" : {
             "type" : "boolean"
@@ -5268,7 +5268,7 @@
             }
           },
           "graduatedAt" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "crossingTimeline" : {
@@ -5319,7 +5319,7 @@
             "type" : "string"
           },
           "unrealizedPct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "acknowledged" : {
             "type" : "boolean"
@@ -5348,15 +5348,15 @@
             "format" : "int64"
           },
           "signalId" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "strategyId" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "uuid"
           },
           "insightId" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "uuid"
           },
           "channel" : {
@@ -5370,7 +5370,7 @@
             "format" : "int32"
           },
           "detail" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "createdAt" : {
             "type" : "string",
@@ -5425,16 +5425,16 @@
             "format" : "int32"
           },
           "meanCompositeFired" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "meanCompositeRejected" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "meanSupportRatioFired" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "meanSupportRatioRejected" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "firedCount", "meanCompositeFired", "meanCompositeRejected", "meanSupportRatioFired", "meanSupportRatioRejected", "rejectedCount" ]
@@ -5510,13 +5510,13 @@
             "type" : "string"
           },
           "side" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "composite" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "threshold" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "blockingRail" : {
             "type" : "string"
@@ -5556,10 +5556,10 @@
             "type" : "string"
           },
           "priority" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "band" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "components" : {
             "type" : "array",
@@ -5568,7 +5568,7 @@
             }
           },
           "optionLegCost" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "marginEstimate" : {
             "type" : "string"
@@ -5577,7 +5577,7 @@
             "type" : [ "number", "null" ]
           },
           "entryPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "stopLoss" : {
             "type" : [ "number", "null" ]
@@ -5611,7 +5611,7 @@
             "type" : "boolean"
           },
           "differsMost" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "columns" : {
             "type" : "array",
@@ -5635,10 +5635,10 @@
             "type" : "string"
           },
           "points" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "c" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "c", "key", "points" ]

@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.insights;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
@@ -20,13 +21,13 @@ public class NotificationEventsRepository {
   /** One delivery-audit row. */
   public record NotificationEventRow(
       long id,
-      Long signalId,
-      UUID strategyId,
-      UUID insightId,
+      @Schema(types = {"integer", "null"}) Long signalId,
+      @Schema(types = {"string", "null"}) UUID strategyId,
+      @Schema(types = {"string", "null"}) UUID insightId,
       String channel,
       String status,
       int attempts,
-      String detail,
+      @Schema(types = {"string", "null"}) String detail,
       OffsetDateTime createdAt) {}
 
   private final JdbcTemplate jdbc;

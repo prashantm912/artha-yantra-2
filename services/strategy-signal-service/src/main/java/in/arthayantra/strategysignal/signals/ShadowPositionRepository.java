@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.signals;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -61,7 +62,7 @@ public class ShadowPositionRepository {
    */
   public record VariantSummary(
       String variant, long open, long closed, long wins, long losses, BigDecimal pnlPoints,
-      BigDecimal pnlNet, long unpriced) {}
+      @Schema(types = {"number", "null"}) BigDecimal pnlNet, long unpriced) {}
 
   private final JdbcTemplate jdbc;
 

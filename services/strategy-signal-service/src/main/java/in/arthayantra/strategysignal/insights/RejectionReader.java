@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.insights;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.time.Ist;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -279,11 +280,17 @@ public class RejectionReader {
 
   /** One rejected signal's Stage-1 row (adds the blocking rail + composite threshold). */
   public record RejectedRow(
-      long rejectionId, String tradingsymbol, String side, BigDecimal composite, BigDecimal threshold,
+      long rejectionId, String tradingsymbol,
+      @Schema(types = {"string", "null"}) String side,
+      @Schema(types = {"number", "null"}) BigDecimal composite,
+      @Schema(types = {"number", "null"}) BigDecimal threshold,
       String blockingRail, int dotSupports, int dotTotal, OffsetDateTime generatedAt) {}
 
   /** The fired-vs-rejected summary contrast. */
   public record Contrast(
-      int firedCount, int rejectedCount, BigDecimal meanCompositeFired, BigDecimal meanCompositeRejected,
-      BigDecimal meanSupportRatioFired, BigDecimal meanSupportRatioRejected) {}
+      int firedCount, int rejectedCount,
+      @Schema(types = {"number", "null"}) BigDecimal meanCompositeFired,
+      @Schema(types = {"number", "null"}) BigDecimal meanCompositeRejected,
+      @Schema(types = {"number", "null"}) BigDecimal meanSupportRatioFired,
+      @Schema(types = {"number", "null"}) BigDecimal meanSupportRatioRejected) {}
 }

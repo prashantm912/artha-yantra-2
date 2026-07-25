@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.registry.StrategyRepository.StrategyRow;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
@@ -72,8 +73,8 @@ public class GraduationService {
       String stage,
       int trades,
       BigDecimal netRealized,
-      BigDecimal winRate,
-      BigDecimal profitFactor,
+      @Schema(types = {"number", "null"}) BigDecimal winRate,
+      @Schema(types = {"number", "null"}) BigDecimal profitFactor,
       BigDecimal expectancy,
       BigDecimal maxDrawdownPct,
       List<Criterion> criteria) {}

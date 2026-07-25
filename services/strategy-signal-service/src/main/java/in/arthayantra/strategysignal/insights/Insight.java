@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.insights;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -22,15 +23,15 @@ public record Insight(
     String title,
     String explanation,
     JsonNode evidence,
-    BigDecimal priority,
+    @Schema(types = {"number", "null"}) BigDecimal priority,
     JsonNode priorityDetail,
     String dataTrust,
     List<String> trustReasons,
     String dedupeKey,
-    OffsetDateTime cooldownUntil,
+    @Schema(types = {"string", "null"}) OffsetDateTime cooldownUntil,
     boolean suppressed,
     String status,
-    OffsetDateTime expiresAt,
+    @Schema(types = {"string", "null"}) OffsetDateTime expiresAt,
     String engineVersion,
     String configHash) {
 

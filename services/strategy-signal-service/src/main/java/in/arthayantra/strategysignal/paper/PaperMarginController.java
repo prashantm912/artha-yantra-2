@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -49,12 +50,12 @@ public class PaperMarginController {
    */
   public record MarginHeat(
       boolean priced,
-      String unpricedReason,
-      BigDecimal spanMargin,
-      BigDecimal exposureMargin,
-      BigDecimal totalMargin,
-      BigDecimal requiredMargin,
-      BigDecimal finalMargin,
+      @Schema(types = {"string", "null"}) String unpricedReason,
+      @Schema(types = {"number", "null"}) BigDecimal spanMargin,
+      @Schema(types = {"number", "null"}) BigDecimal exposureMargin,
+      @Schema(types = {"number", "null"}) BigDecimal totalMargin,
+      @Schema(types = {"number", "null"}) BigDecimal requiredMargin,
+      @Schema(types = {"number", "null"}) BigDecimal finalMargin,
       int openPositions,
       int pricedLegs,
       OffsetDateTime asOf) {

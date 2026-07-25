@@ -10,6 +10,7 @@ import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
 import in.arthayantra.strategysignal.signals.SignalRepository;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -47,18 +48,18 @@ public class SwingSellDecisionService {
   public record SwingSellDecision(
       long signalId,
       String symbol,
-      String setup,
-      Integer stage,
-      String setupType,
-      String footprint,
-      BigDecimal entryPrice,
+      @Schema(types = {"string", "null"}) String setup,
+      @Schema(types = {"integer", "null"}) Integer stage,
+      @Schema(types = {"string", "null"}) String setupType,
+      @Schema(types = {"string", "null"}) String footprint,
+      @Schema(types = {"number", "null"}) BigDecimal entryPrice,
       BigDecimal currentPrice,
-      BigDecimal unrealizedPct,
-      BigDecimal stopLevel,
-      BigDecimal trailLevel,
+      @Schema(types = {"number", "null"}) BigDecimal unrealizedPct,
+      @Schema(types = {"number", "null"}) BigDecimal stopLevel,
+      @Schema(types = {"number", "null"}) BigDecimal trailLevel,
       boolean stillBuyable,
       boolean sellingNow,
-      String sellReason,
+      @Schema(types = {"string", "null"}) String sellReason,
       String verdict) {}
 
   /** The {asOf, items} envelope. */

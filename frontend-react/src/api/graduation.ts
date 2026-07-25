@@ -45,14 +45,17 @@ export interface GraduationBoard {
   asOf: string;
 }
 
-/** One GRADUATED strategy (F7): the marker + the metrics snapshot captured at graduation. */
+/**
+ * One GRADUATED strategy (F7): the marker + the metrics snapshot captured at graduation.
+ * The three metric NUMERICs are nullable in strategy.strategy_graduations (V024).
+ */
 export interface Promotion {
   strategyId: string;
   graduatedAt: string;
   trades: number;
-  expectancy: string;
-  sharpe: string;
-  maxDrawdownPct: string;
+  expectancy: string | null;
+  sharpe: string | null;
+  maxDrawdownPct: string | null;
 }
 
 const GRADUATION = 'graduation';

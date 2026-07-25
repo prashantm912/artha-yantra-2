@@ -6,6 +6,7 @@ import in.arthayantra.strategysignal.insights.StrategyEvidenceInputs.BoardRow;
 import in.arthayantra.strategysignal.insights.StrategyEvidenceInputs.Criterion;
 import in.arthayantra.strategysignal.insights.StrategyEvidenceInputs.PriorSnapshot;
 import in.arthayantra.strategysignal.paper.GraduationService;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -252,12 +253,12 @@ public class StrategyEvidenceReader {
   /** The server-assembled qualification dossier (§5.1). Typed record → enumerates into the contract. */
   public record Dossier(
       UUID strategyId,
-      String slug,
-      String name,
+      @Schema(types = {"string", "null"}) String slug,
+      @Schema(types = {"string", "null"}) String name,
       boolean enabled,
       String stage,
       List<Criterion> criteria,
-      OffsetDateTime graduatedAt,
+      @Schema(types = {"string", "null"}) OffsetDateTime graduatedAt,
       List<CrossingEntry> crossingTimeline,
       List<RailCount> rejectionProfile,
       List<OpenSell> openSellDecisions,
@@ -272,6 +273,7 @@ public class StrategyEvidenceReader {
 
   /** One open sell-decision row in the dossier. */
   public record OpenSell(
-      long sellDecisionId, LocalDate runDate, String symbol, String verdict, BigDecimal unrealizedPct,
+      long sellDecisionId, LocalDate runDate, String symbol, String verdict,
+      @Schema(types = {"number", "null"}) BigDecimal unrealizedPct,
       boolean acknowledged) {}
 }

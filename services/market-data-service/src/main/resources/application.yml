@@ -156,6 +156,13 @@ resilience4j:
         failure-rate-threshold: 50
         wait-duration-in-open-state: 30s
         permitted-number-of-calls-in-half-open-state: 2
+        # A LOCAL limiter rejection is not an upstream fault. Since the breaker now sits OUTSIDE the
+        # limiter (so an open breaker cannot burn a scarce permit, F-SYNC), RequestNotPermitted would
+        # otherwise propagate THROUGH the breaker and be recorded as a failure — 5 local saturations
+        # in a 10-call window would open the SHARED breaker while Kite is perfectly healthy and 503
+        # every family. Ignore it: it says "we paced ourselves", never "the upstream is broken".
+        ignore-exceptions:
+          - io.github.resilience4j.ratelimiter.RequestNotPermitted
       # OpenAlgo gets its OWN breaker so an OpenAlgo outage never trips Kite-direct calls (§4)
       openalgo-rest:
         sliding-window-type: COUNT_BASED
@@ -164,6 +171,9 @@ resilience4j:
         failure-rate-threshold: 50
         wait-duration-in-open-state: 30s
         permitted-number-of-calls-in-half-open-state: 2
+        # Same reasoning as kite-rest above — a local pacing rejection must never open this breaker.
+        ignore-exceptions:
+          - io.github.resilience4j.ratelimiter.RequestNotPermitted
       kite-ticker:
         sliding-window-type: COUNT_BASED
         sliding-window-size: 5

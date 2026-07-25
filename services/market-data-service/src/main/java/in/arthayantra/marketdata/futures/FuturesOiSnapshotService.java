@@ -87,7 +87,14 @@ public class FuturesOiSnapshotService {
    * through that window and abandon the whole minute. Retrying the acquisition is what closes the
    * ~2-min effective cadence — it does NOT widen the rate budget (still one call, still 1/s).
    *
-   * <p>Sized to stay well inside the 60 s cadence so a pass can never overlap its own next fire.
+   * <p>This is the SECONDARY half of the T12 fix. The primary cause was scheduler starvation — see
+   * {@code MonitorSchedulingConfig.oiCaptureTaskScheduler}. Limiter contention only becomes reachable
+   * once this cron has its own thread, because before that the options pass simply blocked it.
+   *
+   * <p><b>Worst-case wall time is ~29 s, not the ~9 s of sleeping</b>: four 5 s limiter acquisitions
+   * plus three 3 s backoffs. That still cannot overlap the next fire or starve anything else — this
+   * method owns its scheduler thread and nothing else targets it — but a slow acquired HTTP call on
+   * top can still cause one cron fire to be missed, which is counted.
    */
   private static final int QUOTE_ACQUIRE_ATTEMPTS = 4;
 

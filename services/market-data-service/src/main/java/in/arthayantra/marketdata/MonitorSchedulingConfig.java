@@ -102,21 +102,25 @@ public class MonitorSchedulingConfig {
    * losing roughly every other minute — 161 single-minute skips — and the cause is neither the
    * budget nor the cron.
    *
-   * <p><b>The measured picture.</b> Kite documents the quote endpoint at 1 req/second, which is
-   * exactly what the {@code kite-quote} limiter is configured to (any SECOND dedicated limiter would
-   * put us at 2/s, i.e. over Kite's published budget — that is why the row's literal "dedicated quote
-   * limiter" framing is NOT what was built). Demand is well inside the budget:
-   * {@link #barFlushTaskScheduler} already records that one {@code OptionsSnapshotService} pass is
-   * "~70 batched calls ≈ 70 s at the 1/s limit", and it runs every 2 minutes — ~35 permits/min —
-   * while this pass wants 1/min, against 60 permits/min available. The loss is FAIRNESS, not
-   * capacity: resilience4j's {@code AtomicRateLimiter} is not FIFO, so while the options pass is
-   * taking a permit every second for 70 consecutive seconds, a competitor that waits only the
-   * configured 5 s can be starved straight through its window and abandon the minute.
+   * <p><b>The primary cause is SCHEDULER STARVATION, not the rate limiter.</b> Both snapshot jobs sat
+   * on the single default {@code taskScheduler} (pool size 1, ~32 scheduled methods). While
+   * {@code OptionsSnapshotService}'s pass held that one thread — {@link #barFlushTaskScheduler}
+   * already sizes it at "~70 batched calls ≈ 70 s at the 1/s limit" — this cron could not even be
+   * INVOKED, so its fires were dropped before any permit was requested. Moving it to its own thread
+   * is therefore the fix; the patience ladder in {@code FuturesOiSnapshotService} is the secondary
+   * half, and it only becomes relevant AFTER this isolation, because only then can the two passes
+   * contend at the limiter concurrently rather than one simply blocking the other.
    *
-   * <p>So the fix is patience, and patience is only safe off the default pool. The default
-   * {@code taskScheduler} is pool size 1 shared by ~32 scheduled methods; waiting there would trade
-   * one capture gap for a service-wide scheduler stall — the S1–S3 failure mode (#1016) this class
-   * already exists to prevent. On its own thread the pass can wait for its turn and block nothing.
+   * <p><b>Budget.</b> Kite documents the quote endpoint at 1 req/second, exactly what the
+   * {@code kite-quote} limiter is configured to — so any SECOND dedicated limiter would put us at
+   * 2/s, over Kite's published budget. That is why the row's literal "dedicated quote limiter"
+   * framing is NOT what was built. Nominal scheduled demand is close to the ceiling, not comfortably
+   * under it: ~35/min from the options snapshot pass, up to ~24/min from
+   * {@code OptionsSnapshotService.scheduledBroadcast} (six configured underlyings × two quote calls
+   * through the default chain), plus 1/min here — roughly 60 of 60 permits/min. Completion-based
+   * {@code fixedDelay} keeps ACTUAL throughput below that, so the budget is not proven to be
+   * exceeded, but it is not "well inside" either. If {@code ay_futures_oi_snapshot_skips_total}
+   * starts advancing, capacity — not patience — is the thing to look at.
    *
    * <p><b>Why not {@link #monitorTaskScheduler()}.</b> Same fence as {@code barFlushTaskScheduler}:
    * that pool is reserved for pure liveness DETECTORS, and this is a write path (batched quote fetch

@@ -200,6 +200,35 @@ class DotHealthCanaryTest {
   }
 
   @Test
+  void expiryDayNeutralQuadrantsAreSuppressedNotDeadRequired() {
+    // codex round 2/3: MarketOiClient degrades the OI reads to NEUTRAL on a monthly index-expiry
+    // day BY DESIGN (S24) — the quadrant dots are then not "expected alive today": required must
+    // drop so paging, /status and the UI badge all agree it is not an outage. Date discovered from
+    // the bundled calendar so the test tracks the real CSV set.
+    java.time.LocalDate expiry = java.time.LocalDate.of(2026, 1, 1);
+    while (!in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(expiry)) {
+      expiry = expiry.plusDays(1);
+    }
+    now.set(expiry.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant());
+    stubRows(
+        row("{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
+            + "\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("futures_oi,underlying_oi");
+
+    DotHealthCanary.DotHealth health = canary.evaluate();
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("futures_oi") || s.dot().equals("underlying_oi"))
+        .allSatisfy(
+            s -> {
+              assertThat(s.required()).as("not expected alive on the suppression day").isFalse();
+              assertThat(s.detail()).contains("by design");
+            });
+
+    canary.sweep();
+    verifyNoInteractions(events);
+  }
+
+  @Test
   void aLiveQuadrantReadsAlive() {
     stubRows(
         row("{\"oi\":{\"futuresQuadrant\":\"LONG_BUILDUP\",\"underlyingQuadrant\":\"SHORT_COVERING\"}}"));

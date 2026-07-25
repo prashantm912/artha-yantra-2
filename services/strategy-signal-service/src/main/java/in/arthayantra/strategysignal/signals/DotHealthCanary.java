@@ -144,6 +144,7 @@ public class DotHealthCanary {
         }
       }
     }
+    boolean expiryDay = expirySuppressed(now.toLocalDate());
     List<DotState> dots = new ArrayList<>(PROBES.size());
     for (Probe p : PROBES) {
       boolean alive = false;
@@ -153,6 +154,11 @@ public class DotHealthCanary {
           break;
         }
       }
+      // `required` means "expected alive TODAY" (class javadoc). On a monthly index-expiry day the
+      // OI reads are S24-suppressed to NEUTRAL by design, so the quadrant dots are NOT expected
+      // alive — dropping the flag here keeps every consumer (paging, /status count, UI badge)
+      // agreeing with the no-outage decision instead of each needing its own exemption.
+      boolean suppressedToday = expiryDay && OI_QUADRANT_DOTS.contains(p.dot());
       String detail;
       if (alive) {
         detail = "input live in the last " + contextRows.size() + " context-bearing rejections";
@@ -162,13 +168,14 @@ public class DotHealthCanary {
                 ? "no rejections yet today"
                 : "UNINFORMATIVE — " + scanned.size() + " rejections scanned, none carry context"
                     + " (early-rail blocks only)";
-      } else if (OI_QUADRANT_DOTS.contains(p.dot()) && expirySuppressed(now.toLocalDate())) {
+      } else if (suppressedToday) {
         detail =
             "NEUTRAL by design — monthly index-expiry day, OI reads S24-suppressed (not an outage)";
       } else {
         detail = "input dead across " + contextRows.size() + " context-bearing rejections";
       }
-      dots.add(new DotState(p.dot(), alive, required.contains(p.dot()), detail));
+      dots.add(
+          new DotState(p.dot(), alive, required.contains(p.dot()) && !suppressedToday, detail));
     }
     return new DotHealth(
         now.toOffsetDateTime().toString(), session, scanned.size(), contextRows.size(),

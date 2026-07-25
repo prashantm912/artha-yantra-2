@@ -53,7 +53,7 @@ entry_rules:
 
 exit_rules:
   - { type: take_profit, params: { basis: premium_pct, value: 35 } }   # T21 (owner 2026-07-25): +35% premium target for the bracket-less families
-  - { type: stop_loss, params: { basis: premium_pct, value: 25 } }     # T21: -25% premium stop; the tighter of this and any structural/index stop wins
+  - { type: stop_loss, params: { basis: premium_pct, value: 25 } }     # T21: -25% premium stop on the OPTION leg (paper bracket path); index-side levels stay structural/index_points
   - { type: signal_exit, params: { rule: "vwma20 > vwap", min_volume: 125000 } }   # VWMA falls back below VWAP (cross undone)
   - { type: trailing_stop, params: { basis: indicator, alias: supertrend_line } }   # E9 §3.10: trail with the Super Trend line — exit when the future closes through it
   - { type: time_stop,   params: { max_bars: 12 } }

@@ -6,7 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 /**
- * The {@code swing_catchup_runs} durable claim + attempt ledger (V046, 2026-07-17 incident). The
+ * The {@code swing_catchup_runs} durable claim + attempt ledger (V047, 2026-07-17 incident). The
  * catch-up's money-effecting run must be gated by an ATOMIC claim taken BEFORE any emission: two
  * overlapping invocations (the 08:35 cron racing a manual {@code POST /run}, or a crash-restart)
  * would otherwise both read "not yet run", both emit an ENTRY for the same symbol, and the second

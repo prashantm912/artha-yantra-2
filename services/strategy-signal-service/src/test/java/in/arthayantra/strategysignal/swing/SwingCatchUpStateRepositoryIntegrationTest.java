@@ -11,7 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * The {@code swing_catchup_runs} atomic claim (V046) against the REAL Timescale + flyway lineage — the
+ * The {@code swing_catchup_runs} atomic claim (V047) against the REAL Timescale + flyway lineage — the
  * durability gate for the catch-up double-fill (2026-07-17 review, Critical 2). Proves the single
  * {@code INSERT ... ON CONFLICT DO UPDATE ... WHERE ... RETURNING} statement is a genuine mutual
  * exclusion: at most one caller wins a fresh session, a fresh RUNNING claim blocks a second, a PENDING

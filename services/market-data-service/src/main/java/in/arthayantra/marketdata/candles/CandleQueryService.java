@@ -265,9 +265,17 @@ public class CandleQueryService {
       String exchange,
       String tradingsymbol,
       String baseInterval,
-      OffsetDateTime from,
-      OffsetDateTime to,
+      OffsetDateTime rawFrom,
+      OffsetDateTime rawTo,
       String source) {
+    // T19 choke-point normalization (codex round 1): backfillRange snaps its window above, but
+    // refreshAsync forwards CALLER-controlled bounds from the public 202 endpoint straight here —
+    // an off-grid request would persist the same phantom keys. Snapping at the single fetch/store
+    // funnel covers every current and future caller; a no-op for already-aligned windows, and
+    // harmless for 1d (date-bounded fetches are minute-aligned by construction).
+    GapDetector.Gap window = alignBackfillWindow(rawFrom, rawTo);
+    OffsetDateTime from = window.from();
+    OffsetDateTime to = window.to();
     InstrumentKey key = new InstrumentKey(exchange, tradingsymbol);
     for (GapDetector.Gap page : GapDetector.pages(new GapDetector.Gap(from, to))) {
       List<HistoricalCandleGateway.Candle> fetched =

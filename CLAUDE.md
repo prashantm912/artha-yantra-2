@@ -439,9 +439,20 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   mergeCommit BEFORE building/deploying. And **never pipe a git command whose failure must stop a
   chain** (`git rebase 2>&1 | tail` exits with tail's 0 — a conflicted rebase then push ships a
   mid-rebase branch); check `git status -sb` for `## HEAD (no branch)` after any scripted rebase.
+- **Branch cleanup is now automatic on the REMOTE, manual on this machine.** `delete_branch_on_merge`
+  is ENABLED on the repo (set 2026-07-26), so GitHub deletes the head branch on every merge whoever
+  does it — never hand-delete a remote branch again. Nothing server-side can touch this box, though,
+  and the local leftovers are what actually bite (see the next bullet). After any merge run
+  **`bash tools/git-prune-merged.sh`** (add `--dry` to preview): it removes worktrees + local
+  branches whose upstream is GONE and whose tree is CLEAN, and refuses to touch `main`, a
+  never-pushed local WIP branch, a dirty worktree, or a branch still holding commits main lacks —
+  so the parked `worktree-agent-abb02bf43adbb895d` swing catch-up (1 genuinely unmerged commit)
+  survives it.
 - **`gh pr merge --delete-branch` can fail its LOCAL step while the merge SUCCEEDS** — with a
   concurrent session holding `main` in a worktree it aborts with `fatal: 'main' is already used by
-  worktree at …` and no other output. The squash-merge already landed server-side, so **never re-run
+  worktree at …` and no other output. **Same failure when a worktree holds the BRANCH BEING MERGED**
+  (`fatal: '<branch>' is already used by worktree at …`) — hit twice on 2026-07-26. Cheapest fix:
+  `git worktree remove <path>` BEFORE merging, or just run `tools/git-prune-merged.sh` after. The squash-merge already landed server-side, so **never re-run
   the merge**: confirm with `gh pr view <n> --json state,mergeCommit`, then
   `git push origin --delete <branch>` by hand. Same cause blocks `git checkout main` in the primary
   checkout — cut new branches from `origin/main` directly instead.

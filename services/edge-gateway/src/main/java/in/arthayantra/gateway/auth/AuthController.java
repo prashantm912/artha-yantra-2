@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.ErrorResponse;
+import io.swagger.v3.oas.annotations.Parameter;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -93,9 +94,16 @@ public class AuthController {
             });
   }
 
-  /** Logout: removes the session from Redis (A.2.1). */
+  /**
+   * Logout: removes the session from Redis (A.2.1).
+   *
+   * <p>{@code @Parameter(hidden = true)}: springdoc does not recognise {@link WebSession} as an
+   * injected WebFlux type (it does recognise {@code ServerWebExchange}), so it documented this
+   * argument as a REQUIRED query parameter carrying a serialized session object — a request shape
+   * the gateway neither accepts nor needs, published to every generated client.
+   */
   @PostMapping("/logout")
-  public Mono<ResponseEntity<Void>> logout(WebSession session) {
+  public Mono<ResponseEntity<Void>> logout(@Parameter(hidden = true) WebSession session) {
     return session.invalidate().thenReturn(ResponseEntity.noContent().build());
   }
 

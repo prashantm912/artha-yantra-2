@@ -72,19 +72,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        WebSession: {
-            id?: string;
-            started?: boolean;
-            attributes?: {
-                [key: string]: unknown;
-            };
-            /** Format: date-time */
-            lastAccessTime?: string;
-            /** Format: date-time */
-            creationTime?: string;
-            maxIdleTime?: string;
-            expired?: boolean;
-        };
         ErrorResponse: {
             code?: string;
             message?: string;
@@ -101,9 +88,7 @@ export type $defs = Record<string, never>;
 export interface operations {
     logout: {
         parameters: {
-            query: {
-                session: components["schemas"]["WebSession"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;

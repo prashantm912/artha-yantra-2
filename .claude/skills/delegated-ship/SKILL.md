@@ -11,7 +11,13 @@ pre-merge). The main loop NEVER builds substantive code — it briefs, audits, r
 fixes small, merges, deploys, verifies, records. Outcome log + trap details: memory
 topic `opus-delegation-standard`.
 
-## 1. Brief the builder (Agent tool, `model:"opus"`, `isolation:"worktree"`)
+**Model routing (owner revision 2026-07-25):** the main loop is **Opus 5** (orchestrator + final
+gate). The builder below is **Codex first** (`codex-build`); this Agent-subagent path is the
+fallback — **Sonnet 5** for mechanical work, **Opus** whenever the surface is parity / money / exit
+doctrine / migrations / the live engine. Items meeting the plan bar (HOLD, migration, money/parity,
+>~3 files) get a **Fable 5** plan first ([fable-method] §2a). Full table: `.claude/skills/codex/ROUTING.md`.
+
+## 1. Brief the builder (Agent tool, `model:"opus"` or `"sonnet"` per ROUTING, `isolation:"worktree"`)
 
 A brief is SELF-CONTAINED — the builder gets CLAUDE.md but never memory. Every brief
 carries, in this order:

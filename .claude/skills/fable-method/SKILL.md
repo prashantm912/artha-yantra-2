@@ -56,6 +56,27 @@ ledger over your own sense of "what's next"**.
 When unsure which tier, it's HOLD. Arming/un-arming an existing flag on the owner's
 explicit ask is clean (see [arm-flag]).
 
+## 2a. Plan the item — but only if it earns a plan (owner revision 2026-07-25)
+
+**Trigger (any one):** HOLD tier · a migration · a money/parity/exit-doctrine surface · >~3 files
+or multi-PR. Below that bar a written plan costs more than the item — go straight to a
+self-contained builder brief.
+
+When triggered, the plan is written by a **Fable 5 subagent** (Agent tool, `model: "fable"`; the main
+loop writes it itself on a capacity error — don't stall the item). The point is a *different
+reasoning style applied before code exists*: decomposition, design forks resolved against real
+code/DB evidence, and the "is this already built?" check that has killed whole items. A plan that
+meets the bar then goes through `codex-plan-review` — cross-vendor by construction, since the
+planner is Anthropic and the reviewer is Codex.
+
+A plan is DONE when it names, per unit: the files/seams it touches, the verify check that must go
+from red to green, the parity/golden exposure, the migration number if any, and the open questions
+it could NOT settle from code. Anything the plan leaves open becomes the Architect's to settle
+BEFORE briefing a builder — never handed down as an unresolved fork.
+
+Routing for the stages after this one (planner / builder / reviewer + every fallback) lives in ONE
+place: `.claude/skills/codex/ROUTING.md`. Never hardcode a model choice in a brief.
+
 ## 3. Verify your own work — the ladder (skip no rung that applies)
 
 1. **Build + tests with `-am`** ([build-service]) — a bare `-pl` run embeds stale libs and

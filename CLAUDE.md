@@ -24,12 +24,27 @@ to cut the common LLM coding mistakes. They bias toward caution over speed — u
    that reproduces it, then make it pass") and loop until they pass. For multi-step work, state
    a brief plan with a verify check per step.
 
-## Delegation model (owner standing rule 2026-07-10, until Fable 5 is generally available)
+## Delegation model (owner standing rule, REVISED 2026-07-25 — supersedes the 2026-07-10 rule)
 Applies to the MAIN session loop only — if you were spawned as a subagent, ignore this section
-and just execute your brief. The main loop delegates ALL substantive execution (builds,
-investigations, audits) to **Opus 4.8 subagents** (Agent tool, `model: "opus"`; parallel code work
-gets `isolation: "worktree"` + rebase-before-push) and itself only orchestrates, audits, fixes,
-merges, deploys, and talks to the owner. Rules proven over the first runs (#675–#680):
+and just execute your brief. **Opus 5 is the main loop: orchestrator + final gate.** It never
+builds substantive code; it orients, classifies, briefs, runs the testing gate, audits, merges,
+deploys, verifies live, and talks to the owner. Four stages, each with its own model
+(full table + fallbacks: `.claude/skills/codex/ROUTING.md`):
+
+| Stage | Model | Note |
+|---|---|---|
+| **Plan** | **Fable 5** (Agent tool, `model: "fable"`) → Opus on capacity error | ONLY for real items: HOLD tier, migrations, money/parity surfaces, or >~3 files / multi-PR. Small chips skip straight to a brief. Non-trivial plans still get `codex-plan-review` (cross-vendor: Fable writes, Codex reviews). |
+| **Build** | **Codex** (`codex-build`) → **Sonnet 5** for MECHANICAL work → **Opus subagent** when Codex is out AND the surface is parity / money / exit doctrine / migrations / the live engine | Never degrade a money or parity path to Sonnet to save tokens — that is exactly where green suites have hidden defects. |
+| **Review** | opposite vendor of the builder, fresh thread (review router in ROUTING.md) | A DISTINCT gate from the audit — see below. |
+| **Audit + ship** | **Opus 5** (main loop) | Final gate, then PR → CI → merge → deploy → live-verify → ledger. |
+
+⚠️ **The review round and the Architect audit are two gates, not one — never collapse them.**
+"The orchestrator reviews it itself" must mean *audit on top of a review round*, never *instead of*
+one. Evidence (2026-07-25): the T21 cross-vendor review found a LIVE Critical no test could reach
+(`premium_pct` exits resolved against the INDEX entry price = a one-bar force-exit on every held-PE
+take), and a later review round caught a foreign hunk the Architect had already read past in audit.
+
+Rules proven over the first delegated runs (#675–#680), model-independent:
 - The brief must be self-contained: goal, constraints, **relevant memory-trap content pasted in**
   (subagents get this file but never the memory files), and a required receipt shape — diff, test
   output, claims WITH evidence (file:line / SQL+result / log line) **each labeled
@@ -42,6 +57,10 @@ merges, deploys, and talks to the owner. Rules proven over the first runs (#675�
   SendMessage.
 - The main loop keeps: merge decisions, live deploys + anything touching secrets/.env, ledger and
   memory writes, owner communication, and tiny fixes where delegation overhead exceeds the work.
+  **Parity/money changes gate on a byte-identical Golden+Parity rerun by the main loop itself** —
+  never on any builder's or reviewer's say-so, whichever model it was.
+- **Availability is detected at FAILURE time, not by preflight probes** — call the primary, fall
+  back when it errors (ROUTING.md's ladder). Don't burn a turn checking whether a model is up.
 Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
 
 ## Build & test
@@ -459,8 +478,9 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` —
   read §17 (Errata) + §18 (Gap Addendum) FIRST; they override §1–§16 on conflict.
 - `.claude/skills/` = executable runbooks. **Start every non-trivial task with
-  `fable-method`** (decompose / verify / decide-next), then the matching routine skill —
-  `ship-a-change` (single-session), `delegated-ship` (Opus-builder pipeline for queue
+  `fable-method`** (orient / decompose / classify / **§2a plan gate** / verify / decide-next),
+  then the matching routine skill —
+  `ship-a-change` (single-session), `delegated-ship` (subagent-builder pipeline for queue
   items / autonomous runs — the delegation model's executable form), `build-service`,
   `adversarial-review`, `swing-backtest`, `scalper-backtest`, `live-verify`, `arm-flag`,
   `daily-ops`, `session-analysis`, `run-artha-yantra`, `mock-walk`, `new-migration`,

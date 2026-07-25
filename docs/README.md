@@ -17,11 +17,13 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 ## Active — forward-work plans (`superpowers/plans/`)
 *(The master plan above is the authority; the docs below are the current open forward-work plans.)*
 - `2026-07-02-remaining-items.md` — the **single forward ledger of everything still open** across the
-  whole platform: the current build frontier is the later increments of the two design programs (EVO
-  E5/E6, INT I3-FE/I4) plus APP Phase 4 / FID Phase-2–4 remainder (§0 groups C/D), then the owner-gated
-  items, next-session verifies, scheduled maintenance (CD-2 calendar refresh), the deferred-by-design
-  list and the consolidated WON'T-DO record. **Read this FIRST when picking the next thing to do.**
-  Supersedes the archived `2026-06-30-remaining-build-inventory.md`.
+  whole platform: §0 is the authoritative queue, followed by the owner-gated items, next-session verifies,
+  scheduled maintenance (CD-2 calendar refresh), the deferred-by-design list and the consolidated WON'T-DO
+  record. **Read this FIRST when picking the next thing to do.** Supersedes the archived
+  `2026-06-30-remaining-build-inventory.md`. *(Frontier as of 2026-07-25: the EVO/INT design programs are
+  built through E6 / I3-FE, the 2026-07-18 audit's P0 set is closed, and the live frontier is the weekly
+  session-forensics loop below plus the owner-gated rows — the ledger's dated deploy-state blocks at the
+  top carry the current picture.)*
 - `2026-06-30-live-signal-analysis-runbook.md` — the standing procedure for analysing ~1 month of
   live-paper scalper trades into the E9 band + per-scalper keep/cut/tune (counterfactual replay on real
   captured premium). Runs when the owner has gathered the data.
@@ -69,6 +71,14 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
 - `signal-analysis/YYYY-MM-DD-session-findings.md` — one immutable findings file per session (named by
   DATA date); periodic multi-session rollups consolidate them into tuning passes. First:
   `2026-07-02-session-findings.md` (volume-floor unpassable; composite capped ~0.765 by 5 dead dots).
+- `signal-analysis/rollup.md` — the **cross-session topic rollup**: every finding that outlived its own
+  session, each marked OPEN / RESOLVED (with the PR that closed it) / CLOSED-by-design. Read it before
+  re-flagging anything from a session file — several entries carry explicit do-not-re-flag notes (e.g.
+  swing-book bracket-starvation pages are suppressed BY DESIGN since #992).
+- `signal-analysis/2026-07-25-weekly-bug-queue.md` — the worked example of the weekly loop: a trading
+  week's routine docs (2026-07-20→24) triaged into an ordered bug queue B0–B11 + an owner-decision pack.
+  **Fully closed 2026-07-25** — the four owner decisions shipped as #990/#991/#992 (+#993, #1016) and are
+  deployed and live-verified; the doc records what proved each.
 
 ## Active — operations & references (top level)
 - `dev-setup.md`, `remote-access.md` — local/dev setup + remote access.

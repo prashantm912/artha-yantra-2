@@ -18,6 +18,14 @@ subset is CI-enforced).
 > 2026-07 comprehensive audit merged (#911, `docs/audits/2026-07-18-comprehensive-audit.md`) — its P0 set
 > (SL-01 metrics, SEC-01/02, OPS-R01, SL-03) is the next build frontier. Also note: SEC-07/08 show the
 > Stage-G hardening layer below was SPEC'd but NOT fully built — "merged as-built" overstates Stage G.**
+>
+> **CURRENCY UPDATE 2026-07-25:** the 2026-07-18 audit's P0 set is CLOSED (SL-01/SEC-01/SEC-02/OPS-R01/SL-03
+> all shipped + deployed). The frontier since is the **weekly session-forensics loop**: the 2026-07-20→24
+> trading week's routine docs produced the B0–B11 bug queue
+> (`docs/signal-analysis/2026-07-25-weekly-bug-queue.md`), now FULLY CLOSED, and its four owner decisions
+> shipped + deployed as #990 (T21 premium bands) / #991 (T22+T6 dot calibration) / #992 (T10) / #993
+> (PE-side stop direction) / #1016 (S1–S3 scheduler isolation). Open work stays in the ledger §0; the only
+> owner action outstanding is the B8 host-clock resync.
 
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the

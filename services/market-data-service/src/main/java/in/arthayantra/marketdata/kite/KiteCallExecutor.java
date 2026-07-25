@@ -21,9 +21,10 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 /**
- * The B-3 resilience stack composed once: {@code Retry( RateLimiter( CircuitBreaker( call ) ) )}.
- * Every attempt re-acquires a limiter permit (strict pacing — retries never burst past the
- * budget) and is recorded by the breaker. Retry: idempotent GETs only, max 4 attempts,
+ * The B-3 resilience stack composed once: {@code Retry( CircuitBreaker( RateLimiter( call ) ) )}.
+ * Every attempt that the breaker admits re-acquires a limiter permit (strict pacing — retries never
+ * burst past the budget) and is recorded by the breaker; a call the breaker REJECTS never reaches
+ * the bucket, so an outage cannot silently drain a scarce budget (see {@link #execute}). Retry: idempotent GETs only, max 4 attempts,
  * exponential 500 ms ×2 capped 8 s with FULL JITTER, honoring Kite's {@code Retry-After} on 429;
  * never on 4xx auth/validation. Limiter saturation (after the 5 s queue) maps to
  * {@code 429 RATE_LIMIT_LOCAL} — surfaced distinctly from Kite's own 429.
@@ -128,12 +129,26 @@ public class KiteCallExecutor {
     return false;
   }
 
-  /** Executes a Kite call under the family's limiter, the kite-rest breaker and retry. */
+  /**
+   * Executes a Kite call under the family's limiter, the kite-rest breaker and retry.
+   *
+   * <p><b>Decoration order is load-bearing: the BREAKER is outside the LIMITER.</b> It used to be
+   * the other way round, which meant the permit was acquired BEFORE the breaker was consulted — so
+   * a call rejected by an open breaker still spent its permit without ever reaching the network.
+   * Harmless for the 1-per-second families, fatal for {@code kite-dump}, whose budget is **1 permit
+   * per 30 minutes**: one rejected attempt burned the whole window, and the retries that followed
+   * failed with {@code local broker DUMP budget saturated} rather than the breaker's own message.
+   * That is the daily ~08:36 IST {@code INSTRUMENT_SYNC} failure (ledger G4 / F-SYNC).
+   *
+   * <p>This order is also what resilience4j itself recommends (Retry → CircuitBreaker →
+   * RateLimiter → … ). With the breaker CLOSED the behaviour is identical; with it OPEN the permit
+   * survives for the retry once the breaker half-opens.
+   */
   public <T> T execute(Family family, Supplier<T> call) {
     RateLimiter limiter = rateLimiters.rateLimiter(family.limiterName);
     CircuitBreaker breaker = circuitBreakers.circuitBreaker(family.breakerName);
     Supplier<T> attempt =
-        () -> RateLimiter.decorateSupplier(limiter, CircuitBreaker.decorateSupplier(breaker, call)).get();
+        () -> CircuitBreaker.decorateSupplier(breaker, RateLimiter.decorateSupplier(limiter, call)).get();
     try {
       return Retry.decorateSupplier(retry, attempt).get();
     } catch (RequestNotPermitted saturation) {

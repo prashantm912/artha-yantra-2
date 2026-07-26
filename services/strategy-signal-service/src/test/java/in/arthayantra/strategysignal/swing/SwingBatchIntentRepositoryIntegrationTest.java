@@ -64,7 +64,7 @@ class SwingBatchIntentRepositoryIntegrationTest extends StrategySignalIntegratio
     intents.recordScheduled(batch, session, false);
 
     assertThat(intents.find(batch, session)).contains(false);
-    assertThat(intents.claimableMissedSessionsBefore(batch, session.plusDays(1), 30, 64))
+    assertThat(intents.claimableMissedSessionsBefore(batch, session.plusDays(1), 30, 5, 64))
         .isEmpty();
   }
 
@@ -76,7 +76,7 @@ class SwingBatchIntentRepositoryIntegrationTest extends StrategySignalIntegratio
       intents.recordScheduled(batch, first.plusDays(day), true);
     }
 
-    assertThat(intents.claimableMissedSessionsBefore(batch, first.plusDays(66), 30, 64))
+    assertThat(intents.claimableMissedSessionsBefore(batch, first.plusDays(66), 30, 5, 64))
         .hasSize(64)
         .startsWith(first.plusDays(2))
         .endsWith(first.plusDays(65));

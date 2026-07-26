@@ -79,6 +79,7 @@ public class SwingBatchIntentRepository {
       String batch,
       LocalDate exclusiveDate,
       int pageLeaseMinutes,
+      int maxPages,
       int recentSessionLimit) {
     return jdbc.query(
         """
@@ -101,7 +102,10 @@ public class SwingBatchIntentRepository {
           )
           AND (
             latch.batch IS NULL
-            OR latch.claimed_at < now() - make_interval(mins => ?)
+            OR (
+              latch.claimed_at < now() - make_interval(mins => ?)
+              AND latch.pages < ?
+            )
           )
         ORDER BY intent.session_date
         """,
@@ -111,6 +115,7 @@ public class SwingBatchIntentRepository {
         recentSessionLimit,
         batch,
         batch,
-        pageLeaseMinutes);
+        pageLeaseMinutes,
+        maxPages);
   }
 }

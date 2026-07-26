@@ -10,7 +10,7 @@ import org.springframework.stereotype.Repository;
  *
  * <p>This is a rate limiter, NOT a terminal "already paged" latch. {@link #claim} succeeds the first
  * time a session is seen and again once the previous claim's lease has expired, so a session that
- * stays missing pages once per sweep until it finally gets a {@code swing_batch_runs} marker.
+ * stays missing pages once per sweep — up to a bounded number of times.
  *
  * <p>A one-shot latch would be unsafe here: the detector publishes to an {@code @Async} listener
  * that swallows every exception, so "we alerted" can only ever mean "we enqueued". An ntfy 5xx, a
@@ -33,10 +33,17 @@ public class SwingMissedBatchAlertRepository {
 
   /**
    * Atomically claims the right to page this session, returning empty when a claim taken inside the
-   * lease window already exists. Concurrent callers cannot both win — the conflicting UPDATE takes
-   * the row lock and its {@code WHERE} re-reads the just-written {@code claimed_at}.
+   * lease window already exists or when the session has already been paged {@code maxPages} times.
+   * Concurrent callers cannot both win — the conflicting UPDATE takes the row lock and its {@code
+   * WHERE} re-reads the just-written {@code claimed_at}.
+   *
+   * <p>The ceiling is what stops the repeat from becoming a permanent alarm. A missed session can
+   * NEVER acquire a run marker retroactively — {@code SwingBatchRecorder} stamps the run date as
+   * today, so a manual rerun records today and not the session that was missed. Without a ceiling
+   * "repeat until a run marker appears" is a loop with no exit, and the ops channel ends up muted,
+   * which loses exactly the page this lease exists to protect.
    */
-  public Optional<Claim> claim(String batch, LocalDate session, int leaseMinutes) {
+  public Optional<Claim> claim(String batch, LocalDate session, int leaseMinutes, int maxPages) {
     return jdbc
         .query(
             """
@@ -46,12 +53,14 @@ public class SwingMissedBatchAlertRepository {
               SET pages = swing_missed_batch_alerts.pages + 1,
                   claimed_at = now()
               WHERE swing_missed_batch_alerts.claimed_at < now() - make_interval(mins => ?)
+                AND swing_missed_batch_alerts.pages < ?
             RETURNING pages
             """,
             (rs, n) -> new Claim(rs.getInt("pages")),
             batch,
             java.sql.Date.valueOf(session),
-            leaseMinutes)
+            leaseMinutes,
+            maxPages)
         .stream()
         .findFirst();
   }

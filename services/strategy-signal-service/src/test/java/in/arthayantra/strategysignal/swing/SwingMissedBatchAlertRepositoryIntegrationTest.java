@@ -24,8 +24,8 @@ class SwingMissedBatchAlertRepositoryIntegrationTest extends StrategySignalInteg
   void theFirstClaimWinsAndASecondInsideTheLeaseLoses() {
     String batch = "alert-it-fresh-" + UUID.randomUUID();
 
-    Optional<SwingMissedBatchAlertRepository.Claim> first = alerts.claim(batch, SESSION, 30);
-    Optional<SwingMissedBatchAlertRepository.Claim> second = alerts.claim(batch, SESSION, 30);
+    Optional<SwingMissedBatchAlertRepository.Claim> first = alerts.claim(batch, SESSION, 30, 5);
+    Optional<SwingMissedBatchAlertRepository.Claim> second = alerts.claim(batch, SESSION, 30, 5);
 
     assertThat(first).isPresent();
     assertThat(first.get().pages()).isEqualTo(1);
@@ -40,25 +40,43 @@ class SwingMissedBatchAlertRepositoryIntegrationTest extends StrategySignalInteg
   @Test
   void anExpiredLeaseRepagesTheSameSession() {
     String batch = "alert-it-repage-" + UUID.randomUUID();
-    assertThat(alerts.claim(batch, SESSION, 30)).isPresent();
+    assertThat(alerts.claim(batch, SESSION, 30, 5)).isPresent();
     expireLease(batch);
 
-    Optional<SwingMissedBatchAlertRepository.Claim> repage = alerts.claim(batch, SESSION, 30);
+    Optional<SwingMissedBatchAlertRepository.Claim> repage = alerts.claim(batch, SESSION, 30, 5);
 
     assertThat(repage).as("the session pages again after its lease expires").isPresent();
     assertThat(repage.get().pages()).as("and counts how many mornings it has paged").isEqualTo(2);
-    assertThat(alerts.claim(batch, SESSION, 30)).as("the new lease then holds").isEmpty();
+    assertThat(alerts.claim(batch, SESSION, 30, 5)).as("the new lease then holds").isEmpty();
   }
 
   @Test
   void thePageCountKeepsClimbingAcrossSuccessiveLeases() {
     String batch = "alert-it-count-" + UUID.randomUUID();
     for (int expected = 1; expected <= 3; expected++) {
-      Optional<SwingMissedBatchAlertRepository.Claim> claim = alerts.claim(batch, SESSION, 30);
+      Optional<SwingMissedBatchAlertRepository.Claim> claim = alerts.claim(batch, SESSION, 30, 5);
       assertThat(claim).isPresent();
       assertThat(claim.get().pages()).isEqualTo(expected);
       expireLease(batch);
     }
+  }
+
+  /**
+   * The ceiling is what keeps the repeat from becoming a permanent alarm: a missed session can never
+   * acquire a run marker retroactively, so without it the page would recur until the session aged
+   * out of the scan — and a channel nobody reads loses the page the repeat exists to protect.
+   */
+  @Test
+  void theCeilingStopsTheRepeatEvenThoughNoRunMarkerEverArrives() {
+    String batch = "alert-it-ceiling-" + UUID.randomUUID();
+    for (int page = 1; page <= 3; page++) {
+      assertThat(alerts.claim(batch, SESSION, 30, 3)).as("page %d of 3", page).isPresent();
+      expireLease(batch);
+    }
+
+    assertThat(alerts.claim(batch, SESSION, 30, 3))
+        .as("the fourth morning is silent despite an expired lease and no run marker")
+        .isEmpty();
   }
 
   private void expireLease(String batch) {

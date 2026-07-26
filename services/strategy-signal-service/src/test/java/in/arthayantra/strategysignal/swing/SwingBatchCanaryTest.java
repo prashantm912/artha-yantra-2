@@ -44,7 +44,7 @@ class SwingBatchCanaryTest {
   /** Default: neither family has an intent row anywhere and the bounded sweep finds nothing. */
   @BeforeEach
   void quietByDefault() {
-    when(intents.claimableMissedSessionsBefore(any(), any(), anyInt(), anyInt()))
+    when(intents.claimableMissedSessionsBefore(any(), any(), anyInt(), anyInt(), anyInt()))
         .thenReturn(List.of());
     when(intents.find(any(), any())).thenReturn(Optional.empty());
     when(intents.lastKnownArmedOnOrBefore(any(), any())).thenReturn(Optional.empty());
@@ -55,13 +55,13 @@ class SwingBatchCanaryTest {
   }
 
   private void claimSucceeds(int pages) {
-    when(alerts.claim(eq("minervini"), eq(FRIDAY), anyInt()))
+    when(alerts.claim(eq("minervini"), eq(FRIDAY), anyInt(), anyInt()))
         .thenReturn(Optional.of(new SwingMissedBatchAlertRepository.Claim(pages)));
   }
 
   @Test
   void anArmedSessionWithNoSuccessfulRunIsReported() {
-    when(intents.claimableMissedSessionsBefore(eq("minervini"), eq(MONDAY), anyInt(), anyInt()))
+    when(intents.claimableMissedSessionsBefore(eq("minervini"), eq(MONDAY), anyInt(), anyInt(), anyInt()))
         .thenReturn(List.of(FRIDAY));
     when(intents.find("minervini", FRIDAY)).thenReturn(Optional.of(true));
     when(runs.hasRun("minervini", FRIDAY)).thenReturn(false);
@@ -84,7 +84,7 @@ class SwingBatchCanaryTest {
 
   @Test
   void aSessionThatRanSuccessfullyIsNotReported() {
-    when(intents.claimableMissedSessionsBefore(eq("minervini"), eq(MONDAY), anyInt(), anyInt()))
+    when(intents.claimableMissedSessionsBefore(eq("minervini"), eq(MONDAY), anyInt(), anyInt(), anyInt()))
         .thenReturn(List.of(FRIDAY));
     when(intents.find("minervini", FRIDAY)).thenReturn(Optional.of(true));
     when(runs.hasRun("minervini", FRIDAY)).thenReturn(true);
@@ -92,7 +92,7 @@ class SwingBatchCanaryTest {
     canary().check();
 
     verify(events, never()).publishEvent(any());
-    verify(alerts, never()).claim(any(), any(), anyInt());
+    verify(alerts, never()).claim(any(), any(), anyInt(), anyInt());
   }
 
   /**
@@ -125,7 +125,7 @@ class SwingBatchCanaryTest {
     canary().check();
 
     verify(events, never()).publishEvent(any());
-    verify(alerts, never()).claim(any(), any(), anyInt());
+    verify(alerts, never()).claim(any(), any(), anyInt(), anyInt());
   }
 
   /** Fail closed: a fresh deploy has no intent anywhere, so it must not page for every session. */
@@ -134,7 +134,7 @@ class SwingBatchCanaryTest {
     canary().check();
 
     verify(events, never()).publishEvent(any());
-    verify(alerts, never()).claim(any(), any(), anyInt());
+    verify(alerts, never()).claim(any(), any(), anyInt(), anyInt());
   }
 
   /**
@@ -143,11 +143,11 @@ class SwingBatchCanaryTest {
    */
   @Test
   void aPersistentGapPagesAgainOnceTheLeaseExpires() {
-    when(intents.claimableMissedSessionsBefore(eq("minervini"), eq(MONDAY), anyInt(), anyInt()))
+    when(intents.claimableMissedSessionsBefore(eq("minervini"), eq(MONDAY), anyInt(), anyInt(), anyInt()))
         .thenReturn(List.of(FRIDAY));
     when(intents.find("minervini", FRIDAY)).thenReturn(Optional.of(true));
     when(runs.hasRun("minervini", FRIDAY)).thenReturn(false);
-    when(alerts.claim(eq("minervini"), eq(FRIDAY), anyInt()))
+    when(alerts.claim(eq("minervini"), eq(FRIDAY), anyInt(), anyInt()))
         .thenReturn(
             Optional.of(new SwingMissedBatchAlertRepository.Claim(1)),
             Optional.empty(),
@@ -161,16 +161,35 @@ class SwingBatchCanaryTest {
     verify(events, times(2)).publishEvent(any(SwingBatchAlert.class));
   }
 
+  /**
+   * The two sweeps must be independently fault-isolated, not just the two families: if the
+   * scheduled-session query fails, the container-down sweep — the one that closes the blind spot —
+   * still has to run.
+   */
+  @Test
+  void aFailureInTheScheduledSweepStillLeavesTheContainerDownSweepRunning() {
+    when(intents.claimableMissedSessionsBefore(eq("minervini"), any(), anyInt(), anyInt(), anyInt()))
+        .thenThrow(new IllegalStateException("intent ledger unreachable"));
+    when(intents.find("minervini", FRIDAY)).thenReturn(Optional.empty());
+    when(intents.lastKnownArmedOnOrBefore("minervini", FRIDAY)).thenReturn(Optional.of(true));
+    when(runs.hasRun("minervini", FRIDAY)).thenReturn(false);
+    claimSucceeds(1);
+
+    canary().check();
+
+    verify(events).publishEvent(any(SwingBatchAlert.class));
+  }
+
   /** A repository failure must not take the other family's sweep down with it. */
   @Test
   void aFailureCheckingOneBatchDoesNotStopTheOther() {
-    when(intents.claimableMissedSessionsBefore(eq("minervini"), any(), anyInt(), anyInt()))
+    when(intents.claimableMissedSessionsBefore(eq("minervini"), any(), anyInt(), anyInt(), anyInt()))
         .thenThrow(new IllegalStateException("intent ledger unreachable"));
-    when(intents.claimableMissedSessionsBefore(eq("manas-arora"), eq(MONDAY), anyInt(), anyInt()))
+    when(intents.claimableMissedSessionsBefore(eq("manas-arora"), eq(MONDAY), anyInt(), anyInt(), anyInt()))
         .thenReturn(List.of(FRIDAY));
     when(intents.find("manas-arora", FRIDAY)).thenReturn(Optional.of(true));
     when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
-    when(alerts.claim(eq("manas-arora"), eq(FRIDAY), anyInt()))
+    when(alerts.claim(eq("manas-arora"), eq(FRIDAY), anyInt(), anyInt()))
         .thenReturn(Optional.of(new SwingMissedBatchAlertRepository.Claim(1)));
 
     canary().check();

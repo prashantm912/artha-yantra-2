@@ -84,6 +84,14 @@ public class PaperPositionRepository {
         .findFirst();
   }
 
+  /** The local book key for one position, without loading detail-pane or instrument-provenance columns. */
+  public Optional<String> findBook(long id) {
+    return jdbc
+        .query("SELECT book FROM paper_positions WHERE id=?", (rs, n) -> rs.getString("book"), id)
+        .stream()
+        .findFirst();
+  }
+
   /**
    * The FULL position row for the detail pane (Phase-2 §6.4): the base {@link PositionRow} fields plus
    * the provenance columns the compact row omits — {@code subaccount_idx} (E10 ledger), the F9

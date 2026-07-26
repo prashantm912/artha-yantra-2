@@ -181,4 +181,106 @@ class OptionAtmPinnerTest {
       registry.subscribe("existing-" + i, new InstrumentKey("NSE", "INDEX-" + i), SubscriptionMode.QUOTE, SubscriptionPriority.PINNED_INDEX);
     }
   }
+
+  /**
+   * CRITICAL regression (cross-vendor review): a transient chain failure used to empty the desired
+   * set for that underlying, and the stale sweep then unsubscribed its live pins — dropping capture
+   * and opening unrecoverable 1-minute gaps until the next ready/master event. A failed underlying
+   * must keep every pin it already holds.
+   */
+  @Test
+  void aFailedUnderlyingKeepsItsExistingPinsInsteadOfBeingRolledOff() {
+    OptionsChainService chains = mock(OptionsChainService.class);
+    when(chains.expiriesWithin(anyString(), eq(7))).thenReturn(List.of(NEAR));
+    when(chains.chain("NIFTY 50", NEAR)).thenReturn(chain("NIFTY 50", NEAR, 100));
+
+    Map<String, InstrumentTokenResolver.TokenInfo> master = new HashMap<>();
+    addOptionKeys(master, "NFO", "NIFTY 50", 100);
+    SubscriptionRegistry registry =
+        new SubscriptionRegistry(
+            key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
+    OptionAtmPinner pinner =
+        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+
+    pinner.repin();
+    assertThat(pinner.pinnedContracts()).hasSize(22);
+
+    // The chain service now fails for this underlying — resolution is impossible, not "empty".
+    when(chains.chain("NIFTY 50", NEAR)).thenThrow(new IllegalStateException("chain unavailable"));
+    pinner.repin();
+
+    assertThat(pinner.pinnedContracts())
+        .as("a resolution FAILURE must not be read as 'nothing wanted'")
+        .hasSize(22);
+    assertThat(registry.view()).hasSize(22);
+  }
+
+  /**
+   * An underlying with no expiry inside the horizon is also NOT resolved, so it must be left alone
+   * rather than swept — same class as the failure case above.
+   */
+  @Test
+  void anUnderlyingWithNoExpiryInHorizonKeepsItsPins() {
+    OptionsChainService chains = mock(OptionsChainService.class);
+    when(chains.expiriesWithin(anyString(), eq(7))).thenReturn(List.of(NEAR));
+    when(chains.chain("NIFTY 50", NEAR)).thenReturn(chain("NIFTY 50", NEAR, 100));
+
+    Map<String, InstrumentTokenResolver.TokenInfo> master = new HashMap<>();
+    addOptionKeys(master, "NFO", "NIFTY 50", 100);
+    SubscriptionRegistry registry =
+        new SubscriptionRegistry(
+            key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
+    OptionAtmPinner pinner =
+        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+    pinner.repin();
+    assertThat(pinner.pinnedContracts()).hasSize(22);
+
+    when(chains.expiriesWithin(anyString(), eq(7))).thenReturn(List.of());
+    pinner.repin();
+
+    assertThat(pinner.pinnedContracts()).hasSize(22);
+  }
+
+  /**
+   * MAJOR regression: these holds are SPECULATIVE and therefore PERSISTED and replayed across a
+   * restart, so a fresh pinner starts with an empty in-memory set while the registry already holds
+   * yesterday's strikes. Without hydrating from the registry it could never roll an expired one off,
+   * and they would accumulate forever.
+   */
+  @Test
+  void aFreshPinnerHydratesRestoredHoldsAndRollsOffTheExpiredWindow() {
+    OptionsChainService chains = mock(OptionsChainService.class);
+    when(chains.expiriesWithin(anyString(), eq(7))).thenReturn(List.of(NEAR));
+    when(chains.chain("NIFTY 50", NEAR)).thenReturn(chain("NIFTY 50", NEAR, 100));
+
+    Map<String, InstrumentTokenResolver.TokenInfo> master = new HashMap<>();
+    addOptionKeys(master, "NFO", "NIFTY 50", 100);
+    addOptionKeys(master, "NFO", "NIFTY 50", 300);
+    SubscriptionRegistry registry =
+        new SubscriptionRegistry(
+            key -> Optional.ofNullable(master.get(key.canonical())), 3_000, new SimpleMeterRegistry());
+
+    // Stand in for SubscriptionReplayer: yesterday's window is already in the registry under the
+    // pinner's own subscriber id, with NO in-memory state anywhere.
+    for (String symbol : expectedSymbols("NFO", "NIFTY", 300)) {
+      registry.subscribe("system-opt-atm-pins", key(symbol));
+    }
+    int restored = registry.view().size();
+    assertThat(restored).isEqualTo(22);
+
+    OptionAtmPinner fresh =
+        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+    fresh.repin();
+
+    assertThat(fresh.pinnedContracts())
+        .as("the restored 300-window must be rolled off, not stranded forever")
+        .containsExactlyInAnyOrderElementsOf(
+            expectedSymbols("NFO", "NIFTY", 100).stream().map(OptionAtmPinnerTest::key).toList());
+    assertThat(registry.view()).hasSize(22);
+  }
+
+  private static InstrumentKey key(String canonical) {
+    String[] parts = canonical.split(":", 2);
+    return new InstrumentKey(parts[0], parts[1]);
+  }
 }

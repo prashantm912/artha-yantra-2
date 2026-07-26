@@ -78,6 +78,7 @@ public class OptionAtmPinner {
 
   /** Re-resolves after each instrument-master refresh — dispatched, never on the sync thread. */
   @EventListener(InstrumentMasterUpdated.class)
+  @Order(org.springframework.core.Ordered.LOWEST_PRECEDENCE)
   public void onMasterUpdated() {
     repinAsync();
   }
@@ -120,17 +121,9 @@ public class OptionAtmPinner {
     Set<InstrumentKey> desiredAll = new HashSet<>();
     resolved.values().forEach(desiredAll::addAll);
 
+    Set<InstrumentKey> capRefused = new HashSet<>();
     for (InstrumentKey key : desiredAll) {
-      try {
-        registry.subscribe(SUBSCRIBER, key);
-        currentPins.add(key);
-      } catch (Exception failure) {
-        if (failure.getMessage() != null && failure.getMessage().contains("subscription cap")) {
-          log.error("option ATM pin {} refused at the subscription cap: {}", key.canonical(), failure.getMessage());
-        } else {
-          log.warn("option ATM pin {} failed: {}", key.canonical(), failure.getMessage());
-        }
-      }
+      subscribeOne(key, capRefused);
     }
 
     // Roll off ONLY within underlyings that resolved this pass.
@@ -148,6 +141,16 @@ public class OptionAtmPinner {
         log.info("option ATM pin rolled off: {}", stale.canonical());
       }
     }
+    // Cap refusals get ONE retry AFTER the stale sweep. On an expiry rollover against a full
+    // registry the new window is refused first and the OLD window is only released afterwards, so
+    // without this the pass would free the slots and then leave them unused for a whole cycle.
+    // (Cross-vendor review Major.)
+    if (!capRefused.isEmpty()) {
+      log.info("retrying {} cap-refused option pins after the stale sweep", capRefused.size());
+      for (InstrumentKey key : capRefused) {
+        subscribeOne(key, null);
+      }
+    }
     log.info(
         "option ATM pin pass: underlyings resolved={}/{}, desired={}, pinned={}",
         resolved.size(), underlyings.size(), desiredAll.size(), currentPins.size());
@@ -162,6 +165,25 @@ public class OptionAtmPinner {
   private static String registryRoot(String underlying) {
     int space = underlying.indexOf(' ');
     return space < 0 ? underlying : underlying.substring(0, space);
+  }
+
+  /** Subscribes one leg; collects cap refusals when {@code capRefused} is non-null. */
+  private void subscribeOne(InstrumentKey key, Set<InstrumentKey> capRefused) {
+    try {
+      registry.subscribe(SUBSCRIBER, key);
+      currentPins.add(key);
+    } catch (Exception failure) {
+      String message = failure.getMessage();
+      if (message != null && message.contains("subscription cap")) {
+        if (capRefused != null) {
+          capRefused.add(key);
+          return; // retried after the stale sweep frees slots
+        }
+        log.error("option ATM pin {} refused at the subscription cap: {}", key.canonical(), message);
+      } else {
+        log.warn("option ATM pin {} failed: {}", key.canonical(), message);
+      }
+    }
   }
 
   /** The current option pin set. */

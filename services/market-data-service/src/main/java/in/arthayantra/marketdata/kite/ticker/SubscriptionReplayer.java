@@ -31,14 +31,18 @@ public class SubscriptionReplayer {
   }
 
   /** Replay once the context is up — ordered last so the master/token resolver is ready. */
+  // Strictly BEFORE any listener that hydrates from the registry (OptionAtmPinner does). At
+  // LOWEST_PRECEDENCE both tied, and a self-reconciling pinner that hydrated first would never see
+  // the holds replay was about to restore — so yesterday's expired strikes could never be rolled off.
   @EventListener(ApplicationReadyEvent.class)
-  @Order(Ordered.LOWEST_PRECEDENCE)
+  @Order(Ordered.LOWEST_PRECEDENCE - 100)
   public void onStartup() {
     replay();
   }
 
   /** Re-attempt after each instrument sync — boot-unresolvable instruments resolve here. */
   @EventListener(InstrumentMasterUpdated.class)
+  @Order(Ordered.LOWEST_PRECEDENCE - 100)
   public void onMasterUpdated() {
     replay();
   }

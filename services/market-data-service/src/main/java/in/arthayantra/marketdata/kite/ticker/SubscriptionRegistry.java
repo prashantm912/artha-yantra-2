@@ -5,6 +5,7 @@ import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.InstrumentTokenResolver;
+import in.arthayantra.marketdata.kite.PinnedSubscriptionRegistrar;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.ArrayList;
@@ -27,7 +28,7 @@ import org.springframework.stereotype.Component;
  * {@code VALIDATION_FAILED}. Profile-agnostic: in mock mode it simply has no ticker listening.
  */
 @Component
-public class SubscriptionRegistry {
+public class SubscriptionRegistry implements PinnedSubscriptionRegistrar {
 
   /** Commands a live ticker executes when the desired set changes; absent under mock. */
   public interface TickerCommands {
@@ -88,6 +89,29 @@ public class SubscriptionRegistry {
     this.commands = tickerCommands;
   }
 
+  @Override
+  public synchronized java.util.Set<InstrumentKey> heldBy(String subscriber) {
+    java.util.Set<InstrumentKey> held = new java.util.LinkedHashSet<>();
+    instruments.forEach(
+        (key, instrument) -> {
+          if (instrument.holds().containsKey(subscriber)) {
+            held.add(key);
+          }
+        });
+    return held;
+  }
+
+  /** Adds/raises a subscriber's hold; returns the instrument's effective mode. */
+  @Override
+  public void subscribe(String subscriber, InstrumentKey key) {
+    // SPECULATIVE, deliberately — see PinnedSubscriptionRegistrar. This port serves RESEARCH capture
+    // (option-premium bars), and subscribe() EVICTS lower-priority holds at the cap. At PINNED_INDEX
+    // a few dozen option strikes could displace a live STRATEGY subscription, trading a tradeable
+    // signal for a research bar. FuturesPinner keeps PINNED_INDEX via the explicit 4-arg call: the
+    // front/next/far futures ARE index infrastructure, not capture.
+    subscribe(subscriber, key, SubscriptionMode.QUOTE, SubscriptionPriority.SPECULATIVE);
+  }
+
   /** Adds/raises a subscriber's hold; returns the instrument's effective mode. */
   public synchronized SubscriptionMode subscribe(
       String subscriber, InstrumentKey key, SubscriptionMode mode, SubscriptionPriority priority) {
@@ -123,6 +147,7 @@ public class SubscriptionRegistry {
   }
 
   /** Releases a subscriber's hold; drops or downgrades the instrument as refcounts dictate. */
+  @Override
   public synchronized void unsubscribe(String subscriber, InstrumentKey key) {
     Instrument existing = instruments.get(key);
     if (existing == null || existing.holds().remove(subscriber) == null) {

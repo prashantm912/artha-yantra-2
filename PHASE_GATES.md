@@ -26,6 +26,24 @@ subset is CI-enforced).
 > shipped + deployed as #990 (T21 premium bands) / #991 (T22+T6 dot calibration) / #992 (T10) / #993
 > (PE-side stop direction) / #1016 (S1–S3 scheduler isolation). Open work stays in the ledger §0; the only
 > owner action outstanding is the B8 host-clock resync.
+>
+> **CURRENCY UPDATE 2026-07-27:** the residual G-group is now CLOSED and deployed — **G3** F-OPT
+> `OptionAtmPinner` (#1039, live: 44 option pins, 2.3% of the subscription cap, 0 evictions),
+> **G4** F-SYNC (#1023, the `kite-dump` permit was spent by a breaker-rejected call — resilience4j
+> decoration order), **G5**/T12 futures-OI cadence (#1031, the cause was scheduler starvation, not
+> the limiter), **G2**/T9 strategy-coverage watchdog (#1035, deployed **DISABLED** — arming is an
+> owner decision), plus task_1b85c64f (#1033, HOLD) and task_bd871971 (#1034).
+>
+> The **swing catch-up branch was SPLIT** rather than shipped or dropped (owner-approved): the
+> *detect* half is live and armed (#1044 + orphan cleanup #1046), the *auto-replay* half stays a
+> parked draft (#1036) because all seven Criticals live in it. **Its behaviour is not yet verified** —
+> the intent ledger was empty at deploy, so the first meaningful sweep is the morning after the
+> first weekday evening; a recurring 08:40 IST weekday check is scheduled.
+>
+> Two OWNER items outstanding: the B8 host-clock resync (carried), and **arming the T9 watchdog**
+> (needs an alert channel, a `NOT_LIVE_RESOLVABLE` re-page cadence, and an OBSERVE_ONLY duration).
+> **INT I4 is PARKED to ~2026-08-09** — 7 Majors, and its headline delivery-rate number was wrong
+> (see ledger C8).
 
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the

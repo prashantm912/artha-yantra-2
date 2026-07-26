@@ -173,7 +173,12 @@ public class SignalEngine {
    *     of the other two, which is exactly how a totally dead engine used to report "0 loaded,
    *     0 unresolved" and be read as success
    */
-  private record ReloadOutcome(int loadedCount, int unresolvedDrops, int loadErrors) {
+  private record ReloadOutcome(
+      int loadedCount,
+      int unresolvedDrops,
+      int loadErrors,
+      long coverageGeneration,
+      Map<String, StrategyCoverageSnapshot.Classification> coverageClassifications) {
 
     /**
      * The ONLY success signal: NOTHING failed in a way a retry could fix.
@@ -586,6 +591,18 @@ public class SignalEngine {
    * @return what this reload COMPUTED (installed or not), or null when the engine is stopped
    */
   private synchronized ReloadOutcome reload(boolean keepBest) {
+    return reload(keepBest, true);
+  }
+
+  /**
+   * (Re)loads published+enabled strategies with explicit coverage terminalization.
+   *
+   * <p>The CONNECTED retry chain keeps each completed unsuccessful attempt {@code IN_FLIGHT}; it
+   * owns the final terminalization after the chain either becomes healthy or exhausts its attempts.
+   * A thrown attempt remains {@code IN_FLIGHT} as an aborted reload. Direct reload callers retain
+   * the historical immediate terminalization behavior.
+   */
+  private synchronized ReloadOutcome reload(boolean keepBest, boolean terminalizeCoverage) {
     if (stopped.get()) {
       return null;
     }
@@ -747,7 +764,9 @@ public class SignalEngine {
               + "never leave the engine holding less than it already did",
           retained, unresolvedDrops, loadErrors);
     }
-    ReloadOutcome outcome = new ReloadOutcome(fresh.size(), unresolvedDrops, loadErrors);
+    ReloadOutcome outcome =
+        new ReloadOutcome(
+            fresh.size(), unresolvedDrops, loadErrors, coverageGeneration, classifications);
     Set<LoadedIdentity> freshIdentities = identitiesOf(fresh);
     Set<LoadedIdentity> installedIdentities = identitiesOf(loaded);
 
@@ -771,7 +790,9 @@ public class SignalEngine {
       if (reloadLedger != null) {
         reloadLedger.record(fresh.size(), unresolvedDrops, loadErrors, false);
       }
-      completeCoverageReload(coverageGeneration, classifications);
+      if (terminalizeCoverage) {
+        completeCoverageReload(coverageGeneration, classifications);
+      }
       return outcome;
     }
     bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
@@ -789,7 +810,9 @@ public class SignalEngine {
     if (reloadLedger != null) {
       reloadLedger.record(fresh.size(), unresolvedDrops, loadErrors, true);
     }
-    completeCoverageReload(coverageGeneration, classifications);
+    if (terminalizeCoverage) {
+      completeCoverageReload(coverageGeneration, classifications);
+    }
     return outcome;
   }
 
@@ -2317,7 +2340,10 @@ public class SignalEngine {
       ReloadOutcome outcome = null;
       try {
         // keep-best: a RETRY must never leave the engine holding less than it already does.
-        outcome = reload(true);
+        // Keep coverage IN_FLIGHT until this coordinator knows whether the chain converged or
+        // exhausted. An exception still leaves the pre-body marker in place so an aborted attempt
+        // cannot be mistaken for the last completed snapshot.
+        outcome = reload(true, false);
       } catch (RuntimeException e) {
         log.warn("kite.status reload attempt {} failed: {}", attempt, e.toString());
       }
@@ -2329,6 +2355,9 @@ public class SignalEngine {
       // took an UNCOUNTED skip reports 0 drops over a DEAD engine. ReloadOutcome.healthy rejects
       // both, so success can never be reported while the engine holds zero usable strategies. A
       // legitimately all-swing registry has no live candidates ⇒ healthy on attempt 1.
+      if (outcome != null && (outcome.healthy() || attempt >= KITE_CONNECTED_RELOAD_MAX_ATTEMPTS)) {
+        completeCoverageReload(outcome.coverageGeneration(), outcome.coverageClassifications());
+      }
       if (outcome != null && outcome.healthy()) {
         log.info(
             "kite.status reload attempt {} resolved every universe ({} loaded) — retry complete",

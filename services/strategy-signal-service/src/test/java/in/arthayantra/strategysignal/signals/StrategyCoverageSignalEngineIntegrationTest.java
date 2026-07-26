@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.signals;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -11,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyschema.StrategyDocuments;
 import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
@@ -19,6 +21,7 @@ import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -28,6 +31,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -252,6 +257,135 @@ class StrategyCoverageSignalEngineIntegrationTest extends StrategySignalIntegrat
     }
   }
 
+  @Test
+  void connectedRetryLeavesIntermediateAttemptInFlightAndConvergesHealthy() throws IOException {
+    ObjectMapper objectMapper = new ObjectMapper();
+    JsonNode normal = StrategyDocuments.parse(NORMAL_YAML).config();
+    List<StrategyRepository.StrategyRow> rows = new ArrayList<>();
+    Map<UUID, StrategyRepository.VersionRow> versions = new LinkedHashMap<>();
+    add(rows, versions, new LinkedHashMap<>(), "coverage-retry-converges", futuresOfUnderlying(normal), UNRESOLVED);
+
+    StrategyRepository registry = registry(rows, versions);
+    AtomicBoolean available = new AtomicBoolean(false);
+    AtomicInteger resolutions = new AtomicInteger();
+    FuturesUniverseResolver resolver = mock(FuturesUniverseResolver.class);
+    when(resolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              resolutions.incrementAndGet();
+              return available.get()
+                  ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "COVERAGE-FUT")))
+                  : Optional.empty();
+            });
+
+    Clock clock = Clock.fixed(Instant.parse("2026-07-24T04:30:00Z"), ZoneOffset.UTC);
+    try (EngineFixture fixture = engine(registry, resolver, objectMapper, clock)) {
+      fixture.engine().reload();
+      int bootResolutions = resolutions.get();
+      fixture.engine().kiteConnectedReloadDelayMillis = 1_000L;
+      ReflectionTestUtils.invokeMethod(fixture.engine(), "requestKiteConnectedReload");
+
+      await()
+          .atMost(Duration.ofSeconds(5))
+          .until(
+              () ->
+                  resolutions.get() > bootResolutions
+                      && fixture.engine().strategyCoverageSnapshot().terminalState()
+                          == StrategyCoverageSnapshot.TerminalState.IN_FLIGHT);
+
+      List<StrategyCoverageAlert> alerts = new ArrayList<>();
+      new StrategyCoverageWatchdog(
+              fixture.engine(), registry, event -> alerts.add((StrategyCoverageAlert) event), clock, "ARMED", 180_000)
+          .sweep();
+      assertThat(alerts).isEmpty();
+
+      available.set(true);
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .until(
+              () ->
+                  !fixture.engine().kiteConnectedReloadInFlight()
+                      && fixture.engine().strategyCoverageSnapshot().terminalState()
+                          == StrategyCoverageSnapshot.TerminalState.HEALTHY);
+
+      StrategyCoverageSnapshot snapshot = fixture.engine().strategyCoverageSnapshot();
+      assertThat(snapshot.completedCurrentGeneration()).isTrue();
+      assertThat(snapshot.classifications().get("coverage-retry-converges")).isEqualTo(RESOLVED);
+    }
+  }
+
+  @Test
+  void exhaustedConnectedRetryTerminalizesDegradedAndPagesTheSlug() throws IOException {
+    ObjectMapper objectMapper = new ObjectMapper();
+    JsonNode normal = StrategyDocuments.parse(NORMAL_YAML).config();
+    List<StrategyRepository.StrategyRow> rows = new ArrayList<>();
+    Map<UUID, StrategyRepository.VersionRow> versions = new LinkedHashMap<>();
+    add(rows, versions, new LinkedHashMap<>(), "coverage-retry-exhausted", futuresOfUnderlying(normal), UNRESOLVED);
+    StrategyRepository registry = registry(rows, versions);
+    FuturesUniverseResolver resolver = mock(FuturesUniverseResolver.class);
+    when(resolver.resolve(anyString(), anyString(), anyString(), anyInt())).thenReturn(Optional.empty());
+    Clock clock = Clock.fixed(Instant.parse("2026-07-24T04:30:00Z"), ZoneOffset.UTC);
+
+    try (EngineFixture fixture = engine(registry, resolver, objectMapper, clock)) {
+      fixture.engine().reload();
+      fixture.engine().kiteConnectedReloadDelayMillis = 10L;
+      ReflectionTestUtils.invokeMethod(fixture.engine(), "requestKiteConnectedReload");
+
+      await().atMost(Duration.ofSeconds(10)).until(() -> !fixture.engine().kiteConnectedReloadInFlight());
+
+      List<StrategyCoverageAlert> alerts = new ArrayList<>();
+      new StrategyCoverageWatchdog(
+              fixture.engine(), registry, event -> alerts.add((StrategyCoverageAlert) event), clock, "ARMED", 1)
+          .sweep();
+
+      StrategyCoverageSnapshot snapshot = fixture.engine().strategyCoverageSnapshot();
+      assertThat(snapshot.terminalState())
+          .isEqualTo(StrategyCoverageSnapshot.TerminalState.DEGRADED_TERMINAL);
+      assertThat(snapshot.completedCurrentGeneration()).isTrue();
+      assertThat(alerts).singleElement().satisfies(alert -> {
+        assertThat(alert.kind()).isEqualTo(StrategyCoverageAlert.Kind.STRATEGY_DARK);
+        assertThat(alert.slug()).isEqualTo("coverage-retry-exhausted");
+        assertThat(alert.classification()).isEqualTo(UNRESOLVED);
+      });
+    }
+  }
+
+  @Test
+  void inFlightConnectedRetryTripsSnapshotMissingPastGrace() throws IOException {
+    ObjectMapper objectMapper = new ObjectMapper();
+    JsonNode normal = StrategyDocuments.parse(NORMAL_YAML).config();
+    List<StrategyRepository.StrategyRow> rows = new ArrayList<>();
+    Map<UUID, StrategyRepository.VersionRow> versions = new LinkedHashMap<>();
+    add(rows, versions, new LinkedHashMap<>(), "coverage-retry-missing", futuresOfUnderlying(normal), UNRESOLVED);
+    StrategyRepository registry = registry(rows, versions);
+    FuturesUniverseResolver resolver = mock(FuturesUniverseResolver.class);
+    when(resolver.resolve(anyString(), anyString(), anyString(), anyInt())).thenReturn(Optional.empty());
+    Clock engineClock = Clock.fixed(Instant.parse("2026-07-24T04:30:00Z"), ZoneOffset.UTC);
+    Clock sweepClock = Clock.fixed(Instant.parse("2026-07-24T04:31:00Z"), ZoneOffset.UTC);
+
+    try (EngineFixture fixture = engine(registry, resolver, objectMapper, engineClock)) {
+      fixture.engine().reload();
+      fixture.engine().kiteConnectedReloadDelayMillis = 10_000L;
+      ReflectionTestUtils.invokeMethod(fixture.engine(), "requestKiteConnectedReload");
+      await()
+          .atMost(Duration.ofSeconds(5))
+          .until(
+              () ->
+                  fixture.engine().strategyCoverageSnapshot().terminalState()
+                          == StrategyCoverageSnapshot.TerminalState.IN_FLIGHT
+                      && fixture.engine().strategyCoverageSnapshot().requestedGeneration()
+                          > fixture.engine().strategyCoverageSnapshot().completedGeneration());
+
+      List<StrategyCoverageAlert> alerts = new ArrayList<>();
+      new StrategyCoverageWatchdog(
+              fixture.engine(), registry, event -> alerts.add((StrategyCoverageAlert) event), sweepClock, "ARMED", 1)
+          .sweep();
+
+      assertThat(alerts).singleElement().extracting(StrategyCoverageAlert::kind)
+          .isEqualTo(StrategyCoverageAlert.Kind.SNAPSHOT_MISSING);
+    }
+  }
+
   private static final StrategyCoverageSnapshot.Classification RESOLVED =
       StrategyCoverageSnapshot.Classification.RESOLVED;
   private static final StrategyCoverageSnapshot.Classification RESOLVED_EMPTY =
@@ -391,6 +525,18 @@ class StrategyCoverageSignalEngineIntegrationTest extends StrategySignalIntegrat
 
   private static EngineFixture engine(
       StrategyRepository registry, FuturesUniverseResolver resolver, ObjectMapper objectMapper) {
+    return engine(
+        registry,
+        resolver,
+        objectMapper,
+        Clock.fixed(OffsetDateTime.of(2026, 7, 24, 10, 0, 0, 0, ZoneOffset.UTC).toInstant(), ZoneOffset.UTC));
+  }
+
+  private static EngineFixture engine(
+      StrategyRepository registry,
+      FuturesUniverseResolver resolver,
+      ObjectMapper objectMapper,
+      Clock clock) {
     LettuceConnectionFactory redis = new LettuceConnectionFactory(redisHost(), redisPort());
     redis.afterPropertiesSet();
     PrometheusMeterRegistry meters = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
@@ -404,7 +550,7 @@ class StrategyCoverageSignalEngineIntegrationTest extends StrategySignalIntegrat
             resolver,
             redis,
             objectMapper,
-            Clock.fixed(OffsetDateTime.of(2026, 7, 24, 10, 0, 0, 0, ZoneOffset.UTC).toInstant(), ZoneOffset.UTC),
+            clock,
             meters,
             Optional.empty(),
             Optional.empty(),
@@ -416,6 +562,17 @@ class StrategyCoverageSignalEngineIntegrationTest extends StrategySignalIntegrat
             60,
             true);
     return new EngineFixture(engine, redis, meters);
+  }
+
+  private static StrategyRepository registry(
+      List<StrategyRepository.StrategyRow> rows,
+      Map<UUID, StrategyRepository.VersionRow> versions) {
+    StrategyRepository registry = mock(StrategyRepository.class);
+    when(registry.listAll()).thenReturn(rows);
+    when(registry.countEnabledWithPublishedPointer()).thenReturn((long) rows.size());
+    when(registry.findVersionById(org.mockito.ArgumentMatchers.any(UUID.class)))
+        .thenAnswer(invocation -> Optional.ofNullable(versions.get(invocation.getArgument(0))));
+    return registry;
   }
 
   private record EngineFixture(

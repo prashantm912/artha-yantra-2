@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -143,7 +144,7 @@ class ManasAroraSwingEngineTest {
   }
 
   @Test
-  void aPositionWithPreAndPostSessionLotsIsRefusedAndRecordedAsSkipped() throws IOException {
+  void aPositionWithPreAndPostSessionLotsIsRefusedWithoutAFalseMissingBarSkip() throws IOException {
     ExitHarness h = new ExitHarness();
     h.stubAnchors(
         h.anchor(42L, h.series.get(24).bucketStart()), // 2026-06-25, before/equal to the pin
@@ -153,9 +154,34 @@ class ManasAroraSwingEngineTest {
         h.engine().runDaily(h.doctrine(false), LocalDate.of(2026, 6, 25), false);
 
     assertThat(run.exits()).isZero();
-    assertThat(run.exitSkipped()).as("mixed lots are refused, never partially evaluated").isEqualTo(1);
+    assertThat(run.exitSkipped()).as("mixed lots are refused, never partially evaluated").isZero();
+    assertThat(run.refusalReasons()).containsExactly("MIXED_PRE_POST_LOTS:TESTCO");
     verify(h.candles, never()).fetch(any(), any(), any(), any(), any());
     verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalExited));
+  }
+
+  @Test
+  void aDeadlineCrossedDuringEvaluationStopsBeforeTheNextMoneyEffect() throws IOException {
+    ExitHarness h = new ExitHarness();
+    AtomicInteger checks = new AtomicInteger();
+    SwingBatchEngine.SwingRun run =
+        h.engine()
+            .runDaily(
+                h.doctrine(false), LocalDate.of(2026, 6, 28), false, Optional.empty(), true,
+                () -> checks.incrementAndGet() > 1);
+
+    assertThat(run.exits()).isZero();
+    assertThat(run.deadlineReached()).isTrue();
+    verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalExited));
+  }
+
+  @Test
+  void aPostSessionLotCannotQualifyAnEntryOrPyramidAdd() throws IOException {
+    LocalDate session = LocalDate.of(2026, 6, 25);
+    AddResult r = runPyramidAdd(new BigDecimal("10000"), session.plusDays(1), session);
+
+    assertThat(r.run().entries()).as("a future lot must not be treated as an as-of pyramid position").isZero();
+    verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
   }
 
   @Test
@@ -179,6 +205,11 @@ class ManasAroraSwingEngineTest {
       SwingBatchEngine.SwingRun run, SignalRepository signals, ApplicationEventPublisher events) {}
 
   private AddResult runPyramidAdd(BigDecimal existingOpenRiskInr) throws IOException {
+    return runPyramidAdd(existingOpenRiskInr, null, null);
+  }
+
+  private AddResult runPyramidAdd(
+      BigDecimal existingOpenRiskInr, LocalDate anchorDate, LocalDate requiredBarDate) throws IOException {
     UUID strategyId = UUID.randomUUID();
     UUID publishedVersion = UUID.randomUUID();
     JsonNode config = breakoutConfig();
@@ -189,8 +220,10 @@ class ManasAroraSwingEngineTest {
 
     List<EngineCandle> series = craft(3_000L);
     SignalRepository signals = mock(SignalRepository.class);
+    OffsetDateTime anchorAt =
+        anchorDate == null ? series.get(19).bucketStart() : anchorDate.atStartOfDay().atOffset(IST);
     when(signals.activeEntries())
-        .thenReturn(List.of(anchor(42L, publishedVersion, new BigDecimal("142"), series.get(19).bucketStart())));
+        .thenReturn(List.of(anchor(42L, publishedVersion, new BigDecimal("142"), anchorAt)));
     stubInsert(signals, 55L);
 
     ManasFunnelClient funnel = mock(ManasFunnelClient.class);
@@ -216,7 +249,7 @@ class ManasAroraSwingEngineTest {
             funnel, signals, new ManasPyramidPolicy(true, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
             new ObjectMapper(), true, 520, 10, 1440);
 
-    return new AddResult(engine.runDaily(doctrine), signals, events);
+    return new AddResult(engine.runDaily(doctrine, requiredBarDate), signals, events);
   }
 
   // ---- harness --------------------------------------------------------------------------------

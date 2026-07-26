@@ -109,7 +109,7 @@ public class SwingBatchRecorder {
     try {
       if (!doctrine.enabled()) {
         return runLocked(
-            doctrine, sessionDate, entriesEnabled, markerPolicy, null, false);
+            doctrine, sessionDate, entriesEnabled, markerPolicy, null, false, null);
       }
       SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
       return runLocked(
@@ -118,7 +118,7 @@ public class SwingBatchRecorder {
           entriesEnabled,
           markerPolicy,
           read == null ? null : read.snapshot(),
-          doctrine.enabled());
+          doctrine.enabled(), null);
     } finally {
       lock.unlock();
     }
@@ -136,7 +136,25 @@ public class SwingBatchRecorder {
     try {
       // This overload is used by catch-up after it has read the historical schedule intent. The
       // current doctrine flag may have changed since that session, so it is deliberately not the gate.
-      return runLocked(doctrine, sessionDate, entriesEnabled, markerPolicy, candidateSnapshot, true);
+      return runLocked(doctrine, sessionDate, entriesEnabled, markerPolicy, candidateSnapshot, true, null);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  /** Runs from the catch-up snapshot with a deadline checked before the marker is written. */
+  public RunOutcome runAndRecord(
+      SwingDoctrine doctrine,
+      LocalDate sessionDate,
+      boolean entriesEnabled,
+      MarkerPolicy markerPolicy,
+      Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
+      SwingBatchEngine.RunDeadline deadline) {
+    ReentrantLock lock = mutex.lockFor(doctrine.batchName());
+    lock.lock();
+    try {
+      return runLocked(
+          doctrine, sessionDate, entriesEnabled, markerPolicy, candidateSnapshot, true, deadline);
     } finally {
       lock.unlock();
     }
@@ -148,12 +166,18 @@ public class SwingBatchRecorder {
       boolean entriesEnabled,
       MarkerPolicy markerPolicy,
       Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
-      boolean executionArmed) {
+      boolean executionArmed,
+      SwingBatchEngine.RunDeadline deadline) {
     LocalDate runDate = sessionDate != null ? sessionDate : LocalDate.now(clock.withZone(IST));
     SwingBatchEngine.SwingRun result =
         candidateSnapshot == null
-            ? engine.runDaily(doctrine, sessionDate, entriesEnabled)
-            : engine.runDaily(doctrine, sessionDate, entriesEnabled, candidateSnapshot, executionArmed);
+            ? deadline == null
+                ? engine.runDaily(doctrine, sessionDate, entriesEnabled)
+                : engine.runDaily(doctrine, sessionDate, entriesEnabled, deadline)
+            : deadline == null
+                ? engine.runDaily(doctrine, sessionDate, entriesEnabled, candidateSnapshot, executionArmed)
+                : engine.runDaily(
+                    doctrine, sessionDate, entriesEnabled, candidateSnapshot, executionArmed, deadline);
     if (!executionArmed) {
       return new RunOutcome(result, false); // disarmed no-op — nothing ran, nothing recorded
     }
@@ -167,7 +191,9 @@ public class SwingBatchRecorder {
         FlagSnapshotService.SWING_BATCH, doctrine.batchName() + ":" + runDate, doctrine.book(), flags);
     boolean markerRecorded = false;
     boolean snapshotAvailable = candidateSnapshot == null || candidateSnapshot.isPresent();
-    if (snapshotAvailable && (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0)) {
+    if (snapshotAvailable
+        && !result.deadlineReached()
+        && (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0)) {
       try {
         SwingBatchEngine.AdmissionProbe probe = result.admission();
         markerRecorded =
@@ -195,7 +221,12 @@ public class SwingBatchRecorder {
             + result.strategies() + " strategies)";
     publishQuietly(
         doctrine.batchName(),
-        result.exitSkipped() > 0
+        !result.refusalReasons().isEmpty()
+            ? new SwingBatchAlert(
+                doctrine.batchName(),
+                doctrine.alertLabel() + " batch REFUSED",
+                summary + " — " + String.join(", ", result.refusalReasons()))
+            : result.exitSkipped() > 0
             ? new SwingBatchAlert(
                 doctrine.batchName(),
                 doctrine.alertLabel() + ": " + result.exitSkipped() + " exit(s) NOT evaluated",

@@ -272,7 +272,8 @@ class MinerviniSwingEngineTest {
     SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(), LAST_BAR_DATE);
 
     assertThat(run.exits()).isZero();
-    assertThat(run.exitSkipped()).as("mixed lots are a recorded refusal").isEqualTo(1);
+    assertThat(run.exitSkipped()).as("mixed lots are refused, not reported as a missing bar").isZero();
+    assertThat(run.refusalReasons()).containsExactly("MIXED_PRE_POST_LOTS:TESTCO");
     verify(h.signals, org.mockito.Mockito.never()).transition(any(Long.class), any());
     verify(h.candles, org.mockito.Mockito.never()).fetch(any(), any(), any(), any(), any());
   }

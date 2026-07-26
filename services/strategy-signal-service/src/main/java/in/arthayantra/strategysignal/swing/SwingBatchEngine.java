@@ -22,6 +22,8 @@ import in.arthayantra.strategysignal.signals.SignalEmitted;
 import in.arthayantra.strategysignal.signals.SignalExited;
 import in.arthayantra.strategysignal.signals.SignalPublisher;
 import in.arthayantra.strategysignal.signals.SignalRepository;
+import in.arthayantra.strategysignal.signals.SwingBatchAlert;
+import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -36,6 +38,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -85,7 +88,24 @@ public class SwingBatchEngine {
    */
   public record SwingRun(
       int strategies, int candidates, int entries, int exits, int exitSkipped,
-      AdmissionProbe admission) {}
+      AdmissionProbe admission, List<String> refusalReasons, boolean deadlineReached) {
+
+    public SwingRun(
+        int strategies, int candidates, int entries, int exits, int exitSkipped,
+        AdmissionProbe admission) {
+      this(strategies, candidates, entries, exits, exitSkipped, admission, List.of(), false);
+    }
+
+    public SwingRun(
+        int strategies, int candidates, int entries, int exits, int exitSkipped,
+        AdmissionProbe admission, List<String> refusalReasons) {
+      this(strategies, candidates, entries, exits, exitSkipped, admission, refusalReasons, false);
+    }
+
+    public SwingRun {
+      refusalReasons = refusalReasons == null ? List.of() : List.copyOf(refusalReasons);
+    }
+  }
 
   /**
    * The ledger-F3 admission probe: a MEASUREMENT-ONLY read of how hard the book's slot cap bound this
@@ -108,9 +128,19 @@ public class SwingBatchEngine {
     }
   }
 
-  private record EntryResult(int candidates, int fired) {}
+  @FunctionalInterface
+  public interface RunDeadline {
 
-  private record ExitResult(int closed, int skipped) {}
+    boolean expired();
+
+    static RunDeadline never() {
+      return () -> false;
+    }
+  }
+
+  private record EntryResult(int candidates, int fired, List<String> refusalReasons, boolean deadlineReached) {}
+
+  private record ExitResult(int closed, int skipped, List<String> refusalReasons, boolean deadlineReached) {}
 
   private final StrategyRepository registry;
   private final MarketDataCandlesClient candles;
@@ -121,8 +151,37 @@ public class SwingBatchEngine {
   private final TransactionTemplate tx;
   private final ObjectMapper objectMapper;
   private final Clock clock;
+  private final SwingPaperEffectRepository paperEffects;
+  private final SwingBatchRefusalRepository refusals;
 
   /** Wires the shared collaborators (family-neutral); the family varies only via the doctrine arg. */
+  @Autowired
+  public SwingBatchEngine(
+      StrategyRepository registry,
+      MarketDataCandlesClient candles,
+      SignalRepository signals,
+      SignalPublisher publisher,
+      ApplicationEventPublisher events,
+      Optional<EmissionGuard> emissionGuard,
+      TransactionTemplate tx,
+      ObjectMapper objectMapper,
+      Clock clock,
+      SwingPaperEffectRepository paperEffects,
+      SwingBatchRefusalRepository refusals) {
+    this.registry = registry;
+    this.candles = candles;
+    this.signals = signals;
+    this.publisher = publisher;
+    this.events = events;
+    this.emissionGuard = emissionGuard;
+    this.tx = tx;
+    this.objectMapper = objectMapper;
+    this.clock = clock;
+    this.paperEffects = paperEffects;
+    this.refusals = refusals;
+  }
+
+  /** Backwards-compatible seam for focused unit tests that do not exercise the V049 ledgers. */
   public SwingBatchEngine(
       StrategyRepository registry,
       MarketDataCandlesClient candles,
@@ -133,15 +192,9 @@ public class SwingBatchEngine {
       TransactionTemplate tx,
       ObjectMapper objectMapper,
       Clock clock) {
-    this.registry = registry;
-    this.candles = candles;
-    this.signals = signals;
-    this.publisher = publisher;
-    this.events = events;
-    this.emissionGuard = emissionGuard;
-    this.tx = tx;
-    this.objectMapper = objectMapper;
-    this.clock = clock;
+    this(
+        registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
+        null, null);
   }
 
   /** Runs one full daily batch for a family: the entry pass over its funnel, then the exit pass. */
@@ -174,6 +227,15 @@ public class SwingBatchEngine {
    * {@code true}.
    */
   public SwingRun runDaily(SwingDoctrine doctrine, LocalDate requiredBarDate, boolean entriesEnabled) {
+    return runDaily(doctrine, requiredBarDate, entriesEnabled, RunDeadline.never());
+  }
+
+  /** Catch-up overload carrying the market-open deadline into the per-session engine. */
+  public SwingRun runDaily(
+      SwingDoctrine doctrine,
+      LocalDate requiredBarDate,
+      boolean entriesEnabled,
+      RunDeadline deadline) {
     if (!doctrine.enabled()) {
       return new SwingRun(0, 0, 0, 0, 0, AdmissionProbe.empty());
     }
@@ -181,7 +243,7 @@ public class SwingBatchEngine {
         entriesEnabled
             ? Optional.of(new SwingDoctrine.CandidateSnapshot(null, doctrine.candidates()))
             : Optional.empty();
-    return runDaily(doctrine, requiredBarDate, entriesEnabled, candidateSnapshot);
+    return runDaily(doctrine, requiredBarDate, entriesEnabled, candidateSnapshot, doctrine.enabled(), deadline);
   }
 
   /** Runs a batch from one already-fetched funnel snapshot; an empty Optional means the fetch failed. */
@@ -190,7 +252,7 @@ public class SwingBatchEngine {
       LocalDate requiredBarDate,
       boolean entriesEnabled,
       Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot) {
-    return runDaily(doctrine, requiredBarDate, entriesEnabled, candidateSnapshot, doctrine.enabled());
+    return runDaily(doctrine, requiredBarDate, entriesEnabled, candidateSnapshot, doctrine.enabled(), RunDeadline.never());
   }
 
   /** Runs from a snapshot while explicitly supplying the schedule-time arming state. */
@@ -200,12 +262,27 @@ public class SwingBatchEngine {
       boolean entriesEnabled,
       Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
       boolean executionArmed) {
+    return runDaily(
+        doctrine, requiredBarDate, entriesEnabled, candidateSnapshot, executionArmed, RunDeadline.never());
+  }
+
+  /** Runs from a snapshot and schedule-time arming state with an optional market-open deadline. */
+  public SwingRun runDaily(
+      SwingDoctrine doctrine,
+      LocalDate requiredBarDate,
+      boolean entriesEnabled,
+      Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
+      boolean executionArmed,
+      RunDeadline deadline) {
     // The single arming gate for BOTH the scheduler AND the on-demand POST /run: with the family flag
     // off the batch is a NO-OP whoever calls it (audit P9 — else a curious authenticated POST /run
     // fires entries + auto-paper before the owner has armed the flag).
     if (!executionArmed) {
       log.debug("{} swing batch disabled — skipping", doctrine.batchName());
       return new SwingRun(0, 0, 0, 0, 0, AdmissionProbe.empty());
+    }
+    if (deadline.expired()) {
+      return new SwingRun(0, 0, 0, 0, 0, AdmissionProbe.empty(), List.of(), true);
     }
     List<SwingStrategy> swings = loadPublishedSwingStrategies(doctrine);
     if (swings.isEmpty()) {
@@ -225,9 +302,13 @@ public class SwingBatchEngine {
         new java.util.HashSet<>(openLotsBySymbol(resolution).keySet());
     EntryResult entry =
         entriesEnabled
-            ? entryPass(doctrine, swings, resolution, seriesCache, candidates, requiredBarDate)
-            : new EntryResult(0, 0);
-    ExitResult exit = exitPass(doctrine, resolution, seriesCache, requiredBarDate);
+            ? entryPass(
+                doctrine, swings, resolution, seriesCache, candidates, requiredBarDate, deadline)
+            : new EntryResult(0, 0, List.of(), false);
+    ExitResult exit =
+        entry.deadlineReached()
+            ? new ExitResult(0, 0, List.of(), true)
+            : exitPass(doctrine, resolution, seriesCache, requiredBarDate, deadline);
     AdmissionProbe probe =
         entriesEnabled
             ? admissionProbe(
@@ -238,8 +319,12 @@ public class SwingBatchEngine {
             + " (would-enter {}, admitted {}, cap-exceedance {})",
         doctrine.batchName(), swings.size(), entry.candidates(), entry.fired(), exit.closed(),
         exit.skipped(), probe.wouldEnter(), probe.admitted(), probe.capExceedance());
+    List<String> refusalReasons = new ArrayList<>(entry.refusalReasons());
+    refusalReasons.addAll(exit.refusalReasons());
     return new SwingRun(
-        swings.size(), entry.candidates(), entry.fired(), exit.closed(), exit.skipped(), probe);
+        swings.size(), entry.candidates(), entry.fired(), exit.closed(), exit.skipped(), probe,
+        refusalReasons,
+        entry.deadlineReached() || exit.deadlineReached());
   }
 
   // ---- anchor resolution (audit H2) -----------------------------------------------------------
@@ -327,14 +412,14 @@ public class SwingBatchEngine {
   private EntryResult entryPass(
       SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
       Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates,
-      LocalDate requiredBarDate) {
+      LocalDate requiredBarDate, RunDeadline deadline) {
     // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped at the START
     // of the run takes no entries at all (cheap — skips the whole candidate scan).
     if (entryBlocked(doctrine)) {
-      return new EntryResult(0, 0);
+      return new EntryResult(0, 0, List.of(), false);
     }
     if (candidates.isEmpty()) {
-      return new EntryResult(0, 0);
+      return new EntryResult(0, 0, List.of(), false);
     }
     // The open lots per symbol at the START of the run (a DB snapshot). A symbol with ≥1 lot is
     // "held": with a NONE pyramid policy it is skipped (single-lot); with an add-capable policy it may
@@ -343,11 +428,33 @@ public class SwingBatchEngine {
     java.util.Set<String> firedThisRun = new java.util.HashSet<>();
     PyramidPolicy pyramid = doctrine.pyramid();
     int fired = 0;
+    List<String> refusalReasons = new ArrayList<>();
     for (SwingCandidate c : candidates) {
+      if (deadline.expired()) {
+        return new EntryResult(candidates.size(), fired, refusalReasons, true);
+      }
       if (firedThisRun.contains(c.symbol())) {
         continue; // already emitted an entry/add for this symbol earlier in the run
       }
-      List<SignalRepository.SignalRow> lots = openLots.getOrDefault(c.symbol(), List.of());
+      List<SignalRepository.SignalRow> allLots = openLots.getOrDefault(c.symbol(), List.of());
+      if (requiredBarDate != null && !allLots.isEmpty()) {
+        List<SignalRepository.SignalRow> asOfLots = lotsAsOf(allLots, requiredBarDate);
+        if (asOfLots.size() != allLots.size()) {
+          String reason =
+              asOfLots.isEmpty() ? postSessionLotReason(c.symbol()) : mixedLotReason(c.symbol());
+          recordMixedLotRefusal(doctrine, requiredBarDate, c.symbol(), reason);
+          refusalReasons.add(reason);
+          continue;
+        }
+      }
+      // A retry must not emit a second logical entry for the same pinned symbol after a prior paper
+      // effect was claimed. That second signal would average into the same paper position.
+      LocalDate effectSession = effectSession(requiredBarDate);
+      if (paperEffects != null
+          && paperEffects.entryAttempted(doctrine.batchName(), effectSession, c.symbol())) {
+        continue;
+      }
+      List<SignalRepository.SignalRow> lots = allLots;
       boolean isAdd = !lots.isEmpty();
       if (isAdd && !pyramid.hasRoom(lots)) {
         continue; // held with no room → skip BEFORE any fetch (the single-lot held-skip)
@@ -383,7 +490,7 @@ public class SwingBatchEngine {
             log.info(
                 "{} swing: {} book gate tripped mid-run after {} entries — stopping",
                 doctrine.batchName(), doctrine.book(), fired);
-            return new EntryResult(candidates.size(), fired);
+            return new EntryResult(candidates.size(), fired, refusalReasons, false);
           }
           // §3.4.3: an ADD only goes on if the book's aggregate open risk stays within the portfolio
           // cap. A fresh (first) entry is unbounded here — the ordinary book governor already bounds it.
@@ -396,14 +503,20 @@ public class SwingBatchEngine {
                 doctrine.batchName(), c.symbol());
             break; // no setup may add more risk for this symbol this run
           }
-          emitEntry(doctrine, strat, c, bar, eval.get(), bank, series.size() - 1, lots.size() + 1);
-          firedThisRun.add(c.symbol()); // one entry/add per symbol per run
-          fired++;
+          if (deadline.expired()) {
+            return new EntryResult(candidates.size(), fired, refusalReasons, true);
+          }
+          if (emitEntry(
+              doctrine, strat, c, bar, eval.get(), bank, series.size() - 1, lots.size() + 1,
+              effectSession)) {
+            firedThisRun.add(c.symbol()); // one entry/add per symbol per run
+            fired++;
+          }
           break;
         }
       }
     }
-    return new EntryResult(candidates.size(), fired);
+    return new EntryResult(candidates.size(), fired, refusalReasons, false);
   }
 
   /** True when the family book's per-book gate (kill-switch / caps / daily-loss) blocks entry. */
@@ -522,9 +635,10 @@ public class SwingBatchEngine {
         .orElseThrow();
   }
 
-  private void emitEntry(
+  private boolean emitEntry(
       SwingDoctrine doctrine, SwingStrategy strat, SwingCandidate c, EngineCandle bar,
-      EntryEvaluator.Evaluation eval, IndicatorBank bank, int index, int lotNumber) {
+      EntryEvaluator.Evaluation eval, IndicatorBank bank, int index, int lotNumber,
+      LocalDate effectSession) {
     BigDecimal entryPrice = bar.close();
     ExitEvaluator.EntryLevels levels =
         ExitEvaluator.entryLevels(
@@ -560,6 +674,10 @@ public class SwingBatchEngine {
     long id =
         tx.execute(
             status -> {
+              if (paperEffects != null
+                  && !paperEffects.expectEntry(doctrine.batchName(), effectSession, c.symbol())) {
+                return -1L;
+              }
               long newId =
                   signals.insert(
                       strat.versionId(), EX, c.symbol(), IV, "ENTRY", "BUY", entryPrice, stopLoss,
@@ -568,8 +686,21 @@ public class SwingBatchEngine {
                 signals.stampSuggestedQty(newId, suggestedQty);
               }
               doctrine.stampDetail(newId, detailJson);
+              if (paperEffects != null) {
+                paperEffects.bindEntry(
+                    doctrine.batchName(), effectSession, c.symbol(), newId,
+                    suggestedQty == null ? 0L : suggestedQty.longValue());
+                if (suggestedQty == null || suggestedQty.signum() <= 0) {
+                  // No sized paper order can be produced for this signal; retain the ledger row as
+                  // the idempotency marker but do not strand the session behind a nonexistent effect.
+                  paperEffects.confirmEntry(newId);
+                }
+              }
               return newId;
             });
+    if (id <= 0) {
+      return false;
+    }
     JsonNode canonical;
     try {
       canonical = objectMapper.readTree(breakdownJson);
@@ -588,13 +719,14 @@ public class SwingBatchEngine {
         "{} swing ENTRY #{} {} {} at {} (composite {})",
         doctrine.batchName(), id, strat.slug(), c.symbol(), entryPrice,
         eval.breakdown().composite());
+    return true;
   }
 
   // ---- exit pass ----------------------------------------------------------------------------
 
   private ExitResult exitPass(
       SwingDoctrine doctrine, AnchorResolution resolution,
-      Map<String, List<EngineCandle>> seriesCache, LocalDate requiredBarDate) {
+      Map<String, List<EngineCandle>> seriesCache, LocalDate requiredBarDate, RunDeadline deadline) {
     // Group the open lots by symbol. A pyramided symbol holds several lots sharing ONE averaged paper
     // position (§3.4); the governing stop is the OLDEST lot's trailed stop — the tightest, first to
     // hit (§3.5.D). So the exit is driven off that lot and, when it fires, closes the whole position
@@ -603,7 +735,11 @@ public class SwingBatchEngine {
     Map<String, List<SignalRepository.SignalRow>> bySymbol = openLotsBySymbol(resolution);
     int closed = 0;
     int skipped = 0;
+    List<String> refusalReasons = new ArrayList<>();
     for (Map.Entry<String, List<SignalRepository.SignalRow>> e : bySymbol.entrySet()) {
+      if (deadline.expired()) {
+        return new ExitResult(closed, skipped, refusalReasons, true);
+      }
       List<SignalRepository.SignalRow> allLots = e.getValue();
       List<SignalRepository.SignalRow> lots = lotsAsOf(allLots, requiredBarDate);
       if (lots.isEmpty()) {
@@ -615,11 +751,15 @@ public class SwingBatchEngine {
         continue;
       }
       if (requiredBarDate != null && lots.size() != allLots.size()) {
+        if (!lots.isEmpty()) {
+          String reason = mixedLotReason(e.getKey());
+          recordMixedLotRefusal(doctrine, requiredBarDate, e.getKey(), reason);
+          refusalReasons.add(reason);
+        }
         log.error(
             "{} swing exit: {} has mixed pre/post-session lots for pinned session {} â€” refusing"
                 + " approximate evaluation",
             doctrine.batchName(), e.getKey(), requiredBarDate);
-        skipped++;
         continue;
       }
       SignalRepository.SignalRow primary = oldestLot(lots);
@@ -666,11 +806,56 @@ public class SwingBatchEngine {
                   ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex),
               series.size() - 1);
       if (exit.isPresent()) {
-        emitExit(doctrine, strat, primary, lots, series.get(series.size() - 1), exit.get());
-        closed++;
+        if (deadline.expired()) {
+          return new ExitResult(closed, skipped, refusalReasons, true);
+        }
+        if (emitExit(
+            doctrine,
+            strat,
+            primary,
+            lots,
+            series.get(series.size() - 1),
+            exit.get(),
+            effectSession(requiredBarDate))) {
+          closed++;
+        }
       }
     }
-    return new ExitResult(closed, skipped);
+    return new ExitResult(closed, skipped, refusalReasons, false);
+  }
+
+  private void recordMixedLotRefusal(
+      SwingDoctrine doctrine, LocalDate sessionDate, String symbol, String reason) {
+    if (refusals != null) {
+      try {
+        refusals.record(doctrine.batchName(), sessionDate, symbol, reason);
+      } catch (RuntimeException e) {
+        log.error(
+            "{} swing: failed to persist refusal {} for {} {}",
+            doctrine.batchName(), reason, sessionDate, symbol, e);
+      }
+    }
+    try {
+      events.publishEvent(
+          new SwingBatchAlert(
+              doctrine.batchName(),
+              doctrine.alertLabel() + " " + reason + " refusal",
+              sessionDate + " " + reason + " — refusing as-of evaluation; no approximate money effect was emitted."));
+    } catch (RuntimeException e) {
+      log.warn("{} swing refusal alert failed: {}", doctrine.batchName(), e.getMessage());
+    }
+  }
+
+  private static String mixedLotReason(String symbol) {
+    return "MIXED_PRE_POST_LOTS:" + symbol;
+  }
+
+  private static String postSessionLotReason(String symbol) {
+    return "POST_SESSION_LOT_PRESENT:" + symbol;
+  }
+
+  private LocalDate effectSession(LocalDate requiredBarDate) {
+    return requiredBarDate != null ? requiredBarDate : LocalDate.now(clock.withZone(IST));
   }
 
   /** Returns only lots that existed at the pinned session; an unpinned run keeps the live set intact. */
@@ -738,15 +923,25 @@ public class SwingBatchEngine {
     return List.of();
   }
 
-  private void emitExit(
-      SwingDoctrine doctrine, SwingStrategy strat, SignalRepository.SignalRow primary,
-      List<SignalRepository.SignalRow> lots, EngineCandle bar, ExitEvaluator.ExitDecision exit) {
+  private boolean emitExit(
+      SwingDoctrine doctrine,
+      SwingStrategy strat,
+      SignalRepository.SignalRow primary,
+      List<SignalRepository.SignalRow> lots,
+      EngineCandle bar,
+      ExitEvaluator.ExitDecision exit,
+      LocalDate effectSession) {
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(IST);
     // the paper close_reason taxonomy is UPPERCASE (STOP_LOSS / TRAILING_STOP / SIGNAL_EXIT / …)
     String reason = exit.type().toUpperCase(Locale.ROOT);
     long id =
         tx.execute(
-            status -> {
+      status -> {
+              if (paperEffects != null
+                  && !paperEffects.expectExit(
+                      doctrine.batchName(), effectSession, primary.id(), reason, bar.close())) {
+                return -1L;
+              }
               long newId =
                   signals.insert(
                       strat.versionId(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(),
@@ -758,8 +953,14 @@ public class SwingBatchEngine {
               for (SignalRepository.SignalRow lot : lots) {
                 signals.transition(lot.id(), "EXPIRED");
               }
+              if (paperEffects != null) {
+                paperEffects.bindExit(doctrine.batchName(), effectSession, primary.id(), newId);
+              }
               return newId;
             });
+    if (id <= 0) {
+      return false;
+    }
     publisher.publish(
         id, strat.versionId(), strat.name(), strat.slug(), strat.version(), strat.checksum(),
         doctrine.book(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(), null, null,
@@ -775,6 +976,7 @@ public class SwingBatchEngine {
         "{} swing EXIT #{} {} {} at {} ({}{})",
         doctrine.batchName(), id, strat.slug(), primary.tradingsymbol(), bar.close(), reason,
         lots.size() > 1 ? " — " + lots.size() + " lots" : "");
+    return true;
   }
 
   // ---- shared helpers -----------------------------------------------------------------------

@@ -62,6 +62,45 @@ public class SwingCatchUpStateRepository {
         .findFirst();
   }
 
+  /**
+   * Seeds every missing session before the catch-up takes its JVM mutex or starts funnel/candle work.
+   * A canonical run marker wins over a seed, and an existing PENDING/RUNNING/terminal row is never
+   * overwritten.
+   */
+  public void seedMissing(String batch, java.util.List<LocalDate> sessions) {
+    for (LocalDate session : sessions) {
+      jdbc.update(
+          """
+          INSERT INTO swing_catchup_runs (batch, session_date, status, attempts, updated_at)
+          SELECT ?, ?, 'PENDING', 0, now()
+          WHERE NOT EXISTS (
+            SELECT 1 FROM swing_batch_runs WHERE batch=? AND run_date=?
+          )
+          ON CONFLICT (batch, session_date) DO NOTHING
+          """,
+          batch,
+          java.sql.Date.valueOf(session),
+          batch,
+          java.sql.Date.valueOf(session));
+    }
+  }
+
+  /** Name used by the catch-up coordinator: seed the window before taking its JVM mutex. */
+  public void seedWindow(String batch, java.util.List<LocalDate> sessions) {
+    seedMissing(batch, sessions);
+  }
+
+  /** Seeds unresolved paper-effect sessions even when their canonical run marker was already written. */
+  public void seedPending(String batch, java.util.List<LocalDate> sessions) {
+    for (LocalDate session : sessions) {
+      jdbc.update(
+          "INSERT INTO swing_catchup_runs (batch, session_date, status, attempts, updated_at)"
+              + " VALUES (?, ?, 'PENDING', 0, now()) ON CONFLICT (batch, session_date) DO NOTHING",
+          batch,
+          java.sql.Date.valueOf(session));
+    }
+  }
+
   /** Returns every retryable row, including rows older than the ordinary rolling session window. */
   public java.util.List<LocalDate> retryableSessions(String batch, int staleLeaseMinutes) {
     return jdbc.query(
@@ -108,7 +147,23 @@ public class SwingCatchUpStateRepository {
 
   /** Retryable partial — a held anchor's daily bar was missing; a later session may resolve it. */
   public void markPending(String batch, LocalDate session) {
-    setStatus(batch, session, "PENDING");
+    jdbc.update(
+        "UPDATE swing_catchup_runs SET status = 'PENDING', updated_at = now()"
+            + " WHERE batch = ? AND session_date = ?"
+            + " AND status IN ('RUNNING', 'PENDING')",
+        batch,
+        java.sql.Date.valueOf(session));
+  }
+
+  /** Retryable partial with a durable, structured reason that survives later retries. */
+  public void markPending(String batch, LocalDate session, String reason) {
+    jdbc.update(
+        "UPDATE swing_catchup_runs SET status = 'PENDING', reason = COALESCE(?, reason),"
+            + " updated_at = now() WHERE batch = ? AND session_date = ?"
+            + " AND status IN ('RUNNING', 'PENDING')",
+        reason,
+        batch,
+        java.sql.Date.valueOf(session));
   }
 
   /** Terminal give-up — the session exhausted its attempt budget without completing. */
@@ -123,7 +178,8 @@ public class SwingCatchUpStateRepository {
         INSERT INTO swing_catchup_runs (batch, session_date, status, attempts, reason, updated_at)
         VALUES (?, ?, 'ABANDONED', 0, ?, now())
         ON CONFLICT (batch, session_date) DO UPDATE
-          SET status = 'ABANDONED', reason = EXCLUDED.reason, updated_at = now()
+          SET status = 'ABANDONED', reason = COALESCE(swing_catchup_runs.reason, EXCLUDED.reason),
+              updated_at = now()
           WHERE swing_catchup_runs.status NOT IN ('DONE', 'ABANDONED', 'DISARMED')
         """,
         batch, java.sql.Date.valueOf(session), reason);
@@ -131,7 +187,7 @@ public class SwingCatchUpStateRepository {
 
   private void setStatus(String batch, LocalDate session, String status) {
     jdbc.update(
-        "UPDATE swing_catchup_runs SET status = ?, reason = NULL, updated_at = now()"
+        "UPDATE swing_catchup_runs SET status = ?, updated_at = now()"
             + " WHERE batch = ? AND session_date = ?"
             + " AND status IN ('RUNNING', 'PENDING')",
         status, batch, java.sql.Date.valueOf(session));

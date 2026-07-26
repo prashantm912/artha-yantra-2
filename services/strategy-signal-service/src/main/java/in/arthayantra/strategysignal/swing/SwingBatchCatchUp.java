@@ -1,11 +1,15 @@
 package in.arthayantra.strategysignal.swing;
 
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
+import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
+import in.arthayantra.strategysignal.signals.SwingPaperEffectRetry;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -17,6 +21,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -62,10 +67,11 @@ import org.springframework.stereotype.Component;
  * real entries and real paper exits, so arming it is the owner's call.
  */
 @Component
+@SuppressWarnings({"StringConcatToTextBlock", "ThreadJoinLoop"})
 public class SwingBatchCatchUp {
 
   private static final Logger log = LoggerFactory.getLogger(SwingBatchCatchUp.class);
-  private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+  private static final ZoneId IST = ZoneOffset.ofHoursMinutes(5, 30);
   /** A live run never approaches this; the daily cadence makes any RUNNING claim this old a crash. */
   private static final int STALE_LEASE_MINUTES = 30;
 
@@ -73,6 +79,8 @@ public class SwingBatchCatchUp {
   private final SwingBatchRunRepository runs;
   private final SwingCatchUpStateRepository state;
   private final SwingBatchIntentRepository intents;
+  private final SwingPaperEffectRepository paperEffects;
+  private final SignalRepository signals;
   private final SwingRunMutex mutex;
   private final List<SwingDoctrine> doctrines;
   private final ApplicationEventPublisher events;
@@ -81,12 +89,15 @@ public class SwingBatchCatchUp {
   private final boolean enabled;
   private final int maxAttempts;
 
-  /** Wires the recorder, the marker + claim repos, the run mutex, every family doctrine, the bus, and the knobs. */
+  /** Wires the recorder, durable catch-up/effect repos, every family doctrine, the bus, and the knobs. */
+  @Autowired
   public SwingBatchCatchUp(
       SwingBatchRecorder recorder,
       SwingBatchRunRepository runs,
       SwingCatchUpStateRepository state,
       SwingBatchIntentRepository intents,
+      SwingPaperEffectRepository paperEffects,
+      SignalRepository signals,
       SwingRunMutex mutex,
       List<SwingDoctrine> doctrines,
       ApplicationEventPublisher events,
@@ -97,12 +108,49 @@ public class SwingBatchCatchUp {
     this.runs = runs;
     this.state = state;
     this.intents = intents;
+    this.paperEffects = paperEffects;
+    this.signals = signals;
     this.mutex = mutex;
     this.doctrines = doctrines;
     this.events = events;
     this.clock = clock;
     this.enabled = enabled;
     this.maxAttempts = Math.max(1, maxAttempts);
+  }
+
+  /** Backwards-compatible constructor for focused catch-up tests that predate the V049 seams. */
+  public SwingBatchCatchUp(
+      SwingBatchRecorder recorder,
+      SwingBatchRunRepository runs,
+      SwingCatchUpStateRepository state,
+      SwingBatchIntentRepository intents,
+      SwingPaperEffectRepository paperEffects,
+      SwingRunMutex mutex,
+      List<SwingDoctrine> doctrines,
+      ApplicationEventPublisher events,
+      Clock clock,
+      boolean enabled,
+      int maxAttempts) {
+    this(
+        recorder, runs, state, intents, paperEffects, null, mutex, doctrines, events, clock, enabled,
+        maxAttempts);
+  }
+
+  /** Backwards-compatible constructor for focused catch-up tests that predate the V049 seams. */
+  public SwingBatchCatchUp(
+      SwingBatchRecorder recorder,
+      SwingBatchRunRepository runs,
+      SwingCatchUpStateRepository state,
+      SwingBatchIntentRepository intents,
+      SwingRunMutex mutex,
+      List<SwingDoctrine> doctrines,
+      ApplicationEventPublisher events,
+      Clock clock,
+      boolean enabled,
+      int maxAttempts) {
+    this(
+        recorder, runs, state, intents, null, null, mutex, doctrines, events, clock, enabled,
+        maxAttempts);
   }
 
   /**
@@ -144,6 +192,26 @@ public class SwingBatchCatchUp {
       if (!enabled) {
         continue; // recovery feature is off; leave all ledger rows for a later enabled sweep
       }
+      Optional<LocalDate> lastRun = runs.lastRunDate(doctrine.batchName());
+      List<LocalDate> pendingEffectSessions =
+          paperEffects == null
+              ? List.of()
+              : paperEffects.pendingSessions(doctrine.batchName());
+      if (lastRun.isEmpty() && pendingEffectSessions.isEmpty()) {
+        // A blank marker table has no evidence that this deployment owns the rolling history. Do not
+        // seed it now and accidentally replay those sessions after the first on-time marker lands.
+        continue;
+      }
+      // SEED before taking the family mutex. A busy lock, a deadline return, or an exception before
+      // the old claim point must not let a window session disappear without a retryable durable row.
+      // A blank marker table is deliberately left untouched: there is no evidence this deployment
+      // owns that history yet.
+      if (lastRun.isPresent()) {
+        state.seedWindow(doctrine.batchName(), window);
+      }
+      if (!pendingEffectSessions.isEmpty()) {
+        state.seedPending(doctrine.batchName(), pendingEffectSessions);
+      }
       // Hold the family run lock across its whole sweep so a manual POST /run cannot interleave and
       // double a fill. tryLock (not lock): a run already in flight means we simply retry next sweep,
       // never block the shared scheduler thread.
@@ -153,7 +221,7 @@ public class SwingBatchCatchUp {
         continue;
       }
       try {
-        catchUpFamily(doctrine, window);
+        catchUpFamily(doctrine);
       } catch (RuntimeException e) {
         log.error("swing catch-up for {} failed: {}", doctrine.batchName(), e.getMessage(), e);
       } finally {
@@ -174,14 +242,13 @@ public class SwingBatchCatchUp {
     return out;
   }
 
-  private void catchUpFamily(SwingDoctrine doctrine, List<LocalDate> window) {
+  private void catchUpFamily(SwingDoctrine doctrine) {
     String batch = doctrine.batchName();
     List<LocalDate> retryable = state.retryableSessions(batch, STALE_LEASE_MINUTES);
     if (retryable == null) {
       retryable = List.of();
     }
-    Set<LocalDate> sessions = new TreeSet<>(window);
-    sessions.addAll(retryable);
+    Set<LocalDate> sessions = new TreeSet<>(retryable);
     if (runs.lastRunDate(batch).isEmpty() && retryable.isEmpty()) {
       // Fresh marker table (fresh deploy) — no watermark means no evidence anything was MISSED, and a
       // catch-up on a blank slate would fire a full pass off an unowned history. (Same posture as the canary.)
@@ -202,11 +269,18 @@ public class SwingBatchCatchUp {
   private void catchUpSession(SwingDoctrine doctrine, LocalDate session, boolean retryable) {
     String batch = doctrine.batchName();
     if (runs.hasRun(batch, session)) {
-      // A crash can leave the canonical marker committed while the catch-up ledger is still
-      // RUNNING/PENDING. Reconcile that active row to terminal DONE; terminal rows are guarded by the
-      // repository and remain ABANDONED/DISARMED.
       if (retryable) {
-        state.markDone(batch, session);
+        repairPendingEffects(batch, session);
+        if (hasUnconfirmedPaperEffects(batch, session)) {
+          state.markPending(batch, session, "PAPER_EFFECT_UNCONFIRMED");
+          alert(
+              doctrine,
+              "catch-up PAPER EFFECTS UNCONFIRMED for " + session,
+              "The canonical batch marker exists, but one or more paper effects are still CLAIMED;"
+                  + " the session remains retryable and will be repaired on the next sweep.");
+        } else {
+          state.markDone(batch, session);
+        }
       }
       return; // the on-time batch (or a prior complete catch-up) already ran this session
     }
@@ -244,23 +318,54 @@ public class SwingBatchCatchUp {
               + batch + "-swing/run if still needed.");
       return;
     }
+    if (marketOpenDeadlinePassed()) {
+      state.markPending(batch, session, "MARKET_OPEN_DEADLINE");
+      return;
+    }
+    repairPendingEffects(batch, session);
     Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot = readCandidateSnapshot(doctrine);
     boolean entriesReady =
         candidateSnapshot.map(snapshot -> session.equals(snapshot.screenDate())).orElse(false);
     SwingBatchRecorder.RunOutcome outcome =
         recorder.runAndRecord(
-            doctrine, session, entriesReady, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
-            candidateSnapshot);
+            doctrine,
+            session,
+            entriesReady,
+            SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            candidateSnapshot,
+            this::marketOpenDeadlinePassed);
     if (outcome == null) {
       // Compatibility for pre-snapshot test doubles. The real recorder always returns an outcome from
       // the snapshot-aware overload above.
       outcome =
-          recorder.runAndRecord(doctrine, session, entriesReady, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE);
+          recorder.runAndRecord(
+              doctrine,
+              session,
+              entriesReady,
+              SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+              candidateSnapshot);
+    }
+    if (outcome == null) {
+      // Compatibility for recorder doubles from before the immutable snapshot seam.
+      outcome =
+          recorder.runAndRecord(
+              doctrine, session, entriesReady, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE);
     }
     SwingBatchEngine.SwingRun run = outcome.run();
     String summary =
         run.candidates() + " candidates, " + run.entries() + " entries, " + run.exits() + " exits, "
-            + run.exitSkipped() + " exit-skipped";
+            + run.exitSkipped() + " exit-skipped, " + run.refusalReasons().size() + " refusal(s)";
+    if (run.deadlineReached()) {
+      state.markPending(batch, session, "MARKET_OPEN_DEADLINE");
+      alert(
+          doctrine,
+          "catch-up DEADLINE for " + session,
+          "The market-open deadline crossed before the next money effect; the current claim remains"
+              + " retryable and no completeness marker was accepted.");
+      return;
+    }
+    repairPendingEffects(batch, session);
+    boolean paperEffectsConfirmed = !hasUnconfirmedPaperEffects(batch, session);
     // DONE requires BOTH: every held stop evaluated AND the canonical swing_batch_runs marker actually
     // written. A marker-write failure (fail-soft-swallowed in the recorder) leaves hasRun false, so a
     // DONE claim here would strand the session forever (hasRun false → looks un-run, claim DONE → never
@@ -275,6 +380,25 @@ public class SwingBatchCatchUp {
           doctrine, "catch-up INPUTS UNAVAILABLE for " + session,
           "The " + session + " batch could not read one immutable funnel snapshot. " + summary
               + "; the session stays retryable and will be attempted again.");
+    } else if (!paperEffectsConfirmed) {
+      state.markPending(batch, session, "PAPER_EFFECT_UNCONFIRMED");
+      log.error(
+          "swing catch-up: {} paper effect confirmation incomplete for {} — leaving retryable",
+          batch,
+          session);
+      alert(
+          doctrine,
+          "catch-up PAPER EFFECTS UNCONFIRMED for " + session,
+          "The batch produced " + summary
+              + ", but at least one expected paper effect is not CONFIRMED; repair will be retried.");
+    } else if (!run.refusalReasons().isEmpty()) {
+      String reason = run.refusalReasons().get(0);
+      state.markPending(batch, session, reason);
+      alert(
+          doctrine,
+          "catch-up REFUSED for " + session,
+          "The session remains retryable because the engine refused an approximate money effect: "
+              + reason + ". " + summary);
     } else if (run.exitSkipped() == 0 && outcome.markerRecorded()) {
       state.markDone(batch, session);
       log.warn("swing catch-up: {} caught up {} — {}", batch, session, summary);
@@ -304,6 +428,86 @@ public class SwingBatchCatchUp {
           doctrine, "catch-up INCOMPLETE for " + session,
           "Caught up what it could for " + session + " (" + summary + ") but " + run.exitSkipped()
               + " held stop(s) had no daily bar — leaving the session retryable for the next sweep.");
+    }
+  }
+
+  /** Reconciles visible paper effects and replays unresolved claimed effects through the event bus. */
+  private void repairPendingEffects(String batch, LocalDate session) {
+    if (paperEffects == null) {
+      return;
+    }
+    if (marketOpenDeadlinePassed()) {
+      return;
+    }
+    List<SwingPaperEffectRepository.Effect> pending;
+    try {
+      pending = paperEffects.repairable(batch, session);
+    } catch (RuntimeException e) {
+      log.error("swing catch-up: paper-effect ledger read failed for {} {}", batch, session, e);
+      return;
+    }
+    for (SwingPaperEffectRepository.Effect effect : pending) {
+      if (marketOpenDeadlinePassed()) {
+        return;
+      }
+      try {
+        boolean alreadyApplied =
+            "ENTRY".equals(effect.effectType())
+                ? effect.signalId() != null && paperEffects.entryConfirmedByPaper(effect.signalId())
+                : effect.anchorSignalId() != null
+                    && paperEffects.exitConfirmedByPaper(effect.anchorSignalId());
+        if (alreadyApplied) {
+          if ("ENTRY".equals(effect.effectType())) {
+            paperEffects.confirmEntry(effect.signalId());
+          } else {
+            paperEffects.confirmExit(effect.anchorSignalId());
+          }
+          continue;
+        }
+        if ("ENTRY".equals(effect.effectType())) {
+          if (signals == null || effect.signalId() == null) {
+            continue;
+          }
+          signals
+              .find(effect.signalId())
+              .filter(row -> row.suggestedQty() != null && row.suggestedQty().intValue() > 0)
+              .ifPresent(
+                  row ->
+                      events.publishEvent(
+                          SwingPaperEffectRetry.entry(
+                              batch,
+                              session,
+                              row.id(),
+                              row.suggestedQty().intValue(),
+                              row.entryPrice(),
+                              row.scalperDetail() != null)));
+        } else if (effect.anchorSignalId() != null && effect.exitSignalId() != null) {
+          events.publishEvent(
+              SwingPaperEffectRetry.exit(
+                  batch,
+                  session,
+                  effect.anchorSignalId(),
+                  effect.exitSignalId(),
+                  effect.closeReason(),
+                  effect.closePrice()));
+        }
+      } catch (RuntimeException e) {
+        log.warn(
+            "swing catch-up: paper effect {} repair failed: {}", effect.effectKey(), e.getMessage());
+      }
+    }
+  }
+
+  /** Ledger read failure is fail-closed: an unverifiable paper effect cannot permit DONE. */
+  private boolean hasUnconfirmedPaperEffects(String batch, LocalDate session) {
+    if (paperEffects == null) {
+      return false;
+    }
+    try {
+      return !paperEffects.allConfirmed(batch, session);
+    } catch (RuntimeException e) {
+      log.error("swing catch-up: paper-effect ledger verification failed for {} {}", batch, session, e);
+      return true;
     }
   }
 

@@ -2,7 +2,9 @@ package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -10,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
+import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -60,6 +63,29 @@ class PaperSignalListenerTest {
     ScalperAccountModel accounts = mock(ScalperAccountModel.class);
     new PaperSignalListener(paper, accounts, noStraddle()).onSignalTaken(new SignalTaken(7L, null, null, true));
     verify(paper, never()).openOrder(any());
+  }
+
+  @Test
+  void aRetryAfterAnOpenWasAppliedDoesNotAverageThePositionAgain() {
+    PaperService paper = mock(PaperService.class);
+    ScalperAccountModel accounts = mock(ScalperAccountModel.class);
+    SwingPaperEffectRepository effects = mock(SwingPaperEffectRepository.class);
+    SwingPaperEffectRepository.Effect effect = mock(SwingPaperEffectRepository.Effect.class);
+    when(effect.id()).thenReturn(99L);
+    when(effect.expectedQty()).thenReturn(5L);
+    when(effect.quantityBefore()).thenReturn(10L);
+    when(effects.findOpenBySignal(7L)).thenReturn(Optional.of(effect));
+    when(effects.claimOpen(eq(99L), anyLong(), anyInt())).thenReturn(Optional.of(effect));
+    when(paper.openQuantityForSignal(7L)).thenReturn(10L, 10L, 20L);
+    when(paper.openOrder(any())).thenThrow(new RuntimeException("failure after the fill commit"));
+
+    PaperSignalListener listener = new PaperSignalListener(paper, accounts, noStraddle(), effects);
+    SignalTaken event = new SignalTaken(7L, 5, new BigDecimal("100"), false);
+    listener.onSignalTaken(event);
+    listener.onSignalTaken(event); // stale-claim repair sees the already-applied size
+
+    verify(paper).openOrder(any());
+    verify(effects).confirm(99L);
   }
 
   /** A directional scalper take opens the PICKED OPTION at its captured premium (audit P0-3). */

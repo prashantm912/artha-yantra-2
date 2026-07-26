@@ -134,4 +134,20 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
             String.class, batch, java.sql.Date.valueOf(SESSION));
     assertThat(reason).isEqualTo("ATTEMPT_BUDGET_EXHAUSTED");
   }
+
+  @Test
+  void structuredRefusalReasonSurvivesRetryAndAbandonment() {
+    String batch = "cu-it-mixed-reason-" + System.nanoTime();
+    String refusal = "MIXED_PRE_POST_LOTS:TESTCO";
+    assertThat(state.claim(batch, SESSION, 30)).isPresent();
+    state.markPending(batch, SESSION, refusal);
+    assertThat(state.claim(batch, SESSION, 30)).isPresent();
+    state.markAbandoned(batch, SESSION, "ATTEMPT_BUDGET_EXHAUSTED");
+
+    String reason =
+        jdbc.queryForObject(
+            "SELECT reason FROM swing_catchup_runs WHERE batch = ? AND session_date = ?",
+            String.class, batch, java.sql.Date.valueOf(SESSION));
+    assertThat(reason).isEqualTo(refusal);
+  }
 }

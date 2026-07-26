@@ -612,6 +612,21 @@ public class PaperService {
         .orElseThrow(() -> new ApiException(500, ErrorCodes.INTERNAL_ERROR, "position not opened"));
   }
 
+  /**
+   * Read-back quantity for one signal's open paper legs. Swing effect retries use this immediately
+   * before claiming and after attempting an open so a fill-then-throw cannot be averaged again.
+   */
+  @Transactional(readOnly = true)
+  public long openQuantityForSignal(long signalId) {
+    return positions.openForSignal(signalId).stream().mapToLong(PositionRow::qty).sum();
+  }
+
+  /** True when no open paper leg remains linked to the signal. */
+  @Transactional(readOnly = true)
+  public boolean hasOpenForSignal(long signalId) {
+    return !positions.openForSignal(signalId).isEmpty();
+  }
+
   private void upsertPosition(
       String book,
       String exchange,

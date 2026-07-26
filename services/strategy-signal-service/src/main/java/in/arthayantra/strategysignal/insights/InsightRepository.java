@@ -34,10 +34,11 @@ public class InsightRepository {
    * UPSERTs an insight on its OPEN {@code dedupe_key} (§2.5.1). A regenerated insight refreshes the
    * existing OPEN row's payload in place; a first sighting inserts.
    */
-  public void insertOrRefresh(Insight in) {
+  public Insight insertOrRefresh(Insight in) {
     String[] reasons =
         in.trustReasons() == null ? new String[0] : in.trustReasons().toArray(new String[0]);
-    jdbc.update(
+    List<UUID> ids =
+        jdbc.query(
         con -> {
           var ps =
               con.prepareStatement(
@@ -53,9 +54,16 @@ public class InsightRepository {
                     title = EXCLUDED.title, explanation = EXCLUDED.explanation, evidence = EXCLUDED.evidence,
                     priority = EXCLUDED.priority, priority_detail = EXCLUDED.priority_detail,
                     data_trust = EXCLUDED.data_trust, trust_reasons = EXCLUDED.trust_reasons,
-                    cooldown_until = EXCLUDED.cooldown_until, suppressed = EXCLUDED.suppressed,
+                    cooldown_until = CASE
+                      WHEN insights.cooldown_until IS NOT NULL
+                           AND insights.cooldown_until > EXCLUDED.generated_at
+                        THEN insights.cooldown_until
+                      ELSE EXCLUDED.cooldown_until
+                    END,
+                    suppressed = EXCLUDED.suppressed,
                     expires_at = EXCLUDED.expires_at, engine_version = EXCLUDED.engine_version,
                     config_hash = EXCLUDED.config_hash
+                  RETURNING id
                   """);
           ps.setObject(1, in.id());
           ps.setObject(2, in.generatedAt());
@@ -81,7 +89,68 @@ public class InsightRepository {
           ps.setString(18, in.engineVersion());
           ps.setString(19, in.configHash());
           return ps;
-        });
+        },
+        (rs, rowNum) -> rs.getObject("id", UUID.class));
+    UUID persistedId = ids.stream().findFirst().orElseThrow();
+    if (persistedId.equals(in.id())) {
+      return in;
+    }
+    return new Insight(
+        persistedId,
+        in.generatedAt(),
+        in.type(),
+        in.severity(),
+        in.scope(),
+        in.title(),
+        in.explanation(),
+        in.evidence(),
+        in.priority(),
+        in.priorityDetail(),
+        in.dataTrust(),
+        in.trustReasons(),
+        in.dedupeKey(),
+        in.cooldownUntil(),
+        in.suppressed(),
+        in.status(),
+        in.expiresAt(),
+        in.engineVersion(),
+        in.configHash());
+  }
+
+  /** True when an existing OPEN row for this dedupe key is still inside its cooldown window. */
+  public boolean isCooling(String dedupeKey, OffsetDateTime now) {
+    Boolean cooling =
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM insights WHERE dedupe_key = ? AND status = 'OPEN'"
+                + " AND cooldown_until IS NOT NULL AND cooldown_until > ?)",
+            Boolean.class,
+            dedupeKey,
+            now);
+    return Boolean.TRUE.equals(cooling);
+  }
+
+  /**
+   * A persistent owner mute from the existing MUTE_TYPE action seam. A missing scope is a global
+   * type mute; a strategy scope limits the mute to that strategy's insight rows.
+   */
+  public boolean isMuted(String type, String scope) {
+    if (latestMuteAction(type, null)) {
+      return true;
+    }
+    return scope != null && scope.startsWith("strategy:") && latestMuteAction(type, scope);
+  }
+
+  private boolean latestMuteAction(String type, String scope) {
+    String sql =
+        "SELECT action FROM insight_actions"
+            + " WHERE action IN ('MUTE_TYPE', 'UNMUTE_TYPE') AND target_ref->>'type' = ?"
+            + (scope == null ? " AND target_ref->>'scope' IS NULL" : " AND target_ref->>'scope' = ?")
+            + " ORDER BY acted_at DESC, id DESC LIMIT 1";
+    List<String> actions =
+        scope == null
+            ? jdbc.query(sql, (rs, n) -> rs.getString("action"), type)
+            : jdbc.query(sql, (rs, n) -> rs.getString("action"), type, scope);
+    return !actions.isEmpty() && "MUTE_TYPE".equals(actions.get(0));
   }
 
   /** Paged/filtered feed, newest first (INT §9.1). */

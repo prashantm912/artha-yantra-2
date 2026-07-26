@@ -288,10 +288,19 @@ public class InsightController {
         triage(id, Insight.Status.DISMISSED, "DISMISS");
         yield done(id, action, "dismissed");
       }
-      case "MUTE_TYPE" -> {
-        repository.updateStatus(id, Insight.Status.DISMISSED.name());
-        repository.insertAction(id, "MUTE_TYPE", refJson(Map.of("type", insight.type())), "owner");
-        yield done(id, action, "type muted for this instance (server-side per-type mutes are §13 row 10)");
+      case "MUTE_TYPE", "UNMUTE_TYPE" -> {
+        Map<String, Object> ref = new java.util.LinkedHashMap<>();
+        ref.put("type", insight.type());
+        if (insight.scope() != null && insight.scope().startsWith("strategy:")) {
+          ref.put("scope", insight.scope());
+        }
+        repository.insertAction(id, action, refJson(ref), "owner");
+        yield done(
+            id,
+            action,
+            "MUTE_TYPE".equals(action)
+                ? "type muted for future delivery (strategy-scoped when applicable)"
+                : "type mute removed for future delivery (strategy-scoped when applicable)");
       }
       case "OPEN_TICKET" -> ticket(insight, id, action, body, "/api/v1/paper/orders");
       case "TAKE_SIGNAL" -> ticket(insight, id, action, body, null);

@@ -24,9 +24,9 @@ import org.springframework.stereotype.Service;
  * pure; ALL IO (trust reads, book-heat reads, persistence) is here at the edge — so the generators
  * stay unit-testable against fixtures and the whole set replays byte-identically (§10.1).
  *
- * <p><b>I1 is shadow mode.</b> Insights are written as rows only — NO ntfy/Telegram/WS delivery
- * (that arms in I3/I4). Dedupe (one OPEN row per {@code dedupe_key}, refreshed in place) is the noise
- * control that runs now; {@code cooldown_until} is recorded for the delivery floors that arm later.
+ * <p>Insights are written as durable rows first; delivery remains gated by the configured I4 channel
+ * flags. Dedupe (one OPEN row per {@code dedupe_key}, refreshed in place), cooldown, and owner mutes
+ * are applied before a row can publish.
  */
 @Service
 public class InsightEngine {
@@ -197,6 +197,7 @@ public class InsightEngine {
   private void persist(InsightCandidate c, OffsetDateTime now) {
     try {
       OffsetDateTime cooldownUntil = c.cooldownMinutes() == null ? null : now.plusMinutes(c.cooldownMinutes());
+      boolean suppressed = c.suppressed() || repository.isCooling(c.dedupeKey(), now);
       Insight row =
           new Insight(
               UUID.randomUUID(),
@@ -213,19 +214,19 @@ public class InsightEngine {
               c.trustReasons(),
               c.dedupeKey(),
               cooldownUntil,
-              c.suppressed(),
+              suppressed,
               Insight.Status.OPEN.name(),
               c.expiresAt(),
               stamp.engineVersion(),
               stamp.configHash());
-      repository.insertOrRefresh(row);
+      Insight persisted = repository.insertOrRefresh(row);
       meters.counter("ay_insights_generated_total", "type", c.type().name()).increment();
-      if (c.suppressed()) {
+      if (suppressed) {
         meters.counter("ay_insights_suppressed_total").increment();
       }
       // Stage-1 WS delivery (§9.3): the publisher no-ops in shadow mode (flag default OFF), so nothing
       // pushes until the owner arms it — the durable row above is always the record of truth.
-      publisher.publish(row);
+      publisher.publish(persisted);
     } catch (RuntimeException e) {
       log.warn("insight persist failed ({}): {}", c.dedupeKey(), e.toString());
     }

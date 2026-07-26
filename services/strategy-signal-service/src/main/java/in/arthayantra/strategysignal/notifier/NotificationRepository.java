@@ -92,4 +92,18 @@ public class NotificationRepository {
         attempts,
         detail);
   }
+
+  /** Append one insight delivery-attempt audit row; strategyId is nullable for market-scoped insights. */
+  public void recordInsight(
+      UUID insightId, UUID strategyId, String channel, String status, int attempts, String detail) {
+    jdbc.update(
+        "INSERT INTO notification_events (signal_id, strategy_id, insight_id, channel, status, attempts, detail) "
+            + "VALUES (NULL, ?, ?, ?, ?, ?, ?)",
+        strategyId,
+        insightId,
+        channel,
+        status,
+        attempts,
+        detail);
+  }
 }

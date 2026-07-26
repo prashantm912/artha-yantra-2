@@ -389,6 +389,11 @@ public class SignalEngine {
   // cannot be mistaken for the last healthy snapshot still in memory.
   private volatile StrategyCoverageSnapshot coverageSnapshot;
 
+  // The generation the CONNECTED retry chain owns, held for the chain's whole life so every attempt
+  // republishes the SAME marker instead of resetting the SNAPSHOT_MISSING grace clock. Written only
+  // from the serial evalExecutor chain; cleared when the chain terminalizes.
+  private volatile Long connectedChainGeneration;
+
   // Subscriber-liveness heartbeat: wall-clock (clock) millis of the last candle message RECEIVED on
   // any candles.1m.* channel. SubscriberHealthCanary compares this against market-data's ticks:last-at
   // to catch a SILENT Redis subscription drop (feed alive, but this consumer stopped receiving) — the
@@ -602,11 +607,17 @@ public class SignalEngine {
    * A thrown attempt remains {@code IN_FLIGHT} as an aborted reload. Direct reload callers retain
    * the historical immediate terminalization behavior.
    */
-  private synchronized ReloadOutcome reload(boolean keepBest, boolean terminalizeCoverage) {
+  private ReloadOutcome reload(boolean keepBest, boolean terminalizeCoverage) {
+    return reload(keepBest, terminalizeCoverage, null);
+  }
+
+  /** As above; {@code chainGeneration} makes a retry REUSE its chain's generation + grace clock. */
+  private synchronized ReloadOutcome reload(
+      boolean keepBest, boolean terminalizeCoverage, Long chainGeneration) {
     if (stopped.get()) {
       return null;
     }
-    long coverageGeneration = beginCoverageReload();
+    long coverageGeneration = beginCoverageReload(chainGeneration);
     reloadRequested.set(false);
     List<Loaded> fresh = new ArrayList<>();
     int unresolvedDrops = 0;
@@ -822,10 +833,35 @@ public class SignalEngine {
   }
 
   private long beginCoverageReload() {
-    long nextGeneration =
-        coverageSnapshot == null ? 1L : coverageSnapshot.requestedGeneration() + 1L;
-    long completedGeneration =
-        coverageSnapshot == null ? 0L : coverageSnapshot.completedGeneration();
+    return beginCoverageReload(null);
+  }
+
+  /**
+   * Publishes the pre-body IN_FLIGHT marker and returns the generation this reload owns.
+   *
+   * <p><b>A retry chain must REUSE its generation, not mint a fresh one per attempt.</b> Each call
+   * allocates a generation AND stamps {@code reloadTimestamp} with the current instant, and
+   * {@code StrategyCoverageWatchdog.sweepMissing()} measures the SNAPSHOT_MISSING grace from that
+   * stamp. So a chain retrying every ~35 s used to reset its own grace clock on every attempt: the
+   * marker never aged past the 180 s grace, and a chain that was logically incomplete for its entire
+   * ~245 s window — or ~9 minutes with slower production attempts — stayed invisible to predicate B.
+   * That is the precise blindness predicate B exists to prevent. Passing the chain's existing
+   * generation republishes the SAME marker with its ORIGINAL timestamp, so the grace clock runs from
+   * when the chain actually started. (Cross-vendor review Major, 2026-07-26.)
+   */
+  private long beginCoverageReload(Long chainGeneration) {
+    StrategyCoverageSnapshot current = coverageSnapshot;
+    long completedGeneration = current == null ? 0L : current.completedGeneration();
+    if (chainGeneration != null
+        && current != null
+        && current.requestedGeneration() == chainGeneration) {
+      // Same chain, later attempt: republish unchanged so reloadTimestamp keeps the chain start time.
+      coverageSnapshot =
+          StrategyCoverageSnapshot.inFlight(
+              chainGeneration, completedGeneration, current.reloadTimestamp());
+      return chainGeneration;
+    }
+    long nextGeneration = current == null ? 1L : current.requestedGeneration() + 1L;
     coverageSnapshot =
         StrategyCoverageSnapshot.inFlight(
             nextGeneration, completedGeneration, OffsetDateTime.ofInstant(clock.instant(), Ist.ZONE));
@@ -2343,9 +2379,20 @@ public class SignalEngine {
         // Keep coverage IN_FLIGHT until this coordinator knows whether the chain converged or
         // exhausted. An exception still leaves the pre-body marker in place so an aborted attempt
         // cannot be mistaken for the last completed snapshot.
-        outcome = reload(true, false);
+        // Reuse the chain's generation so the SNAPSHOT_MISSING grace clock runs from when the CHAIN
+        // started, not from this attempt — otherwise every retry resets it and predicate B goes blind
+        // for the whole retry window.
+        outcome = reload(true, false, connectedChainGeneration);
       } catch (RuntimeException e) {
         log.warn("kite.status reload attempt {} failed: {}", attempt, e.toString());
+      } finally {
+        // Capture the generation even when the attempt THREW — beginCoverageReload already published
+        // the marker, so without this a chain whose first attempt throws would mint a fresh
+        // generation on attempt 2 and reset its own grace clock once.
+        StrategyCoverageSnapshot published = coverageSnapshot;
+        if (connectedChainGeneration == null && published != null) {
+          connectedChainGeneration = published.requestedGeneration();
+        }
       }
       ReloadOutcome first = attempt == 1 ? outcome : firstOutcome;
 
@@ -2357,6 +2404,7 @@ public class SignalEngine {
       // legitimately all-swing registry has no live candidates ⇒ healthy on attempt 1.
       if (outcome != null && (outcome.healthy() || attempt >= KITE_CONNECTED_RELOAD_MAX_ATTEMPTS)) {
         completeCoverageReload(outcome.coverageGeneration(), outcome.coverageClassifications());
+        connectedChainGeneration = null; // chain over — the next one starts a fresh grace clock
       }
       if (outcome != null && outcome.healthy()) {
         log.info(

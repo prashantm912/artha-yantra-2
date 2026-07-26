@@ -173,7 +173,12 @@ public class SignalEngine {
    *     of the other two, which is exactly how a totally dead engine used to report "0 loaded,
    *     0 unresolved" and be read as success
    */
-  private record ReloadOutcome(int loadedCount, int unresolvedDrops, int loadErrors) {
+  private record ReloadOutcome(
+      int loadedCount,
+      int unresolvedDrops,
+      int loadErrors,
+      long coverageGeneration,
+      Map<String, StrategyCoverageSnapshot.Classification> coverageClassifications) {
 
     /**
      * The ONLY success signal: NOTHING failed in a way a retry could fix.
@@ -379,6 +384,16 @@ public class SignalEngine {
 
   private volatile List<Loaded> loaded = List.of();
 
+  // T9: a total load-coverage snapshot, published only after a reload reaches a terminal
+  // classification. The IN_FLIGHT marker is published before the reload body starts, so an abort
+  // cannot be mistaken for the last healthy snapshot still in memory.
+  private volatile StrategyCoverageSnapshot coverageSnapshot;
+
+  // The generation the CONNECTED retry chain owns, held for the chain's whole life so every attempt
+  // republishes the SAME marker instead of resetting the SNAPSHOT_MISSING grace clock. Written only
+  // from the serial evalExecutor chain; cleared when the chain terminalizes.
+  private volatile Long connectedChainGeneration;
+
   // Subscriber-liveness heartbeat: wall-clock (clock) millis of the last candle message RECEIVED on
   // any candles.1m.* channel. SubscriberHealthCanary compares this against market-data's ticks:last-at
   // to catch a SILENT Redis subscription drop (feed alive, but this consumer stopped receiving) — the
@@ -581,15 +596,35 @@ public class SignalEngine {
    * @return what this reload COMPUTED (installed or not), or null when the engine is stopped
    */
   private synchronized ReloadOutcome reload(boolean keepBest) {
+    return reload(keepBest, true);
+  }
+
+  /**
+   * (Re)loads published+enabled strategies with explicit coverage terminalization.
+   *
+   * <p>The CONNECTED retry chain keeps each completed unsuccessful attempt {@code IN_FLIGHT}; it
+   * owns the final terminalization after the chain either becomes healthy or exhausts its attempts.
+   * A thrown attempt remains {@code IN_FLIGHT} as an aborted reload. Direct reload callers retain
+   * the historical immediate terminalization behavior.
+   */
+  private ReloadOutcome reload(boolean keepBest, boolean terminalizeCoverage) {
+    return reload(keepBest, terminalizeCoverage, null);
+  }
+
+  /** As above; {@code chainGeneration} makes a retry REUSE its chain's generation + grace clock. */
+  private synchronized ReloadOutcome reload(
+      boolean keepBest, boolean terminalizeCoverage, Long chainGeneration) {
     if (stopped.get()) {
       return null;
     }
+    long coverageGeneration = beginCoverageReload(chainGeneration);
     reloadRequested.set(false);
     List<Loaded> fresh = new ArrayList<>();
     int unresolvedDrops = 0;
     int loadErrors = 0;
     int retained = 0;
     List<StrategyRepository.StrategyRow> all = registry.listAll();
+    Map<String, StrategyCoverageSnapshot.Classification> classifications = new LinkedHashMap<>();
     for (StrategyRepository.StrategyRow strategy : all) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
         continue;
@@ -597,6 +632,8 @@ public class SignalEngine {
       Optional<StrategyRepository.VersionRow> versionRow =
           registry.findVersionById(strategy.publishedVersionId());
       if (versionRow.isEmpty()) {
+        classifications.put(
+            strategy.slug(), StrategyCoverageSnapshot.Classification.MISSING_VERSION_ROW);
         continue;
       }
       try {
@@ -624,6 +661,8 @@ public class SignalEngine {
               "scalper {} has no engine-fireable bounding exit (time_stop / index-side stop_loss)"
                   + " — not loaded (§0B hard-SL rule)",
               strategy.slug());
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.NO_BOUNDING_EXIT);
           continue;
         }
         // Phase-9: swing strategies (session.style=swing, 1d primary) are driven by the daily
@@ -631,6 +670,8 @@ public class SignalEngine {
         // them here cleanly (not an error) so the batch owns them and the ROLLABLE check below never
         // logs a spurious "not live-rollable" warning for a strategy that is working as designed.
         if ("swing".equals(definition.session().style())) {
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.NOT_APPLICABLE_SWING);
           continue;
         }
         // A non-rollable primary (e.g. '1d' on a non-btst strategy) used to silently degrade to
@@ -642,12 +683,16 @@ public class SignalEngine {
           log.warn(
               "strategy {} primary '{}' is not live-rollable (needs 1m/3m/5m/15m/1h) — not loaded",
               strategy.slug(), definition.primaryTimeframe());
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.NOT_ROLLABLE_PRIMARY);
           continue;
         }
         UniverseResolution resolution = resolveUniverse(config);
         if (resolution.status() == UniverseResolutionStatus.UNRESOLVED) {
           unresolvedDrops++;
           retained += retainLastGood(fresh, strategy.id(), keepBest);
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.UNRESOLVED);
           log.warn("strategy {} has an unresolved universe — not loaded", strategy.slug());
           continue;
         }
@@ -658,6 +703,8 @@ public class SignalEngine {
           // with the engine still reporting "0 dropped on an unresolved universe".
           log.warn(
               "strategy {} universe mode is not live-resolvable — not loaded", strategy.slug());
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.NOT_LIVE_RESOLVABLE);
           continue;
         }
         if (resolution.status() == UniverseResolutionStatus.RESOLVED_EMPTY) {
@@ -667,6 +714,8 @@ public class SignalEngine {
           // neither block the retry chain from completing nor make the engine look degraded.
           log.info(
               "strategy {} resolves to an empty universe — standing aside today", strategy.slug());
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.RESOLVED_EMPTY);
           continue;
         }
         List<StrategyDefinition.InstrumentRef> universe = resolution.instruments();
@@ -706,6 +755,7 @@ public class SignalEngine {
                 strategy.id(), versionRow.get().id(), strategy.slug(), strategy.name(),
                 versionRow.get().version(), versionRow.get().checksum(), definition,
                 universe, keys, scalper, Books.fromTags(strategy.tags())));
+        classifications.put(strategy.slug(), StrategyCoverageSnapshot.Classification.RESOLVED);
       } catch (RuntimeException e) {
         // RETRYABLE by construction: this catch spans the market-data-dependent work (universe
         // resolution, series warm-up), so a transient upstream fault lands here — and a boot where
@@ -714,6 +764,7 @@ public class SignalEngine {
         // trade, because the alternative is a silently dead engine.
         loadErrors++;
         retained += retainLastGood(fresh, strategy.id(), keepBest);
+        classifications.put(strategy.slug(), StrategyCoverageSnapshot.Classification.LOAD_ERROR);
         log.error("strategy {} failed to load — skipped: {}", strategy.slug(), e.getMessage());
       }
     }
@@ -724,7 +775,9 @@ public class SignalEngine {
               + "never leave the engine holding less than it already did",
           retained, unresolvedDrops, loadErrors);
     }
-    ReloadOutcome outcome = new ReloadOutcome(fresh.size(), unresolvedDrops, loadErrors);
+    ReloadOutcome outcome =
+        new ReloadOutcome(
+            fresh.size(), unresolvedDrops, loadErrors, coverageGeneration, classifications);
     Set<LoadedIdentity> freshIdentities = identitiesOf(fresh);
     Set<LoadedIdentity> installedIdentities = identitiesOf(loaded);
 
@@ -748,6 +801,9 @@ public class SignalEngine {
       if (reloadLedger != null) {
         reloadLedger.record(fresh.size(), unresolvedDrops, loadErrors, false);
       }
+      if (terminalizeCoverage) {
+        completeCoverageReload(coverageGeneration, classifications);
+      }
       return outcome;
     }
     bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
@@ -765,7 +821,67 @@ public class SignalEngine {
     if (reloadLedger != null) {
       reloadLedger.record(fresh.size(), unresolvedDrops, loadErrors, true);
     }
+    if (terminalizeCoverage) {
+      completeCoverageReload(coverageGeneration, classifications);
+    }
     return outcome;
+  }
+
+  /** Current T9 snapshot; volatile publication makes the reload thread the sole snapshot writer. */
+  public StrategyCoverageSnapshot strategyCoverageSnapshot() {
+    return coverageSnapshot;
+  }
+
+  private long beginCoverageReload() {
+    return beginCoverageReload(null);
+  }
+
+  /**
+   * Publishes the pre-body IN_FLIGHT marker and returns the generation this reload owns.
+   *
+   * <p><b>A retry chain must REUSE its generation, not mint a fresh one per attempt.</b> Each call
+   * allocates a generation AND stamps {@code reloadTimestamp} with the current instant, and
+   * {@code StrategyCoverageWatchdog.sweepMissing()} measures the SNAPSHOT_MISSING grace from that
+   * stamp. So a chain retrying every ~35 s used to reset its own grace clock on every attempt: the
+   * marker never aged past the 180 s grace, and a chain that was logically incomplete for its entire
+   * ~245 s window — or ~9 minutes with slower production attempts — stayed invisible to predicate B.
+   * That is the precise blindness predicate B exists to prevent. Passing the chain's existing
+   * generation republishes the SAME marker with its ORIGINAL timestamp, so the grace clock runs from
+   * when the chain actually started. (Cross-vendor review Major, 2026-07-26.)
+   */
+  private long beginCoverageReload(Long chainGeneration) {
+    StrategyCoverageSnapshot current = coverageSnapshot;
+    long completedGeneration = current == null ? 0L : current.completedGeneration();
+    if (chainGeneration != null
+        && current != null
+        && current.requestedGeneration() == chainGeneration) {
+      // Same chain, later attempt: republish unchanged so reloadTimestamp keeps the chain start time.
+      coverageSnapshot =
+          StrategyCoverageSnapshot.inFlight(
+              chainGeneration, completedGeneration, current.reloadTimestamp());
+      return chainGeneration;
+    }
+    long nextGeneration = current == null ? 1L : current.requestedGeneration() + 1L;
+    coverageSnapshot =
+        StrategyCoverageSnapshot.inFlight(
+            nextGeneration, completedGeneration, OffsetDateTime.ofInstant(clock.instant(), Ist.ZONE));
+    return nextGeneration;
+  }
+
+  private void completeCoverageReload(
+      long generation, Map<String, StrategyCoverageSnapshot.Classification> classifications) {
+    boolean abnormal = classifications.values().stream().anyMatch(
+        StrategyCoverageSnapshot.Classification::abnormal);
+    coverageSnapshot =
+        new StrategyCoverageSnapshot(
+            generation,
+            generation,
+            generation,
+            OffsetDateTime.ofInstant(clock.instant(), Ist.ZONE),
+            abnormal
+                ? StrategyCoverageSnapshot.TerminalState.DEGRADED_TERMINAL
+                : StrategyCoverageSnapshot.TerminalState.HEALTHY,
+            classifications);
   }
 
   /** The {@link LoadedIdentity} of every entry — what the engine would LOSE by not installing. */
@@ -2260,9 +2376,27 @@ public class SignalEngine {
       ReloadOutcome outcome = null;
       try {
         // keep-best: a RETRY must never leave the engine holding less than it already does.
-        outcome = reload(true);
+        // Keep coverage IN_FLIGHT until this coordinator knows whether the chain converged or
+        // exhausted. An exception still leaves the pre-body marker in place so an aborted attempt
+        // cannot be mistaken for the last completed snapshot.
+        // Reuse the chain's generation so the SNAPSHOT_MISSING grace clock runs from when the CHAIN
+        // started, not from this attempt — otherwise every retry resets it and predicate B goes blind
+        // for the whole retry window.
+        outcome = reload(true, false, connectedChainGeneration);
       } catch (RuntimeException e) {
         log.warn("kite.status reload attempt {} failed: {}", attempt, e.toString());
+      } finally {
+        // ALWAYS adopt the generation this attempt actually published — never only when the field is
+        // null. A direct reload (hot-swap, morning reload, the 20 s reconcile) can land in the ~35 s
+        // retry gap and terminalize a NEWER generation; the chain's stored value then no longer
+        // matches the snapshot, so beginCoverageReload mints a fresh one, and a null-only adopt would
+        // leave the stale value in place and repeat that mismatch on EVERY later attempt — resetting
+        // the grace clock exactly as before. Re-adopting each pass keeps the chain tracking reality.
+        // Works when the attempt THREW too, since beginCoverageReload published the marker first.
+        StrategyCoverageSnapshot published = coverageSnapshot;
+        if (published != null) {
+          connectedChainGeneration = published.requestedGeneration();
+        }
       }
       ReloadOutcome first = attempt == 1 ? outcome : firstOutcome;
 
@@ -2272,6 +2406,10 @@ public class SignalEngine {
       // took an UNCOUNTED skip reports 0 drops over a DEAD engine. ReloadOutcome.healthy rejects
       // both, so success can never be reported while the engine holds zero usable strategies. A
       // legitimately all-swing registry has no live candidates ⇒ healthy on attempt 1.
+      if (outcome != null && (outcome.healthy() || attempt >= KITE_CONNECTED_RELOAD_MAX_ATTEMPTS)) {
+        completeCoverageReload(outcome.coverageGeneration(), outcome.coverageClassifications());
+        connectedChainGeneration = null; // chain over — the next one starts a fresh grace clock
+      }
       if (outcome != null && outcome.healthy()) {
         log.info(
             "kite.status reload attempt {} resolved every universe ({} loaded) — retry complete",

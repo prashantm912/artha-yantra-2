@@ -9,10 +9,12 @@ import in.arthayantra.strategysignal.signals.PartialBucketCanary;
 import in.arthayantra.strategysignal.signals.RiskSuppressionPruneJob;
 import in.arthayantra.strategysignal.signals.SignalEvalOutcomeRollupJob;
 import in.arthayantra.strategysignal.signals.SubscriberHealthCanary;
+import in.arthayantra.strategysignal.signals.StrategyCoverageWatchdog;
 import in.arthayantra.strategysignal.telegram.TelegramCommandBot;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.task.TaskSchedulingAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -68,6 +70,28 @@ class MonitorSchedulingConfigTest {
     assertBoundToMonitorScheduler(SubscriberHealthCanary.class, "sweep");
     assertBoundToMonitorScheduler(PartialBucketCanary.class, "sweep");
     assertBoundToMonitorScheduler(DotHealthCanary.class, "sweep");
+    assertBoundToMonitorScheduler(StrategyCoverageWatchdog.class, "sweep");
+  }
+
+  @Test
+  void strategyCoverageWatchdogKeepsItsPublishedCadenceAndGraceIndependentOfDefaultPool()
+      throws NoSuchMethodException {
+    Scheduled scheduled =
+        StrategyCoverageWatchdog.class.getDeclaredMethod("sweep").getAnnotation(Scheduled.class);
+    assertThat(scheduled).isNotNull();
+    assertThat(scheduled.scheduler()).isEqualTo("monitorTaskScheduler");
+    assertThat(scheduled.fixedDelay()).isEqualTo(60_000L);
+    assertThat(scheduled.initialDelay()).isEqualTo(120_000L);
+  }
+
+  @Test
+  void strategyCoverageWatchdogIsGuardedByTheEngineLifecycleFlag() {
+    ConditionalOnProperty guard =
+        StrategyCoverageWatchdog.class.getAnnotation(ConditionalOnProperty.class);
+    assertThat(guard).isNotNull();
+    assertThat(guard.name()).containsExactly("artha.signals.engine-enabled");
+    assertThat(guard.havingValue()).isEqualTo("true");
+    assertThat(guard.matchIfMissing()).isTrue();
   }
 
   private static void assertBoundToMonitorScheduler(Class<?> type, String method)

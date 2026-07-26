@@ -146,6 +146,29 @@ public class StrategyRepository {
         "SELECT * FROM strategies ORDER BY updated_at DESC LIMIT 10000", this::strategyRow);
   }
 
+  /**
+   * Enabled strategies carrying a published POINTER, whatever the version row says — including a
+   * pointer whose {@code strategy_versions} row is missing entirely.
+   *
+   * <p>Deliberately NOT {@link #countEnabledPublished()}, which inner-joins {@code strategy_versions}
+   * and so EXCLUDES exactly the broken case. The coverage watchdog uses this as its "is anything
+   * supposed to be running?" guard: with the joined count, a slug classified
+   * {@code MISSING_VERSION_ROW} is absent from the count, so if it is the only affected strategy the
+   * guard reads zero and the watchdog returns silently — the classified-slug-vanishes failure the
+   * watchdog exists to catch. Found in cross-vendor review, 2026-07-26.
+   */
+  public long countEnabledWithPublishedPointer() {
+    Long count =
+        jdbc.queryForObject(
+            """
+            SELECT count(*)
+            FROM strategies s
+            WHERE s.enabled = TRUE AND s.published_version_id IS NOT NULL
+            """,
+            Long.class);
+    return count == null ? 0L : count;
+  }
+
   /** Number of enabled strategies whose published version is still marked published. */
   public long countEnabledPublished() {
     Long count =

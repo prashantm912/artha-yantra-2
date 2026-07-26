@@ -2415,9 +2415,9 @@ export interface components {
             /** Format: int32 */
             totalTrades: number;
             setups: components["schemas"]["SetupStat"][];
-            portfolio: components["schemas"]["PortfolioStat"];
-            portfolioRsPriority: components["schemas"]["PortfolioStat"];
-            portfolioRsPriorityNet: components["schemas"]["PortfolioStat"];
+            portfolio: components["schemas"]["PortfolioStat"] | null;
+            portfolioRsPriority: components["schemas"]["PortfolioStat"] | null;
+            portfolioRsPriorityNet: components["schemas"]["PortfolioStat"] | null;
             note: string | null;
         };
         SetupStat: {
@@ -2803,7 +2803,7 @@ export interface components {
             variants: components["schemas"]["Report"][];
             sweep: components["schemas"]["SweepCell"][];
             slotSweep: components["schemas"]["SlotCell"][];
-            rotation: components["schemas"]["RotationResult"];
+            rotation: components["schemas"]["RotationResult"] | null;
             note: string;
         };
         RotationResult: {
@@ -3309,7 +3309,7 @@ export interface components {
         };
         ChainTableLeg: {
             leg: components["schemas"]["Leg"];
-            deltas: components["schemas"]["LegDeltas"];
+            deltas: components["schemas"]["LegDeltas"] | null;
         };
         ChainTableRow: {
             strike: number;
@@ -3477,7 +3477,7 @@ export interface components {
             /** Format: int32 */
             missingDays: number;
             days: components["schemas"]["DayVerdict"][];
-            lastRun: components["schemas"]["LastRun"];
+            lastRun: components["schemas"]["LastRun"] | null;
         };
         CanaryReport: {
             status: string;
@@ -3865,14 +3865,14 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            pcr: components["schemas"]["Pcr"];
-            maxPain: components["schemas"]["MaxPain"];
+            pcr: components["schemas"]["Pcr"] | null;
+            maxPain: components["schemas"]["MaxPain"] | null;
             oiGainers: components["schemas"]["StrikeMove"][];
             oiLosers: components["schemas"]["StrikeMove"][];
-            activeStrikes: components["schemas"]["ActiveStrikeMigration"];
-            atmStraddle: components["schemas"]["Straddle"];
-            atmIv: components["schemas"]["AtmIv"];
-            oiStructure: components["schemas"]["OiStructure"];
+            activeStrikes: components["schemas"]["ActiveStrikeMigration"] | null;
+            atmStraddle: components["schemas"]["Straddle"] | null;
+            atmIv: components["schemas"]["AtmIv"] | null;
+            oiStructure: components["schemas"]["OiStructure"] | null;
             /** Format: date-time */
             asOf: string | null;
             dataTrust: string;
@@ -3907,8 +3907,8 @@ export interface components {
         };
         FuturesDigest: {
             underlyings: components["schemas"]["UnderlyingQuadrant"][];
-            banks: components["schemas"]["BanksSummary"];
-            termStructure: components["schemas"]["TermStructureState"];
+            banks: components["schemas"]["BanksSummary"] | null;
+            termStructure: components["schemas"]["TermStructureState"] | null;
             /** Format: date-time */
             asOf: string | null;
             dataTrust: string;
@@ -3960,11 +3960,11 @@ export interface components {
             reason: string | null;
         };
         FiiDigest: {
-            cash: components["schemas"]["FiiCash"];
-            dii: components["schemas"]["DiiDivergence"];
-            futuresLongShort: components["schemas"]["FiiFuturesLongShort"];
-            participant: components["schemas"]["ParticipantPositioning"];
-            derivative: components["schemas"]["FiiDerivativeAvailability"];
+            cash: components["schemas"]["FiiCash"] | null;
+            dii: components["schemas"]["DiiDivergence"] | null;
+            futuresLongShort: components["schemas"]["FiiFuturesLongShort"] | null;
+            participant: components["schemas"]["ParticipantPositioning"] | null;
+            derivative: components["schemas"]["FiiDerivativeAvailability"] | null;
             /** Format: date-time */
             asOf: string | null;
             dataTrust: string;
@@ -4083,16 +4083,16 @@ export interface components {
         EquityDigest: {
             /** Format: date */
             tradeDate: string | null;
-            advanceDecline: components["schemas"]["AdvanceDecline"];
-            aboveMa: components["schemas"]["AboveMa"];
-            breadthThrust: components["schemas"]["BreadthThrust"];
+            advanceDecline: components["schemas"]["AdvanceDecline"] | null;
+            aboveMa: components["schemas"]["AboveMa"] | null;
+            breadthThrust: components["schemas"]["BreadthThrust"] | null;
             topSectors: components["schemas"]["SectorRotation"][];
             bottomSectors: components["schemas"]["SectorRotation"][];
             deliveryOutliers: components["schemas"]["DeliveryOutlier"][];
             returnsWindow: string | null;
             returnWinners: components["schemas"]["ReturnLeader"][];
             returnLosers: components["schemas"]["ReturnLeader"][];
-            indexConcentration: components["schemas"]["IndexConcentration"];
+            indexConcentration: components["schemas"]["IndexConcentration"] | null;
             /** Format: date-time */
             asOf: string | null;
             dataTrust: string;
@@ -4127,10 +4127,10 @@ export interface components {
             tradeDate: string;
             sessionPhase: string;
             holiday: components["schemas"]["HolidayProximity"];
-            options: components["schemas"]["OptionsDigest"];
-            vix: components["schemas"]["Vix"];
+            options: components["schemas"]["OptionsDigest"] | null;
+            vix: components["schemas"]["Vix"] | null;
             overnightCues: components["schemas"]["GlobalCue"][];
-            indexPriceAction: components["schemas"]["IndexPriceAction"];
+            indexPriceAction: components["schemas"]["IndexPriceAction"] | null;
             ingestTrust: components["schemas"]["IngestTrust"];
             /** Format: date-time */
             asOf: string;
@@ -8209,6 +8209,13 @@ export interface operations {
                 content: {
                     "*/*": components["schemas"]["EquityFundamentals"];
                 };
+            };
+            /** @description Fundamentals not found for symbol */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error envelope (COMMON 8.3) */
             default: {

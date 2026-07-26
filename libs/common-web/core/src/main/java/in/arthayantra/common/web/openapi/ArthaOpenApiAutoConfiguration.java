@@ -21,6 +21,12 @@ public class ArthaOpenApiAutoConfiguration {
     return new RecordRequiredModelConverter();
   }
 
+  /** Rewrites nullable record references into an honest OpenAPI 3.1 {@code anyOf}. */
+  @Bean
+  public NullableRefCustomizer nullableRefCustomizer() {
+    return new NullableRefCustomizer();
+  }
+
   /** Applies {@code required} to response-only schemas once the document is assembled. */
   @Bean
   public ResponseRequiredCustomizer responseRequiredCustomizer(

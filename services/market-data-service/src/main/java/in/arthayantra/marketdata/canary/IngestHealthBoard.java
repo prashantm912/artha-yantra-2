@@ -69,7 +69,7 @@ public class IngestHealthBoard {
       String detail,
       int missingDays,
       List<DayVerdict> days,
-      LastRun lastRun) {}
+      @Schema(types = {"object", "null"}) LastRun lastRun) {}
 
   /** The whole board: the evaluated window plus one {@link SourceHealth} per expected source. */
   public record BoardReport(

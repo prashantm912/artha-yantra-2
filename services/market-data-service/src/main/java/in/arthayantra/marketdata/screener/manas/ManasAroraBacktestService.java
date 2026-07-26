@@ -128,9 +128,9 @@ public class ManasAroraBacktestService {
       int symbolsScanned,
       int totalTrades,
       List<SetupStat> setups,
-      PortfolioStat portfolio,
-      PortfolioStat portfolioRsPriority,
-      PortfolioStat portfolioRsPriorityNet,
+      @Schema(types = {"object", "null"}) PortfolioStat portfolio,
+      @Schema(types = {"object", "null"}) PortfolioStat portfolioRsPriority,
+      @Schema(types = {"object", "null"}) PortfolioStat portfolioRsPriorityNet,
       @Schema(types = {"string", "null"}) String note) {}
 
   /** One slot-sweep row: the RS-priority portfolio at {@code slots} concurrent positions (v6). */

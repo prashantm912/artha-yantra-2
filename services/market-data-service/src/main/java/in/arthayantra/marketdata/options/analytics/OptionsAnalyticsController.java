@@ -176,7 +176,8 @@ public class OptionsAnalyticsController {
       OiInterpretation interpretation) {}
 
   /** A live chain leg (greeks/IV/OI/LTP from {@code /chain}) plus its interval deltas (or null). */
-  public record ChainTableLeg(OptionsChainService.Leg leg, LegDeltas deltas) {}
+  public record ChainTableLeg(
+      OptionsChainService.Leg leg, @Schema(types = {"object", "null"}) LegDeltas deltas) {}
 
   /** One faithful-chain row: CE | strike | PE, each leg enriched with deltas. */
   public record ChainTableRow(BigDecimal strike, ChainTableLeg ce, ChainTableLeg pe) {}

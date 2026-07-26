@@ -1544,7 +1544,7 @@ export interface components {
             subaccountIdx: number | null;
             /** Format: int64 */
             openingSignalId: number | null;
-            openingSignal: components["schemas"]["OpeningSignal"];
+            openingSignal: components["schemas"]["OpeningSignal"] | null;
             orders: components["schemas"]["OrderLeg"][];
         };
         AuditLogResponse: {

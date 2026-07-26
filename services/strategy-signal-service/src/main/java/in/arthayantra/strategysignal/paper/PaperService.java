@@ -206,7 +206,7 @@ public class PaperService {
       @Schema(types = {"number", "null"}) BigDecimal marginPct,
       @Schema(types = {"integer", "null"}) Integer subaccountIdx,
       @Schema(types = {"integer", "null"}) Long openingSignalId,
-      OpeningSignal openingSignal,
+      @Schema(types = {"object", "null"}) OpeningSignal openingSignal,
       List<OrderLeg> orders) {}
 
   /** The result of a bracket edit: the previous levels (for the audit trail) + the refreshed detail. */

@@ -74,6 +74,7 @@ class PaperSignalListenerTest {
     when(effect.id()).thenReturn(99L);
     when(effect.expectedQty()).thenReturn(5L);
     when(effect.quantityBefore()).thenReturn(10L);
+    when(effect.decision()).thenReturn("REQUIRED");
     when(effects.findOpenBySignal(7L)).thenReturn(Optional.of(effect));
     when(effects.claimOpen(eq(99L), anyLong(), anyInt())).thenReturn(Optional.of(effect));
     when(paper.openQuantityForSignal(7L)).thenReturn(10L, 10L, 20L);

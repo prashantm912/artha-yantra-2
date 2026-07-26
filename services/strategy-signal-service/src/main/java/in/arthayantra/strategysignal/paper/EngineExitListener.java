@@ -6,6 +6,8 @@ import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRetry;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,7 +63,9 @@ public class EngineExitListener {
       closeSwingEffect(
           event.anchorSignalId(),
           event.reason(),
-          event.price());
+          event.price(),
+          event.exitSignalId(),
+          true);
       return;
     }
     try {
@@ -86,71 +90,79 @@ public class EngineExitListener {
     closeSwingEffect(
         retry.anchorSignalId(),
         retry.reason(),
-        retry.price());
+        retry.price(),
+        retry.exitSignalId(),
+        false);
   }
 
   private void closeSwingEffect(
       long anchorSignalId,
       String reason,
-      java.math.BigDecimal price) {
+      java.math.BigDecimal price,
+      long exitSignalId,
+      boolean allowTargetDiscovery) {
     try {
-      if (positions != null && !hasOpenSwingPosition(anchorSignalId)) {
-        paperEffects.findCloseByAnchor(anchorSignalId).ifPresent(effect -> paperEffects.confirm(effect.id()));
-        return;
-      }
       var effect = paperEffects.findCloseByAnchor(anchorSignalId);
       if (effect.isEmpty()) {
         return; // a sibling SignalExited event; the primary effect owns the shared position
       }
-      var lease = paperEffects.claimClose(effect.get().id());
+      var current = effect.get();
+      if (current.targetPositionIds().isEmpty()) {
+        // Only the freshly emitted event may discover the positions that existed before this close.
+        // A recovery event must never bind today's reusable-key position to an old effect.
+        if (!allowTargetDiscovery
+            || !Objects.equals(current.exitSignalId(), exitSignalId)
+            || positions == null) {
+          return;
+        }
+        List<Long> targetIds =
+            positions.openForSignal(anchorSignalId).stream()
+                .map(PaperPositionRepository.PositionRow::id)
+                .distinct()
+                .toList();
+        if (targetIds.isEmpty()) {
+          paperEffects.skipExit(current.id());
+          return;
+        }
+        if (!paperEffects.bindExitPositionIds(current.id(), targetIds)) {
+          current = paperEffects.findCloseByAnchor(anchorSignalId).orElse(null);
+          if (current == null || current.targetPositionIds().isEmpty()) {
+            return;
+          }
+        }
+        current = paperEffects.findCloseByAnchor(anchorSignalId).orElse(null);
+        if (current == null || current.targetPositionIds().isEmpty()) {
+          return;
+        }
+      }
+      if (!"REQUIRED".equals(current.decision()) && !paperEffects.requireExit(current.id())) {
+        return;
+      }
+      current = paperEffects.findCloseByAnchor(anchorSignalId).orElse(null);
+      if (current == null || current.targetPositionIds().isEmpty()) {
+        return;
+      }
+      var lease = paperEffects.claimClose(current.id());
       if (lease.isEmpty()) {
         return; // already confirmed or another retry owns the lease
       }
-      int closed = closeSwingPosition(anchorSignalId, reason, price);
-      if (positions == null || !hasOpenSwingPosition(anchorSignalId)) {
+      int settled = 0;
+      for (long positionId : lease.get().targetPositionIds()) {
+        settled += paper.closeForPosition(positionId, reason, price);
+      }
+      if (settled == lease.get().targetPositionIds().size()) {
         paperEffects.confirm(lease.get().id());
       }
-      if (closed > 0) {
+      if (settled > 0) {
         log.info(
             "engine EXIT ({}) closed {} paper position(s) for signal {}",
             reason,
-            closed,
+            settled,
             anchorSignalId);
       }
     } catch (Exception e) {
       log.warn("paper close failed for exited swing signal {}: {}", anchorSignalId, e.getMessage());
     }
-  }
-
-  /** A pyramid add can own the shared paper row even when the oldest exit anchor has no order. */
-  private boolean hasOpenSwingPosition(long anchorSignalId) {
-    SignalRepository.SignalRow anchor = signals.find(anchorSignalId).orElse(null);
-    if (anchor == null) {
-      return !positions.openForSignal(anchorSignalId).isEmpty();
-    }
-    return positions
-        .findOpen(
-            signals.bookForSignal(anchorSignalId),
-            anchor.exchange(),
-            anchor.tradingsymbol(),
-            anchor.side())
-        .isPresent();
-  }
-
-  /** Close every signal-linked order on the shared key, once, preserving averaged-pyramid semantics. */
-  private int closeSwingPosition(
-      long anchorSignalId, String reason, java.math.BigDecimal price) {
-    SignalRepository.SignalRow anchor = signals.find(anchorSignalId).orElse(null);
-    if (anchor == null) {
-      return paper.closeForSignal(anchorSignalId, reason, price);
-    }
-    String book = signals.bookForSignal(anchorSignalId);
-    int closed = 0;
-    for (long signalId :
-        positions.signalIdsFor(book, anchor.exchange(), anchor.tradingsymbol(), anchor.side())) {
-      closed += paper.closeForSignal(signalId, reason, price);
-    }
-    return closed;
   }
 
   private SwingContext swingContext(long anchorSignalId, long exitSignalId) {

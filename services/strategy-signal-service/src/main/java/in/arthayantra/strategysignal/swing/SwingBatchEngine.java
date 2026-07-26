@@ -693,7 +693,7 @@ public class SwingBatchEngine {
                 if (suggestedQty == null || suggestedQty.signum() <= 0) {
                   // No sized paper order can be produced for this signal; retain the ledger row as
                   // the idempotency marker but do not strand the session behind a nonexistent effect.
-                  paperEffects.confirmEntry(newId);
+                  paperEffects.skipEntry(newId);
                 }
               }
               return newId;

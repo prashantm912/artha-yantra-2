@@ -1035,6 +1035,29 @@ public class PaperService {
     return closed;
   }
 
+  /**
+   * Closes one exact paper-position id for a durable swing effect. Unlike {@link #closeForSignal}, this
+   * path never resolves the target through the reusable book/symbol/side key, so a later re-entry cannot
+   * be settled by an old effect. Returns one when the target is already closed or this call settles it.
+   */
+  @Transactional
+  public int closeForPosition(long positionId, String closeReason, BigDecimal price) {
+    PositionRow pos = positions.find(positionId).orElse(null);
+    if (pos == null) {
+      return 0;
+    }
+    if (!"OPEN".equals(pos.status())) {
+      return 1;
+    }
+    try {
+      settle(pos, price, closeReason);
+      return 1;
+    } catch (Exception e) {
+      log.warn("exact paper-position close failed for {}: {}", positionId, e.getMessage());
+      return 0;
+    }
+  }
+
   /** 15:45 IST mark-to-close: settle every OPEN intraday position so it does not carry overnight. */
   @Transactional
   public int markToCloseIntraday() {

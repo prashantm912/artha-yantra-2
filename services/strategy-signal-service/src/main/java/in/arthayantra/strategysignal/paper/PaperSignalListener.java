@@ -60,8 +60,18 @@ public class PaperSignalListener {
       Optional<SwingPaperEffectRepository.Effect> swingEffect =
           paperEffects == null ? Optional.empty() : paperEffects.findOpenBySignal(event.signalId());
       if (swingEffect.isPresent()) {
-        openSwingEffect(event, swingEffect.get());
-        return;
+        String decision = swingEffect.get().decision();
+        if ("REQUIRED".equals(decision)) {
+          openSwingEffect(event, swingEffect.get());
+          return;
+        }
+        if (!"SKIPPED".equals(decision)) {
+          // An unresolved effect has no durable decision. Never turn an ambiguous ledger row into a
+          // paper open merely because a retry/take event arrived.
+          return;
+        }
+        // SKIPPED means auto-paper did not claim this emission; an explicit manual take still uses
+        // the ordinary open path below.
       }
       // E10: a scalper take is charged to a round-robin sub-account (the per-account first-loss freeze
       // reads it); a non-scalper / manual take leaves the ledger key NULL. A straddle's TWO legs share

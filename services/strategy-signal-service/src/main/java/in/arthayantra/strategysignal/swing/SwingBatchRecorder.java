@@ -193,6 +193,7 @@ public class SwingBatchRecorder {
     boolean snapshotAvailable = candidateSnapshot == null || candidateSnapshot.isPresent();
     if (snapshotAvailable
         && !result.deadlineReached()
+        && result.refusalReasons().isEmpty()
         && (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0)) {
       try {
         SwingBatchEngine.AdmissionProbe probe = result.admission();

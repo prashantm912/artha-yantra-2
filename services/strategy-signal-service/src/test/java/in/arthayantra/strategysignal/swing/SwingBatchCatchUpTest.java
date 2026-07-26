@@ -13,7 +13,9 @@ import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
+import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
+import in.arthayantra.strategysignal.signals.SwingPaperEffectRetry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -48,6 +50,7 @@ class SwingBatchCatchUpTest {
   private final SwingCatchUpStateRepository state = retryableState(runs);
   private final SwingBatchIntentRepository intents = mock(SwingBatchIntentRepository.class);
   private final SwingPaperEffectRepository effects = mock(SwingPaperEffectRepository.class);
+  private final SignalRepository signals = mock(SignalRepository.class);
   private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
   private boolean effectDefaultsConfigured;
 
@@ -87,7 +90,7 @@ class SwingBatchCatchUpTest {
       effectDefaultsConfigured = true;
     }
     return new SwingBatchCatchUp(
-        recorder, runs, state, intents, effects, new SwingRunMutex(), List.of(doctrines), events, clock, enabled, 5);
+        recorder, runs, state, intents, effects, signals, new SwingRunMutex(), List.of(doctrines), events, clock, enabled, 5);
   }
 
   /** A run outcome whose canonical marker write SUCCEEDED (the ordinary complete/partial cases). */
@@ -405,6 +408,62 @@ class SwingBatchCatchUpTest {
     verify(state).markPending("manas-arora", FRIDAY, "PAPER_EFFECT_UNCONFIRMED");
     verify(state).markDone("manas-arora", FRIDAY);
     verify(recorder).runAndRecord(eq(manas), eq(FRIDAY), anyBoolean(), any());
+  }
+
+  @Test
+  void anUndecidedPaperEffectIsNotReplayedAfterRestart() {
+    SwingDoctrine manas = doctrine(true, FRIDAY);
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
+    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(true);
+    when(effects.pendingSessions("manas-arora")).thenReturn(List.of(FRIDAY));
+    when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(FRIDAY));
+    when(effects.allConfirmed("manas-arora", FRIDAY)).thenReturn(false);
+    SwingPaperEffectRepository.Effect effect = mock(SwingPaperEffectRepository.Effect.class);
+    SignalRepository.SignalRow signal = mock(SignalRepository.SignalRow.class);
+    when(signal.id()).thenReturn(7L);
+    when(signal.suggestedQty()).thenReturn(new java.math.BigDecimal("5"));
+    when(signal.entryPrice()).thenReturn(new java.math.BigDecimal("100"));
+    when(signal.scalperDetail()).thenReturn(null);
+    when(signals.find(7L)).thenReturn(Optional.of(signal));
+    when(effect.decision()).thenReturn("UNDECIDED");
+    when(effect.effectType()).thenReturn("ENTRY");
+    when(effect.signalId()).thenReturn(7L);
+    SwingBatchCatchUp runner = catchUp(MONDAY_0835, true, manas);
+    when(effects.repairable("manas-arora", FRIDAY)).thenReturn(List.of(effect));
+
+    when(effects.allConfirmed("manas-arora", FRIDAY)).thenReturn(false);
+    runner.catchUp();
+
+    verify(events, never()).publishEvent(any(SwingPaperEffectRetry.class));
+    verify(state).markPending("manas-arora", FRIDAY, "PAPER_EFFECT_UNCONFIRMED");
+  }
+
+  @Test
+  void aRefusedRunIsRetriedInsteadOfBecomingDoneOnTheNextSweep() {
+    SwingDoctrine manas = doctrine(true, FRIDAY);
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
+    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false, false);
+    when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(FRIDAY), List.of(FRIDAY));
+    when(intents.find("manas-arora", FRIDAY))
+        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+    when(state.claim("manas-arora", FRIDAY, 30))
+        .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)))
+        .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(2)));
+    SwingBatchEngine.SwingRun refused =
+        new SwingBatchEngine.SwingRun(
+            1, 1, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty(),
+            List.of("MIXED_PRE_POST_LOTS:TESTCO"));
+    when(recorder.runAndRecord(
+            eq(manas), eq(FRIDAY), anyBoolean(), any(), any()))
+        .thenReturn(new SwingBatchRecorder.RunOutcome(refused, false));
+
+    SwingBatchCatchUp runner = catchUp(MONDAY_0835, true, manas);
+    runner.catchUp();
+    runner.catchUp();
+
+    verify(recorder, org.mockito.Mockito.times(2))
+        .runAndRecord(eq(manas), eq(FRIDAY), anyBoolean(), any(), any());
+    verify(state, never()).markDone("manas-arora", FRIDAY);
   }
 
   @Test

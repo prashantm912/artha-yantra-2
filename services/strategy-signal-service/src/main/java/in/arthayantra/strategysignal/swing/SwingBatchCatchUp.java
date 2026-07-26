@@ -451,11 +451,17 @@ public class SwingBatchCatchUp {
         return;
       }
       try {
+        // Recovery is deliberately stricter than the original event path: an UNDECIDED or SKIPPED
+        // row carries no permission to infer a money effect. The repository also filters these rows,
+        // but keep the guard here so a stale/legacy repository implementation cannot widen replay.
+        if (!"REQUIRED".equals(effect.decision())) {
+          continue;
+        }
         boolean alreadyApplied =
             "ENTRY".equals(effect.effectType())
                 ? effect.signalId() != null && paperEffects.entryConfirmedByPaper(effect.signalId())
-                : effect.anchorSignalId() != null
-                    && paperEffects.exitConfirmedByPaper(effect.anchorSignalId());
+                : !effect.targetPositionIds().isEmpty()
+                    && paperEffects.exitConfirmedByPaper(effect.targetPositionIds());
         if (alreadyApplied) {
           if ("ENTRY".equals(effect.effectType())) {
             paperEffects.confirmEntry(effect.signalId());
@@ -481,7 +487,9 @@ public class SwingBatchCatchUp {
                               row.suggestedQty().intValue(),
                               row.entryPrice(),
                               row.scalperDetail() != null)));
-        } else if (effect.anchorSignalId() != null && effect.exitSignalId() != null) {
+        } else if (effect.anchorSignalId() != null
+            && effect.exitSignalId() != null
+            && !effect.targetPositionIds().isEmpty()) {
           events.publishEvent(
               SwingPaperEffectRetry.exit(
                   batch,

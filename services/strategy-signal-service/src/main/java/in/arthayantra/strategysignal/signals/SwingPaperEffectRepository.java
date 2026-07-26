@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.signals;
 
 import java.math.BigDecimal;
+import java.sql.PreparedStatement;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -33,7 +34,14 @@ public class SwingPaperEffectRepository {
       BigDecimal closePrice,
       long expectedQty,
       long quantityBefore,
-      String status) {}
+      String status,
+      String decision,
+      List<Long> targetPositionIds) {
+
+    public Effect {
+      targetPositionIds = targetPositionIds == null ? List.of() : List.copyOf(targetPositionIds);
+    }
+  }
 
   private static Effect map(java.sql.ResultSet rs, int n) throws java.sql.SQLException {
     return new Effect(
@@ -50,7 +58,19 @@ public class SwingPaperEffectRepository {
         rs.getBigDecimal("close_price"),
         rs.getLong("expected_qty"),
         rs.getLong("quantity_before"),
-        rs.getString("status"));
+        rs.getString("status"),
+        rs.getString("decision"),
+        readPositionIds(rs));
+  }
+
+  private static List<Long> readPositionIds(java.sql.ResultSet rs) throws java.sql.SQLException {
+    java.sql.Array array = rs.getArray("target_position_ids");
+    if (array == null || !(array.getArray() instanceof Object[] values)) {
+      return List.of();
+    }
+    return java.util.Arrays.stream(values)
+        .map(value -> value instanceof Number n ? n.longValue() : Long.parseLong(value.toString()))
+        .toList();
   }
 
   /** Creates the expected entry before the signal is emitted. */
@@ -103,11 +123,72 @@ public class SwingPaperEffectRepository {
       String batch, LocalDate sessionDate, long anchorSignalId, long exitSignalId) {
     jdbc.update(
         "UPDATE swing_paper_effects SET exit_signal_id=?, updated_at=now()"
-            + " WHERE batch=? AND session_date=? AND effect_key=? AND status='EXPECTED'",
+            + " WHERE batch=? AND session_date=? AND effect_key=? AND status='EXPECTED'"
+            + " AND exit_signal_id IS NULL",
         exitSignalId,
         batch,
         java.sql.Date.valueOf(sessionDate),
         exitKey(anchorSignalId));
+  }
+
+  /** Records the auto-paper decision before a REQUIRED entry can be published or replayed. */
+  public boolean requireEntry(long signalId) {
+    return jdbc.update(
+            "UPDATE swing_paper_effects SET decision='REQUIRED', updated_at=now()"
+                + " WHERE effect_type='ENTRY' AND signal_id=? AND decision='UNDECIDED'"
+                + " AND status IN ('EXPECTED','CLAIMED')",
+            signalId)
+        == 1;
+  }
+
+  /** Records that no paper entry is required and closes the ledger row without a money effect. */
+  public boolean skipEntry(long signalId) {
+    return jdbc.update(
+            "UPDATE swing_paper_effects SET decision='SKIPPED', status='CONFIRMED',"
+                + " confirmed_at=now(), updated_at=now()"
+                + " WHERE effect_type='ENTRY' AND signal_id=? AND decision='UNDECIDED'"
+                + " AND status IN ('EXPECTED','CLAIMED')",
+            signalId)
+        == 1;
+  }
+
+  /** Binds the exact paper-position ids that existed for this exit before claiming the close. */
+  public boolean bindExitPositionIds(long effectId, List<Long> positionIds) {
+    if (positionIds == null || positionIds.isEmpty()) {
+      return false;
+    }
+    return jdbc.update(
+            connection -> {
+              PreparedStatement statement =
+                  connection.prepareStatement(
+                      "UPDATE swing_paper_effects SET target_position_ids=?, updated_at=now()"
+                          + " WHERE id=? AND status='EXPECTED' AND target_position_ids IS NULL");
+              statement.setArray(1, connection.createArrayOf("bigint", positionIds.toArray()));
+              statement.setLong(2, effectId);
+              return statement;
+            })
+        == 1;
+  }
+
+  /** Marks an exit REQUIRED only after its exact position ids are durably bound. */
+  public boolean requireExit(long effectId) {
+    return jdbc.update(
+            "UPDATE swing_paper_effects SET decision='REQUIRED', updated_at=now()"
+                + " WHERE id=? AND decision='UNDECIDED' AND status IN ('EXPECTED','CLAIMED')"
+                + " AND target_position_ids IS NOT NULL AND cardinality(target_position_ids) > 0",
+            effectId)
+        == 1;
+  }
+
+  /** Records that no paper close is required because no position existed at the emitted exit. */
+  public boolean skipExit(long effectId) {
+    return jdbc.update(
+            "UPDATE swing_paper_effects SET decision='SKIPPED', status='CONFIRMED',"
+                + " confirmed_at=now(), updated_at=now()"
+                + " WHERE id=? AND decision='UNDECIDED' AND status IN ('EXPECTED','CLAIMED')"
+                + " AND (target_position_ids IS NULL OR cardinality(target_position_ids) = 0)",
+            effectId)
+        == 1;
   }
 
   /** Claims an entry immediately before PaperService.openOrder. */
@@ -118,6 +199,7 @@ public class SwingPaperEffectRepository {
                 + " quantity_before=CASE WHEN status='EXPECTED' THEN ? ELSE quantity_before END,"
                 + " claimed_at=now(), updated_at=now() WHERE id=? AND (status='EXPECTED' OR"
                 + " (status='CLAIMED' AND claimed_at < now() - make_interval(mins => ?)))"
+                + " AND decision='REQUIRED'"
                 + " RETURNING " + columns(),
             SwingPaperEffectRepository::map,
             quantityBefore,
@@ -134,6 +216,8 @@ public class SwingPaperEffectRepository {
             "UPDATE swing_paper_effects SET status='CLAIMED', attempts=attempts+1, claimed_at=now(),"
                 + " updated_at=now() WHERE id=? AND (status='EXPECTED' OR"
                 + " (status='CLAIMED' AND claimed_at < now() - make_interval(mins => ?)))"
+                + " AND decision='REQUIRED' AND target_position_ids IS NOT NULL"
+                + " AND cardinality(target_position_ids) > 0"
                 + " RETURNING " + columns(),
             SwingPaperEffectRepository::map,
             effectId,
@@ -154,7 +238,8 @@ public class SwingPaperEffectRepository {
   public void confirmEntry(long signalId) {
     jdbc.update(
         "UPDATE swing_paper_effects SET status='CONFIRMED', confirmed_at=now(), updated_at=now()"
-            + " WHERE effect_type='ENTRY' AND signal_id=? AND status IN ('EXPECTED','CLAIMED')",
+            + " WHERE effect_type='ENTRY' AND signal_id=? AND decision='REQUIRED'"
+            + " AND status IN ('EXPECTED','CLAIMED')",
         signalId);
   }
 
@@ -214,7 +299,8 @@ public class SwingPaperEffectRepository {
   public List<Effect> pending(String batch, LocalDate sessionDate) {
     return jdbc.query(
         "SELECT " + columns() + " FROM swing_paper_effects"
-            + " WHERE batch=? AND session_date=? AND status <> 'CONFIRMED' ORDER BY id",
+            + " WHERE batch=? AND session_date=? AND status <> 'CONFIRMED'"
+            + " AND decision='REQUIRED' ORDER BY id",
         SwingPaperEffectRepository::map,
         batch,
         java.sql.Date.valueOf(sessionDate));
@@ -278,7 +364,7 @@ public class SwingPaperEffectRepository {
   private static String columns() {
     return "id, batch, session_date, effect_key, effect_type, tradingsymbol, signal_id,"
         + " anchor_signal_id, exit_signal_id, close_reason, close_price, expected_qty,"
-        + " quantity_before, status";
+        + " quantity_before, status, decision, target_position_ids";
   }
 
   private static String entryKey(String symbol) {
@@ -333,15 +419,25 @@ public class SwingPaperEffectRepository {
     return Boolean.TRUE.equals(result);
   }
 
-  public boolean exitConfirmedByPaper(long anchorSignalId) {
-    Boolean result =
-        jdbc.queryForObject(
-            "SELECT NOT EXISTS(SELECT 1 FROM paper_positions p JOIN signals s ON s.id=?"
-                + " WHERE p.status='OPEN' AND p.book=COALESCE(s.book, 'other')"
-                + " AND p.exchange=s.exchange AND p.tradingsymbol=s.tradingsymbol"
-                + " AND p.side=s.side)",
-            Boolean.class,
-            anchorSignalId);
-    return Boolean.TRUE.equals(result);
+  /** Reconciles only the exact ids bound to the effect; an empty/missing target fails closed. */
+  public boolean exitConfirmedByPaper(List<Long> positionIds) {
+    if (positionIds == null || positionIds.isEmpty()) {
+      return false;
+    }
+    for (Long positionId : positionIds) {
+      boolean settled =
+          jdbc.query(
+                  "SELECT status FROM paper_positions WHERE id=?",
+                  (rs, n) -> rs.getString("status"),
+                  positionId)
+              .stream()
+              .findFirst()
+              .map(status -> !"OPEN".equals(status))
+              .orElse(false);
+      if (!settled) {
+        return false;
+      }
+    }
+    return true;
   }
 }

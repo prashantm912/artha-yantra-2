@@ -213,4 +213,27 @@ class SwingBatchRecorderTest {
         any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
         anyInt(), anyBoolean(), any());
   }
+
+  @Test
+  void aRefusedRunDoesNotRecordTheCanonicalCompletionMarker() {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(engine.runDaily(doctrine, null, true))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(
+                1, 2, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty(),
+                List.of("MIXED_PRE_POST_LOTS:TESTCO")));
+
+    SwingBatchRecorder recorder =
+        new SwingBatchRecorder(
+            engine, runs, mock(SwingSellDecisionService.class), mock(FlagSnapshotService.class),
+            new SwingRunMutex(), mock(ApplicationEventPublisher.class), Clock.systemUTC());
+
+    SwingBatchRecorder.RunOutcome outcome =
+        recorder.runAndRecord(doctrine, null, true, SwingBatchRecorder.MarkerPolicy.ALWAYS);
+
+    assertThat(outcome.markerRecorded()).isFalse();
+    org.mockito.Mockito.verifyNoInteractions(runs);
+  }
 }

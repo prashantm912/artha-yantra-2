@@ -47,9 +47,9 @@ public class SwingBatchCanary {
 
   /**
    * How long a page suppresses the next one for the same session. Deliberately just under a day, so
-   * that against a once-per-weekday-morning sweep an unresolved session pages again every morning
-   * until it gets a run marker — see {@link SwingMissedBatchAlertRepository} for why this is a
-   * repeating lease and not a one-shot latch.
+   * that against a once-per-weekday-morning sweep an unresolved session pages again the next
+   * morning — up to {@link #MAX_PAGES_PER_SESSION} times. See {@link SwingMissedBatchAlertRepository}
+   * for why this is a repeating lease rather than a one-shot latch.
    */
   private static final int PAGE_LEASE_MINUTES = 20 * 60;
 
@@ -77,9 +77,14 @@ public class SwingBatchCanary {
    * <p>The binding constraint is DETECTOR downtime, not outage length: a session escapes this sweep
    * only if the 08:30 check fails to run for this many consecutive trading days after it — i.e.
    * strategy-signal itself was down for two weeks, which the owner learns by other means long
-   * before. (It is deliberately NOT justified by the external dead-man heartbeat: {@code
+   * before. Past that point the value of a page is forensic rather than operational, and this is a
+   * pager. (It is deliberately NOT justified by the external dead-man heartbeat: {@code
    * SwingBatchHeartbeat} is built but still dormant, and citing an unarmed fallback would read as
    * covered when it is not.)
+   *
+   * <p>Shorter than {@link #RECENT_SESSION_LIMIT} only because of that alerting horizon — NOT
+   * because this branch's evidence is weaker. Extending it could not manufacture a false positive:
+   * the branch already fails closed when no prior arming exists at all.
    */
   private static final int NO_INTENT_LOOKBACK_SESSIONS = 10;
 
@@ -183,8 +188,9 @@ public class SwingBatchCanary {
    *
    * <p>Past the END of the bundled holiday CSVs (the CD-2 calendar cliff) {@code previousTradingDay}
    * throws on the very first step, and an empty set would silently disable the container-down sweep
-   * while the rest of the detector kept looking healthy. So the empty case is logged loudly by the
-   * caller — a half-dead detector must not read as a live one.
+   * while the rest of the detector kept looking healthy. The loop always runs at least once, so an
+   * empty result can only mean that first throw — it is logged at WARN below, because a half-dead
+   * detector must not read as a live one.
    */
   private Set<LocalDate> recentTradingSessionsBefore(LocalDate today) {
     Set<LocalDate> sessions = new LinkedHashSet<>();

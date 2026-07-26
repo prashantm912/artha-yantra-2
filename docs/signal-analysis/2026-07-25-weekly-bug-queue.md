@@ -55,8 +55,21 @@ you park in a closing bullet, or the next session will not find it.
 - **S1–S3 scheduler isolation → #1016** (dedicated bar-flush + Telegram pools, IST cron zone,
   bounded registry-reload query). **DEPLOYED + LIVE-VERIFIED** — thread dumps show
   `bar-flush-sched-1` and `telegram-poll-sched-1`.
-- Still open from this pack: **T12 accept** (no build), **B8 host clock = OWNER before Monday**,
-  item 7's blocked tunes (wait for post-fix forward sessions).
+- **NOTHING FROM THIS PACK IS OPEN as of 2026-07-27 pre-open.** Two of the three closed differently
+  than this bullet predicted:
+  - **T12 was not merely "accepted" — it was BUILT and deployed** ([#1031](https://github.com/prashantm912/artha-yantra-2/pull/1031),
+    ledger G5). Investigation overturned the premise: the cause was **scheduler starvation, not the
+    rate limiter** — both snapshot jobs shared the single default `taskScheduler`, so while the options
+    pass held that one thread the futures cron could not even be INVOKED and its fires were dropped
+    before any permit was requested. Fixed with a dedicated `oiCaptureTaskScheduler`. ⚠️ The literal
+    "dedicated kite-quote limiter" option in item 5 was deliberately **NOT** built: Kite documents the
+    quote endpoint at 1 req/s, which is exactly what the limiter is set to, so a second limiter would
+    put us at 2/s — over the published budget.
+  - **B8 host clock is FIXED and verified** (ledger B8 row): drift vs an external reference is **+1 s**,
+    `W32Time` `Running`/`Automatic`, stratum 4, source `pool.ntp.org`, last sync 2026-07-26 23:17:54 IST.
+    The SERVICE state is the half that matters — a correct reading alone would drift straight back.
+  - Item 7's blocked tunes remain blocked by design (they wait on post-fix forward sessions, ledger G1 —
+    earliest Tue 2026-07-28). That is a gate, not an open task.
 
 1. **T21 — premium exits on the 30 bracket-less scalpers.** (a) declare indicator-exit-only
    intentional and accept square-off rides (document it, done); (b) add a `premium_pct` band to the

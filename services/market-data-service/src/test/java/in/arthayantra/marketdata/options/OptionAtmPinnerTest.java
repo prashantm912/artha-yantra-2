@@ -7,9 +7,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import in.arthayantra.marketdata.kite.InstrumentKey;
+import in.arthayantra.marketdata.kite.InstrumentMasterUpdated;
 import in.arthayantra.marketdata.kite.InstrumentTokenResolver;
 import in.arthayantra.marketdata.kite.ticker.SubscriptionPriority;
 import in.arthayantra.marketdata.kite.ticker.SubscriptionRegistry;
+import in.arthayantra.marketdata.kite.ticker.SubscriptionReplayer;
 import in.arthayantra.marketdata.kite.ticker.SubscriptionMode;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
@@ -22,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 
 class OptionAtmPinnerTest {
 
@@ -282,5 +285,88 @@ class OptionAtmPinnerTest {
   private static InstrumentKey key(String canonical) {
     String[] parts = canonical.split(":", 2);
     return new InstrumentKey(parts[0], parts[1]);
+  }
+
+  /**
+   * Round-2 regression: ROLLOVER AT EXACTLY FULL CAP. The subscribe pass runs BEFORE the stale sweep
+   * frees capacity, so on an expiry roll against a full registry every new contract is cap-refused,
+   * the old window is then released, and without the post-sweep retry the freed slots would sit
+   * unused for a whole cycle. The earlier cap test only populated an empty registry and so could
+   * never reach this path.
+   */
+  @Test
+  void rolloverAtExactlyFullCapRetriesTheRefusedWindowAfterTheStaleSweep() {
+    OptionsChainService chains = mock(OptionsChainService.class);
+    when(chains.expiriesWithin(anyString(), eq(7))).thenReturn(List.of(NEAR));
+    when(chains.chain("NIFTY 50", NEAR)).thenReturn(chain("NIFTY 50", NEAR, 100));
+
+    Map<String, InstrumentTokenResolver.TokenInfo> master = new HashMap<>();
+    addOptionKeys(master, "NFO", "NIFTY 50", 100);
+    addOptionKeys(master, "NFO", "NIFTY 50", 300);
+    // Cap == exactly one window, so the second window cannot be admitted until the first is released.
+    SubscriptionRegistry registry =
+        new SubscriptionRegistry(
+            key -> Optional.ofNullable(master.get(key.canonical())), 22, new SimpleMeterRegistry());
+    OptionAtmPinner pinner =
+        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+
+    pinner.repin();
+    assertThat(pinner.pinnedContracts()).hasSize(22);
+    assertThat(registry.view()).hasSize(22);
+
+    // Expiry rolls: the whole desired set is new, and the registry is already exactly full.
+    when(chains.chain("NIFTY 50", NEAR)).thenReturn(chain("NIFTY 50", NEAR, 300));
+    pinner.repin();
+
+    assertThat(pinner.pinnedContracts())
+        .as("the freed slots must be reused in the SAME pass, not left idle for a cycle")
+        .containsExactlyInAnyOrderElementsOf(
+            expectedSymbols("NFO", "NIFTY", 300).stream().map(OptionAtmPinnerTest::key).toList());
+    assertThat(registry.view()).hasSize(22);
+  }
+
+  /**
+   * Round-2 regression: LISTENER ORDER. Hydrating from the registry is only sound if replay has
+   * already restored the persisted holds. Both listeners once sat at LOWEST_PRECEDENCE, so the
+   * pinner could win and never see the holds replay was about to put back. Asserted on the
+   * annotations because the ordering — not any single pass — is the invariant.
+   */
+  @Test
+  void subscriptionReplayerIsOrderedStrictlyBeforeThePinnerOnBothEvents() throws Exception {
+    int replayReady = orderOf(SubscriptionReplayer.class, ApplicationReadyEvent.class);
+    int replayMaster = orderOf(SubscriptionReplayer.class, InstrumentMasterUpdated.class);
+    int pinnerReady = orderOf(OptionAtmPinner.class, ApplicationReadyEvent.class);
+    int pinnerMaster = orderOf(OptionAtmPinner.class, InstrumentMasterUpdated.class);
+
+    assertThat(replayReady)
+        .as("replay must restore persisted holds before the pinner hydrates from the registry")
+        .isLessThan(pinnerReady);
+    assertThat(replayMaster)
+        .as("same ordering on the instrument-master path")
+        .isLessThan(pinnerMaster);
+  }
+
+  /** The @Order value of the listener method handling {@code event} on {@code type}. */
+  private static int orderOf(Class<?> type, Class<?> event) {
+    for (java.lang.reflect.Method method : type.getDeclaredMethods()) {
+      org.springframework.context.event.EventListener listener =
+          method.getAnnotation(org.springframework.context.event.EventListener.class);
+      if (listener == null) {
+        continue;
+      }
+      boolean handles = false;
+      for (Class<?> candidate : listener.value()) {
+        if (candidate.equals(event)) {
+          handles = true;
+        }
+      }
+      if (!handles) {
+        continue;
+      }
+      org.springframework.core.annotation.Order order =
+          method.getAnnotation(org.springframework.core.annotation.Order.class);
+      return order == null ? org.springframework.core.Ordered.LOWEST_PRECEDENCE : order.value();
+    }
+    throw new AssertionError("no @EventListener for " + event.getSimpleName() + " on " + type);
   }
 }

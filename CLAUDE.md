@@ -466,6 +466,22 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   fail several CI iterations (cold start, constrained cores). Gate e2e readiness on
   container healthchecks, not gateway HTTP (a 401 is the gateway auth filter, not
   upstream readiness).
+- **`--admin` is NO LONGER the normal way to merge (2026-07-26).** `main` carried
+  `lock_branch: {"enabled": true}` — the branch was READ-ONLY — so with `enforce_admins: false`
+  EVERY merge had to use `gh pr merge --admin`, which bypasses ALL six required status checks
+  including a genuinely red one. It hid behind two unrelated, real bugs in the same row
+  (task_db8bdf1e): a dead `frontend` required context, and path-filtered workflows never reporting.
+  Both were fixed first, and a plain `--squash` STILL returned `the base branch policy prohibits the
+  merge` with every required context SUCCESS and `mergeable: MERGEABLE` — that mismatch (MERGEABLE
+  but BLOCKED, no failing check) is the fingerprint of a branch-level lock, not a check problem.
+  Owner ruled it accidental; `lock_branch` is now `false`. **Merge normally. If you find yourself
+  reaching for `--admin`, something is actually wrong — read the failing check.** `hotfix/*` keeps
+  its own fast-lane.
+  ⚠️ **The protection API is a WHOLE-OBJECT `PUT`** — a partial payload silently drops every field
+  you omit (required contexts, `strict`, force-push bans). Build it by mirroring the live `GET`
+  field-by-field and **diff before/after** to prove only the intended key moved. Also check
+  `GET /repos/{o}/{r}/rulesets` — rulesets are a SECOND, independent mechanism that can block a
+  merge with classic protection looking clean (ours is `[]`).
 - **The `e2e` job's two former 2-core flakes are FIXED (#903, 2026-07-18)** — `tests/signals.spec.ts` +
   `tests/ws-reconnect.spec.ts` intermittently timed out on the cold-stack `/signals` table-settle for two
   reasons: while `GET /api/v1/signals` was pending the page showed a `qs-loading` skeleton the locator

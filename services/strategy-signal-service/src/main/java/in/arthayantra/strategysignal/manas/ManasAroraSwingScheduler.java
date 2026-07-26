@@ -1,33 +1,56 @@
 package in.arthayantra.strategysignal.manas;
 
+import in.arthayantra.strategysignal.swing.SwingBatchIntentRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
  * Fires the Manas Arora swing batch once per trading evening (20:05 IST, weekdays), just after the
- * Minervini batch (20:00) so the two don't contend. A thin per-family shell over the shared {@link
- * SwingBatchRecorder} (which owns the marker + the FAILED-alert envelope), bound to the {@link
- * ManasDoctrine}. Gated on {@code artha.manas-arora.swing.enabled=true} (default off) so CI/test/mock
- * contexts stay inert.
+ * Minervini batch. The recorder keeps execution inert when the family flag is false, while this
+ * scheduler records the effective schedule-time arming intent for the missed-batch detector.
  */
 @Component
-@ConditionalOnProperty(value = "artha.manas-arora.swing.enabled", havingValue = "true")
 public class ManasAroraSwingScheduler {
+
+  private static final Logger log = LoggerFactory.getLogger(ManasAroraSwingScheduler.class);
+  private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
   private final SwingBatchRecorder recorder;
   private final ManasDoctrine doctrine;
+  private final SwingBatchIntentRepository intents;
+  private final Clock clock;
 
-  /** Wires the shared recorder and the Manas doctrine. */
-  public ManasAroraSwingScheduler(SwingBatchRecorder recorder, ManasDoctrine doctrine) {
+  /** Wires the recorder, doctrine, schedule-intent ledger, and clock. */
+  public ManasAroraSwingScheduler(
+      SwingBatchRecorder recorder,
+      ManasDoctrine doctrine,
+      SwingBatchIntentRepository intents,
+      Clock clock) {
     this.recorder = recorder;
     this.doctrine = doctrine;
+    this.intents = intents;
+    this.clock = clock;
   }
 
-  /** Post-close daily run (20:05 IST, weekdays) — after the geometry/funnel refresh. */
+  /** Post-close daily run (20:05 IST, weekdays). */
   @Scheduled(cron = "${artha.manas-arora.swing.cron:0 5 20 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
+    LocalDate session = LocalDate.now(clock.withZone(IST));
+    try {
+      intents.recordScheduled(doctrine.batchName(), session, doctrine.enabled());
+    } catch (RuntimeException e) {
+      log.warn(
+          "{} swing schedule-intent record failed for {} - continuing scheduled batch: {}",
+          doctrine.batchName(),
+          session,
+          e.getMessage());
+    }
     recorder.runScheduled(doctrine);
   }
 }

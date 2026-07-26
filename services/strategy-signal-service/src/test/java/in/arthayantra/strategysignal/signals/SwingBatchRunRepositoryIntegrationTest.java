@@ -34,10 +34,13 @@ class SwingBatchRunRepositoryIntegrationTest extends StrategySignalIntegrationTe
 
     repo.record(batch, d1, 4, 20, 3, 1, 0, 2, 5, 3, 2, true, List.of());
     assertThat(repo.lastRunDate(batch)).contains(d1);
+    assertThat(repo.hasRun(batch, d1)).isTrue();
+    assertThat(repo.hasRun(batch, d2)).isFalse();
 
     // A later date advances the watermark.
     repo.record(batch, d2, 4, 25, 5, 2, 1, 3, 7, 5, 2, true, List.of());
     assertThat(repo.lastRunDate(batch)).contains(d2);
+    assertThat(repo.hasRun(batch, d2)).isTrue();
 
     // Re-stamping the SAME date is an upsert (no duplicate-key blow-up) that overwrites the counters.
     repo.record(batch, d2, 4, 30, 6, 4, 0, 0, 6, 6, 0, false, List.of());

@@ -118,17 +118,97 @@ public class SwingPaperEffectRepository {
         == 1;
   }
 
+  /**
+   * Creates an EXIT effect with its final paper decision before the engine expires any anchors.
+   * A non-empty target list is REQUIRED; an empty list is a confirmed SKIPPED effect because the
+   * target query completed and found no open paper position.
+   */
+  public boolean expectExit(
+      String batch,
+      LocalDate sessionDate,
+      long anchorSignalId,
+      String reason,
+      BigDecimal price,
+      List<Long> targetPositionIds) {
+    if (targetPositionIds == null || targetPositionIds.isEmpty()) {
+      return jdbc.update(
+              "INSERT INTO swing_paper_effects"
+                  + " (batch, session_date, effect_key, effect_type, anchor_signal_id, close_reason,"
+                  + " close_price, status, decision, confirmed_at)"
+                  + " VALUES (?, ?, ?, 'EXIT', ?, ?, ?, 'CONFIRMED', 'SKIPPED', now())"
+                  + " ON CONFLICT (batch, session_date, effect_key) DO NOTHING",
+              batch,
+              java.sql.Date.valueOf(sessionDate),
+              exitKey(anchorSignalId),
+              anchorSignalId,
+              reason,
+              price)
+          == 1;
+    }
+    return jdbc.update(
+            connection -> {
+              PreparedStatement statement =
+                  connection.prepareStatement(
+                      "INSERT INTO swing_paper_effects"
+                          + " (batch, session_date, effect_key, effect_type, anchor_signal_id,"
+                          + " close_reason, close_price, target_position_ids, status, decision)"
+                          + " VALUES (?, ?, ?, 'EXIT', ?, ?, ?, ?, 'EXPECTED', 'REQUIRED')"
+                          + " ON CONFLICT (batch, session_date, effect_key) DO NOTHING");
+              statement.setString(1, batch);
+              statement.setDate(2, java.sql.Date.valueOf(sessionDate));
+              statement.setString(3, exitKey(anchorSignalId));
+              statement.setLong(4, anchorSignalId);
+              statement.setString(5, reason);
+              statement.setObject(6, price);
+              statement.setArray(
+                  7, connection.createArrayOf("bigint", targetPositionIds.toArray()));
+              return statement;
+            })
+        == 1;
+  }
+
   /** Binds the generated EXIT signal after the expected close exists. */
   public void bindExit(
       String batch, LocalDate sessionDate, long anchorSignalId, long exitSignalId) {
     jdbc.update(
         "UPDATE swing_paper_effects SET exit_signal_id=?, updated_at=now()"
-            + " WHERE batch=? AND session_date=? AND effect_key=? AND status='EXPECTED'"
+            + " WHERE batch=? AND session_date=? AND effect_key=?"
+            + " AND status IN ('EXPECTED','CONFIRMED')"
             + " AND exit_signal_id IS NULL",
         exitSignalId,
         batch,
         java.sql.Date.valueOf(sessionDate),
         exitKey(anchorSignalId));
+  }
+
+  /**
+   * Resolves the currently OPEN position ids linked to any of the exited lots. The position row is
+   * reusable across pyramid adds, so this deliberately unions signal-linked orders instead of
+   * resolving one reusable book/symbol/side key from the oldest anchor.
+   */
+  public List<Long> openPositionIdsForSignals(List<Long> signalIds) {
+    if (signalIds == null) {
+      return List.of();
+    }
+    List<Long> ids = signalIds.stream().filter(id -> id != null).distinct().toList();
+    if (ids.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.query(
+        connection -> {
+          PreparedStatement statement =
+              connection.prepareStatement(
+                  "SELECT DISTINCT p.id"
+                      + " FROM paper_positions p"
+                      + " JOIN paper_orders o"
+                      + " ON o.book=p.book AND o.exchange=p.exchange"
+                      + " AND o.tradingsymbol=p.tradingsymbol AND o.side=p.side"
+                      + " WHERE p.status='OPEN' AND o.signal_id = ANY (?)"
+                      + " ORDER BY p.id");
+          statement.setArray(1, connection.createArrayOf("bigint", ids.toArray()));
+          return statement;
+        },
+        (rs, n) -> rs.getLong("id"));
   }
 
   /** Records the auto-paper decision before a REQUIRED entry can be published or replayed. */

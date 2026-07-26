@@ -934,12 +934,35 @@ public class SwingBatchEngine {
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(IST);
     // the paper close_reason taxonomy is UPPERCASE (STOP_LOSS / TRAILING_STOP / SIGNAL_EXIT / …)
     String reason = exit.type().toUpperCase(Locale.ROOT);
+    final List<Long> targetPositionIds;
+    if (paperEffects == null) {
+      targetPositionIds = List.of();
+    } else {
+      try {
+        targetPositionIds =
+            paperEffects.openPositionIdsForSignals(
+                lots.stream().map(SignalRepository.SignalRow::id).distinct().toList());
+      } catch (RuntimeException e) {
+        log.error(
+            "{} swing EXIT {} target discovery failed before anchor expiry — refusing commit",
+            doctrine.batchName(),
+            primary.tradingsymbol(),
+            e);
+        throw new IllegalStateException(
+            "swing exit paper target discovery failed before anchor expiry", e);
+      }
+    }
     long id =
         tx.execute(
-      status -> {
+            status -> {
               if (paperEffects != null
                   && !paperEffects.expectExit(
-                      doctrine.batchName(), effectSession, primary.id(), reason, bar.close())) {
+                      doctrine.batchName(),
+                      effectSession,
+                      primary.id(),
+                      reason,
+                      bar.close(),
+                      targetPositionIds)) {
                 return -1L;
               }
               long newId =

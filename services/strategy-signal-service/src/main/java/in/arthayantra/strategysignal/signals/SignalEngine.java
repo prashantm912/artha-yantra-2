@@ -2386,11 +2386,15 @@ public class SignalEngine {
       } catch (RuntimeException e) {
         log.warn("kite.status reload attempt {} failed: {}", attempt, e.toString());
       } finally {
-        // Capture the generation even when the attempt THREW — beginCoverageReload already published
-        // the marker, so without this a chain whose first attempt throws would mint a fresh
-        // generation on attempt 2 and reset its own grace clock once.
+        // ALWAYS adopt the generation this attempt actually published — never only when the field is
+        // null. A direct reload (hot-swap, morning reload, the 20 s reconcile) can land in the ~35 s
+        // retry gap and terminalize a NEWER generation; the chain's stored value then no longer
+        // matches the snapshot, so beginCoverageReload mints a fresh one, and a null-only adopt would
+        // leave the stale value in place and repeat that mismatch on EVERY later attempt — resetting
+        // the grace clock exactly as before. Re-adopting each pass keeps the chain tracking reality.
+        // Works when the attempt THREW too, since beginCoverageReload published the marker first.
         StrategyCoverageSnapshot published = coverageSnapshot;
-        if (connectedChainGeneration == null && published != null) {
+        if (published != null) {
           connectedChainGeneration = published.requestedGeneration();
         }
       }

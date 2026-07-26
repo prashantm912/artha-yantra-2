@@ -13,8 +13,8 @@ import org.springframework.stereotype.Repository;
 
 /**
  * The {@code swing_batch_runs} dead-man marker (V025, audit P0-4/H10): each swing batch records
- * one row per IST run date; {@code SwingBatchCanary} reads the watermark next morning and alerts
- * when an armed batch has no row for the last NSE trading day.
+ * one row per IST run date; {@code SwingBatchCanary} checks the exact historical session next
+ * morning and alerts when a schedule-time armed batch has no matching row.
  *
  * <p>Since V034 (ledger F3) the same row also carries the batch's admission PROBE — the slot-cap
  * exceedance + the RS-ordered names the cap dropped ({@link #recentProbes}); the probe columns are
@@ -65,6 +65,14 @@ public class SwingBatchRunRepository {
     return Optional.ofNullable(
         jdbc.queryForObject(
             "SELECT max(run_date) FROM swing_batch_runs WHERE batch = ?", LocalDate.class, batch));
+  }
+
+  /** Whether this exact IST session has a durable successful run marker. */
+  public boolean hasRun(String batch, LocalDate sessionDate) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM swing_batch_runs WHERE batch = ? AND run_date = ?)",
+            Boolean.class, batch, java.sql.Date.valueOf(sessionDate)));
   }
 
   /**

@@ -264,11 +264,13 @@ public class PaperController {
    * MANUAL_CLOSE — an owner-initiated close is a discretionary override of the strategy's own exit rule,
    * and without the row it was indistinguishable from a routine engine/bracket close (noticed 2026-07-20
    * while hand-closing a position the outaged 07-17 swing batch never exited). The book is read BEFORE
-   * the close because the audit is keyed by book and the trade DTO does not carry it.
+   * the close via a lightweight local query because the audit is keyed by book and the trade DTO does
+   * not carry it. Full position-detail enrichment is deliberately not on this urgent path; the audit
+   * write remains after the close.
    */
   @PostMapping("/positions/{id}/close")
   public PaperService.TradeDto close(@PathVariable long id, @RequestBody(required = false) CloseBody body) {
-    String book = paper.positionDetail(id).book();
+    String book = paper.positionBook(id);
     BigDecimal requestedPrice = body == null ? null : body.price();
     PaperService.TradeDto trade = paper.closePosition(id, requestedPrice);
     adminAudit.recordManualClose(book, id, requestedPrice, trade.realizedPnl());

@@ -23,11 +23,13 @@ import in.arthayantra.strategysignal.signals.SignalExited;
 import in.arthayantra.strategysignal.signals.SignalPublisher;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchEngine;
+import in.arthayantra.strategysignal.swing.SwingDoctrine;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -124,6 +126,53 @@ class ManasAroraSwingEngineTest {
 
     assertThat(r.run().entries()).as("the risk cap blocks the add").isZero();
     verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+  }
+
+  @Test
+  void aLotOpenedAfterThePinnedSessionIsNotEvaluated() throws IOException {
+    ExitHarness h = new ExitHarness();
+    h.stubAnchors(h.anchor(42L, h.series.get(25).bucketStart())); // 2026-06-26, after the pin
+
+    SwingBatchEngine.SwingRun run =
+        h.engine().runDaily(h.doctrine(false), LocalDate.of(2026, 6, 25), false);
+
+    assertThat(run.exits()).isZero();
+    assertThat(run.exitSkipped()).as("a future lot is not an approximate exit").isZero();
+    verify(h.candles, never()).fetch(any(), any(), any(), any(), any());
+    verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalExited));
+  }
+
+  @Test
+  void aPositionWithPreAndPostSessionLotsIsRefusedAndRecordedAsSkipped() throws IOException {
+    ExitHarness h = new ExitHarness();
+    h.stubAnchors(
+        h.anchor(42L, h.series.get(24).bucketStart()), // 2026-06-25, before/equal to the pin
+        h.anchor(43L, h.series.get(25).bucketStart())); // 2026-06-26, after the pin
+
+    SwingBatchEngine.SwingRun run =
+        h.engine().runDaily(h.doctrine(false), LocalDate.of(2026, 6, 25), false);
+
+    assertThat(run.exits()).isZero();
+    assertThat(run.exitSkipped()).as("mixed lots are refused, never partially evaluated").isEqualTo(1);
+    verify(h.candles, never()).fetch(any(), any(), any(), any(), any());
+    verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalExited));
+  }
+
+  @Test
+  void oneFunnelSnapshotReachesTheEngineWithoutASecondFunnelRead() throws IOException {
+    ExitHarness h = new ExitHarness();
+    ManasDoctrine doctrine = h.doctrine(false);
+    when(h.funnel.snapshot())
+        .thenReturn(Optional.of(new ManasFunnelClient.Snapshot(LocalDate.of(2026, 6, 25), List.of())));
+
+    Optional<SwingDoctrine.CandidateSnapshot> snapshot = doctrine.candidateSnapshot().snapshot();
+    assertThat(snapshot).isPresent();
+
+    h.engine().runDaily(doctrine, LocalDate.of(2026, 6, 25), true, snapshot, true);
+
+    verify(h.funnel).snapshot();
+    verify(h.funnel, never()).buyableAndOnDeck();
+    verify(h.funnel, never()).screenDate();
   }
 
   private record AddResult(

@@ -16,6 +16,7 @@ import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
@@ -355,6 +356,37 @@ class SwingBatchCatchUpTest {
   }
 
   @Test
+  void stopsBeforeClaimingRemainingSessionsWhenTheMarketOpens() {
+    MutableClock clock = new MutableClock(MONDAY_0835.instant());
+    LocalDate wednesday = LocalDate.of(2026, 7, 15);
+    SwingDoctrine manas = doctrine(true, null);
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(wednesday));
+    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRun("manas-arora", THURSDAY)).thenReturn(false);
+    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
+    when(intents.find(eq("manas-arora"), any()))
+        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+    when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of());
+    when(state.claim(eq("manas-arora"), any(), anyInt()))
+        .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
+    when(recorder.runAndRecord(eq(manas), any(), anyBoolean(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              clock.set(Instant.parse("2026-07-20T03:46:00Z")); // 09:16 IST, after the deadline
+              return run(0, 1, 0);
+            });
+
+    catchUp(clock, true, manas).catchUp();
+
+    verify(recorder).runAndRecord(eq(manas), eq(THURSDAY), anyBoolean(), any(), any());
+    verify(recorder, never())
+        .runAndRecord(eq(manas), eq(FRIDAY), anyBoolean(), any(), any());
+    verify(state).markDone("manas-arora", THURSDAY);
+    verify(state, never()).markDone("manas-arora", FRIDAY);
+    verify(state, never()).markPending("manas-arora", FRIDAY);
+  }
+
+  @Test
   void missingScheduleIntentIsRefusedAndRecordedInsteadOfReplayed() {
     SwingDoctrine manas = doctrine(true, FRIDAY);
     armedFamilyOnlyFridayMissed();
@@ -408,5 +440,32 @@ class SwingBatchCatchUpTest {
         .filter(SwingBatchAlert.class::isInstance)
         .map(SwingBatchAlert.class::cast)
         .toList();
+  }
+
+  private static final class MutableClock extends Clock {
+    private volatile Instant current;
+
+    private MutableClock(Instant current) {
+      this.current = current;
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneId.of("Asia/Kolkata");
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return current;
+    }
+
+    private void set(Instant current) {
+      this.current = current;
+    }
   }
 }

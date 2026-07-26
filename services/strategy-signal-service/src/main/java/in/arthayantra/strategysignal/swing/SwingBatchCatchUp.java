@@ -5,7 +5,6 @@ import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -119,14 +118,17 @@ public class SwingBatchCatchUp {
    *       records an explicit terminal reason.
    * </ul>
    */
-  @Scheduled(cron = "${artha.swing.catchup-cron:0 35 8 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(
+      cron = "${artha.swing.catchup-cron:0 35 8 * * MON-FRI}",
+      zone = "Asia/Kolkata",
+      scheduler = "swingCatchUpTaskScheduler")
   public void catchUp() {
     ZonedDateTime now = ZonedDateTime.now(clock.withZone(IST));
-    // GATE — never during market hours. The cron already places this at 08:35, but a cron override or a
+    // GATE — never after the market-open deadline. The cron already places this at 08:35, but a cron override or a
     // future caller must not be able to fire an END-OF-DAY batch into a live session (a mid-session
     // "daily" bar is a partial one, and every decision here would price off it).
-    if (calendar.isTradingDay(now.toLocalDate()) && withinSession(now.toLocalTime())) {
-      log.warn("swing catch-up: inside market hours ({}) — refusing; this is an EOD process", now.toLocalTime());
+    if (marketOpenDeadlinePassed()) {
+      log.warn("swing catch-up: past the market-open deadline ({}) — refusing", now.toLocalTime());
       return;
     }
     List<LocalDate> window;
@@ -187,6 +189,12 @@ public class SwingBatchCatchUp {
       return;
     }
     for (LocalDate session : sessions) {
+      if (marketOpenDeadlinePassed()) {
+        log.warn(
+            "swing catch-up: market opened during the {} sweep — leaving remaining sessions retryable",
+            batch);
+        return;
+      }
       catchUpSession(doctrine, session, retryable.contains(session));
     }
   }
@@ -299,7 +307,13 @@ public class SwingBatchCatchUp {
     }
   }
 
-  /** True while the NSE cash session is open (09:15–15:30 IST, both edges inclusive). */
+  /** True once the current trading day's 09:15 IST market-open deadline has passed. */
+  private boolean marketOpenDeadlinePassed() {
+    ZonedDateTime now = ZonedDateTime.now(clock.withZone(IST));
+    return calendar.isTradingDay(now.toLocalDate())
+        && !now.toLocalTime().isBefore(MarketCalendar.SESSION_OPEN);
+  }
+
   private Optional<SwingDoctrine.CandidateSnapshot> readCandidateSnapshot(SwingDoctrine doctrine) {
     SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
     if (read != null) {
@@ -309,10 +323,6 @@ public class SwingBatchCatchUp {
     Optional<LocalDate> screenDate = doctrine.inputsAsOf();
     return Optional.of(
         new SwingDoctrine.CandidateSnapshot(screenDate == null ? null : screenDate.orElse(null), List.of()));
-  }
-
-  private static boolean withinSession(LocalTime t) {
-    return !t.isBefore(MarketCalendar.SESSION_OPEN) && !t.isAfter(MarketCalendar.SESSION_CLOSE);
   }
 
   private void alert(SwingDoctrine doctrine, String title, String message) {

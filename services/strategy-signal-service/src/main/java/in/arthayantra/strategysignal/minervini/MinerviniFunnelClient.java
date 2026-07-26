@@ -3,13 +3,16 @@ package in.arthayantra.strategysignal.minervini;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -24,6 +27,8 @@ import org.springframework.web.client.RestClient;
 public class MinerviniFunnelClient {
 
   private static final Logger log = LoggerFactory.getLogger(MinerviniFunnelClient.class);
+  private static final int CONNECT_TIMEOUT_MS = 2_000;
+  private static final int READ_TIMEOUT_MS = 30_000;
 
   /**
    * One funnel candidate + its seeded geometry. {@code onDeck} is which funnel bucket the row came
@@ -50,12 +55,29 @@ public class MinerviniFunnelClient {
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
 
-  /** Wires the market-data base URL (REST only — no schema read). */
+  /** Wires the market-data base URL with explicit bounds for the synchronous funnel read. */
+  @Autowired
   public MinerviniFunnelClient(
       RestClient.Builder builder,
       ObjectMapper objectMapper,
       @Value("${artha.marketdata.base-url}") String baseUrl) {
-    this.restClient = builder.baseUrl(baseUrl).build();
+    this(builder, objectMapper, baseUrl, CONNECT_TIMEOUT_MS, READ_TIMEOUT_MS);
+  }
+
+  /** Test seam for exercising the real request-factory timeout against a delayed HTTP server. */
+  public MinerviniFunnelClient(
+      RestClient.Builder builder,
+      ObjectMapper objectMapper,
+      String baseUrl,
+      int connectTimeoutMs,
+      int readTimeoutMs) {
+    if (connectTimeoutMs <= 0 || readTimeoutMs <= 0) {
+      throw new IllegalArgumentException("funnel timeouts must be positive");
+    }
+    SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+    factory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
+    factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
+    this.restClient = builder.baseUrl(baseUrl).requestFactory(factory).build();
     this.objectMapper = objectMapper;
   }
 

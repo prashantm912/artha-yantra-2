@@ -715,6 +715,13 @@ public class PaperService {
         .orElseThrow(() -> new ApiException(500, ErrorCodes.INTERNAL_ERROR, "close failed"));
   }
 
+  /** Reads only the local book key needed by the manual-close audit, without detail enrichment or HTTP. */
+  public String positionBook(long id) {
+    return positions
+        .findBook(id)
+        .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_RESOURCE, "no such position"));
+  }
+
   /**
    * The shared close path (manual close, the 15:45 sweep, bracket SL/TP, engine exit). {@code
    * @Transactional} + public so the ONE external caller that isn't already in a transaction — {@link

@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -13,9 +12,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Pins the V025 {@code swing_batch_runs} marker upsert against the real schema (audit P0-4 review):
- * the marker table's only consumer is a SAFETY mechanism — a silent SQL/schema defect here
- * disarms the did-not-run canary permanently (record() fails soft, lastRunDate stays empty, the
- * never-recorded guard skips the batch forever). So the round-trip + re-stamp are worth pinning.
+ * the marker table's only consumer is a SAFETY mechanism — a silent SQL/schema defect here disarms
+ * the missed-batch detector, and it fails in the quiet direction (a marker that never lands reads as
+ * "the batch did not run", so the detector pages for sessions that were fine, or — if {@code hasRun}
+ * wrongly answered true — swallows a real miss). So the round-trip + re-stamp are worth pinning.
  * Since V034 (ledger F3) the same row carries the admission probe — {@link #recentProbesRoundTrips}
  * pins the JSONB dropped-by-cap column + the newest-first read.
  */
@@ -26,25 +26,24 @@ class SwingBatchRunRepositoryIntegrationTest extends StrategySignalIntegrationTe
   @Autowired private JdbcTemplate jdbc;
 
   @Test
-  void recordThenReadBackTheWatermarkAndReStampSameDate() {
+  void recordThenReadBackTheMarkerAndReStampSameDate() {
     // Unique batch name so the singleton-DB, no-cleanup IT convention holds.
     String batch = "it-mv-" + java.util.UUID.randomUUID();
     LocalDate d1 = LocalDate.of(2026, 7, 3);
     LocalDate d2 = LocalDate.of(2026, 7, 6);
 
     repo.record(batch, d1, 4, 20, 3, 1, 0, 2, 5, 3, 2, true, List.of());
-    assertThat(repo.lastRunDate(batch)).contains(d1);
     assertThat(repo.hasRun(batch, d1)).isTrue();
     assertThat(repo.hasRun(batch, d2)).isFalse();
 
-    // A later date advances the watermark.
+    // A later date adds its own marker without disturbing the earlier one.
     repo.record(batch, d2, 4, 25, 5, 2, 1, 3, 7, 5, 2, true, List.of());
-    assertThat(repo.lastRunDate(batch)).contains(d2);
     assertThat(repo.hasRun(batch, d2)).isTrue();
+    assertThat(repo.hasRun(batch, d1)).isTrue();
 
     // Re-stamping the SAME date is an upsert (no duplicate-key blow-up) that overwrites the counters.
     repo.record(batch, d2, 4, 30, 6, 4, 0, 0, 6, 6, 0, false, List.of());
-    assertThat(repo.lastRunDate(batch)).contains(d2);
+    assertThat(repo.hasRun(batch, d2)).isTrue();
     Integer entries =
         jdbc.queryForObject(
             "SELECT entries FROM swing_batch_runs WHERE batch = ? AND run_date = ?",
@@ -87,9 +86,14 @@ class SwingBatchRunRepositoryIntegrationTest extends StrategySignalIntegrationTe
     assertThat(probes.get(1).droppedByCap()).isEmpty();
   }
 
+  /**
+   * A batch that has never recorded must read as NOT run rather than throwing or defaulting true —
+   * the detector calls this for every candidate session, so a wrong answer here either buries a real
+   * miss or invents one.
+   */
   @Test
-  void lastRunDateIsEmptyForANeverRecordedBatch() {
-    assertThat(repo.lastRunDate("it-never-" + java.util.UUID.randomUUID()))
-        .isEqualTo(Optional.empty());
+  void hasRunIsFalseForANeverRecordedBatch() {
+    assertThat(repo.hasRun("it-never-" + java.util.UUID.randomUUID(), LocalDate.of(2026, 7, 3)))
+        .isFalse();
   }
 }

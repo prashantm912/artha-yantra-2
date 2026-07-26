@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -58,13 +57,6 @@ public class SwingBatchRunRepository {
         """,
         batch, java.sql.Date.valueOf(runDate), strategies, candidates, entries, exits, exitSkipped,
         openAtStart, wouldEnter, admitted, capExceedance, capBound, writeDropped(droppedByCap));
-  }
-
-  /** The latest recorded run date for a batch — empty when the batch has never recorded. */
-  public Optional<LocalDate> lastRunDate(String batch) {
-    return Optional.ofNullable(
-        jdbc.queryForObject(
-            "SELECT max(run_date) FROM swing_batch_runs WHERE batch = ?", LocalDate.class, batch));
   }
 
   /** Whether this exact IST session has a durable successful run marker. */

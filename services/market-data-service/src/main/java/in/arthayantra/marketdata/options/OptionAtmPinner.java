@@ -8,6 +8,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -48,23 +50,77 @@ public class OptionAtmPinner {
     meterRegistry.gauge("ay_options_atm_pinned_contracts", currentPins, Set::size);
   }
 
-  /** Initial pin pass after startup. */
+  /**
+   * Off-thread repin.
+   *
+   * <p>{@code repin()} does network-backed, rate-limited full-chain resolution.
+   * {@code InstrumentMasterUpdated} is published SYNCHRONOUSLY from inside instrument sync, and
+   * {@code ApplicationReadyEvent} runs on the boot thread — so calling it inline made quote latency
+   * and retries block instrument sync, and behind it the single default {@code taskScheduler} that
+   * ~32 scheduled jobs share. Starving that pool is the S1–S3 failure mode (#1016). A dedicated
+   * single daemon thread keeps every caller's thread free; passes can only ever queue behind each
+   * other, which is what {@code synchronized repin()} already guaranteed. (Cross-vendor review Major.)
+   */
+  private final java.util.concurrent.ExecutorService repinExecutor =
+      java.util.concurrent.Executors.newSingleThreadExecutor(
+          runnable -> {
+            Thread thread = new Thread(runnable, "option-atm-pinner");
+            thread.setDaemon(true);
+            return thread;
+          });
+
+  /** Initial pin pass after startup — dispatched, never on the boot thread. */
   @EventListener(ApplicationReadyEvent.class)
   @Order(org.springframework.core.Ordered.LOWEST_PRECEDENCE)
   public void onReady() {
-    repin();
+    repinAsync();
   }
 
-  /** Re-resolves the option window after each instrument-master refresh. */
+  /** Re-resolves after each instrument-master refresh — dispatched, never on the sync thread. */
   @EventListener(InstrumentMasterUpdated.class)
   public void onMasterUpdated() {
-    repin();
+    repinAsync();
   }
 
-  /** Resolves the nearest expiry and reconciles its ATM±N CE/PE pin set. */
+  /** Hands one reconcile to the dedicated thread; never throws into the publishing caller. */
+  private void repinAsync() {
+    repinExecutor.execute(
+        () -> {
+          try {
+            repin();
+          } catch (RuntimeException failure) {
+            log.warn("option ATM repin pass failed: {}", failure.toString());
+          }
+        });
+  }
+
+  /** Releases the repin thread on context shutdown. */
+  @jakarta.annotation.PreDestroy
+  public void shutdown() {
+    repinExecutor.shutdownNow();
+  }
+
+  /**
+   * Resolves each underlying's nearest expiry and reconciles ONLY that underlying's pin set.
+   *
+   * <p><b>A failed underlying keeps its existing pins.</b> Reconciling against a single flat desired
+   * set made "I could not resolve" indistinguishable from "nothing is wanted": one chain-service
+   * outage emptied the desired set and the stale phase then unsubscribed every live pin, opening
+   * unrecoverable 1-minute gaps until the next ready/master event. Resolution failure is now scoped
+   * per underlying and simply skips that underlying's reconcile. (Cross-vendor review Critical.)
+   */
   public synchronized void repin() {
-    Set<InstrumentKey> desired = desiredPins();
-    for (InstrumentKey key : desired) {
+    // Hydrate from the REGISTRY, not from our own field. These holds are SPECULATIVE and therefore
+    // PERSISTED and replayed across a restart, so a fresh process starts with an empty currentPins
+    // while the registry already holds yesterday's strikes — which could then never be rolled off.
+    // (Cross-vendor review Major.)
+    currentPins.addAll(registry.heldBy(SUBSCRIBER));
+
+    Map<String, Set<InstrumentKey>> resolved = desiredPins();
+    Set<InstrumentKey> desiredAll = new HashSet<>();
+    resolved.values().forEach(desiredAll::addAll);
+
+    for (InstrumentKey key : desiredAll) {
       try {
         registry.subscribe(SUBSCRIBER, key);
         currentPins.add(key);
@@ -76,14 +132,36 @@ public class OptionAtmPinner {
         }
       }
     }
-    for (InstrumentKey stale : new HashSet<>(currentPins)) {
-      if (!desired.contains(stale)) {
+
+    // Roll off ONLY within underlyings that resolved this pass.
+    for (Map.Entry<String, Set<InstrumentKey>> entry : resolved.entrySet()) {
+      String prefix = optionExchange(entry.getKey());
+      for (InstrumentKey stale : new HashSet<>(currentPins)) {
+        if (!stale.exchange().equals(prefix) || entry.getValue().contains(stale)) {
+          continue;
+        }
+        if (!belongsTo(stale, entry.getKey())) {
+          continue;
+        }
         registry.unsubscribe(SUBSCRIBER, stale);
         currentPins.remove(stale);
         log.info("option ATM pin rolled off: {}", stale.canonical());
       }
     }
-    log.info("option ATM pin pass: desired={}, pinned={}", desired.size(), currentPins.size());
+    log.info(
+        "option ATM pin pass: underlyings resolved={}/{}, desired={}, pinned={}",
+        resolved.size(), underlyings.size(), desiredAll.size(), currentPins.size());
+  }
+
+  /** Whether a pinned key belongs to this underlying's option root (registry grammar). */
+  private static boolean belongsTo(InstrumentKey key, String underlying) {
+    return key.tradingsymbol().startsWith(registryRoot(underlying));
+  }
+
+  /** "NIFTY 50" -> "NIFTY"; the option tradingsymbol root strips at the first space. */
+  private static String registryRoot(String underlying) {
+    int space = underlying.indexOf(' ');
+    return space < 0 ? underlying : underlying.substring(0, space);
   }
 
   /** The current option pin set. */
@@ -91,24 +169,29 @@ public class OptionAtmPinner {
     return Set.copyOf(currentPins);
   }
 
-  private Set<InstrumentKey> desiredPins() {
-    Set<InstrumentKey> desired = new HashSet<>();
+  private Map<String, Set<InstrumentKey>> desiredPins() {
+    Map<String, Set<InstrumentKey>> desired = new LinkedHashMap<>();
     for (String configuredUnderlying : underlyings) {
       String underlying = configuredUnderlying.trim();
       try {
         List<LocalDate> expiries = chains.expiriesWithin(underlying, expiryHorizonDays);
         if (expiries.isEmpty()) {
+          // NOT resolved — absent from the map, so this underlying's pins are left untouched.
           log.warn("no option expiry within {} days for {} yet", expiryHorizonDays, underlying);
           continue;
         }
         OptionsChainService.Chain chain = chains.chain(underlying, expiries.get(0));
         List<OptionsChainService.StrikeRow> rows = atmWindow(chain);
         String exchange = optionExchange(underlying);
+        Set<InstrumentKey> forUnderlying = new HashSet<>();
         for (OptionsChainService.StrikeRow row : rows) {
-          addLeg(desired, exchange, underlying, row.ce());
-          addLeg(desired, exchange, underlying, row.pe());
+          addLeg(forUnderlying, exchange, underlying, row.ce());
+          addLeg(forUnderlying, exchange, underlying, row.pe());
         }
+        desired.put(underlying, forUnderlying);
       } catch (RuntimeException failure) {
+        // NOT resolved — absent from the map, so repin() leaves this underlying's live pins alone
+        // rather than reading the failure as "nothing wanted" and unsubscribing them.
         log.warn("option ATM pin resolution failed for {}: {}", underlying, failure.getMessage());
       }
     }

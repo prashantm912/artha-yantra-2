@@ -89,6 +89,18 @@ public class SubscriptionRegistry implements PinnedSubscriptionRegistrar {
     this.commands = tickerCommands;
   }
 
+  @Override
+  public synchronized java.util.Set<InstrumentKey> heldBy(String subscriber) {
+    java.util.Set<InstrumentKey> held = new java.util.LinkedHashSet<>();
+    instruments.forEach(
+        (key, instrument) -> {
+          if (instrument.holds().containsKey(subscriber)) {
+            held.add(key);
+          }
+        });
+    return held;
+  }
+
   /** Adds/raises a subscriber's hold; returns the instrument's effective mode. */
   @Override
   public void subscribe(String subscriber, InstrumentKey key) {

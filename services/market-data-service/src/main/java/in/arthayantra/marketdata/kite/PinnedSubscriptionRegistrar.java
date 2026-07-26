@@ -17,4 +17,14 @@ public interface PinnedSubscriptionRegistrar {
 
   /** Releases one pinned hold. */
   void unsubscribe(String subscriber, InstrumentKey key);
+
+  /**
+   * Keys this subscriber currently holds, as the REGISTRY sees them.
+   *
+   * <p>A self-reconciling pinner must hydrate from this on startup, not from an empty in-memory set.
+   * These holds are persisted and replayed across a restart (the registry persists every
+   * non-{@code PINNED_INDEX} hold), so a fresh process that trusted its own empty set would never
+   * learn about the strikes it restored — and could therefore never roll an expired one off.
+   */
+  java.util.Set<InstrumentKey> heldBy(String subscriber);
 }

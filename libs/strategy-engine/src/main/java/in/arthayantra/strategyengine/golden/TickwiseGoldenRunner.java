@@ -609,6 +609,11 @@ public final class TickwiseGoldenRunner {
    * exactly, so their floors are bit-for-bit what they were. Only 1h leaves a remainder
    * (19800 mod 3600 = 1800), which is precisely the 30-minute phase error.
    *
+   * <p><b>If 1w is ever added to {@link #intervalDuration}, decide its origin explicitly.</b> It is
+   * unreachable today (the switch rejects it), and this guard would leave it raw-epoch aligned — which
+   * would NOT match the live {@code candles_1w} cagg, IST-aligned via its {@code 'Asia/Kolkata'}
+   * timezone parameter since V004. Raised in cross-vendor review 2026-07-26; not a current defect.
+   *
    * <p><b>1d is deliberately left on the raw epoch floor.</b> Shifting it would change only the bar's
    * LABEL, not its contents — a 05:30-IST-anchored day and a 00:00-IST-anchored day both wholly
    * contain one 09:15–15:30 session, so every 1d bar groups the same bars either way. But goldens

@@ -1,13 +1,12 @@
 package in.arthayantra.strategysignal.swing;
 
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** The V048 schedule-time arming ledger used by the missed-batch detector. */
+/** The V047 schedule-time arming ledger used by the missed-batch detector. */
 @Repository
 public class SwingBatchIntentRepository {
 
@@ -17,9 +16,6 @@ public class SwingBatchIntentRepository {
   public SwingBatchIntentRepository(JdbcTemplate jdbc) {
     this.jdbc = jdbc;
   }
-
-  /** The immutable arming intent captured for one scheduled session. */
-  public record Intent(boolean armed, OffsetDateTime scheduledAt) {}
 
   /** Records the effective flag once; a later same-day retry must not rewrite historical intent. */
   public void recordScheduled(String batch, LocalDate session, boolean armed) {
@@ -32,30 +28,57 @@ public class SwingBatchIntentRepository {
         batch, java.sql.Date.valueOf(session), armed);
   }
 
-  /** Reads the arming state captured for the session, or empty for pre-V048/failed-capture history. */
-  public Optional<Intent> find(String batch, LocalDate session) {
+  /** The arming captured for exactly this session, or empty when the scheduler never fired for it. */
+  public Optional<Boolean> find(String batch, LocalDate session) {
     return jdbc
         .query(
-            "SELECT armed, scheduled_at FROM swing_batch_schedule_intents"
-                + " WHERE batch = ? AND session_date = ?",
-            (rs, n) ->
-                new Intent(rs.getBoolean("armed"), rs.getObject("scheduled_at", OffsetDateTime.class)),
+            "SELECT armed FROM swing_batch_schedule_intents WHERE batch = ? AND session_date = ?",
+            (rs, n) -> rs.getBoolean("armed"),
             batch, java.sql.Date.valueOf(session))
         .stream()
         .findFirst();
   }
 
   /**
-   * Claimable missed sessions among the most recent schedule-intent rows, oldest first.
+   * The newest arming captured at or before {@code session} — how the detector reasons about a
+   * session the scheduler never fired for at all.
    *
-   * <p>The inner LIMIT applies before the run/latch filters so the daily detector never rescans an
-   * ever-growing history of successful runs. Successful sessions and terminal latches are excluded
-   * in SQL; a stale RUNNING row remains eligible so a crash may produce a benign duplicate page.
+   * <p>This is the container-down case the detector exists for: no JVM at 20:00 means no intent row,
+   * so treating "no row" as "not armed" would leave the detector blind to precisely the incident it
+   * replaces. Carrying the last known arming forward keeps every property the design needs — a
+   * family deliberately disarmed yesterday reads {@code false} and stays quiet, re-enabling it today
+   * cannot invent a past miss because the read is still historical, and a fresh deploy with no
+   * intent rows at all returns empty and stays silent.
+   */
+  public Optional<Boolean> lastKnownArmedOnOrBefore(String batch, LocalDate session) {
+    return jdbc
+        .query(
+            """
+            SELECT armed FROM swing_batch_schedule_intents
+            WHERE batch = ? AND session_date <= ?
+            ORDER BY session_date DESC
+            LIMIT 1
+            """,
+            (rs, n) -> rs.getBoolean("armed"),
+            batch, java.sql.Date.valueOf(session))
+        .stream()
+        .findFirst();
+  }
+
+  /**
+   * Sessions that were armed at schedule time, have no run marker, and are outside their page lease
+   * — oldest first. Covers every session the scheduler DID fire for.
+   *
+   * <p>The inner LIMIT applies before the run/lease filters so the daily sweep never rescans an
+   * ever-growing history of successful runs. <b>Effect, not just intent:</b> a missed session that
+   * has since fallen outside the newest {@code recentSessionLimit} intent rows will never be paged
+   * by this query again — roughly a three-month horizon at 64, far beyond any window in which a
+   * missed EOD batch is still actionable.
    */
   public List<LocalDate> claimableMissedSessionsBefore(
       String batch,
       LocalDate exclusiveDate,
-      int staleLeaseMinutes,
+      int pageLeaseMinutes,
       int recentSessionLimit) {
     return jdbc.query(
         """
@@ -78,11 +101,7 @@ public class SwingBatchIntentRepository {
           )
           AND (
             latch.batch IS NULL
-            OR (
-              latch.status = 'RUNNING'
-              AND latch.claimed_at IS NOT NULL
-              AND latch.claimed_at < now() - make_interval(mins => ?)
-            )
+            OR latch.claimed_at < now() - make_interval(mins => ?)
           )
         ORDER BY intent.session_date
         """,
@@ -92,6 +111,6 @@ public class SwingBatchIntentRepository {
         recentSessionLimit,
         batch,
         batch,
-        staleLeaseMinutes);
+        pageLeaseMinutes);
   }
 }

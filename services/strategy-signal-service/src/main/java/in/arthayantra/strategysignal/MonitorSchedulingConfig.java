@@ -77,7 +77,7 @@ public class MonitorSchedulingConfig {
   public ThreadPoolTaskScheduler swingDetectorTaskScheduler() {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     scheduler.setPoolSize(1);
-    scheduler.setThreadNamePrefix("swing-catchup-sched-");
+    scheduler.setThreadNamePrefix("swing-detector-sched-");
     scheduler.setDaemon(true);
     return scheduler;
   }

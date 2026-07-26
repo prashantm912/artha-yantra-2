@@ -12,8 +12,13 @@ import org.springframework.stereotype.Component;
 
 /**
  * Fires the Manas Arora swing batch once per trading evening (20:05 IST, weekdays), just after the
- * Minervini batch. The recorder keeps execution inert when the family flag is false, while this
- * scheduler records the effective schedule-time arming intent for the missed-batch detector.
+ * Minervini batch. Execution stays inert when the family flag is false, while this scheduler records
+ * the effective schedule-time arming intent for the missed-batch detector.
+ *
+ * <p>The inert-when-disarmed gate is {@code SwingBatchEngine.runDaily}'s own {@code
+ * doctrine.enabled()} check, NOT the recorder's — {@code SwingBatchRecorder.runAndRecord} calls the
+ * engine before consulting its own flag. That one line is what makes it safe for this scheduler to
+ * fire unconditionally so the intent row is always written.
  */
 @Component
 public class ManasAroraSwingScheduler {

@@ -220,7 +220,21 @@ Run in order; each answers one question. Canned SQL in §6.
     (650 absolute AND ≤10% of the expected sum — a thin frozen bar still fires), so a surviving WARN
     means either the frozen-partial regression (persistent one-directional ~⅔ shortfall) or a new
     attribution defect. Investigate, don't tolerate-away.
-18. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
+    2026-07-27) — the live scalper signal series is the **dated front future**, and
+    `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27
+    every rejection evaluated `NFO:NIFTY26AUGFUT@3m` while every prior file in this folder measured
+    `NIFTY26JULFUT`. **Nothing in `signal_rejections` names the contract** — `diagnostic.context.chart`
+    has no `signalSymbol` field — so the roll is silent, and a §3.8/§3.15 ground-truth query run against
+    last session's contract silently mis-places every threshold. The two series differ materially: on
+    2026-07-27 AUGFUT ran p90 47,320 / max 117,000 against JULFUT's p90 57,785 / max 222,560 over the
+    same session. Derive it, don't assume it: take any context-bearing row's
+    `context.chart.close` and match it against the candidate contracts' 1m ranges for the day (SQL in
+    §6). State the contract in the findings file, and **never compare volume percentiles or floor
+    thresholds across a roll** without saying so. Rolls are monthly (last Tuesday); the `docker logs`
+    line `scalper confluence blocked entry: <slug> NFO:<contract> rail=…` also names it directly and is
+    the cheapest confirmation while the container is still up.
+19. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -565,6 +579,19 @@ FROM marketdata.candles WHERE exchange='NFO' AND interval='1m' AND tradingsymbol
   AND EXTRACT(second FROM bucket)=0 AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1 ORDER BY 1;
 -- compare the flagged bucket's value against the canary's logged "3m bar volume" (they matched on
 -- 2026-07-24 — it was the in-memory 1m sum that diverged).
+
+-- §3.18 which contract did the engine actually signal off? (the roll is SILENT in the row)
+-- take a context-bearing close, then see which candidate contract's day range contains it.
+SELECT DISTINCT (diagnostic->'context'->'chart'->>'close')::numeric close_seen
+FROM strategy.signal_rejections
+WHERE generated_at >= :d0915 AND diagnostic->'context'->'chart'->>'close' IS NOT NULL LIMIT 5;
+SELECT tradingsymbol, (array_agg(open ORDER BY bucket))[1] o, max(high) h, min(low) l,
+       (array_agg(close ORDER BY bucket DESC))[1] c
+FROM marketdata.candles WHERE interval='1m' AND EXTRACT(second FROM bucket)=0
+  AND tradingsymbol IN ('NIFTY26JULFUT','NIFTY26AUGFUT')   -- adjust to the live pair
+  AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1;
+-- cheapest confirmation while the container is up (the rail log names the contract):
+--   docker logs ay-strategy-signal-service --since <T> 2>&1 | grep -oE "NFO:[A-Z0-9]+" | sort -u
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

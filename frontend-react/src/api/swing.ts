@@ -1,8 +1,9 @@
 // Swing sell-decision data layer (audit M20 + §7.2.4). The daily "would I buy it now / why am I
 // holding / where am I a seller" triad for the two EOD swing books — Minervini SEPA + Manas Arora.
-// Two surfaces: the LIVE recompute-on-read triad (per-family /sell-decisions), and the durable HISTORY
-// the 20:05 batch persists (V037) at /signals/sell-decisions with an acknowledge affordance. Decimals
-// cross the wire as JSON strings (see CLAUDE.md; render via lib/decimal).
+// Read surfaces: the LIVE recompute-on-read triad (per-family /sell-decisions), and the durable
+// HISTORY the 20:05 batch persists (V037) at /signals/sell-decisions with an acknowledge affordance.
+// The explicit per-family run mutation is a real current-input batch, not an idempotent history read.
+// Decimals cross the wire as JSON strings (see CLAUDE.md; render via lib/decimal).
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from './client.ts';
@@ -39,6 +40,11 @@ const PATHS: Record<SwingFamily, string> = {
   'manas-arora': '/signals/manas-arora-swing/sell-decisions',
 };
 
+const RUN_PATHS: Record<SwingFamily, string> = {
+  minervini: '/signals/minervini-swing/run',
+  'manas-arora': '/signals/manas-arora-swing/run',
+};
+
 /** The read-only daily sell-decision triad for one swing family's open holdings. */
 export function useSwingSellDecisions(family: SwingFamily, enabled = true) {
   return useQuery({
@@ -46,6 +52,25 @@ export function useSwingSellDecisions(family: SwingFamily, enabled = true) {
     queryFn: () => apiFetch<SwingSellReport>(PATHS[family]),
     enabled,
   });
+}
+
+/** The typed summary returned by the manual swing batch endpoint. */
+export interface SwingRun {
+  strategies: number;
+  candidates: number;
+  entries: number;
+  exits: number;
+  exitSkipped: number;
+  admission: {
+    openAtStart: number;
+    wouldEnter: number;
+    admitted: number;
+    capExceedance: number;
+    capBound: boolean;
+    droppedByCap: { symbol: string; admissionRank: number }[];
+  };
+  refusalReasons: string[];
+  deadlineReached: boolean;
 }
 
 /** One durable recorded sell-decision row (V037) — the acknowledgeable batch-time snapshot. */
@@ -74,6 +99,19 @@ export interface RecordedSellDecision {
 }
 
 const RECORDED_KEY = 'recorded-sell-decisions';
+
+/** Fires one real current-input run; the server serializes concurrency but does not dedupe same-day calls. */
+export function useRunSwingBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (family: SwingFamily) =>
+      apiFetch<SwingRun>(RUN_PATHS[family], { method: 'POST' }),
+    onSuccess: (_run, family) => {
+      void qc.invalidateQueries({ queryKey: ['swing-sell-decisions', family] });
+      void qc.invalidateQueries({ queryKey: [RECORDED_KEY, family] });
+    },
+  });
+}
 
 /** The persisted sell-decision history for one swing book, newest first (the batch writes one/day). */
 export function useRecordedSellDecisions(family: SwingFamily, enabled = true) {

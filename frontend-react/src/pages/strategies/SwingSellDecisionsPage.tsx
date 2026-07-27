@@ -1,16 +1,27 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { m } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { formatDecimal, isNegative } from '../../lib/decimal.ts';
 import { cn } from '../../lib/cn.ts';
+import { isMarketHoursIst } from '../../lib/marketHours.ts';
+import { Button } from '../../components/atoms/Button.tsx';
 import { DataTable, type DataColumn } from '../../components/DataTable.tsx';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { QueryState } from '../../components/QueryState.tsx';
 import { Skeleton } from '../../components/Skeletons.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog.tsx';
+import {
   useAckSellDecision,
   useRecordedSellDecisions,
+  useRunSwingBatch,
   useSwingSellDecisions,
   type RecordedSellDecision,
   type SwingFamily,
@@ -21,12 +32,17 @@ import {
 // books. For every open Minervini / Manas Arora swing position it shows the "would I buy it now / why am
 // I holding / where am I a seller" read. Two views: LIVE recomputes each held anchor's fresh daily series
 // server-side; RECORDED reads the durable snapshot the 20:05 batch persists (V037), with an acknowledge
-// affordance + a deep-link to the paper book. Read-only otherwise — it never moves the book.
+// affordance + a deep-link to the paper book. Those tables stay read-only; the explicit confirmed run
+// controls are the sole mutation here and can emit real entries/exits.
 
 const FAMILIES: { key: SwingFamily; label: string }[] = [
   { key: 'minervini', label: 'Minervini' },
   { key: 'manas-arora', label: 'Manas Arora' },
 ];
+
+const MARKET_HOURS_DISABLED_LABEL = 'Disabled during market hours (09:15–15:30 IST)';
+const SWING_RUN_WARNING =
+  'Runs on CURRENT inputs — this is NOT an as-of replay of a past session. The armed 08:35 catch-up is the primary recovery path; use this only when swing_catchup_runs shows ABANDONED/refused.';
 
 type Setupish = { setup: string | null; stage?: number | null; setupType?: string | null };
 
@@ -90,8 +106,69 @@ function AckCell({ d, family }: { d: RecordedSellDecision; family: SwingFamily }
 export function SwingSellDecisionsPage() {
   const [family, setFamily] = useState<SwingFamily>('minervini');
   const [view, setView] = useState<'live' | 'recorded'>('live');
+  const [pendingRunFamily, setPendingRunFamily] = useState<SwingFamily | null>(null);
+  const [forceClosed, setForceClosed] = useState(false);
+  const [marketHours, setMarketHours] = useState(() => isMarketHoursIst());
+  const runTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const runGroupRef = useRef<HTMLDivElement | null>(null);
+  // Mirror for the interval closure — it must know whether a dialog is open without re-subscribing.
+  const pendingRunRef = useRef<SwingFamily | null>(null);
+  pendingRunRef.current = pendingRunFamily;
   const live = useSwingSellDecisions(family, view === 'live');
   const recorded = useRecordedSellDecisions(family, view === 'recorded');
+  const run = useRunSwingBatch();
+
+  useEffect(() => {
+    const refreshMarketHours = () => {
+      const disabled = isMarketHoursIst();
+      setMarketHours(disabled);
+      if (disabled && pendingRunRef.current != null) {
+        setPendingRunFamily(null);
+        setForceClosed(true);
+      }
+    };
+    const interval = window.setInterval(refreshMarketHours, 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  // Focus repair for the force-close, AFTER the dialog unmounts: focusing synchronously inside the
+  // interval loses to Radix's still-mounted focus trap, and onCloseAutoFocus never fires on an
+  // unmount-close — while the trigger is disabled, so its .focus() is a no-op. Land the keyboard
+  // user on the buttons group, not <body> (cross-vendor review m1).
+  useEffect(() => {
+    if (forceClosed) {
+      runGroupRef.current?.focus();
+      setForceClosed(false);
+    }
+  }, [forceClosed]);
+
+  const requestRun = (nextFamily: SwingFamily, event: MouseEvent<HTMLButtonElement>) => {
+    if (isMarketHoursIst()) {
+      setMarketHours(true);
+      return;
+    }
+    runTriggerRef.current = event.currentTarget;
+    setPendingRunFamily(nextFamily);
+  };
+
+  // The run's own result MUST be surfaced (cross-vendor review M1): POST /run answers HTTP 200 with
+  // an ALL-ZERO SwingRun when the family flag is disarmed, when no published swing strategies are
+  // loaded, or when the deadline was reached — on this escalation surface, a silent zero reads as
+  // "recovered" while the session's stop actually stays unrecovered.
+  const ranFamily = FAMILIES.find((f) => f.key === run.variables)?.label ?? run.variables;
+  const ranNothing =
+    run.isSuccess && run.data.strategies === 0 && run.data.entries === 0 && run.data.exits === 0;
+
+  const confirmRun = () => {
+    if (pendingRunFamily == null) return;
+    if (isMarketHoursIst()) {
+      setMarketHours(true);
+      setPendingRunFamily(null);
+      return;
+    }
+    run.mutate(pendingRunFamily);
+    setPendingRunFamily(null);
+  };
 
   const liveColumns: DataColumn<SwingSellDecision>[] = useMemo(
     () => [
@@ -253,7 +330,7 @@ export function SwingSellDecisionsPage() {
       <PageHeader
         title="Swing sell decisions"
         subtitle="Daily HOLD / SELL triad for the Minervini + Manas Arora swing books"
-        help="For every open swing holding: would I buy it now (the entry gate re-run on today's bar), where my exits sit (the base stop + the current trail), and whether the frozen exit doctrine fires a SELL today. Live recomputes on read; Recorded is the durable snapshot the EOD swing batch (~20:00 IST) persists, which you can acknowledge. Read-only — it never moves the book."
+        help="For every open swing holding: would I buy it now (the entry gate re-run on today's bar), where my exits sit (the base stop + the current trail), and whether the frozen exit doctrine fires a SELL today. Live recomputes on read; Recorded is the durable snapshot the EOD swing batch (~20:00 IST) persists, which you can acknowledge. Those views are read-only; the confirmed Run batch now controls are the only actions here that can emit real entries or exits."
         right={right}
       />
 
@@ -279,6 +356,82 @@ export function SwingSellDecisionsPage() {
             </button>
           ))}
         </div>
+        <div
+          ref={runGroupRef}
+          tabIndex={-1}
+          className="flex flex-wrap items-center gap-2"
+          role="group"
+          aria-label="Run swing batch"
+        >
+          {FAMILIES.map((f) => {
+            const disabled = marketHours || run.isPending;
+            const descriptionId = `${f.key}-run-disabled-reason`;
+            const title = marketHours
+              ? MARKET_HOURS_DISABLED_LABEL
+              : run.isPending
+                ? 'Disabled while a swing batch is in flight.'
+                : `Run the ${f.label} swing batch with current inputs.`;
+            return (
+              <div key={f.key} className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-medium text-ay-muted">{f.label}</span>
+                <Button
+                  type="button"
+                  aria-describedby={marketHours ? descriptionId : undefined}
+                  disabled={disabled}
+                  loading={run.isPending && run.variables === f.key}
+                  onClick={(event) => requestRun(f.key, event)}
+                  title={title}
+                  variant="primary"
+                  size="sm"
+                >
+                  Run {f.label} batch now
+                </Button>
+                {marketHours && (
+                  <span id={descriptionId} className="text-xs text-ay-muted">
+                    {MARKET_HOURS_DISABLED_LABEL}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {(run.isSuccess || run.isError) && (
+          <div role="status" className="w-full text-sm">
+            {run.isSuccess && ranNothing && (
+              <p className="font-medium text-red-500">
+                {ranFamily}: the server answered OK but ran 0 strategies — nothing was recovered.
+                The family arming flag is likely OFF, or no published swing strategies are loaded.
+                Verify before treating the session as recovered.
+              </p>
+            )}
+            {run.isSuccess && !ranNothing && (
+              <p className="text-ay-text">
+                {ranFamily} run finished: {run.data.strategies} strategies, {run.data.entries}{' '}
+                entries, {run.data.exits} exits
+                {run.data.exitSkipped > 0 && (
+                  <span className="font-medium text-red-500">
+                    {' '}
+                    — {run.data.exitSkipped} exit(s) SKIPPED (a held stop went unevaluated; check the
+                    series and re-run)
+                  </span>
+                )}
+              </p>
+            )}
+            {run.isSuccess && run.data.deadlineReached && (
+              <p className="font-medium text-red-500">
+                The market-open deadline was reached mid-run — the pass is INCOMPLETE.
+              </p>
+            )}
+            {run.isSuccess && run.data.refusalReasons.length > 0 && (
+              <p className="text-ay-muted">Refusals: {run.data.refusalReasons.join('; ')}</p>
+            )}
+            {run.isError && (
+              <p className="font-medium text-red-500">
+                {ranFamily} run FAILED: {run.error instanceof Error ? run.error.message : 'request error'}
+              </p>
+            )}
+          </div>
+        )}
         <div
           className="inline-flex rounded-md border border-ay-border"
           role="group"
@@ -310,6 +463,51 @@ export function SwingSellDecisionsPage() {
           </button>
         </div>
       </div>
+
+      {pendingRunFamily != null && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setPendingRunFamily(null);
+          }}
+        >
+          <DialogContent
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              // The trigger is DISABLED when the 30s interval force-closed us at market open —
+              // .focus() on a disabled button is a no-op and dumps a keyboard user on <body>
+              // (cross-vendor review m1). Fall back to the buttons group, which is focusable.
+              const trigger = runTriggerRef.current;
+              if (trigger && !trigger.disabled) {
+                trigger.focus();
+              } else {
+                runGroupRef.current?.focus();
+              }
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>
+                Run {FAMILIES.find((f) => f.key === pendingRunFamily)?.label} batch now?
+              </DialogTitle>
+              <DialogDescription>{SWING_RUN_WARNING}</DialogDescription>
+            </DialogHeader>
+            <p className="text-sm text-ay-muted">
+              This endpoint performs a real current-input re-run every time it is called. The server-side
+              per-family mutex prevents concurrent runs, but a second same-day call is not a no-op — and
+              the server enforces no market-hours guard of its own; the 09:15–15:30 block here is
+              client-side courtesy only.
+            </p>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setPendingRunFamily(null)}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={confirmRun} loading={run.isPending}>
+                Confirm &amp; run
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <m.div
         key={`${family}:${view}`}

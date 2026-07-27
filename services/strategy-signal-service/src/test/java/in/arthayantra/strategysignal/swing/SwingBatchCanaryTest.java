@@ -51,7 +51,11 @@ class SwingBatchCanaryTest {
   }
 
   private SwingBatchCanary canary() {
-    return new SwingBatchCanary(runs, intents, alerts, events, MONDAY_0830);
+    return canary(false);
+  }
+
+  private SwingBatchCanary canary(boolean catchupEnabled) {
+    return new SwingBatchCanary(runs, intents, alerts, events, MONDAY_0830, catchupEnabled);
   }
 
   private void claimSucceeds(int pages) {
@@ -80,6 +84,30 @@ class SwingBatchCanaryTest {
             "No automatic replay was attempted",
             "POST /api/v1/signals/minervini-swing/run",
             "not a historical as-of replay");
+  }
+
+  /**
+   * With the catch-up ARMED the page must tell the truth about what the machine will do (cross-vendor
+   * round 5): an automatic pinned replay is queued for 08:35 and stamps the marker — so the message
+   * must warn AGAINST a manual run instead of recommending one, or the operator fires a duplicate
+   * money run on top of the queued replay.
+   */
+  @Test
+  void withCatchupArmedThePageWarnsAgainstAManualRunInsteadOfRecommendingOne() {
+    when(intents.claimableMissedSessionsBefore(eq("minervini"), eq(MONDAY), anyInt(), anyInt(), anyInt()))
+        .thenReturn(List.of(FRIDAY));
+    when(intents.find("minervini", FRIDAY)).thenReturn(Optional.of(true));
+    when(runs.hasRun("minervini", FRIDAY)).thenReturn(false);
+    claimSucceeds(1);
+
+    canary(true).check();
+
+    ArgumentCaptor<Object> published = ArgumentCaptor.forClass(Object.class);
+    verify(events).publishEvent(published.capture());
+    SwingBatchAlert alert = (SwingBatchAlert) published.getValue();
+    assertThat(alert.message())
+        .contains("armed catch-up", "do NOT run POST", "swing_catchup_runs")
+        .doesNotContain("No automatic replay was attempted");
   }
 
   @Test

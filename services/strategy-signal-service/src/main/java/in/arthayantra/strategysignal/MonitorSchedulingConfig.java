@@ -18,17 +18,18 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  * {@code @Scheduled(scheduler = "monitorTaskScheduler")} — {@code SubscriberHealthCanary.sweep},
  * {@code PartialBucketCanary.sweep}, {@code DotHealthCanary.sweep}. The engine reload trio, PaperScheduler, and every EOD/batch job
  * keep the default pool (their serial single-thread assumption is load-bearing), except for the
- * synchronous swing missed-batch detector, which has its own fenced pool below.
+ * synchronous swing missed-batch detector and the synchronous multi-session
+ * {@code SwingBatchCatchUp}, which each have their own fenced pool below.
  *
- * <p>A FOURTH pool, {@link #evalOutcomeTaskScheduler()}, carries the V045 eval-outcome rollup. It
+ * <p>A FIFTH pool, {@link #evalOutcomeTaskScheduler()}, carries the V045 eval-outcome rollup. It
  * belongs on none of the earlier pools — see that method's javadoc for the shared-pool hazards.
  *
- * <p>A FIFTH, {@link #maintenanceTaskScheduler()}, carries the daily retention prunes. Same
- * reasoning as the fourth, applied to a different risk class — see that method's javadoc, including
+ * <p>A SIXTH, {@link #maintenanceTaskScheduler()}, carries the daily retention prunes. Same
+ * reasoning as the fifth, applied to a different risk class — see that method's javadoc, including
  * why the prunes are NOT folded onto the eval-outcome pool.
  *
- * <p>A SIXTH, {@link #telegramTaskScheduler()}, carries the live-armed Telegram command poller — the
- * only default-pool job that makes an outbound call to a THIRD PARTY. See that method's javadoc.
+ * <p>A SEVENTH, {@link #telegramTaskScheduler()}, carries the live-armed Telegram command poller —
+ * the only default-pool job that makes an outbound call to a THIRD PARTY. See that method's javadoc.
  */
 @Configuration(proxyBeanMethods = false)
 public class MonitorSchedulingConfig {
@@ -83,6 +84,32 @@ public class MonitorSchedulingConfig {
   }
 
   /**
+   * A single daemon thread owned solely by {@code SwingBatchCatchUp.catchUp}. The catch-up is a
+   * synchronous multi-session DB + market-data HTTP sweep that can run for several minutes, and it
+   * can emit real paper entries/exits. Leaving it on the DEFAULT pool would let it park
+   * {@code PaperScheduler.bracketEvaluation}, the 15-second stop-loss/target sweep, along with every
+   * other default scheduled job.
+   *
+   * <p><b>Why not {@code monitorTaskScheduler}.</b> That pool is fenced for pure liveness DETECTORS.
+   * The catch-up has money effects and blocking I/O; putting it there could starve
+   * {@code SubscriberHealthCanary}, {@code PartialBucketCanary}, and {@code DotHealthCanary} exactly
+   * when the recovery path is slow. <b>Why not {@code swingDetectorTaskScheduler}.</b> Same fence
+   * from the other side: a multi-minute replay parked on the detector thread would suppress the
+   * next-morning missed-batch page — the detector must keep firing precisely while recovery runs.
+   *
+   * <p>The per-family {@code SwingRunMutex} remains the run-serialization guard. This pool only removes
+   * scheduler starvation; it does not replace the mutex or provide durable idempotency.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler swingCatchUpTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("swing-catchup-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
    * A single daemon thread owned solely by {@code SignalEvalOutcomeRollupJob} (V045). Unlike the
    * pools above, this one exists to be EXPENDABLE: the rollup makes a synchronous JDBC write, and
    * the whole point is that a DB lock, a lock wait, or a network stall can park nothing but the
@@ -105,6 +132,8 @@ public class MonitorSchedulingConfig {
    *       hazard {@code RejectionWriter} and {@code RiskSuppressionWriter} are both async to avoid.
    *   <li><b>{@code swingDetectorTaskScheduler} is detector-dedicated.</b> A stalled rollup there
    *       would suppress the next-morning missed-batch page.
+   *   <li><b>{@code swingCatchUpTaskScheduler} is the money-effect recovery lane.</b> A rollup
+   *       stall there would delay a catch-up that can emit real paper entries and exits.
    * </ul>
    *
    * <p>Belt-and-braces, the write is also BOUNDED: {@code SignalEvalOutcomeRepository} runs on its

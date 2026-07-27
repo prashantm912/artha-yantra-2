@@ -11,6 +11,7 @@ import in.arthayantra.strategysignal.signals.SignalEvalOutcomeRollupJob;
 import in.arthayantra.strategysignal.signals.SubscriberHealthCanary;
 import in.arthayantra.strategysignal.signals.StrategyCoverageWatchdog;
 import in.arthayantra.strategysignal.swing.SwingBatchCanary;
+import in.arthayantra.strategysignal.swing.SwingBatchCatchUp;
 import in.arthayantra.strategysignal.telegram.TelegramCommandBot;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -256,6 +257,34 @@ class MonitorSchedulingConfigTest {
     assertThat(scheduled.scheduler())
         .as("bracketEvaluation keeps Boot's default scheduler")
         .isEqualTo("");
+  }
+
+  /** The catch-up must not share the default paper SL/TP pool or the fenced detector pool. */
+  @Test
+  void theSwingCatchUpOwnsItsOwnScheduler() throws NoSuchMethodException {
+    Scheduled scheduled =
+        SwingBatchCatchUp.class.getDeclaredMethod("catchUp").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("SwingBatchCatchUp.catchUp is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler())
+        .as("catch-up must not share the default pool with paper SL/TP evaluation")
+        .isEqualTo("swingCatchUpTaskScheduler");
+  }
+
+  /** The catch-up pool is distinct from both default money-adjacent work and fenced detectors. */
+  @Test
+  void theSwingCatchUpSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("swingCatchUpTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the default scheduling pool")
+              .isNotSameAs(context.getBean("taskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the fenced monitor detectors")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+        });
   }
 
   /** The bean the poller names must exist, distinct from all three siblings and the default pool. */

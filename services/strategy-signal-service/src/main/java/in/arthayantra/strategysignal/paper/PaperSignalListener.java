@@ -2,9 +2,12 @@ package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
+import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
+import in.arthayantra.strategysignal.signals.SwingPaperEffectRetry;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
@@ -26,13 +29,25 @@ public class PaperSignalListener {
   private final PaperService paper;
   private final ScalperAccountModel scalperAccounts;
   private final SignalRepository signals;
+  private final SwingPaperEffectRepository paperEffects;
 
   /** Wires the ledger service, the 5-account sub-ledger + the signal store. */
+  @Autowired
   public PaperSignalListener(
-      PaperService paper, ScalperAccountModel scalperAccounts, SignalRepository signals) {
+      PaperService paper,
+      ScalperAccountModel scalperAccounts,
+      SignalRepository signals,
+      SwingPaperEffectRepository paperEffects) {
     this.paper = paper;
     this.scalperAccounts = scalperAccounts;
     this.signals = signals;
+    this.paperEffects = paperEffects;
+  }
+
+  /** Backwards-compatible constructor for focused paper-listener tests. */
+  public PaperSignalListener(
+      PaperService paper, ScalperAccountModel scalperAccounts, SignalRepository signals) {
+    this(paper, scalperAccounts, signals, null);
   }
 
   /** Opens a position (or, for a straddle, both legs) from the signal when a qty was supplied. */
@@ -42,6 +57,22 @@ public class PaperSignalListener {
       return;
     }
     try {
+      Optional<SwingPaperEffectRepository.Effect> swingEffect =
+          paperEffects == null ? Optional.empty() : paperEffects.findOpenBySignal(event.signalId());
+      if (swingEffect.isPresent()) {
+        String decision = swingEffect.get().decision();
+        if ("REQUIRED".equals(decision)) {
+          openSwingEffect(event, swingEffect.get());
+          return;
+        }
+        if (!"SKIPPED".equals(decision)) {
+          // An unresolved effect has no durable decision. Never turn an ambiguous ledger row into a
+          // paper open merely because a retry/take event arrived.
+          return;
+        }
+        // SKIPPED means auto-paper did not claim this emission; an explicit manual take still uses
+        // the ordinary open path below.
+      }
       // E10: a scalper take is charged to a round-robin sub-account (the per-account first-loss freeze
       // reads it); a non-scalper / manual take leaves the ledger key NULL. A straddle's TWO legs share
       // the SAME sub-account (one position).
@@ -58,8 +89,73 @@ public class PaperSignalListener {
       } else {
         openSingle(event, subaccountIdx);
       }
+      if (paperEffects != null) {
+        paperEffects.confirmEntry(event.signalId());
+      }
     } catch (Exception e) {
       log.warn("paper position not opened for taken signal {}: {}", event.signalId(), e.getMessage());
+    }
+  }
+
+  /** Replays a previously claimed swing ENTRY only after the catch-up verified no filled order exists. */
+  @EventListener
+  public void onSwingPaperEffectRetry(SwingPaperEffectRetry retry) {
+    if (retry.kind() != SwingPaperEffectRetry.Kind.ENTRY) {
+      return;
+    }
+    onSignalTaken(new SignalTaken(retry.signalId(), retry.qty(), retry.fillPrice(), retry.scalper()));
+  }
+
+  /** Claims before the open and confirms only after a quantity read-back. */
+  private void openSwingEffect(
+      SignalTaken event, SwingPaperEffectRepository.Effect effect) {
+    // A repair event can arrive after the original SignalTaken publication was lost. Re-establish
+    // the same ACTIVE->TAKEN anchor before any paper open; the effect lease still gates the money path.
+    signals.transitionIf(event.signalId(), "ACTIVE", "TAKEN");
+    long before = paper.openQuantityForSignal(event.signalId());
+    long expected = effect.expectedQty() > 0 ? effect.expectedQty() : event.qty();
+    if (before >= Math.addExact(effect.quantityBefore(), expected)) {
+      paperEffects.confirm(effect.id());
+      return;
+    }
+    Optional<SwingPaperEffectRepository.Effect> claimed =
+        paperEffects.claimOpen(effect.id(), before, event.qty());
+    if (claimed.isEmpty()) {
+      return;
+    }
+    SwingPaperEffectRepository.Effect lease = claimed.get();
+    long afterClaim = paper.openQuantityForSignal(event.signalId());
+    long target = Math.addExact(lease.quantityBefore(), expected);
+    if (afterClaim >= target) {
+      paperEffects.confirm(lease.id());
+      return;
+    }
+    try {
+      openPaperPosition(event);
+      if (paper.openQuantityForSignal(event.signalId()) >= target) {
+        paperEffects.confirm(lease.id());
+      }
+    } catch (Exception e) {
+      // Leave CLAIMED. The next catch-up repair can reclaim the stale lease after read-back.
+      log.warn("paper swing effect {} failed: {}", lease.id(), e.getMessage());
+    }
+  }
+
+  private void openPaperPosition(SignalTaken event) {
+    // E10: a scalper take is charged to a round-robin sub-account (the per-account first-loss freeze
+    // reads it); a non-scalper / manual take leaves the ledger key NULL.
+    Integer subaccountIdx = event.scalper() ? scalperAccounts.nextFreeAccount() : null;
+    Optional<StraddleLegs.Pair> straddle =
+        event.scalper()
+            ? signals
+                .find(event.signalId())
+                .map(SignalRepository.SignalRow::scalperDetail)
+                .flatMap(StraddleLegs::parse)
+            : Optional.empty();
+    if (straddle.isPresent()) {
+      openStraddle(event, straddle.get(), subaccountIdx);
+    } else {
+      openSingle(event, subaccountIdx);
     }
   }
 

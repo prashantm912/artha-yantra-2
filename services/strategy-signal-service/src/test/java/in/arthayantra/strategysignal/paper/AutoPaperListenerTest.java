@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.strategysignal.signals.SignalEmitted;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
+import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
@@ -49,10 +50,12 @@ class AutoPaperListenerTest {
     when(risk.autoPaperTradeEnabled("scalper")).thenReturn(false);
     SignalRepository signals = mock(SignalRepository.class);
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingPaperEffectRepository effects = mock(SwingPaperEffectRepository.class);
 
-    new AutoPaperListener(risk, signals, books, events).onSignalEmitted(emitted(7));
+    new AutoPaperListener(risk, signals, books, events, effects).onSignalEmitted(emitted(7));
 
     verifyNoInteractions(signals, events); // the toggle is OFF — nothing happens
+    verify(effects).skipEntry(7L);
   }
 
   @Test
@@ -74,6 +77,24 @@ class AutoPaperListenerTest {
     assertThat(taken.getValue().signalId()).isEqualTo(7L);
     assertThat(taken.getValue().qty()).isEqualTo(5);
     assertThat(taken.getValue().fillPrice()).isEqualByComparingTo("100"); // the signal's entry price
+  }
+
+  @Test
+  void anUnrecordedRequiredDecisionFailsClosed() {
+    RiskService risk = mock(RiskService.class);
+    BookResolver books = mock(BookResolver.class);
+    when(books.bookForSignal(anyLong())).thenReturn("scalper");
+    when(risk.autoPaperTradeEnabled("scalper")).thenReturn(true);
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.find(7L)).thenReturn(Optional.of(row(new BigDecimal("5"), null)));
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingPaperEffectRepository effects = mock(SwingPaperEffectRepository.class);
+
+    new AutoPaperListener(risk, signals, books, events, effects).onSignalEmitted(emitted(7));
+
+    verify(effects).requireEntry(7L);
+    verify(signals, never()).transitionIf(anyLong(), any(), any());
+    verifyNoInteractions(events);
   }
 
   @Test

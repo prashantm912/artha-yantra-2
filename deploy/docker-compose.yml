@@ -578,6 +578,16 @@ services:
       ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 0 20 * * MON-FRI}"
       ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 5 20 * * MON-FRI}"
       ARTHA_SWING_CANARY_CRON: "${ARTHA_SWING_CANARY_CRON:-0 30 8 * * MON-FRI}"
+      # Swing-batch CATCH-UP (2026-07-17 incident): re-runs a batch the stack was down for, pinned to
+      # the missed session's daily bar. Runs in the post-close/pre-open window (08:35, after the 08:30
+      # canary alert) where the newest daily bar is still the missed session's — so it decides off the
+      # SAME bar the on-time run would have. Default-OFF: it fires real entries + real paper exits.
+      ARTHA_SWING_CATCHUP_ENABLED: ${ARTHA_SWING_CATCHUP_ENABLED:-false}
+      ARTHA_SWING_CATCHUP_CRON: "${ARTHA_SWING_CATCHUP_CRON:-0 35 8 * * MON-FRI}"
+      # How many missed sessions the sweep will keep retrying before it abandons one (a held bar that
+      # never lands). The scan window is this + 2 most-recent trading days, so a multi-day outage
+      # catches up every session in range, oldest first.
+      ARTHA_SWING_CATCHUP_MAX_ATTEMPTS: ${ARTHA_SWING_CATCHUP_MAX_ATTEMPTS:-5}
       # External dead-man's-switch for the swing batches (catches a whole-stack/host OUTAGE, which the
       # in-stack P0-4 canary can't). Blank = dormant; paste a healthchecks.io/UptimeRobot heartbeat URL
       # to arm, and set the external check to expect a ping on 15 20 * * 1-5 (TZ Asia/Kolkata).

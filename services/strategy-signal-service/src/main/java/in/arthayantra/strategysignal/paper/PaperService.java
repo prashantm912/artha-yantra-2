@@ -510,10 +510,25 @@ public class PaperService {
     BigDecimal signalEntry = null;
     OffsetDateTime signalGeneratedAt = null;
     if (request.signalId() != null) {
+      // Serialize against the swing EXIT's target discovery BEFORE reading the anchor (cross-vendor
+      // round 4 TOCTOU): both sides take the same per-anchor advisory lock inside their transaction,
+      // so this open either commits before the exit's discovery reads (the exit binds this position)
+      // or blocks until the exit committed — and then sees the EXPIRED anchor below and refuses,
+      // instead of opening a position whose only exit path has already run.
+      signals.lockAnchors(List.of(request.signalId()));
       SignalRepository.SignalRow signal =
           signals
               .find(request.signalId())
               .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_SIGNAL, "no such signal"));
+      if ("EXPIRED".equals(signal.status())) {
+        throw new ApiException(
+            422,
+            ErrorCodes.VALIDATION_FAILED,
+            "signal #" + request.signalId()
+                + " is EXPIRED — its exit already settled, so a position opened now could never be"
+                + " closed by the engine",
+            Map.of("signalId", request.signalId(), "status", signal.status()));
+      }
       // STRUCTURAL INVARIANT — an EXIT never opens exposure. The callers are guarded too
       // (openManualOrder + SignalsController.taken), but this is the layer that actually WRITES the
       // position, so the assert belongs here: a future SignalTaken publisher or a direct openOrder
@@ -610,6 +625,21 @@ public class PaperService {
         .findOpen(book, exchange, tradingsymbol, side)
         .map(row -> toPositionDto(row).withWarning(warning))
         .orElseThrow(() -> new ApiException(500, ErrorCodes.INTERNAL_ERROR, "position not opened"));
+  }
+
+  /**
+   * Read-back quantity for one signal's open paper legs. Swing effect retries use this immediately
+   * before claiming and after attempting an open so a fill-then-throw cannot be averaged again.
+   */
+  @Transactional(readOnly = true)
+  public long openQuantityForSignal(long signalId) {
+    return positions.openForSignal(signalId).stream().mapToLong(PositionRow::qty).sum();
+  }
+
+  /** True when no open paper leg remains linked to the signal. */
+  @Transactional(readOnly = true)
+  public boolean hasOpenForSignal(long signalId) {
+    return !positions.openForSignal(signalId).isEmpty();
   }
 
   private void upsertPosition(
@@ -1018,6 +1048,29 @@ public class PaperService {
       }
     }
     return closed;
+  }
+
+  /**
+   * Closes one exact paper-position id for a durable swing effect. Unlike {@link #closeForSignal}, this
+   * path never resolves the target through the reusable book/symbol/side key, so a later re-entry cannot
+   * be settled by an old effect. Returns one when the target is already closed or this call settles it.
+   */
+  @Transactional
+  public int closeForPosition(long positionId, String closeReason, BigDecimal price) {
+    PositionRow pos = positions.find(positionId).orElse(null);
+    if (pos == null) {
+      return 0;
+    }
+    if (!"OPEN".equals(pos.status())) {
+      return 1;
+    }
+    try {
+      settle(pos, price, closeReason);
+      return 1;
+    } catch (Exception e) {
+      log.warn("exact paper-position close failed for {}: {}", positionId, e.getMessage());
+      return 0;
+    }
   }
 
   /** 15:45 IST mark-to-close: settle every OPEN intraday position so it does not carry overnight. */

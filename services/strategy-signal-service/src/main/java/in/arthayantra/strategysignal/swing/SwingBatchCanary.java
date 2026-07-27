@@ -93,20 +93,24 @@ public class SwingBatchCanary {
   private final SwingMissedBatchAlertRepository alerts;
   private final ApplicationEventPublisher events;
   private final Clock clock;
+  private final boolean catchupEnabled;
   private final MarketCalendar calendar = MarketCalendar.nse();
 
-  /** Wires the run marker, schedule-intent ledger, page lease, event bus, and clock. */
+  /** Wires the run marker, schedule-intent ledger, page lease, event bus, clock, and catch-up flag. */
   public SwingBatchCanary(
       SwingBatchRunRepository runs,
       SwingBatchIntentRepository intents,
       SwingMissedBatchAlertRepository alerts,
       ApplicationEventPublisher events,
-      Clock clock) {
+      Clock clock,
+      @org.springframework.beans.factory.annotation.Value("${artha.swing.catchup-enabled:false}")
+          boolean catchupEnabled) {
     this.runs = runs;
     this.intents = intents;
     this.alerts = alerts;
     this.events = events;
     this.clock = clock;
+    this.catchupEnabled = catchupEnabled;
   }
 
   /** Morning check (08:30 IST, weekdays), on the dedicated detector scheduler. */
@@ -225,14 +229,26 @@ public class SwingBatchCanary {
       return;
     }
     String title = batch + " swing batch DID NOT RUN";
+    // The operator guidance must match what the machine will actually do (cross-vendor round 5):
+    // with the catch-up ARMED, the old "no automatic replay / run it by hand" text prompted a
+    // second, duplicate money run while the pinned as-of replay was already queued for 08:35.
+    String guidance =
+        catchupEnabled
+            ? " The armed catch-up will attempt a pinned as-of replay of this session at its 08:35"
+                + " sweep and, when complete, stamp the session's run marker — do NOT run POST"
+                + " /api/v1/signals/" + batch + "-swing/run by hand first; a manual run uses"
+                + " current/latest inputs and would duplicate the queued replay. Inspect"
+                + " swing_catchup_runs after 08:35 and intervene manually only if this session's"
+                + " row is ABANDONED or refused."
+            : " No automatic replay was attempted, and no paper position was touched."
+                + " Review the session inputs and paper/risk state, then deliberately use POST"
+                + " /api/v1/signals/" + batch + "-swing/run by hand if a rerun is still intended."
+                + " That endpoint uses current/latest inputs; it is not a historical as-of replay —"
+                + " so this session can never acquire a run marker retroactively, and this alert"
+                + " stops on its own rather than waiting for one.";
     String message =
         "No successful " + batch + " swing batch run was recorded for session " + session + " — "
-            + why + ". No automatic replay was attempted, and no paper position was touched."
-            + " Review the session inputs and paper/risk state, then deliberately use POST"
-            + " /api/v1/signals/" + batch + "-swing/run by hand if a rerun is still intended. That"
-            + " endpoint uses current/latest inputs; it is not a historical as-of replay — so this"
-            + " session can never acquire a run marker retroactively, and this alert stops on its"
-            + " own rather than waiting for one. (page " + claim.get().pages() + " of "
+            + why + "." + guidance + " (page " + claim.get().pages() + " of "
             + MAX_PAGES_PER_SESSION + " for this session)";
     log.error("swing canary: {} — {}", title, message);
     try {

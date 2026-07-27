@@ -31,8 +31,7 @@ public class PaperAdminAuditLedger {
   public static final String ACTION_CAPITAL_CHANGE = "CAPITAL_CHANGE";
   /** A manual owner override of an OPEN position's stop-loss / take-profit (PATCH .../brackets). */
   public static final String ACTION_BRACKET_EDIT = "BRACKET_EDIT";
-
-  /** An owner-initiated hand close, so it is distinguishable from a routine engine/bracket close. */
+  /** An owner-initiated close of an OPEN position (POST .../positions/{id}/close). */
   public static final String ACTION_MANUAL_CLOSE = "MANUAL_CLOSE";
 
   private static final Logger log = LoggerFactory.getLogger(PaperAdminAuditLedger.class);

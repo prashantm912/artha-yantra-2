@@ -39,7 +39,7 @@ class AutoPaperListenerTest {
     return new SignalRepository.SignalRow(
         7L, UUID.randomUUID(), "NFO", "NIFTY 50", "3m", "ENTRY", "BUY",
         new BigDecimal("100"), null, null, new BigDecimal("0.7"), null, "ACTIVE",
-        null, null, suggestedQty, null, null, scalperDetail, null, null);
+        null, null, suggestedQty, null, null, scalperDetail, null, null, null);
   }
 
   @Test

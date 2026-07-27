@@ -462,6 +462,16 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - The **`guard-paths.py` PreToolUse hook resolves its path relative to the Bash cwd** —
   a persisted `cd <subdir>` makes every later Edit/Write fail (`can't open
   .../<subdir>/tools/claude/guard-paths.py`). Keep the Bash cwd at repo root, or subshell.
+- ⚠️ **Same persisted cwd silently builds the WRONG CHECKOUT when a worktree is in play**
+  (2026-07-26, #1044). A bare `./mvnw.cmd -pl <svc> -am verify` inherits whatever cwd the last
+  command left, so one polling command that starts `cd <repo-root>` sends the NEXT build to the
+  main checkout instead of the worktree — and it reports **BUILD SUCCESS for code you did not
+  write**, which is worse than a failure because it reads as a passing gate. Always
+  `(cd <worktree> && ./mvnw.cmd …)` in a subshell. Two tells if you suspect it: the compiler/
+  checkstyle paths lack the worktree segment, and the run executes classes your branch deletes or
+  renames. Related: `target/surefire-reports/` is NEVER pruned, so a renamed or deleted test class
+  leaves its old report behind and any `cat *.txt | awk` tally **double-counts** — match each
+  report to its full package path under `src/test/java`, or just read Maven's own reactor summary.
 - CI runs on a **fresh compose stack + 2-core runner** — code green locally can still
   fail several CI iterations (cold start, constrained cores). Gate e2e readiness on
   container healthchecks, not gateway HTTP (a 401 is the gateway auth filter, not

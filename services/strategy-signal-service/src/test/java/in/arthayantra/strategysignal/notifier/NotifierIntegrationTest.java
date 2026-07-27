@@ -134,6 +134,6 @@ class NotifierIntegrationTest extends StrategySignalIntegrationTestBase {
     return signalRepo.insert(
         versionId, "NSE", "RELIANCE", "1m", "ENTRY", "BUY",
         new BigDecimal("100.00"), new BigDecimal("95.00"), new BigDecimal("110.00"),
-        new BigDecimal("0.80"), "{}", now, now.plusHours(1));
+        new BigDecimal("0.80"), "{}", now, now.plusHours(1), null);
   }
 }

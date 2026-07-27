@@ -1,5 +1,5 @@
 -- 2026-07-26 swing catch-up round 3: fail-closed effect decisions and exact close targets.
--- V049 may already be applied by a test or shared database; keep this correction additive.
+-- V050 may already be applied by a test or shared database; keep this correction additive.
 ALTER TABLE swing_paper_effects
     ADD COLUMN decision TEXT NOT NULL DEFAULT 'UNDECIDED'
         CHECK (decision IN ('UNDECIDED', 'REQUIRED', 'SKIPPED'));

@@ -1,24 +1,30 @@
 package in.arthayantra.strategysignal.minervini;
 
-import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
 import in.arthayantra.strategysignal.swing.SwingBatchIntentRepository;
+import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
  * Fires the Minervini swing batch once per trading evening (20:00 IST, weekdays), AFTER the
- * market-data geometry scan has refreshed the SEPA funnel (~19:30 IST). A thin per-family shell over
- * the shared {@link SwingBatchRecorder} (which owns the marker + the FAILED-alert envelope), bound to
- * the {@link MinerviniDoctrine}. The recorder keeps execution inert when
- * {@code artha.minervini.swing.enabled} is false (default off), while this scheduler still records
- * the effective schedule-time arming intent.
+ * market-data geometry scan has refreshed the SEPA funnel (~19:30 IST). Execution stays inert when
+ * the family flag is false, while this scheduler records the effective schedule-time arming intent
+ * for the missed-batch detector.
+ *
+ * <p>The inert-when-disarmed gate is {@code SwingBatchEngine.runDaily}'s own {@code
+ * doctrine.enabled()} check, NOT the recorder's — {@code SwingBatchRecorder.runAndRecord} calls the
+ * engine before consulting its own flag. That one line is what makes it safe for this scheduler to
+ * fire unconditionally so the intent row is always written.
  */
 @Component
 public class MinerviniSwingScheduler {
 
+  private static final Logger log = LoggerFactory.getLogger(MinerviniSwingScheduler.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
   private final SwingBatchRecorder recorder;
@@ -26,9 +32,11 @@ public class MinerviniSwingScheduler {
   private final SwingBatchIntentRepository intents;
   private final Clock clock;
 
-  /** Wires the shared recorder, Minervini doctrine, schedule-intent ledger, and clock. */
+  /** Wires the recorder, doctrine, schedule-intent ledger, and clock. */
   public MinerviniSwingScheduler(
-      SwingBatchRecorder recorder, MinerviniDoctrine doctrine, SwingBatchIntentRepository intents,
+      SwingBatchRecorder recorder,
+      MinerviniDoctrine doctrine,
+      SwingBatchIntentRepository intents,
       Clock clock) {
     this.recorder = recorder;
     this.doctrine = doctrine;
@@ -36,11 +44,19 @@ public class MinerviniSwingScheduler {
     this.clock = clock;
   }
 
-  /** Post-close daily run (20:00 IST, weekdays) — after the 19:30 geometry/funnel refresh. */
+  /** Post-close daily run (20:00 IST, weekdays). */
   @Scheduled(cron = "${artha.minervini.swing.cron:0 0 20 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
     LocalDate session = LocalDate.now(clock.withZone(IST));
-    intents.recordScheduled(doctrine.batchName(), session, doctrine.enabled());
+    try {
+      intents.recordScheduled(doctrine.batchName(), session, doctrine.enabled());
+    } catch (RuntimeException e) {
+      log.warn(
+          "{} swing schedule-intent record failed for {} - continuing scheduled batch: {}",
+          doctrine.batchName(),
+          session,
+          e.getMessage());
+    }
     recorder.runScheduled(doctrine);
   }
 }

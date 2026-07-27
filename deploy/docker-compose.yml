@@ -489,6 +489,8 @@ services:
       # T9 load-coverage watchdog: ship dormant; owner arms OBSERVE_ONLY, then ARMED.
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE:-DISABLED}
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS:-180000}
+      # EOD swing missed-batch detector: ship dormant; owner arms after ops ntfy is configured.
+      ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED: ${ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED:-false}
       # (The ARTHA_SIGNALS_STARVATION_WATCHDOG_* passthroughs were removed 2026-07-26 with the
       # retirement of SignalStarvationCanary — see the note in strategy-signal's application.yml.)
       # PF-03 risk_suppressions retention (task_f168c23c): daily 02:30-IST prune of rows older than N

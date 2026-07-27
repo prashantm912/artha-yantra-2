@@ -879,7 +879,14 @@ public class ScalperConfluenceGate {
     }
     // E3 fii-bias (tag fii-bias, §4.6): the FII L/S flow must not oppose the side (long% >= 50 for CE).
     // Reads the existing Macro.fiiLongPct (no new feed); fail-open on a null/neutral read.
-    if (cfg.has("fii-bias")) {
+    //
+    // Scoped to ENTRY (enforceOptionSide) for the SAME reason as option-side-constraint above: the bare
+    // evaluate() read is the confluence-flip EXIT oracle, and a rail that can fail on the OPPOSITE side
+    // would stop a held position ever seeing the flip against it — silently removing a protective exit.
+    // That is not hypothetical here: FII index-future long share sits near 8-16%, so a CE evaluation
+    // fails this rail on essentially every bar, and a held PE could never flip out. Harmless while
+    // Macro.fiiLongPct was null (fail-open), which is exactly why fixing the EOD read exposed it.
+    if (enforceOptionSide && cfg.has("fii-bias")) {
       diag.fails("fii-bias", ScalperGates.fiiBias(ctx.macro(), side), ScalperGates.FII_NEUTRAL_PCT);
     }
     // E3 §3.3 fii-dii-gate (tag fii-dii-gate): the RICHER FII participant bias — the futures change-in-OI

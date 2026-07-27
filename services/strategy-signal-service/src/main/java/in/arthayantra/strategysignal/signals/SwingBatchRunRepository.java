@@ -13,8 +13,8 @@ import org.springframework.stereotype.Repository;
 
 /**
  * The {@code swing_batch_runs} dead-man marker (V025, audit P0-4/H10): each swing batch records
- * one row per IST run date; {@code SwingBatchCanary} reads the watermark next morning and alerts
- * when an armed batch has no row for the last NSE trading day.
+ * one row per IST run date; {@code SwingBatchCanary} checks the exact historical session next
+ * morning and alerts when a schedule-time armed batch has no matching row.
  *
  * <p>Since V034 (ledger F3) the same row also carries the batch's admission PROBE — the slot-cap
  * exceedance + the RS-ordered names the cap dropped ({@link #recentProbes}); the probe columns are
@@ -74,8 +74,9 @@ public class SwingBatchRunRepository {
 
   /**
    * Whether a batch recorded a run for EXACTLY this IST session — the catch-up's completeness signal
-   * (the on-time run, or a COMPLETE catch-up, stamps one row per session). {@code lastRunDate} tracks
-   * only the max, so it cannot answer "did session X run" when a later session ran but X was skipped.
+   * and the detector's run-marker probe (the on-time run, or a COMPLETE catch-up, stamps one row per
+   * session). {@code lastRunDate} tracks only the max, so it cannot answer "did session X run" when a
+   * later session ran but X was skipped.
    */
   public boolean hasRun(String batch, LocalDate sessionDate) {
     return Boolean.TRUE.equals(

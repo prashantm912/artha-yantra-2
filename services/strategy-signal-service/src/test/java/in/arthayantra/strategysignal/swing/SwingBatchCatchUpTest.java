@@ -112,7 +112,7 @@ class SwingBatchCatchUpTest {
     when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
     when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find("manas-arora", FRIDAY))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+        .thenReturn(Optional.of(true));
     when(state.claim(eq("manas-arora"), any(), org.mockito.ArgumentMatchers.anyInt()))
         .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
   }
@@ -178,7 +178,7 @@ class SwingBatchCatchUpTest {
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
     when(runs.hasRun(eq("manas-arora"), any())).thenReturn(false); // nothing recorded for the window
     when(intents.find(eq("manas-arora"), any()))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(false, null)));
+        .thenReturn(Optional.of(false));
 
     catchUp(MONDAY_0835, true, manas).catchUp();
 
@@ -197,7 +197,7 @@ class SwingBatchCatchUpTest {
     SwingDoctrine manas = doctrine(false, FRIDAY);
     when(runs.hasRun(eq("manas-arora"), any())).thenReturn(false);
     when(intents.find(eq("manas-arora"), any()))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(false, null)));
+        .thenReturn(Optional.of(false));
 
     catchUp(MONDAY_0835, false, manas).catchUp(); // catch-up feature OFF
 
@@ -233,9 +233,9 @@ class SwingBatchCatchUpTest {
     when(runs.hasRun(eq("manas-arora"), any())).thenReturn(false);
     when(runs.hasRun("manas-arora", THURSDAY)).thenReturn(true);
     when(intents.find("manas-arora", FRIDAY))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+        .thenReturn(Optional.of(true));
     when(intents.find("manas-arora", FRIDAY))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+        .thenReturn(Optional.of(true));
     when(state.claim(eq("manas-arora"), any(), org.mockito.ArgumentMatchers.anyInt()))
         .thenReturn(Optional.empty()); // every claim lost
 
@@ -269,7 +269,7 @@ class SwingBatchCatchUpTest {
     when(runs.hasRun(eq("manas-arora"), any())).thenReturn(false);
     when(runs.hasRun("manas-arora", THURSDAY)).thenReturn(true);
     when(intents.find("manas-arora", FRIDAY))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+        .thenReturn(Optional.of(true));
     // FRIDAY reports the 6th attempt on a max-5 budget → abandon; the other window sessions lose the claim.
     when(state.claim(eq("manas-arora"), any(), org.mockito.ArgumentMatchers.anyInt()))
         .thenReturn(Optional.empty());
@@ -343,7 +343,7 @@ class SwingBatchCatchUpTest {
     when(runs.hasRun("manas-arora", THURSDAY)).thenReturn(false);
     when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find(eq("manas-arora"), any()))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+        .thenReturn(Optional.of(true));
     when(state.claim(eq("manas-arora"), any(), org.mockito.ArgumentMatchers.anyInt()))
         .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
     when(recorder.runAndRecord(
@@ -368,7 +368,7 @@ class SwingBatchCatchUpTest {
     when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
     when(runs.hasRun("manas-arora", oldest)).thenReturn(false);
     when(intents.find("manas-arora", oldest))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+        .thenReturn(Optional.of(true));
     when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(oldest), List.of(oldest));
     when(state.claim(eq("manas-arora"), eq(oldest), anyInt()))
         .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)))
@@ -445,7 +445,7 @@ class SwingBatchCatchUpTest {
     when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false, false);
     when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(FRIDAY), List.of(FRIDAY));
     when(intents.find("manas-arora", FRIDAY))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+        .thenReturn(Optional.of(true));
     when(state.claim("manas-arora", FRIDAY, 30))
         .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)))
         .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(2)));
@@ -474,7 +474,7 @@ class SwingBatchCatchUpTest {
     when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
     when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find("manas-arora", FRIDAY))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+        .thenReturn(Optional.of(true));
     when(state.claim("manas-arora", FRIDAY, 30))
         .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
     when(recorder.runAndRecord(eq(manas), eq(FRIDAY), anyBoolean(), any()))
@@ -497,7 +497,7 @@ class SwingBatchCatchUpTest {
     when(runs.hasRun("manas-arora", THURSDAY)).thenReturn(false);
     when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find(eq("manas-arora"), any()))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(true, null)));
+        .thenReturn(Optional.of(true));
     when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(THURSDAY, FRIDAY));
     when(state.claim(eq("manas-arora"), any(), anyInt()))
         .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
@@ -556,7 +556,7 @@ class SwingBatchCatchUpTest {
     when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
     when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find("manas-arora", FRIDAY))
-        .thenReturn(Optional.of(new SwingBatchIntentRepository.Intent(false, null)));
+        .thenReturn(Optional.of(false));
 
     catchUp(MONDAY_0835, true, manas).catchUp();
 

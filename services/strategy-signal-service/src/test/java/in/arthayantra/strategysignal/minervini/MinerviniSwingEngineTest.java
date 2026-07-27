@@ -426,7 +426,7 @@ class MinerviniSwingEngineTest {
     return new SignalRepository.SignalRow(
         id, versionId, "NSE", symbol, "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
         new ObjectMapper().createObjectNode(), "TAKEN", series.get(0).bucketStart(),
-        series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null);
+        series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null, null);
   }
 
   // ---- harness --------------------------------------------------------------------------------
@@ -483,7 +483,7 @@ class MinerviniSwingEngineTest {
   }
 
   private static void stubInsert(SignalRepository signals, long id) {
-    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(id);
   }
 
@@ -498,7 +498,7 @@ class MinerviniSwingEngineTest {
     return new SignalRepository.SignalRow(
         id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
         new ObjectMapper().createObjectNode(), "TAKEN", series.get(0).bucketStart(),
-        series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null);
+        series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null, null);
   }
 
   private static SignalRepository.SignalRow anchorAt(
@@ -507,7 +507,7 @@ class MinerviniSwingEngineTest {
     return new SignalRepository.SignalRow(
         id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null,
         BigDecimal.ONE, new ObjectMapper().createObjectNode(), "TAKEN", generatedAt,
-        generatedAt.plusDays(1), null, null, null, null, null, null);
+        generatedAt.plusDays(1), null, null, null, null, null, null, null);
   }
 
   private static StrategyDefinition vcp() throws IOException {

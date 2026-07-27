@@ -84,7 +84,7 @@ class ManasAroraSellDecisionServiceTest {
                 new SignalRepository.SignalRow(
                     42L, publishedVersion, "NSE", "TESTCO", "1d", "ENTRY", "BUY", new BigDecimal("152"),
                     null, null, BigDecimal.ONE, om.createObjectNode(), "TAKEN", entryAt,
-                    entryAt.plusDays(1), null, null, null, null, null, detail)));
+                    entryAt.plusDays(1), null, null, null, null, null, detail, null)));
 
     MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
     when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);

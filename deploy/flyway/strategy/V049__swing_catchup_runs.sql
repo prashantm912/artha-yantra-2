@@ -18,6 +18,7 @@ CREATE TABLE swing_catchup_runs (
                  CHECK (status IN ('RUNNING', 'PENDING', 'DONE', 'ABANDONED', 'DISARMED')),
     attempts     INTEGER     NOT NULL DEFAULT 0,
     claimed_at   TIMESTAMPTZ,            -- when the current RUNNING claim was taken (stale-lease reclaim)
+    reason       TEXT,                   -- why a terminal row was ABANDONED/DISARMED/refused; NULL otherwise
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (batch, session_date)
 );

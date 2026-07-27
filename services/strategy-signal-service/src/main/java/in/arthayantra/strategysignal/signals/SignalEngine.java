@@ -1951,7 +1951,7 @@ public class SignalEngine {
                   signals.insert(
                       strategy.versionId(), exchange, tradingsymbol, interval, "ENTRY", side,
                       entryPrice, stopLevel, target, evaluation.breakdown().composite(),
-                      breakdownJson, generatedAt, expiresAt);
+                      breakdownJson, generatedAt, expiresAt, null); // ENTRY carries no exit reason
               if (stampQty != null) {
                 signals.stampSuggestedQty(newId, stampQty);
               }
@@ -2252,7 +2252,7 @@ public class SignalEngine {
                       strategy.versionId(), exchange, tradingsymbol, interval, type, side,
                       bar.close(), null, null, anchor.compositeScore(),
                       anchor.scoreBreakdown().toString(), generatedAt,
-                      generatedAt.plusMinutes(signalTtlMinutes));
+                      generatedAt.plusMinutes(signalTtlMinutes), exitReason);
               signals.transition(anchor.id(), "EXPIRED"); // the entry resolved — the pair is closed
               return newId;
             });

@@ -10,6 +10,7 @@ import in.arthayantra.strategysignal.signals.RiskSuppressionPruneJob;
 import in.arthayantra.strategysignal.signals.SignalEvalOutcomeRollupJob;
 import in.arthayantra.strategysignal.signals.SubscriberHealthCanary;
 import in.arthayantra.strategysignal.signals.StrategyCoverageWatchdog;
+import in.arthayantra.strategysignal.swing.SwingBatchCanary;
 import in.arthayantra.strategysignal.swing.SwingBatchCatchUp;
 import in.arthayantra.strategysignal.telegram.TelegramCommandBot;
 import java.util.concurrent.CountDownLatch;
@@ -93,6 +94,38 @@ class MonitorSchedulingConfigTest {
     assertThat(guard.name()).containsExactly("artha.signals.engine-enabled");
     assertThat(guard.havingValue()).isEqualTo("true");
     assertThat(guard.matchIfMissing()).isTrue();
+  }
+
+  /** The missed-batch detector must not share the default or fenced monitor pool. */
+  @Test
+  void theSwingMissedBatchDetectorOwnsItsOwnScheduler() throws NoSuchMethodException {
+    Scheduled scheduled =
+        SwingBatchCanary.class.getDeclaredMethod("check").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("SwingBatchCanary.check is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler()).isEqualTo("swingDetectorTaskScheduler");
+    ConditionalOnProperty guard =
+        SwingBatchCanary.class.getAnnotation(ConditionalOnProperty.class);
+    assertThat(guard).as("missed-batch paging ships dormant").isNotNull();
+    assertThat(guard.name())
+        .containsExactly("artha.signals.swing-missed-batch-detector.enabled");
+    assertThat(guard.havingValue()).isEqualTo("true");
+    assertThat(guard.matchIfMissing()).isFalse();
+  }
+
+  /** The dedicated swing detector pool is distinct from every existing scheduler class. */
+  @Test
+  void theSwingDetectorSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("swingDetectorTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler).isNotSameAs(context.getBean("taskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("evalOutcomeTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("maintenanceTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("telegramTaskScheduler"));
+        });
   }
 
   private static void assertBoundToMonitorScheduler(Class<?> type, String method)

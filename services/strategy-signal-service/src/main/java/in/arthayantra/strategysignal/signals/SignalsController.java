@@ -89,13 +89,14 @@ public class SignalsController {
             CsvExport.DEFAULT_MAX_ROWS,
             "id", "generated_at", "status", "exchange", "tradingsymbol", "interval", "signal_type",
             "side", "entry_price", "stop_loss", "target", "composite_score", "suggested_qty",
-            "tradeable_exchange", "tradeable_tradingsymbol", "strategy_version_id", "expires_at");
+            "tradeable_exchange", "tradeable_tradingsymbol", "strategy_version_id", "expires_at",
+            "exit_reason");
     for (SignalRepository.SignalRow r : rows) {
       w.row(
           r.id(), r.generatedAt(), r.status(), r.exchange(), r.tradingsymbol(), r.interval(),
           r.signalType(), r.side(), r.entryPrice(), r.stopLoss(), r.target(), r.compositeScore(),
           r.suggestedQty(), r.tradeableExchange(), r.tradeableTradingsymbol(), r.strategyVersionId(),
-          r.expiresAt());
+          r.expiresAt(), r.exitReason());
     }
     return w.download("signals.csv");
   }
@@ -201,6 +202,10 @@ public class SignalsController {
     dto.put("tradeableExchange", row.tradeableExchange());
     dto.put("tradeableTradingsymbol", row.tradeableTradingsymbol());
     dto.put("scalperDetail", row.scalperDetail());
+    // Why an EXIT fired. NULL on ENTRY rows and on EXITs predating V048 — those reasons only
+    // ever reached a log line. The endpoint returns a Map, so springdoc does not enumerate it
+    // and adding the key does not drift the contract.
+    dto.put("exitReason", row.exitReason());
     return dto;
   }
 }

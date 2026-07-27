@@ -28,7 +28,7 @@ class MinerviniDetailIntegrationTest extends StrategySignalIntegrationTestBase {
     return repo.insert(
         versionId, "NSE", sym, "1d", "ENTRY", "BUY",
         new BigDecimal("150.00"), new BigDecimal("138.00"), null, new BigDecimal("0.70"),
-        "{}", OffsetDateTime.parse("2026-07-03T09:15:00+05:30"), null);
+        "{}", OffsetDateTime.parse("2026-07-03T09:15:00+05:30"), null, null);
   }
 
   @Test

@@ -118,7 +118,7 @@ public class SwingBatchCatchUp {
     this.maxAttempts = Math.max(1, maxAttempts);
   }
 
-  /** Backwards-compatible constructor for focused catch-up tests that predate the V049 seams. */
+  /** Backwards-compatible constructor for focused catch-up tests that predate the V050 seams. */
   public SwingBatchCatchUp(
       SwingBatchRecorder recorder,
       SwingBatchRunRepository runs,
@@ -136,7 +136,7 @@ public class SwingBatchCatchUp {
         maxAttempts);
   }
 
-  /** Backwards-compatible constructor for focused catch-up tests that predate the V049 seams. */
+  /** Backwards-compatible constructor for focused catch-up tests that predate the V050 seams. */
   public SwingBatchCatchUp(
       SwingBatchRecorder recorder,
       SwingBatchRunRepository runs,
@@ -284,19 +284,19 @@ public class SwingBatchCatchUp {
       }
       return; // the on-time batch (or a prior complete catch-up) already ran this session
     }
-    Optional<SwingBatchIntentRepository.Intent> intent = intents.find(batch, session);
+    Optional<Boolean> intent = intents.find(batch, session);
     if (intent.isEmpty()) {
       state.markAbandoned(batch, session, "NO_SCHEDULE_INTENT");
-      log.error("swing catch-up: {} {} refused â€” no schedule-time arming row", batch, session);
+      log.error("swing catch-up: {} {} refused - no schedule-time arming row", batch, session);
       alert(
           doctrine, "catch-up REFUSED for " + session,
-          "The " + session + " batch has no schedule-time arming row (pre-V048 or capture failure);"
-              + " refusing replay rather than inferring today's flag.");
+          "The " + session + " batch has no schedule-time arming row (pre-intent-ledger or capture"
+              + " failure); refusing replay rather than inferring today's flag.");
       return;
     }
-    if (!intent.get().armed()) {
+    if (!intent.get()) {
       state.recordDisarmed(batch, session);
-      log.info("swing catch-up: {} {} was DISARMED at schedule time â€” not replaying", batch, session);
+      log.info("swing catch-up: {} {} was DISARMED at schedule time - not replaying", batch, session);
       return;
     }
     // ATOMIC claim BEFORE any emission. Lost = another caller holds a fresh RUNNING claim, or the

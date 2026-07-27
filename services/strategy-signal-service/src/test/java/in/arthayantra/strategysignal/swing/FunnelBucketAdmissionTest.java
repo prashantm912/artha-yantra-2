@@ -169,7 +169,7 @@ class FunnelBucketAdmissionTest {
 
     SignalRepository signals = mock(SignalRepository.class);
     when(signals.activeEntries()).thenReturn(List.of()); // nothing held → a FRESH entry
-    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(55L);
 
     RestClient.Builder builder = RestClient.builder();

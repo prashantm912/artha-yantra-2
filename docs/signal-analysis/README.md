@@ -220,7 +220,21 @@ Run in order; each answers one question. Canned SQL in §6.
     (650 absolute AND ≤10% of the expected sum — a thin frozen bar still fires), so a surviving WARN
     means either the frozen-partial regression (persistent one-directional ~⅔ shortfall) or a new
     attribution defect. Investigate, don't tolerate-away.
-18. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
+    2026-07-27) — the live scalper signal series is the **dated front future**, and
+    `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27
+    every rejection evaluated `NFO:NIFTY26AUGFUT@3m` while every prior file in this folder measured
+    `NIFTY26JULFUT`. **Nothing in `signal_rejections` names the contract** — `diagnostic.context.chart`
+    has no `signalSymbol` field — so the roll is silent, and a §3.8/§3.15 ground-truth query run against
+    last session's contract silently mis-places every threshold. The two series differ materially: on
+    2026-07-27 AUGFUT ran p90 47,320 / max 117,000 against JULFUT's p90 57,785 / max 222,560 over the
+    same session. Derive it, don't assume it: take any context-bearing row's
+    `context.chart.close` and match it against the candidate contracts' 1m ranges for the day (SQL in
+    §6). State the contract in the findings file, and **never compare volume percentiles or floor
+    thresholds across a roll** without saying so. Rolls are monthly (last Tuesday); the `docker logs`
+    line `scalper confluence blocked entry: <slug> NFO:<contract> rail=…` also names it directly and is
+    the cheapest confirmation while the container is still up.
+19. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -234,7 +248,24 @@ restart services, or write during market hours.
   text here said it was): `recordRejection` runs only PAST the chart gate, so an ordinary
   SuperTrend-DOWN leg silences every scalper at once. Confirm liveness POSITIVELY via a fresh
   `strategy.signal_eval_outcomes` row (§4.3 step 4) before calling anything a problem.
+- ⚠️ **Before ~09:45 IST only a handful of strategies are in-window, so a FLAT Σ
+  `ay_signal_eval_outcome_total` there is the trade WINDOW, not a stall** (added 2026-07-27). Most
+  scalper YAMLs open after 09:45 (the cross-strategy "after 09:45" rule); the `morning-trade` family
+  is the deliberate exception (`window: { from: "09:16", to: "15:00" }`, owner-confirmed in its YAML
+  header). Measured 2026-07-27: Σ sat at **36 across two reads spanning 09:43:45–09:45:33** with
+  **2** slugs emitting, then jumped to **72 with 16 slugs by 09:46:54** as the 09:45 bar brought the
+  rest in-window — a +36 step in ~1.4 min, after ~2 min of apparent flatness. Both
+  `ay_signal_bar_*_age_seconds` gauges read fresh throughout, which is what actually settled it.
+  Practical rule: read the gauges for liveness, and if you want a counter DELTA that means anything,
+  space the two reads across a bar boundary **after 09:45**. Σ is an attribution primitive (§4.3
+  step 4), never a liveness one — flatness inside the opening half-hour is the single easiest way to
+  re-manufacture the 07-17 false escalation.
 - Context nulls (dimension §3.7) on TODAY's rows — catches a dead feed the same day it dies, not at EOD.
+  ⚠️ **`iv_rank` / `dow` / `fii` dead in a MORNING dot-health read is the standing state, not "too
+  early to populate"** (added 2026-07-27, correcting the reading carried in `2026-07-27-open-gate.md`
+  §6): the 07-24 ledger already has `ivRank` NULL 100%, `fiiLongPct` NULL 100% (both dead-data, carried
+  since 07-02) and `dowUp` NULL by design (un-armed). All three are `required: false`. Only a CHANGE
+  in that set — one of them alive, or a fourth dot joining them — is news.
 - Capture liveness: `max(bucket)` on 1m candles + snapshot counts vs wall clock.
 
 ### 4.2 Live counterfactual — "would loosening knob X have made money TODAY?"
@@ -548,6 +579,19 @@ FROM marketdata.candles WHERE exchange='NFO' AND interval='1m' AND tradingsymbol
   AND EXTRACT(second FROM bucket)=0 AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1 ORDER BY 1;
 -- compare the flagged bucket's value against the canary's logged "3m bar volume" (they matched on
 -- 2026-07-24 — it was the in-memory 1m sum that diverged).
+
+-- §3.18 which contract did the engine actually signal off? (the roll is SILENT in the row)
+-- take a context-bearing close, then see which candidate contract's day range contains it.
+SELECT DISTINCT (diagnostic->'context'->'chart'->>'close')::numeric close_seen
+FROM strategy.signal_rejections
+WHERE generated_at >= :d0915 AND diagnostic->'context'->'chart'->>'close' IS NOT NULL LIMIT 5;
+SELECT tradingsymbol, (array_agg(open ORDER BY bucket))[1] o, max(high) h, min(low) l,
+       (array_agg(close ORDER BY bucket DESC))[1] c
+FROM marketdata.candles WHERE interval='1m' AND EXTRACT(second FROM bucket)=0
+  AND tradingsymbol IN ('NIFTY26JULFUT','NIFTY26AUGFUT')   -- adjust to the live pair
+  AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1;
+-- cheapest confirmation while the container is up (the rail log names the contract):
+--   docker logs ay-strategy-signal-service --since <T> 2>&1 | grep -oE "NFO:[A-Z0-9]+" | sort -u
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

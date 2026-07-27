@@ -82,8 +82,9 @@ already resolvable. `unresolved == 0` on the first and only attempt. Health sign
 one row. This is the first session since 07-23 at full coverage, and better than 07-23 in that 07-23's
 count was also 38 but the `hero-zero` pair went silent the very next session.
 
-**Eval counters (actuator :8082, read 16:47 IST — no post-close deploy has run).** The container booted at
-23:20 IST **yesterday**, so the cumulative counters ARE today's session totals — no delta arithmetic needed:
+**Eval counters (actuator :8082, read 16:47 IST — before the post-close deploy of §9).** The container
+booted at 23:20 IST **yesterday**, so the cumulative counters ARE today's session totals — no delta
+arithmetic needed:
 
 | outcome | 2026-07-27 (cumulative = today) |
 |---|---|
@@ -709,5 +710,87 @@ says the blocked tunes (T1/T2/T3/T5/T7) unblock "after 2 clean forward sessions 
 - Shadow exits replicate premium brackets + structural stop + square-off — no indicator-driven exits.
   Every entry is stamped ~80 s after `bar_time`.
 - Costs are the 1-lot engine fill model (statutory + ₹20/lot). Not cost-adjusted twice.
-- This run was **read-only**: SELECTs, `docker logs`, in-container actuator/health GETs, and source/git
-  reads. No restart, deploy, write or config change. No strategy knob was altered.
+- The **analysis** run (16:30–17:40 IST) was **read-only**: SELECTs, `docker logs`, in-container
+  actuator/health GETs, and source/git reads. No restart, deploy, write or config change. No strategy knob
+  was altered. The separate post-close **deploy** run at 17:50–18:01 IST — a different scheduled task — did
+  restart strategy-signal and republish three strategies; it is recorded in §9 and everything above it was
+  measured before it.
+
+---
+
+## 9 Post-close deploy — #1050 (FII EOD read + CE `fii-bias` removal)
+
+Separate scheduled task (`deploy-fii-eod-fix-post-close`), ran **17:50–18:01 IST**, after the 15:30 close.
+Everything in §0–§8 was measured **before** it and is unaffected.
+
+**Why it needed its own post-close window.** A scalper YAML change is a silent no-op until re-published:
+`ScalperStrategySeeder` mints a fresh DRAFT on boot and never publishes, while the engine runs the
+PUBLISHED version. Between deploying the JAR and republishing, the OLD published config still carried
+`fii-bias` on the CE strategies — and with the read now repaired (FII long share ~8.6% against a `>= 50`
+requirement) that gate is an unconditional block on every otherwise-qualifying CE entry. The window was
+~4 minutes and after the close, but it was closed deliberately rather than assumed away.
+
+**What ran.** #1050 merged at 11:03 IST (`7a21bdce`). Built at 17:53 from the **main checkout** — reactor
+paths carry no worktree segment, checked rather than assumed (the 2026-07-26 false-green trap). Deployed
+strategy-signal only; no migration in the PR, so `flyway-init` was not forced. Container healthy 17:57.
+
+**The new JAR was proven by behaviour, not by exit code.** At boot the seeder logged `0 new draft
+strategies created, 3 existing re-armed` and minted three drafts at 17:56:36 IST — exactly the three CE
+strategies, each with `fii-bias` absent. Old code cannot produce that row.
+
+**Published state after the three republishes:**
+
+| slug | enabled | published | `fii-bias` | `relative-volume-floor` |
+|---|---|---|---|---|
+| `scalp-trend-change-nifty` | t | 1.0.9 | **false** | true |
+| `scalp-trend-change-sensex-niftyoi` | t | 1.0.7 | **false** | true |
+| `scalp-trend-change-sensex-sensexoi` | f | 1.0.7 | **false** | true |
+| `scalp-trend-change-nifty-pe` | t | 1.0.5 | true | true |
+| `scalp-trend-change-sensex-niftyoi-pe` | t | 1.0.3 | true | true |
+| `scalp-trend-change-sensex-sensexoi-pe` | f | 1.0.1 | true | **false** |
+
+The three PE rows keep the tag deliberately (`<= 50` passes today; see E10).
+
+**Engine health after the restart:** `strategy.engine_reloads` id 24 @ 18:00:46 IST —
+`loaded 38, unresolved 0, load_errors 0, installed t`. The health signal is `unresolved == 0`, not
+`loaded > 0`. Logs show `reconcile: published-strategy set changed` firing after each publish.
+
+### 9.1 The pre-publish diff earned its keep
+
+The two LIVE targets were clean: `fii-bias` was the only tag lost and the rest of the config was
+byte-identical. **`scalp-trend-change-sensex-sensexoi` was not.** It held a leftover 1.0.6 draft and a
+published version stuck at **2026-06-30**, so republishing it also moved it forward by two changes nobody
+asked for in this task:
+
+- **gains `relative-volume-floor`** — it and its `-pe` twin were the only two of the six published without it
+- **gains `take_profit premium_pct 35` + `stop_loss premium_pct 25`** — the T21 owner change of 2026-07-25
+
+It was published anyway, and the reasoning is recorded because it is a judgment call: the strategy is
+`enabled=f` so there is zero live effect; the draft was diffed against the repo YAML **file** and matches
+exactly; and both deltas are owner decisions already applied to every sibling. Leaving it at the 06-30
+config would have preserved the `fii-bias` block *and* two stale-config gaps for whenever it is enabled.
+
+This is the #1016 trap read in the opposite direction — there, a blind republish would have *reverted* a
+strategy to a draft missing an armed tag; here the leftover draft was the newer, correct one. The lesson
+is the same either way: **pick targets by "latest version row ≠ `published_version_id`" and diff what the
+republish GAINS vs LOSES, never just that it differs.**
+
+### 9.2 Residual, not fixed
+
+**`scalp-trend-change-sensex-sensexoi-pe` is still drifted and was deliberately left alone** — out of this
+task's scope (its YAML was untouched by #1050 and PE keeps `fii-bias` by design). Published 1.0.1 lacks
+`relative-volume-floor`; a 1.0.3 draft from 07-25 carries it. It is `enabled=f`, so nothing is blocked
+today, but it will run a stale config the moment it is enabled. Chipped `task_76d8f2a4`.
+
+### 9.3 Honesty caveats on this section
+
+- **The eval counters read 0.0 across every outcome after the restart, and that proves nothing either
+  way.** The process restarted at 17:56, well after the close, so the eval loop has had no market bars to
+  count. It is neither a liveness signal nor a starvation signal. The real check is the 08:40 IST
+  weekday gate.
+- **No CE entry has yet been observed firing with the tag removed.** The republish is verified at the
+  *config* level (published rows no longer contain `fii-bias`) and the engine is verified to have reloaded
+  them. That the block is actually gone in the funnel is an inference until a live session exercises it.
+- The `sss-publish` loopback sidecar was brought up to reach the publish endpoint without handling the
+  owner password, then removed; final container state matches the pre-deploy set plus the newer
+  strategy-signal.

@@ -22,6 +22,7 @@ import {
   useAckSellDecision,
   useRecordedSellDecisions,
   useRunSwingBatch,
+  useSwingCatchUpStatus,
   useSwingSellDecisions,
   type RecordedSellDecision,
   type SwingFamily,
@@ -116,6 +117,7 @@ export function SwingSellDecisionsPage() {
   pendingRunRef.current = pendingRunFamily;
   const live = useSwingSellDecisions(family, view === 'live');
   const recorded = useRecordedSellDecisions(family, view === 'recorded');
+  const catchUpStatus = useSwingCatchUpStatus(pendingRunFamily ?? family, pendingRunFamily != null);
   const run = useRunSwingBatch();
 
   useEffect(() => {
@@ -491,11 +493,30 @@ export function SwingSellDecisionsPage() {
               </DialogTitle>
               <DialogDescription>{SWING_RUN_WARNING}</DialogDescription>
             </DialogHeader>
+            <div className="rounded-md border border-ay-border bg-surface-1 px-3 py-2 text-sm">
+              <p className="font-medium text-ay-text">Latest catch-up status</p>
+              {catchUpStatus.isPending && (
+                <p className="text-ay-muted">Loading latest catch-up status…</p>
+              )}
+              {catchUpStatus.isError && (
+                <p className="text-ay-muted">
+                  Latest catch-up status is unavailable; this does not block the confirmation.
+                </p>
+              )}
+              {catchUpStatus.isSuccess && catchUpStatus.data.status == null && (
+                <p className="text-ay-muted">no catch-up rows — nothing has been claimed</p>
+              )}
+              {catchUpStatus.isSuccess && catchUpStatus.data.status != null && (
+                <p className="text-ay-muted">
+                  Latest catch-up: {catchUpStatus.data.status} · session {catchUpStatus.data.sessionDate}{' '}
+                  · reason: {catchUpStatus.data.reason ?? 'none recorded'}
+                </p>
+              )}
+            </div>
             <p className="text-sm text-ay-muted">
               This endpoint performs a real current-input re-run every time it is called. The server-side
               per-family mutex prevents concurrent runs, but a second same-day call is not a no-op — and
-              the server enforces no market-hours guard of its own; the 09:15–15:30 block here is
-              client-side courtesy only.
+              the server also refuses unforced runs during 09:15–15:30 IST market hours.
             </p>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setPendingRunFamily(null)}>

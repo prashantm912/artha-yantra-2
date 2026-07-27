@@ -88,8 +88,30 @@ class ManasAroraSwingEngineTest {
     assertThat(run.exits()).as("ONE symbol closed (not one-per-lot)").isEqualTo(1);
     verify(h.signals).transition(42L, "EXPIRED");
     verify(h.signals).transition(43L, "EXPIRED");
-    verify(h.events).publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 42L));
-    verify(h.events).publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 43L));
+
+    // V048 propagation guard through the REAL engine path: the EXIT row's persisted reason must be
+    // the SAME string the SignalExited events carry — the repository IT alone would stay green if
+    // the engine regressed to inserting null (cross-vendor review, round 1).
+    ArgumentCaptor<String> exitReason = ArgumentCaptor.forClass(String.class);
+    verify(h.signals)
+        .insert(
+            any(), any(), any(), any(), eq("EXIT"), any(), any(), any(), any(), any(), any(),
+            any(), any(), exitReason.capture());
+    assertThat(exitReason.getValue()).as("the engine's computed reason reaches the row").isNotNull();
+    verify(h.events)
+        .publishEvent(
+            argThat(
+                (Object e) ->
+                    e instanceof SignalExited s
+                        && s.anchorSignalId() == 42L
+                        && exitReason.getValue().equals(s.reason())));
+    verify(h.events)
+        .publishEvent(
+            argThat(
+                (Object e) ->
+                    e instanceof SignalExited s
+                        && s.anchorSignalId() == 43L
+                        && exitReason.getValue().equals(s.reason())));
   }
 
   @Test

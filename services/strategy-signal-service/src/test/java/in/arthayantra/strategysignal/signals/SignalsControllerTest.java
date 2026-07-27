@@ -1,6 +1,8 @@
 package in.arthayantra.strategysignal.signals;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -8,7 +10,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategysignal.signals.SignalRepository.SignalRow;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -56,5 +60,54 @@ class SignalsControllerTest {
     assertThat(dto).containsKey("scalperDetail");
     assertThat(dto.get("scalperDetail")).isNull();
     assertThat(dto.get("tradeableExchange")).isNull();
+  }
+
+  private static SignalRow exitRow(String exitReason) {
+    return new SignalRow(
+        2L, UUID.randomUUID(), "NFO", "NIFTY24JUN24000CE", "3m", "EXIT", "SELL",
+        new BigDecimal("112"), null, null, new BigDecimal("0.8"),
+        OM.nullNode(), "ACTIVE", OffsetDateTime.parse("2026-06-20T10:03:00+05:30"), null,
+        new BigDecimal("50"), null, null, null, null, null, exitReason);
+  }
+
+  /**
+   * Both operator read surfaces must carry the V048 reason: the JSON dto AND the CSV export — the
+   * export enumerates its columns by hand, so a repository field does not reach the file unless
+   * someone wires it (cross-vendor review, round 1: the CSV had been forgotten).
+   */
+  @Test
+  void detailAndCsvExportBothCarryTheExitReason() {
+    SignalRepository repo = mock(SignalRepository.class);
+    when(repo.find(2L)).thenReturn(Optional.of(exitRow("CONFLUENCE_FLIP")));
+    when(repo.list(any(), any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        .thenReturn(List.of(exitRow("CONFLUENCE_FLIP")));
+    SignalsController controller =
+        new SignalsController(repo, mock(ApplicationEventPublisher.class));
+
+    assertThat(controller.detail(2L).get("exitReason")).isEqualTo("CONFLUENCE_FLIP");
+
+    String csv =
+        new String(
+            controller.export(null, null, null, null, null, null, null).getBody(),
+            StandardCharsets.UTF_8);
+    String[] lines = csv.split("\r?\n");
+    assertThat(lines[0]).endsWith(",exit_reason");
+    assertThat(lines[1]).endsWith(",CONFLUENCE_FLIP");
+  }
+
+  /** An ENTRY row's reason cell is empty, not the string "null". */
+  @Test
+  void csvExportLeavesTheReasonCellEmptyOnEntryRows() {
+    SignalRepository repo = mock(SignalRepository.class);
+    when(repo.list(any(), any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+        .thenReturn(List.of(row(null, null, null)));
+    SignalsController controller =
+        new SignalsController(repo, mock(ApplicationEventPublisher.class));
+
+    String csv =
+        new String(
+            controller.export(null, null, null, null, null, null, null).getBody(),
+            StandardCharsets.UTF_8);
+    assertThat(csv.split("\r?\n")[1]).endsWith(",");
   }
 }

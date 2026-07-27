@@ -89,13 +89,14 @@ public class SignalsController {
             CsvExport.DEFAULT_MAX_ROWS,
             "id", "generated_at", "status", "exchange", "tradingsymbol", "interval", "signal_type",
             "side", "entry_price", "stop_loss", "target", "composite_score", "suggested_qty",
-            "tradeable_exchange", "tradeable_tradingsymbol", "strategy_version_id", "expires_at");
+            "tradeable_exchange", "tradeable_tradingsymbol", "strategy_version_id", "expires_at",
+            "exit_reason");
     for (SignalRepository.SignalRow r : rows) {
       w.row(
           r.id(), r.generatedAt(), r.status(), r.exchange(), r.tradingsymbol(), r.interval(),
           r.signalType(), r.side(), r.entryPrice(), r.stopLoss(), r.target(), r.compositeScore(),
           r.suggestedQty(), r.tradeableExchange(), r.tradeableTradingsymbol(), r.strategyVersionId(),
-          r.expiresAt());
+          r.expiresAt(), r.exitReason());
     }
     return w.download("signals.csv");
   }

@@ -20,9 +20,10 @@ ALTER TABLE signals ADD COLUMN exit_reason TEXT;
 COMMENT ON COLUMN signals.exit_reason IS
   'Why an EXIT signal fired (STRUCTURAL_STOP / CONFLUENCE_FLIP / ExitEvaluator reason). NULL on ENTRY rows and on EXITs predating 2026-07-27, whose reasons were only ever logged.';
 
--- The question this exists to answer is "which reason fired, how often" over a recent window, so the
--- index is on the shape that query takes rather than on the column alone. Partial: ENTRY rows are the
--- large majority and carry no reason, so they are excluded from the index entirely.
+-- The question this exists to answer is "which reason fired, how often" over a RECENT WINDOW, so
+-- generated_at leads: a multicolumn btree only prunes on its left prefix, and with the reason
+-- leading a time-bounded scan would walk the full history of every reason. Partial: ENTRY rows are
+-- the large majority and carry no reason, so they are excluded from the index entirely.
 CREATE INDEX idx_signals_exit_reason
-    ON signals (exit_reason, generated_at DESC)
+    ON signals (generated_at DESC, exit_reason)
     WHERE exit_reason IS NOT NULL;

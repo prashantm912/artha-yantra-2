@@ -110,4 +110,21 @@ class SignalExitReasonIntegrationTest extends StrategySignalIntegrationTestBase 
         .as("ENTRY rows must not appear; both EXIT reasons must")
         .containsExactly("CONFLUENCE_FLIP", "STRUCTURAL_STOP", "STRUCTURAL_STOP");
   }
+
+  /**
+   * The index must lead with generated_at: a btree prunes only on its left prefix, so with the
+   * reason leading, the recent-window aggregation above would walk every reason's full history
+   * (cross-vendor review, round 1). Asserted against pg_indexes so a well-meaning reorder — which
+   * every existing test would survive — goes red here.
+   */
+  @Test
+  void thePartialIndexLeadsWithTimeSoRecentWindowScansPrune() {
+    String def =
+        jdbc.queryForObject(
+            "SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_signals_exit_reason'",
+            String.class);
+    assertThat(def)
+        .contains("(generated_at DESC, exit_reason)")
+        .contains("WHERE (exit_reason IS NOT NULL)");
+  }
 }

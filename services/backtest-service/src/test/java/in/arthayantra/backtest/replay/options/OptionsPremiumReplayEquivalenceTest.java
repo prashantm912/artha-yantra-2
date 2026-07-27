@@ -114,7 +114,15 @@ class OptionsPremiumReplayEquivalenceTest {
       assertLevel(trade.takeProfit(), levels.path("takeProfit"), name + " takeProfit");
       JsonNode expect = sc.path("expect");
       if (expect.path("reason").isNull()) {
-        assertThat(trade.exitReason()).as(name).isIn("SIGNAL_EXIT", "END_OF_DATA");
+        // Pinned EXACTLY, not isIn(...) (cross-vendor review B2). A no-bracket-breach scenario is
+        // SIGNAL_EXIT here while the raw-evaluator suite pins END_OF_DATA — a determinate HARNESS
+        // difference, not a semantics divergence: this adapter passes PairedLeg(false, 0, size-1),
+        // so signalExitOffset = size-1 and the evaluator's i >= signalExitOffset branch fires on the
+        // last bar; the raw suite passes premiums.size(), which that branch can never reach. A
+        // loose isIn() would let a REAL future divergence between the two hide inside the same
+        // assertion, which is precisely what this fixture exists to prevent.
+        String expectedNullReason = premiums.size() == 1 ? "END_OF_DATA" : "SIGNAL_EXIT";
+        assertThat(trade.exitReason()).as(name).isEqualTo(expectedNullReason);
       } else {
         assertThat(trade.exitReason()).as(name).isEqualTo(expect.path("reason").asText());
         assertThat(trade.barsHeld()).as(name).isEqualTo(expect.path("barOffset").asInt());

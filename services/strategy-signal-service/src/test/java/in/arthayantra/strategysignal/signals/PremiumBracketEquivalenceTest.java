@@ -34,10 +34,16 @@ class PremiumBracketEquivalenceTest {
 
       PremiumBracketRules.Brackets brackets = PremiumBracketRules.resolve(config, entry);
       String name = sc.path("name").asText();
-      assertThat(brackets.stopLoss()).as(name).isEqualByComparingTo(levels.path("stopLoss").asText());
-      assertThat(brackets.takeProfit())
-          .as(name)
-          .isEqualByComparingTo(levels.path("takeProfit").asText());
+      assertLevel(brackets.stopLoss(), levels.path("stopLoss"), name + " stopLoss");
+      assertLevel(brackets.takeProfit(), levels.path("takeProfit"), name + " takeProfit");
+    }
+  }
+
+  private static void assertLevel(BigDecimal actual, JsonNode expected, String name) {
+    if (expected.isNull() || expected.isMissingNode()) {
+      assertThat(actual).as(name).isNull();
+    } else {
+      assertThat(actual).as(name).isEqualByComparingTo(expected.asText());
     }
   }
 }

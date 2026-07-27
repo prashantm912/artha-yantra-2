@@ -107,8 +107,13 @@ export function SwingSellDecisionsPage() {
   const [family, setFamily] = useState<SwingFamily>('minervini');
   const [view, setView] = useState<'live' | 'recorded'>('live');
   const [pendingRunFamily, setPendingRunFamily] = useState<SwingFamily | null>(null);
+  const [forceClosed, setForceClosed] = useState(false);
   const [marketHours, setMarketHours] = useState(() => isMarketHoursIst());
   const runTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const runGroupRef = useRef<HTMLDivElement | null>(null);
+  // Mirror for the interval closure — it must know whether a dialog is open without re-subscribing.
+  const pendingRunRef = useRef<SwingFamily | null>(null);
+  pendingRunRef.current = pendingRunFamily;
   const live = useSwingSellDecisions(family, view === 'live');
   const recorded = useRecordedSellDecisions(family, view === 'recorded');
   const run = useRunSwingBatch();
@@ -117,11 +122,25 @@ export function SwingSellDecisionsPage() {
     const refreshMarketHours = () => {
       const disabled = isMarketHoursIst();
       setMarketHours(disabled);
-      if (disabled) setPendingRunFamily(null);
+      if (disabled && pendingRunRef.current != null) {
+        setPendingRunFamily(null);
+        setForceClosed(true);
+      }
     };
     const interval = window.setInterval(refreshMarketHours, 30_000);
     return () => window.clearInterval(interval);
   }, []);
+
+  // Focus repair for the force-close, AFTER the dialog unmounts: focusing synchronously inside the
+  // interval loses to Radix's still-mounted focus trap, and onCloseAutoFocus never fires on an
+  // unmount-close — while the trigger is disabled, so its .focus() is a no-op. Land the keyboard
+  // user on the buttons group, not <body> (cross-vendor review m1).
+  useEffect(() => {
+    if (forceClosed) {
+      runGroupRef.current?.focus();
+      setForceClosed(false);
+    }
+  }, [forceClosed]);
 
   const requestRun = (nextFamily: SwingFamily, event: MouseEvent<HTMLButtonElement>) => {
     if (isMarketHoursIst()) {
@@ -131,6 +150,14 @@ export function SwingSellDecisionsPage() {
     runTriggerRef.current = event.currentTarget;
     setPendingRunFamily(nextFamily);
   };
+
+  // The run's own result MUST be surfaced (cross-vendor review M1): POST /run answers HTTP 200 with
+  // an ALL-ZERO SwingRun when the family flag is disarmed, when no published swing strategies are
+  // loaded, or when the deadline was reached — on this escalation surface, a silent zero reads as
+  // "recovered" while the session's stop actually stays unrecovered.
+  const ranFamily = FAMILIES.find((f) => f.key === run.variables)?.label ?? run.variables;
+  const ranNothing =
+    run.isSuccess && run.data.strategies === 0 && run.data.entries === 0 && run.data.exits === 0;
 
   const confirmRun = () => {
     if (pendingRunFamily == null) return;
@@ -329,7 +356,13 @@ export function SwingSellDecisionsPage() {
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Run swing batch">
+        <div
+          ref={runGroupRef}
+          tabIndex={-1}
+          className="flex flex-wrap items-center gap-2"
+          role="group"
+          aria-label="Run swing batch"
+        >
           {FAMILIES.map((f) => {
             const disabled = marketHours || run.isPending;
             const descriptionId = `${f.key}-run-disabled-reason`;
@@ -362,6 +395,43 @@ export function SwingSellDecisionsPage() {
             );
           })}
         </div>
+        {(run.isSuccess || run.isError) && (
+          <div role="status" className="w-full text-sm">
+            {run.isSuccess && ranNothing && (
+              <p className="font-medium text-red-500">
+                {ranFamily}: the server answered OK but ran 0 strategies — nothing was recovered.
+                The family arming flag is likely OFF, or no published swing strategies are loaded.
+                Verify before treating the session as recovered.
+              </p>
+            )}
+            {run.isSuccess && !ranNothing && (
+              <p className="text-ay-text">
+                {ranFamily} run finished: {run.data.strategies} strategies, {run.data.entries}{' '}
+                entries, {run.data.exits} exits
+                {run.data.exitSkipped > 0 && (
+                  <span className="font-medium text-red-500">
+                    {' '}
+                    — {run.data.exitSkipped} exit(s) SKIPPED (a held stop went unevaluated; check the
+                    series and re-run)
+                  </span>
+                )}
+              </p>
+            )}
+            {run.isSuccess && run.data.deadlineReached && (
+              <p className="font-medium text-red-500">
+                The market-open deadline was reached mid-run — the pass is INCOMPLETE.
+              </p>
+            )}
+            {run.isSuccess && run.data.refusalReasons.length > 0 && (
+              <p className="text-ay-muted">Refusals: {run.data.refusalReasons.join('; ')}</p>
+            )}
+            {run.isError && (
+              <p className="font-medium text-red-500">
+                {ranFamily} run FAILED: {run.error instanceof Error ? run.error.message : 'request error'}
+              </p>
+            )}
+          </div>
+        )}
         <div
           className="inline-flex rounded-md border border-ay-border"
           role="group"
@@ -404,7 +474,15 @@ export function SwingSellDecisionsPage() {
           <DialogContent
             onCloseAutoFocus={(event) => {
               event.preventDefault();
-              runTriggerRef.current?.focus();
+              // The trigger is DISABLED when the 30s interval force-closed us at market open —
+              // .focus() on a disabled button is a no-op and dumps a keyboard user on <body>
+              // (cross-vendor review m1). Fall back to the buttons group, which is focusable.
+              const trigger = runTriggerRef.current;
+              if (trigger && !trigger.disabled) {
+                trigger.focus();
+              } else {
+                runGroupRef.current?.focus();
+              }
             }}
           >
             <DialogHeader>
@@ -415,7 +493,9 @@ export function SwingSellDecisionsPage() {
             </DialogHeader>
             <p className="text-sm text-ay-muted">
               This endpoint performs a real current-input re-run every time it is called. The server-side
-              per-family mutex prevents concurrent runs, but a second same-day call is not a no-op.
+              per-family mutex prevents concurrent runs, but a second same-day call is not a no-op — and
+              the server enforces no market-hours guard of its own; the 09:15–15:30 block here is
+              client-side courtesy only.
             </p>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setPendingRunFamily(null)}>

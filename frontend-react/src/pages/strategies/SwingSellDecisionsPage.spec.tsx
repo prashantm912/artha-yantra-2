@@ -113,6 +113,27 @@ function renderPage() {
   );
 }
 
+/** A structurally complete all-zero SwingRun — the shape the server returns for a designed no-op. */
+function zeroRun() {
+  return {
+    strategies: 0,
+    candidates: 0,
+    entries: 0,
+    exits: 0,
+    exitSkipped: 0,
+    admission: {
+      openAtStart: 0,
+      wouldEnter: 0,
+      admitted: 0,
+      capExceedance: 0,
+      capBound: false,
+      droppedByCap: [],
+    },
+    refusalReasons: [],
+    deadlineReached: false,
+  };
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-07-27T08:00:00+05:30'));
@@ -210,7 +231,15 @@ describe('SwingSellDecisionsPage', () => {
     expect(screen.getByRole('button', { name: 'Run Minervini batch now' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Run Manas Arora batch now' })).toBeDisabled();
 
-    await act(async () => resolveRun({}));
+    // Cross-vendor M1: POST /run answers 200 with an ALL-ZERO SwingRun when the family flag is
+    // disarmed or no published strategies load — the page must scream, not read as "recovered".
+    // Flush the resolved mutation under fake timers (TanStack schedules through a timer tick);
+    // findBy* would stall because waitFor polls with the faked setTimeout.
+    await act(async () => {
+      resolveRun(zeroRun());
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText(/ran 0 strategies/i)).toBeInTheDocument();
   });
 
   it('does not post when the run confirmation is cancelled and restores trigger focus', async () => {
@@ -222,6 +251,36 @@ describe('SwingSellDecisionsPage', () => {
 
     expect(apiFetch).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('refuses to open the dialog at all during market hours (requestRun recheck)', () => {
+    // Cross-vendor M2: the dialog-open recheck had no regression guard — deleting it left every
+    // test green. Force-click the (disabled) trigger; the handler itself must also refuse.
+    vi.setSystemTime(new Date('2026-07-27T03:50:00Z')); // Monday 09:20 IST
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Minervini batch now' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('force-closes an open dialog when the 30s sweep crosses into market hours, focusing the group', () => {
+    // Cross-vendor M2 (interval half) + m1 (focus falls back off the now-disabled trigger).
+    vi.setSystemTime(new Date('2026-07-27T03:44:00Z')); // Monday 09:14 IST
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Run Manas Arora batch now' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    vi.setSystemTime(new Date('2026-07-27T03:46:00Z')); // Monday 09:16 IST
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Run Manas Arora batch now' })).toBeDisabled();
+    expect(screen.getByRole('group', { name: 'Run swing batch' })).toHaveFocus();
   });
 
   it('blocks both family runs when IST market hours begin after confirmation opens', () => {

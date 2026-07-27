@@ -1,8 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { RecordedSellDecision, SwingSellReport } from '../../api/swing.ts';
+
+const apiFetch = vi.fn();
+
+vi.mock('../../api/client.ts', async (importActual) => {
+  const actual = await importActual<typeof import('../../api/client.ts')>();
+  return { ...actual, apiFetch: (...args: unknown[]) => apiFetch(...args) };
+});
 
 const report: SwingSellReport = {
   asOf: '2026-07-09T20:15:00+05:30',
@@ -106,6 +113,18 @@ function renderPage() {
   );
 }
 
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-07-27T08:00:00+05:30'));
+  ackMutate.mockReset();
+  apiFetch.mockReset();
+  apiFetch.mockResolvedValue({});
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('SwingSellDecisionsPage', () => {
   it('renders the sell-decision table with a HOLD row and a SELL row', () => {
     renderPage();
@@ -159,5 +178,65 @@ describe('SwingSellDecisionsPage', () => {
     const ackBtn = within(table).getByRole('button', { name: 'Acknowledge' });
     fireEvent.click(ackBtn);
     expect(ackMutate).toHaveBeenCalledWith(7);
+  });
+
+  it.each([
+    ['Minervini', '/signals/minervini-swing/run'],
+    ['Manas Arora', '/signals/manas-arora-swing/run'],
+  ])('confirms the %s run before posting its exact endpoint and no body', async (label, path) => {
+    let resolveRun!: (value: unknown) => void;
+    apiFetch.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveRun = resolve;
+      }),
+    );
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: `Run ${label} batch now` }));
+    expect(
+      screen.getByText(
+        'Runs on CURRENT inputs — this is NOT an as-of replay of a past session. The armed 08:35 catch-up is the primary recovery path; use this only when swing_catchup_runs shows ABANDONED/refused.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/real current-input re-run every time.*second same-day call is not a no-op/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm & run' }));
+    await vi.waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith(path, { method: 'POST' });
+    });
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Run Minervini batch now' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Run Manas Arora batch now' })).toBeDisabled();
+
+    await act(async () => resolveRun({}));
+  });
+
+  it('does not post when the run confirmation is cancelled and restores trigger focus', async () => {
+    renderPage();
+
+    const trigger = screen.getByRole('button', { name: 'Run Manas Arora batch now' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(apiFetch).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('blocks both family runs when IST market hours begin after confirmation opens', () => {
+    // UTC instants keep this proof independent of the client machine's local time zone.
+    vi.setSystemTime(new Date('2026-07-27T03:44:00Z')); // Monday 09:14 IST
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Minervini batch now' }));
+    vi.setSystemTime(new Date('2026-07-27T03:45:00Z')); // Monday 09:15 IST
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm & run' }));
+
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Minervini batch now' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Run Manas Arora batch now' })).toBeDisabled();
+    expect(screen.getAllByText('Disabled during market hours (09:15–15:30 IST)')).toHaveLength(2);
   });
 });

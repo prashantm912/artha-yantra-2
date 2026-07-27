@@ -234,7 +234,24 @@ restart services, or write during market hours.
   text here said it was): `recordRejection` runs only PAST the chart gate, so an ordinary
   SuperTrend-DOWN leg silences every scalper at once. Confirm liveness POSITIVELY via a fresh
   `strategy.signal_eval_outcomes` row (§4.3 step 4) before calling anything a problem.
+- ⚠️ **Before ~09:45 IST only a handful of strategies are in-window, so a FLAT Σ
+  `ay_signal_eval_outcome_total` there is the trade WINDOW, not a stall** (added 2026-07-27). Most
+  scalper YAMLs open after 09:45 (the cross-strategy "after 09:45" rule); the `morning-trade` family
+  is the deliberate exception (`window: { from: "09:16", to: "15:00" }`, owner-confirmed in its YAML
+  header). Measured 2026-07-27: Σ sat at **36 across two reads spanning 09:43:45–09:45:33** with
+  **2** slugs emitting, then jumped to **72 with 16 slugs by 09:46:54** as the 09:45 bar brought the
+  rest in-window — a +36 step in ~1.4 min, after ~2 min of apparent flatness. Both
+  `ay_signal_bar_*_age_seconds` gauges read fresh throughout, which is what actually settled it.
+  Practical rule: read the gauges for liveness, and if you want a counter DELTA that means anything,
+  space the two reads across a bar boundary **after 09:45**. Σ is an attribution primitive (§4.3
+  step 4), never a liveness one — flatness inside the opening half-hour is the single easiest way to
+  re-manufacture the 07-17 false escalation.
 - Context nulls (dimension §3.7) on TODAY's rows — catches a dead feed the same day it dies, not at EOD.
+  ⚠️ **`iv_rank` / `dow` / `fii` dead in a MORNING dot-health read is the standing state, not "too
+  early to populate"** (added 2026-07-27, correcting the reading carried in `2026-07-27-open-gate.md`
+  §6): the 07-24 ledger already has `ivRank` NULL 100%, `fiiLongPct` NULL 100% (both dead-data, carried
+  since 07-02) and `dowUp` NULL by design (un-armed). All three are `required: false`. Only a CHANGE
+  in that set — one of them alive, or a fourth dot joining them — is news.
 - Capture liveness: `max(bucket)` on 1m candles + snapshot counts vs wall clock.
 
 ### 4.2 Live counterfactual — "would loosening knob X have made money TODAY?"

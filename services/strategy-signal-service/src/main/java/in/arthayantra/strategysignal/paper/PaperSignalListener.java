@@ -30,24 +30,36 @@ public class PaperSignalListener {
   private final ScalperAccountModel scalperAccounts;
   private final SignalRepository signals;
   private final SwingPaperEffectRepository paperEffects;
+  private final InstrumentMetaClient instruments;
 
-  /** Wires the ledger service, the 5-account sub-ledger + the signal store. */
+  /** Wires the ledger service, the 5-account sub-ledger, the signal store + the instrument master. */
   @Autowired
   public PaperSignalListener(
       PaperService paper,
       ScalperAccountModel scalperAccounts,
       SignalRepository signals,
-      SwingPaperEffectRepository paperEffects) {
+      SwingPaperEffectRepository paperEffects,
+      InstrumentMetaClient instruments) {
     this.paper = paper;
     this.scalperAccounts = scalperAccounts;
     this.signals = signals;
     this.paperEffects = paperEffects;
+    this.instruments = instruments;
+  }
+
+  /** Backwards-compatible constructor for focused paper-listener tests. */
+  public PaperSignalListener(
+      PaperService paper,
+      ScalperAccountModel scalperAccounts,
+      SignalRepository signals,
+      SwingPaperEffectRepository paperEffects) {
+    this(paper, scalperAccounts, signals, paperEffects, null);
   }
 
   /** Backwards-compatible constructor for focused paper-listener tests. */
   public PaperSignalListener(
       PaperService paper, ScalperAccountModel scalperAccounts, SignalRepository signals) {
-    this(paper, scalperAccounts, signals, null);
+    this(paper, scalperAccounts, signals, null, null);
   }
 
   /** Opens a position (or, for a straddle, both legs) from the signal when a qty was supplied. */
@@ -261,9 +273,16 @@ public class PaperSignalListener {
 
   /** Opens BOTH straddle legs (CE + PE) at the combined-premium lot count, linked to the signal. */
   private void openStraddle(SignalTaken event, StraddleLegs.Pair pair, Integer subaccountIdx) {
-    int qty = StraddleLegs.combinedQty(event.qty(), pair.ce().ltp(), pair.pe().ltp());
+    // The lot comes from the CE leg's own instrument meta — both legs of a straddle share the
+    // underlying's lot size. Without it combinedQty cannot floor to a whole lot (review C1).
+    long lot =
+        instruments == null
+            ? 0L
+            : instruments.meta(pair.ce().exchange(), pair.ce().tradingsymbol()).lotSize();
+    int qty = StraddleLegs.combinedQty(event.qty(), pair.ce().ltp(), pair.pe().ltp(), lot);
     if (qty <= 0) {
-      // A premium was missing — degrade to the single primary leg rather than mis-size the pair.
+      // A premium was missing, or the lot did not resolve — degrade to the single primary leg
+      // rather than mis-size the pair.
       openSingle(event, subaccountIdx);
       return;
     }

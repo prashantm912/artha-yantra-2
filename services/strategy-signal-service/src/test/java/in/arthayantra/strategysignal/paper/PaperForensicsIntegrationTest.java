@@ -42,6 +42,7 @@ class PaperForensicsIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   @Autowired private PaperService paper;
+  @Autowired private PaperOrderRejectionRecorder rejections;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private StringRedisTemplate redis;
   @Autowired private ObjectMapper objectMapper;
@@ -110,6 +111,25 @@ class PaperForensicsIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(reject.get("tick_age_ms")).isNotNull();
     assertThat(reject.get("book")).isEqualTo("manual");
     assertThat(reject.get("side")).isEqualTo("BUY");
+  }
+
+  @Test
+  void zeroSizedEntryRejectionIsDurableInTheExistingForensicsLedger() {
+    String sym = "TESTZERO-" + UUID.randomUUID();
+    rejections.recordZeroSize(
+        89L, "scalper", "BFO", sym, "BUY",
+        "strategy=scalp-connect-the-dots-sensex; premium=776; lot=20; budget_inr=15000; computed_lots=0");
+
+    Map<String, Object> reject =
+        jdbc.queryForMap(
+            "SELECT reason, qty, book, exchange, detail FROM paper_order_rejections"
+                + " WHERE tradingsymbol=? ORDER BY id DESC LIMIT 1",
+            sym);
+    assertThat(reject.get("reason")).isEqualTo("ZERO_SIZE");
+    assertThat(reject.get("qty")).isEqualTo(0L);
+    assertThat(reject.get("book")).isEqualTo("scalper");
+    assertThat(reject.get("exchange")).isEqualTo("BFO");
+    assertThat(reject.get("detail").toString()).contains("computed_lots=0");
   }
 
   private void seedTick(String sym, String price, OffsetDateTime at) {

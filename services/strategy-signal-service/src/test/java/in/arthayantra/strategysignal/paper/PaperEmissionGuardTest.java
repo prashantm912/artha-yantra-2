@@ -3,13 +3,18 @@ package in.arthayantra.strategysignal.paper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
 
 import in.arthayantra.strategyengine.fills.InstrumentClass;
+import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -61,7 +66,7 @@ class PaperEmissionGuardTest {
     PaperEmissionGuard guard =
         new PaperEmissionGuard(
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
-            mock(PaperPositionRepository.class));
+            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class));
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
 
@@ -76,5 +81,39 @@ class PaperEmissionGuardTest {
     // null / non-positive premium -> null (the caller keeps the ordinary advisory qty).
     assertThat(guard.heroZeroSuggestedQty("NFO", "NIFTY25000CE", null)).isNull();
     assertThat(guard.heroZeroSuggestedQty("NFO", "NIFTY25000CE", BigDecimal.ZERO)).isNull();
+  }
+
+  @Test
+  void unaffordableOptionSizeIsZeroAndRecordsItsDurableRejectionDetails() {
+    InstrumentMetaClient instruments = mock(InstrumentMetaClient.class);
+    PaperOrderRejectionRecorder rejections = mock(PaperOrderRejectionRecorder.class);
+    when(instruments.meta("BFO", "SENSEX26JUL76300CE"))
+        .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 20L));
+    PaperEmissionGuard guard =
+        new PaperEmissionGuard(
+            mock(RiskService.class), mock(PaperAccountService.class), instruments,
+            mock(ScalperAccountModel.class), mock(PaperPositionRepository.class), rejections);
+    StrategyDefinition.SizingSpec sizing =
+        new StrategyDefinition.SizingSpec("premium_budget", Map.of("budget_inr", bd("15000")));
+
+    assertThat(
+            guard.suggestedQty(
+                sizing, "BFO", "SENSEX26JUL76300CE", bd("776"), null, "scalper"))
+        .isNull();
+
+    guard.recordZeroSizedEntry(
+         89L, "scalp-connect-the-dots-sensex", sizing, "scalper", "BFO",
+         "SENSEX26JUL76300CE", bd("776"), null, "BUY");
+
+    ArgumentCaptor<String> detail = ArgumentCaptor.forClass(String.class);
+    verify(rejections)
+        .recordZeroSize(
+            eq(89L), eq("scalper"), eq("BFO"), eq("SENSEX26JUL76300CE"), eq("BUY"), detail.capture());
+    assertThat(detail.getValue())
+        .contains("strategy=scalp-connect-the-dots-sensex")
+        .contains("premium=776")
+        .contains("lot=20")
+        .contains("budget_inr=15000")
+        .contains("computed_lots=0");
   }
 }

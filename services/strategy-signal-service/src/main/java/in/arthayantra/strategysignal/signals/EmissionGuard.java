@@ -103,4 +103,20 @@ public interface EmissionGuard {
   default BigDecimal heroZeroSuggestedQty(String exchange, String tradingsymbol, BigDecimal premium) {
     return null;
   }
+
+  /**
+   * Records a fired entry whose final paper size was zero. The signals module owns only this port;
+   * the paper adapter supplies the durable implementation. Default no-op keeps non-paper and test
+   * adapters permissive.
+   */
+  default void recordZeroSizedEntry(
+      long signalId,
+      String strategySlug,
+      StrategyDefinition.SizingSpec sizing,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      BigDecimal premium,
+      BigDecimal stopDistance,
+      String side) {}
 }

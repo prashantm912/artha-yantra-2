@@ -127,6 +127,26 @@ public class SignalEngine {
       ScalperConfig scalper,
       String book) {}
 
+  /** The concrete leg used by paper/live routing and by the A12 sizing seam. */
+  record TradeableLeg(String exchange, String tradingsymbol, BigDecimal premium) {}
+
+  /** Resolves a scalper's picked option leg; non-scalpers keep their keyed signal instrument. */
+  static TradeableLeg tradeableLeg(
+      String signalExchange,
+      String signalTradingsymbol,
+      BigDecimal signalPrice,
+      String optionUnderlying,
+      ScalperConfluenceGate.Decision decision) {
+    if (decision == null) {
+      return new TradeableLeg(signalExchange, signalTradingsymbol, signalPrice);
+    }
+    StrikePicker.Candidate candidate = decision.pick().candidate();
+    return new TradeableLeg(
+        ShadowBookService.optionExchange(optionUnderlying),
+        candidate.tradingsymbol(),
+        candidate.ltp());
+  }
+
   private enum UniverseResolutionStatus {
     /** Resolved to at least one tradable instrument. */
     RESOLVED,
@@ -1838,6 +1858,15 @@ public class SignalEngine {
       }
     }
     BigDecimal entryPrice = bar.close();
+    TradeableLeg tradeable =
+        tradeableLeg(
+            exchange,
+            tradingsymbol,
+            entryPrice,
+            decision == null || strategy.scalper() == null
+                ? null
+                : strategy.scalper().underlying(),
+            decision);
     // T21 review round 2 (Critical): premium_pct rules are OPTION-side bands — resolving them
     // against the INDEX entry price here produced nonsense levels (25% of a 25,000 future = a
     // 6,250-point "stop"), and for a held-PE (SHORT-direction) position that below-entry stop made
@@ -1885,8 +1914,8 @@ public class SignalEngine {
     // Computed BEFORE the insert (it may call market-data REST) so the row + its stamps commit in
     // one tight transaction below — never a DB txn held open across an HTTP call.
     BigDecimal suggestedQty = null;
+    BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
     if (emissionGuard.isPresent()) {
-      BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
       // E8 §3.2: a probability-graded size multiplier off the confluence aggregate — scalper decisions
       // only (null for non-scalper signals → ungraded). Applied + lot-rounded inside the paper adapter;
       // defaults to 1.0 so the stamped qty is byte-identical until a weak-vs-strong spread is present.
@@ -1897,7 +1926,8 @@ public class SignalEngine {
                   decision.confluence().aggregate(), decision.oiImbalancePct(), decision.vixLevel());
       suggestedQty =
           emissionGuard.get().suggestedQty(
-              strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance,
+              strategy.definition().sizing(), tradeable.exchange(), tradeable.tradingsymbol(),
+              tradeable.premium(), stopDistance,
               sizeMultiplier, strategy.book());
       // E9/§3.7 hero-zero profit-funded sizing: the expiry-day hero-zero leg deploys ~10% of accumulated
       // realised PROFIT ("play with house money, never capital") with a ₹2.5k floor when profits are thin
@@ -1909,9 +1939,7 @@ public class SignalEngine {
           && decision.pick().candidate().ltp() != null) {
         BigDecimal hzQty =
             emissionGuard.get().heroZeroSuggestedQty(
-                exchange,
-                decision.pick().candidate().tradingsymbol(),
-                decision.pick().candidate().ltp());
+                tradeable.exchange(), tradeable.tradingsymbol(), tradeable.premium());
         if (hzQty != null) {
           suggestedQty = hzQty;
         }
@@ -1919,9 +1947,11 @@ public class SignalEngine {
     }
     // §12.9 Track-2 side-channel: the signal is keyed on the index future; record the option the
     // confluence picked (the order/paper layer trades it) + the confluence detail, OUTSIDE the
-    // frozen score breakdown. Options trade on the same derivatives exchange as the index future.
+    // frozen score breakdown. The option's own exchange is derived from its underlying root.
     String scalperDetail =
-        decision == null ? null : scalperDetailJson(decision, strategy.scalper(), exchange);
+        decision == null
+            ? null
+            : scalperDetailJson(decision, strategy.scalper(), tradeable.exchange());
     // INT §13 row 19 / FID P1-8 fired-side rail-operand side-channel: serialize the confluence gate's full
     // condition matrix (built from the SAME evaluation the Decision came from — never re-evaluated, so it
     // is deterministic) mirroring signal_rejections.diagnostic's shape. Built HERE (not inside the tx) so a
@@ -1957,11 +1987,28 @@ public class SignalEngine {
               }
               if (scalperDetail != null) {
                 signals.stampScalperDetail(
-                    newId, exchange, decision.pick().candidate().tradingsymbol(), scalperDetail);
+                    newId, tradeable.exchange(), tradeable.tradingsymbol(), scalperDetail);
               }
               return newId;
             });
     stampEmissionLatency(id);
+    if (suggestedQty == null
+        && decision != null
+        && tradeable.premium() != null
+        && emissionGuard.isPresent()) {
+      emissionGuard
+          .get()
+          .recordZeroSizedEntry(
+              id,
+              strategy.slug(),
+              strategy.definition().sizing(),
+              strategy.book(),
+              tradeable.exchange(),
+              tradeable.tradingsymbol(),
+              tradeable.premium(),
+              stopDistance,
+              side);
+    }
     emitted.increment();
     // Best-effort post-commit stamp of the fired-side diagnostic (§13 row 19): NOT inside the tx above —
     // a scalper contrast diagnostic must never roll back / break the real ENTRY (mirrors recordRejection's

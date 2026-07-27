@@ -88,25 +88,35 @@ public final class StraddleLegs {
   }
 
   /**
-   * The per-leg lot count for the two legs of the straddle. {@code suggestedQty} was sized against the
-   * PRIMARY (CE) premium alone (budget / (ceLtp × lot)); the combined straddle must spend that same
-   * budget across BOTH legs, so {@code combinedQty = suggestedQty × ceLtp / (ceLtp + peLtp)} (floored,
-   * min 1). Both legs open at this qty. Returns 0 when either premium is missing / non-positive (the
-   * caller then skips the straddle open). Derives purely from the two premiums — no budget/lot lookup.
+   * The per-leg quantity for the two legs of the straddle, ALWAYS a whole multiple of {@code lot}.
+   * {@code suggestedQty} was sized against the PRIMARY (CE) premium alone (budget / (ceLtp × lot));
+   * the combined straddle must spend that same budget across BOTH legs, so the split is
+   * {@code suggestedQty × ceLtp / (ceLtp + peLtp)} — then floored DOWN TO A WHOLE LOT, min one lot.
+   * Both legs open at this qty. Returns 0 when either premium is missing / non-positive, or when the
+   * lot is unknown (the caller then skips the straddle open rather than mis-sizing the pair).
+   *
+   * <p><b>The lot floor is load-bearing</b> (cross-vendor review C1). Flooring to a whole UNIT
+   * yielded quantities that cannot exist — CE 130 / PE 125 / lot 65 gives
+   * {@code floor(65 × 130/255) = 33}, i.e. 33 units of a 65-lot contract on BOTH legs. This branch
+   * was unreachable while every straddle scalper's suggested_qty was NULL; the sizing fix in this
+   * same PR makes it live, and a non-lot-aligned qty is a broker reject the moment
+   * {@code artha.scalper.execution} arms.
    */
-  public static int combinedQty(int suggestedQty, BigDecimal ceLtp, BigDecimal peLtp) {
+  public static int combinedQty(int suggestedQty, BigDecimal ceLtp, BigDecimal peLtp, long lot) {
     if (suggestedQty <= 0
         || ceLtp == null
         || peLtp == null
         || ceLtp.signum() <= 0
-        || peLtp.signum() <= 0) {
+        || peLtp.signum() <= 0
+        || lot <= 0) {
       return 0;
     }
-    BigDecimal q =
+    BigDecimal units =
         BigDecimal.valueOf(suggestedQty)
             .multiply(ceLtp)
             .divide(ceLtp.add(peLtp), 0, RoundingMode.FLOOR);
-    return Math.max(1, q.intValue());
+    long lots = units.longValue() / lot;
+    return Math.toIntExact(Math.max(1L, lots) * lot);
   }
 
   private static String text(JsonNode n, String field) {

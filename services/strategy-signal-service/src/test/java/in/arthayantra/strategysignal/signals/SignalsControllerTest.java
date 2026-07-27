@@ -25,7 +25,7 @@ class SignalsControllerTest {
         1L, UUID.randomUUID(), "NSE", "NIFTY24JUNFUT", "3m", "ENTRY", "BUY",
         new BigDecimal("100"), new BigDecimal("95"), null, new BigDecimal("0.8"),
         OM.nullNode(), "ACTIVE", OffsetDateTime.parse("2026-06-20T10:00:00+05:30"), null,
-        new BigDecimal("50"), tradeableExch, tradeableSym, scalperDetail, null, null);
+        new BigDecimal("50"), tradeableExch, tradeableSym, scalperDetail, null, null, null);
   }
 
   @Test

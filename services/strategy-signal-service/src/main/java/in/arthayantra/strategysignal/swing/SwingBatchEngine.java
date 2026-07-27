@@ -498,7 +498,8 @@ public class SwingBatchEngine {
               long newId =
                   signals.insert(
                       strat.versionId(), EX, c.symbol(), IV, "ENTRY", "BUY", entryPrice, stopLoss,
-                      target, eval.breakdown().composite(), breakdownJson, generatedAt, expiresAt);
+                      target, eval.breakdown().composite(), breakdownJson, generatedAt, expiresAt,
+                      null); // ENTRY carries no exit reason
               if (suggestedQty != null) {
                 signals.stampSuggestedQty(newId, suggestedQty);
               }
@@ -619,7 +620,7 @@ public class SwingBatchEngine {
                   signals.insert(
                       strat.versionId(), EX, primary.tradingsymbol(), IV, "EXIT", "SELL", bar.close(),
                       null, null, primary.compositeScore(), primary.scoreBreakdown().toString(),
-                      generatedAt, generatedAt.plusMinutes(doctrine.ttlMinutes()));
+                      generatedAt, generatedAt.plusMinutes(doctrine.ttlMinutes()), reason);
               // A pyramided position closes ALL lots at once (§3.5.D): expire every lot of the symbol
               // so no add lingers as a phantom active anchor once its shared position is gone. A
               // single-lot symbol expires its one anchor (identical to the per-anchor path).

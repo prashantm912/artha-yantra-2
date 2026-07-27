@@ -174,7 +174,7 @@ class PaperSignalTakeFreshnessIntegrationTest extends StrategySignalIntegrationT
     return signals.insert(
         versionId, "NSE", sym, "1m", "ENTRY", "BUY",
         new BigDecimal("100.00"), new BigDecimal("50.00"), new BigDecimal("150.00"),
-        new BigDecimal("0.80"), "{}", generatedAt, generatedAt.plusHours(48));
+        new BigDecimal("0.80"), "{}", generatedAt, generatedAt.plusHours(48), null);
   }
 
   private String order(long signalId, String sym, String book) throws Exception {

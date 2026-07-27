@@ -222,7 +222,7 @@ class ManasAroraSwingEngineTest {
   }
 
   private static void stubInsert(SignalRepository signals, long id) {
-    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(id);
   }
 
@@ -241,7 +241,7 @@ class ManasAroraSwingEngineTest {
       long id, UUID versionId, BigDecimal entryPrice, OffsetDateTime at) {
     return new SignalRepository.SignalRow(
         id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
-        new ObjectMapper().createObjectNode(), "TAKEN", at, at.plusDays(1), null, null, null, null, null, null);
+        new ObjectMapper().createObjectNode(), "TAKEN", at, at.plusDays(1), null, null, null, null, null, null, null);
   }
 
   private static JsonNode breakoutConfig() throws IOException {

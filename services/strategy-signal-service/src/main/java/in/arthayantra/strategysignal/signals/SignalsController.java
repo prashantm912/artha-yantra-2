@@ -201,6 +201,10 @@ public class SignalsController {
     dto.put("tradeableExchange", row.tradeableExchange());
     dto.put("tradeableTradingsymbol", row.tradeableTradingsymbol());
     dto.put("scalperDetail", row.scalperDetail());
+    // Why an EXIT fired. NULL on ENTRY rows and on EXITs predating V048 — those reasons only
+    // ever reached a log line. The endpoint returns a Map, so springdoc does not enumerate it
+    // and adding the key does not drift the contract.
+    dto.put("exitReason", row.exitReason());
     return dto;
   }
 }

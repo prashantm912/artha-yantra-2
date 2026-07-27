@@ -44,6 +44,20 @@ subset is CI-enforced).
 > (needs an alert channel, a `NOT_LIVE_RESOLVABLE` re-page cadence, and an OBSERVE_ONLY duration).
 > **INT I4 is PARKED to ~2026-08-09** — 7 Majors, and its headline delivery-rate number was wrong
 > (see ledger C8).
+>
+> **CURRENCY UPDATE 2026-07-28 (supersedes the 07-27 swing paragraph above):** the swing story is
+> now THREE armed layers, all live-verified. The **detect** half's intent machinery proved itself on
+> first contact (intent rows at exactly 19:59:59/20:04:59 IST, both batches marked). The
+> **auto-replay** half was FINISHED the same day the owner funded it and — on the owner's
+> "merge and arm both" — **#1036 is MERGED + DEPLOYED + ARMED** (`2e4ea6f0`; V049–V051 probed,
+> `swing-catchup-sched-1` thread live; a 7th Critical, an exit-vs-open TOCTOU, was found in round 4
+> and closed with per-anchor advisory-lock serialization). The **#640 dead-man's-switch turned out
+> ALREADY armed** (URL set, ping verified) — the "dormant" note was stale. Also shipped same night:
+> **V048 `signals.exit_reason`** (#1057, deployed + DB-probed — scalper exits are now durably
+> explainable) and the **guarded swing Run-batch-now buttons** (#1061, deployed, bundle-probed) as
+> the escalation surface for ABANDONED/refused sessions. First armed 08:35 catch-up sweep verifies
+> via a one-time 08:50 task on 07-28 (expected: clean no-op). Owner items unchanged: B8 clock, T9
+> arming, I4 ~2026-08-09.
 
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the

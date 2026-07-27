@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-07-28 — SUPERSEDED.** The owner took the compression path instead: V049__compress_candle_caggs.sql shipped (#940), AYDB-01 resolved (46 GB -> 28 GB, see docs/retention.md). Kept for provenance.
+
 # AYDB — cagg storage relief via RETENTION, not compression (design pass)
 
 > **SUPERSEDED 2026-07-19 — NOT the path taken.** Adversarial review measured the real reclaim at

@@ -45,8 +45,19 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
   mechanism was INVALIDATED live 2026-07-17** (the "REST/JDBC can see bar flow" premise is false); §1/§2
   stay authoritative, and reviving Part B is an owner decision (a market-data bounded-recent-bar contract
   vs a cross-schema grant + ADR). Carries a STOP block up top.
+- `2026-07-18-pf02-typed-scoring-bias-design.md` — AUD-PF02 typed `scoring.bias` design; build is
+  owner-gated on the bearish-normalizer numbers (ledger row `AUD-PF02`).
+- `2026-07-26-t9-strategy-coverage-watchdog-design.md` — T9 per-strategy coverage watchdog; **BUILT
+  #1035 but deployed DISABLED** — the doc stays active until the owner's arming decision (channel /
+  re-page cadence / OBSERVE_ONLY duration, ledger G2).
 - `superpowers/plans/archive/` — everything completed / decided / superseded, each with an ARCHIVED
-  status banner. **2026-07-10 sweep added:** the full **Minervini SEPA set** (implementation plan +
+  status banner. **2026-07-28 sweep added:** **aydb-cagg-retention-design** (superseded — owner took
+  the V049 cagg-compression path, #940; AYDB-01 resolved), the **nullable-contract-sweep pair**
+  (sweep CLOSED — #996/#999–#1003/#1005/#1008/#1034; findings doc consumed by #1034) and the
+  **contract-hygiene session closeout** (statuses frozen 2026-07-25; task_db8bdf1e later closed
+  fully — ledger authoritative). Same sweep archived the eight MERGED `docs/handoffs/` brief/receipt
+  pairs of the 2026-07-26 wave into `handoffs/archive/` (detector #1044, catch-up #1036 arc, F-OPT
+  #1039, T9-retry) — only the parked INT-I4 brief stays in the lane. **2026-07-10 sweep added:** the full **Minervini SEPA set** (implementation plan +
   build-log + phase6/partial-close build-specs — all phases shipped+live #524–#563; only the
   forward-paper watch remains, tracked in the ledger), **manas-arora-and-book-separation-plan**
   (fully shipped #566–#575), **swing-doctrine-port-build-spec** (M31 shipped #655).

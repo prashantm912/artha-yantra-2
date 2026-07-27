@@ -179,6 +179,54 @@ class MarketOiClientTest {
     assertThat(client.deriveDowUp(om.readTree("{}"))).isNull(); // absent → unknown
   }
 
+  /**
+   * The EOD-sourced reads must ask for the last SETTLED session, never the live bar's own date.
+   *
+   * <p>NSE publishes FII/participant and bhavcopy data after the close, so a read keyed on today
+   * returns an EMPTY set for the whole session — which is precisely what happened live: all three
+   * engine call sites passed the bar date, `/fii-dii/long-short?from=<today>` answered
+   * `{"items":[]}`, and the `fii` dot was null on every bar of every session.
+   *
+   * <p>The bar date here is Monday 2026-06-22, so the expected read date is Friday 2026-06-19 —
+   * June 2026 carries exactly one NSE holiday (2026-06-26), so that pair holds independently of the
+   * resolver being tested. Each stub matches on the DATE IN THE URL, so asking for the wrong day
+   * fails to match and the test fails.
+   */
+  @Test
+  void eodReadsAskForTheLastSettledSessionNotTheLiveBarDate() {
+    wire();
+    LocalDate monday = LocalDate.of(2026, 6, 22);
+
+    // The three EOD-sourced reads, each pinned to the SETTLED session (Friday), not the bar date.
+    stub(
+        "fii-dii/long-short?from=2026-06-19",
+        "{\"items\":[{\"fiiLong\":70,\"fiiShort\":30}]}");
+    stub("fii-dii/bias?date=2026-06-19", "{\"biasSign\":-1,\"bias\":\"BEAR\"}");
+    stub("/api/v1/market/breadth?date=2026-06-19", "{\"summary\":{\"advances\":35,\"declines\":12}}");
+
+    // Everything else macro() touches — not under test, stubbed so the fan-out completes.
+    stub("/api/v1/market/options/iv-history", "{\"currentIv\":\"0.14\",\"insufficientHistory\":true}");
+    // /breadth/live never returns null on a 200, so it must FAIL for the dated fallback to fire —
+    // which is the only breadth path that carries a date, and therefore the only one to pin.
+    server
+        .expect(ExpectedCount.once(), requestTo(containsString("/api/v1/market/breadth/live")))
+        .andRespond(withServerError());
+    stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
+    stub("/api/v1/market/equity/index-contribution", "{\"indexChangePct\":\"0.5\"}");
+    stub("/api/v1/market/options/active-strikes", "{\"activeStrikeIvSeries\":[]}");
+    stub("/api/v1/market/vix", "{\"ltp\":\"14.5\",\"change\":\"-0.30\"}");
+    stub("/api/v1/market/global/dow", "{\"direction\":1}");
+
+    Macro m = client.macro(UNDERLYING, monday, EXPIRY);
+
+    server.verify(); // every date-pinned stub was hit — i.e. no read asked for the bar date
+    assertThat(m.fiiLongPct())
+        .as("the dot the live defect left null on every bar")
+        .isEqualByComparingTo("70");
+    assertThat(m.fiiBiasSign()).isEqualByComparingTo("-1");
+    assertThat(m.advances()).isEqualTo(35);
+  }
+
   @Test
   void mapsMacroHalfAndScalesIvRankToHundred() {
     wire();

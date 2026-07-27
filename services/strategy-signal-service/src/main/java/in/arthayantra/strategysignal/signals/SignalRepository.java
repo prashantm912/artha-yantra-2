@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -44,9 +45,33 @@ public class SignalRepository {
       /** Why an EXIT fired; NULL on ENTRY rows and on EXITs predating V048 (log-only back then). */
       String exitReason) {}
 
+  /** Advisory-lock namespace for per-anchor serialization ({@link #lockAnchors}). */
+  private static final int ANCHOR_LOCK_NAMESPACE = 4801;
+
   private final JdbcTemplate jdbc;
   private final ObjectMapper objectMapper;
   private final ApplicationEventPublisher events;
+
+  /**
+   * Transaction-scoped advisory lock on signal anchors — the serialization point between the swing
+   * EXIT's paper-target discovery and a concurrent paper open for the same anchor (cross-vendor
+   * round 4 TOCTOU: discovery used to complete before the exit transaction, so a {@code /taken}
+   * open landing in the gap was persisted as a stale empty SKIPPED and the position orphaned).
+   * Both sides take this lock inside their own transaction; whichever commits first, the loser then
+   * observes committed state — the exit sees the opened position, or the open sees the EXPIRED
+   * anchor and refuses.
+   *
+   * <p>Ids are locked in ascending order so a multi-lot exit cannot deadlock against another
+   * multi-lot exit. {@code Math.toIntExact} is deliberate: the two-int lock form takes int4, and a
+   * bigserial overflowing int (billions of signals away) must fail loud here, never truncate into a
+   * colliding key. Requires an active transaction ({@code pg_advisory_xact_lock} releases on
+   * commit/rollback); every caller is {@code @Transactional} or inside {@code tx.execute}.
+   */
+  public void lockAnchors(Collection<Long> signalIds) {
+    signalIds.stream().distinct().sorted().forEach(id ->
+        jdbc.queryForList(
+            "SELECT pg_advisory_xact_lock(?, ?)", ANCHOR_LOCK_NAMESPACE, Math.toIntExact(id)));
+  }
 
   /** Wires the strategy datasource + the status-change event publisher (audit §7.2.1). */
   public SignalRepository(

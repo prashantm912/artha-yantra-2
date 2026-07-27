@@ -935,27 +935,23 @@ public class SwingBatchEngine {
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(IST);
     // the paper close_reason taxonomy is UPPERCASE (STOP_LOSS / TRAILING_STOP / SIGNAL_EXIT / …)
     String reason = exit.type().toUpperCase(Locale.ROOT);
-    final List<Long> targetPositionIds;
-    if (paperEffects == null) {
-      targetPositionIds = List.of();
-    } else {
-      try {
-        targetPositionIds =
-            paperEffects.openPositionIdsForSignals(
-                lots.stream().map(SignalRepository.SignalRow::id).distinct().toList());
-      } catch (RuntimeException e) {
-        log.error(
-            "{} swing EXIT {} target discovery failed before anchor expiry — refusing commit",
-            doctrine.batchName(),
-            primary.tradingsymbol(),
-            e);
-        throw new IllegalStateException(
-            "swing exit paper target discovery failed before anchor expiry", e);
-      }
-    }
+    List<Long> lotIds = lots.stream().map(SignalRepository.SignalRow::id).distinct().toList();
     long id =
         tx.execute(
             status -> {
+              // Discovery runs INSIDE the effect transaction, behind the per-anchor advisory lock
+              // (cross-vendor round 4 TOCTOU): outside the transaction, a concurrent /taken paper
+              // open landing between the read and the commit was persisted as a stale empty
+              // SKIPPED and the position orphaned. Under the lock the open either committed first
+              // (discovery sees it) or waits and then sees the EXPIRED anchor and refuses. A
+              // discovery failure throws here, rolling back before anything durable.
+              final List<Long> targetPositionIds;
+              if (paperEffects == null) {
+                targetPositionIds = List.of();
+              } else {
+                signals.lockAnchors(lotIds);
+                targetPositionIds = paperEffects.openPositionIdsForSignals(lotIds);
+              }
               if (paperEffects != null
                   && !paperEffects.expectExit(
                       doctrine.batchName(),

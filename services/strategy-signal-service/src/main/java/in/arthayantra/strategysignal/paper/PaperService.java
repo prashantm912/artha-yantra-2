@@ -510,10 +510,25 @@ public class PaperService {
     BigDecimal signalEntry = null;
     OffsetDateTime signalGeneratedAt = null;
     if (request.signalId() != null) {
+      // Serialize against the swing EXIT's target discovery BEFORE reading the anchor (cross-vendor
+      // round 4 TOCTOU): both sides take the same per-anchor advisory lock inside their transaction,
+      // so this open either commits before the exit's discovery reads (the exit binds this position)
+      // or blocks until the exit committed — and then sees the EXPIRED anchor below and refuses,
+      // instead of opening a position whose only exit path has already run.
+      signals.lockAnchors(List.of(request.signalId()));
       SignalRepository.SignalRow signal =
           signals
               .find(request.signalId())
               .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_SIGNAL, "no such signal"));
+      if ("EXPIRED".equals(signal.status())) {
+        throw new ApiException(
+            422,
+            ErrorCodes.VALIDATION_FAILED,
+            "signal #" + request.signalId()
+                + " is EXPIRED — its exit already settled, so a position opened now could never be"
+                + " closed by the engine",
+            Map.of("signalId", request.signalId(), "status", signal.status()));
+      }
       // STRUCTURAL INVARIANT — an EXIT never opens exposure. The callers are guarded too
       // (openManualOrder + SignalsController.taken), but this is the layer that actually WRITES the
       // position, so the assert belongs here: a future SignalTaken publisher or a direct openOrder

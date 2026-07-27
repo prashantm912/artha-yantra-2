@@ -186,6 +186,31 @@ class SwingPaperExitCriticalsIntegrationTest extends StrategySignalIntegrationTe
     assertThat(effects.allConfirmed(batch, SESSION)).isFalse();
   }
 
+  /**
+   * The observable half of the round-4 TOCTOU closure: once the swing EXIT settles an anchor
+   * (EXPIRED), a late paper open for that anchor is REFUSED. Under the shared per-anchor advisory
+   * lock the open that loses the race sees exactly this committed state — refusing it is what
+   * prevents the permanently orphaned position the review traced (open lands between discovery and
+   * commit, effect persists as stale-empty SKIPPED, nothing ever closes the position).
+   */
+  @Test
+  void aPaperOpenForAnExpiredAnchorIsRefused() throws Exception {
+    String uid = uniqueId();
+    String symbol = "R4EX" + uid;
+    UUID versionId = publishManasBreakout(uid);
+    long anchor =
+        insertEntry(
+            versionId, symbol, SESSION.atStartOfDay(IST).toOffsetDateTime(), new BigDecimal("152"));
+    jdbc.update("UPDATE signals SET status = 'EXPIRED' WHERE id = ?", anchor);
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> openPosition(anchor, symbol, new BigDecimal("152")))
+        .hasMessageContaining("EXPIRED");
+    assertThat(positions.findOpen(Books.MANAS_ARORA, "NSE", symbol, "BUY"))
+        .as("no position row may exist for a settled anchor")
+        .isEmpty();
+  }
+
   @Test
   void laterPyramidLotOwnsSharedRowAndUnionExitClosesBeforeCatchupCanBeDone() throws Exception {
     String uid = uniqueId();

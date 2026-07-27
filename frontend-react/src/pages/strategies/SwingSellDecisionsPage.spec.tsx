@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { RecordedSellDecision, SwingSellReport } from '../../api/swing.ts';
+import type {
+  RecordedSellDecision,
+  SwingCatchUpStatus,
+  SwingSellReport,
+} from '../../api/swing.ts';
 
 const apiFetch = vi.fn();
 
@@ -76,6 +80,17 @@ const recorded: { items: RecordedSellDecision[] } = {
   ],
 };
 
+const catchUpStatus: SwingCatchUpStatus = {
+  batch: 'minervini',
+  sessionDate: '2026-07-24',
+  status: 'ABANDONED',
+  attempts: 3,
+  reason: 'NO_SCHEDULE_INTENT',
+  updatedAt: '2026-07-25T03:10:00Z',
+};
+
+let latestCatchUpStatus: SwingCatchUpStatus = catchUpStatus;
+
 const ackMutate = vi.fn();
 
 vi.mock('../../api/swing.ts', async (importActual) => {
@@ -91,6 +106,13 @@ vi.mock('../../api/swing.ts', async (importActual) => {
     }),
     useRecordedSellDecisions: () => ({
       data: recorded,
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      refetch: () => {},
+    }),
+    useSwingCatchUpStatus: () => ({
+      data: latestCatchUpStatus,
       isPending: false,
       isError: false,
       isSuccess: true,
@@ -140,6 +162,7 @@ beforeEach(() => {
   ackMutate.mockReset();
   apiFetch.mockReset();
   apiFetch.mockResolvedValue({});
+  latestCatchUpStatus = catchUpStatus;
 });
 
 afterEach(() => {
@@ -240,6 +263,32 @@ describe('SwingSellDecisionsPage', () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(screen.getByText(/ran 0 strategies/i)).toBeInTheDocument();
+  });
+
+  it('shows the selected family catch-up status in the confirmation dialog', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Minervini batch now' }));
+
+    expect(screen.getByText(/Latest catch-up: ABANDONED/)).toBeInTheDocument();
+    expect(screen.getByText(/session 2026-07-24/)).toBeInTheDocument();
+    expect(screen.getByText(/reason: NO_SCHEDULE_INTENT/)).toBeInTheDocument();
+  });
+
+  it('states plainly when the selected family has no catch-up rows', () => {
+    latestCatchUpStatus = {
+      batch: 'minervini',
+      sessionDate: null,
+      status: null,
+      attempts: null,
+      reason: null,
+      updatedAt: null,
+    };
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Minervini batch now' }));
+
+    expect(screen.getByText('no catch-up rows — nothing has been claimed')).toBeInTheDocument();
   });
 
   it('does not post when the run confirmation is cancelled and restores trigger focus', async () => {

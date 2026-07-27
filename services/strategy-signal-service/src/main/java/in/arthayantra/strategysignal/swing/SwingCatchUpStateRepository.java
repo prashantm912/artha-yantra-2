@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.swing;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -30,6 +31,10 @@ public class SwingCatchUpStateRepository {
 
   /** The won claim, carrying the (post-increment) attempt number for the age-out decision. */
   public record Claim(int attempts) {}
+
+  /** The latest durable catch-up row for one swing family. */
+  public record LatestCatchUpRow(
+      LocalDate sessionDate, String status, int attempts, String reason, OffsetDateTime updatedAt) {}
 
   /**
    * Atomically claims a session for a catch-up attempt. Returns the {@link Claim} (with the new
@@ -115,6 +120,29 @@ public class SwingCatchUpStateRepository {
         ORDER BY session_date
         """,
         (rs, n) -> rs.getObject("session_date", LocalDate.class), batch, staleLeaseMinutes);
+  }
+
+  /** Returns the most recently updated catch-up row for a family, if any. */
+  public Optional<LatestCatchUpRow> latest(String batch) {
+    return jdbc
+        .query(
+            """
+            SELECT session_date, status, attempts, reason, updated_at
+            FROM swing_catchup_runs
+            WHERE batch = ?
+            ORDER BY updated_at DESC, session_date DESC
+            LIMIT 1
+            """,
+            (rs, n) ->
+                new LatestCatchUpRow(
+                    rs.getObject("session_date", LocalDate.class),
+                    rs.getString("status"),
+                    rs.getInt("attempts"),
+                    rs.getString("reason"),
+                    rs.getObject("updated_at", OffsetDateTime.class)),
+            batch)
+        .stream()
+        .findFirst();
   }
 
   /**

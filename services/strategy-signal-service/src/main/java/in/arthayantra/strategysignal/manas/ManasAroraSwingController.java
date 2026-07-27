@@ -3,7 +3,12 @@ package in.arthayantra.strategysignal.manas;
 import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchEngine;
 import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
+import in.arthayantra.strategysignal.swing.SwingCatchUpStateRepository;
+import in.arthayantra.strategysignal.swing.SwingMarketHoursGuard;
 import in.arthayantra.strategysignal.swing.SwingSellDecisionService;
+import io.swagger.v3.oas.annotations.media.Schema;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,6 +31,8 @@ public class ManasAroraSwingController {
   private final SwingBatchRecorder recorder;
   private final SwingSellDecisionService sellDecisions;
   private final SwingBatchRunRepository batchRuns;
+  private final SwingCatchUpStateRepository catchUpState;
+  private final SwingMarketHoursGuard marketHoursGuard;
   private final ManasDoctrine doctrine;
 
   /** Wires the shared recorder + sell-decision service + batch-run repo and the Manas doctrine. */
@@ -33,10 +40,14 @@ public class ManasAroraSwingController {
       SwingBatchRecorder recorder,
       SwingSellDecisionService sellDecisions,
       SwingBatchRunRepository batchRuns,
+      SwingCatchUpStateRepository catchUpState,
+      SwingMarketHoursGuard marketHoursGuard,
       ManasDoctrine doctrine) {
     this.recorder = recorder;
     this.sellDecisions = sellDecisions;
     this.batchRuns = batchRuns;
+    this.catchUpState = catchUpState;
+    this.marketHoursGuard = marketHoursGuard;
     this.doctrine = doctrine;
   }
 
@@ -46,8 +57,41 @@ public class ManasAroraSwingController {
    * else the did-not-run canary keeps alerting for a date the owner already ran.
    */
   @PostMapping("/run")
-  public SwingBatchEngine.SwingRun run() {
+  public SwingBatchEngine.SwingRun run(
+      @RequestParam(name = "force", defaultValue = "false") boolean force) {
+    marketHoursGuard.check(force);
     return recorder.runAndRecord(doctrine);
+  }
+
+  /** The latest durable catch-up state for the Manas Arora family, or a typed empty response. */
+  @GetMapping("/catchup-status")
+  public CatchUpStatus catchUpStatus() {
+    return catchUpState
+        .latest(doctrine.batchName())
+        .map(
+            row ->
+                new CatchUpStatus(
+                    doctrine.batchName(),
+                    row.sessionDate(),
+                    row.status(),
+                    row.attempts(),
+                    row.reason(),
+                    row.updatedAt()))
+        .orElseGet(() -> CatchUpStatus.empty(doctrine.batchName()));
+  }
+
+  /** Typed response for the latest catch-up row; null row fields mean no row exists yet. */
+  public record CatchUpStatus(
+      String batch,
+      @Schema(types = {"string", "null"}, format = "date") LocalDate sessionDate,
+      @Schema(types = {"string", "null"}) String status,
+      @Schema(types = {"integer", "null"}) Integer attempts,
+      @Schema(types = {"string", "null"}) String reason,
+      @Schema(types = {"string", "null"}, format = "date-time") OffsetDateTime updatedAt) {
+
+    static CatchUpStatus empty(String batch) {
+      return new CatchUpStatus(batch, null, null, null, null, null);
+    }
   }
 
   /** The daily sell-decision triad for every open Manas swing position — read-only. */

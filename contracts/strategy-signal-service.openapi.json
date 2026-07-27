@@ -944,6 +944,15 @@
       "post" : {
         "tags" : [ "minervini-swing-controller" ],
         "operationId" : "run",
+        "parameters" : [ {
+          "name" : "force",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : false
+          }
+        } ],
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -972,6 +981,15 @@
       "post" : {
         "tags" : [ "manas-arora-swing-controller" ],
         "operationId" : "run_1",
+        "parameters" : [ {
+          "name" : "force",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : false
+          }
+        } ],
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -2126,6 +2144,34 @@
         }
       }
     },
+    "/api/v1/signals/minervini-swing/catchup-status" : {
+      "get" : {
+        "tags" : [ "minervini-swing-controller" ],
+        "operationId" : "catchUpStatus",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CatchUpStatus"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/signals/minervini-swing/admission-probe" : {
       "get" : {
         "tags" : [ "minervini-swing-controller" ],
@@ -2175,6 +2221,34 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/SwingSellReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/signals/manas-arora-swing/catchup-status" : {
+      "get" : {
+        "tags" : [ "manas-arora-swing-controller" ],
+        "operationId" : "catchUpStatus_1",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CatchUpStatus"
                 }
               }
             }
@@ -3956,9 +4030,18 @@
           },
           "admission" : {
             "$ref" : "#/components/schemas/AdmissionProbe"
+          },
+          "refusalReasons" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "deadlineReached" : {
+            "type" : "boolean"
           }
         },
-        "required" : [ "admission", "candidates", "entries", "exitSkipped", "exits", "strategies" ]
+        "required" : [ "admission", "candidates", "deadlineReached", "entries", "exitSkipped", "exits", "refusalReasons", "strategies" ]
       },
       "RegisterRequest" : {
         "type" : "object",
@@ -4784,6 +4867,33 @@
           }
         },
         "required" : [ "asOf", "items" ]
+      },
+      "CatchUpStatus" : {
+        "type" : "object",
+        "properties" : {
+          "batch" : {
+            "type" : "string"
+          },
+          "sessionDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "status" : {
+            "type" : [ "string", "null" ]
+          },
+          "attempts" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "reason" : {
+            "type" : [ "string", "null" ]
+          },
+          "updatedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "attempts", "batch", "reason", "sessionDate", "status", "updatedAt" ]
       },
       "AdmissionProbes" : {
         "type" : "object",

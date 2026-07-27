@@ -150,4 +150,20 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
             String.class, batch, java.sql.Date.valueOf(SESSION));
     assertThat(reason).isEqualTo(refusal);
   }
+
+  @Test
+  void latestReturnsTheMostRecentlyUpdatedRowAndEmptyForAnUnknownBatch() {
+    String batch = "cu-it-latest-" + System.nanoTime();
+    state.markAbandoned(batch, SESSION, "NO_SCHEDULE_INTENT");
+
+    Optional<SwingCatchUpStateRepository.LatestCatchUpRow> latest = state.latest(batch);
+
+    assertThat(latest).isPresent();
+    assertThat(latest.get().sessionDate()).isEqualTo(SESSION);
+    assertThat(latest.get().status()).isEqualTo("ABANDONED");
+    assertThat(latest.get().attempts()).isZero();
+    assertThat(latest.get().reason()).isEqualTo("NO_SCHEDULE_INTENT");
+    assertThat(latest.get().updatedAt()).isNotNull();
+    assertThat(state.latest("cu-it-no-such-batch-" + System.nanoTime())).isEmpty();
+  }
 }

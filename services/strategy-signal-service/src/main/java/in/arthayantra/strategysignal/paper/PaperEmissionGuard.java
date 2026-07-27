@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.eval.PositionSizer;
+import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.signals.EmissionGuard;
 import java.math.BigDecimal;
@@ -116,6 +117,16 @@ public class PaperEmissionGuard implements EmissionGuard {
       BigDecimal multiplier,
       String book) {
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
+    // FAIL CLOSED on an unresolved derivatives instrument (cross-vendor review C2). A meta lookup
+    // failure — market-data restarting mid-session, or a newly listed weekly strike the master has
+    // not picked up yet — returns the EQUITY_PROXY with lot=1. Before this PR that produced 0 lots
+    // and no position; now it would produce a REAL one at a non-lot-aligned qty (15000/776 = 19
+    // units of a 20-lot SENSEX option), auto-taken and silently wrong. An option that does not
+    // resolve as an OPTION is not sizable: refuse, and let the ZERO_SIZE trace make the miss
+    // visible. A safety gate must fail closed (checklist, Money/data fidelity).
+    if (unresolvedDerivative(exchange, tradingsymbol, meta)) {
+      return null;
+    }
     long lot = Math.max(1, meta.lotSize());
     long base =
         PositionSizer.size(
@@ -144,6 +155,9 @@ public class PaperEmissionGuard implements EmissionGuard {
       return null;
     }
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
+    if (unresolvedDerivative(exchange, tradingsymbol, meta)) {
+      return null; // same fail-closed rule as suggestedQty (review C2) — hero-zero is options-only
+    }
     long lot = Math.max(1, meta.lotSize());
     // Hero-zero is a scalper (expiry-day options) concept — funded off the scalper book's realised P&L.
     BigDecimal budget = heroZeroDeployBudget(account.realisedProfit(BookResolver.SCALPER));
@@ -208,5 +222,30 @@ public class PaperEmissionGuard implements EmissionGuard {
     BigDecimal tenPct =
         realisedProfit == null ? BigDecimal.ZERO : realisedProfit.multiply(HERO_ZERO_PROFIT_PCT);
     return tenPct.compareTo(HERO_ZERO_MIN_DEPLOY_INR) > 0 ? tenPct : HERO_ZERO_MIN_DEPLOY_INR;
+  }
+
+  /**
+   * True when a derivatives symbol did not resolve as an OPTION — i.e. the instrument-meta lookup
+   * fell back to the EQUITY_PROXY (lot 1) because market-data was unreachable or the master has not
+   * picked the contract up yet.
+   *
+   * <p>FAIL CLOSED (cross-vendor review C2). Before the option-leg sizing fix this state produced
+   * 0 lots and no position; with it, a lot-1 proxy yields a NON-LOT-ALIGNED quantity — 15000/776 =
+   * 19 units of a 20-lot SENSEX option — auto-taken and silently wrong, which is the exact defect
+   * that fix exists to remove. Refusing costs one missed entry; filling costs a position that cannot
+   * be traded and that a live broker would reject.
+   */
+  private boolean unresolvedDerivative(String exchange, String tradingsymbol, InstrumentMeta meta) {
+    if (!"NFO".equals(exchange) && !"BFO".equals(exchange)) {
+      return false;
+    }
+    if (meta.instrumentClass() == InstrumentClass.OPTION) {
+      return false;
+    }
+    log.warn(
+        "refusing to size {}:{} — derivatives symbol did not resolve as an OPTION (class={}, lot={});"
+            + " instrument meta is unavailable or stale",
+        exchange, tradingsymbol, meta.instrumentClass(), meta.lotSize());
+    return true;
   }
 }

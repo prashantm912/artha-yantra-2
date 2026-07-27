@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.paper;
 
+import in.arthayantra.strategysignal.signals.Books;
 import in.arthayantra.strategysignal.signals.SignalEmitted;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SignalTaken;
@@ -57,22 +58,24 @@ public class AutoPaperListener {
     try {
       String book = books.bookForSignal(event.signalId());
       if (!risk.autoPaperTradeEnabled(book)) {
-        skipSwingEffect(event.signalId());
+        skipSwingEffect(book, event.signalId());
         return;
       }
       SignalRepository.SignalRow row = signals.find(event.signalId()).orElse(null);
       if (row == null || row.suggestedQty() == null) {
-        skipSwingEffect(event.signalId());
+        skipSwingEffect(book, event.signalId());
         return; // nothing to size — leave the signal ACTIVE for a manual take
       }
       int qty = row.suggestedQty().intValue();
       if (qty <= 0) {
-        skipSwingEffect(event.signalId());
+        skipSwingEffect(book, event.signalId());
         return;
       }
       // The decision is durable before the event that can open paper. If this write or any lookup
       // above throws, the effect remains UNDECIDED and recovery will refuse to infer a paper entry.
-      if (paperEffects != null && !paperEffects.requireEntry(event.signalId())) {
+      if (isSwingBook(book)
+          && paperEffects != null
+          && !paperEffects.requireEntry(event.signalId())) {
         return;
       }
       boolean scalper = row.scalperDetail() != null;
@@ -88,10 +91,14 @@ public class AutoPaperListener {
   }
 
   /** Auto-paper OFF (or an un-sized signal) means this emission has no paper effect to await. */
-  private void skipSwingEffect(long signalId) {
-    if (paperEffects != null) {
+  private void skipSwingEffect(String book, long signalId) {
+    if (isSwingBook(book) && paperEffects != null) {
       paperEffects.skipEntry(signalId);
     }
+  }
+
+  private static boolean isSwingBook(String book) {
+    return Books.MINERVINI.equals(book) || Books.MANAS_ARORA.equals(book);
   }
 
 }

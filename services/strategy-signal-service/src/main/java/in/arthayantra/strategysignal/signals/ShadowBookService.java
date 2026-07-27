@@ -143,9 +143,19 @@ public class ShadowBookService {
     return id;
   }
 
-  /** The option leg's derivatives exchange from the option root (BSE roots trade on BFO). */
+  /**
+   * The option leg's derivatives exchange from the option root (BSE roots trade on BFO).
+   *
+   * <p>⚠️ This is a PREFIX HEURISTIC on what is now a MONEY path (it stamps
+   * {@code tradeable_exchange}, which feeds paper sizing AND live order routing). A miss is not
+   * benign: the instrument-meta lookup 404s, falls back to an equity proxy with lot 1, and produces
+   * a non-lot-aligned qty — the exact defect this was extracted to fix. The list is complete for
+   * every BFO option root that exists today (verified against {@code marketdata.instruments}:
+   * SENSEX, BANKEX, FOCIT and nothing else), but a newly listed BSE root would be silently mapped
+   * to NFO. Resolving from the instrument master instead is chipped as task_032bff42.
+   */
   static String optionExchange(String underlying) {
     String u = underlying == null ? "" : underlying.toUpperCase(java.util.Locale.ROOT);
-    return u.startsWith("SENSEX") || u.startsWith("BANKEX") ? "BFO" : "NFO";
+    return u.startsWith("SENSEX") || u.startsWith("BANKEX") || u.startsWith("FOCIT") ? "BFO" : "NFO";
   }
 }

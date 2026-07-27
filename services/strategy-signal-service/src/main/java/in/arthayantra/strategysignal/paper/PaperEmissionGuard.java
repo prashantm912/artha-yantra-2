@@ -7,6 +7,8 @@ import in.arthayantra.strategysignal.signals.EmissionGuard;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -16,6 +18,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class PaperEmissionGuard implements EmissionGuard {
+
+  private static final Logger log = LoggerFactory.getLogger(PaperEmissionGuard.class);
 
   // §3.7 hero-zero profit-funded sizing: deploy ~10% of accumulated realised PROFIT (mode a, "play with
   // house money, never capital"), floored to a ₹2,500 minimum deploy (mode b — the ₹2-3k midpoint) when
@@ -28,6 +32,7 @@ public class PaperEmissionGuard implements EmissionGuard {
   private final InstrumentMetaClient instruments;
   private final ScalperAccountModel scalperAccounts;
   private final PaperPositionRepository positions;
+  private final PaperOrderRejectionRecorder rejections;
 
   /** Wires the risk gate + capital model + the scalper 5-account discipline + the position ledger. */
   public PaperEmissionGuard(
@@ -35,12 +40,14 @@ public class PaperEmissionGuard implements EmissionGuard {
       PaperAccountService account,
       InstrumentMetaClient instruments,
       ScalperAccountModel scalperAccounts,
-      PaperPositionRepository positions) {
+      PaperPositionRepository positions,
+      PaperOrderRejectionRecorder rejections) {
     this.risk = risk;
     this.account = account;
     this.instruments = instruments;
     this.scalperAccounts = scalperAccounts;
     this.positions = positions;
+    this.rejections = rejections;
   }
 
   @Override
@@ -144,6 +151,52 @@ public class PaperEmissionGuard implements EmissionGuard {
     long affordableLots = budget.divide(perLotCost, 0, RoundingMode.DOWN).longValueExact();
     long lots = Math.max(1L, affordableLots); // a fired entry deploys at least one lot (advisory)
     return BigDecimal.valueOf(lots * lot);
+  }
+
+  @Override
+  public void recordZeroSizedEntry(
+      long signalId,
+      String strategySlug,
+      StrategyDefinition.SizingSpec sizing,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      BigDecimal premium,
+      BigDecimal stopDistance,
+      String side) {
+    try {
+      InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
+      long lot = Math.max(1, meta.lotSize());
+      long computedQty =
+          PositionSizer.size(
+              sizing,
+              new PositionSizer.Inputs(account.equity(book), premium, stopDistance, meta.lotSize()));
+      long computedLots = computedQty / lot;
+      BigDecimal budget = budgetInr(sizing);
+      String detail =
+          "strategy=" + strategySlug
+              + "; premium=" + premium.toPlainString()
+              + "; lot=" + lot
+              + "; budget_inr=" + (budget == null ? "n/a" : budget.toPlainString())
+              + "; computed_lots=" + computedLots;
+      log.warn(
+          "paper ENTRY zero-sized: strategy={} book={} symbol={}:{} premium={} lot={} budget={} computedLots={}",
+          strategySlug, book, exchange, tradingsymbol, premium, lot, budget, computedLots);
+      rejections.recordZeroSize(signalId, book, exchange, tradingsymbol, side, detail);
+    } catch (RuntimeException e) {
+      log.warn(
+          "paper_order_rejections (zero-size) not written for {}:{}: {}",
+          exchange,
+          tradingsymbol,
+          e.getMessage());
+    }
+  }
+
+  private static BigDecimal budgetInr(StrategyDefinition.SizingSpec sizing) {
+    Object value = sizing.params().get("budget_inr");
+    return value == null
+        ? null
+        : value instanceof BigDecimal bd ? bd : new BigDecimal(value.toString());
   }
 
   /**

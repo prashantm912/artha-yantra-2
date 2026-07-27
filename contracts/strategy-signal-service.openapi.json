@@ -2154,7 +2154,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/CatchUpStatus"
+                  "$ref" : "#/components/schemas/SwingCatchUpStatus"
                 }
               }
             }
@@ -2248,7 +2248,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/CatchUpStatus"
+                  "$ref" : "#/components/schemas/SwingCatchUpStatus"
                 }
               }
             }
@@ -4868,7 +4868,7 @@
         },
         "required" : [ "asOf", "items" ]
       },
-      "CatchUpStatus" : {
+      "SwingCatchUpStatus" : {
         "type" : "object",
         "properties" : {
           "batch" : {

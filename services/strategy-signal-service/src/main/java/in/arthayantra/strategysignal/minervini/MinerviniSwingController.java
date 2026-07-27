@@ -4,6 +4,7 @@ import in.arthayantra.strategysignal.signals.SwingBatchRunRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchEngine;
 import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
 import in.arthayantra.strategysignal.swing.SwingCatchUpStateRepository;
+import in.arthayantra.strategysignal.swing.SwingCatchUpStatus;
 import in.arthayantra.strategysignal.swing.SwingMarketHoursGuard;
 import in.arthayantra.strategysignal.swing.SwingSellDecisionService;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -65,34 +66,21 @@ public class MinerviniSwingController {
 
   /** The latest durable catch-up state for the Minervini family, or a typed empty response. */
   @GetMapping("/catchup-status")
-  public CatchUpStatus catchUpStatus() {
+  public SwingCatchUpStatus catchUpStatus() {
     return catchUpState
         .latest(doctrine.batchName())
         .map(
             row ->
-                new CatchUpStatus(
+                new SwingCatchUpStatus(
                     doctrine.batchName(),
                     row.sessionDate(),
                     row.status(),
                     row.attempts(),
                     row.reason(),
                     row.updatedAt()))
-        .orElseGet(() -> CatchUpStatus.empty(doctrine.batchName()));
+        .orElseGet(() -> SwingCatchUpStatus.empty(doctrine.batchName()));
   }
 
-  /** Typed response for the latest catch-up row; null row fields mean no row exists yet. */
-  public record CatchUpStatus(
-      String batch,
-      @Schema(types = {"string", "null"}, format = "date") LocalDate sessionDate,
-      @Schema(types = {"string", "null"}) String status,
-      @Schema(types = {"integer", "null"}) Integer attempts,
-      @Schema(types = {"string", "null"}) String reason,
-      @Schema(types = {"string", "null"}, format = "date-time") OffsetDateTime updatedAt) {
-
-    static CatchUpStatus empty(String batch) {
-      return new CatchUpStatus(batch, null, null, null, null, null);
-    }
-  }
 
   /** The daily sell-decision triad for every open swing position (MV-9.3) — read-only. */
   @GetMapping("/sell-decisions")

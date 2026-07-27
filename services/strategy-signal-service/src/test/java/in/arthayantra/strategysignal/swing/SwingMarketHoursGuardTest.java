@@ -70,7 +70,36 @@ class SwingMarketHoursGuardTest {
                         error -> {
                           assertThat(error.httpStatus()).isEqualTo(422);
                           assertThat(error.code()).isEqualTo(ErrorCodes.VALIDATION_FAILED);
-                        }));
+                        }))
+        // The MESSAGE is the point, not just the status (cross-vendor review A2): asserting only
+        // 422+code let a flatly false "refused during market hours (09:15-15:30)" pass for the
+        // uncoverable-date path, which from 2027-01-01 would fire at 22:00 on a Sunday.
+        .hasMessageContaining("could not be determined")
+        .hasMessageNotContaining("09:15-15:30");
+  }
+
+  /** The emergency override must survive a broken clock — that is when it is most needed. */
+  @Test
+  void forceOverridesEvenWhenTheClockIsBroken() {
+    Clock brokenClock =
+        new Clock() {
+          @Override
+          public ZoneId getZone() {
+            return ZoneId.of("Asia/Kolkata");
+          }
+
+          @Override
+          public Clock withZone(ZoneId zone) {
+            return this;
+          }
+
+          @Override
+          public Instant instant() {
+            throw new IllegalStateException("clock unavailable");
+          }
+        };
+
+    assertThatNoException().isThrownBy(() -> guard(brokenClock).check(true));
   }
 
   private static SwingMarketHoursGuard guard(Clock clock) {

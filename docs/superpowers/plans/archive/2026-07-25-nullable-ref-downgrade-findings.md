@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-07-28 — research fully consumed by #1034 (task_bd871971 DONE 2026-07-26).** Kept for the measured evidence (allOf option dead 3 ways).
+
 # Nullable `$ref` response components — measured findings + implementation plan (2026-07-25)
 
 Chip **task_bd871971**, the structural carve-out the nullable-contract sweep left open (sweep doc:

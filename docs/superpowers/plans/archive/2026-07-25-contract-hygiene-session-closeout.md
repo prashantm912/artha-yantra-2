@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-07-28 — session record, all statuses FROZEN at 2026-07-25.** Its 'still open' claims are stale: task_db8bdf1e later closed FULLY (all three causes, incl. lock_branch, 2026-07-26 — the ledger row is authoritative). Successor chips live in the ledger §4b.
+
 # Contract-hygiene session closeout — findings + remaining items (2026-07-25)
 
 One-page record of the session that closed the nullable-contract sweep and the four findings its

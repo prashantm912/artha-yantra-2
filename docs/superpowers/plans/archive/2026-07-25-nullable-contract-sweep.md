@@ -1,3 +1,5 @@
+> **ARCHIVED 2026-07-28 — SWEEP CLOSED 2026-07-25.** All 4 slices + both carve-outs DONE (#996, #999-#1003, #1005, #1008, #1034). Residual BuzzMatrix.cells is a documented permanent limitation, not an open item. Method + constraints kept for the next contract sweep.
+
 # Nullable-contract sweep (chip task_79d12a4d) — evidence + slice plan (2026-07-25)
 
 Since `RecordRequiredModelConverter` (task_ade97df8) every response-record component is

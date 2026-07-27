@@ -37,6 +37,13 @@ beyond what the compiler requires, theoretical edge cases, or a prior finding al
   not a match; without it the gateway serves SPA `index.html`. Only live-verify catches it.
 - New query params + new `@*Mapping` paths DO drift the springdoc spec (`ContractCaptureTest`);
   adding keys to an existing `Map` return does NOT.
+- **`@Schema(nullable = true)` is a SILENT NO-OP at OpenAPI 3.1** — a nullable response field must
+  be spelled `@Schema(types = {"<type>", "null"})`. A reintroduced `nullable = true` is a Major.
+- The **PR body must carry the anchored `Cross-vendor review:` verdict line** (`ci-review-verdict`
+  fails without it): `APPROVED`/`REQUEST_CHANGES`/`NEEDS_REWORK` need `— <routed model> (<Vendor>)`
+  with model↔vendor PAIRED (Opus/Sonnet/Fable↔Anthropic, gpt/Codex↔OpenAI); `REQUEST_CHANGES`/
+  `NEEDS_REWORK` additionally need `(resolved)`; `SKIPPED` needs a non-empty parenthesised reason.
+  A reviewer of a PR-bound diff should confirm the line exists and is honest.
 
 ## Modulith module boundaries (Major)
 
@@ -67,6 +74,21 @@ beyond what the compiler requires, theoretical edge cases, or a prior finding al
   persisted P&L or fill prices.
 - Paper tick-freshness doctrine: entries reject a stale tick (>15s → 422 DATA_STALE); settles use
   the last REAL tick at any age. Don't refuse to leave a position forever.
+- **Swing-exit ↔ paper-open serialization (V048/#1036, closed a live TOCTOU):** any writer touching
+  the swing EXIT path or a signal-linked paper open must take the per-anchor advisory lock
+  (`SignalRepository.lockAnchors`, `pg_advisory_xact_lock` namespace 4801) INSIDE its own
+  transaction, ids ascending; `Math.toIntExact` must fail loud, never truncate into a colliding
+  key. Discovery/decisions outside the transaction that commits them = Critical.
+- **`SignalRepository.insert` takes `exitReason` as a REQUIRED last param, deliberately no
+  overload** — the compiler enumerates every caller (that is how two discarded-reason sites were
+  found). A convenience overload or defaulted-null reintroduction is a Major.
+- **Safety gates FAIL CLOSED.** Any gate that blocks a dangerous action (market-hours block,
+  freshness gate) must treat a parse/`catch`/non-finite path as BLOCKED, never as "allow"
+  (`isMarketHoursIst` precedent: the old `toLocaleString` re-parse failed OPEN).
+- **Operator-facing alert/page text must match actual machine behaviour under the current flags.**
+  If an alert's remediation instruction changes when a flag arms (e.g. "run it by hand" vs "an
+  automatic replay is queued — do NOT run by hand"), the message must branch on that flag
+  (`SwingBatchCanary` precedent — the stale text prompted a duplicate money run).
 
 ## Security (Critical)
 

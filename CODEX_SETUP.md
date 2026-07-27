@@ -1,5 +1,15 @@
 # CODEX_SETUP.md — Claude (Architect) + OpenAI Codex (Builder/Executor)
 
+> ⚠️ **HISTORICAL (2026-07-13 spike record) — superseded where it disagrees (marked 2026-07-28).**
+> The LIVE lane is `.claude/skills/codex-*` + `.claude/skills/codex/ROUTING.md` + `AGENTS.md`; they
+> win on every conflict. Known-stale claims here: the root-AGENTS.md replacement it proposes SHIPPED
+> long ago; review is now a MANDATORY opposite-vendor gate (not an optional extra lens); builds run
+> `--bypass` in a git WORKTREE (not a sandboxed `codex-work/` clone with `--profile artha` — that
+> profile ERRORS on current codex); EDIT-ONLY mode means a receipt can be a final MESSAGE, not a
+> file ("no receipt file → no merge" is ship-mode only); the main loop is Opus 5 (Fable 5 = the
+> planner role, per ROUTING.md); the pinned CLI version is old. Kept for provenance and the
+> still-valid installation walkthrough.
+
 **Status:** setup guide, written 2026-07-13 by Claude (Fable 5) at the owner's request.
 **Scope:** how to wire the OpenAI Codex app/CLI into this repo so tasks are *initiated in
 Claude* and *executed by Codex* (terminal, git, testing), with Claude keeping architecture,

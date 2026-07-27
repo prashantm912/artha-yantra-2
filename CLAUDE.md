@@ -368,6 +368,17 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `npm run test:ci` + `npm run build`. After a rebuild HARD-reload (Ctrl+Shift+R) — a stale cached
   chunk renders the old UI. **Deploy gotcha:** the Dockerfile COPYs the HOST-built `dist/`, so
   `npm run build` on the main checkout FIRST, then `docker compose build frontend-react`.
+- **Full-suite vitest timeouts in UNTOUCHED specs are usually suite-growth, not your bug** (#1061,
+  2026-07-28): the heaviest render specs sit at 96–99% of the default 5s budget and tip over when
+  ANY new spec file shifts worker scheduling — green in isolation, red in the full run, and a fresh
+  worktree's cold caches make it worse (a worktree full-suite red proves nothing by itself). Debug
+  ladder: name the failures → run them in ISOLATION → full suite on MAIN's warm checkout (baseline)
+  → full suite at the branch on that same checkout (the only decisive gate). A borderline spec gets
+  an explicit `}, 15_000);` budget + dated comment, not a global testTimeout bump. Also: fake-timer
+  specs — `findBy*`/`vi.waitFor` poll with the FAKED setTimeout and stall; flush with
+  `act(async () => { …; await vi.advanceTimersByTimeAsync(0); })` then plain `getBy*`; and a
+  force-close that UNMOUNTS a Radix dialog never fires `onCloseAutoFocus` (focus repair needs a
+  post-unmount effect, and `.focus()` on a disabled trigger is a silent no-op).
 
 ## Database / migrations
 - **Applied Flyway migrations are checksum-locked** in the dev stack and CI — editing
@@ -492,6 +503,14 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   field-by-field and **diff before/after** to prove only the intended key moved. Also check
   `GET /repos/{o}/{r}/rulesets` — rulesets are a SECOND, independent mechanism that can block a
   merge with classic protection looking clean (ours is `[]`).
+- **Every non-`hotfix/*` PR body needs the anchored `Cross-vendor review:` verdict line** — the
+  required `verdict` check (`ci-review-verdict.yml`, reads the body LIVE so an edit + rerun fixes it)
+  accepts `APPROVED`/`REQUEST_CHANGES (resolved)`/`NEEDS_REWORK (resolved)` each with
+  `— <routed model> (<Vendor>)` model↔vendor PAIRED, or `SKIPPED (<reason>)`. Open builder PRs with
+  `PENDING (...)` — red verdict until the review resolves is the DESIGN, not a failure. And with
+  `strict: true` on main, a green PR goes `BEHIND` whenever main moves — fix with
+  `gh api -X PUT repos/{o}/{r}/pulls/<n>/update-branch` (server-side, no local checkout needed),
+  then let CI re-run; hit twice per evening on busy nights.
 - **The `e2e` job's two former 2-core flakes are FIXED (#903, 2026-07-18)** — `tests/signals.spec.ts` +
   `tests/ws-reconnect.spec.ts` intermittently timed out on the cold-stack `/signals` table-settle for two
   reasons: while `GET /api/v1/signals` was pending the page showed a `qs-loading` skeleton the locator

@@ -247,6 +247,17 @@ class ScalperConfluenceGateTest {
         new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
   }
 
+  // a bullish context whose macro carries a specific FII long-share % (the fii-bias rail's operand).
+  private static ScalperGateContext bullContextWithFiiLongPct(BigDecimal fiiLongPct) {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"), null, null, null, false,
+            false, null, null, null),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, fiiLongPct, null, null));
+  }
+
   // a bullish context whose OI carries a specific call-put dOI imbalance % (the #5 pre-gate operand).
   private static ScalperGateContext bullContextWithImbalance(BigDecimal imbalancePct) {
     return new ScalperGateContext(
@@ -1102,19 +1113,31 @@ class ScalperConfluenceGateTest {
   }
 
   @Test
-  void fiiBiasTagBlocksWhenTheFlowOpposesAndPassesOnNeutral() {
-    // E3: fii-bias blocks a CE when FII flow is net short (30 < 50); a neutral read (bullContext, 50)
-    // passes; the bare CFG (gate off) fires on the same net-short context.
+  void fiiBiasTagBlocksTheENTRYWhenTheFlowOpposesAndPassesOnNeutral() {
+    // E3: fii-bias blocks a CE ENTRY when FII flow is net short (30 < 50); a neutral read (bullContext,
+    // 50) passes; the bare CFG (gate off) fires on the same net-short context.
+    //
+    // Asserted through evaluateWithDiagnostic, the ENTRY path. This test previously drove the rail
+    // through bare evaluate() and asserted an EMPTY result on the opposing read — which pinned the
+    // very defect the flip-exit test below now forbids: bare evaluate() is the confluence-flip EXIT
+    // oracle, and a held PE needs it to keep reporting CE in order to exit.
     MarketOiClient client = mock(MarketOiClient.class);
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
     ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
 
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(ctxFiiShort());
-    assertThat(gate.evaluate(cfgTags("fii-bias"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isEmpty();
-    assertThat(gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+    assertThat(
+            gate.evaluateWithDiagnostic(cfgTags("fii-bias"), bullBank(), null, 0, NOW, IST_TIME, EOD)
+                .decision())
+        .isEmpty();
+    assertThat(gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD).decision())
+        .isPresent();
 
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
-    assertThat(gate.evaluate(cfgTags("fii-bias"), bullBank(), null, 0, NOW, IST_TIME, EOD)).isPresent();
+    assertThat(
+            gate.evaluateWithDiagnostic(cfgTags("fii-bias"), bullBank(), null, 0, NOW, IST_TIME, EOD)
+                .decision())
+        .isPresent();
   }
 
   @Test
@@ -1852,6 +1875,44 @@ class ScalperConfluenceGateTest {
             gate.evaluateWithDiagnostic(cfgFrom("[]", "scalper"), bullBank(), null, 0, NOW, IST_TIME, EOD)
                 .decision())
         .isPresent();
+  }
+
+  /**
+   * `fii-bias` must gate ENTRIES only — never the bare confluence-flip EXIT oracle.
+   *
+   * <p>Same hazard the option-side-constraint rail is scoped for: the bare {@code evaluate()} read is
+   * what {@code SignalEngine.confluenceFlipExit} uses to ask "has the market flipped against my held
+   * side". A rail that fails on the OPPOSITE side stops a held position ever SEEING that flip, which
+   * silently removes a protective exit.
+   *
+   * <p>Not hypothetical: the FII index-future long share sits near 8-16%, so a CE evaluation fails
+   * this rail on essentially every bar. A held PE with bullish CE confluence would never flip out.
+   * It was harmless only while `Macro.fiiLongPct` was null and the rail failed open — which is
+   * exactly why repairing the EOD read is what exposed it.
+   */
+  @Test
+  void fiiBiasGatesEntriesButNeverTheConfluenceFlipExitOracle() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    // A realistic live read: FII long share 8.63% — CE opposes (needs >= 50), PE would pass.
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithFiiLongPct(bd("8.63")));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
+    ScalperConfig cfg = cfgFrom("[]", "scalper", "fii-bias");
+
+    // ENTRY path: the rail is live and blocks the CE entry the FII flow opposes.
+    ScalperConfluenceGate.Result entry =
+        gate.evaluateWithDiagnostic(cfg, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(entry.blocked()).as("CE entry blocked by opposing FII flow").isTrue();
+    assertThat(entry.rejection().blockingRail()).isEqualTo("fii-bias");
+
+    // EXIT oracle: the SAME bar, same config, read through bare evaluate() — must still report CE, so a
+    // held PE can detect the flip against it and exit.
+    assertThat(gate.evaluate(cfg, bullBank(), null, 0, NOW, IST_TIME, EOD))
+        .as("the flip-exit oracle must still see the true market side")
+        .isPresent()
+        .get()
+        .satisfies(d -> assertThat(d.side()).isEqualTo(CE));
   }
 
   @Test

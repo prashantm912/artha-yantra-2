@@ -461,24 +461,23 @@ public class MarketOiClient {
     BigDecimal rank = decimal(ivHistory.path("rank"));
     BigDecimal ivRank = rank == null ? null : rank.multiply(HUNDRED);
 
-    // F3.1 live breadth: the "advances > 32" rule is a NIFTY-50-universe rule, and the EOD
-    // bhavcopy read is 0/0 all session (no bhavcopy for today until post-close) — so the dot was
-    // structurally dead live. Prefer the intraday constituent fold (the index-contribution page's
-    // source, counts of ~50); fall back to the EOD date read (history / quotes unavailable).
+    // F3.1 live breadth: the "advances > 32" rule is a NIFTY-50-universe rule, so the operand MUST be
+    // the ~50-name constituent fold. `/breadth/live` serves exactly that and already falls back to an
+    // EOD read WITHIN the same universe (its `live` flag reports which it used), so one read is enough.
+    //
+    // The old `/breadth?date=` second fallback is REMOVED, not re-dated. That endpoint counts the whole
+    // NSE EQ bhavcopy — thousands of names, not fifty — so a >32 test against it is satisfied by
+    // essentially any session and would support BOTH sides at once, manufacturing entries and flip
+    // exits out of a breadth outage. It was inert only because it was being asked for TODAY (0/0 until
+    // the post-close bhavcopy lands); pointing it at a settled date would have armed a scale mismatch
+    // that market-data's own BreadthController javadoc warns about. Degrade to 0/0 instead: a dead
+    // breadth read must never confirm a side.
     int[] breadth =
         get(
             uri -> uri.path("/api/v1/market/breadth/live").queryParam("index", "NIFTY 50").build(),
             this::advanceDecline,
-            null,
+            new int[] {0, 0},
             "breadth-live");
-    if (breadth == null) {
-      breadth =
-          get(
-              uri -> uri.path("/api/v1/market/breadth").queryParam("date", eodDate).build(),
-              this::advanceDecline,
-              new int[] {0, 0},
-              "breadth");
-    }
 
     BigDecimal fiiLongPct =
         get(

@@ -106,7 +106,7 @@ class SignalStatusFrameIntegrationTest extends StrategySignalIntegrationTestBase
         signals.insert(
             versionId, "NFO", "STATOPT" + suffix, "3m", "ENTRY", "BUY",
             new BigDecimal("100"), new BigDecimal("80"), new BigDecimal("140"),
-            new BigDecimal("0.5"), "{}", OffsetDateTime.now(), OffsetDateTime.now().plusHours(1));
+            new BigDecimal("0.5"), "{}", OffsetDateTime.now(), OffsetDateTime.now().plusHours(1), null);
 
     List<String> frames = new CopyOnWriteArrayList<>();
     RedisMessageListenerContainer listener = new RedisMessageListenerContainer();
@@ -160,7 +160,7 @@ class SignalStatusFrameIntegrationTest extends StrategySignalIntegrationTestBase
         signals.insert(
             versionId, "NFO", "EXPOPT" + suffix, "3m", "ENTRY", "BUY",
             new BigDecimal("100"), new BigDecimal("80"), new BigDecimal("140"),
-            new BigDecimal("0.5"), "{}", OffsetDateTime.now(), OffsetDateTime.now().plusHours(1));
+            new BigDecimal("0.5"), "{}", OffsetDateTime.now(), OffsetDateTime.now().plusHours(1), null);
 
     List<String> frames = new CopyOnWriteArrayList<>();
     RedisMessageListenerContainer listener = new RedisMessageListenerContainer();

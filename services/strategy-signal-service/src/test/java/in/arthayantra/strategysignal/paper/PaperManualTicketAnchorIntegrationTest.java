@@ -257,7 +257,7 @@ class PaperManualTicketAnchorIntegrationTest extends StrategySignalIntegrationTe
         signalRepo.insert(
             versionId, "NFO", symbol, "1m", "ENTRY", "BUY",
             new BigDecimal("80.00"), new BigDecimal("40.00"), new BigDecimal("120.00"),
-            new BigDecimal("0.80"), "{}", now, now.plusHours(1));
+            new BigDecimal("0.80"), "{}", now, now.plusHours(1), null);
     assertThat(signalRepo.find(signalId).orElseThrow().status()).isEqualTo("ACTIVE");
 
     // Pin the premise the whole orphan rests on: this strategy's style is swept by expireAllActive

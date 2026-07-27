@@ -88,8 +88,30 @@ class ManasAroraSwingEngineTest {
     assertThat(run.exits()).as("ONE symbol closed (not one-per-lot)").isEqualTo(1);
     verify(h.signals).transition(42L, "EXPIRED");
     verify(h.signals).transition(43L, "EXPIRED");
-    verify(h.events).publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 42L));
-    verify(h.events).publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 43L));
+
+    // V048 propagation guard through the REAL engine path: the EXIT row's persisted reason must be
+    // the SAME string the SignalExited events carry — the repository IT alone would stay green if
+    // the engine regressed to inserting null (cross-vendor review, round 1).
+    ArgumentCaptor<String> exitReason = ArgumentCaptor.forClass(String.class);
+    verify(h.signals)
+        .insert(
+            any(), any(), any(), any(), eq("EXIT"), any(), any(), any(), any(), any(), any(),
+            any(), any(), exitReason.capture());
+    assertThat(exitReason.getValue()).as("the engine's computed reason reaches the row").isNotNull();
+    verify(h.events)
+        .publishEvent(
+            argThat(
+                (Object e) ->
+                    e instanceof SignalExited s
+                        && s.anchorSignalId() == 42L
+                        && exitReason.getValue().equals(s.reason())));
+    verify(h.events)
+        .publishEvent(
+            argThat(
+                (Object e) ->
+                    e instanceof SignalExited s
+                        && s.anchorSignalId() == 43L
+                        && exitReason.getValue().equals(s.reason())));
   }
 
   @Test
@@ -222,7 +244,7 @@ class ManasAroraSwingEngineTest {
   }
 
   private static void stubInsert(SignalRepository signals, long id) {
-    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(id);
   }
 
@@ -241,7 +263,7 @@ class ManasAroraSwingEngineTest {
       long id, UUID versionId, BigDecimal entryPrice, OffsetDateTime at) {
     return new SignalRepository.SignalRow(
         id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
-        new ObjectMapper().createObjectNode(), "TAKEN", at, at.plusDays(1), null, null, null, null, null, null);
+        new ObjectMapper().createObjectNode(), "TAKEN", at, at.plusDays(1), null, null, null, null, null, null, null);
   }
 
   private static JsonNode breakoutConfig() throws IOException {

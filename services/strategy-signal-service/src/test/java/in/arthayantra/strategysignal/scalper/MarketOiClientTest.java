@@ -179,6 +179,49 @@ class MarketOiClientTest {
     assertThat(client.deriveDowUp(om.readTree("{}"))).isNull(); // absent → unknown
   }
 
+  /**
+   * The EOD-sourced reads must ask for the last SETTLED session, never the live bar's own date.
+   *
+   * <p>NSE publishes FII/participant and bhavcopy data after the close, so a read keyed on today
+   * returns an EMPTY set for the whole session — which is precisely what happened live: all three
+   * engine call sites passed the bar date, `/fii-dii/long-short?from=<today>` answered
+   * `{"items":[]}`, and the `fii` dot was null on every bar of every session.
+   *
+   * <p>The bar date here is Monday 2026-06-22, so the expected read date is Friday 2026-06-19 —
+   * June 2026 carries exactly one NSE holiday (2026-06-26), so that pair holds independently of the
+   * resolver being tested. Each stub matches on the DATE IN THE URL, so asking for the wrong day
+   * fails to match and the test fails.
+   */
+  @Test
+  void eodReadsAskForTheLastSettledSessionNotTheLiveBarDate() {
+    wire();
+    LocalDate monday = LocalDate.of(2026, 6, 22);
+
+    // The three EOD-sourced reads, each pinned to the SETTLED session (Friday), not the bar date.
+    stub(
+        "fii-dii/long-short?from=2026-06-19",
+        "{\"items\":[{\"fiiLong\":70,\"fiiShort\":30}]}");
+    stub("fii-dii/bias?date=2026-06-19", "{\"biasSign\":-1,\"bias\":\"BEAR\"}");
+
+    // Everything else macro() touches — not under test, stubbed so the fan-out completes.
+    stub("/api/v1/market/options/iv-history", "{\"currentIv\":\"0.14\",\"insufficientHistory\":true}");
+    stub("/api/v1/market/breadth/live", "{\"summary\":{\"advances\":35,\"declines\":12}}");
+    stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
+    stub("/api/v1/market/equity/index-contribution", "{\"indexChangePct\":\"0.5\"}");
+    stub("/api/v1/market/options/active-strikes", "{\"activeStrikeIvSeries\":[]}");
+    stub("/api/v1/market/vix", "{\"ltp\":\"14.5\",\"change\":\"-0.30\"}");
+    stub("/api/v1/market/global/dow", "{\"direction\":1}");
+
+    Macro m = client.macro(UNDERLYING, monday, EXPIRY);
+
+    server.verify(); // every date-pinned stub was hit — i.e. no read asked for the bar date
+    assertThat(m.fiiLongPct())
+        .as("the dot the live defect left null on every bar")
+        .isEqualByComparingTo("70");
+    assertThat(m.fiiBiasSign()).isEqualByComparingTo("-1");
+    assertThat(m.advances()).isEqualTo(35);
+  }
+
   @Test
   void mapsMacroHalfAndScalesIvRankToHundred() {
     wire();
@@ -365,17 +408,25 @@ class MarketOiClientTest {
     assertThat(stats.items()).isEmpty();
   }
 
+  /**
+   * A breadth outage must NOT fall through to the whole-NSE bhavcopy read.
+   *
+   * <p>The "advances &gt; 32" rule is a NIFTY-50-universe rule (32 of 50). `/breadth?date=` counts the
+   * entire NSE EQ bhavcopy — thousands of names — so &gt;32 is satisfied by essentially any session and
+   * would confirm BOTH sides at once, manufacturing entries and confluence-flip exits out of an outage.
+   * That fallback was inert only because it was asked for TODAY (0/0 until the post-close bhavcopy
+   * lands); giving it a settled date would have armed the scale mismatch. `/breadth/live` already falls
+   * back within its own ~50-name universe, so a dead read degrades to 0/0 and confirms nothing.
+   */
   @Test
-  void breadthFallsBackToEodDateReadWhenTheLiveFoldIsDown() {
+  void aBreadthOutageDegradesToZeroInsteadOfTheWholeMarketBhavcopy() {
     wire();
     stub("/api/v1/market/options/iv-history", "{\"currentIv\":\"0.14\",\"rank\":\"0.5\"}");
-    // F3.1: the live constituent fold 500s (quotes down) → the EOD date read still serves
     server
         .expect(ExpectedCount.once(), requestTo(containsString("/api/v1/market/breadth/live")))
         .andRespond(withServerError());
-    stub(
-        "/api/v1/market/breadth?date",
-        "{\"summary\":{\"advances\":35,\"declines\":12,\"unchanged\":3,\"total\":50}}");
+    // No /breadth?date= stub is registered: if the removed fallback ever returns, MockRestServiceServer
+    // fails the request as unexpected rather than quietly serving whole-market counts.
     stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");
     stub("/api/v1/market/equity/index-contribution", "{}");
@@ -386,17 +437,17 @@ class MarketOiClientTest {
 
     Macro m = client.macro(UNDERLYING, TRADE_DATE, EXPIRY);
 
-    assertThat(m.advances()).isEqualTo(35);
-    assertThat(m.declines()).isEqualTo(12);
+    assertThat(m.advances()).as("a dead breadth read must never confirm a side").isZero();
+    assertThat(m.declines()).isZero();
   }
 
   @Test
   void breadthDefaultsToZeroZeroSoTheGateCannotConfirm() {
     wire();
     stub("/api/v1/market/options/iv-history", "{\"currentIv\":\"0.14\",\"rank\":\"0.5\"}");
-    // F3.1: BOTH breadth reads down — the live constituent fold and the EOD date fallback
+    // F3.1: the single breadth read (the ~50-name constituent fold) is down.
     server
-        .expect(ExpectedCount.twice(), requestTo(containsString("/api/v1/market/breadth")))
+        .expect(ExpectedCount.once(), requestTo(containsString("/api/v1/market/breadth")))
         .andRespond(withServerError());
     stub("/api/v1/market/fii-dii/long-short", "{\"items\":[]}");
     stub("/api/v1/market/options/chain", "{\"spot\":\"20000\",\"rows\":[]}");

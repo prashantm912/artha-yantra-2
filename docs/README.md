@@ -86,6 +86,12 @@ authority is the OpenAlgo/React master plan; the design authority is `docs/desig
   session, each marked OPEN / RESOLVED (with the PR that closed it) / CLOSED-by-design. Read it before
   re-flagging anything from a session file — several entries carry explicit do-not-re-flag notes (e.g.
   swing-book bracket-starvation pages are suppressed BY DESIGN since #992).
+- `signal-analysis/2026-07-29-session-learnings.md` — **process learnings, not market findings**: what the
+  six-round cross-vendor review on the scalper sizing/governor work actually caught (six defects, three
+  created by the fixes for earlier rounds, none reachable by the test suite), the recurring "one rule in
+  two places" defect shape, why adding enforcement converts harmless gaps into live defects, and three
+  false greens (a `-Dtest` filter that ran zero tests, a stale surefire report, a monitor that fired on
+  file existence). Read before trusting a green gate on a money path.
 - `signal-analysis/2026-07-25-weekly-bug-queue.md` — the worked example of the weekly loop: a trading
   week's routine docs (2026-07-20→24) triaged into an ordered bug queue B0–B11 + an owner-decision pack.
   **Fully closed 2026-07-25** — the four owner decisions shipped as #990/#991/#992 (+#993, #1016) and are

@@ -25,8 +25,7 @@ class MarketOiClientDerivationTest {
   private final MarketOiClient client =
       new MarketOiClient(
           RestClient.builder(), mapper, MarketCalendar.nse(),
-          new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
-          new OptionExchangeResolver(RestClient.builder(), "http://unused"), "http://unused");
+          new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), "http://unused");
 
   private JsonNode json(String raw) {
     try {

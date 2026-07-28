@@ -165,6 +165,66 @@ public class SignalEngine {
     return new TradeableLeg(candidate.exchange(), candidate.tradingsymbol(), candidate.ltp());
   }
 
+  /**
+   * Whether EVERY leg of a decision carries a master-sourced exchange.
+   *
+   * <p>{@link #tradeableLeg} only inspects the PRIMARY candidate, which is the whole story for a
+   * directional scalp but not for a neutral straddle: those serialize a {@code legs[]} array that
+   * the order/paper layer routes from leg by leg. The legs are separate contracts and nothing
+   * guarantees they resolve alike, so the primary's exchange is not evidence about the other's.
+   */
+  static boolean allLegsHaveAnExchange(ScalperConfluenceGate.Decision decision) {
+    return decision.legs().stream()
+        .map(leg -> leg.pick().candidate().exchange())
+        .allMatch(e -> e != null && !e.isBlank());
+  }
+
+  /**
+   * Returns {@code decision} with any exchange-less leg re-keyed from the instrument master, or
+   * unchanged when nothing is missing (the overwhelmingly common case — market-data publishes the
+   * exchange, so this returns on the first check without touching the network).
+   *
+   * <p>A leg that STILL cannot be resolved keeps its null and is refused downstream, by design: the
+   * two callers of this method both treat null as "do not enter". Fail-soft throughout — the
+   * resolver never throws into the eval loop.
+   */
+  static ScalperConfluenceGate.Decision resolveMissingLegExchanges(
+      ScalperConfluenceGate.Decision decision,
+      String slug,
+      in.arthayantra.strategysignal.scalper.OptionExchangeResolver exchangeResolver) {
+    if (decision == null || exchangeResolver == null || allLegsHaveAnExchange(decision)) {
+      return decision;
+    }
+    List<ScalperConfluenceGate.Leg> rekeyed = new java.util.ArrayList<>(decision.legs().size());
+    for (ScalperConfluenceGate.Leg leg : decision.legs()) {
+      StrikePicker.Candidate c = leg.pick().candidate();
+      if (c.exchange() != null && !c.exchange().isBlank()) {
+        rekeyed.add(leg);
+        continue;
+      }
+      String resolved = exchangeResolver.resolve(c.tradingsymbol());
+      if (resolved == null) {
+        rekeyed.add(leg);
+        continue;
+      }
+      log.warn(
+          "{}: leg {} carried no exchange from market-data — resolved {} from the instrument master."
+              + " market-data is older than this build; deploy it to restore the zero-lookup path",
+          slug, c.tradingsymbol(), resolved);
+      rekeyed.add(
+          new ScalperConfluenceGate.Leg(
+              leg.optionType(),
+              new StrikePicker.Pick(
+                  new StrikePicker.Candidate(
+                      resolved, c.tradingsymbol(), c.strike(), c.type(), c.ltp(), c.iv()),
+                  leg.pick().delta())));
+    }
+    return new ScalperConfluenceGate.Decision(
+        decision.side(), rekeyed, decision.confluence(), decision.expiry(),
+        decision.structuralStop(), decision.ohTier(), decision.oiImbalancePct(),
+        decision.vixLevel());
+  }
+
   private enum UniverseResolutionStatus {
     /** Resolved to at least one tradable instrument. */
     RESOLVED,
@@ -262,6 +322,21 @@ public class SignalEngine {
   // under threshold (V044 composite_rejections). Bounded ASYNC writer so a DB stall can never park
   // the sole signal-eval thread (#866 class).
   private final CompositeRejectionWriter compositeRejections;
+
+  /**
+   * Last-resort exchange resolution for a leg market-data did not key (see {@link
+   * in.arthayantra.strategysignal.scalper.OptionExchangeResolver}). Consulted ONLY here, on the
+   * entry path — at most once or twice per entry attempt.
+   *
+   * <p>It used to run inside the chain parse, which cross-vendor review round 2 correctly called a
+   * Critical: {@code MarketOiClient}'s memo caches the response BODY, so the parse — and therefore
+   * every per-leg lookup — re-runs for EVERY strategy on EVERY bar. A dozen CE variants over a
+   * ~14-leg chain turned "one lookup per leg" into hundreds, each able to burn the client timeout,
+   * on the single evaluation thread that also drives EXITS. Resolving the selected leg instead
+   * costs the same protection at a fraction of a percent of the calls, and keeps a slow master from
+   * ever delaying a confluence-flip exit.
+   */
+  private final in.arthayantra.strategysignal.scalper.OptionExchangeResolver exchangeResolver;
   // T15: durable reload ledger (strategy.engine_reloads, V046) — null in harnesses that construct
   // without it; the record call is skipped, never a substitute no-op bean.
   private final EngineReloadLedger reloadLedger;
@@ -491,6 +566,7 @@ public class SignalEngine {
       MeterRegistry meterRegistry,
       java.util.Optional<EmissionGuard> emissionGuard,
       java.util.Optional<ScalperConfluenceGate> scalperGate,
+      java.util.Optional<in.arthayantra.strategysignal.scalper.OptionExchangeResolver> exchangeResolver,
       RejectionWriter rejectionWriter,
       RiskSuppressionWriter riskSuppressions,
       CompositeRejectionWriter compositeRejections,
@@ -499,6 +575,7 @@ public class SignalEngine {
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes,
       @Value("${artha.signals.record-composite-rejections:true}") boolean recordCompositeRejections) {
     this.compositeRejections = compositeRejections;
+    this.exchangeResolver = exchangeResolver.orElse(null);
     this.reloadLedger = reloadLedger.orElse(null);
     this.recordCompositeRejections = recordCompositeRejections;
     this.registry = registry;
@@ -1876,6 +1953,11 @@ public class SignalEngine {
       }
     }
     BigDecimal entryPrice = bar.close();
+    // LAST resort before refusing: an older market-data publishes no exchange on any chain leg, and
+    // refusing every entry until it is deployed is a worse failure than the mis-routing being fixed
+    // — it is indistinguishable from a quiet tape. Resolve the SELECTED leg(s) from the master here,
+    // where it costs one or two calls per entry attempt, never a call per leg per strategy per bar.
+    decision = resolveMissingLegExchanges(decision, strategy.slug(), exchangeResolver);
     TradeableLeg tradeable = tradeableLeg(exchange, tradingsymbol, entryPrice, decision);
     if (tradeable == null) {
       // The picked leg carries no master exchange, so it cannot be sized or routed. Refuse the
@@ -1884,6 +1966,16 @@ public class SignalEngine {
       // is still visible to the read-only confluence-flip oracle upstream.
       log.warn(
           "ENTRY suppressed: picked option leg for {} {}:{} has no instrument-master exchange",
+          strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
+    // A neutral (straddle) decision routes off the legs[] side-channel, not the primary stamp, so
+    // validating only the primary would leave the second leg unchecked — the exact hole the
+    // single-leg guard above closes. Every leg must resolve or the whole entry is refused: a
+    // straddle is one position, and half of one is a directional trade nobody asked for.
+    if (decision != null && decision.neutral() && !allLegsHaveAnExchange(decision)) {
+      log.warn(
+          "ENTRY suppressed: a straddle leg for {} {}:{} has no instrument-master exchange",
           strategy.slug(), exchange, tradingsymbol);
       return;
     }
@@ -1972,7 +2064,7 @@ public class SignalEngine {
     String scalperDetail =
         decision == null
             ? null
-            : scalperDetailJson(decision, strategy.scalper(), tradeable.exchange());
+            : scalperDetailJson(decision, strategy.scalper());
     // INT §13 row 19 / FID P1-8 fired-side rail-operand side-channel: serialize the confluence gate's full
     // condition matrix (built from the SAME evaluation the Decision came from — never re-evaluated, so it
     // is deterministic) mirroring signal_rejections.diagnostic's shape. Built HERE (not inside the tx) so a
@@ -2091,7 +2183,7 @@ public class SignalEngine {
    * strike, option_ltp, iv, delta}) — the two-leg carrier the order/paper layer reads.
    */
   private String scalperDetailJson(
-      ScalperConfluenceGate.Decision d, ScalperConfig cfg, String tradeableExchange) {
+      ScalperConfluenceGate.Decision d, ScalperConfig cfg) {
     StrikePicker.Candidate c = d.pick().candidate();
     ObjectNode root = objectMapper.createObjectNode();
     root.put("side", d.neutral() ? "NEUTRAL" : d.side().name());
@@ -2124,7 +2216,13 @@ public class SignalEngine {
       for (ScalperConfluenceGate.Leg leg : d.legs()) {
         StrikePicker.Candidate lc = leg.pick().candidate();
         ObjectNode n = legs.addObject();
-        n.put("exchange", tradeableExchange);
+        // EACH leg carries its OWN master-sourced exchange. Copying the primary's onto both was the
+        // same mis-routing defect this change removes, surviving in the two-leg path: a straddle's
+        // legs are separate contracts and nothing guarantees they resolve alike, yet the order/paper
+        // layer routes off exactly this field. `emitEntry` refuses a neutral entry unless every leg
+        // resolved, so a null can never reach here — but stamp the leg's own value regardless, so
+        // the invariant is expressed where the value is written and not only where it is checked.
+        n.put("exchange", lc.exchange());
         n.put("tradingsymbol", lc.tradingsymbol());
         n.put("side", "BUY"); // long straddle = both legs BUY (short = SELL is SPAN-deferred)
         n.put("option_type", leg.optionType().name());

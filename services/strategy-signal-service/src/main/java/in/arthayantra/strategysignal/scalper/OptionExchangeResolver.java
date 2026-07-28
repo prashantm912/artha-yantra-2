@@ -1,8 +1,6 @@
 package in.arthayantra.strategysignal.scalper;
 
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,21 +32,20 @@ import org.springframework.web.client.RestClientException;
  * is returned only when those rows agree on one — {@code (exchange, tradingsymbol)} is the master's
  * primary key, so the same symbol on two exchanges is genuinely ambiguous and gets refused, not
  * broken arbitrarily.
+ *
+ * <p><b>Deliberately uncached.</b> An earlier revision memoised positive answers for the process
+ * lifetime, which cross-vendor review round 2 called a Critical: the 08:30 IST master sync can
+ * introduce a second row for the same tradingsymbol, and a cached value would then be served
+ * without ever reaching the ambiguity check above — stale routing that no amount of later syncing
+ * corrects. Rather than reason about generations, the cache is gone. It can be, because this is
+ * consulted once or twice per ENTRY (a handful per day) rather than per chain leg: the call volume
+ * that made a cache look necessary was itself the other Critical.
  */
 @Component
 public class OptionExchangeResolver {
 
   private static final Logger log = LoggerFactory.getLogger(OptionExchangeResolver.class);
 
-  /**
-   * Positive answers only, and never evicted by age: an instrument's exchange is immutable for the
-   * life of the contract. Negatives are deliberately NOT cached — a miss usually means the master
-   * has not synced that contract yet (the 08:30 IST sync), and caching it would outlive the gap.
-   * Cleared wholesale past the cap so a long-running process cannot accumulate expired weeklies.
-   */
-  private static final int CACHE_CAP = 4_000;
-
-  private final Map<String, String> cache = new ConcurrentHashMap<>();
   private final RestClient restClient;
 
   /** Wires the configured market-data base URL (same bean pattern as the other clients). */
@@ -66,21 +63,6 @@ public class OptionExchangeResolver {
     if (tradingsymbol == null || tradingsymbol.isBlank()) {
       return null;
     }
-    String cached = cache.get(tradingsymbol);
-    if (cached != null) {
-      return cached;
-    }
-    String resolved = lookup(tradingsymbol);
-    if (resolved != null) {
-      if (cache.size() >= CACHE_CAP) {
-        cache.clear();
-      }
-      cache.put(tradingsymbol, resolved);
-    }
-    return resolved;
-  }
-
-  private String lookup(String tradingsymbol) {
     try {
       List<InstrumentRow> rows =
           restClient

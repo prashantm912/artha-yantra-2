@@ -124,6 +124,7 @@ class SignalEngineLatencyTest {
             meters,
             Optional.empty(),
             Optional.empty(),
+            java.util.Optional.empty(),
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
             mock(CompositeRejectionWriter.class),

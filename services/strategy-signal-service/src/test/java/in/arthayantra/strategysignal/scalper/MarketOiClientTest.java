@@ -41,7 +41,6 @@ class MarketOiClientTest {
         new MarketOiClient(
             builder, new ObjectMapper(), MarketCalendar.nse(),
             new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
-            new OptionExchangeResolver(builder, "http://market-data:8081"),
             "http://market-data:8081");
   }
 

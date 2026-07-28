@@ -65,8 +65,6 @@ public class MarketOiClient {
   private final java.util.concurrent.atomic.AtomicBoolean chainPublishesExchange =
       new java.util.concurrent.atomic.AtomicBoolean(true);
 
-  private final OptionExchangeResolver exchangeResolver;
-
   /**
    * Short-TTL response memo (audit P1-12): every scalper passing the chart gate on the SAME bar
    * re-ran the full ~15-call OI/macro fan-out sequentially on the single eval thread — 12 CE
@@ -87,12 +85,10 @@ public class MarketOiClient {
       ObjectMapper objectMapper,
       MarketCalendar calendar,
       io.micrometer.core.instrument.MeterRegistry meterRegistry,
-      OptionExchangeResolver exchangeResolver,
       @Value("${artha.marketdata.base-url}") String baseUrl) {
     this.restClient = builder.baseUrl(baseUrl).build();
     this.objectMapper = objectMapper;
     this.calendar = calendar;
-    this.exchangeResolver = exchangeResolver;
     this.legsWithoutExchange = meterRegistry.counter("ay_scalper_chain_leg_no_exchange_total");
     io.micrometer.core.instrument.Gauge.builder(
             "ay_scalper_chain_exchange_capability",
@@ -302,12 +298,7 @@ public class MarketOiClient {
    * instrument-meta lookup, a lot-1 equity proxy and a non-lot-aligned quantity that also 400s the
    * Upstox margin call (UDAPI1104).
    *
-   * <p><b>Absent on the payload ⇒ ask the master directly, still never guess.</b> The field is new,
-   * so a strategy-signal newer than its market-data would see it on no leg at all and refuse every
-   * entry (see {@link OptionExchangeResolver} for why that failure mode is worse than the bug being
-   * fixed). The fallback re-reads the same authority through an endpoint that predates the field.
-   *
-   * <p><b>Still unresolvable ⇒ KEEP the candidate with a NULL exchange</b> (cross-vendor review
+   * <p><b>Absent ⇒ KEEP the candidate with a NULL exchange</b> (cross-vendor review
    * Critical 1). Dropping it here was an ENTRY-safety reflex applied to a path that also serves
    * EXITS: this same snapshot feeds the read-only confluence-flip exit oracle, and an absent
    * decision reads as "do not exit" ({@code SignalEngine.confluenceFlipExit} → {@code
@@ -315,8 +306,12 @@ public class MarketOiClient {
    * inverts the project doctrine: entries need FRESH truth (you can always not enter), exits need
    * the BEST AVAILABLE truth (you cannot refuse to leave forever). Analytical eligibility and TRADE
    * eligibility are separate concerns — the null travels with the candidate and {@code
-   * SignalEngine.tradeableLeg} refuses the ENTRY there. Loud either way: a WARN naming the symbol
-   * plus {@code ay_scalper_chain_leg_no_exchange_total}.
+   * SignalEngine.tradeableLeg} refuses the ENTRY there — and only there does {@code
+   * OptionExchangeResolver} get consulted, because this parse re-runs for every strategy on every
+   * bar (the memo caches the response BODY, not the parsed snapshot), so a per-leg lookup here would
+   * multiply into hundreds of synchronous calls on the single evaluation thread that also drives
+   * EXITS. Loud either way: a WARN naming the symbol plus
+   * {@code ay_scalper_chain_leg_no_exchange_total}.
    */
   private void addLeg(
       List<StrikePicker.Candidate> out, BigDecimal strike, Black76.OptionType type, JsonNode leg) {
@@ -330,21 +325,12 @@ public class MarketOiClient {
     boolean fromPayload = exchange != null && !exchange.isBlank();
     chainPublishesExchange.set(fromPayload);
     if (!fromPayload) {
-      exchange = exchangeResolver.resolve(tradingsymbol);
-      if (exchange == null || exchange.isBlank()) {
-        exchange = null;
-        legsWithoutExchange.increment();
-        log.warn(
-            "chain leg {} (strike {} {}) has no exchange on the payload and the instrument master"
-                + " could not resolve one — retained for read-only exit/confluence evaluation but"
-                + " NOT tradeable",
-            tradingsymbol, strike, type);
-      } else {
-        log.warn(
-            "chain leg {} carried no exchange — resolved {} from the instrument master. market-data"
-                + " is older than this build; deploy it to restore the zero-lookup path",
-            tradingsymbol, exchange);
-      }
+      exchange = null; // a blank is as unkeyed as a missing one — never an empty-string key
+      legsWithoutExchange.increment();
+      log.warn(
+          "chain leg {} (strike {} {}) carries no exchange — retained for read-only exit/confluence"
+              + " evaluation; the entry path resolves it from the instrument master or refuses",
+          tradingsymbol, strike, type);
     }
     out.add(new StrikePicker.Candidate(exchange, tradingsymbol, strike, type, ltp, iv));
   }

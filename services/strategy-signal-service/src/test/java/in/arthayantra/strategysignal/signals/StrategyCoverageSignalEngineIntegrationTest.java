@@ -554,6 +554,7 @@ class StrategyCoverageSignalEngineIntegrationTest extends StrategySignalIntegrat
             meters,
             Optional.empty(),
             Optional.empty(),
+            java.util.Optional.empty(),
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
             mock(CompositeRejectionWriter.class),

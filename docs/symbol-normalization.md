@@ -61,7 +61,7 @@ tradingsymbol; index derivatives → `NSE`, BSE → `BFO`).
    re-reads the master via `/instruments/search` when an older market-data omits the field, exact
    tradingsymbol match only, ambiguity refused → still unresolved ⇒ the leg stays visible to
    read-only analytics but `SignalEngine.tradeableLeg` refuses the ENTRY.
-   `ay_scalper_chain_exchange_capability` reads 0 while the fallback is in use.
+   `ay_scalper_chain_exchange_capability` reads 0 while market-data omits the field.
 
 ## Resilience + drift detection
 

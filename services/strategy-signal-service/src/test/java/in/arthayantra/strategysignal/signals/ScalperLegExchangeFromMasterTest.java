@@ -39,6 +39,7 @@ class ScalperLegExchangeFromMasterTest {
   private MockRestServiceServer server;
   private MarketOiClient client;
   private SimpleMeterRegistry meters;
+  private in.arthayantra.strategysignal.scalper.OptionExchangeResolver resolver;
 
   private void wire() {
     RestClient.Builder builder = RestClient.builder();
@@ -50,9 +51,10 @@ class ScalperLegExchangeFromMasterTest {
             new ObjectMapper(),
             MarketCalendar.nse(),
             meters,
-            new in.arthayantra.strategysignal.scalper.OptionExchangeResolver(
-                builder, "http://market-data:8081"),
             "http://market-data:8081");
+    resolver =
+        new in.arthayantra.strategysignal.scalper.OptionExchangeResolver(
+            builder, "http://market-data:8081");
   }
 
   /**
@@ -98,25 +100,42 @@ class ScalperLegExchangeFromMasterTest {
         "NIFTY 50",
         legJson(null, "NIFTY26AUG25000CE", "152.65"),
         legJson(null, "NIFTY26AUG25000PE", "140.10"));
-    // The master's answer CONTRADICTS a prefix guess, so only a real lookup can produce it.
+    // EXACTLY ONE search is stubbed, for the CE leg, and the chain carries TWO exchange-less legs.
+    // That asymmetry is the assertion: if the chain PARSE resolved per leg (round 2's Critical — the
+    // parse re-runs per strategy per bar, so a lookup there multiplies without bound), it would
+    // consume this stub for the CE leg and then fail outright on an unexpected PE request. Only
+    // resolving the SELECTED leg at entry time fits one stub. The master's answer also CONTRADICTS
+    // a prefix guess, so only a real lookup can produce it.
     stubSearch("NIFTY26AUG25000CE", "[{\"exchange\":\"BFO\",\"tradingsymbol\":\"NIFTY26AUG25000CE\"}]");
-    stubSearch("NIFTY26AUG25000PE", "[{\"exchange\":\"BFO\",\"tradingsymbol\":\"NIFTY26AUG25000PE\"}]");
 
     List<StrikePicker.Candidate> candidates = client.chain("NIFTY 50").orElseThrow().candidates();
 
-    assertThat(candidates).hasSize(2).allSatisfy(c -> assertThat(c.exchange()).isEqualTo("BFO"));
-    assertThat(
-            SignalEngine.tradeableLeg(
-                    "NFO", "NIFTY26AUGFUT", new BigDecimal("24092.00"), decision(candidates.get(0)))
-                .exchange())
-        .as("a resolved leg is tradeable — the deploy window costs a lookup, not the entry")
-        .isEqualTo("BFO");
-    assertThat(meters.counter("ay_scalper_chain_leg_no_exchange_total").count())
-        .as("nothing was lost, so the loss counter must stay at zero")
-        .isZero();
+    assertThat(candidates).hasSize(2).allSatisfy(c -> assertThat(c.exchange()).isNull());
     assertThat(meters.get("ay_scalper_chain_exchange_capability").gauge().value())
         .as("the degraded upstream is a dashboard fact, not an inference from a quiet tape")
         .isZero();
+
+    ScalperConfluenceGate.Decision resolved =
+        SignalEngine.resolveMissingLegExchanges(decision(candidates.get(0)), "scalp-test", resolver);
+
+    assertThat(
+            SignalEngine.tradeableLeg(
+                    "NFO", "NIFTY26AUGFUT", new BigDecimal("24092.00"), resolved)
+                .exchange())
+        .as("a resolved leg is tradeable — the deploy window costs a lookup, not the entry")
+        .isEqualTo("BFO");
+    server.verify();
+  }
+
+  /** Nothing missing ⇒ the resolver is never consulted, so the normal path stays lookup-free. */
+  @Test
+  void aFullyKeyedDecisionNeverTouchesTheMaster() {
+    wire();
+    ScalperConfluenceGate.Decision d =
+        decision(candidate("NFO", "NIFTY26AUG25000CE", OptionType.CE));
+
+    assertThat(SignalEngine.resolveMissingLegExchanges(d, "scalp-test", resolver)).isSameAs(d);
+    // No /instruments/search stubbed: an attempted call would fail the mock server outright.
     server.verify();
   }
 
@@ -141,10 +160,6 @@ class ScalperLegExchangeFromMasterTest {
         "NIFTY 50",
         legJson(null, "NIFTY26AUG25000CE", "152.65"),
         legJson(null, "NIFTY26AUG25000PE", "140.10"));
-    // The master knows nothing about either symbol — no exact match, so no exchange.
-    stubSearch("NIFTY26AUG25000CE", "[]");
-    stubSearch("NIFTY26AUG25000PE", "[]");
-
     MarketOiClient.ChainSnapshot snapshot = client.chain("NIFTY 50").orElseThrow();
 
     // Analytical eligibility: the oracle must still see the true market side on BOTH legs.
@@ -173,22 +188,23 @@ class ScalperLegExchangeFromMasterTest {
   @Test
   void anAmbiguousMasterAnswerIsRefusedRatherThanPickedFrom() {
     wire();
-    stubChain("NIFTY 50", legJson(null, "NIFTY26AUG25000CE", "152.65"), legJson("NFO", "NIFTY26AUG25000PE", "140.10"));
     stubSearch(
         "NIFTY26AUG25000CE",
         "[{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY26AUG25000CE\"},"
             + "{\"exchange\":\"BFO\",\"tradingsymbol\":\"NIFTY26AUG25000CE\"}]");
 
-    List<StrikePicker.Candidate> candidates = client.chain("NIFTY 50").orElseThrow().candidates();
-    StrikePicker.Candidate ambiguous =
-        candidates.stream().filter(c -> c.tradingsymbol().endsWith("CE")).findFirst().orElseThrow();
+    ScalperConfluenceGate.Decision d =
+        decision(candidate(null, "NIFTY26AUG25000CE", OptionType.CE));
+    ScalperConfluenceGate.Decision after =
+        SignalEngine.resolveMissingLegExchanges(d, "scalp-test", resolver);
 
-    assertThat(ambiguous.exchange()).isNull();
-    assertThat(
-            SignalEngine.tradeableLeg(
-                "NFO", "NIFTY26AUGFUT", new BigDecimal("24092.00"), decision(ambiguous)))
+    assertThat(after.pick().candidate().exchange())
+        .as("two exchanges claim this symbol, so neither is THE answer")
         .isNull();
-    assertThat(meters.counter("ay_scalper_chain_leg_no_exchange_total").count()).isEqualTo(1.0);
+    assertThat(
+            SignalEngine.tradeableLeg("NFO", "NIFTY26AUGFUT", new BigDecimal("24092.00"), after))
+        .as("an unresolved leg is refused, never coin-tossed onto one of the candidates")
+        .isNull();
     server.verify();
   }
 
@@ -200,7 +216,6 @@ class ScalperLegExchangeFromMasterTest {
         "NIFTY 50",
         legJson("", "NIFTY26AUG25000CE", "152.65"),
         legJson("NFO", "NIFTY26AUG25000PE", "140.10"));
-    stubSearch("NIFTY26AUG25000CE", "[]");
 
     List<StrikePicker.Candidate> candidates = client.chain("NIFTY 50").orElseThrow().candidates();
 
@@ -222,6 +237,55 @@ class ScalperLegExchangeFromMasterTest {
         .isNull();
     assertThat(meters.counter("ay_scalper_chain_leg_no_exchange_total").count()).isEqualTo(1.0);
     server.verify();
+  }
+
+  /**
+   * The NEUTRAL two-leg (straddle) path (cross-vendor review round 2). A straddle routes off the
+   * {@code legs[]} side-channel, not the primary stamp, so validating only the primary left the
+   * second leg unchecked — and the serializer copied the primary's exchange onto BOTH legs, which
+   * is the same mis-route this change removes, surviving one level down.
+   *
+   * <p>Refusing the WHOLE entry (not just the bad leg) is the point: a straddle is one position, and
+   * half of one is a directional trade nobody asked for.
+   */
+  @Test
+  void aStraddleIsRefusedWhenAnyLegLacksAnExchange() {
+    StrikePicker.Candidate ce = candidate("NFO", "NIFTY26AUG25000CE", OptionType.CE);
+    StrikePicker.Candidate pe = candidate(null, "NIFTY26AUG25000PE", OptionType.PE);
+
+    assertThat(SignalEngine.allLegsHaveAnExchange(straddle(ce, pe)))
+        .as("the PRIMARY leg resolves, so a primary-only check would have passed this")
+        .isFalse();
+    assertThat(SignalEngine.allLegsHaveAnExchange(straddle(ce, candidate("", "X", OptionType.PE))))
+        .as("blank is as unresolved as null")
+        .isFalse();
+    assertThat(
+            SignalEngine.allLegsHaveAnExchange(
+                straddle(ce, candidate("BFO", "NIFTY26AUG25000PE", OptionType.PE))))
+        .as("legs may legitimately differ — both resolved is the only requirement")
+        .isTrue();
+  }
+
+  private static StrikePicker.Candidate candidate(
+      String exchange, String tradingsymbol, OptionType type) {
+    return new StrikePicker.Candidate(
+        exchange, tradingsymbol, new BigDecimal("25000"), type, new BigDecimal("150.00"),
+        new BigDecimal("0.14"));
+  }
+
+  private static ScalperConfluenceGate.Decision straddle(
+      StrikePicker.Candidate ce, StrikePicker.Candidate pe) {
+    return new ScalperConfluenceGate.Decision(
+        null, // side == null ⇒ neutral
+        List.of(
+            new ScalperConfluenceGate.Leg(OptionType.CE, new StrikePicker.Pick(ce, new BigDecimal("0.5"))),
+            new ScalperConfluenceGate.Leg(OptionType.PE, new StrikePicker.Pick(pe, new BigDecimal("-0.5")))),
+        null,
+        null,
+        null,
+        null,
+        null,
+        null);
   }
 
   /** Drives chain JSON → candidate → stamped tradeable leg and asserts the stamped exchange. */
@@ -276,6 +340,7 @@ class ScalperLegExchangeFromMasterTest {
         + ",\"tradingsymbol\":\"" + tradingsymbol + "\",\"ltp\":\"" + ltp + "\",\"iv\":\"0.14\"}";
   }
 
+  /** A directional single-leg decision around one candidate. */
   private static ScalperConfluenceGate.Decision decision(StrikePicker.Candidate candidate) {
     return new ScalperConfluenceGate.Decision(
         OptionType.CE,

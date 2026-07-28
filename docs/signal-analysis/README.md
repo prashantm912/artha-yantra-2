@@ -264,7 +264,28 @@ Run in order; each answers one question. Canned SQL in §6.
     NEUTRAL dots stay in the denominator with `absent=false` (§3.12), so the composite is
     structurally starved — max **0.3457** against a 0.600 threshold on 2026-07-28. Zero fires is the
     mechanical outcome, not evidence. Mark such a session REGIME in the rollup, never STRUCTURAL.
-20. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+20. **A dot and its namesake RAIL may not share a threshold — read the scorer's call site before
+    attributing a dead dot to data, regime, or the rail's own tuning** (added 2026-07-28) — the
+    `volume` dot sat at 0% support for nine consecutive sessions under the standing explanation
+    "mechanically dead behind the 125,000 floor". That explanation survived the floor being fixed
+    (T16/#980 armed the relative floor on 38/38 scalpers on 07-25) and the dot **still** read 0/909 on
+    07-27, which falsified it. The cause is a **call-site divergence**, visible only in code:
+    `ConnectTheDotsScorer.java:141` calls the **two-argument** `ScalperGates.volume(underlying, volume)`
+    overload, which delegates to `volume(underlying, volume, null)` and resolves the floor via
+    `volumeFloorFor(underlying, null)` → the **static per-index default** (`VOL_FLOOR`: NIFTY
+    **125,000** / other indices 50,000, `ScalperGates.java:173-175`). The `relative-volume-floor` tag
+    substitutes the banded floor **only at the rail's call site** (`ScalperConfluenceGate.java:422`,
+    `cfg.has(...)`-gated), which passes an explicit override. **The dot never sees it**, on any
+    strategy, armed or not. The arithmetic is the confirmation: on 2026-07-28 (a thick expiry tape) 6 of
+    125 3m bars cleared 125,000 (4.8%) and the dot supported 38/1,068 rows (3.6%) — its first non-zero
+    reading ever; on 07-27 the same series' max was 117,000, so **zero** bars could clear it and the dot
+    read 0/909. Net effect: 1.0 of composite weight permanently gated at roughly the **p95** of its own
+    operand. **Standing check when a dot reads 0% (or 100%) across sessions:** find its `add(dots, …)`
+    line in `ConnectTheDotsScorer`, follow the gate call it makes, and confirm which threshold that
+    overload actually resolves — the rejection row records the dot's *verdict*, only the code records
+    which threshold produced it. The same trap is available to any dot/rail pair sharing a name
+    (`volume`, `rsi`, `vwap`, `oi_spurt`).
+21. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -638,6 +659,25 @@ FROM strategy.signal_rejections WHERE generated_at >= :d0915 GROUP BY 1;
 -- (c) capture must still be healthy underneath the suppression:
 SELECT count(*) snaps, count(DISTINCT date_trunc('minute',ts)) minutes, max(ts AT TIME ZONE 'Asia/Kolkata') last_ist
 FROM marketdata.futures_oi_snapshots WHERE ts >= :d0915;
+
+-- §3.20 dot-vs-rail threshold divergence: does a dot's support rate track its namesake RAIL?
+-- If the rail blocks on a BANDED threshold while the dot is pinned at 0% (or 100%), the two are not
+-- reading the same floor — go read the scorer's call site (the SQL only shows you WHERE to look).
+SELECT d->>'dot' dot, d->>'reason' reason,
+       round(100.0*count(*) FILTER (WHERE (d->>'supports')::boolean)/count(*),1) dot_support_pct,
+       min(r.blocking_threshold) rail_min_thr, max(r.blocking_threshold) rail_max_thr
+FROM strategy.signal_rejections r, jsonb_array_elements(r.diagnostic->'confluence'->'dots') d
+WHERE r.generated_at >= :d0915 AND d->>'dot' = :dot AND r.blocking_rail = :namesake_rail
+GROUP BY 1,2;
+-- then place the SUSPECTED static default on the operand's own distribution (§3.8/§3.15 form):
+WITH b AS (SELECT time_bucket('3 minutes', bucket) b3, sum(volume) vol FROM marketdata.candles
+  WHERE tradingsymbol=:front_fut AND exchange='NFO' AND interval='1m' AND EXTRACT(second FROM bucket)=0
+    AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1)
+SELECT count(*) bars, count(*) FILTER (WHERE vol >= :suspected_static_floor) clearing,
+       round(100.0*count(*) FILTER (WHERE vol >= :suspected_static_floor)/count(*),1) pct FROM b;
+-- `clearing` matching the dot's distinct supporting BUCKET count is the fingerprint.
+-- code side (the actual proof): ConnectTheDotsScorer's add(dots,"<dot>",…) line -> the ScalperGates
+-- overload it calls -> whether that overload takes a floor override at all.
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

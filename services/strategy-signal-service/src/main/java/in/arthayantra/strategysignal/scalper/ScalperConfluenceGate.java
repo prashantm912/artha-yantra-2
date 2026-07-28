@@ -983,7 +983,10 @@ public class ScalperConfluenceGate {
     Confluence conf =
         ConnectTheDotsScorer.score(
             ctx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps, vwapHardGate,
-            cfg.has("iv-per-strike"), cfg.has("premium-skew"), cfg.has("dow-confluence"));
+            cfg.has("iv-per-strike"), cfg.has("premium-skew"), cfg.has("dow-confluence"),
+            // T24: the dot must test the SAME floor the rail did (effVolFloor above), not the
+            // static per-index default it resolved on its own.
+            effVolFloor);
     diag.confluence = conf;
     diag.confluenceThreshold = cfg.confluenceThreshold();
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();

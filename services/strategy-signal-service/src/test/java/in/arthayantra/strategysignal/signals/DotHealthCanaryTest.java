@@ -205,11 +205,7 @@ class DotHealthCanaryTest {
     // day BY DESIGN (S24) — the quadrant dots are then not "expected alive today": required must
     // drop so paging, /status and the UI badge all agree it is not an outage. Date discovered from
     // the bundled calendar so the test tracks the real CSV set.
-    java.time.LocalDate expiry = java.time.LocalDate.of(2026, 1, 1);
-    while (!in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(expiry)) {
-      expiry = expiry.plusDays(1);
-    }
-    now.set(expiry.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant());
+    now.set(expiryDayAt11Ist());
     stubRows(
         row("{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
             + "\"macro\":{\"advances\":30,\"declines\":20}}"));
@@ -226,6 +222,73 @@ class DotHealthCanaryTest {
 
     canary.sweep();
     verifyNoInteractions(events);
+  }
+
+  @Test
+  void expiryDaySuppressionCoversTheSpurtProbeNotJustTheQuadrants() {
+    // 2026-07-28 live check: MarketOiClient.oi() SKIPS the whole OI block on a monthly index-expiry
+    // day and returns an inert Oi (MarketOiClient:292-294) that NEUTRALs both quadrants AND nulls
+    // the spurt magnitudes. The exemption set held only the two quadrant dots, so `oi_spurt_price`
+    // reported "input dead across 16 context-bearing rejections" — a false outage — while its two
+    // siblings correctly reported by-design. All three come off the SAME skipped read.
+    now.set(expiryDayAt11Ist());
+    stubRows(
+        row("{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\","
+            + "\"spurtPricePct\":null},\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("futures_oi,underlying_oi,oi_spurt_price");
+
+    DotHealthCanary.DotHealth health = canary.evaluate();
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).isFalse();
+              assertThat(s.required()).as("not expected alive on the suppression day").isFalse();
+              assertThat(s.detail()).contains("by design").doesNotContain("input dead");
+            });
+
+    canary.sweep();
+    verifyNoInteractions(events); // the whole OI trio is by-design today — nothing pages
+  }
+
+  @Test
+  void aDeadSpurtProbeStillPagesOnAnOrdinaryDay() {
+    // The other half of the exemption: widening it must not blind the probe on a NON-expiry day,
+    // when a null spurt magnitude is a real outage.
+    java.time.LocalDate ordinary = java.time.LocalDate.of(2026, 6, 10); // Wednesday, no monthly
+    assertThat(in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(ordinary))
+        .as("fixture day must not be an NSE monthly expiry")
+        .isFalse();
+    assertThat(in.arthayantra.marketcalendar.MarketCalendar.bse().isMonthlyIndexExpiryDay(ordinary))
+        .as("fixture day must not be a BSE monthly expiry")
+        .isFalse();
+    now.set(ordinary.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant());
+    stubRows(
+        row("{\"oi\":{\"spurtPricePct\":null},\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("oi_spurt_price");
+
+    DotHealthCanary.DotHealth health = canary.evaluate();
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.required()).isTrue();
+              assertThat(s.detail()).contains("input dead");
+            });
+
+    canary.sweep();
+    verify(events, times(1)).publishEvent(alertContaining("oi_spurt_price DEAD"));
+  }
+
+  /** The bundled calendar's first NSE monthly index-expiry day of 2026, at 11:00 IST. */
+  private static Instant expiryDayAt11Ist() {
+    java.time.LocalDate expiry = java.time.LocalDate.of(2026, 1, 1);
+    while (!in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(expiry)) {
+      expiry = expiry.plusDays(1);
+    }
+    return expiry.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant();
   }
 
   @Test

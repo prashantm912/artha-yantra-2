@@ -97,12 +97,18 @@ public class DotHealthCanary {
    */
   public record DotInputAlert(String title, String message) {}
 
-  // The two OI-quadrant probes are exempt from paging on a monthly index-expiry day: MarketOiClient
-  // deliberately degrades the OI reads to NEUTRAL then (S24 — chain OI is corrupted by the expiring
-  // series' unwind), so an all-NEUTRAL window is by-design, not an outage. Keyed per root exactly
+  // Every probe fed by MarketOiClient.oi() is exempt from paging on a monthly index-expiry day: that
+  // method SKIPS the whole OI block then (S24 — chain OI is corrupted by the expiring series' unwind)
+  // and returns inert defaults, so a dead window is by-design, not an outage. Keyed per root exactly
   // like the suppression itself (NSE monthly for NIFTY, BSE Thursday monthly for SENSEX) — the
-  // window mixes both roots, so either root's suppression day exempts the pair.
-  private static final Set<String> OI_QUADRANT_DOTS = Set.of("futures_oi", "underlying_oi");
+  // window mixes both roots, so either root's suppression day exempts the set.
+  //
+  // The inert Oi (MarketOiClient:292-294) NEUTRALs both quadrants AND nulls the spurt magnitudes, so
+  // `oi_spurt_price` belongs here too — it was missing until 2026-07-28, when a live check read it as
+  // a plain "input dead" outage on an expiry day while its two siblings correctly read by-design.
+  // Only these three probes read /context/oi; the rest read /context/macro and are unaffected.
+  private static final Set<String> S24_SUPPRESSED_DOTS =
+      Set.of("futures_oi", "underlying_oi", "oi_spurt_price");
 
   private final SignalRejectionRepository rejections;
   private final ApplicationEventPublisher events;
@@ -155,10 +161,10 @@ public class DotHealthCanary {
         }
       }
       // `required` means "expected alive TODAY" (class javadoc). On a monthly index-expiry day the
-      // OI reads are S24-suppressed to NEUTRAL by design, so the quadrant dots are NOT expected
-      // alive — dropping the flag here keeps every consumer (paging, /status count, UI badge)
-      // agreeing with the no-outage decision instead of each needing its own exemption.
-      boolean suppressedToday = expiryDay && OI_QUADRANT_DOTS.contains(p.dot());
+      // OI reads are S24-suppressed by design, so those dots are NOT expected alive — dropping the
+      // flag here keeps every consumer (paging, /status count, UI badge) agreeing with the
+      // no-outage decision instead of each needing its own exemption.
+      boolean suppressedToday = expiryDay && S24_SUPPRESSED_DOTS.contains(p.dot());
       String detail;
       if (alive) {
         detail = "input live in the last " + contextRows.size() + " context-bearing rejections";
@@ -169,8 +175,10 @@ public class DotHealthCanary {
                 : "UNINFORMATIVE — " + scanned.size() + " rejections scanned, none carry context"
                     + " (early-rail blocks only)";
       } else if (suppressedToday) {
+        // Deliberately says "inert", not "NEUTRAL": the quadrants degrade to NEUTRAL but the spurt
+        // magnitudes degrade to NULL, and both come off the same skipped read.
         detail =
-            "NEUTRAL by design — monthly index-expiry day, OI reads S24-suppressed (not an outage)";
+            "inert by design — monthly index-expiry day, OI reads S24-suppressed (not an outage)";
       } else {
         detail = "input dead across " + contextRows.size() + " context-bearing rejections";
       }
@@ -203,8 +211,8 @@ public class DotHealthCanary {
         if (state == null) {
           continue;
         }
-        if (expiryDay && OI_QUADRANT_DOTS.contains(dot)) {
-          continue; // S24 suppression: NEUTRAL quadrants are by-design today, never an outage page
+        if (expiryDay && S24_SUPPRESSED_DOTS.contains(dot)) {
+          continue; // S24 suppression: the inert OI reads are by-design today, never an outage page
         }
         if (!state.alive()) {
           if (!today.equals(alertedDeadOn.get(dot))) {

@@ -282,6 +282,59 @@ class DotHealthCanaryTest {
     verify(events, times(1)).publishEvent(alertContaining("oi_spurt_price DEAD"));
   }
 
+  @Test
+  void oneCalendarExpiringDoesNotSuppressTheOtherRootsRows() {
+    // codex review: MarketOiClient.oi() keys suppression on the ROW'S OWN underlying
+    // (ScalperCalendars.forUnderlying — BSE Thursday monthly for SENSEX, NSE monthly otherwise), so
+    // on an NSE-only expiry day a SENSEX-rooted OI read is NOT suppressed and a dead OI dot there is
+    // a genuine outage. Treating either calendar's expiry as a blanket exemption silences it.
+    java.time.LocalDate nseOnly = nseOnlyMonthlyExpiry2026();
+    now.set(nseOnly.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant());
+    String deadOi = "\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\","
+        + "\"spurtPricePct\":null},\"macro\":{\"advances\":30,\"declines\":20}";
+
+    // (a) window mixes a suppressed NIFTY root with a LIVE SENSEX root — must NOT stand down
+    stubRows(
+        row("{" + deadOi + ",\"underlying\":\"NIFTY 50\"}"),
+        row("{" + deadOi + ",\"underlying\":\"SENSEX\"}"));
+    DotHealthCanary mixed = canary("oi_spurt_price");
+    assertThat(mixed.evaluate().dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.required()).as("SENSEX root is not expiring — still expected").isTrue();
+              assertThat(s.detail()).contains("input dead");
+            });
+    mixed.sweep();
+    verify(events, times(1)).publishEvent(alertContaining("oi_spurt_price DEAD"));
+
+    // (b) same DAY, all rows on the expiring NIFTY root — proves (a) is not passing merely because
+    // the fixture date is wrong.
+    stubRows(row("{" + deadOi + ",\"underlying\":\"NIFTY 50\"}"));
+    assertThat(canary("oi_spurt_price").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.required()).isFalse();
+              assertThat(s.detail()).contains("by design");
+            });
+  }
+
+  /** A 2026 day that is an NSE monthly index expiry but NOT a BSE one (NSE Tuesday vs BSE Thursday). */
+  private static java.time.LocalDate nseOnlyMonthlyExpiry2026() {
+    java.time.LocalDate d = java.time.LocalDate.of(2026, 1, 1);
+    while (!(in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(d)
+        && !in.arthayantra.marketcalendar.MarketCalendar.bse().isMonthlyIndexExpiryDay(d))) {
+      d = d.plusDays(1);
+      if (d.getYear() > 2026) {
+        throw new IllegalStateException("no NSE-only monthly expiry in 2026 — calendar changed");
+      }
+    }
+    return d;
+  }
+
   /** The bundled calendar's first NSE monthly index-expiry day of 2026, at 11:00 IST. */
   private static Instant expiryDayAt11Ist() {
     java.time.LocalDate expiry = java.time.LocalDate.of(2026, 1, 1);

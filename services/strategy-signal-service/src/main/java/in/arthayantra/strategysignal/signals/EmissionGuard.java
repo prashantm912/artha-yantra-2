@@ -96,11 +96,23 @@ public interface EmissionGuard {
    * OPTION premium + lot (the deploy is in premium terms, unlike the index-priced {@link #suggestedQty}).
    * Default null (non-paper / no equity) ⇒ the caller keeps the ordinary advisory qty.
    *
+   * <p><b>Takes the sizing spec so {@code max_lots} binds here too.</b> This quantity OVERRIDES the
+   * ordinary {@link #suggestedQty}, so a cap applied only in {@code PositionSizer} left the
+   * hero-zero family completely uncapped — the config declared a cap that did nothing, while the
+   * backtest replay ({@code OptionsPremiumReplay}) capped correctly, so live and replay sized
+   * differently for exactly the strategies whose premium is cheapest.
+   *
+   * @param sizing the strategy's sizing spec — only {@code max_lots} is read; the BUDGET is
+   *     hero-zero's own profit-funded one, not {@code budget_inr}
    * @param exchange the option's exchange
    * @param tradingsymbol the option tradingsymbol (drives the lot size)
    * @param premium the option premium (ltp) per unit
    */
-  default BigDecimal heroZeroSuggestedQty(String exchange, String tradingsymbol, BigDecimal premium) {
+  default BigDecimal heroZeroSuggestedQty(
+      in.arthayantra.strategyengine.config.StrategyDefinition.SizingSpec sizing,
+      String exchange,
+      String tradingsymbol,
+      BigDecimal premium) {
     return null;
   }
 

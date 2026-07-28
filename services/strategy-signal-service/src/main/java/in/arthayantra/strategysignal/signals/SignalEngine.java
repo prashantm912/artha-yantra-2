@@ -2051,7 +2051,8 @@ public class SignalEngine {
           && decision.pick().candidate().ltp() != null) {
         BigDecimal hzQty =
             emissionGuard.get().heroZeroSuggestedQty(
-                tradeable.exchange(), tradeable.tradingsymbol(), tradeable.premium());
+                strategy.definition().sizing(), tradeable.exchange(), tradeable.tradingsymbol(),
+                tradeable.premium());
         if (hzQty != null) {
           suggestedQty = hzQty;
         }

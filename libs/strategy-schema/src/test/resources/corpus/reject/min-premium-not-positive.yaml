@@ -1,0 +1,28 @@
+# expect: /risk/position_sizing
+# A premium floor of ZERO is not "no floor" — it is a floor nothing can fall below, i.e. a config
+# that reads as protective while protecting nothing. A strategy that wants no floor OMITS the key
+# (absent is the documented no-op). Refusing it here keeps that ambiguity off a money path, exactly
+# as `max_lots: 0` is refused rather than silently meaning "unlimited".
+schema: strategy-schema/v1
+id: reject-min-premium-not-positive
+name: "Min Premium Not Positive"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1d }
+indicators:
+  - { name: EMA, alias: ema20, timeframe: 1d, params: { period: 20 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema20"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: r_multiple, value: 1.5 } }
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000, min_premium_inr: 0 } }
+  max_positions: 1
+  session: { style: positional, allow_overnight: true }

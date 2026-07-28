@@ -150,7 +150,8 @@ public class PaperEmissionGuard implements EmissionGuard {
   }
 
   @Override
-  public BigDecimal heroZeroSuggestedQty(String exchange, String tradingsymbol, BigDecimal premium) {
+  public BigDecimal heroZeroSuggestedQty(
+      StrategyDefinition.SizingSpec sizing, String exchange, String tradingsymbol, BigDecimal premium) {
     if (premium == null || premium.signum() <= 0) {
       return null;
     }
@@ -164,6 +165,14 @@ public class PaperEmissionGuard implements EmissionGuard {
     BigDecimal perLotCost = premium.multiply(BigDecimal.valueOf(lot));
     long affordableLots = budget.divide(perLotCost, 0, RoundingMode.DOWN).longValueExact();
     long lots = Math.max(1L, affordableLots); // a fired entry deploys at least one lot (advisory)
+    // The declared max_lots binds HERE too. This quantity overrides the ordinary suggestedQty, so a
+    // cap enforced only inside PositionSizer left hero-zero uncapped: the config said 5 while live
+    // deployed whatever the profit pot afforded and the backtest replay capped at 5 — a live-vs-sim
+    // divergence introduced by the very change meant to remove one (cross-vendor review, #1075).
+    long maxLots = PositionSizer.maxLots(sizing);
+    if (maxLots > 0 && lots > maxLots) {
+      lots = maxLots;
+    }
     return BigDecimal.valueOf(lots * lot);
   }
 

@@ -333,8 +333,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/IndicatorRegistry"
                 }
               }
             }
@@ -1818,6 +1817,61 @@
           }
         },
         "required" : [ "jobId", "note", "tags" ]
+      },
+      "IndicatorMeta" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "params" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ParamMeta"
+            }
+          },
+          "outputs" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "render" : {
+            "type" : "string"
+          },
+          "pane" : {
+            "type" : "string"
+          },
+          "requiresContext" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "id", "label", "outputs", "pane", "params", "render", "requiresContext" ]
+      },
+      "IndicatorRegistry" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/IndicatorMeta"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "ParamMeta" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "defaultValue" : { }
+        },
+        "required" : [ "defaultValue", "name" ]
       },
       "RunResult" : {
         "type" : "object",

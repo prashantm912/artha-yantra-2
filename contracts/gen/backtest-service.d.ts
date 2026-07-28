@@ -599,6 +599,22 @@ export interface components {
             tags: string[];
             note: string | null;
         };
+        IndicatorMeta: {
+            id: string;
+            label: string;
+            params: components["schemas"]["ParamMeta"][];
+            outputs: string[];
+            render: string;
+            pane: string;
+            requiresContext: boolean;
+        };
+        IndicatorRegistry: {
+            items: components["schemas"]["IndicatorMeta"][];
+        };
+        ParamMeta: {
+            name: string;
+            defaultValue: unknown;
+        };
         RunResult: {
             metrics: components["schemas"]["JsonNode"];
             equityCurve: components["schemas"]["JsonNode"];
@@ -1085,9 +1101,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["IndicatorRegistry"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

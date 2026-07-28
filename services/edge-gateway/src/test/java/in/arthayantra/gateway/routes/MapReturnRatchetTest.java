@@ -27,10 +27,17 @@ class MapReturnRatchetTest {
    * Frozen at the 2026-07-02 audit-fix baseline, ratcheted DOWN as handlers are converted. DOWN is
    * progress; UP fails the build.
    *
-   * <p>backtest-service 10 → 8 (2026-07-29): {@code ResultsController.results} now returns the
+   * <p>backtest-service 10 → 7 (2026-07-29): {@code ResultsController.results} now returns the
    * typed {@code RunResult}, and {@code StressWindowController.stressWindow} the typed
    * {@code StressWindow} — both pure retypings of a LinkedHashMap, same keys in the same order, so
-   * the wire is byte-identical and only the spec gained the shape.
+   * the wire is byte-identical and only the spec gained the shape. {@code IndicatorsController.list}
+   * followed ({@code IndicatorRegistry}) — its ITEM type was already typed, so the envelope was the
+   * only opaque part.
+   *
+   * <p>DELIBERATELY still a Map, assessed 2026-07-29 and not a miss: {@code
+   * HeroZeroPremiumController.heroZeroPremium}. Its response is POLYMORPHIC — the empty path emits 5
+   * keys, the populated path 16 — so one record would add 11 null keys to the empty response. That is
+   * a wire change, not a retyping; typing it needs a deliberate shape decision, not a refactor.
    *
    * <p>edge-gateway 2 → 0 (ledger D3 slice 1, 2026-07-28): {@code AuthController.session} and
    * {@code SystemStatusController.status} now return records. Both were pure retypings — every key
@@ -43,7 +50,7 @@ class MapReturnRatchetTest {
           "edge-gateway", 0,
           "market-data-service", 30,
           "strategy-signal-service", 28,
-          "backtest-service", 8);
+          "backtest-service", 7);
 
   private static final Pattern MAP_RETURN =
       Pattern.compile("public (Mono<)?Map<String, Object>");

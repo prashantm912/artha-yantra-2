@@ -78,7 +78,7 @@ exit_rules:
   - { type: time_stop,   params: { max_bars: 16 } }                    # ~48 min cap into the 15:20 square-off
 
 risk:
-  position_sizing: { method: premium_budget, params: { budget_inr: 2000 } }   # section 7: small size
+  position_sizing: { method: premium_budget, params: { budget_inr: 2000, max_lots: 5 } }   # section 7: small size
   max_positions: 1
   max_positions_per_underlying: 1
   max_daily_loss_pct: 2.0

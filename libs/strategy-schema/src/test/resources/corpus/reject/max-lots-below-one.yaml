@@ -1,0 +1,28 @@
+# expect: /risk/position_sizing
+# `max_lots` bounds the lot COUNT a fixed premium budget can buy. Zero is not "unlimited" at the
+# CONFIG layer even though it is at the code layer: a strategy that means unlimited omits the key,
+# and one that writes 0 almost certainly meant "no position", which the sizer cannot express. The
+# schema is where that ambiguity gets refused, so it never reaches a money path.
+schema: strategy-schema/v1
+id: reject-max-lots-below-one
+name: "Max Lots Below One"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1d }
+indicators:
+  - { name: EMA, alias: ema20, timeframe: 1d, params: { period: 20 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema20"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: r_multiple, value: 1.5 } }
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000, max_lots: 0 } }
+  max_positions: 1
+  session: { style: positional, allow_overnight: true }

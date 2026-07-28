@@ -5,6 +5,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.constituents.StockSectorMap;
 import in.arthayantra.marketdata.freshness.DataFreshness;
+import in.arthayantra.marketdata.screener.AdjustedEquityDailySql;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -68,9 +69,9 @@ public class EquityReturnsService {
     // badge. (The distinct rn-vs-calendar / 07-02-partial window-base finding is out of scope here.)
     //
     // CA-adjusted price plane (FID P0-4 / audit H6): each base close is multiplied by the cumulative
-    // product of every eod_corporate_actions ratio whose ex_date falls AFTER that bar — the SAME
-    // multiplicative rule the shared AdjustedEquityDailySql plane applies (exp(sum(ln(ratio))) LEFT
-    // JOIN LATERAL, COALESCE 1 no-op for the ~99.9% non-CA universe), rounded to 4dp to match the
+    // product of every eod_corporate_actions ratio whose ex_date falls AFTER that bar, via the
+    // SHARED AdjustedEquityDailySql.factorLateral (one definition, §9-02 — it used to be pasted here),
+    // rounded to 4dp to match the
     // NUMERIC(18,4) close scale. WITHOUT it a split/bonus inside a window opened a false price cliff
     // that cratered the multi-day return (the raw pre-split close sits on a different price scale than
     // the post-split LTP). The lateral runs only on the ≤6 picked rows per symbol. Unlike the
@@ -95,12 +96,10 @@ public class EquityReturnsService {
                 + "  max(round(p.close_price * caf.factor, 4)) FILTER (WHERE rn = 127) AS c6m, "
                 + "  max(round(p.close_price * caf.factor, 4)) FILTER (WHERE rn = 253) AS c1y "
                 + "FROM picked p "
-                + "LEFT JOIN LATERAL ("
-                + "  SELECT COALESCE(exp(sum(ln(ca.ratio))), 1) AS factor "
-                + "  FROM eod_corporate_actions ca "
-                + "  WHERE ca.exchange = 'NSE' AND ca.tradingsymbol = p.symbol "
-                + "    AND ca.ex_date > p.trade_date"
-                + ") caf ON true "
+                // §9-02: the CA factor comes from the SHARED plane, not a local copy. This used to be
+                // a byte-identical inline paste under a comment promising it applied "the SAME
+                // multiplicative rule" — a promise nothing enforced.
+                + AdjustedEquityDailySql.factorLateral("p", "trade_date")
                 + "GROUP BY p.symbol "
                 + "HAVING max(p.trade_date) FILTER (WHERE rn = 1) "
                 + "     = (SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series = 'EQ')",

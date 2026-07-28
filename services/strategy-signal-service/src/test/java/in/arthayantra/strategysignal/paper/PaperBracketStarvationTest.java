@@ -92,6 +92,10 @@ class PaperBracketStarvationTest {
     when(positions.listOpen()).thenReturn(List.of(p));
     when(lastTick.lastTick("NFO", "NIFTY26JUL25000CE"))
         .thenReturn(Optional.of(new LastTickReader.TickView(new BigDecimal("85"), Duration.ofSeconds(1))));
+    // settle() returns the realized amount only when THIS call won the CAS close (§9-05). An
+    // unstubbed mock now yields Optional.empty() — i.e. "someone else closed it" — so the win must
+    // be stated explicitly rather than assumed.
+    when(paper.settle(any(), any(), anyString())).thenReturn(Optional.of(new BigDecimal("-1125")));
 
     int closed = evaluator.evaluate();
 

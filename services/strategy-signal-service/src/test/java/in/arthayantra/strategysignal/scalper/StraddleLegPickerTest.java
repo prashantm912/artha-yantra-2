@@ -26,11 +26,11 @@ class StraddleLegPickerTest {
   }
 
   private static StrikePicker.Candidate ce(String strike, String ltp) {
-    return new StrikePicker.Candidate("N" + strike + "CE", bd(strike), CE, bd(ltp), bd("0.14"));
+    return new StrikePicker.Candidate("NFO", "N" + strike + "CE", bd(strike), CE, bd(ltp), bd("0.14"));
   }
 
   private static StrikePicker.Candidate pe(String strike, String ltp) {
-    return new StrikePicker.Candidate("N" + strike + "PE", bd(strike), PE, bd(ltp), bd("0.14"));
+    return new StrikePicker.Candidate("NFO", "N" + strike + "PE", bd(strike), PE, bd(ltp), bd("0.14"));
   }
 
   @Test

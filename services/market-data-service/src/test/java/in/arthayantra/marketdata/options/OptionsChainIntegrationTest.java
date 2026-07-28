@@ -122,6 +122,40 @@ class OptionsChainIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(wing.ce().ltp()).isNotNull();
   }
 
+  /**
+   * Every published leg carries a REAL {@code (exchange, tradingsymbol)} master key — the canonical
+   * instrument identity (docs/symbol-normalization.md), asserted against {@code instruments} itself
+   * rather than a hardcoded "NFO" so it proves PROVENANCE, not a constant. Consumers stamp this pair
+   * onto money paths (paper sizing / live order routing), and the alternative they were forced into
+   * — guessing the derivatives exchange from the underlying's name — mis-routes any newly listed BSE
+   * root (task_032bff42).
+   */
+  @Test
+  void everyChainLegPublishesARealInstrumentMasterKey() {
+    OptionsChainService.Chain chain = chainService.chain("NIFTY 50", null);
+
+    List<OptionsChainService.Leg> legs =
+        chain.rows().stream()
+            .flatMap(row -> java.util.stream.Stream.of(row.ce(), row.pe()))
+            .filter(java.util.Objects::nonNull)
+            .toList();
+
+    assertThat(legs).as("the fixture ladder resolves legs").isNotEmpty();
+    assertThat(legs)
+        .allSatisfy(
+            leg -> {
+              assertThat(leg.exchange()).as("leg %s exchange", leg.tradingsymbol()).isNotBlank();
+              assertThat(
+                      jdbc.queryForObject(
+                          "SELECT count(*) FROM instruments WHERE exchange = ? AND tradingsymbol = ?",
+                          Integer.class,
+                          leg.exchange(),
+                          leg.tradingsymbol()))
+                  .as("(%s, %s) is a real instrument-master key", leg.exchange(), leg.tradingsymbol())
+                  .isEqualTo(1);
+            });
+  }
+
   @Test
   void snapshotPersistsEveryRowProvenanceComplete() {
     OptionsChainService.Chain chain = snapshotService.snapshotNow("NIFTY 50", null);

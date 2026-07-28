@@ -41,8 +41,18 @@ public class OptionsChainService {
    * One strike side. {@code prevOi} is non-null ONLY on the Upstox source (its {@code prev_oi}).
    * {@code vanna}/{@code charm}/{@code vomma} are the second-order greeks (§17.6) — additive,
    * live-only fields surfaced on the chain output; they are NOT persisted to the snapshot table.
+   *
+   * <p>{@code (exchange, tradingsymbol)} is the canonical instrument key (docs/symbol-normalization.md)
+   * and is published as a PAIR so a consumer never has to guess the derivatives exchange from the
+   * root's name — a name-prefix guess silently mis-routes any newly listed BSE root, and downstream
+   * that means a 404'd instrument-meta lookup, an equity-proxy lot size of 1 and a non-lot-aligned
+   * order quantity. Both come straight off the resolved {@code Instrument} the quote was keyed by,
+   * so this costs no extra lookup. NULL only on the captured-snapshot projection
+   * ({@code OptionsAnalyticsController.snapLeg}), which has no instrument row — the live
+   * {@code /options/chain} path always populates both.
    */
   public record Leg(
+      @Schema(types = {"string", "null"}) String exchange,
       String tradingsymbol,
       @Schema(types = {"number", "null"}) BigDecimal ltp,
       @Schema(types = {"number", "null"}) BigDecimal bid,
@@ -392,6 +402,7 @@ public class OptionsChainService {
       }
     }
     return new Leg(
+        instrument.exchange(),
         instrument.tradingsymbol(),
         quote.lastPrice(),
         quote.bid(),

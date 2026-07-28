@@ -23,7 +23,9 @@ class MarketOiClientDerivationTest {
   private final ObjectMapper mapper = new ObjectMapper();
   // The derivation helpers are pure (JsonNode in → carrier out); the RestClient is never exercised.
   private final MarketOiClient client =
-      new MarketOiClient(RestClient.builder(), mapper, MarketCalendar.nse(), "http://unused");
+      new MarketOiClient(
+          RestClient.builder(), mapper, MarketCalendar.nse(),
+          new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), "http://unused");
 
   private JsonNode json(String raw) {
     try {

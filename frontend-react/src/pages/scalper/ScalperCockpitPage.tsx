@@ -17,7 +17,7 @@ import {
   type PaperPosition,
 } from '../../api/paper.ts';
 import { useExpiries, useUnderlyings } from '../../api/instruments.ts';
-import { optionExchange, useOptionChain, type ChainLeg } from '../../api/scalper.ts';
+import { useOptionChain, type ChainLeg } from '../../api/scalper.ts';
 import { useLiveTicks } from '../../api/ticks.ts';
 import { PageHeader } from '../../components/PageHeader.tsx';
 import { BeatBlock, LoadBeat } from '../../components/LoadBeat.tsx';
@@ -193,11 +193,16 @@ export function ScalperCockpitPage() {
     },
   ];
 
+  // The exchange is the LEG's — the instrument master's, published alongside the tradingsymbol as
+  // the canonical pair. It used to be guessed from the underlying's NAME here, and this ticket
+  // submits a real paper order: a wrong exchange 404s the instrument lookup, falls back to a lot-1
+  // equity proxy and books a non-lot-aligned quantity. An unkeyed leg is not pickable at all —
+  // leaving the instrument blank keeps the Place button disabled by its existing ':' guard.
   const pickLeg = (leg: ChainLeg) => {
-    if (!leg.tradingsymbol) return;
+    if (!leg.tradingsymbol || !leg.exchange) return;
     setTicket({
       signalId: null,
-      instrument: `${optionExchange(underlying)}:${leg.tradingsymbol}`,
+      instrument: `${leg.exchange}:${leg.tradingsymbol}`,
       side: 'BUY',
       qty: ticket.qty || '1',
       price: leg.ltp ?? '',
@@ -307,13 +312,13 @@ export function ScalperCockpitPage() {
                     {(chain.data?.rows ?? []).map((r) => (
                       <tr key={r.strike} className="border-t border-ay-border">
                         <td className="px-1 py-0.5">
-                          <button type="button" onClick={() => pickLeg(r.ce)} title="Load this call (CE) strike into the order ticket" className="w-full rounded px-1 py-0.5 text-left tabular-nums text-bull hover:bg-surface-2">
+                          <button type="button" onClick={() => pickLeg(r.ce)} disabled={!r.ce.exchange} title={r.ce.exchange ? 'Load this call (CE) strike into the order ticket' : 'Not pickable — the instrument master has no exchange for this contract'} className="w-full rounded px-1 py-0.5 text-left tabular-nums text-bull hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40">
                             {r.ce.ltp ? money(r.ce.ltp) : '—'}
                           </button>
                         </td>
                         <td className="px-2 py-0.5 text-center tabular-nums font-semibold">{money(r.strike)}</td>
                         <td className="px-1 py-0.5">
-                          <button type="button" onClick={() => pickLeg(r.pe)} title="Load this put (PE) strike into the order ticket" className="w-full rounded px-1 py-0.5 text-right tabular-nums text-bear hover:bg-surface-2">
+                          <button type="button" onClick={() => pickLeg(r.pe)} disabled={!r.pe.exchange} title={r.pe.exchange ? 'Load this put (PE) strike into the order ticket' : 'Not pickable — the instrument master has no exchange for this contract'} className="w-full rounded px-1 py-0.5 text-right tabular-nums text-bear hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40">
                             {r.pe.ltp ? money(r.pe.ltp) : '—'}
                           </button>
                         </td>

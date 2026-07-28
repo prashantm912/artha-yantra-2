@@ -44,6 +44,9 @@ function toChainRows(rows: ChainHistoryRow[]): ChainTableRow[] {
     }
     const leg: ChainTableLeg = {
       leg: {
+        // The captured-snapshot projection has no instrument row, so it carries no exchange — the
+        // same null the backend's snapLeg emits. Time-travel is read-only, so nothing routes off it.
+        exchange: null,
         tradingsymbol: r.tradingsymbol,
         ltp: r.ltp,
         bid: r.bid,

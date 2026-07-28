@@ -51,6 +51,19 @@ public class MarketOiClient {
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
   private final MarketCalendar calendar;
+  /** Chain legs with no resolvable canonical exchange (see {@link #addLeg}) — a live alarm. */
+  private final io.micrometer.core.instrument.Counter legsWithoutExchange;
+
+  /**
+   * The runtime capability handshake (cross-vendor review Major 3). True while the market-data we
+   * are talking to publishes {@code exchange} on chain legs; false the moment one arrives without
+   * it — i.e. market-data is older than this build and every leg is costing an extra master lookup.
+   * Exposed as {@code ay_scalper_chain_exchange_capability} so the degraded path is a dashboard
+   * fact, not something inferred from a suddenly quiet tape. Tracks the LAST leg observed, so it
+   * self-clears as soon as a newer market-data is deployed — no restart needed.
+   */
+  private final java.util.concurrent.atomic.AtomicBoolean chainPublishesExchange =
+      new java.util.concurrent.atomic.AtomicBoolean(true);
 
   /**
    * Short-TTL response memo (audit P1-12): every scalper passing the chart gate on the SAME bar
@@ -71,10 +84,18 @@ public class MarketOiClient {
       RestClient.Builder builder,
       ObjectMapper objectMapper,
       MarketCalendar calendar,
+      io.micrometer.core.instrument.MeterRegistry meterRegistry,
       @Value("${artha.marketdata.base-url}") String baseUrl) {
     this.restClient = builder.baseUrl(baseUrl).build();
     this.objectMapper = objectMapper;
     this.calendar = calendar;
+    this.legsWithoutExchange = meterRegistry.counter("ay_scalper_chain_leg_no_exchange_total");
+    io.micrometer.core.instrument.Gauge.builder(
+            "ay_scalper_chain_exchange_capability",
+            chainPublishesExchange,
+            b -> b.get() ? 1d : 0d)
+        .description("1 while market-data publishes the canonical exchange on each chain leg")
+        .register(meterRegistry);
     this.uriFactory = new org.springframework.web.util.DefaultUriBuilderFactory(baseUrl);
   }
 
@@ -266,13 +287,52 @@ public class MarketOiClient {
     return new ChainSnapshot(LocalDate.parse(expiryRaw), spot, forward, candidates, strikeOi);
   }
 
-  private static void addLeg(
+  /**
+   * Maps one chain-row side to a {@link StrikePicker.Candidate}, resolving its canonical exchange.
+   *
+   * <p>A leg needs a live premium and a solved IV to be a candidate at all. Its canonical
+   * {@code (exchange, tradingsymbol)} key is what makes it <b>tradeable</b>, and the exchange comes
+   * from the instrument master — published on the payload by market-data, which already resolved
+   * the instrument to quote it — and is NEVER inferred from the underlying's name. A name-prefix
+   * guess silently mis-routes any newly listed BSE root, and downstream that means a 404'd
+   * instrument-meta lookup, a lot-1 equity proxy and a non-lot-aligned quantity that also 400s the
+   * Upstox margin call (UDAPI1104).
+   *
+   * <p><b>Absent ⇒ KEEP the candidate with a NULL exchange</b> (cross-vendor review
+   * Critical 1). Dropping it here was an ENTRY-safety reflex applied to a path that also serves
+   * EXITS: this same snapshot feeds the read-only confluence-flip exit oracle, and an absent
+   * decision reads as "do not exit" ({@code SignalEngine.confluenceFlipExit} → {@code
+   * now.isPresent()}), so an open position would have silently lost its CONFLUENCE_FLIP rail. That
+   * inverts the project doctrine: entries need FRESH truth (you can always not enter), exits need
+   * the BEST AVAILABLE truth (you cannot refuse to leave forever). Analytical eligibility and TRADE
+   * eligibility are separate concerns — the null travels with the candidate and {@code
+   * SignalEngine.tradeableLeg} refuses the ENTRY there — and only there does {@code
+   * OptionExchangeResolver} get consulted, because this parse re-runs for every strategy on every
+   * bar (the memo caches the response BODY, not the parsed snapshot), so a per-leg lookup here would
+   * multiply into hundreds of synchronous calls on the single evaluation thread that also drives
+   * EXITS. Loud either way: a WARN naming the symbol plus
+   * {@code ay_scalper_chain_leg_no_exchange_total}.
+   */
+  private void addLeg(
       List<StrikePicker.Candidate> out, BigDecimal strike, Black76.OptionType type, JsonNode leg) {
     BigDecimal ltp = decimal(leg.path("ltp"));
     BigDecimal iv = decimal(leg.path("iv"));
-    if (ltp != null && iv != null && iv.signum() > 0) {
-      out.add(new StrikePicker.Candidate(text(leg.path("tradingsymbol")), strike, type, ltp, iv));
+    if (ltp == null || iv == null || iv.signum() <= 0) {
+      return;
     }
+    String tradingsymbol = text(leg.path("tradingsymbol"));
+    String exchange = text(leg.path("exchange"));
+    boolean fromPayload = exchange != null && !exchange.isBlank();
+    chainPublishesExchange.set(fromPayload);
+    if (!fromPayload) {
+      exchange = null; // a blank is as unkeyed as a missing one — never an empty-string key
+      legsWithoutExchange.increment();
+      log.warn(
+          "chain leg {} (strike {} {}) carries no exchange — retained for read-only exit/confluence"
+              + " evaluation; the entry path resolves it from the instrument master or refuses",
+          tradingsymbol, strike, type);
+    }
+    out.add(new StrikePicker.Candidate(exchange, tradingsymbol, strike, type, ltp, iv));
   }
 
   /**

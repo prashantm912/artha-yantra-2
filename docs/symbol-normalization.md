@@ -50,6 +50,18 @@ tradingsymbol; index derivatives → `NSE`, BSE → `BFO`).
    converted per source at the boundary.
 4. **Underlying-name drift.** Kite dump `name="NIFTY"` → cash `"NIFTY 50"` (`UnderlyingRef`); index →
    `NSE_INDEX|Nifty 50` via the static map.
+5. **An option's derivatives exchange is NOT a function of its root's name.** `NIFTY→NFO`,
+   `SENSEX|BANKEX|FOCIT→BFO` happens to be complete for the roots listed *today*, so a prefix guess
+   passes every test you would think to write — and silently mis-routes the first newly listed BSE
+   root. Downstream that is not benign: the instrument-meta lookup 404s, falls back to an equity
+   proxy with lot size 1, and yields a non-lot-aligned quantity that also 400s the Upstox margin call
+   (`UDAPI1104`). **Resolution order, never a guess at any step:** market-data publishes
+   `(exchange, tradingsymbol)` as a PAIR on every `/options/chain` leg (it already resolved the
+   instrument to quote it, so this costs nothing) → strategy-signal's `OptionExchangeResolver`
+   re-reads the master via `/instruments/search` when an older market-data omits the field, exact
+   tradingsymbol match only, ambiguity refused → still unresolved ⇒ the leg stays visible to
+   read-only analytics but `SignalEngine.tradeableLeg` refuses the ENTRY.
+   `ay_scalper_chain_exchange_capability` reads 0 while market-data omits the field.
 
 ## Resilience + drift detection
 

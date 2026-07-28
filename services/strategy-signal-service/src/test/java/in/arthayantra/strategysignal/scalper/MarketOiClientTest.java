@@ -37,7 +37,11 @@ class MarketOiClientTest {
   private void wire() {
     RestClient.Builder builder = RestClient.builder();
     server = MockRestServiceServer.bindTo(builder).ignoreExpectOrder(true).build();
-    client = new MarketOiClient(builder, new ObjectMapper(), MarketCalendar.nse(), "http://market-data:8081");
+    client =
+        new MarketOiClient(
+            builder, new ObjectMapper(), MarketCalendar.nse(),
+            new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+            "http://market-data:8081");
   }
 
   private void stub(String pathFragment, String json) {
@@ -299,11 +303,11 @@ class MarketOiClientTest {
         "/api/v1/market/options/chain",
         "{\"underlying\":\"NIFTY 50\",\"expiry\":\"2026-06-25\",\"spot\":\"20000\",\"forward\":\"20040\","
             + "\"rows\":["
-            + "{\"strike\":\"19900\",\"ce\":{\"tradingsymbol\":\"NIFTY19900CE\",\"ltp\":\"180\",\"iv\":\"0.14\"},"
-            + "\"pe\":{\"tradingsymbol\":\"NIFTY19900PE\",\"ltp\":\"60\",\"iv\":\"0.15\"}},"
+            + "{\"strike\":\"19900\",\"ce\":{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY19900CE\",\"ltp\":\"180\",\"iv\":\"0.14\"},"
+            + "\"pe\":{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY19900PE\",\"ltp\":\"60\",\"iv\":\"0.15\"}},"
             // a leg with null iv is dropped (cannot price it)
-            + "{\"strike\":\"20000\",\"ce\":{\"tradingsymbol\":\"NIFTY20000CE\",\"ltp\":\"110\",\"iv\":null},"
-            + "\"pe\":{\"tradingsymbol\":\"NIFTY20000PE\",\"ltp\":\"120\",\"iv\":\"0.13\"}}]}");
+            + "{\"strike\":\"20000\",\"ce\":{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY20000CE\",\"ltp\":\"110\",\"iv\":null},"
+            + "\"pe\":{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY20000PE\",\"ltp\":\"120\",\"iv\":\"0.13\"}}]}");
 
     MarketOiClient.ChainSnapshot snap = client.chain(UNDERLYING).orElseThrow();
 

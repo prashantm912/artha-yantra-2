@@ -128,28 +128,88 @@ class OptionAtmPinnerTest {
         .doesNotContain("NIFTY100CE");
   }
 
+  /**
+   * The discriminating case (cross-vendor review Major 4): the leg's exchange CONTRADICTS the root's
+   * name. The underlying is {@code NIFTY 50} and every symbol starts with {@code NIFTY}, so the
+   * removed helper — which mapped {@code SENSEX→BFO}, {@code *NIFTY*→NFO} and THREW on anything else
+   * — pins {@code NFO:*}. Only reading the master-sourced value on each leg pins {@code BFO:*}.
+   *
+   * <p>This is what makes the pinner root-agnostic rather than merely correct for today's two
+   * configured underlyings: a newly listed BSE root used to be unpinnable at all (the helper threw
+   * once per cycle, forever), so the contracts were simply never captured.
+   */
+  @Test
+  void theExchangeIsTheMastersEvenWhenItContradictsTheRootsName() {
+    OptionsChainService chains = mock(OptionsChainService.class);
+    when(chains.expiriesWithin("NIFTY 50", 7)).thenReturn(List.of(NEAR));
+    when(chains.chain("NIFTY 50", NEAR)).thenReturn(chain("NIFTY 50", NEAR, 100, "BFO"));
+
+    Map<String, InstrumentTokenResolver.TokenInfo> master = new HashMap<>();
+    addOptionKeys(master, "BFO", "NIFTY 50", 100);
+    SubscriptionRegistry registry = registry(master, 3_000);
+
+    OptionAtmPinner pinner =
+        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+    pinner.repin();
+
+    assertThat(pinner.pinnedContracts())
+        .as("a name-prefix guess would have pinned NFO for every one of these NIFTY-named symbols")
+        .isNotEmpty()
+        .allSatisfy(key -> assertThat(key.exchange()).isEqualTo("BFO"));
+    assertThat(pinner.pinnedContracts().stream().map(InstrumentKey::canonical).toList())
+        .containsExactlyInAnyOrderElementsOf(expectedSymbols("BFO", "NIFTY", 100));
+  }
+
+  /** A leg the master gave no exchange for is SKIPPED, not guessed — an unresolvable pin is silent. */
+  @Test
+  void aLegWithNoMasterExchangeIsSkippedRatherThanGuessed() {
+    OptionsChainService chains = mock(OptionsChainService.class);
+    when(chains.expiriesWithin("NIFTY 50", 7)).thenReturn(List.of(NEAR));
+    when(chains.chain("NIFTY 50", NEAR)).thenReturn(chain("NIFTY 50", NEAR, 100, null));
+
+    Map<String, InstrumentTokenResolver.TokenInfo> master = new HashMap<>();
+    addOptionKeys(master, "NFO", "NIFTY 50", 100);
+    SubscriptionRegistry registry = registry(master, 3_000);
+
+    OptionAtmPinner pinner =
+        new OptionAtmPinner(registry, chains, List.of("NIFTY 50"), 5, 7, new SimpleMeterRegistry());
+    pinner.repin();
+
+    assertThat(pinner.pinnedContracts())
+        .as("guessing NFO here would pin a key the registry cannot vouch for")
+        .isEmpty();
+  }
+
   private static SubscriptionRegistry registry(Map<String, InstrumentTokenResolver.TokenInfo> master, int cap) {
     return new SubscriptionRegistry(key -> Optional.ofNullable(master.get(key.canonical())), cap, new SimpleMeterRegistry());
   }
 
   private static OptionsChainService.Chain chain(String underlying, LocalDate expiry, int center) {
+    return chain(underlying, expiry, center, underlying.equals("NIFTY 50") ? "NFO" : "BFO");
+  }
+
+  /** Same chain, with the leg exchange stated explicitly — lets a test contradict the root's name. */
+  private static OptionsChainService.Chain chain(
+      String underlying, LocalDate expiry, int center, String legExchange) {
     List<OptionsChainService.StrikeRow> rows = new ArrayList<>();
     for (int offset = -10; offset <= 10; offset++) {
       int strike = center + offset * 10;
       rows.add(new OptionsChainService.StrikeRow(
           BigDecimal.valueOf(strike),
-          leg(underlying, strike, "CE"),
-          leg(underlying, strike, "PE")));
+          leg(underlying, strike, "CE", legExchange),
+          leg(underlying, strike, "PE", legExchange)));
     }
     return new OptionsChainService.Chain(
         underlying, expiry, BigDecimal.valueOf(center), null, "TEST", BigDecimal.ZERO, null,
         false, OffsetDateTime.parse("2026-07-20T10:00:00+05:30"), rows);
   }
 
-  private static OptionsChainService.Leg leg(String underlying, int strike, String type) {
+  private static OptionsChainService.Leg leg(
+      String underlying, int strike, String type, String exchange) {
     String symbol = underlying.equals("NIFTY 50") ? "NIFTY" : "SENSEX";
-    return new OptionsChainService.Leg(symbol + strike + type, null, null, null, null, null, null,
-        null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    return new OptionsChainService.Leg(exchange, symbol + strike + type, null, null, null,
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+        null, null);
   }
 
   private static void addOptionKeys(Map<String, InstrumentTokenResolver.TokenInfo> master, String exchange, String underlying, int center) {

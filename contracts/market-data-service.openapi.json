@@ -9702,6 +9702,9 @@
       "Leg" : {
         "type" : "object",
         "properties" : {
+          "exchange" : {
+            "type" : [ "string", "null" ]
+          },
           "tradingsymbol" : {
             "type" : "string"
           },
@@ -9769,7 +9772,7 @@
             "type" : [ "string", "null" ]
           }
         },
-        "required" : [ "ask", "bid", "charm", "color", "delta", "gamma", "iv", "ivReason", "ltp", "oi", "prevOi", "priceSource", "rho", "speed", "theta", "tradingsymbol", "vanna", "vega", "volume", "vomma", "zomma" ]
+        "required" : [ "ask", "bid", "charm", "color", "delta", "exchange", "gamma", "iv", "ivReason", "ltp", "oi", "prevOi", "priceSource", "rho", "speed", "theta", "tradingsymbol", "vanna", "vega", "volume", "vomma", "zomma" ]
       },
       "StrikeRow" : {
         "type" : "object",

@@ -7,6 +7,7 @@ import type { OiInterpretation } from '../core/oiInterpretation.ts';
 function leg(oi: number, ltp: string, interp: OiInterpretation): ChainTableLeg {
   return {
     leg: {
+      exchange: 'NFO',
       tradingsymbol: 'X',
       ltp,
       bid: null,

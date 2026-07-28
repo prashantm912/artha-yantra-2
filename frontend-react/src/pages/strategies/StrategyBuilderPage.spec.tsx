@@ -25,6 +25,7 @@ const chain: ChainTable = {
 
 function makeLeg(sym: string, ltp: string, delta: string) {
   return {
+    exchange: 'NFO',
     tradingsymbol: sym,
     ltp,
     bid: null,

@@ -6,6 +6,8 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from './client.ts';
 
 export interface ChainLeg {
+  /** The instrument master's exchange — the other half of the canonical key. Never guessed here. */
+  exchange: string | null;
   tradingsymbol: string;
   ltp: string | null;
   oi: number | null;
@@ -51,9 +53,4 @@ export function useLatestTick(symbol: string, enabled: boolean) {
     refetchInterval: 3000,
     select: (m) => m[symbol] ?? null,
   });
-}
-
-/** NSE underlyings settle on NFO; the BSE indices (SENSEX / BANKEX) settle on BFO. */
-export function optionExchange(underlying: string): string {
-  return /SENSEX|BANKEX/i.test(underlying) ? 'BFO' : 'NFO';
 }

@@ -51,8 +51,21 @@ public class MarketOiClient {
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
   private final MarketCalendar calendar;
-  /** Chain legs dropped for a missing canonical exchange (see {@link #addLeg}) — a live alarm. */
+  /** Chain legs with no resolvable canonical exchange (see {@link #addLeg}) — a live alarm. */
   private final io.micrometer.core.instrument.Counter legsWithoutExchange;
+
+  /**
+   * The runtime capability handshake (cross-vendor review Major 3). True while the market-data we
+   * are talking to publishes {@code exchange} on chain legs; false the moment one arrives without
+   * it — i.e. market-data is older than this build and every leg is costing an extra master lookup.
+   * Exposed as {@code ay_scalper_chain_exchange_capability} so the degraded path is a dashboard
+   * fact, not something inferred from a suddenly quiet tape. Tracks the LAST leg observed, so it
+   * self-clears as soon as a newer market-data is deployed — no restart needed.
+   */
+  private final java.util.concurrent.atomic.AtomicBoolean chainPublishesExchange =
+      new java.util.concurrent.atomic.AtomicBoolean(true);
+
+  private final OptionExchangeResolver exchangeResolver;
 
   /**
    * Short-TTL response memo (audit P1-12): every scalper passing the chart gate on the SAME bar
@@ -74,11 +87,19 @@ public class MarketOiClient {
       ObjectMapper objectMapper,
       MarketCalendar calendar,
       io.micrometer.core.instrument.MeterRegistry meterRegistry,
+      OptionExchangeResolver exchangeResolver,
       @Value("${artha.marketdata.base-url}") String baseUrl) {
     this.restClient = builder.baseUrl(baseUrl).build();
     this.objectMapper = objectMapper;
     this.calendar = calendar;
+    this.exchangeResolver = exchangeResolver;
     this.legsWithoutExchange = meterRegistry.counter("ay_scalper_chain_leg_no_exchange_total");
+    io.micrometer.core.instrument.Gauge.builder(
+            "ay_scalper_chain_exchange_capability",
+            chainPublishesExchange,
+            b -> b.get() ? 1d : 0d)
+        .description("1 while market-data publishes the canonical exchange on each chain leg")
+        .register(meterRegistry);
     this.uriFactory = new org.springframework.web.util.DefaultUriBuilderFactory(baseUrl);
   }
 
@@ -271,22 +292,31 @@ public class MarketOiClient {
   }
 
   /**
-   * Maps one chain-row side to a tradeable {@link StrikePicker.Candidate}, or drops it.
+   * Maps one chain-row side to a {@link StrikePicker.Candidate}, resolving its canonical exchange.
    *
-   * <p>A leg is tradeable only with a live premium, a solved IV <b>and</b> its canonical
-   * {@code (exchange, tradingsymbol)} key. The exchange is taken from the payload — the instrument
-   * master is the only thing that knows it — and is NEVER inferred from the underlying's name.
+   * <p>A leg needs a live premium and a solved IV to be a candidate at all. Its canonical
+   * {@code (exchange, tradingsymbol)} key is what makes it <b>tradeable</b>, and the exchange comes
+   * from the instrument master — published on the payload by market-data, which already resolved
+   * the instrument to quote it — and is NEVER inferred from the underlying's name. A name-prefix
+   * guess silently mis-routes any newly listed BSE root, and downstream that means a 404'd
+   * instrument-meta lookup, a lot-1 equity proxy and a non-lot-aligned quantity that also 400s the
+   * Upstox margin call (UDAPI1104).
    *
-   * <p><b>Missing exchange ⇒ DROP, never guess (fail-closed).</b> This is a money path: the stamped
-   * exchange drives paper position sizing and, with {@code artha.scalper.execution=live}, real
-   * broker order routing. A wrong exchange 404s the instrument-meta lookup, falls back to an equity
-   * proxy with lot size 1, and produces a non-lot-aligned quantity that also 400s the Upstox margin
-   * call (UDAPI1104). Dropping costs at most a missed entry; guessing books a wrong-sized trade —
-   * and an entry you can always decline to take, a mis-routed one you cannot take back. If EVERY
-   * leg lacks an exchange (a market-data too old to publish it), the snapshot ends up with no
-   * candidates and {@link #toChainSnapshot} returns null, so the seam blocks exactly as it already
-   * does for an unavailable chain. The drop is loud: a WARN naming the symbol plus
-   * {@code ay_scalper_chain_leg_no_exchange_total}.
+   * <p><b>Absent on the payload ⇒ ask the master directly, still never guess.</b> The field is new,
+   * so a strategy-signal newer than its market-data would see it on no leg at all and refuse every
+   * entry (see {@link OptionExchangeResolver} for why that failure mode is worse than the bug being
+   * fixed). The fallback re-reads the same authority through an endpoint that predates the field.
+   *
+   * <p><b>Still unresolvable ⇒ KEEP the candidate with a NULL exchange</b> (cross-vendor review
+   * Critical 1). Dropping it here was an ENTRY-safety reflex applied to a path that also serves
+   * EXITS: this same snapshot feeds the read-only confluence-flip exit oracle, and an absent
+   * decision reads as "do not exit" ({@code SignalEngine.confluenceFlipExit} → {@code
+   * now.isPresent()}), so an open position would have silently lost its CONFLUENCE_FLIP rail. That
+   * inverts the project doctrine: entries need FRESH truth (you can always not enter), exits need
+   * the BEST AVAILABLE truth (you cannot refuse to leave forever). Analytical eligibility and TRADE
+   * eligibility are separate concerns — the null travels with the candidate and {@code
+   * SignalEngine.tradeableLeg} refuses the ENTRY there. Loud either way: a WARN naming the symbol
+   * plus {@code ay_scalper_chain_leg_no_exchange_total}.
    */
   private void addLeg(
       List<StrikePicker.Candidate> out, BigDecimal strike, Black76.OptionType type, JsonNode leg) {
@@ -297,21 +327,24 @@ public class MarketOiClient {
     }
     String tradingsymbol = text(leg.path("tradingsymbol"));
     String exchange = text(leg.path("exchange"));
-    if (exchange == null || exchange.isBlank()) {
-      // KEPT, not dropped — with a NULL exchange, which is what makes it untradeable downstream
-      // (cross-vendor review Critical 1). Dropping it here was an ENTRY-safety reflex applied to a
-      // path that also serves EXITS: this same snapshot feeds the read-only confluence-flip exit
-      // oracle, and an absent decision reads as "do not exit" (SignalEngine.confluenceFlipExit ->
-      // now.isPresent()). So an open position would have silently lost its CONFLUENCE_FLIP rail for
-      // as long as any leg lacked an exchange. That inverts the project doctrine: entries need fresh
-      // truth (you can always NOT enter), exits need the BEST AVAILABLE truth (you cannot refuse to
-      // leave forever). Analytical eligibility and TRADE eligibility are now separate concerns —
-      // the null exchange travels with the candidate and the entry/stamp path refuses it there.
-      legsWithoutExchange.increment();
-      log.warn(
-          "chain leg {} (strike {} {}) carries no exchange — retained for read-only exit/confluence"
-              + " evaluation but NOT tradeable; the exchange comes from the instrument master only",
-          tradingsymbol, strike, type);
+    boolean fromPayload = exchange != null && !exchange.isBlank();
+    chainPublishesExchange.set(fromPayload);
+    if (!fromPayload) {
+      exchange = exchangeResolver.resolve(tradingsymbol);
+      if (exchange == null || exchange.isBlank()) {
+        exchange = null;
+        legsWithoutExchange.increment();
+        log.warn(
+            "chain leg {} (strike {} {}) has no exchange on the payload and the instrument master"
+                + " could not resolve one — retained for read-only exit/confluence evaluation but"
+                + " NOT tradeable",
+            tradingsymbol, strike, type);
+      } else {
+        log.warn(
+            "chain leg {} carried no exchange — resolved {} from the instrument master. market-data"
+                + " is older than this build; deploy it to restore the zero-lookup path",
+            tradingsymbol, exchange);
+      }
     }
     out.add(new StrikePicker.Candidate(exchange, tradingsymbol, strike, type, ltp, iv));
   }

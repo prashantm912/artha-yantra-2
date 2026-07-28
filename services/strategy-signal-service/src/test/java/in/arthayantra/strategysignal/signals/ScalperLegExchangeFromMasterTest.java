@@ -46,7 +46,13 @@ class ScalperLegExchangeFromMasterTest {
     meters = new SimpleMeterRegistry();
     client =
         new MarketOiClient(
-            builder, new ObjectMapper(), MarketCalendar.nse(), meters, "http://market-data:8081");
+            builder,
+            new ObjectMapper(),
+            MarketCalendar.nse(),
+            meters,
+            new in.arthayantra.strategysignal.scalper.OptionExchangeResolver(
+                builder, "http://market-data:8081"),
+            "http://market-data:8081");
   }
 
   /**
@@ -77,8 +83,47 @@ class ScalperLegExchangeFromMasterTest {
   }
 
   /**
-   * A leg with no exchange is RETAINED for analysis but is NOT tradeable — the two are separate
-   * concerns (cross-vendor review Critical 1).
+   * The DEPLOY-ORDERING case (cross-vendor review Major 3). A market-data older than this build
+   * publishes no {@code exchange} on any leg. Without a second route to the master, every entry
+   * would be refused for as long as that lasted — scalpers silently stop firing, which looks exactly
+   * like a quiet tape. {@link
+   * in.arthayantra.strategysignal.scalper.OptionExchangeResolver} re-reads the SAME authority
+   * through {@code /instruments/search}, an endpoint that predates the new field, so the leg is
+   * still tradeable and still master-sourced — never a name guess.
+   */
+  @Test
+  void anOlderMarketDataIsHandledByResolvingTheExchangeFromTheMaster() {
+    wire();
+    stubChain(
+        "NIFTY 50",
+        legJson(null, "NIFTY26AUG25000CE", "152.65"),
+        legJson(null, "NIFTY26AUG25000PE", "140.10"));
+    // The master's answer CONTRADICTS a prefix guess, so only a real lookup can produce it.
+    stubSearch("NIFTY26AUG25000CE", "[{\"exchange\":\"BFO\",\"tradingsymbol\":\"NIFTY26AUG25000CE\"}]");
+    stubSearch("NIFTY26AUG25000PE", "[{\"exchange\":\"BFO\",\"tradingsymbol\":\"NIFTY26AUG25000PE\"}]");
+
+    List<StrikePicker.Candidate> candidates = client.chain("NIFTY 50").orElseThrow().candidates();
+
+    assertThat(candidates).hasSize(2).allSatisfy(c -> assertThat(c.exchange()).isEqualTo("BFO"));
+    assertThat(
+            SignalEngine.tradeableLeg(
+                    "NFO", "NIFTY26AUGFUT", new BigDecimal("24092.00"), decision(candidates.get(0)))
+                .exchange())
+        .as("a resolved leg is tradeable — the deploy window costs a lookup, not the entry")
+        .isEqualTo("BFO");
+    assertThat(meters.counter("ay_scalper_chain_leg_no_exchange_total").count())
+        .as("nothing was lost, so the loss counter must stay at zero")
+        .isZero();
+    assertThat(meters.get("ay_scalper_chain_exchange_capability").gauge().value())
+        .as("the degraded upstream is a dashboard fact, not an inference from a quiet tape")
+        .isZero();
+    server.verify();
+  }
+
+  /**
+   * Both routes exhausted: the payload omits the exchange AND the master cannot resolve it. The leg
+   * is RETAINED for analysis but is NOT tradeable — the two are separate concerns (cross-vendor
+   * review Critical 1).
    *
    * <p>Dropping it at the chain boundary was an ENTRY-safety reflex applied to a path that also
    * serves EXITS: this same snapshot feeds the read-only confluence-flip exit oracle, and an absent
@@ -90,12 +135,15 @@ class ScalperLegExchangeFromMasterTest {
    * SignalEngine#tradeableLeg} is what refuses it for ENTRY.
    */
   @Test
-  void aLegWithoutAnExchangeSurvivesForAnalysisButIsNotTradeable() {
+  void anUnresolvableLegSurvivesForAnalysisButIsNotTradeable() {
     wire();
     stubChain(
         "NIFTY 50",
         legJson(null, "NIFTY26AUG25000CE", "152.65"),
         legJson(null, "NIFTY26AUG25000PE", "140.10"));
+    // The master knows nothing about either symbol — no exact match, so no exchange.
+    stubSearch("NIFTY26AUG25000CE", "[]");
+    stubSearch("NIFTY26AUG25000PE", "[]");
 
     MarketOiClient.ChainSnapshot snapshot = client.chain("NIFTY 50").orElseThrow();
 
@@ -104,7 +152,6 @@ class ScalperLegExchangeFromMasterTest {
         .as("candidates are retained so the confluence-flip EXIT oracle can still evaluate")
         .hasSize(2)
         .allSatisfy(c -> assertThat(c.exchange()).isNull());
-    // ...and the drop that would have hidden them is still counted for alerting.
     assertThat(meters.counter("ay_scalper_chain_leg_no_exchange_total").count()).isEqualTo(2.0);
 
     // TRADE eligibility: the very same candidate is refused at the entry/stamp boundary.
@@ -117,6 +164,34 @@ class ScalperLegExchangeFromMasterTest {
     server.verify();
   }
 
+  /**
+   * An AMBIGUOUS master answer is refused, not broken arbitrarily. {@code (exchange, tradingsymbol)}
+   * is the master's primary key, so the same symbol on two exchanges is a genuine ambiguity — and
+   * {@code /search} is a RANKED trigram typeahead whose order is not a contract, so "take the first"
+   * would be a coin toss on a money path.
+   */
+  @Test
+  void anAmbiguousMasterAnswerIsRefusedRatherThanPickedFrom() {
+    wire();
+    stubChain("NIFTY 50", legJson(null, "NIFTY26AUG25000CE", "152.65"), legJson("NFO", "NIFTY26AUG25000PE", "140.10"));
+    stubSearch(
+        "NIFTY26AUG25000CE",
+        "[{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY26AUG25000CE\"},"
+            + "{\"exchange\":\"BFO\",\"tradingsymbol\":\"NIFTY26AUG25000CE\"}]");
+
+    List<StrikePicker.Candidate> candidates = client.chain("NIFTY 50").orElseThrow().candidates();
+    StrikePicker.Candidate ambiguous =
+        candidates.stream().filter(c -> c.tradingsymbol().endsWith("CE")).findFirst().orElseThrow();
+
+    assertThat(ambiguous.exchange()).isNull();
+    assertThat(
+            SignalEngine.tradeableLeg(
+                "NFO", "NIFTY26AUGFUT", new BigDecimal("24092.00"), decision(ambiguous)))
+        .isNull();
+    assertThat(meters.counter("ay_scalper_chain_leg_no_exchange_total").count()).isEqualTo(1.0);
+    server.verify();
+  }
+
   /** A blank exchange is treated exactly like a missing one — no empty-string instrument keys. */
   @Test
   void aBlankExchangeIsAlsoUntradeable() {
@@ -125,6 +200,7 @@ class ScalperLegExchangeFromMasterTest {
         "NIFTY 50",
         legJson("", "NIFTY26AUG25000CE", "152.65"),
         legJson("NFO", "NIFTY26AUG25000PE", "140.10"));
+    stubSearch("NIFTY26AUG25000CE", "[]");
 
     List<StrikePicker.Candidate> candidates = client.chain("NIFTY 50").orElseThrow().candidates();
 
@@ -166,7 +242,21 @@ class ScalperLegExchangeFromMasterTest {
     assertThat(stamped.tradingsymbol()).isEqualTo(symbol);
     assertThat(stamped.premium()).isEqualByComparingTo("152.65");
     assertThat(meters.counter("ay_scalper_chain_leg_no_exchange_total").count()).isZero();
+    assertThat(meters.get("ay_scalper_chain_exchange_capability").gauge().value())
+        .as("market-data published it, so the capability gauge reads healthy")
+        .isEqualTo(1.0);
+    // No /instruments/search was stubbed: the mock server fails an unexpected request, so this
+    // asserting-by-omission IS the zero-extra-lookup claim on the emission hot path.
     server.verify();
+  }
+
+  /** One {@code /instruments/search} answer — the master's second route, used only as a fallback. */
+  private void stubSearch(String tradingsymbol, String rowsJson) {
+    server
+        .expect(
+            ExpectedCount.once(),
+            requestTo(containsString("/api/v1/instruments/search?q=" + tradingsymbol)))
+        .andRespond(withSuccess(rowsJson, MediaType.APPLICATION_JSON));
   }
 
   private void stubChain(String underlying, String ce, String pe) {

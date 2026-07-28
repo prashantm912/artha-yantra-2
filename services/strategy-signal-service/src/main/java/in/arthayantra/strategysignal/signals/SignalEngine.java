@@ -137,9 +137,13 @@ public class SignalEngine {
    * leg by market-data and carried through the pick untouched. It is deliberately NOT derived from
    * the underlying's name: this value stamps {@code signals.tradeable_exchange}, which drives paper
    * position sizing and (with {@code artha.scalper.execution=live}) live broker order routing, and a
-   * name-prefix guess silently mis-routes any newly listed BSE root. A candidate without an exchange
-   * cannot exist — {@code MarketOiClient.addLeg} drops such a leg at the chain boundary — so there is
-   * no fallback here by construction.
+   * name-prefix guess silently mis-routes any newly listed BSE root.
+   *
+   * <p>Returns {@code null} when the picked candidate has no exchange — the ENTRY is then refused by
+   * the caller. That is the LAST of three chances to get it right, and the only one that may say no:
+   * market-data publishes it per leg, {@code OptionExchangeResolver} re-reads the master when an
+   * older market-data omits it, and only then does the candidate arrive here unresolved. Refusing
+   * costs one missed entry; stamping a guess books a wrong-sized, possibly mis-routed trade.
    */
   static TradeableLeg tradeableLeg(
       String signalExchange,

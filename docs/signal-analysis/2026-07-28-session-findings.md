@@ -535,6 +535,46 @@ scheduled deploy task, not to this analysis run** (this run is read-only and doe
 If the post-14:45 context-less tail makes every probe read uninformative after the restart, that must be
 recorded as **UNOBSERVABLE**, not as a pass.
 
+#### 6.3.1 ✅ RESOLVED — deployed 16:43:29 IST, post-fix label observed live
+
+The scheduled task (`deploy-dot-canary-s24-fix-post-close`) completed after this analysis run. Container
+recreated **2026-07-28 16:43:29 +0530**, healthy, secret mount verified a real 32-byte file (not the
+worktree crash-loop directory). Probe at 16:44:56 IST, 40 context-bearing rows — the *same* window size
+as §6.3's pre-fix read, so the pair is directly comparable:
+
+| dot | pre-fix, 16:07 IST | post-fix, 16:44 IST |
+|---|---|---|
+| `oi_spurt_price` | `input dead across 40 context-bearing rejections` ⚠ | **`inert by design — monthly index-expiry day, OI reads S24-suppressed (not an outage)`** ✅ |
+| `futures_oi` / `underlying_oi` | `NEUTRAL by design — …` ✅ | `inert by design — …` ✅ (wording renamed) |
+
+Verbatim:
+
+```json
+{"dot":"oi_spurt_price","alive":false,"required":false,"detail":"inert by design — monthly index-expiry day, OI reads S24-suppressed (not an outage)"}
+```
+
+`NEUTRAL by design` no longer appears anywhere in the response; exactly **3** dots carry `inert by design`
+— the intended `{futures_oi, underlying_oi, oi_spurt_price}` set. **Verdict: PASS**, on the endpoint payload
+— not on container health.
+
+**Not the T17 tail case.** `breadth`, `fii` and `vix` all read `alive` at 16:44, so the window was
+context-bearing and the by-design label is a real observation, not the all-`UNINFORMATIVE` degenerate
+reading §6.3 warned would have to be recorded as UNOBSERVABLE.
+
+**Half (b) executed but is not discriminated by this observation.** The per-root gate ran — `allRowsSuppressed`
+requires *every* sampled row's own root to be suppressed, and it evaluated true — but on an NSE-only monthly
+expiry a blanket `nse || bse` test yields the same output. Its discriminating case (a SENSEX-rooted row
+staying unsuppressed so a genuine OI outage there still pages) needs a window mixing both roots and remains
+**unobserved**. §6.3's finding that all 1,068 rows were `NIFTY 50`-rooted is exactly why.
+
+⚠ **Live strategy-signal now runs `edd2a2b1`, NOT main HEAD.** Main had moved three commits past #1073 by
+deploy time and the live image predated *all* of them, so building at HEAD would have shipped
+[#1071](https://github.com/prashantm912/artha-yantra-2/pull/1071) — whose market-data and frontend halves
+would have stayed undeployed, a partial cross-service deploy including a contract change — plus
+[#1076](https://github.com/prashantm912/artha-yantra-2/pull/1076). The deploy therefore pinned the exact
+merge commit `edd2a2b1`, a strict descendant of what was live (#1067), so nothing was reverted. **#1071 and
+#1076 remain undeployed on live strategy-signal** — the next deployer must not assume live == main.
+
 ### 6.4 The 07-28 live-health carry-list, discharged
 
 | # | carry item | outcome |
@@ -544,7 +584,7 @@ recorded as **UNOBSERVABLE**, not as a pass.
 | 3 | Re-check `oi_spurt` at EOD against 07-27's 9.9% | ✅ **0/1,068 — S24-inert, says nothing about #991.** Re-check on the next NON-expiry session (§7 T22-watch) |
 | 4 | Re-run the §3.15 phantom-candle probe at EOD | ✅ **0 rows session-wide** — 4th clean session (§4) |
 | 5 | Derive the signal contract properly per §3.18 | ✅ Done — `NIFTY26AUGFUT`, derived from `context.chart.close` against candidate day-ranges (header) |
-| 6 | Confirm the #1073 post-close deploy + the `inert by design` label | ⚠ **NOT deployed at 16:07 IST**; pre-fix defect captured live instead (§6.3). Verification passes to the deploy task |
+| 6 | Confirm the #1073 post-close deploy + the `inert by design` label | ✅ **PASS** — deployed 16:43:29 IST, label observed live at 16:44 (§6.3.1). Pre-fix defect captured at 16:07 first (§6.3), giving a same-window before/after pair |
 | 7 | Re-check the host-clock guard at EOD | ✅ **<0.3 s** drift (§4) |
 
 ### 6.5 Method addendum → README §3.20
@@ -618,9 +658,10 @@ session with a sub-threshold composite cap is not a clean forward session for en
 - **§6.1's "the fixed signature did not recur" is one session.** A single clean negative control on the
   09:15 bucket does not close T23, and the count tripling is the countervailing observation in the same
   data.
-- **#1073's status is reported as observed at 16:07 IST** (`RestartCount 0`, pre-fix labels live). It may
-  well have deployed minutes later; this file makes no claim about the post-deploy state and does not
-  substitute for the deploy task's own verification.
+- **#1073's status is reported as observed at 16:07 IST** (`RestartCount 0`, pre-fix labels live). The
+  deploy landed at 16:43:29 and its own verification is folded in at §6.3.1 — added after this analysis
+  run closed, and the only part of this file not measured by it. Its half-(b) limit stands: the per-root
+  keying is **unobserved**, not verified.
 - **The 09:30 and 15:00–15:30 rejection holes are ruled out as stalls via the eval counters** (§1.2), per
   §3.11's honesty limit — an empty bucket is never by itself proof of a dead engine, and here it is proof
   of nothing more than a narrow trade window.

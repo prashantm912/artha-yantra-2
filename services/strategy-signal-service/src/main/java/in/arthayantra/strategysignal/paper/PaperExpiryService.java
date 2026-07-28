@@ -89,8 +89,11 @@ public class PaperExpiryService {
         continue;
       }
       try {
-        settleOne(pos, info.get());
-        settled++;
+        // Count only what THIS pass settled. A concurrent closer winning the CAS returns false, and
+        // counting it anyway reported someone else's exit as this sweep's own (§9-05).
+        if (settleOne(pos, info.get())) {
+          settled++;
+        }
       } catch (Exception e) {
         log.warn("expiry settlement failed for position {}: {}", pos.id(), e.getMessage());
       }
@@ -155,8 +158,7 @@ public class PaperExpiryService {
           "stock F&O paper position {} {}:{} settled late off its expiry-day close — a real position"
               + " would go to physical delivery / auction (never modeled)",
           pos.id(), pos.exchange(), pos.tradingsymbol());
-      paper.settleExpiry(pos, close.get(), false);
-      return true;
+      return paper.settleExpiry(pos, close.get(), false).isPresent();
     }
     // Index derivatives cash-settle vs the EXPIRY-day SPOT close (a documented approximation).
     Optional<BigDecimal> spot =
@@ -167,11 +169,10 @@ public class PaperExpiryService {
       return false;
     }
     if (info.instrumentClass() == InstrumentClass.OPTION) {
-      paper.settleExpiry(pos, intrinsic(info.optionType(), spot.get(), info.strike()), true);
-    } else {
-      paper.settleExpiry(pos, spot.get(), false);
+      return paper.settleExpiry(pos, intrinsic(info.optionType(), spot.get(), info.strike()), true)
+          .isPresent();
     }
-    return true;
+    return paper.settleExpiry(pos, spot.get(), false).isPresent();
   }
 
   /**
@@ -181,7 +182,7 @@ public class PaperExpiryService {
    * what the doctrine forbids ("never reintroduce an avgEntryPrice breakeven fallback on a close
    * path"), so a symbol that has NEVER ticked is left durably OPEN + alerted, not closed at fiction.
    */
-  public void settleOne(PositionRow pos, ContractInfo info) {
+  public boolean settleOne(PositionRow pos, ContractInfo info) {
     if (!info.indexUnderlying()) {
       // stock F&O: physical delivery is never modeled — close with the warning. A null reference
       // delegates the exit price to PaperService.doSettle's #694 fallback: the position's OWN last
@@ -193,19 +194,17 @@ public class PaperExpiryService {
           pos.id(),
           pos.exchange(),
           pos.tradingsymbol());
-      paper.settleExpiry(pos, null, false);
-      return;
+      return paper.settleExpiry(pos, null, false).isPresent();
     }
     // Index derivatives cash-settle vs the SPOT LTP (a documented approximation — Kite exposes no
     // settlement feed). Resolve the spot with the #694 close-path semantics (last REAL spot at any
     // age; refuse only when the spot has NEVER ticked) — see resolveSettlementSpot.
     BigDecimal spot = resolveSettlementSpot(pos, info);
     if (info.instrumentClass() == InstrumentClass.OPTION) {
-      paper.settleExpiry(pos, intrinsic(info.optionType(), spot, info.strike()), true);
-    } else {
-      // index future: cash-settle at the spot LTP at expiry close
-      paper.settleExpiry(pos, spot, false);
+      return paper.settleExpiry(pos, intrinsic(info.optionType(), spot, info.strike()), true).isPresent();
     }
+    // index future: cash-settle at the spot LTP at expiry close
+    return paper.settleExpiry(pos, spot, false).isPresent();
   }
 
   /**

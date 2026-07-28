@@ -86,6 +86,56 @@ and leaves the SENSEX family dormant **for a different reason** — budget, not 
 owner decision, chipped as `task_79b20900`; defect 4's new observability is what makes it visible
 rather than silent.
 
+## First live session after the fix — 2026-07-28, INCONCLUSIVE by absence of fires
+
+Verified read-only at **16:18 IST** (post-close), scheduled check `verify-scalper-paper-first-open`.
+The running `ay-strategy-signal-service` started **2026-07-28 03:10:01 IST**, three minutes after
+#1067 merged (`2f92558e`, 03:07:18 IST), so the session ran entirely on the fixed build.
+
+**No scalper fired, so the fix is still unproven end to end.** That is one of the two healthy
+outcomes, not a failure — but it is also not evidence:
+
+| Probe | Result |
+|---|---|
+| `strategy.signals` today, any book | **0 rows** (scalper: 0) |
+| `strategy.paper_positions` / `paper_orders` where `book='scalper'` | **0 rows** — still no scalper row has ever existed |
+| `paper_order_rejections` where `reason='ZERO_SIZE'` | **0 rows**; table present and queryable (defect 4's observability is deployed, just unexercised) |
+| Logs, 10 h, `zero-sized\|refusing to size\|paper position not opened` | no hits |
+
+The zero is mechanical, not starvation — the engine evaluated **3,570** times and the reload line
+reads `38 loaded, 0 unresolved, 0 load errors`:
+
+```
+ay_signal_eval_outcome_total{outcome="chart-gate-failed"}          1982
+ay_signal_eval_outcome_total{outcome="confluence-blocked"}         1350
+ay_signal_eval_outcome_total{outcome="composite-below-threshold"}   238
+ay_signal_eval_outcome_total{outcome="fired"}                         0
+```
+
+Max composite **0.4521** against the 0.600 threshold, rejections spanning 09:19:39–14:58:01 IST —
+consistent with `2026-07-28-session-findings.md` §3.1, which proves arithmetically that a fire was
+impossible on a monthly expiry (cap 10.3/18.8 = 0.5479). **The one session that could have tested
+this path was the one session where no row could clear the gate.**
+
+What still has to be seen on the next scalper fire, in this order — none of it is established yet:
+
+1. `suggested_qty` **NON-NULL** on a scalper ENTRY (defect 1, the root cause).
+2. `tradeable_exchange` = **BFO** for a SENSEX leg, **NFO** for a NIFTY one (defect 2).
+3. qty a whole multiple of the lot — 65 NIFTY, 20 SENSEX.
+4. Either a `paper_positions` row, or a `ZERO_SIZE` rejection row that explains the refusal
+   (defect 4 — the outcome that must never again be silence).
+
+Today gave **no SENSEX sizing evidence**, so the `budget_inr` decision
+(`2026-07-28-scalper-budget-inr-decision.md`, chip `task_79b20900`) is unchanged and still
+un-informed by live data.
+
+Two unrelated deploys held on the same probe: `ay_candle_gate_rejected_total` = **0.0** on a
+trading day, and **0** phantom `TICK_AGG` 1m rows (`volume=0`, o=h=l=c) outside 09:15–15:30.
+
+**Deploy caveat:** that 03:10 IST container predates #1073, #1071 and #1076 (merged 11:06 / 12:52 /
+13:42 IST) — those are on `main` but **not running**, which is the same undeployed state
+`2026-07-28-session-findings.md` §6.3 records for #1073.
+
 ## Open, worth its own look
 
 - **Straddle qty accounting under the lease** — `openSwingEffect` compares read-back against a

@@ -738,7 +738,12 @@ public class PaperService {
     if (!"OPEN".equals(pos.status())) {
       throw new ApiException(409, ErrorCodes.CONFLICT_POSITION_CLOSED, "position already closed");
     }
-    settle(pos, price, "MANUAL");
+    if (settle(pos, price, "MANUAL").isEmpty()) {
+      // Lost the CAS between the status read above and the close. Returning the winner's trade here
+      // made PaperController write a MANUAL_CLOSE audit row for a close this request never performed
+      // — the same 409 the pre-read would have raised a moment earlier, just later (§9-05 review).
+      throw new ApiException(409, ErrorCodes.CONFLICT_POSITION_CLOSED, "position already closed");
+    }
     return positions
         .find(id)
         .map(this::toTradeDto)
@@ -759,15 +764,21 @@ public class PaperService {
    * {@code PaperPositionClosed} event was published outside any tx and its AFTER_COMMIT listeners
    * (the TAKEN-anchor resolver + auto-journal) silently never fired. Self-invoking
    * callers (closePosition/closeForSignal/markToCloseIntraday) simply join their own tx.
+   *
+   * <p><b>Returns empty when THIS call did not perform the close</b> — a concurrent closer won the
+   * CAS below. That distinction used to be invisible: the realized amount came back either way, so a
+   * caller could not tell "I closed it" from "someone else already had". {@link
+   * PaperBracketEvaluator} consequently counted and logged closes it never performed (architecture
+   * candidate §9-05, the CAS-leaks-onto-callers interface leak).
    */
   @Transactional
-  public BigDecimal settle(PositionRow pos, BigDecimal price, String closeReason) {
+  public Optional<BigDecimal> settle(PositionRow pos, BigDecimal price, String closeReason) {
     return doSettle(pos, price, closeReason, false);
   }
 
   /** Expiry settlement at intrinsic/spot — exercise STT leg, no slippage (Phase 43B). Tx: see {@link #settle}. */
   @Transactional
-  public BigDecimal settleExpiry(PositionRow pos, BigDecimal reference, boolean exercise) {
+  public Optional<BigDecimal> settleExpiry(PositionRow pos, BigDecimal reference, boolean exercise) {
     return doSettle(pos, reference, "EXPIRY_SETTLEMENT", exercise);
   }
 
@@ -784,7 +795,8 @@ public class PaperService {
    * refuse: counter + ntfy + 422 DATA_STALE, leaving the position OPEN for the next pass (the
    * automated callers catch + log; the manual close surfaces the 422).
    */
-  private BigDecimal doSettle(PositionRow pos, BigDecimal price, String closeReason, boolean exercise) {
+  private Optional<BigDecimal> doSettle(
+      PositionRow pos, BigDecimal price, String closeReason, boolean exercise) {
     InstrumentMeta meta = instruments.meta(pos.exchange(), pos.tradingsymbol());
     Side exitSide = "BUY".equals(pos.side()) ? Side.SELL : Side.BUY;
     // P1-5 fill-reference provenance on the EXIT leg too: CALLER = an explicit settle price (manual
@@ -793,6 +805,7 @@ public class PaperService {
     BigDecimal reference = price;
     String refSource = reference != null ? "CALLER" : null;
     Long refTickAgeMs = null;
+    Duration staleAge = null;
     if (reference == null) {
       Optional<LastTickReader.TickView> tick = lastTick.lastTick(pos.exchange(), pos.tradingsymbol());
       if (tick.isEmpty()) {
@@ -808,9 +821,10 @@ public class PaperService {
       refSource = "LIVE_TICK";
       Duration age = tick.get().age();
       refTickAgeMs = age == null ? null : age.toMillis();
-      if (age != null && age.compareTo(tickMaxAge) > 0) {
-        staleTicks.staleSettleUsed(pos, closeReason, age);
-      }
+      // NOT alerted here: the "settled off a stale tick" record is only true if this call goes on to
+      // WIN the CAS below. Emitting it first made a race loser report a stale settlement it never
+      // performed (§9-05 review) — the same class of false record this change exists to remove.
+      staleAge = age != null && age.compareTo(tickMaxAge) > 0 ? age : null;
     }
     Fill exit =
         exercise
@@ -822,7 +836,12 @@ public class PaperService {
     // fill + fires the closed event. A concurrent closer (e.g. the 15s bracket poll racing an engine
     // exit) that lost the CAS returns without inserting a duplicate exit order or double-publishing.
     if (positions.close(pos.id(), realized, closeReason) == 0) {
-      return realized;
+      // Lost the CAS — EMPTY, not the realized amount. The caller must be able to tell that it did
+      // not close this position, or it reports someone else's exit as its own (§9-05).
+      return Optional.empty();
+    }
+    if (staleAge != null) {
+      staleTicks.staleSettleUsed(pos, closeReason, staleAge);
     }
     orders.insertFilled(
         pos.book(), null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
@@ -830,7 +849,7 @@ public class PaperService {
     // Auto-journal hook: the journal module listens AFTER_COMMIT (so a journal failure can never
     // roll back the close). Publishing inside the close tx is fine — delivery is deferred to commit.
     events.publishEvent(new PaperPositionClosed(pos.id(), realized, closeReason));
-    return realized;
+    return Optional.of(realized);
   }
 
   /** Open positions with mark-to-market P&amp;L ({@code book} null → all books; unrealized never stored). */
@@ -1041,8 +1060,10 @@ public class PaperService {
     int closed = 0;
     for (PositionRow pos : positions.openForSignal(signalId)) {
       try {
-        settle(pos, price, closeReason);
-        closed++;
+        // Count only what THIS pass closed — a lost CAS is someone else's exit (§9-05 review).
+        if (settle(pos, price, closeReason).isPresent()) {
+          closed++;
+        }
       } catch (Exception e) {
         log.warn("signal-exit close failed for position {}: {}", pos.id(), e.getMessage());
       }
@@ -1079,8 +1100,10 @@ public class PaperService {
     int closed = 0;
     for (PositionRow pos : positions.intradayOpen()) {
       try {
-        settle(pos, null, "INTRADAY_MTM");
-        closed++;
+        // Count only what THIS pass closed — a lost CAS is someone else's exit (§9-05 review).
+        if (settle(pos, null, "INTRADAY_MTM").isPresent()) {
+          closed++;
+        }
       } catch (Exception e) {
         log.warn("mark-to-close failed for position {}: {}", pos.id(), e.getMessage());
       }

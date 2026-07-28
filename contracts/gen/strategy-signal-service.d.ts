@@ -660,6 +660,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signals/minervini-swing/catchup-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["catchUpStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signals/minervini-swing/admission-probe": {
         parameters: {
             query?: never;
@@ -684,6 +700,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["sellDecisions_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signals/manas-arora-swing/catchup-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["catchUpStatus_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1331,6 +1363,8 @@ export interface components {
             /** Format: int32 */
             exitSkipped: number;
             admission: components["schemas"]["AdmissionProbe"];
+            refusalReasons: string[];
+            deadlineReached: boolean;
         };
         RegisterRequest: {
             name?: string;
@@ -1632,6 +1666,17 @@ export interface components {
             /** Format: date-time */
             asOf: string;
             items: components["schemas"]["SwingSellDecision"][];
+        };
+        CatchUpStatus: {
+            batch: string;
+            /** Format: date */
+            sessionDate: string | null;
+            status: string | null;
+            /** Format: int32 */
+            attempts: number | null;
+            reason: string | null;
+            /** Format: date-time */
+            updatedAt: string | null;
         };
         AdmissionProbes: {
             items: components["schemas"]["ProbeRow"][];
@@ -2722,7 +2767,9 @@ export interface operations {
     };
     run: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2751,7 +2798,9 @@ export interface operations {
     };
     run_1: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3614,6 +3663,35 @@ export interface operations {
             };
         };
     };
+    catchUpStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CatchUpStatus"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     admissionProbe: {
         parameters: {
             query?: {
@@ -3661,6 +3739,35 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["SwingSellReport"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    catchUpStatus_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CatchUpStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

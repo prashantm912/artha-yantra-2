@@ -45,11 +45,35 @@ const RUN_PATHS: Record<SwingFamily, string> = {
   'manas-arora': '/signals/manas-arora-swing/run',
 };
 
+const CATCH_UP_STATUS_PATHS: Record<SwingFamily, string> = {
+  minervini: '/signals/minervini-swing/catchup-status',
+  'manas-arora': '/signals/manas-arora-swing/catchup-status',
+};
+
 /** The read-only daily sell-decision triad for one swing family's open holdings. */
 export function useSwingSellDecisions(family: SwingFamily, enabled = true) {
   return useQuery({
     queryKey: ['swing-sell-decisions', family],
     queryFn: () => apiFetch<SwingSellReport>(PATHS[family]),
+    enabled,
+  });
+}
+
+/** The latest durable catch-up row for one swing family; null row fields mean no row exists yet. */
+export interface SwingCatchUpStatus {
+  batch: SwingFamily;
+  sessionDate: string | null;
+  status: string | null;
+  attempts: number | null;
+  reason: string | null;
+  updatedAt: string | null;
+}
+
+/** Reads the latest catch-up state without affecting the manual-run mutation. */
+export function useSwingCatchUpStatus(family: SwingFamily, enabled = true) {
+  return useQuery({
+    queryKey: ['swing-catchup-status', family],
+    queryFn: () => apiFetch<SwingCatchUpStatus>(CATCH_UP_STATUS_PATHS[family]),
     enabled,
   });
 }

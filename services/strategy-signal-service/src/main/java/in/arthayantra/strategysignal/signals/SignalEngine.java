@@ -150,6 +150,14 @@ public class SignalEngine {
       return new TradeableLeg(signalExchange, signalTradingsymbol, signalPrice);
     }
     StrikePicker.Candidate candidate = decision.pick().candidate();
+    if (candidate.exchange() == null || candidate.exchange().isBlank()) {
+      // TRADE eligibility, separate from analytical eligibility (cross-vendor review Critical 1).
+      // The candidate is retained upstream so the read-only confluence-flip EXIT oracle still sees
+      // the true market side, but it is not tradeable: without the master's exchange the
+      // instrument-meta lookup 404s to a lot-1 equity proxy and mis-sizes the position. Refuse the
+      // ENTRY here, where refusing costs one missed entry rather than one un-exitable position.
+      return null;
+    }
     return new TradeableLeg(candidate.exchange(), candidate.tradingsymbol(), candidate.ltp());
   }
 
@@ -1865,6 +1873,16 @@ public class SignalEngine {
     }
     BigDecimal entryPrice = bar.close();
     TradeableLeg tradeable = tradeableLeg(exchange, tradingsymbol, entryPrice, decision);
+    if (tradeable == null) {
+      // The picked leg carries no master exchange, so it cannot be sized or routed. Refuse the
+      // ENTRY loudly rather than stamping a key that would 404 into a lot-1 equity proxy
+      // (cross-vendor review Critical 1). The position's EXIT rails are unaffected — the candidate
+      // is still visible to the read-only confluence-flip oracle upstream.
+      log.warn(
+          "ENTRY suppressed: picked option leg for {} {}:{} has no instrument-master exchange",
+          strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
     // T21 review round 2 (Critical): premium_pct rules are OPTION-side bands — resolving them
     // against the INDEX entry price here produced nonsense levels (25% of a 25,000 future = a
     // 6,250-point "stop"), and for a held-PE (SHORT-direction) position that below-entry stop made

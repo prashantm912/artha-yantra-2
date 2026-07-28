@@ -298,12 +298,20 @@ public class MarketOiClient {
     String tradingsymbol = text(leg.path("tradingsymbol"));
     String exchange = text(leg.path("exchange"));
     if (exchange == null || exchange.isBlank()) {
+      // KEPT, not dropped — with a NULL exchange, which is what makes it untradeable downstream
+      // (cross-vendor review Critical 1). Dropping it here was an ENTRY-safety reflex applied to a
+      // path that also serves EXITS: this same snapshot feeds the read-only confluence-flip exit
+      // oracle, and an absent decision reads as "do not exit" (SignalEngine.confluenceFlipExit ->
+      // now.isPresent()). So an open position would have silently lost its CONFLUENCE_FLIP rail for
+      // as long as any leg lacked an exchange. That inverts the project doctrine: entries need fresh
+      // truth (you can always NOT enter), exits need the BEST AVAILABLE truth (you cannot refuse to
+      // leave forever). Analytical eligibility and TRADE eligibility are now separate concerns —
+      // the null exchange travels with the candidate and the entry/stamp path refuses it there.
       legsWithoutExchange.increment();
       log.warn(
-          "chain leg {} (strike {} {}) carries no exchange — dropped, NOT guessed from the root"
-              + " name; the option leg's exchange comes from the instrument master only",
+          "chain leg {} (strike {} {}) carries no exchange — retained for read-only exit/confluence"
+              + " evaluation but NOT tradeable; the exchange comes from the instrument master only",
           tradingsymbol, strike, type);
-      return;
     }
     out.add(new StrikePicker.Candidate(exchange, tradingsymbol, strike, type, ltp, iv));
   }

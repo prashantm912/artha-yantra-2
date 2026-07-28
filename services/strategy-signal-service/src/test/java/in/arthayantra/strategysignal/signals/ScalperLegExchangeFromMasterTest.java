@@ -77,28 +77,49 @@ class ScalperLegExchangeFromMasterTest {
   }
 
   /**
-   * Fail-closed at the chain boundary: a leg with no exchange has no canonical key, so it is DROPPED
-   * rather than guessed. With no other tradeable leg the whole snapshot is absent — the same shape
-   * the seam already handles for an unavailable chain — and the drop is counted for alerting.
+   * A leg with no exchange is RETAINED for analysis but is NOT tradeable — the two are separate
+   * concerns (cross-vendor review Critical 1).
+   *
+   * <p>Dropping it at the chain boundary was an ENTRY-safety reflex applied to a path that also
+   * serves EXITS: this same snapshot feeds the read-only confluence-flip exit oracle, and an absent
+   * decision reads as "do not exit" ({@code SignalEngine.confluenceFlipExit} → {@code
+   * now.isPresent()}). A held position would have silently lost its CONFLUENCE_FLIP rail for as long
+   * as any leg lacked an exchange — inverting the project doctrine that entries need FRESH truth
+   * (you can always not enter) while exits need the BEST AVAILABLE truth (you cannot refuse to leave
+   * forever). The candidate therefore survives with a null exchange, and {@link
+   * SignalEngine#tradeableLeg} is what refuses it for ENTRY.
    */
   @Test
-  void aLegWithoutAnExchangeIsDroppedNotGuessed() {
+  void aLegWithoutAnExchangeSurvivesForAnalysisButIsNotTradeable() {
     wire();
     stubChain(
         "NIFTY 50",
         legJson(null, "NIFTY26AUG25000CE", "152.65"),
         legJson(null, "NIFTY26AUG25000PE", "140.10"));
 
-    Optional<MarketOiClient.ChainSnapshot> snapshot = client.chain("NIFTY 50");
+    MarketOiClient.ChainSnapshot snapshot = client.chain("NIFTY 50").orElseThrow();
 
-    assertThat(snapshot).isEmpty();
+    // Analytical eligibility: the oracle must still see the true market side on BOTH legs.
+    assertThat(snapshot.candidates())
+        .as("candidates are retained so the confluence-flip EXIT oracle can still evaluate")
+        .hasSize(2)
+        .allSatisfy(c -> assertThat(c.exchange()).isNull());
+    // ...and the drop that would have hidden them is still counted for alerting.
     assertThat(meters.counter("ay_scalper_chain_leg_no_exchange_total").count()).isEqualTo(2.0);
+
+    // TRADE eligibility: the very same candidate is refused at the entry/stamp boundary.
+    assertThat(
+            SignalEngine.tradeableLeg(
+                "NFO", "NIFTY26AUGFUT", new BigDecimal("24092.00"),
+                decision(snapshot.candidates().get(0))))
+        .as("an exchange-less leg must never be stamped or sized")
+        .isNull();
     server.verify();
   }
 
   /** A blank exchange is treated exactly like a missing one — no empty-string instrument keys. */
   @Test
-  void aBlankExchangeIsAlsoDropped() {
+  void aBlankExchangeIsAlsoUntradeable() {
     wire();
     stubChain(
         "NIFTY 50",
@@ -107,10 +128,22 @@ class ScalperLegExchangeFromMasterTest {
 
     List<StrikePicker.Candidate> candidates = client.chain("NIFTY 50").orElseThrow().candidates();
 
-    assertThat(candidates).singleElement().satisfies(c -> {
-      assertThat(c.exchange()).isEqualTo("NFO");
-      assertThat(c.tradingsymbol()).isEqualTo("NIFTY26AUG25000PE");
-    });
+    assertThat(candidates).hasSize(2);
+    StrikePicker.Candidate blank =
+        candidates.stream().filter(c -> "NIFTY26AUG25000CE".equals(c.tradingsymbol())).findFirst().orElseThrow();
+    StrikePicker.Candidate good =
+        candidates.stream().filter(c -> "NIFTY26AUG25000PE".equals(c.tradingsymbol())).findFirst().orElseThrow();
+
+    assertThat(good.exchange()).isEqualTo("NFO");
+    assertThat(
+            SignalEngine.tradeableLeg(
+                "NFO", "NIFTY26AUGFUT", new BigDecimal("24092.00"), decision(good)))
+        .isNotNull();
+    assertThat(
+            SignalEngine.tradeableLeg(
+                "NFO", "NIFTY26AUGFUT", new BigDecimal("24092.00"), decision(blank)))
+        .as("a blank exchange is as untradeable as a missing one")
+        .isNull();
     assertThat(meters.counter("ay_scalper_chain_leg_no_exchange_total").count()).isEqualTo(1.0);
     server.verify();
   }

@@ -1667,7 +1667,7 @@ export interface components {
             asOf: string;
             items: components["schemas"]["SwingSellDecision"][];
         };
-        CatchUpStatus: {
+        SwingCatchUpStatus: {
             batch: string;
             /** Format: date */
             sessionDate: string | null;
@@ -1772,6 +1772,49 @@ export interface components {
         };
         PaperEventsResponse: {
             items: components["schemas"]["PaperEventDto"][];
+        };
+        Tradebook: {
+            items: components["schemas"]["TradebookEntry"][];
+        };
+        TradebookEntry: {
+            symbol: string;
+            exchange: string;
+            action: string;
+            qty: number;
+            price: number;
+            tradeValue: number;
+            product: string;
+            orderId: string;
+            tradeTime: string;
+        };
+        PositionEntry: {
+            symbol: string;
+            exchange: string;
+            side: string;
+            qty: number;
+            product: string;
+            avgPrice: number;
+            ltp: number;
+            mtmPnl: number;
+        };
+        Positions: {
+            items: components["schemas"]["PositionEntry"][];
+        };
+        Orderbook: {
+            items: components["schemas"]["OrderbookEntry"][];
+        };
+        OrderbookEntry: {
+            symbol: string;
+            exchange: string;
+            action: string;
+            qty: number;
+            price: number;
+            triggerPrice: number;
+            pricetype: string;
+            product: string;
+            orderId: string;
+            status: string;
+            timestamp: string;
         };
         Funds: {
             status: string;
@@ -3678,7 +3721,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["CatchUpStatus"];
+                    "*/*": components["schemas"]["SwingCatchUpStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3767,7 +3810,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["CatchUpStatus"];
+                    "*/*": components["schemas"]["SwingCatchUpStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4267,9 +4310,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Tradebook"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4298,9 +4339,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Positions"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4329,9 +4368,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Orderbook"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

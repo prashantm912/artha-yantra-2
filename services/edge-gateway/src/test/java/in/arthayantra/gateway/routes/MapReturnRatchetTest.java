@@ -49,7 +49,7 @@ class MapReturnRatchetTest {
       Map.of(
           "edge-gateway", 0,
           "market-data-service", 30,
-          "strategy-signal-service", 28,
+          "strategy-signal-service", 25,
           "backtest-service", 7);
 
   private static final Pattern MAP_RETURN =

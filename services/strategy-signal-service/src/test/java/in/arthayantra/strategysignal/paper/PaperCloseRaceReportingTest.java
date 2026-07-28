@@ -97,6 +97,7 @@ class PaperCloseRaceReportingTest {
             mock(PaperOrderRepository.class), positions, new PaperFillService(), mock(LastTickReader.class),
             instruments, mock(in.arthayantra.strategysignal.signals.SignalRepository.class),
             mock(PaperAccountService.class), mock(BookResolver.class), mock(RiskService.class),
+            mock(ScalperAccountModel.class),
             mock(org.springframework.context.ApplicationEventPublisher.class),
             mock(PaperStaleTickAlerter.class), mock(PaperOrderRejectionRecorder.class),
             mock(org.springframework.transaction.PlatformTransactionManager.class),

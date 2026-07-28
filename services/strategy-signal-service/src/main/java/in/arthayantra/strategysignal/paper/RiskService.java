@@ -99,6 +99,50 @@ public class RiskService {
   }
 
   /**
+   * The DEPLOYMENT rail alone, projected against a candidate order's own notional — {@code true} when
+   * filling it would push the book PAST its cap.
+   *
+   * <p>Deliberately separate from {@link #entryVeto}, and deliberately PURE: no {@code risk_audit} row,
+   * no ntfy, no per-day dedup, no reads that depend on call order. That purity is what makes it safe to
+   * call from the fill path. {@code entryVeto} is not: its rails carry once-per-entry side-effects, which
+   * is precisely why {@code openOrder} must never re-run it ({@code
+   * PaperManualOrderGovernorIntegrationTest.takenPathOpenOrderIsUngatedByDesign} — "or a taken entry
+   * would be double-charged"). That test forbids re-running the GOVERNOR; it does not forbid the writer
+   * from validating. This method charges nothing, so calling it twice costs nothing.
+   *
+   * <p>Why the deployment rail specifically cannot be decided at emission: it is the ONE rail whose
+   * answer depends on the candidate's SIZE, and at emission neither the tradeable leg nor the sized
+   * quantity nor the slippage-adjusted fill price exists yet. The old form could therefore only refuse
+   * an entry once the book was ALREADY at or over the cap, so the order that CROSSED the cap was always
+   * admitted in full.
+   *
+   * <p>{@code >} not {@code >=}: landing exactly ON the cap is inside it. The already-at-cap case stays
+   * {@link #entryVeto}'s job; this exists solely to catch the crossing order.
+   */
+  public boolean deploymentWouldCross(String book, BigDecimal candidateDeployment) {
+    if (candidateDeployment == null || candidateDeployment.signum() <= 0) {
+      return false;
+    }
+    Optional<Setting> deployment = settings.get(book, MAX_DEPLOYMENT_PCT);
+    if (!enabled(deployment)) {
+      return false;
+    }
+    BigDecimal value = deployment.get().value().path("value").decimalValue();
+    BigDecimal cap = account.equity(book).multiply(value).divide(BigDecimal.valueOf(100));
+    return account.capitalUsed(book).add(candidateDeployment).compareTo(cap) > 0;
+  }
+
+  /** The deployment cap in rupees for a book, or empty when the rail is disabled (for refusal detail). */
+  public Optional<BigDecimal> deploymentCap(String book) {
+    Optional<Setting> deployment = settings.get(book, MAX_DEPLOYMENT_PCT);
+    if (!enabled(deployment)) {
+      return Optional.empty();
+    }
+    BigDecimal value = deployment.get().value().path("value").decimalValue();
+    return Optional.of(account.equity(book).multiply(value).divide(BigDecimal.valueOf(100)));
+  }
+
+  /**
    * The governor rail (a limit-key constant, e.g. {@link #KILL_SWITCH}) blocking a new ENTRY on a book
    * right now, or {@link Optional#empty()} when entry is allowed. This is the single source of truth for
    * the per-book gate: {@link #entryAllowed(String)} is a thin {@code isEmpty()} view, so both callers

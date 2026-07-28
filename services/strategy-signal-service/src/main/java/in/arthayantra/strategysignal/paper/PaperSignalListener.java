@@ -87,8 +87,8 @@ public class PaperSignalListener {
       }
       // E10: a scalper take is charged to a round-robin sub-account (the per-account first-loss freeze
       // reads it); a non-scalper / manual take leaves the ledger key NULL. A straddle's TWO legs share
-      // the SAME sub-account (one position).
-      Integer subaccountIdx = event.scalper() ? scalperAccounts.nextFreeAccount() : null;
+      // the SAME sub-account (one position). The PICK itself happens in PaperService, under the book
+      // lock that also validates and writes it — picking out here raced the ceiling (round 4).
       Optional<StraddleLegs.Pair> straddle =
           event.scalper()
               ? signals
@@ -97,9 +97,9 @@ public class PaperSignalListener {
                   .flatMap(StraddleLegs::parse)
               : Optional.empty();
       if (straddle.isPresent()) {
-        openStraddle(event, straddle.get(), subaccountIdx);
+        openStraddle(event, straddle.get(), event.scalper());
       } else {
-        openSingle(event, subaccountIdx);
+        openSingle(event, event.scalper());
       }
       if (paperEffects != null) {
         paperEffects.confirmEntry(event.signalId());
@@ -154,9 +154,7 @@ public class PaperSignalListener {
   }
 
   private void openPaperPosition(SignalTaken event) {
-    // E10: a scalper take is charged to a round-robin sub-account (the per-account first-loss freeze
-    // reads it); a non-scalper / manual take leaves the ledger key NULL.
-    Integer subaccountIdx = event.scalper() ? scalperAccounts.nextFreeAccount() : null;
+    // E10 sub-account: assigned inside PaperService under the book lock (see openScalperOrder).
     Optional<StraddleLegs.Pair> straddle =
         event.scalper()
             ? signals
@@ -165,9 +163,9 @@ public class PaperSignalListener {
                 .flatMap(StraddleLegs::parse)
             : Optional.empty();
     if (straddle.isPresent()) {
-      openStraddle(event, straddle.get(), subaccountIdx);
+      openStraddle(event, straddle.get(), event.scalper());
     } else {
-      openSingle(event, subaccountIdx);
+      openSingle(event, event.scalper());
     }
   }
 
@@ -185,7 +183,7 @@ public class PaperSignalListener {
    * A non-scalper/manual take is unchanged: the signal's primary leg, with its same-basis SL/TP as
    * bracket levels so {@code PaperBracketEvaluator} backstops the position (audit P0-2).
    */
-  private void openSingle(SignalTaken event, Integer subaccountIdx) {
+  private void openSingle(SignalTaken event, boolean scalper) {
     Optional<SignalRepository.SignalRow> row = signals.find(event.signalId());
     if (row.isPresent()
         && row.get().tradeableTradingsymbol() != null
@@ -198,19 +196,33 @@ public class PaperSignalListener {
           optionLtp == null
               ? PremiumBrackets.NONE
               : premiumBrackets(r.strategyVersionId(), optionLtp);
-      paper.openOrder(
+      open(
+          scalper,
           new PaperService.OrderRequest(
               event.signalId(), r.tradeableExchange(), r.tradeableTradingsymbol(), "BUY",
               event.qty(), optionLtp != null ? optionLtp : event.fillPrice(),
-              brackets.stopLoss(), brackets.takeProfit(), subaccountIdx));
+              brackets.stopLoss(), brackets.takeProfit(), null));
       return;
     }
-    paper.openOrder(
+    open(
+        scalper,
         new PaperService.OrderRequest(
             event.signalId(), null, null, null, event.qty(), event.fillPrice(),
             row.map(SignalRepository.SignalRow::stopLoss).orElse(null),
             row.map(SignalRepository.SignalRow::target).orElse(null),
-            subaccountIdx));
+            null));
+  }
+
+  /**
+   * A scalper entry routes through {@code openScalperOrder} so its sub-account is PICKED under the
+   * same book lock that validates and writes it; everything else opens unchanged with a NULL key.
+   */
+  private void open(boolean scalper, PaperService.OrderRequest request) {
+    if (scalper) {
+      paper.openScalperOrder(request);
+    } else {
+      paper.openOrder(request);
+    }
   }
 
   /** Option-premium bracket levels derived from the YAML's premium_pct exit rules. */
@@ -272,7 +284,7 @@ public class PaperSignalListener {
   }
 
   /** Opens BOTH straddle legs (CE + PE) at the combined-premium lot count, linked to the signal. */
-  private void openStraddle(SignalTaken event, StraddleLegs.Pair pair, Integer subaccountIdx) {
+  private void openStraddle(SignalTaken event, StraddleLegs.Pair pair, boolean scalper) {
     // The lot comes from the CE leg's own instrument meta — both legs of a straddle share the
     // underlying's lot size. Without it combinedQty cannot floor to a whole lot (review C1).
     long lot =
@@ -283,20 +295,25 @@ public class PaperSignalListener {
     if (qty <= 0) {
       // A premium was missing, or the lot did not resolve — degrade to the single primary leg
       // rather than mis-size the pair.
-      openSingle(event, subaccountIdx);
+      openSingle(event, scalper);
       return;
     }
-    openLeg(event.signalId(), pair.ce(), qty, subaccountIdx);
-    openLeg(event.signalId(), pair.pe(), qty, subaccountIdx);
+    // ATOMIC: both legs or neither. A capital cap can now refuse the second leg, and a refused leg 2
+    // with leg 1 already open is a naked directional position, not a straddle.
+    PaperService.OrderRequest ce = legRequest(event.signalId(), pair.ce(), qty);
+    PaperService.OrderRequest pe = legRequest(event.signalId(), pair.pe(), qty);
+    if (scalper) {
+      paper.openScalperPair(ce, pe);
+    } else {
+      paper.openPair(ce, pe);
+    }
     log.info(
         "straddle 2-leg paper open: signal {} → CE {} + PE {} @ {} lots each",
         event.signalId(), pair.ce().tradingsymbol(), pair.pe().tradingsymbol(), qty);
   }
 
-  private void openLeg(long signalId, StraddleLegs.Leg leg, int qty, Integer subaccountIdx) {
-    paper.openOrder(
-        new PaperService.OrderRequest(
-            signalId, leg.exchange(), leg.tradingsymbol(), "BUY", qty, leg.ltp(), null, null,
-            subaccountIdx));
+  private PaperService.OrderRequest legRequest(long signalId, StraddleLegs.Leg leg, int qty) {
+    return new PaperService.OrderRequest(
+        signalId, leg.exchange(), leg.tradingsymbol(), "BUY", qty, leg.ltp(), null, null, null);
   }
 }

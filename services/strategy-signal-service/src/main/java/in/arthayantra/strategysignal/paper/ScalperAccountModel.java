@@ -93,6 +93,47 @@ public class ScalperAccountModel {
   }
 
   /**
+   * Whether charging {@code candidate} rupees to sub-account {@code idx} would push it PAST its
+   * allocation (starting capital × {@code capital_fraction} — ₹30,000 on the default equal 5-way split
+   * of a ₹150,000 book).
+   *
+   * <p>The allocation is the whole point of splitting the book: an account that can be overdrawn is
+   * not an allocation, it is a label. The freeze/profit-lock rails bound an account's LOSSES for the
+   * day; nothing bounded its EXPOSURE, so two correlated adds could sit well past ₹30,000 while every
+   * existing rail read green.
+   *
+   * <p>Measured in deployed CAPITAL, not open rows — see {@link
+   * PaperPositionRepository#openCapitalBySubAccount}. Sized off day-stable STARTING capital for the
+   * same reason the profit-lock target is: a live-equity base would float the ceiling up as unrealized
+   * P&amp;L drifts, so the same order would be admitted or refused depending on the tick.
+   *
+   * <p>{@code >} not {@code >=}: landing exactly ON the allocation is inside it.
+   */
+  public boolean wouldExceedSubAccount(String book, int idx, BigDecimal candidate) {
+    if (candidate == null || candidate.signum() <= 0) {
+      return false;
+    }
+    BigDecimal allocation =
+        account
+            .startingCapital(book)
+            .multiply(
+                positions.subAccountCapitalFractions().getOrDefault(idx, DEFAULT_CAPITAL_FRACTION));
+    if (allocation.signum() <= 0) {
+      return false;
+    }
+    BigDecimal deployed =
+        positions.openCapitalBySubAccount(book).getOrDefault(idx, BigDecimal.ZERO);
+    return deployed.add(candidate).compareTo(allocation) > 0;
+  }
+
+  /** A sub-account's rupee allocation (for refusal detail). */
+  public BigDecimal subAccountAllocation(String book, int idx) {
+    return account
+        .startingCapital(book)
+        .multiply(positions.subAccountCapitalFractions().getOrDefault(idx, DEFAULT_CAPITAL_FRACTION));
+  }
+
+  /**
    * The sub-accounts done for the IST day: frozen on a losing trade (≤ 0) OR profit-locked once their
    * net realized P&amp;L reaches ~1% of their allocated capital (starting capital ×
    * {@code capital_fraction}).
@@ -137,14 +178,27 @@ public class ScalperAccountModel {
     for (SubAccountTally t : tallies) {
       tradeCount.put(t.idx(), t.wins() + t.losses());
     }
+    // Route on capital ALREADY DEPLOYED first, closed-trade count only as the tie-break.
+    //
+    // Closed tallies alone are blind to open positions, so every entry taken before anything closes
+    // picked account 1 — fine while nothing enforced an account ceiling, actively harmful once one
+    // does: the second concurrent entry would be REFUSED at account 1's allocation instead of routed
+    // to an idle account, and five sub-accounts would behave as one until trades closed
+    // (cross-vendor round 3). Distribution has to see the exposure it is distributing.
+    java.util.Map<Integer, BigDecimal> deployed =
+        positions.openCapitalBySubAccount(BookResolver.SCALPER);
     int best = 1;
+    BigDecimal bestDeployed = null;
     int bestCount = Integer.MAX_VALUE;
     for (int idx = 1; idx <= ACCOUNTS; idx++) {
       if (frozen.contains(idx)) {
         continue;
       }
+      BigDecimal used = deployed.getOrDefault(idx, BigDecimal.ZERO);
       int count = tradeCount.getOrDefault(idx, 0);
-      if (count < bestCount) {
+      int cmp = bestDeployed == null ? -1 : used.compareTo(bestDeployed);
+      if (cmp < 0 || (cmp == 0 && count < bestCount)) {
+        bestDeployed = used;
         bestCount = count;
         best = idx;
       }

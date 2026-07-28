@@ -127,7 +127,10 @@ Run in order; each answers one question. Canned SQL in §6.
     **total** function over four states with no dead zone (`OiInterpretation.java:16-23`), so NEUTRAL is
     NEVER a market outcome — the strategy-side mirror documents it as "data missing"
     (`OiQuadrant.java:10-25`) and it is the declared fallback on every read failure. **A high
-    NEUTRAL share is a defect signal, never a flat-market artifact.** On 2026-07-20 it was 748/748,
+    NEUTRAL share is a defect signal, never a flat-market artifact.** ⚠️ **AMENDED 2026-07-28 — there
+    is exactly ONE non-defect cause: a MONTHLY index-expiry day, where `MarketOiClient.oi()` skips the
+    whole OI block by design (S24). Apply §3.19's two discriminators before calling NEUTRAL a defect.**
+    On 2026-07-20 it was 748/748,
     killing `futures_oi` (w 1.5), `underlying_oi` (1.0) and `oi_spurt` (1.0) and dropping the composite
     cap 0.816 → 0.7181. Worse than a dead IV dot: NEUTRAL dots are added with `absent=false`
     (`ConnectTheDotsScorer.java:207-214`) so they stay in the denominator and score zero, actively
@@ -234,7 +237,34 @@ Run in order; each answers one question. Canned SQL in §6.
     thresholds across a roll** without saying so. Rolls are monthly (last Tuesday); the `docker logs`
     line `scalper confluence blocked entry: <slug> NFO:<contract> rail=…` also names it directly and is
     the cheapest confirmation while the container is still up.
-19. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+19. **On a MONTHLY index-expiry day, expect EVERY OI-derived dot to be inert — and prove it is the
+    by-design suppression, not an outage** (added 2026-07-28) — `MarketOiClient.oi()`
+    (`MarketOiClient.java:287-295`) tests
+    `ScalperCalendars.forUnderlying(underlying).isMonthlyIndexExpiryDay(tradeDate)` and on a hit
+    **skips the entire OI block** (S24 — the expiring series' writers are unwinding, so chain OI is
+    corrupted), returning an inert `Oi`: both quadrants `NEUTRAL`, sentiment / trending / spurt all
+    null, **`futuresBasis` kept**. Measured 2026-07-28: `spurtPricePct` and `spurtOiPct` NULL on
+    **26/26** rows (0 nulls on 07-27's 909 and 07-24's 1,100), both quadrants NEUTRAL 16/16, and all
+    seven OI-derived dots (`futures_oi`, `underlying_oi`, `oi_spurt`, `drastic_oi`, `sentiment`,
+    `sentiment_slope`, `trending_cross`) at **0/16** supports.
+    **The two discriminators vs a real outage:** (a) `futuresBasis` stays LIVE while the quadrants go
+    NEUTRAL — S24 deliberately keeps the price-derived basis, an outage would not; (b)
+    `marketdata.futures_oi_snapshots` keeps full ~1/minute cadence (2,760 snaps / 40 distinct minutes
+    by 09:55 on 07-28) — capture is healthy, the gate is choosing not to read it.
+    **Suppression is PER OI ROOT, not per day:** NSE monthly (last Tuesday) for a NIFTY-rooted read,
+    BSE Thursday monthly for a SENSEX-rooted one. They rarely coincide, so on most expiry days ONE
+    root is suppressed and the other is LIVE — a dead OI dot on the non-expiring root is a REAL
+    outage. Read the root from `diagnostic->'context'->>'underlying'`, never from the slug name: the
+    `sensex-niftyoi` variants read **NIFTY** OI by design (1,069/1,069 rows were `NIFTY 50` across
+    07-25…07-28). `DotHealthCanary` labels the affected probes `inert by design` and drops their
+    `required` flag, per root (#1073 — before it, the label was missing for `oi_spurt_price` and the
+    keying was a blanket NSE-OR-BSE calendar test that could silence a genuine outage on the
+    non-expiring root).
+    **⚠️ Tuning consequence: NEVER draw an entry-gate calibration conclusion from an expiry session.**
+    NEUTRAL dots stay in the denominator with `absent=false` (§3.12), so the composite is
+    structurally starved — max **0.3457** against a 0.600 threshold on 2026-07-28. Zero fires is the
+    mechanical outcome, not evidence. Mark such a session REGIME in the rollup, never STRUCTURAL.
+20. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -592,6 +622,22 @@ FROM marketdata.candles WHERE interval='1m' AND EXTRACT(second FROM bucket)=0
   AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1;
 -- cheapest confirmation while the container is up (the rail log names the contract):
 --   docker logs ay-strategy-signal-service --since <T> 2>&1 | grep -oE "NFO:[A-Z0-9]+" | sort -u
+
+-- §3.19 monthly-expiry OI suppression: is the dead OI bloc BY DESIGN or a real outage?
+-- (a) the fingerprint — quadrants NEUTRAL + spurt NULL while futuresBasis stays LIVE:
+SELECT count(*) ctx,
+       count(*) FILTER (WHERE diagnostic->'context'->'oi'->>'futuresQuadrant'='NEUTRAL') fq_neutral,
+       count(*) FILTER (WHERE diagnostic->'context'->'oi'->>'spurtPricePct' IS NULL) spurt_null,
+       count(*) FILTER (WHERE diagnostic->'context'->'oi'->>'futuresBasis' IS NOT NULL) basis_live
+FROM strategy.signal_rejections
+WHERE generated_at >= :d0915 AND diagnostic->'context'->'oi' IS NOT NULL;
+-- basis_live = ctx while the other two are saturated ⇒ S24 suppression, NOT an outage.
+-- (b) which ROOT is suppressed? (never infer it from the slug — sensex-niftyoi reads NIFTY OI)
+SELECT diagnostic->'context'->>'underlying' oi_root, count(*)
+FROM strategy.signal_rejections WHERE generated_at >= :d0915 GROUP BY 1;
+-- (c) capture must still be healthy underneath the suppression:
+SELECT count(*) snaps, count(DISTINCT date_trunc('minute',ts)) minutes, max(ts AT TIME ZONE 'Asia/Kolkata') last_ist
+FROM marketdata.futures_oi_snapshots WHERE ts >= :d0915;
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

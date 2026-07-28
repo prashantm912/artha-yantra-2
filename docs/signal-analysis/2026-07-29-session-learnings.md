@@ -111,6 +111,34 @@ assurance.
   tests: the suite was 38/38 green with the inversion in place.
 - `deploy-verify-by-jar-fingerprint` — written earlier the same day, and it paid off twice.
 
+## 6b. §9-06 — a refactor correctly declined
+
+The ledger carried "collapse the two 1m→N rollup readers" as an architecture-deepening candidate.
+Investigated 2026-07-29 and **declined**, because the two anchors are not drift — each is
+load-bearing, and they are mutually exclusive:
+
+- `ConnectingDotsService.bucketStart` floors from **IST midnight**, for **pg `time_bucket` parity**
+  (its own comment says so). A read-time rollup that disagrees with DB-side bucketing disagrees with
+  the caggs.
+- `FuturesOiChartService.bucketStart` floors from **09:15 SESSION_OPEN**, so the OI series left-joins
+  onto the candle grid it shares — its javadoc states both sides use the SAME function for exactly
+  that reason.
+
+Unifying satisfies one requirement and breaks the other. And the divergence is measurable, not
+theoretical: 09:15 is **555 minutes** past midnight, so the grids are **identical for 1/3/5/15m**
+(555 mod N = 0) and **diverge for 10/30/60m** (remainders 5, 15, 15). Both services expose all seven
+`OiInterval` values, so three of them differ today.
+
+**The lesson is about the shape of the finding, not the finding.** "Two functions that do the same
+thing on different grids" reads like duplication — the tabulated defect in §1 of this document. It
+is the opposite: two deliberate anchors serving two different correctness requirements. The
+distinguishing question is *does one definition satisfy every consumer?* Here it provably cannot, and
+the right deliverable was documentation that stops the next reader attempting it.
+
+Earlier in the same session I had declared §9-06 moot from a single grep of the SQL fold shape, and a
+reviewer produced file:line evidence that I was wrong. This time the verdict rests on both
+implementations plus arithmetic.
+
 ## 7. Open, with dates
 
 | Item | State |

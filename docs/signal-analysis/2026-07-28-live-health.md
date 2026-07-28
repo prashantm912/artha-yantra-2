@@ -28,7 +28,8 @@ Two things worth carrying, one operational and one shipped:
 2. **A real diagnostic defect fell out of chasing #1, and is already fixed and merged** — the
    canary's expiry exemption was both too narrow (missed `oi_spurt_price`) and mis-keyed (a
    calendar-OR where the suppression is per OI root). [#1073](https://github.com/prashantm912/artha-yantra-2/pull/1073),
-   merged `edd2a2b1`; deploy deliberately deferred to after the close.
+   merged `edd2a2b1`; deploy deliberately deferred to after the close — **since deployed 16:43:29 IST
+   and verified PASS on the live endpoint**, see `2026-07-28-session-findings.md` §6.3.1.
 
 ## 1 Preconditions
 
@@ -199,6 +200,13 @@ NEUTRAL, the spurt magnitudes to NULL). `DotHealthCanaryTest` 9 → 12, each new
 RED before its fix. **Deploy deferred to after 15:30 IST** — diagnostic labelling only, no reason to
 recreate the container mid-session.
 
+**Deployed 16:43:29 IST and verified PASS**: `oi_spurt_price` now reads
+`inert by design — monthly index-expiry day, OI reads S24-suppressed (not an outage)` on the live
+endpoint, with `breadth`/`fii`/`vix` alive so the window was context-bearing (not the T17
+all-`UNINFORMATIVE` tail). The EOD run captured the pre-fix reading at 16:07 on the same 40-row window
+first, so the before/after pair is directly comparable — both in `2026-07-28-session-findings.md` §6.3
+and §6.3.1. Half (b), the per-root keying, executed but is **not discriminated** by an NSE-only expiry.
+
 ## 7 Data-integrity probes
 
 | probe | result |
@@ -235,4 +243,6 @@ recreate the container mid-session.
    (scheduled task `deploy-dot-canary-s24-fix-post-close`, 16:00 IST). **Today is the only day this
    is directly observable until the next monthly expiry** — if the post-14:45 context-less tail makes
    every dot read `UNINFORMATIVE`, record it as UNOBSERVABLE rather than as a pass.
+   ✅ **DISCHARGED — PASS.** Deployed 16:43:29 IST, label observed live at 16:44 on a context-bearing
+   window (§6.2 above, `2026-07-28-session-findings.md` §6.3.1). The tail did *not* degenerate.
 7. Re-check the host-clock guard at EOD — <1 s this run. B8 stays a free-running-CMOS watch item.

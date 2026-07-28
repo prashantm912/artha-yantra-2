@@ -45,13 +45,15 @@ class PaperBracketEquivalenceTest {
           new BigDecimal(
               (sc.has("entryPremium") ? sc.path("entryPremium") : fx.path("entryPremium")).asText());
       JsonNode levels = sc.has("expectedLevels") ? sc.path("expectedLevels") : fx.path("expectedLevels");
+      BigDecimal stopLoss = level(levels.path("stopLoss"));
+      BigDecimal takeProfit = level(levels.path("takeProfit"));
       PositionRow pos =
           new PositionRow(
               1L, "NFO", "NIFTY26JUL25000CE", "BUY", 75,
               entry, BigDecimal.ZERO, "OPEN",
               OffsetDateTime.parse("2026-07-03T09:18:00+05:30"), null, null,
-              new BigDecimal(levels.path("stopLoss").asText()),
-              new BigDecimal(levels.path("takeProfit").asText()),
+              stopLoss,
+              takeProfit,
               "scalper");
 
       String name = sc.path("name").asText();
@@ -64,5 +66,9 @@ class PaperBracketEquivalenceTest {
         assertThat(got.barOffset()).as(name).isEqualTo(expect.path("barOffset").asInt());
       }
     }
+  }
+
+  private static BigDecimal level(JsonNode node) {
+    return node.isNull() || node.isMissingNode() ? null : new BigDecimal(node.asText());
   }
 }

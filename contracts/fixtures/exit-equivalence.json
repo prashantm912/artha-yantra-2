@@ -1,5 +1,5 @@
 {
-  "comment": "Live-vs-backtest premium-exit equivalence fixture (audit no-live-vs-backtest-exit-equivalence-test). BOTH suites assert against THIS file: backtest-service PremiumExitEquivalenceTest runs PremiumExitEvaluator over each scenario; strategy-signal PremiumBracketEquivalenceTest derives the live bracket levels (PremiumBracketRules) and PaperBracketEquivalenceTest walks the same premium closes through PaperBracketEvaluator.breach. If either implementation drifts from the recorded semantics, its suite goes red. Semantics pinned: long option, close-based checks, SL <= level, TP >= level, SL checked before TP, entry bar (index 0) never exits. A scenario MAY override entryPremium/config/expectedLevels (else it inherits the top-level defaults) — the stop-subpaise-rounding case (audit AY-SL-06) uses that to pin the 2dp-paise level rounding both sides must share.",
+  "comment": "Live-vs-backtest premium-exit equivalence fixture (audit no-live-vs-backtest-exit-equivalence-test). EVERY suite below asserts against THIS file; a semantics change must update the fixture AND all of them in ONE PR. The pinned surfaces, named so a future editor can enumerate them without grepping: (1) backtest PremiumExitEvaluator via PremiumExitEquivalenceTest, which also pins the config->Rules mappers OptionsPremiumReplay.exitRules and ExitKnobs.toRules; (2) live bracket LEVELS via PremiumBracketRules in PremiumBracketEquivalenceTest; (3) live bracket BREACH via PaperBracketEvaluator.breach in PaperBracketEquivalenceTest; (4) the paper-open derivation PaperSignalListener.premiumBrackets (a genuine THIRD copy that does NOT delegate to PremiumBracketRules) via PaperSignalListenerEquivalenceTest; (5) the full replay path OptionsPremiumReplay.tradeForLeg via OptionsPremiumReplayEquivalenceTest. NOT pinned here, deliberately: BtstExitRuleParityBoundaryTest is a SAFE_TYPES/SAFE_LEVEL_BASES YAML allowlist boundary, not a premium-exit implementation. A scenario MAY override entryPremium/config/expectedLevels (else it inherits the top-level defaults). Semantics pinned: long option, close-based checks, SL <= level, TP >= level, SL checked before TP, entry bar (index 0) never exits. A scenario MAY override entryPremium/config/expectedLevels (else it inherits the top-level defaults) — the stop-subpaise-rounding case (audit AY-SL-06) uses that to pin the 2dp-paise level rounding both sides must share.",
   "entryPremium": "100.00",
   "config": {
     "exit_rules": [
@@ -47,6 +47,63 @@
       "expectedLevels": { "stopLoss": "66.68", "takeProfit": "135.01" },
       "premiums": ["100.01", "80.00", "66.68", "70.00"],
       "expect": { "reason": "STOP_LOSS", "barOffset": 2 }
+    },
+    {
+      "name": "single-bar-entry-only",
+      "comment": "Pins that a series containing only the entry close never exits on bar 0 and safely resolves at the end of data.",
+      "premiums": ["100.00"],
+      "expect": { "reason": null, "barOffset": null }
+    },
+    {
+      "name": "only-stop",
+      "comment": "Pins a stop-only configuration: the missing target must not create a take-profit exit or level.",
+      "config": {
+        "exit_rules": [
+          { "type": "stop_loss", "params": { "basis": "premium_pct", "value": 50 } }
+        ]
+      },
+      "expectedLevels": { "stopLoss": "50.00", "takeProfit": null },
+      "premiums": ["100.00", "75.00", "50.00", "70.00"],
+      "expect": { "reason": "STOP_LOSS", "barOffset": 2 }
+    },
+    {
+      "name": "only-target",
+      "comment": "Pins a target-only configuration: the missing stop must not create a stop-loss exit or level, while an exact target touch exits.",
+      "config": {
+        "exit_rules": [
+          { "type": "take_profit", "params": { "basis": "premium_pct", "value": 35 } }
+        ]
+      },
+      "expectedLevels": { "stopLoss": null, "takeProfit": "135.00" },
+      "premiums": ["100.00", "120.00", "135.00", "140.00"],
+      "expect": { "reason": "TAKE_PROFIT", "barOffset": 2 }
+    },
+    {
+      "name": "both-levels-round-to-same-paise-stop-first",
+      "comment": "Pins SL-before-TP when one long-premium close is exactly at both levels: entry 0.01 with 1% stop and 1% target rounds both raw levels to 0.01 (2dp HALF_UP), so the close must resolve STOP_LOSS.",
+      "entryPremium": "0.01",
+      "config": {
+        "exit_rules": [
+          { "type": "stop_loss", "params": { "basis": "premium_pct", "value": 1 } },
+          { "type": "take_profit", "params": { "basis": "premium_pct", "value": 1 } }
+        ]
+      },
+      "expectedLevels": { "stopLoss": "0.01", "takeProfit": "0.01" },
+      "premiums": ["0.01", "0.01"],
+      "expect": { "reason": "STOP_LOSS", "barOffset": 1 }
+    },
+    {
+      "name": "take-profit-subpaise-rounding",
+      "comment": "Pins target-side 2dp HALF_UP rounding beyond AY-SL-06: entry 100.01 with a 33.33% target has raw level 133.343333, so an exact 133.34 close must trigger TAKE_PROFIT.",
+      "entryPremium": "100.01",
+      "config": {
+        "exit_rules": [
+          { "type": "take_profit", "params": { "basis": "premium_pct", "value": 33.33 } }
+        ]
+      },
+      "expectedLevels": { "stopLoss": null, "takeProfit": "133.34" },
+      "premiums": ["100.01", "120.00", "133.34", "120.00"],
+      "expect": { "reason": "TAKE_PROFIT", "barOffset": 2 }
     }
   ]
 }

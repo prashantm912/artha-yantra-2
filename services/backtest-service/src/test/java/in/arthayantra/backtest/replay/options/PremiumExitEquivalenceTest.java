@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.backtest.replay.counterfactual.ExitKnobs;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -52,18 +53,31 @@ class PremiumExitEquivalenceTest {
 
       List<BigDecimal> premiums = new ArrayList<>();
       sc.path("premiums").forEach(n -> premiums.add(new BigDecimal(n.asText())));
-      PremiumExitEvaluator.Exit exit =
-          PremiumExitEvaluator.evaluate(entry, premiums, rules, premiums.size());
+      assertFixtureExit(sc, entry, premiums, rules);
+      assertFixtureExit(sc, entry, premiums, OptionsPremiumReplay.exitRules(config));
+      assertFixtureExit(
+          sc,
+          entry,
+          premiums,
+          new ExitKnobs(tpPct, slPct, null, null, null).toRules());
+    }
+  }
 
-      String name = sc.path("name").asText();
-      JsonNode expect = sc.path("expect");
-      if (expect.path("reason").isNull()) {
-        // no bracket exit — the evaluator falls through to END_OF_DATA at the last bar
-        assertThat(exit.reason()).as(name).isEqualTo("END_OF_DATA");
-      } else {
-        assertThat(exit.reason()).as(name).isEqualTo(expect.path("reason").asText());
-        assertThat(exit.barOffset()).as(name).isEqualTo(expect.path("barOffset").asInt());
-      }
+  private static void assertFixtureExit(
+      JsonNode scenario,
+      BigDecimal entry,
+      List<BigDecimal> premiums,
+      PremiumExitEvaluator.Rules rules) {
+    PremiumExitEvaluator.Exit exit =
+        PremiumExitEvaluator.evaluate(entry, premiums, rules, premiums.size());
+    String name = scenario.path("name").asText();
+    JsonNode expect = scenario.path("expect");
+    if (expect.path("reason").isNull()) {
+      // no bracket exit — the evaluator falls through to END_OF_DATA at the last bar
+      assertThat(exit.reason()).as(name).isEqualTo("END_OF_DATA");
+    } else {
+      assertThat(exit.reason()).as(name).isEqualTo(expect.path("reason").asText());
+      assertThat(exit.barOffset()).as(name).isEqualTo(expect.path("barOffset").asInt());
     }
   }
 }

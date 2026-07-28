@@ -28,9 +28,9 @@ class OrdersControllerTest {
   void disabledGatewayReturnsEmptyEnvelopesAndNotConfiguredFunds() {
     OrdersController controller = new OrdersController(new DisabledOrderGateway());
 
-    assertThat((List<OrderbookEntry>) controller.orderbook().get("items")).isEmpty();
-    assertThat((List<PositionEntry>) controller.positions().get("items")).isEmpty();
-    assertThat((List<TradebookEntry>) controller.tradebook().get("items")).isEmpty();
+    assertThat(controller.orderbook().items()).isEmpty();
+    assertThat(controller.positions().items()).isEmpty();
+    assertThat(controller.tradebook().items()).isEmpty();
     assertThat(controller.funds().status()).isEqualTo("NOT_CONFIGURED");
     assertThat(controller.funds().availableCash()).isNull();
   }
@@ -57,9 +57,9 @@ class OrdersControllerTest {
 
     OrdersController controller = new OrdersController(gateway);
 
-    assertThat(controller.orderbook()).isEqualTo(Map.of("items", List.of(order)));
-    assertThat(controller.positions()).isEqualTo(Map.of("items", List.of(position)));
-    assertThat(controller.tradebook()).isEqualTo(Map.of("items", List.of(trade)));
+    assertThat(controller.orderbook().items()).containsExactly(order);
+    assertThat(controller.positions().items()).containsExactly(position);
+    assertThat(controller.tradebook().items()).containsExactly(trade);
     assertThat(controller.funds().status()).isEqualTo("OK");
     assertThat(controller.funds().availableCash()).isEqualByComparingTo("18083.01");
   }

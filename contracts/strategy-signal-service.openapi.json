@@ -3007,8 +3007,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Tradebook"
                 }
               }
             }
@@ -3036,8 +3035,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Positions"
                 }
               }
             }
@@ -3065,8 +3063,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Orderbook"
                 }
               }
             }
@@ -5153,6 +5150,144 @@
           }
         },
         "required" : [ "items" ]
+      },
+      "Tradebook" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TradebookEntry"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "TradebookEntry" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "number"
+          },
+          "price" : {
+            "type" : "number"
+          },
+          "tradeValue" : {
+            "type" : "number"
+          },
+          "product" : {
+            "type" : "string"
+          },
+          "orderId" : {
+            "type" : "string"
+          },
+          "tradeTime" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "action", "exchange", "orderId", "price", "product", "qty", "symbol", "tradeTime", "tradeValue" ]
+      },
+      "PositionEntry" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "number"
+          },
+          "product" : {
+            "type" : "string"
+          },
+          "avgPrice" : {
+            "type" : "number"
+          },
+          "ltp" : {
+            "type" : "number"
+          },
+          "mtmPnl" : {
+            "type" : "number"
+          }
+        },
+        "required" : [ "avgPrice", "exchange", "ltp", "mtmPnl", "product", "qty", "side", "symbol" ]
+      },
+      "Positions" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PositionEntry"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "Orderbook" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OrderbookEntry"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "OrderbookEntry" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "qty" : {
+            "type" : "number"
+          },
+          "price" : {
+            "type" : "number"
+          },
+          "triggerPrice" : {
+            "type" : "number"
+          },
+          "pricetype" : {
+            "type" : "string"
+          },
+          "product" : {
+            "type" : "string"
+          },
+          "orderId" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "timestamp" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "action", "exchange", "orderId", "price", "pricetype", "product", "qty", "status", "symbol", "timestamp", "triggerPrice" ]
       },
       "Funds" : {
         "type" : "object",

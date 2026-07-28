@@ -3,9 +3,13 @@
 // springdoc-generated schema. A backend rename/remove on a typed endpoint now fails `tsc -b`
 // instead of rendering "—" at runtime. Key-presence only, deliberately: springdoc types
 // BigDecimal money as number while the wire (and our types, C-2.25) carries JSON strings, so a
-// full structural assignability check would be red on every money field by design. Map-returning
-// endpoints (signals list, backtest results, …) are not enumerated in the spec and stay
-// runtime-verified — see the register entry for the accepted boundary.
+// full structural assignability check would be red on every money field by design.
+//
+// The Map-returning endpoints are being retyped to records (ledger D3 slice 1), and each one that
+// lands moves out of "runtime-verified only" and into this file. The SIGNALS family (history page,
+// detail, take/dismiss, rejections, rail-counts) crossed over on 2026-07-29 and is bound below.
+// What is still unbound is whatever remains a `Map<String, Object>` — `MapReturnRatchetTest` holds
+// the authoritative per-service count.
 //
 // Zero runtime: type-only imports, nothing exported, never bundled (no module imports this file);
 // `tsc -b` (the build script) still type-checks it because it sits inside the src include.
@@ -66,6 +70,59 @@ type _Funds = AssertKeys<
   'status' | 'availableCash' | 'collateral' | 'm2mRealized' | 'm2mUnrealized' | 'utilisedDebits'
 >;
 
+// --- signals family (SignalsPage history + detail drawer + take/dismiss) ----------------------
+// Only the REST-carried keys. The app's `SignalDto` additionally declares `strategyName`,
+// `strategyId`, `version`, `checksum` and `book`, which the STOMP `/topic/signals` frame supplies
+// and the REST snapshot does not — asserting them here would fail against the true wire shape.
+type _SignalDto = AssertKeys<
+  Schemas['SignalDto'],
+  | 'id'
+  | 'strategyVersionId'
+  | 'exchange'
+  | 'tradingsymbol'
+  | 'interval'
+  | 'signalType'
+  | 'side'
+  | 'entryPrice'
+  | 'stopLoss'
+  | 'target'
+  | 'compositeScore'
+  | 'scoreBreakdown'
+  | 'status'
+  | 'generatedAt'
+  | 'expiresAt'
+  | 'suggestedQty'
+  | 'tradeableExchange'
+  | 'tradeableTradingsymbol'
+  | 'scalperDetail'
+>;
+type _SignalPage = AssertKeys<Schemas['SignalPage'], 'items' | 'limit' | 'offset'>;
+
+// --- rejection diagnostics (RejectionsPage table + rail rollup) --------------------------------
+type _RejectionRow = AssertKeys<
+  Schemas['RejectionRow'],
+  | 'id'
+  | 'strategyVersionId'
+  | 'strategySlug'
+  | 'exchange'
+  | 'tradingsymbol'
+  | 'interval'
+  | 'side'
+  | 'blockingRail'
+  | 'blockingOperand'
+  | 'blockingThreshold'
+  | 'blockingMargin'
+  | 'blockingReason'
+  | 'compositeScore'
+  | 'compositeThreshold'
+  | 'diagnostic'
+  | 'barTime'
+  | 'generatedAt'
+>;
+type _RejectionPage = AssertKeys<Schemas['RejectionPage'], 'items'>;
+type _RailCount = AssertKeys<Schemas['RailCount'], 'rail' | 'count'>;
+type _RailCountList = AssertKeys<Schemas['RailCountList'], 'items'>;
+
 // --- shadow-variant league (RejectionsPage strip / rollup) ------------------------------------
 type _VariantSummary = AssertKeys<
   Schemas['VariantSummary'],
@@ -111,6 +168,12 @@ export type ContractBridges = [
   _PositionDto,
   _TradeDto,
   _AccountDto,
+  _SignalDto,
+  _SignalPage,
+  _RejectionRow,
+  _RejectionPage,
+  _RailCount,
+  _RailCountList,
   _Funds,
   _VariantSummary,
   _DotHealth,

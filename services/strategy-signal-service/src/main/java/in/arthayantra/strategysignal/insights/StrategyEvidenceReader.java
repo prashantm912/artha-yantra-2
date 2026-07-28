@@ -268,7 +268,13 @@ public class StrategyEvidenceReader {
   /** One threshold-crossing timeline entry (the STRATEGY_EVIDENCE history the board lacks, §5.2). */
   public record CrossingEntry(OffsetDateTime at, String severity, String title) {}
 
-  /** One blocking-rail count in the dossier rejection profile. */
+  /**
+   * One blocking-rail count in the dossier rejection profile.
+   *
+   * <p>⚠️ Shares its simple name with {@code SignalRejectionRepository.RailCount}, and springdoc
+   * collapses both into ONE {@code #/components/schemas/RailCount}. They are structurally identical
+   * today; diverging either one silently rewrites the other's published schema.
+   */
   public record RailCount(String rail, long count) {}
 
   /** One open sell-decision row in the dossier. */

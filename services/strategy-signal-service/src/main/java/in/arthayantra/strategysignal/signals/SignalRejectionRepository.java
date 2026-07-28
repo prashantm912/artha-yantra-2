@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.signals;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -21,7 +22,17 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class SignalRejectionRepository {
 
-  /** One rejection row. */
+  /**
+   * One rejection row — also the wire shape of {@code GET /api/v1/signal-rejections}'s items
+   * (ledger D3 slice 1), which is why the nullable columns carry {@code @Schema} here.
+   *
+   * <p>The nullable set is {@code V015__signal_rejections.sql}'s: {@code side} (NULL when the block
+   * landed before the side resolved, or on a neutral straddle), the four {@code blocking_*}
+   * diagnostics, and the two {@code composite_*} values (NULL when the rail fired before the
+   * composite was computed). Spelled {@code types = {"x", "null"}} because {@code nullable = true}
+   * is a SILENT NO-OP at OpenAPI 3.1. Response-only — no request body binds this record, so marking
+   * the rest required cannot mislead a client into sending them.
+   */
   public record RejectionRow(
       long id,
       UUID strategyVersionId,
@@ -29,14 +40,14 @@ public class SignalRejectionRepository {
       String exchange,
       String tradingsymbol,
       String interval,
-      String side,
+      @Schema(types = {"string", "null"}) String side,
       String blockingRail,
-      BigDecimal blockingOperand,
-      BigDecimal blockingThreshold,
-      BigDecimal blockingMargin,
-      String blockingReason,
-      BigDecimal compositeScore,
-      BigDecimal compositeThreshold,
+      @Schema(types = {"number", "null"}) BigDecimal blockingOperand,
+      @Schema(types = {"number", "null"}) BigDecimal blockingThreshold,
+      @Schema(types = {"number", "null"}) BigDecimal blockingMargin,
+      @Schema(types = {"string", "null"}) String blockingReason,
+      @Schema(types = {"number", "null"}) BigDecimal compositeScore,
+      @Schema(types = {"number", "null"}) BigDecimal compositeThreshold,
       JsonNode diagnostic,
       OffsetDateTime barTime,
       OffsetDateTime generatedAt) {}
@@ -141,7 +152,17 @@ public class SignalRejectionRepository {
         args.toArray());
   }
 
-  /** One (rail, count) aggregate row. */
+  /**
+   * One (rail, count) aggregate row.
+   *
+   * <p>⚠️ A SECOND record with this simple name exists — {@code
+   * StrategyEvidenceReader.RailCount}, the dossier rejection profile — and springdoc collapses
+   * duplicate simple names into ONE {@code #/components/schemas/RailCount}. That is safe only while
+   * the two stay structurally identical, which they are today (same components, same order, same
+   * types, neither annotated). Change one and the other's published schema silently changes with it:
+   * rename a component, add a field, or add a {@code @Schema} here and the dossier endpoint starts
+   * publishing it too. Keep them in lockstep or give one a distinct name.
+   */
   public record RailCount(String rail, long count) {}
 
   private RejectionRow row(ResultSet rs, int rowNum) throws SQLException {

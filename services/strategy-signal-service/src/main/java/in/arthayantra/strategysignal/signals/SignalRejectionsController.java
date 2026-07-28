@@ -1,9 +1,7 @@
 package in.arthayantra.strategysignal.signals;
 
 import java.time.OffsetDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,7 +13,12 @@ import org.springframework.web.bind.annotation.RestController;
  * Read surface for the confluence-gate REJECTION diagnostics: every scalper chart-entry the live
  * §12.3 gate blocked, with the first failing rail + margin, the full dot-by-dot confluence, and the
  * raw OI/macro/chart context. Powers the "Rejections" analysis page. Live-only data (no rows on
- * backtest). Returns {@code Map<String,Object>} so response keys never drift the OpenAPI spec.
+ * backtest).
+ *
+ * <p>Every response is a typed record (ledger D3 slice 1). The two list bodies used to be {@code
+ * Map<String, Object>} under a comment claiming that made response keys safe from drifting the
+ * OpenAPI spec — which is exactly backwards: springdoc cannot enumerate a Map, so a renamed or
+ * removed key here passed the breaking-change gate unseen. Typing them is what makes the gate work.
  */
 @RestController
 @RequestMapping("/api/v1/signal-rejections")
@@ -46,7 +49,7 @@ public class SignalRejectionsController {
 
   /** Paged/filtered rejection history, newest first. */
   @GetMapping
-  public Map<String, Object> list(
+  public SignalViews.RejectionPage list(
       @RequestParam(required = false) UUID strategyVersionId,
       @RequestParam(required = false) String rail,
       @RequestParam(required = false) String exchange,
@@ -62,34 +65,18 @@ public class SignalRejectionsController {
     List<SignalRejectionRepository.RejectionRow> items =
         repository.list(
             strategyVersionId, rail, exchange, tradingsymbol, from, to, boundedLimit, boundedOffset);
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("items", items.stream().map(SignalRejectionsController::dto).toList());
-    response.put("limit", boundedLimit);
-    response.put("offset", boundedOffset);
-    return response;
+    return new SignalViews.RejectionPage(items, boundedLimit, boundedOffset);
   }
 
   /** The per-rail block rollup (which condition blocks most) over an optional window. */
   @GetMapping("/rail-counts")
-  public Map<String, Object> railCounts(
+  public SignalViews.RailCountList railCounts(
       @RequestParam(required = false) UUID strategyVersionId,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime to) {
-    List<SignalRejectionRepository.RailCount> counts =
-        repository.railCounts(strategyVersionId, from, to);
-    return Map.of(
-        "items",
-        counts.stream()
-            .map(
-                c -> {
-                  Map<String, Object> m = new LinkedHashMap<>();
-                  m.put("rail", c.rail());
-                  m.put("count", c.count());
-                  return m;
-                })
-            .toList());
+    return new SignalViews.RailCountList(repository.railCounts(strategyVersionId, from, to));
   }
 
   /** The typed shadow-league envelope (the Map-return ratchet forbids new Map endpoints). */
@@ -110,27 +97,5 @@ public class SignalRejectionsController {
           OffsetDateTime to,
       @RequestParam(required = false) String strategySlug) {
     return new ShadowSummaryResponse(shadows.variantSummary(from, to, strategySlug));
-  }
-
-  private static Map<String, Object> dto(SignalRejectionRepository.RejectionRow row) {
-    Map<String, Object> dto = new LinkedHashMap<>();
-    dto.put("id", row.id());
-    dto.put("strategyVersionId", row.strategyVersionId());
-    dto.put("strategySlug", row.strategySlug());
-    dto.put("exchange", row.exchange());
-    dto.put("tradingsymbol", row.tradingsymbol());
-    dto.put("interval", row.interval());
-    dto.put("side", row.side());
-    dto.put("blockingRail", row.blockingRail());
-    dto.put("blockingOperand", row.blockingOperand());
-    dto.put("blockingThreshold", row.blockingThreshold());
-    dto.put("blockingMargin", row.blockingMargin());
-    dto.put("blockingReason", row.blockingReason());
-    dto.put("compositeScore", row.compositeScore());
-    dto.put("compositeThreshold", row.compositeThreshold());
-    dto.put("diagnostic", row.diagnostic());
-    dto.put("barTime", row.barTime());
-    dto.put("generatedAt", row.generatedAt());
-    return dto;
   }
 }

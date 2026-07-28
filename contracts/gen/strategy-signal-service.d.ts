@@ -1305,6 +1305,32 @@ export interface components {
             qty?: number;
             note?: string;
         };
+        SignalDto: {
+            /** Format: int64 */
+            id: number;
+            /** Format: uuid */
+            strategyVersionId: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
+            signalType: string;
+            side: string;
+            entryPrice: number | null;
+            stopLoss: number | null;
+            target: number | null;
+            compositeScore: number;
+            scoreBreakdown: components["schemas"]["JsonNode"];
+            status: string;
+            /** Format: date-time */
+            generatedAt: string;
+            /** Format: date-time */
+            expiresAt: string | null;
+            suggestedQty: number | null;
+            tradeableExchange: string | null;
+            tradeableTradingsymbol: string | null;
+            scalperDetail: components["schemas"]["JsonNode"] | null;
+            exitReason: string | null;
+        };
         SellDecisionRow: {
             /** Format: int64 */
             id: number;
@@ -1640,6 +1666,13 @@ export interface components {
             sharpe: number | null;
             maxDrawdownPct: number | null;
         };
+        SignalPage: {
+            items: components["schemas"]["SignalDto"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
         SellDecisions: {
             items: components["schemas"]["SellDecisionRow"][];
         };
@@ -1702,6 +1735,39 @@ export interface components {
             capBound: boolean;
             droppedByCap: components["schemas"]["DroppedCandidate"][];
         };
+        SignalFeed: {
+            items: components["schemas"]["SignalDto"][];
+        };
+        RejectionPage: {
+            items: components["schemas"]["RejectionRow"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
+        RejectionRow: {
+            /** Format: int64 */
+            id: number;
+            /** Format: uuid */
+            strategyVersionId: string;
+            strategySlug: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
+            side: string | null;
+            blockingRail: string;
+            blockingOperand: number | null;
+            blockingThreshold: number | null;
+            blockingMargin: number | null;
+            blockingReason: string | null;
+            compositeScore: number | null;
+            compositeThreshold: number | null;
+            diagnostic: components["schemas"]["JsonNode"];
+            /** Format: date-time */
+            barTime: string;
+            /** Format: date-time */
+            generatedAt: string;
+        };
         ShadowSummaryResponse: {
             items: components["schemas"]["VariantSummary"][];
         };
@@ -1719,6 +1785,14 @@ export interface components {
             pnlNet: number | null;
             /** Format: int64 */
             unpriced: number;
+        };
+        RailCount: {
+            rail: string;
+            /** Format: int64 */
+            count: number;
+        };
+        RailCountList: {
+            items: components["schemas"]["RailCount"][];
         };
         DotHealth: {
             asOf: string;
@@ -1909,11 +1983,6 @@ export interface components {
             verdict: string;
             unrealizedPct: number | null;
             acknowledged: boolean;
-        };
-        RailCount: {
-            rail: string;
-            /** Format: int64 */
-            count: number;
         };
         NotificationEventRow: {
             /** Format: int64 */
@@ -2728,9 +2797,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalDto"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2761,9 +2828,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalDto"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3594,9 +3659,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3627,9 +3690,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalDto"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3907,9 +3968,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalFeed"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3947,9 +4006,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RejectionPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4015,9 +4072,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RailCountList"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

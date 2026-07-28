@@ -6,7 +6,6 @@ import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -39,7 +38,7 @@ public class SignalsController {
 
   /** Paged/filtered history. */
   @GetMapping
-  public Map<String, Object> list(
+  public SignalViews.SignalPage list(
       @RequestParam(required = false) String status,
       @RequestParam(required = false) String book,
       @RequestParam(required = false) UUID strategyVersionId,
@@ -57,11 +56,8 @@ public class SignalsController {
         repository.list(
             status, book, strategyVersionId, exchange, tradingsymbol, from, to, boundedLimit,
             boundedOffset);
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("items", items.stream().map(SignalsController::dto).toList());
-    response.put("limit", boundedLimit);
-    response.put("offset", boundedOffset);
-    return response;
+    return new SignalViews.SignalPage(
+        items.stream().map(SignalsController::dto).toList(), boundedLimit, boundedOffset);
   }
 
   /**
@@ -103,13 +99,14 @@ public class SignalsController {
 
   /** Currently takeable ENTRY calls; EXIT advisories remain on history and sell-decision surfaces. */
   @GetMapping("/active")
-  public Map<String, Object> active() {
-    return Map.of("items", repository.active().stream().map(SignalsController::dto).toList());
+  public SignalViews.SignalFeed active() {
+    return new SignalViews.SignalFeed(
+        repository.active().stream().map(SignalsController::dto).toList());
   }
 
   /** Signal detail + the full reasoning payload. */
   @GetMapping("/{id}")
-  public Map<String, Object> detail(@PathVariable long id) {
+  public SignalViews.SignalDto detail(@PathVariable long id) {
     SignalRepository.SignalRow row =
         repository.find(id)
             .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_SIGNAL, "no such signal"));
@@ -118,7 +115,7 @@ public class SignalsController {
 
   /** Owner executed an ENTRY manually at the broker; optionally opens paper when a qty is given. */
   @PostMapping("/{id}/taken")
-  public Map<String, Object> taken(
+  public SignalViews.SignalDto taken(
       @PathVariable long id, @RequestBody(required = false) TakenRequest request) {
     SignalRepository.SignalRow signal = requireExists(id);
     if (!"ENTRY".equals(signal.signalType())) {
@@ -161,7 +158,7 @@ public class SignalsController {
    * a concurrent 15:45 sweep may already have invalidated.
    */
   @PostMapping("/{id}/dismiss")
-  public Map<String, Object> dismiss(@PathVariable long id) {
+  public SignalViews.SignalDto dismiss(@PathVariable long id) {
     requireExists(id);
     if (!repository.transitionIf(id, "ACTIVE", "DISMISSED")) {
       String status = repository.find(id).map(SignalRepository.SignalRow::status).orElse(null);
@@ -181,31 +178,32 @@ public class SignalsController {
         .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_SIGNAL, "no such signal"));
   }
 
-  private static Map<String, Object> dto(SignalRepository.SignalRow row) {
-    Map<String, Object> dto = new LinkedHashMap<>();
-    dto.put("id", row.id());
-    dto.put("strategyVersionId", row.strategyVersionId());
-    dto.put("exchange", row.exchange());
-    dto.put("tradingsymbol", row.tradingsymbol());
-    dto.put("interval", row.interval());
-    dto.put("signalType", row.signalType());
-    dto.put("side", row.side());
-    dto.put("entryPrice", row.entryPrice());
-    dto.put("stopLoss", row.stopLoss());
-    dto.put("target", row.target());
-    dto.put("compositeScore", row.compositeScore());
-    dto.put("scoreBreakdown", row.scoreBreakdown());
-    dto.put("status", row.status());
-    dto.put("generatedAt", row.generatedAt());
-    dto.put("expiresAt", row.expiresAt());
-    dto.put("suggestedQty", row.suggestedQty());
-    dto.put("tradeableExchange", row.tradeableExchange());
-    dto.put("tradeableTradingsymbol", row.tradeableTradingsymbol());
-    dto.put("scalperDetail", row.scalperDetail());
-    // Why an EXIT fired. NULL on ENTRY rows and on EXITs predating V048 — those reasons only
-    // ever reached a log line. The endpoint returns a Map, so springdoc does not enumerate it
-    // and adding the key does not drift the contract.
-    dto.put("exitReason", row.exitReason());
-    return dto;
+  /**
+   * The row as this surface renders it. NOT the row itself: {@code minerviniDetail} and {@code
+   * manasAroraDetail} have never been emitted here, and the row's {@code exitReason} sits after
+   * them, so returning {@code SignalRow} would add two keys and move a third.
+   */
+  private static SignalViews.SignalDto dto(SignalRepository.SignalRow row) {
+    return new SignalViews.SignalDto(
+        row.id(),
+        row.strategyVersionId(),
+        row.exchange(),
+        row.tradingsymbol(),
+        row.interval(),
+        row.signalType(),
+        row.side(),
+        row.entryPrice(),
+        row.stopLoss(),
+        row.target(),
+        row.compositeScore(),
+        row.scoreBreakdown(),
+        row.status(),
+        row.generatedAt(),
+        row.expiresAt(),
+        row.suggestedQty(),
+        row.tradeableExchange(),
+        row.tradeableTradingsymbol(),
+        row.scalperDetail(),
+        row.exitReason());
   }
 }

@@ -39,6 +39,16 @@ class MapReturnRatchetTest {
    * keys, the populated path 16 — so one record would add 11 null keys to the empty response. That is
    * a wire change, not a retyping; typing it needs a deliberate shape decision, not a refactor.
    *
+   * <p>strategy-signal-service 25 → 18 (2026-07-29): the whole SIGNALS surface. {@code
+   * SignalsController}'s five handlers ({@code list} / {@code active} / {@code detail} / {@code
+   * taken} / {@code dismiss}) all rendered through ONE private {@code dto} assembler, so retyping
+   * that one method to {@code SignalViews.SignalDto} typed all five at once. {@code
+   * SignalRejectionsController}'s {@code list} + {@code railCounts} lost their assemblers entirely —
+   * {@code RejectionRow} and {@code RailCount} already matched the emitted keys name-for-name IN
+   * ORDER, so the envelopes were the only opaque part. Its class javadoc claimed the Map return
+   * meant "response keys never drift the OpenAPI spec"; that is exactly backwards, and describing
+   * the blindness as a feature is the clearest argument for this ratchet existing.
+   *
    * <p>edge-gateway 2 → 0 (ledger D3 slice 1, 2026-07-28): {@code AuthController.session} and
    * {@code SystemStatusController.status} now return records. Both were pure retypings — every key
    * name, nesting level and value type unchanged — so the wire is identical and only the SPEC
@@ -49,7 +59,7 @@ class MapReturnRatchetTest {
       Map.of(
           "edge-gateway", 0,
           "market-data-service", 26,
-          "strategy-signal-service", 25,
+          "strategy-signal-service", 18,
           "backtest-service", 7);
 
   private static final Pattern MAP_RETURN =

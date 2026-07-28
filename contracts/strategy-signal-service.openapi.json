@@ -846,8 +846,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalDto"
                 }
               }
             }
@@ -884,8 +883,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalDto"
                 }
               }
             }
@@ -1997,8 +1995,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalPage"
                 }
               }
             }
@@ -2035,8 +2032,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalDto"
                 }
               }
             }
@@ -2396,8 +2392,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SignalFeed"
                 }
               }
             }
@@ -2489,8 +2484,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RejectionPage"
                 }
               }
             }
@@ -2595,8 +2589,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RailCountList"
                 }
               }
             }
@@ -3883,6 +3876,80 @@
           }
         }
       },
+      "SignalDto" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "strategyVersionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "signalType" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : "string"
+          },
+          "entryPrice" : {
+            "type" : [ "number", "null" ]
+          },
+          "stopLoss" : {
+            "type" : [ "number", "null" ]
+          },
+          "target" : {
+            "type" : [ "number", "null" ]
+          },
+          "compositeScore" : {
+            "type" : "number"
+          },
+          "scoreBreakdown" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "expiresAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "suggestedQty" : {
+            "type" : [ "number", "null" ]
+          },
+          "tradeableExchange" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradeableTradingsymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "scalperDetail" : {
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "exitReason" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "compositeScore", "entryPrice", "exchange", "exitReason", "expiresAt", "generatedAt", "id", "interval", "scalperDetail", "scoreBreakdown", "side", "signalType", "status", "stopLoss", "strategyVersionId", "suggestedQty", "target", "tradeableExchange", "tradeableTradingsymbol", "tradingsymbol" ]
+      },
       "SellDecisionRow" : {
         "type" : "object",
         "properties" : {
@@ -4784,6 +4851,26 @@
         },
         "required" : [ "expectancy", "graduatedAt", "maxDrawdownPct", "sharpe", "strategyId", "trades" ]
       },
+      "SignalPage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SignalDto"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
+      },
       "SellDecisions" : {
         "type" : "object",
         "properties" : {
@@ -4954,6 +5041,99 @@
         },
         "required" : [ "admitted", "batch", "candidates", "capBound", "capExceedance", "droppedByCap", "entries", "openAtStart", "ranAt", "runDate", "wouldEnter" ]
       },
+      "SignalFeed" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SignalDto"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "RejectionPage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RejectionRow"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
+      },
+      "RejectionRow" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "strategyVersionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "strategySlug" : {
+            "type" : "string"
+          },
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "side" : {
+            "type" : [ "string", "null" ]
+          },
+          "blockingRail" : {
+            "type" : "string"
+          },
+          "blockingOperand" : {
+            "type" : [ "number", "null" ]
+          },
+          "blockingThreshold" : {
+            "type" : [ "number", "null" ]
+          },
+          "blockingMargin" : {
+            "type" : [ "number", "null" ]
+          },
+          "blockingReason" : {
+            "type" : [ "string", "null" ]
+          },
+          "compositeScore" : {
+            "type" : [ "number", "null" ]
+          },
+          "compositeThreshold" : {
+            "type" : [ "number", "null" ]
+          },
+          "diagnostic" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "barTime" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "barTime", "blockingMargin", "blockingOperand", "blockingRail", "blockingReason", "blockingThreshold", "compositeScore", "compositeThreshold", "diagnostic", "exchange", "generatedAt", "id", "interval", "side", "strategySlug", "strategyVersionId", "tradingsymbol" ]
+      },
       "ShadowSummaryResponse" : {
         "type" : "object",
         "properties" : {
@@ -5000,6 +5180,31 @@
           }
         },
         "required" : [ "closed", "losses", "open", "pnlNet", "pnlPoints", "unpriced", "variant", "wins" ]
+      },
+      "RailCount" : {
+        "type" : "object",
+        "properties" : {
+          "rail" : {
+            "type" : "string"
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "count", "rail" ]
+      },
+      "RailCountList" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RailCount"
+            }
+          }
+        },
+        "required" : [ "items" ]
       },
       "DotHealth" : {
         "type" : "object",
@@ -5575,19 +5780,6 @@
           }
         },
         "required" : [ "acknowledged", "runDate", "sellDecisionId", "symbol", "unrealizedPct", "verdict" ]
-      },
-      "RailCount" : {
-        "type" : "object",
-        "properties" : {
-          "rail" : {
-            "type" : "string"
-          },
-          "count" : {
-            "type" : "integer",
-            "format" : "int64"
-          }
-        },
-        "required" : [ "count", "rail" ]
       },
       "NotificationEventRow" : {
         "type" : "object",

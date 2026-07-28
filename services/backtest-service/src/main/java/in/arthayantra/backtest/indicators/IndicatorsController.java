@@ -33,8 +33,8 @@ public class IndicatorsController {
 
   /** The registry list: id, label, params+defaults, output series, render + pane hints. */
   @GetMapping
-  public Map<String, Object> list() {
-    return Map.of("items", service.registry());
+  public IndicatorRegistry list() {
+    return new IndicatorRegistry(service.registry());
   }
 
   /**

@@ -184,10 +184,10 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
     assertThat(jdbc.queryForObject("SELECT engine_image FROM backtest_runs WHERE id=?", String.class, runId))
         .isEqualTo("backtest-service:9.9.9");
 
-    Map<String, Object> results =
+    RunResult results =
         new RunRepository(jdbc, MAPPER, EngineIdentity.of(null, null)).findResult(runId).orElseThrow();
-    assertThat(results.get("engineSha")).isEqualTo("cafebabe1234");
-    assertThat(results.get("engineImage")).isEqualTo("backtest-service:9.9.9");
+    assertThat(results.engineSha()).isEqualTo("cafebabe1234");
+    assertThat(results.engineImage()).isEqualTo("backtest-service:9.9.9");
   }
 
   // Audit T3 / EVO §13 row 4: a run row carries its actor (inherited from the job by the worker).
@@ -222,13 +222,13 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
 
     assertThat(jdbc.queryForObject("SELECT engine_sha FROM backtest_runs WHERE id=?", String.class, runId))
         .isNull();
-    Map<String, Object> results =
+    RunResult results =
         new RunRepository(jdbc, MAPPER, EngineIdentity.of(null, null)).findResult(runId).orElseThrow();
-    assertThat(results.get("engineSha")).isNull();
-    assertThat(results.get("engineImage")).isNull();
+    assertThat(results.engineSha()).isNull();
+    assertThat(results.engineImage()).isNull();
     // A non-funnel run's job request carries no universeAsOf → the results read surfaces NULL, never
     // a spurious value (task_03b9f52d / task_9062b5f1).
-    assertThat(results.get("universeAsOf")).isNull();
+    assertThat(results.universeAsOf()).isNull();
   }
 
   // task_03b9f52d / task_9062b5f1: a funnel-mode submission stamps the chosen screen date into the job
@@ -239,8 +239,8 @@ class RunRepositoryIntegrationTest extends BacktestIntegrationTestBase {
     UUID jobId = newJobIdWithUniverseAsOf("2026-07-10");
     UUID runId = insertRunForJob(EngineIdentity.of(null, null), jobId, "owner");
 
-    Map<String, Object> results =
+    RunResult results =
         new RunRepository(jdbc, MAPPER, EngineIdentity.of(null, null)).findResult(runId).orElseThrow();
-    assertThat(results.get("universeAsOf")).isEqualTo("2026-07-10");
+    assertThat(results.universeAsOf()).isEqualTo("2026-07-10");
   }
 }

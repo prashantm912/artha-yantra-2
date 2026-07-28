@@ -39,7 +39,7 @@ class ExportControllerTest {
   void jsonDownloadsReuseTheExistingArtifactPayloads() throws Exception {
     ArrayNode equity = mapper.createArrayNode();
     equity.addObject().put("ts", "2026-07-13T09:15:00+05:30").put("value", "100000.00");
-    when(runs.findResult(runId)).thenReturn(Optional.of(Map.of("equityCurve", equity)));
+    when(runs.findResult(runId)).thenReturn(Optional.of(runResultWithEquity(equity)));
 
     Map<String, Object> trade = new LinkedHashMap<>();
     trade.put("seq", 1);
@@ -66,7 +66,8 @@ class ExportControllerTest {
 
   @Test
   void tradeCapSetsTheExplicitTruncationHeaders() {
-    when(runs.findResult(runId)).thenReturn(Optional.of(Map.of("equityCurve", mapper.createArrayNode())));
+    when(runs.findResult(runId))
+        .thenReturn(Optional.of(runResultWithEquity(mapper.createArrayNode())));
     List<Map<String, Object>> rows = new ArrayList<>();
     for (int i = 0; i <= ExportController.MAX_ROWS; i++) {
       rows.add(Map.of("seq", i));
@@ -86,4 +87,12 @@ class ExportControllerTest {
     assertThat(response.getHeaders().getFirst("Content-Disposition")).contains("attachment");
     return mapper.readTree(response.getBody());
   }
+
+  /** Only {@code equityCurve} is read by the export path; the rest of the record is immaterial here. */
+  private static RunResult runResultWithEquity(com.fasterxml.jackson.databind.JsonNode equity) {
+    return new RunResult(
+        null, equity, null, null, null, 0L, null, null, null, null, null, null, null, null, null,
+        List.of());
+  }
+
 }

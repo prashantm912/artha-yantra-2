@@ -77,7 +77,11 @@ class PaperViewsSerializationTest {
     assertThat(keysOf(pnl.points().get(0))).containsExactly("date", "equity");
   }
 
-  /** The two page envelopes echo their bounded window after the items, as the maps did. */
+  /**
+   * The two page envelopes. {@code PositionList} is single-key, so its serialization really is
+   * unchanged; {@code TradePage} came from a multi-key {@code Map.of} and its order is NORMALIZED
+   * here, not preserved — same distinction as the envelope test above.
+   */
   @Test
   void thePageEnvelopesCarryItemsThenTheWindow() {
     assertThat(keysOf(new PaperViews.TradePage(List.of(), 50, 0)))

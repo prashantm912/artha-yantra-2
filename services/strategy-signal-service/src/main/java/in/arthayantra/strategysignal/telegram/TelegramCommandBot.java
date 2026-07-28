@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.telegram;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.strategysignal.paper.PaperService;
+import in.arthayantra.strategysignal.paper.PaperViews;
 import in.arthayantra.strategysignal.paper.RiskService;
 import in.arthayantra.strategysignal.paper.RiskSettingsRepository;
 import in.arthayantra.strategysignal.signals.DotHealthCanary;
@@ -237,13 +238,12 @@ public class TelegramCommandBot {
     }
   }
 
-  @SuppressWarnings("unchecked")
   private String pnl() {
-    Map<String, Object> summary = (Map<String, Object>) paper.pnl(null).get("summary");
-    return "realized total: ₹" + summary.get("realizedTotal")
-        + "\ntrades: " + summary.get("trades")
-        + "\nwin rate: " + orDash(summary.get("winRate"))
-        + "\nexpectancy: ₹" + orDash(summary.get("expectancy"));
+    PaperViews.PnlSummary summary = paper.pnl(null).summary();
+    return "realized total: ₹" + summary.realizedTotal()
+        + "\ntrades: " + summary.trades()
+        + "\nwin rate: " + orDash(summary.winRate())
+        + "\nexpectancy: ₹" + orDash(summary.expectancy());
   }
 
   private String positions() {

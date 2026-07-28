@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategysignal.paper.PaperService;
+import in.arthayantra.strategysignal.paper.PaperViews;
 import in.arthayantra.strategysignal.paper.RiskService;
 import in.arthayantra.strategysignal.paper.RiskSettingsRepository;
 import in.arthayantra.strategysignal.signals.DotHealthCanary;
@@ -151,8 +152,13 @@ class TelegramCommandBotTest {
   void pnlFormatsTheSummary() {
     when(paper.pnl(null))
         .thenReturn(
-            Map.of("points", List.of(), "summary",
-                Map.of("realizedTotal", "1234.50", "trades", 4, "winRate", "0.75", "expectancy", "308.62")));
+            new PaperViews.Pnl(
+                List.of(),
+                new PaperViews.PnlSummary(
+                    new java.math.BigDecimal("1234.50"),
+                    4,
+                    new java.math.BigDecimal("0.75"),
+                    new java.math.BigDecimal("308.62"))));
     bot(true).handle(update(1, OWNER_CHAT, "/pnl"));
     verify(api).sendMessage(eq(OWNER_CHAT), contains("1234.50"));
   }

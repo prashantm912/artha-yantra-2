@@ -1812,6 +1812,31 @@ export interface components {
         ShadowVariantListResponse: {
             items: components["schemas"]["ShadowVariantView"][];
         };
+        TradePage: {
+            items: components["schemas"]["TradeDto"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
+        PositionList: {
+            items: components["schemas"]["PositionDto"][];
+        };
+        EquityPoint: {
+            date: string;
+            equity: number;
+        };
+        Pnl: {
+            points: components["schemas"]["EquityPoint"][];
+            summary: components["schemas"]["PnlSummary"];
+        };
+        PnlSummary: {
+            realizedTotal: number;
+            /** Format: int32 */
+            trades: number;
+            winRate: number | null;
+            expectancy: number | null;
+        };
         MarginHeat: {
             priced: boolean;
             unpricedReason: string | null;
@@ -1897,6 +1922,13 @@ export interface components {
             m2mRealized: number | null;
             m2mUnrealized: number | null;
             utilisedDebits: number | null;
+        };
+        JournalPage: {
+            items: components["schemas"]["Entry"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
         };
         Insight: {
             /** Format: uuid */
@@ -3119,9 +3151,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["JournalPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4137,9 +4167,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["TradePage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4204,9 +4232,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["PositionList"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4268,9 +4294,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Pnl"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

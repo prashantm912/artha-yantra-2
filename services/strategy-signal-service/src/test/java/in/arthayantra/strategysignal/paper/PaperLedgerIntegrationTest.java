@@ -154,7 +154,23 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
     mockMvc
         .perform(get("/api/v1/paper/trades"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.items").isArray());
+        .andExpect(jsonPath("$.items").isArray())
+        .andExpect(jsonPath("$.limit").exists())
+        .andExpect(jsonPath("$.offset").exists());
+
+    // The D3 retyping's wire proof for /pnl, the one converted paper body that actually NESTS: the
+    // envelope, the curve points and every summary key must survive the Map -> record change. A
+    // closed position exists by now, so `points` is non-empty and winRate/expectancy are non-null.
+    mockMvc
+        .perform(get("/api/v1/paper/pnl"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.points").isArray())
+        .andExpect(jsonPath("$.points[0].date").exists())
+        .andExpect(jsonPath("$.points[0].equity").exists())
+        .andExpect(jsonPath("$.summary.realizedTotal").exists())
+        .andExpect(jsonPath("$.summary.trades").exists())
+        .andExpect(jsonPath("$.summary.winRate").exists())
+        .andExpect(jsonPath("$.summary.expectancy").exists());
   }
 
   @Test

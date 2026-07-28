@@ -8,7 +8,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -25,19 +24,20 @@ class JournalControllerTest {
     controller = new JournalController(repository);
   }
 
-  private Map<String, Object> list(int limit, int offset) {
+  private JournalController.JournalPage list(int limit, int offset) {
     return controller.list(null, null, null, null, null, limit, offset);
   }
 
   @Test
   void clampsNegativeLimitAndOffsetToTheBounds() {
-    Map<String, Object> result = list(-5, -10);
+    JournalController.JournalPage result = list(-5, -10);
     ArgumentCaptor<Integer> lim = ArgumentCaptor.forClass(Integer.class);
     ArgumentCaptor<Integer> off = ArgumentCaptor.forClass(Integer.class);
     verify(repository).list(any(), any(), any(), any(), any(), lim.capture(), off.capture());
     assertThat(lim.getValue()).isEqualTo(1);
     assertThat(off.getValue()).isZero();
-    assertThat(result).containsEntry("limit", 1).containsEntry("offset", 0);
+    assertThat(result.limit()).isEqualTo(1);
+    assertThat(result.offset()).isZero();
   }
 
   @Test

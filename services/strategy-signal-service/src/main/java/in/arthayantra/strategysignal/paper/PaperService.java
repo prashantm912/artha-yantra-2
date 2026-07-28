@@ -1165,7 +1165,7 @@ public class PaperService {
   }
 
   /** Daily realized-equity curve + win rate / expectancy over a book's closed trades (null → all). */
-  public Map<String, Object> pnl(String book) {
+  public PaperViews.Pnl pnl(String book) {
     List<PositionRow> closed = positions.listClosed(book, null, null, null, 500, 0);
     // listClosed is newest-first; walk oldest-first for the cumulative curve
     List<PositionRow> chrono = new ArrayList<>(closed);
@@ -1181,21 +1181,24 @@ public class PaperService {
       LocalDate day = row.closedAt() == null ? LocalDate.now(IST) : row.closedAt().atZoneSameInstant(IST).toLocalDate();
       byDay.merge(day, row.realizedPnl(), BigDecimal::add);
     }
-    List<Map<String, Object>> points = new ArrayList<>();
+    List<PaperViews.EquityPoint> points = new ArrayList<>();
     BigDecimal cumulative = BigDecimal.ZERO;
     for (Map.Entry<LocalDate, BigDecimal> entry : byDay.entrySet()) {
       cumulative = cumulative.add(entry.getValue());
-      points.add(Map.of("date", entry.getKey().toString(), "equity", cumulative));
+      points.add(new PaperViews.EquityPoint(entry.getKey().toString(), cumulative));
     }
     int total = chrono.size();
-    Map<String, Object> summary = new LinkedHashMap<>();
-    summary.put("realizedTotal", realizedTotal.setScale(2, RoundingMode.HALF_UP));
-    summary.put("trades", total);
-    summary.put("winRate", total == 0 ? null : BigDecimal.valueOf(wins).divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP));
-    summary.put(
-        "expectancy",
-        total == 0 ? null : realizedTotal.divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP));
-    return Map.of("points", points, "summary", summary);
+    PaperViews.PnlSummary summary =
+        new PaperViews.PnlSummary(
+            realizedTotal.setScale(2, RoundingMode.HALF_UP),
+            total,
+            total == 0
+                ? null
+                : BigDecimal.valueOf(wins).divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP),
+            total == 0
+                ? null
+                : realizedTotal.divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP));
+    return new PaperViews.Pnl(points, summary);
   }
 
   /** How many positions + orders a {@link #reset} wiped — carried to the paper-admin audit row (V14). */

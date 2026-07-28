@@ -119,6 +119,35 @@ public final class ConnectTheDotsScorer {
       ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
       ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot,
       boolean dowDot) {
+    return score(
+        ctx, side, bias60mDir, threshold, props, vwapHardGate, ivPerStrikeGate, premiumSkewDot,
+        dowDot, null);
+  }
+
+  /**
+   * As the 9-arg form but with the RESOLVED §0B volume floor threaded in (T24, root-caused
+   * 2026-07-28).
+   *
+   * <p><b>The defect this closes.</b> The {@code volume} dot called the TWO-argument
+   * {@code ScalperGates.volume(underlying, volume)}, which resolves the floor through
+   * {@code volumeFloorFor(underlying, null)} — i.e. the STATIC per-index default (NIFTY 125,000).
+   * The {@code relative-volume-floor} tag substitutes the banded floor at the RAIL call site only
+   * ({@code ScalperConfluenceGate}), so the dot never saw it. The tag has been armed on all 21 NIFTY
+   * scalpers since #605 and the dot has been reading a floor it could not clear: on 2026-07-27 the
+   * 3m series max was 117,000, so ZERO bars could cross 125,000 and the dot scored 0/909; on
+   * 2026-07-28 only expiry-day churn got it to 38/1,068 (3.6%), its first non-zero reading in nine
+   * sessions. 1.0 of weight had been gated at roughly p95 of its own operand, every strategy, every
+   * session.
+   *
+   * <p>{@code volumeFloor} null ⇒ the per-index default, i.e. byte-identical to the 9-arg form, so
+   * every other caller and every unarmed strategy is unmoved. Only a strategy that actually resolves
+   * a different floor changes — which is the point, and which is why this is HOLD tier: it raises
+   * the composite for armed strategies and therefore changes which signals fire.
+   */
+  public static Confluence score(
+      ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
+      ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot,
+      boolean dowDot, BigDecimal volumeFloor) {
     Chart c = ctx.chart();
     Oi oi = ctx.oi();
     Macro m = ctx.macro();
@@ -138,7 +167,9 @@ public final class ConnectTheDotsScorer {
     add(dots, "vwma", W, ce ? gt(c.close(), c.vwma20()) : gt(c.vwma20(), c.close()), "price vs VWMA20");
     add(dots, "psar", W, ce ? gt(c.close(), c.psar()) : gt(c.psar(), c.close()), "price vs PSAR");
     add(dots, "rsi", W, ScalperGates.rsiBand(c.rsi14(), side).pass(), "RSI band");
-    add(dots, "volume", W, ScalperGates.volume(ctx.signalIndex(), c.volume()).pass(), "volume floor");
+    // T24: the RESOLVED floor — the same value the rail tested — not the static per-index default.
+    add(dots, "volume", W,
+        ScalperGates.volume(ctx.signalIndex(), c.volume(), volumeFloor).pass(), "volume floor");
     add(dots, "futures_oi", W_OI, ScalperGates.oiQuadrant(oi, side).pass(), "futures OI quadrant");
     add(dots, "underlying_oi", W, ce ? oi.underlying().bullish() : oi.underlying().bearish(), "underlying OI quadrant");
     // T2.2: the trending cross is a CHANGE (PE-OI rising while CE-OI falls), not a static PE-CE tilt.

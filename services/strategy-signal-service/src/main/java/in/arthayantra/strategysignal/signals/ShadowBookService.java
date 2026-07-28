@@ -129,10 +129,26 @@ public class ShadowBookService {
     PremiumBracketRules.Brackets brackets =
         PremiumBracketRules.resolve(
             signals.versionConfig(strategyVersionId).orElse(null), entryLtp);
+    // The leg's exchange is the instrument master's, carried on the picked candidate — the same
+    // canonical value the real ENTRY stamps. It used to be a prefix guess off the underlying's name
+    // (task_032bff42), and that helper is gone with nothing to fall back to here: market-data
+    // publishes it per leg and MarketOiClient re-reads the master when an older market-data does
+    // not, so a candidate arriving unresolved has already exhausted both routes.
+    //
+    // Skip rather than insert: shadow_positions.exchange is NOT NULL (V016), so a null would surface
+    // as a constraint violation swallowed by the caller's catch — a DB error standing in for a
+    // knowable condition. A shadow book exists to be priced and compared; one whose leg has no
+    // canonical key can be neither, so recording it would add a row that only ever reads as noise.
+    if (leg.exchange() == null || leg.exchange().isBlank()) {
+      log.warn(
+          "shadow open skipped for rejection {} ({} {}): leg {} has no instrument-master exchange",
+          rejectionId, strategySlug, side, leg.tradingsymbol());
+      return null;
+    }
     long id =
         shadows.insert(
             rejectionId, strategyVersionId, strategySlug, side, d.underlying(),
-            optionExchange(d.underlying()), leg.tradingsymbol(), leg.strike(), d.expiry(),
+            leg.exchange(), leg.tradingsymbol(), leg.strike(), d.expiry(),
             entryLtp, brackets.stopLoss(), brackets.takeProfit(), d.structuralStop(),
             signalExchange, signalTradingsymbol, d.blockingRail(), d.compositeScore(), barTime,
             variant);
@@ -141,21 +157,5 @@ public class ShadowBookService {
         variant, strategySlug, side, leg.tradingsymbol(), entryLtp, rejectionId, d.blockingRail(),
         d.compositeScore(), brackets.stopLoss(), brackets.takeProfit(), d.structuralStop());
     return id;
-  }
-
-  /**
-   * The option leg's derivatives exchange from the option root (BSE roots trade on BFO).
-   *
-   * <p>⚠️ This is a PREFIX HEURISTIC on what is now a MONEY path (it stamps
-   * {@code tradeable_exchange}, which feeds paper sizing AND live order routing). A miss is not
-   * benign: the instrument-meta lookup 404s, falls back to an equity proxy with lot 1, and produces
-   * a non-lot-aligned qty — the exact defect this was extracted to fix. The list is complete for
-   * every BFO option root that exists today (verified against {@code marketdata.instruments}:
-   * SENSEX, BANKEX, FOCIT and nothing else), but a newly listed BSE root would be silently mapped
-   * to NFO. Resolving from the instrument master instead is chipped as task_032bff42.
-   */
-  static String optionExchange(String underlying) {
-    String u = underlying == null ? "" : underlying.toUpperCase(java.util.Locale.ROOT);
-    return u.startsWith("SENSEX") || u.startsWith("BANKEX") || u.startsWith("FOCIT") ? "BFO" : "NFO";
   }
 }

@@ -38,7 +38,7 @@ class HeroZeroStrikeSelectorTest {
 
   private static Candidate leg(String strike, OptionType type) {
     String t = type == CE ? "CE" : "PE";
-    return new Candidate("NIFTY" + strike + t, bd(strike), type, bd("180"), bd("0.14"));
+    return new Candidate("NFO", "NIFTY" + strike + t, bd(strike), type, bd("180"), bd("0.14"));
   }
 
   /** A both-side chain on a 50-point ladder over 19850..20150 (every strike tradeable). */
@@ -136,7 +136,7 @@ class HeroZeroStrikeSelectorTest {
     List<Candidate> chain = new ArrayList<>();
     for (int k = 19850; k <= 20150; k += 50) {
       if (k == 20050) {
-        chain.add(new Candidate("NIFTY20050CE", bd("20050"), CE, bd("180"), null)); // null IV
+        chain.add(new Candidate("NFO", "NIFTY20050CE", bd("20050"), CE, bd("180"), null)); // null IV
       } else {
         chain.add(leg(Integer.toString(k), CE));
       }

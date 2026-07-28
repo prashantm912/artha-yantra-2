@@ -152,6 +152,7 @@ class SignalEngineCompositeRejectionTest {
             new PrometheusMeterRegistry(PrometheusConfig.DEFAULT),
             Optional.empty(),
             Optional.empty(),
+            java.util.Optional.empty(),
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
             writer,

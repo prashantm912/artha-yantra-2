@@ -128,9 +128,8 @@ public class OptionAtmPinner {
 
     // Roll off ONLY within underlyings that resolved this pass.
     for (Map.Entry<String, Set<InstrumentKey>> entry : resolved.entrySet()) {
-      String prefix = optionExchange(entry.getKey());
       for (InstrumentKey stale : new HashSet<>(currentPins)) {
-        if (!stale.exchange().equals(prefix) || entry.getValue().contains(stale)) {
+        if (entry.getValue().contains(stale)) {
           continue;
         }
         if (!belongsTo(stale, entry.getKey())) {
@@ -204,11 +203,10 @@ public class OptionAtmPinner {
         }
         OptionsChainService.Chain chain = chains.chain(underlying, expiries.get(0));
         List<OptionsChainService.StrikeRow> rows = atmWindow(chain);
-        String exchange = optionExchange(underlying);
         Set<InstrumentKey> forUnderlying = new HashSet<>();
         for (OptionsChainService.StrikeRow row : rows) {
-          addLeg(forUnderlying, exchange, underlying, row.ce());
-          addLeg(forUnderlying, exchange, underlying, row.pe());
+          addLeg(forUnderlying, underlying, row.ce());
+          addLeg(forUnderlying, underlying, row.pe());
         }
         desired.put(underlying, forUnderlying);
       } catch (RuntimeException failure) {
@@ -247,24 +245,24 @@ public class OptionAtmPinner {
   }
 
   private static void addLeg(
-      Set<InstrumentKey> desired,
-      String exchange,
-      String underlying,
-      OptionsChainService.Leg leg) {
+      Set<InstrumentKey> desired, String underlying, OptionsChainService.Leg leg) {
     if (leg == null || leg.tradingsymbol() == null || leg.tradingsymbol().isBlank()) {
       log.warn("option ATM pin has no resolvable leg for {}", underlying);
       return;
     }
-    desired.add(new InstrumentKey(exchange, leg.tradingsymbol()));
+    // The exchange comes from the instrument master via the chain leg, never from the underlying's
+    // NAME (task_767294d5). The old helper mapped SENSEX->BFO, *NIFTY*->NFO and THREW on anything
+    // else — so it could not express BANKEX or FOCIT at all, and adding either to the pin list would
+    // have thrown once per cycle forever. Deriving it removes both the guess and that ceiling.
+    if (leg.exchange() == null || leg.exchange().isBlank()) {
+      // Skip rather than guess: an unknown exchange would pin a key the registry cannot resolve, and
+      // the contract would silently never be captured.
+      log.warn(
+          "option ATM pin: leg {} for {} carries no exchange from the instrument master — skipped",
+          leg.tradingsymbol(), underlying);
+      return;
+    }
+    desired.add(new InstrumentKey(leg.exchange(), leg.tradingsymbol()));
   }
 
-  private static String optionExchange(String underlying) {
-    if ("SENSEX".equalsIgnoreCase(underlying)) {
-      return "BFO";
-    }
-    if (underlying.toUpperCase().contains("NIFTY")) {
-      return "NFO";
-    }
-    throw new IllegalArgumentException("unsupported option ATM underlying " + underlying);
-  }
 }

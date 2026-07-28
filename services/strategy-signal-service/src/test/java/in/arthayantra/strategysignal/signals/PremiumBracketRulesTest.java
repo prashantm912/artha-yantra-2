@@ -37,12 +37,4 @@ class PremiumBracketRulesTest {
     assertThat(PremiumBracketRules.resolve(config, null))
         .isEqualTo(PremiumBracketRules.Brackets.NONE);
   }
-
-  @Test
-  void optionExchangeFollowsTheOptionRoot() {
-    assertThat(ShadowBookService.optionExchange("NIFTY 50")).isEqualTo("NFO");
-    assertThat(ShadowBookService.optionExchange("SENSEX")).isEqualTo("BFO");
-    assertThat(ShadowBookService.optionExchange("BANKEX")).isEqualTo("BFO");
-    assertThat(ShadowBookService.optionExchange(null)).isEqualTo("NFO");
-  }
 }

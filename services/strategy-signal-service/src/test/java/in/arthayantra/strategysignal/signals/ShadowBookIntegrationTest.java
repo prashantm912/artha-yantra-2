@@ -59,13 +59,19 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
 
   private RejectionDiagnostic diag(String optSym, BigDecimal composite, BigDecimal entryLtp,
       BigDecimal structuralStop) {
+    return diag(optSym, composite, entryLtp, structuralStop, "NFO");
+  }
+
+  /** Same diagnostic with the picked leg's exchange stated — lets a test contradict the root name. */
+  private RejectionDiagnostic diag(String optSym, BigDecimal composite, BigDecimal entryLtp,
+      BigDecimal structuralStop, String legExchange) {
     return new RejectionDiagnostic(
         "volume-floor", OptionType.CE, new BigDecimal("7865"), new BigDecimal("125000"),
         new BigDecimal("-117135"), "volume < 125000", composite, new BigDecimal("0.60"),
         List.of(), null, null, "NIFTY 50", LocalDate.now().plusDays(5),
         new StrikePicker.Pick(
             new StrikePicker.Candidate(
-                optSym, new BigDecimal("24250"), OptionType.CE, entryLtp, new BigDecimal("0.12")),
+                legExchange, optSym, new BigDecimal("24250"), OptionType.CE, entryLtp, new BigDecimal("0.12")),
             new BigDecimal("0.55")),
         structuralStop);
   }
@@ -113,6 +119,51 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(row.get(0).exchange()).isEqualTo("NFO");
     assertThat(row.get(0).entryLtp()).isEqualByComparingTo("100.00");
     assertThat(row.get(0).blockingRail()).isEqualTo("volume-floor");
+  }
+
+  /**
+   * The discriminating case (cross-vendor review Major 4). The shadow book stamps the SAME exchange
+   * the real ENTRY would, so a guess here corrupts the counterfactual it exists to measure: the row
+   * would be marked to a contract that does not trade on that exchange. The underlying is
+   * {@code NIFTY 50}, so the removed {@code startsWith("SENSEX")…} helper returns NFO — only reading
+   * the picked candidate's master-sourced value persists BFO.
+   */
+  @Test
+  void persistsThePickedLegsMasterExchangeNotAGuessFromTheUnderlying() {
+    UUID v = versionId();
+    String slug = "shadow-it-exch-" + UUID.randomUUID();
+    String optSym = "SHDOPT" + UUID.randomUUID().toString().substring(0, 8);
+    long r = rejection(v, slug, "SHDFUT-EXCH");
+
+    assertThat(
+            shadowBook.maybeOpen(r, v, slug, "NFO", "SHDFUT-EXCH", OffsetDateTime.now(),
+                diag(optSym, new BigDecimal("0.70"), new BigDecimal("100.00"), null, "BFO")))
+        .isNotNull();
+
+    var row = shadows.open().stream().filter(s -> s.strategySlug().equals(slug)).toList();
+    assertThat(row).hasSize(1);
+    assertThat(row.get(0).exchange())
+        .as("a name-prefix guess on 'NIFTY 50' would have written NFO")
+        .isEqualTo("BFO");
+  }
+
+  /**
+   * An unkeyed leg opens NO shadow book. {@code shadow_positions.exchange} is NOT NULL (V016), so
+   * inserting one would surface as a constraint violation swallowed by the caller's catch — a DB
+   * error standing in for a knowable condition. A book that cannot be priced is not worth a row.
+   */
+  @Test
+  void skipsTheBookEntirelyWhenTheLegHasNoMasterExchange() {
+    UUID v = versionId();
+    String slug = "shadow-it-noexch-" + UUID.randomUUID();
+    String optSym = "SHDOPT" + UUID.randomUUID().toString().substring(0, 8);
+    long r = rejection(v, slug, "SHDFUT-NOEXCH");
+
+    assertThat(
+            shadowBook.maybeOpen(r, v, slug, "NFO", "SHDFUT-NOEXCH", OffsetDateTime.now(),
+                diag(optSym, new BigDecimal("0.70"), new BigDecimal("100.00"), null, null)))
+        .isNull();
+    assertThat(shadows.open().stream().filter(s -> s.strategySlug().equals(slug))).isEmpty();
   }
 
   @Test

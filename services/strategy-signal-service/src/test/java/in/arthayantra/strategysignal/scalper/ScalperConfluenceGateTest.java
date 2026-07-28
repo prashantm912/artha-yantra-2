@@ -309,8 +309,8 @@ class ScalperConfluenceGateTest {
     return new ChainSnapshot(
         EXPIRY, bd("20000"), bd("20000"),
         List.of(
-            new StrikePicker.Candidate("NIFTY19850CE", bd("19850"), CE, bd("200"), bd("0.14")),
-            new StrikePicker.Candidate("NIFTY20000CE", bd("20000"), CE, bd("120"), bd("0.14"))),
+            new StrikePicker.Candidate("NFO", "NIFTY19850CE", bd("19850"), CE, bd("200"), bd("0.14")),
+            new StrikePicker.Candidate("NFO", "NIFTY20000CE", bd("20000"), CE, bd("120"), bd("0.14"))),
         List.of(
             new StrikeOi(ceWallStrike, 500_000L, 100L),
             new StrikeOi(bd("21000"), 100L, 800_000L)));
@@ -409,8 +409,8 @@ class ScalperConfluenceGateTest {
     // spot 20000, basis 0, ~5d, iv 0.14 → 19850 CE lands delta ~0.68 (in 0.6–0.7); others out
     List<StrikePicker.Candidate> candidates =
         List.of(
-            new StrikePicker.Candidate("NIFTY19850CE", bd("19850"), CE, bd("200"), bd("0.14")),
-            new StrikePicker.Candidate("NIFTY20000CE", bd("20000"), CE, bd("120"), bd("0.14")));
+            new StrikePicker.Candidate("NFO", "NIFTY19850CE", bd("19850"), CE, bd("200"), bd("0.14")),
+            new StrikePicker.Candidate("NFO", "NIFTY20000CE", bd("20000"), CE, bd("120"), bd("0.14")));
     return new ChainSnapshot(EXPIRY, bd("20000"), bd("20000"), candidates);
   }
 
@@ -1229,7 +1229,7 @@ class ScalperConfluenceGateTest {
     ChainSnapshot otmOnly =
         new ChainSnapshot(
             EXPIRY, bd("20000"), bd("20000"),
-            List.of(new StrikePicker.Candidate("NIFTY20800CE", bd("20800"), CE, bd("110"), bd("0.14"))));
+            List.of(new StrikePicker.Candidate("NFO", "NIFTY20800CE", bd("20800"), CE, bd("110"), bd("0.14"))));
     when(client.chain("NIFTY 50")).thenReturn(Optional.of(otmOnly));
     when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
 
@@ -1685,17 +1685,17 @@ class ScalperConfluenceGateTest {
   private static ChainSnapshot chainWithAtmPair() {
     List<StrikePicker.Candidate> candidates =
         List.of(
-            new StrikePicker.Candidate("NIFTY19900CE", bd("19900"), CE, bd("160"), bd("0.14")),
+            new StrikePicker.Candidate("NFO", "NIFTY19900CE", bd("19900"), CE, bd("160"), bd("0.14")),
             new StrikePicker.Candidate(
-                "NIFTY19900PE", bd("19900"), in.arthayantra.black76.Black76.OptionType.PE,
+                "NFO", "NIFTY19900PE", bd("19900"), in.arthayantra.black76.Black76.OptionType.PE,
                 bd("70"), bd("0.14")),
-            new StrikePicker.Candidate("NIFTY20000CE", bd("20000"), CE, bd("120"), bd("0.14")),
+            new StrikePicker.Candidate("NFO", "NIFTY20000CE", bd("20000"), CE, bd("120"), bd("0.14")),
             new StrikePicker.Candidate(
-                "NIFTY20000PE", bd("20000"), in.arthayantra.black76.Black76.OptionType.PE,
+                "NFO", "NIFTY20000PE", bd("20000"), in.arthayantra.black76.Black76.OptionType.PE,
                 bd("110"), bd("0.14")),
-            new StrikePicker.Candidate("NIFTY20100CE", bd("20100"), CE, bd("80"), bd("0.14")),
+            new StrikePicker.Candidate("NFO", "NIFTY20100CE", bd("20100"), CE, bd("80"), bd("0.14")),
             new StrikePicker.Candidate(
-                "NIFTY20100PE", bd("20100"), in.arthayantra.black76.Black76.OptionType.PE,
+                "NFO", "NIFTY20100PE", bd("20100"), in.arthayantra.black76.Black76.OptionType.PE,
                 bd("150"), bd("0.14")));
     return new ChainSnapshot(EXPIRY, bd("20000"), bd("20000"), candidates);
   }

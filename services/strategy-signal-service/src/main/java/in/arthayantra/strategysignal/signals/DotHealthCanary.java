@@ -154,8 +154,10 @@ public class DotHealthCanary {
     // (ScalperCalendars.forUnderlying — BSE Thursday monthly for SENSEX, NSE monthly for the rest),
     // so on an NSE-only expiry day a SENSEX-rooted read is NOT suppressed and a dead OI dot there is
     // a genuine outage. Treating either calendar's expiry as a blanket exemption would silence it.
+    // One date for the whole sweep — re-reading the clock per row could straddle IST midnight.
+    LocalDate today = now.toLocalDate();
     boolean allRowsSuppressed =
-        !contextRows.isEmpty() && contextRows.stream().allMatch(this::rootSuppressedToday);
+        !contextRows.isEmpty() && contextRows.stream().allMatch(d -> rootSuppressedToday(d, today));
     List<DotState> dots = new ArrayList<>(PROBES.size());
     for (Probe p : PROBES) {
       boolean alive = false;
@@ -255,12 +257,12 @@ public class DotHealthCanary {
    * calendar, which on a BSE-only expiry day reads NOT-suppressed and therefore pages: fail-loud is
    * the right default for a canary.
    */
-  private boolean rootSuppressedToday(JsonNode diagnostic) {
+  private boolean rootSuppressedToday(JsonNode diagnostic, LocalDate today) {
     String underlying = diagnostic.at("/context/underlying").asText("");
     MarketCalendar rootCalendar =
         underlying.toUpperCase(Locale.ROOT).contains("SENSEX") ? bseCalendar : calendar;
     try {
-      return rootCalendar.isMonthlyIndexExpiryDay(clock.instant().atZone(Ist.ZONE).toLocalDate());
+      return rootCalendar.isMonthlyIndexExpiryDay(today);
     } catch (IllegalArgumentException uncoveredYear) {
       return false; // the calendar cliff has its own canary
     }

@@ -89,7 +89,7 @@ class PaperSignalListenerEquivalenceTest {
 
       ArgumentCaptor<PaperService.OrderRequest> request =
           ArgumentCaptor.forClass(PaperService.OrderRequest.class);
-      verify(paper).openOrder(request.capture());
+      verify(paper).openScalperOrder(request.capture()); // scalper take: assignment happens downstream
       assertLevel(request.getValue().stopLoss(), levels.path("stopLoss"), name + " stopLoss");
       assertLevel(request.getValue().takeProfit(), levels.path("takeProfit"), name + " takeProfit");
     }

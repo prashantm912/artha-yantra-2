@@ -89,6 +89,13 @@ public class PaperService {
       this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, subaccountIdx, null, null);
     }
 
+    /** A copy charged to {@code idx} — used when the sub-account is assigned under the book lock. */
+    OrderRequest withSubaccountIdx(Integer idx) {
+      return new OrderRequest(
+          signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, idx, book,
+          clientOrderId);
+    }
+
     /** Pre-E10 8-arg form: no sub-account (manual / non-scalper order leaves the ledger key NULL). */
     public OrderRequest(
         Long signalId,
@@ -222,6 +229,7 @@ public class PaperService {
   private final PaperAccountService accountService;
   private final BookResolver books;
   private final RiskService risk;
+  private final ScalperAccountModel accounts;
   private final ApplicationEventPublisher events;
   private final PaperStaleTickAlerter staleTicks;
   private final PaperOrderRejectionRecorder rejections;
@@ -247,6 +255,7 @@ public class PaperService {
       PaperAccountService accountService,
       BookResolver books,
       RiskService risk,
+      ScalperAccountModel accounts,
       ApplicationEventPublisher events,
       PaperStaleTickAlerter staleTicks,
       PaperOrderRejectionRecorder rejections,
@@ -267,6 +276,7 @@ public class PaperService {
     this.accountService = accountService;
     this.books = books;
     this.risk = risk;
+    this.accounts = accounts;
     this.events = events;
     this.staleTicks = staleTicks;
     this.rejections = rejections;
@@ -501,6 +511,92 @@ public class PaperService {
     return BookResolver.MINERVINI.equals(book) || BookResolver.MANAS_ARORA.equals(book);
   }
 
+  /**
+   * Opens a scalper entry, assigning its E10 sub-account UNDER the same book lock and transaction that
+   * validates and writes it.
+   *
+   * <p>Selecting first and locking later is a race in its own right: two concurrent takes both read an
+   * idle account 1, both pick it, and the writer — now correctly serialized — REFUSES the second
+   * against account 1's allocation instead of routing it to idle account 2 (cross-vendor round 4). A
+   * capital-aware picker only helps if it reads capital nobody else is about to claim, so the pick has
+   * to happen inside the same critical section as the check and the write.
+   */
+  @Transactional
+  public PositionDto openScalperOrder(OrderRequest request) {
+    lockAnchorsBeforeBook(request);
+    return openOrder(request.withSubaccountIdx(assignScalperSubAccount()));
+  }
+
+  /**
+   * The straddle form of {@link #openScalperOrder}: assigns the sub-account ONCE and charges BOTH legs
+   * to it.
+   *
+   * <p>Assigning per leg would re-route leg 2 — leg 1's capital is already visible inside this
+   * transaction, so a capital-aware picker would deliberately send leg 2 somewhere else, breaking the
+   * documented invariant that a straddle's two legs share one sub-account (they are one position).
+   */
+  @Transactional
+  public List<PositionDto> openScalperPair(OrderRequest first, OrderRequest second) {
+    lockAnchorsBeforeBook(first, second);
+    int idx = assignScalperSubAccount();
+    return openPair(first.withSubaccountIdx(idx), second.withSubaccountIdx(idx));
+  }
+
+  /**
+   * Takes the SIGNAL-ANCHOR lock before anything here touches the BOOK lock — the one global lock
+   * order for every entry path.
+   *
+   * <p>{@code openOrder} already takes the anchor lock (for the swing-exit TOCTOU) and then the book
+   * lock. These scalper wrappers acquire the book lock first, to assign the sub-account inside it, so
+   * without this they would run {@code book → anchor} while a signal-linked manual open runs
+   * {@code anchor → book}. Two concurrent entries on the same scalper signal would then deadlock and
+   * PostgreSQL would abort one of them — on the money path (cross-vendor round 5). Ordering is the
+   * only defence: taking the anchor first here makes every wrapper agree.
+   *
+   * <p>Re-taking the same advisory lock later in {@code openOrder} is free — it is transaction-scoped
+   * and re-entrant within the session.
+   */
+  private void lockAnchorsBeforeBook(OrderRequest... requests) {
+    List<Long> anchors = new ArrayList<>();
+    for (OrderRequest r : requests) {
+      if (r.signalId() != null) {
+        anchors.add(r.signalId());
+      }
+    }
+    if (!anchors.isEmpty()) {
+      // lockAnchors distincts + sorts internally, so a pair sharing one signal locks once.
+      signals.lockAnchors(anchors);
+    }
+  }
+
+  /** Takes the book lock, then picks the least-deployed unfrozen sub-account inside it. */
+  private int assignScalperSubAccount() {
+    positions.lockBookCapital(BookResolver.SCALPER);
+    return accounts.nextFreeAccount();
+  }
+
+  /**
+   * Opens BOTH legs of a two-leg pair (the #11 straddle) ATOMICALLY — either both positions exist or
+   * neither does.
+   *
+   * <p>Load-bearing, and it is the capital caps that made it so. The legs used to open through two
+   * independent transactions, which was survivable while nothing could refuse the second one. Once
+   * {@code openOrder} enforces the deployment cap and the sub-account ceiling, a refused SECOND leg
+   * would leave the FIRST one open — turning a delta-neutral straddle into an unintended NAKED
+   * directional position. That is strictly worse than the cap breach the refusal prevents: a breach is
+   * a sizing error, a naked leg is a different strategy (cross-vendor round 3).
+   *
+   * <p>Both calls are in-class, so they BYPASS the proxy and simply join this transaction (the same
+   * self-invocation property {@code openManualOrder} documents). Two consequences, both wanted: leg 2's
+   * cap check sees leg 1's uncommitted write, so the pair is projected cumulatively; and the per-book
+   * advisory lock {@code openOrder} takes is held to commit, so no third order can interleave between
+   * the legs.
+   */
+  @Transactional
+  public List<PositionDto> openPair(OrderRequest first, OrderRequest second) {
+    return List.of(openOrder(first), openOrder(second));
+  }
+
   /** Simulates an entry; fills via {@code ltp_slippage/v1} against the next-tick LTP + cost model. */
   @Transactional
   public PositionDto openOrder(OrderRequest request) {
@@ -599,6 +695,77 @@ public class PaperService {
     String book = bookFor(request);
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
+    // The deployment cap, projected against what this fill ACTUALLY costs. Placed here — at the sole
+    // writer, after the fill is struck — because this is the first and only point where all three
+    // inputs exist together: the resolved instrument, the final quantity, and the SLIPPAGE-ADJUSTED
+    // fill price. Gating at emission cannot use any of them (the leg and size do not exist yet), and
+    // gating in openManualOrder covers one of the four doors.
+    //
+    // Being at the writer is what makes the straddle correct for free: each leg opens through its own
+    // openOrder call in its own transaction, so leg 2 projects against a capitalUsed that ALREADY
+    // includes committed leg 1. A projection computed once at emission prices one leg and admits two.
+    //
+    // This is NOT a re-run of the governor — see RiskService.deploymentWouldCross. It is a pure
+    // read-and-compare with no audit row, no ntfy and no dedup, so the taken path stays ungated in the
+    // sense that test pins (nothing is double-charged).
+    // Valued the SAME way capitalUsed values every open position — accountService.usageFor applies
+    // SPAN (or the flat margin-pct fallback) to futures and SHORT options, the premium to long
+    // options, full notional to equities. Raw `price × qty` would be wrong here: it compares a
+    // notional candidate against a margin-based sum, overstating a short option ~8× (0.12) and a
+    // future ~6.7× (0.15). Long options and equities are identical either way, which is exactly why
+    // the scalper path and every test still passed with the naive form.
+    //
+    // Computed ONCE and reused for the buying-power warning below, which already made this same call
+    // on every open — so this is one FEWER external SPAN round-trip per fill, not one more.
+    BigDecimal projectedCost =
+        accountService.usageFor(
+            meta, exchange, tradingsymbol, side, fill.fillPrice(), request.qty());
+    // Serialize this book's check-plus-write. Both caps below read UNLOCKED aggregates before the
+    // position is persisted, so without this two concurrent opens on the same book each observe the
+    // same pre-write usage, both pass, and both commit past the cap — a hard limit two callers can
+    // straddle is not a limit (cross-vendor round 3). Transaction-scoped, so for a straddle (whose
+    // legs share one transaction) it is held across BOTH legs.
+    positions.lockBookCapital(book);
+    if (risk.deploymentWouldCross(book, projectedCost)) {
+      String detail =
+          "projected " + projectedCost.toPlainString()
+              + " would cross cap "
+              + risk.deploymentCap(book).map(BigDecimal::toPlainString).orElse("n/a");
+      // Durable like every other refusal on this path: REQUIRES_NEW + fail-soft, so the trace survives
+      // the rollback this throw causes and can never mask the 422 itself.
+      recordDeploymentBlockedQuietly(request, exchange, tradingsymbol, side, detail);
+      throw new ApiException(
+          422,
+          ErrorCodes.RISK_ENTRY_BLOCKED,
+          "entry blocked by risk governor (" + RiskService.MAX_DEPLOYMENT_PCT + ") on book " + book
+              + " — " + detail,
+          Map.of("book", book, "rail", RiskService.MAX_DEPLOYMENT_PCT));
+    }
+    // The per-sub-account allocation, against the EFFECTIVE account — the one this fill will actually
+    // be charged to. For an add onto an open key that is the EXISTING row's sub-account, not the
+    // request's: upsertPosition averages into that row and keeps its original idx, so validating the
+    // requested idx would check an account the money never reaches. That mismatch is what let two
+    // correlated adds sit past one account's ceiling while the picker believed load was spread.
+    Integer effectiveSubAccount =
+        positions
+            .openSubAccountIdx(book, exchange, tradingsymbol, side)
+            .orElse(request.subaccountIdx());
+    if (effectiveSubAccount != null
+        && accounts.wouldExceedSubAccount(book, effectiveSubAccount, projectedCost)) {
+      String detail =
+          "projected " + projectedCost.toPlainString()
+              + " would cross sub-account " + effectiveSubAccount + " allocation "
+              + accounts.subAccountAllocation(book, effectiveSubAccount).toPlainString();
+      recordDeploymentBlockedQuietly(request, exchange, tradingsymbol, side, detail);
+      throw new ApiException(
+          422,
+          ErrorCodes.RISK_ENTRY_BLOCKED,
+          "entry blocked by risk governor (sub_account_allocation) on book " + book + " — " + detail,
+          Map.of(
+              "book", book,
+              "rail", "sub_account_allocation",
+              "subaccountIdx", effectiveSubAccount));
+    }
     orders.insertFilled(
         book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
         fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId(), refSource,
@@ -616,11 +783,9 @@ public class PaperService {
       events.publishEvent(
           new PaperPositionOpened(row.id(), book, exchange, tradingsymbol, side, row.qty()));
     }
-    String warning =
-        accountService.buyingPowerWarning(
-            book,
-            accountService.usageFor(
-                meta, exchange, tradingsymbol, side, fill.fillPrice(), request.qty()));
+    // Same projected usage the deployment/sub-account checks above already computed — reused rather
+    // than recomputed, so the SPAN client is called once per fill instead of twice.
+    String warning = accountService.buyingPowerWarning(book, projectedCost);
     return positions
         .findOpen(book, exchange, tradingsymbol, side)
         .map(row -> toPositionDto(row).withWarning(warning))
@@ -720,6 +885,18 @@ public class PaperService {
   }
 
   /** P1-4 reject capture (fail-soft): no reference price was available to strike the entry fill. */
+  private void recordDeploymentBlockedQuietly(
+      OrderRequest request, String exchange, String tradingsymbol, String side, String detail) {
+    try {
+      rejections.recordDeploymentBlocked(
+          request.signalId(), bookFor(request), exchange, tradingsymbol, side, request.qty(), detail);
+    } catch (RuntimeException e) {
+      log.warn(
+          "paper_order_rejections (deployment-blocked) not written for {}:{}: {}",
+          exchange, tradingsymbol, e.getMessage());
+    }
+  }
+
   private void recordNoPriceRejectQuietly(
       OrderRequest request, String exchange, String tradingsymbol, String side) {
     try {

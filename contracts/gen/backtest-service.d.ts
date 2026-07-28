@@ -599,6 +599,25 @@ export interface components {
             tags: string[];
             note: string | null;
         };
+        RunResult: {
+            metrics: components["schemas"]["JsonNode"];
+            equityCurve: components["schemas"]["JsonNode"];
+            drawdownCurve: components["schemas"]["JsonNode"];
+            benchmarkCurve: components["schemas"]["JsonNode"];
+            dataHash: string | null;
+            /** Format: int64 */
+            seed: number;
+            premiumSource: string | null;
+            strategyId: string | null;
+            ranAt: string | null;
+            exchange: string | null;
+            tradingsymbol: string | null;
+            universeChecksum: string | null;
+            universeAsOf: string | null;
+            engineSha: string | null;
+            engineImage: string | null;
+            caveats: string[];
+        };
         SwingReportCard: {
             /** Format: int32 */
             trades: number;
@@ -1305,9 +1324,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RunResult"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

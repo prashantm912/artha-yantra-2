@@ -715,8 +715,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RunResult"
                 }
               }
             }
@@ -1820,6 +1819,64 @@
           }
         },
         "required" : [ "jobId", "note", "tags" ]
+      },
+      "RunResult" : {
+        "type" : "object",
+        "properties" : {
+          "metrics" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "equityCurve" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "drawdownCurve" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "benchmarkCurve" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "dataHash" : {
+            "type" : [ "string", "null" ]
+          },
+          "seed" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "premiumSource" : {
+            "type" : [ "string", "null" ]
+          },
+          "strategyId" : {
+            "type" : [ "string", "null" ]
+          },
+          "ranAt" : {
+            "type" : [ "string", "null" ]
+          },
+          "exchange" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradingsymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "universeChecksum" : {
+            "type" : [ "string", "null" ]
+          },
+          "universeAsOf" : {
+            "type" : [ "string", "null" ]
+          },
+          "engineSha" : {
+            "type" : [ "string", "null" ]
+          },
+          "engineImage" : {
+            "type" : [ "string", "null" ]
+          },
+          "caveats" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "benchmarkCurve", "caveats", "dataHash", "drawdownCurve", "engineImage", "engineSha", "equityCurve", "exchange", "metrics", "premiumSource", "ranAt", "seed", "strategyId", "tradingsymbol", "universeAsOf", "universeChecksum" ]
       },
       "SwingReportCard" : {
         "type" : "object",

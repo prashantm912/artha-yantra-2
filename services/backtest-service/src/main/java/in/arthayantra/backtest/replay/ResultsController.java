@@ -32,7 +32,7 @@ public class ResultsController {
 
   /** Metrics + curves + reproducibility triple for one run. */
   @GetMapping("/{backtestId}/results")
-  public Map<String, Object> results(@PathVariable UUID backtestId) {
+  public RunResult results(@PathVariable UUID backtestId) {
     return runs
         .findResult(backtestId)
         .orElseThrow(

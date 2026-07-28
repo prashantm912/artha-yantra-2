@@ -23,10 +23,19 @@ import org.junit.jupiter.api.Test;
  */
 class MapReturnRatchetTest {
 
-  /** Frozen at the 2026-07-02 audit-fix baseline. DOWN is progress; UP fails the build. */
+  /**
+   * Frozen at the 2026-07-02 audit-fix baseline, ratcheted DOWN as handlers are converted. DOWN is
+   * progress; UP fails the build.
+   *
+   * <p>edge-gateway 2 → 0 (ledger D3 slice 1, 2026-07-28): {@code AuthController.session} and
+   * {@code SystemStatusController.status} now return records. Both were pure retypings — every key
+   * name, nesting level and value type unchanged — so the wire is identical and only the SPEC
+   * gained the shape. The two comments the old assembler carried ("Map return ⇒ this key never
+   * drifts the contract") described exactly the blindness this ratchet exists to remove.
+   */
   private static final Map<String, Integer> FROZEN =
       Map.of(
-          "edge-gateway", 2,
+          "edge-gateway", 0,
           "market-data-service", 30,
           "strategy-signal-service", 28,
           "backtest-service", 10);

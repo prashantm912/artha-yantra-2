@@ -110,6 +110,48 @@ migrate_legacy_state() {
     return 0
 }
 
+# Diagnose a missing-session error before blaming the caller.
+#
+# STATE_DIR is canonicalized above with `cd "$STATE_DIR" && pwd` — so a RELATIVE
+# STATE_DIR (which is exactly what every SKILL.md tells you to export) resolves
+# against the INVOKING CWD. Run a resume from a git worktree and it resolves to
+# that worktree's own .claude/skills/.../state, which EXISTS because .claude is
+# tracked, and is empty — so resume reported "no session" while the real
+# .thread file sat in the repo root's state dir, minutes old. Hit twice on
+# 2026-07-28 ~20 minutes apart.
+#
+# Note what is NOT the cause: the per-target key. For a free-form label target
+# `target_key` hashes the label string itself, which is identical from any cwd.
+# The DIRECTORY moved, not the key — so looking for the same key under a
+# different hash would have found nothing and explained nothing.
+#
+# Prints a pointer when a same-named state file exists in a SIBLING checkout's
+# state dir, else just names where it actually looked.
+explain_missing_session() {
+    local target="$1" key main_root sibling
+    echo "  looked in: $STATE_DIR" >&2
+    key="$(target_key "$target" 2>/dev/null)" || return 0
+    # Where is the MAIN checkout? --git-common-dir points at the shared .git even
+    # from inside a worktree, so its parent is the primary tree.
+    main_root="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+    main_root="$(dirname "$main_root")"
+    [ -z "$main_root" ] && return 0
+    # The same skill's state dir over there — STATE_DIR ends .claude/skills/<skill>/state.
+    sibling="$main_root/.claude/skills/$(basename "$(dirname "$STATE_DIR")")/state"
+    [ "$sibling" = "$STATE_DIR" ] && return 0
+    if ls "$sibling/${key}"*.thread >/dev/null 2>&1; then
+        echo "  BUT a session for this target EXISTS in: $sibling" >&2
+        echo "  STATE_DIR is relative, so it resolved against the CURRENT directory ($(pwd))." >&2
+        echo "  start.sh ran from the main checkout; this call did not." >&2
+        echo "  Fix: run EVERY state op (resume/synthesize/reset/show) from the SAME cwd as" >&2
+        echo "  start.sh — the repo root — and subshell any worktree step:" >&2
+        echo "        (cd <worktree> && git diff ... > \"\$STATE_DIR/x.diff\")   # then call the harness at the root" >&2
+    else
+        echo "  (no session for this target in the main checkout either: $sibling)" >&2
+    fi
+    return 0
+}
+
 # Load a prompt template and substitute {{TARGET}}, {{EXTRA_PROMPT}},
 # {{IMPLEMENTER_NOTES}} from the like-named env vars. Uses bash literal
 # replacement (NOT awk gsub) — gsub treats '&' and '\' as special in the

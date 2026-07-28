@@ -7,7 +7,6 @@ import java.time.Instant;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,7 +28,7 @@ import reactor.core.publisher.Mono;
 @RestController
 public class SystemStatusController {
 
-  private record Cached(Instant at, Map<String, Object> body) {}
+  private record Cached(Instant at, SystemStatus body) {}
 
   private static final Duration CACHE_TTL = Duration.ofSeconds(5);
   // No fresh tick for 5 min DURING market hours ⇒ the feed/producer is likely dead (register §9-22).
@@ -57,7 +56,7 @@ public class SystemStatusController {
 
   /** The rollup; served from the 5 s cache between Redis reads. */
   @GetMapping("/api/v1/system/status")
-  public Mono<Map<String, Object>> status() {
+  public Mono<SystemStatus> status() {
     Cached cached = cache.get();
     if (cached != null && cached.at().plus(CACHE_TTL).isAfter(Instant.now())) {
       return Mono.just(cached.body());
@@ -69,7 +68,7 @@ public class SystemStatusController {
         .doOnNext(body -> cache.set(new Cached(Instant.now(), body)));
   }
 
-  private Map<String, Object> assemble(
+  private SystemStatus assemble(
       String kiteRaw,
       String tickerRaw,
       String integrity,
@@ -91,45 +90,41 @@ public class SystemStatusController {
     } catch (NumberFormatException ignored) {
       tickAge = null;
     }
-    Map<String, Object> kite = new LinkedHashMap<>();
-    kite.put("session", session);
-    // Audit P1-11: the raw feed-state string ("MOCK"/"CONNECTED"/...). The B-13 rollup above
-    // deliberately maps MOCK → VALID for the health view, which made the frontend's MOCK-mode
-    // tag (session.store checks for "MOCK") permanently unreachable — the operator's UI showed
-    // synthetic data with no marker. Map return ⇒ an added key does not drift the contract.
-    kite.put("raw", kiteRaw);
-    kite.put("ticker", ticker);
-    kite.put("lastTickAgeMs", tickAge);
-    // The Kite REST limiter headroom in [0,1], published to kite:rate-budget by market-data; null when
-    // absent/unparseable (no producer has run yet). Map return ⇒ this key never drifts the contract.
-    kite.put("rateBudget", parseRateBudget(rateBudget));
+    // Audit P1-11: `raw` is the unmapped feed-state string. The B-13 rollup maps MOCK → VALID for
+    // the health view, which made the frontend's MOCK-mode tag (session.store checks for "MOCK")
+    // permanently unreachable — the operator's UI showed synthetic data with no marker.
+    SystemStatus.KiteStatus kite =
+        new SystemStatus.KiteStatus(session, kiteRaw, ticker, tickAge, parseRateBudget(rateBudget));
 
-    Object jobs = Map.of("queued", 0, "running", 0);
+    Map<String, Object> jobs = Map.of("queued", 0, "running", 0);
     if (jobsSummary != null) {
       try {
-        jobs = objectMapper.readValue(jobsSummary, Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parsed = objectMapper.readValue(jobsSummary, Map.class);
+        jobs = parsed;
       } catch (Exception unparseable) {
         // keep zeros — Phase 28 owns the producer
       }
     }
     boolean kiteHealthy = "VALID".equals(session);
     String phase = marketPhase();
-    List<Map<String, Object>> services =
+    List<SystemStatus.ServiceStatus> services =
         List.of(
-            mapOf("edge-gateway", "UP"),
+            new SystemStatus.ServiceStatus("edge-gateway", "UP"),
             // derived from the shared keys market-data maintains — never a REST probe
-            mapOf("market-data-service", marketDataStatus(kiteRaw, tickAge, phase)));
+            new SystemStatus.ServiceStatus(
+                "market-data-service", marketDataStatus(kiteRaw, tickAge, phase)));
 
-    Map<String, Object> body = new LinkedHashMap<>();
-    body.put("overall", kiteHealthy ? "UP" : "DEGRADED");
-    body.put("status", kiteHealthy ? "UP" : "DEGRADED"); // back-compat alias
-    body.put("services", services);
-    body.put("kite", kite);
-    body.put("market", Map.of("phase", phase));
-    body.put("corporateActions", integrity == null ? "" : integrity);
-    body.put("jobs", jobs);
-    body.put("asOf", OffsetDateTime.now(IST).toString());
-    return body;
+    String overall = kiteHealthy ? "UP" : "DEGRADED";
+    return new SystemStatus(
+        overall,
+        overall, // back-compat alias, emitted exactly as before
+        services,
+        kite,
+        new SystemStatus.MarketStatus(phase),
+        integrity == null ? "" : integrity,
+        jobs,
+        OffsetDateTime.now(IST).toString());
   }
 
   private String marketPhase() {
@@ -178,10 +173,4 @@ public class SystemStatusController {
     }
   }
 
-  private static Map<String, Object> mapOf(String name, String status) {
-    Map<String, Object> m = new LinkedHashMap<>();
-    m.put("name", name);
-    m.put("status", status);
-    return m;
-  }
 }

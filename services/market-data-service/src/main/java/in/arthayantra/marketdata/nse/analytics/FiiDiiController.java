@@ -40,31 +40,31 @@ public class FiiDiiController {
   public record LongShortRow(LocalDate tradeDate, long fiiLong, long fiiShort, BigDecimal ratio) {}
 
   @GetMapping("/cash")
-  public Map<String, Object> cash(
+  public FiiDiiEnvelopes.Cash cash(
       @RequestParam String from, @RequestParam(required = false) String to) {
     LocalDate f = parseDate(from);
     LocalDate t = to == null || to.isBlank() ? f : parseDate(to);
-    return Map.of("items", reader.fiiDii(f, t));
+    return new FiiDiiEnvelopes.Cash(reader.fiiDii(f, t));
   }
 
   @GetMapping("/derivative-stats")
-  public Map<String, Object> derivativeStats(
+  public FiiDiiEnvelopes.DerivativeStats derivativeStats(
       @RequestParam String from, @RequestParam(required = false) String to) {
     LocalDate f = parseDate(from);
     LocalDate t = to == null || to.isBlank() ? f : parseDate(to);
-    return Map.of("items", reader.fiiDerivativeStats(f, t));
+    return new FiiDiiEnvelopes.DerivativeStats(reader.fiiDerivativeStats(f, t));
   }
 
   @GetMapping("/participant-oi")
-  public Map<String, Object> participantOi(
+  public FiiDiiEnvelopes.ParticipantOi participantOi(
       @RequestParam String from, @RequestParam(required = false) String to) {
     LocalDate f = parseDate(from);
     LocalDate t = to == null || to.isBlank() ? f : parseDate(to);
-    return Map.of("items", reader.participantOi(f, t));
+    return new FiiDiiEnvelopes.ParticipantOi(reader.participantOi(f, t));
   }
 
   @GetMapping("/long-short")
-  public Map<String, Object> longShort(
+  public FiiDiiEnvelopes.LongShort longShort(
       @RequestParam String from, @RequestParam(required = false) String to) {
     LocalDate f = parseDate(from);
     LocalDate t = to == null || to.isBlank() ? f : parseDate(to);
@@ -83,7 +83,7 @@ public class FiiDiiController {
                       r.tradeDate(), r.futureIndexLong(), r.futureIndexShort(), ratio);
                 })
             .toList();
-    return Map.of("items", items);
+    return new FiiDiiEnvelopes.LongShort(items);
   }
 
   /**

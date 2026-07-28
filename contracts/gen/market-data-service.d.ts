@@ -3660,6 +3660,76 @@ export interface components {
             /** Format: date */
             asOf: string | null;
         };
+        ParticipantOi: {
+            items: components["schemas"]["ParticipantOiRow"][];
+        };
+        ParticipantOiRow: {
+            /** Format: date */
+            tradeDate: string;
+            clientType: string;
+            /** Format: int64 */
+            futureIndexLong: number;
+            /** Format: int64 */
+            futureIndexShort: number;
+            /** Format: int64 */
+            futureStockLong: number;
+            /** Format: int64 */
+            futureStockShort: number;
+            /** Format: int64 */
+            optionIndexCallLong: number;
+            /** Format: int64 */
+            optionIndexPutLong: number;
+            /** Format: int64 */
+            optionIndexCallShort: number;
+            /** Format: int64 */
+            optionIndexPutShort: number;
+            /** Format: int64 */
+            optionStockCallLong: number;
+            /** Format: int64 */
+            optionStockPutLong: number;
+            /** Format: int64 */
+            optionStockCallShort: number;
+            /** Format: int64 */
+            optionStockPutShort: number;
+            /** Format: int64 */
+            totalLongContracts: number;
+            /** Format: int64 */
+            totalShortContracts: number;
+        };
+        LongShort: {
+            items: components["schemas"]["LongShortRow"][];
+        };
+        LongShortRow: {
+            /** Format: date */
+            tradeDate: string;
+            /** Format: int64 */
+            fiiLong: number;
+            /** Format: int64 */
+            fiiShort: number;
+            ratio: number;
+        };
+        DerivativeStats: {
+            items: components["schemas"]["FiiDerivativeRow"][];
+        };
+        FiiDerivativeRow: {
+            /** Format: date */
+            tradeDate: string;
+            segment: string;
+            buyValue: number;
+            sellValue: number;
+            netValue: number;
+        };
+        Cash: {
+            items: components["schemas"]["FiiDiiRow"][];
+        };
+        FiiDiiRow: {
+            /** Format: date */
+            tradeDate: string;
+            category: string;
+            buyValue: number;
+            sellValue: number;
+            netValue: number;
+        };
         Bias: {
             /** Format: date */
             tradeDate: string;
@@ -8247,9 +8317,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ParticipantOi"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8281,9 +8349,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["LongShort"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8315,9 +8381,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["DerivativeStats"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8349,9 +8413,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Cash"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

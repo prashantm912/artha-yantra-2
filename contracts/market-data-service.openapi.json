@@ -5366,8 +5366,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ParticipantOi"
                 }
               }
             }
@@ -5410,8 +5409,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/LongShort"
                 }
               }
             }
@@ -5454,8 +5452,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/DerivativeStats"
                 }
               }
             }
@@ -5498,8 +5495,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Cash"
                 }
               }
             }
@@ -10841,6 +10837,188 @@
           }
         },
         "required" : [ "asOf", "freeFloatMcapCr", "freeFloatPct", "isin", "marketCapCr", "netProfitCr", "pe", "promoterPct", "revenueCr", "revenuePrevCr", "roe", "symbol" ]
+      },
+      "ParticipantOi" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ParticipantOiRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "ParticipantOiRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "clientType" : {
+            "type" : "string"
+          },
+          "futureIndexLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "futureIndexShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "futureStockLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "futureStockShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionIndexCallLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionIndexPutLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionIndexCallShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionIndexPutShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionStockCallLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionStockPutLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionStockCallShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "optionStockPutShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalLongContracts" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalShortContracts" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "clientType", "futureIndexLong", "futureIndexShort", "futureStockLong", "futureStockShort", "optionIndexCallLong", "optionIndexCallShort", "optionIndexPutLong", "optionIndexPutShort", "optionStockCallLong", "optionStockCallShort", "optionStockPutLong", "optionStockPutShort", "totalLongContracts", "totalShortContracts", "tradeDate" ]
+      },
+      "LongShort" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/LongShortRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "LongShortRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "fiiLong" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "fiiShort" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "ratio" : {
+            "type" : "number"
+          }
+        },
+        "required" : [ "fiiLong", "fiiShort", "ratio", "tradeDate" ]
+      },
+      "DerivativeStats" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FiiDerivativeRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "FiiDerivativeRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "segment" : {
+            "type" : "string"
+          },
+          "buyValue" : {
+            "type" : "number"
+          },
+          "sellValue" : {
+            "type" : "number"
+          },
+          "netValue" : {
+            "type" : "number"
+          }
+        },
+        "required" : [ "buyValue", "netValue", "segment", "sellValue", "tradeDate" ]
+      },
+      "Cash" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FiiDiiRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "FiiDiiRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "buyValue" : {
+            "type" : "number"
+          },
+          "sellValue" : {
+            "type" : "number"
+          },
+          "netValue" : {
+            "type" : "number"
+          }
+        },
+        "required" : [ "buyValue", "category", "netValue", "sellValue", "tradeDate" ]
       },
       "Bias" : {
         "type" : "object",

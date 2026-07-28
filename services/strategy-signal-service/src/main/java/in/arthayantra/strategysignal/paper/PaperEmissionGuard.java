@@ -159,6 +159,15 @@ public class PaperEmissionGuard implements EmissionGuard {
     if (unresolvedDerivative(exchange, tradingsymbol, meta)) {
       return null; // same fail-closed rule as suggestedQty (review C2) — hero-zero is options-only
     }
+    // The declared min_premium_inr binds here too. This quantity OVERRIDES the ordinary sized one,
+    // so a floor enforced only inside PositionSizer.size left hero-zero unfloored — the SAME defect
+    // already fixed for max_lots, repeated one param later (cross-vendor review, #1084). Floor ₹10 /
+    // premium ₹5 / lot 75 / cap 5 gave 375 live units where the replay skips the entry outright.
+    // Null (not 0) so the caller keeps its ordinary advisory qty, which the floor has already
+    // zeroed — hero-zero must not resurrect a trade the sizer refused.
+    if (PositionSizer.belowPremiumFloor(sizing, premium)) {
+      return null;
+    }
     long lot = Math.max(1, meta.lotSize());
     // Hero-zero is a scalper (expiry-day options) concept — funded off the scalper book's realised P&L.
     BigDecimal budget = heroZeroDeployBudget(account.realisedProfit(BookResolver.SCALPER));

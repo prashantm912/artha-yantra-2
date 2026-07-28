@@ -77,6 +77,50 @@ class PaperEmissionGuardTest {
    * replay capped at 5. The change that was supposed to CLOSE a live-vs-replay sizing divergence
    * opened a new one for exactly the three strategies whose premium is cheapest.
    */
+  /**
+   * Hero-Zero must honour {@code min_premium_inr} as well as {@code max_lots} (cross-vendor review,
+   * #1084 Critical).
+   *
+   * <p>The SAME defect as the lot-cap bypass, repeated one param later: this quantity OVERRIDES the
+   * ordinary sized one, so a floor enforced only inside {@code PositionSizer.size} left the
+   * hero-zero family unfloored. The reviewer's own numbers — floor ₹10, premium ₹5, lot 75, cap 5 —
+   * produced <b>375 live units against ZERO replay units</b>, because
+   * {@code OptionsPremiumReplay} skips a sub-floor entry outright.
+   *
+   * <p>Returns null, not 0: the caller then keeps its ordinary advisory quantity, which the floor
+   * has already zeroed. Hero-Zero must not resurrect a trade the sizer refused.
+   */
+  @Test
+  void heroZeroSuggestedQtyHonoursThePremiumFloor() {
+    PaperAccountService account = mock(PaperAccountService.class);
+    InstrumentMetaClient instruments = mock(InstrumentMetaClient.class);
+    PaperEmissionGuard guard =
+        new PaperEmissionGuard(
+            mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
+            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class));
+    when(instruments.meta(any(), any()))
+        .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
+    when(account.realisedProfit("scalper")).thenReturn(bd("150000"));
+
+    var floored =
+        new in.arthayantra.strategyengine.config.StrategyDefinition.SizingSpec(
+            "premium_budget",
+            java.util.Map.of("budget_inr", bd("2000"), "min_premium_inr", bd("10"), "max_lots", 5));
+
+    assertThat(guard.heroZeroSuggestedQty(floored, "NFO", "NIFTY25000CE", bd("5")))
+        .as("₹5 premium under a ₹10 floor — replay SKIPS this entry, so live must not size it")
+        .isNull();
+    assertThat(guard.heroZeroSuggestedQty(floored, "NFO", "NIFTY25000CE", bd("10")))
+        .as("EXACTLY at the floor is above it — strict-below, same as the ordinary sizer")
+        .isNotNull();
+    assertThat(guard.heroZeroSuggestedQty(floored, "NFO", "NIFTY25000CE", bd("20")))
+        .as("comfortably above the floor — still capped at 5 lots")
+        .isEqualByComparingTo("375");
+    assertThat(guard.heroZeroSuggestedQty(UNCAPPED, "NFO", "NIFTY25000CE", bd("5")))
+        .as("no floor declared ⇒ unchanged, the strict no-op")
+        .isNotNull();
+  }
+
   @Test
   void heroZeroSuggestedQtyHonoursTheDeclaredLotCap() {
     PaperAccountService account = mock(PaperAccountService.class);

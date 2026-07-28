@@ -47,8 +47,7 @@ public final class PositionSizer {
         // would silently change sizing for every existing config and move the goldens; a floor only
         // binds when a strategy asks for one. That asymmetry is real and is called out in the PR
         // rather than papered over: a config that sets nothing still differs between live and replay.
-        BigDecimal minPremium = optionalDecimalParam(spec.params(), "min_premium_inr");
-        if (minPremium != null && inputs.price() != null && inputs.price().compareTo(minPremium) < 0) {
+        if (belowPremiumFloor(spec, inputs.price())) {
           yield 0;
         }
         BigDecimal perLotCost = inputs.price().multiply(BigDecimal.valueOf(lot), EngineMath.MC);
@@ -111,6 +110,22 @@ public final class PositionSizer {
    */
   public static long maxLots(StrategyDefinition.SizingSpec spec) {
     return optionalLongParam(spec.params(), "max_lots");
+  }
+
+  /**
+   * True when {@code premium} sits strictly BELOW the spec's declared {@code min_premium_inr}, i.e.
+   * this is not a trade worth sizing. No floor declared ⇒ false (the strict no-op).
+   *
+   * <p>Public for the same reason {@link #maxLots} is: the hero-zero profit-funded path OVERRIDES
+   * this sizer's answer entirely, so a floor enforced only inside {@link #size} left that family
+   * unfloored — cross-vendor review caught exactly that on #1084, which is the SAME defect already
+   * fixed for {@code max_lots} and then repeated one param later. Floor ₹10, premium ₹5, lot 75,
+   * cap 5 gave 375 live units against ZERO replay units. Two enforcement sites reading one
+   * predicate is what stops them drifting; a second copy is how the gap opened both times.
+   */
+  public static boolean belowPremiumFloor(StrategyDefinition.SizingSpec spec, BigDecimal premium) {
+    BigDecimal floor = optionalDecimalParam(spec.params(), "min_premium_inr");
+    return floor != null && premium != null && premium.compareTo(floor) < 0;
   }
 
   private static BigDecimal decimalParam(Map<String, Object> params, String name) {

@@ -65,7 +65,7 @@ class ShadowBookIntegrationTest extends StrategySignalIntegrationTestBase {
         List.of(), null, null, "NIFTY 50", LocalDate.now().plusDays(5),
         new StrikePicker.Pick(
             new StrikePicker.Candidate(
-                optSym, new BigDecimal("24250"), OptionType.CE, entryLtp, new BigDecimal("0.12")),
+                "NFO", optSym, new BigDecimal("24250"), OptionType.CE, entryLtp, new BigDecimal("0.12")),
             new BigDecimal("0.55")),
         structuralStop);
   }

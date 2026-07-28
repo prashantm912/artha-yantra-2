@@ -37,11 +37,24 @@ public final class StrikePicker {
 
   /**
    * One strike of the chain (the caller pre-filters to the trading side + the ATM±width window).
-   * {@code tradingsymbol} is the option's own symbol — carried through so the seam can stamp the
-   * chosen leg as the signal's tradeable.
+   * {@code (exchange, tradingsymbol)} is the option's own canonical instrument key — carried through
+   * so the seam can stamp the chosen leg as the signal's tradeable.
+   *
+   * <p><b>Both halves come from the instrument master</b> (market-data resolves the chain from
+   * {@code marketdata.instruments} and publishes {@code exchange} on every chain leg). The exchange
+   * is NEVER derived from the underlying's name: a prefix guess mis-routes any newly listed BSE
+   * root, and a mis-routed leg 404s the instrument-meta lookup, falls back to an equity proxy with
+   * lot size 1 and yields a non-lot-aligned quantity on what is now a money path (paper sizing and,
+   * when {@code artha.scalper.execution=live}, broker order routing). A leg whose exchange is
+   * missing is DROPPED at the chain boundary rather than guessed — see {@code MarketOiClient}.
    */
   public record Candidate(
-      String tradingsymbol, BigDecimal strike, Black76.OptionType type, BigDecimal ltp, BigDecimal iv) {}
+      String exchange,
+      String tradingsymbol,
+      BigDecimal strike,
+      Black76.OptionType type,
+      BigDecimal ltp,
+      BigDecimal iv) {}
 
   /** The chosen strike and the {@code |delta|} it was selected on. */
   public record Pick(Candidate candidate, BigDecimal delta) {}

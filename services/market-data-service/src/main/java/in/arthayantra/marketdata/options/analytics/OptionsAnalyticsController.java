@@ -1246,9 +1246,11 @@ public class OptionsAnalyticsController {
     if (p == null) {
       return null;
     }
+    // exchange + tradingsymbol are both null here: a captured snapshot point carries no instrument
+    // row, so this projection has neither half of the canonical key (unchanged for tradingsymbol).
     OptionsChainService.Leg leg =
         new OptionsChainService.Leg(
-            null, p.ltp(), null, null, p.volume(), p.oi(), null, p.iv(),
+            null, null, p.ltp(), null, null, p.volume(), p.oi(), null, p.iv(),
             null, null, null, null, null, null, null, null, null, null, null, null, null);
     return new ChainTableLeg(leg, deltas.get(deltaKey(strike, optionType)));
   }

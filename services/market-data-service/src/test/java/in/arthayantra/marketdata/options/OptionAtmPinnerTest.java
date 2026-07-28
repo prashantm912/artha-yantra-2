@@ -147,9 +147,11 @@ class OptionAtmPinnerTest {
   }
 
   private static OptionsChainService.Leg leg(String underlying, int strike, String type) {
-    String symbol = underlying.equals("NIFTY 50") ? "NIFTY" : "SENSEX";
-    return new OptionsChainService.Leg(symbol + strike + type, null, null, null, null, null, null,
-        null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    boolean nse = underlying.equals("NIFTY 50");
+    String symbol = nse ? "NIFTY" : "SENSEX";
+    return new OptionsChainService.Leg(nse ? "NFO" : "BFO", symbol + strike + type, null, null, null,
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+        null, null);
   }
 
   private static void addOptionKeys(Map<String, InstrumentTokenResolver.TokenInfo> master, String exchange, String underlying, int center) {

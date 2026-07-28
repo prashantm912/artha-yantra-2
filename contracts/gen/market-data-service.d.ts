@@ -3261,6 +3261,7 @@ export interface components {
             rows: components["schemas"]["StrikeRow"][];
         };
         Leg: {
+            exchange: string | null;
             tradingsymbol: string;
             ltp: number | null;
             bid: number | null;

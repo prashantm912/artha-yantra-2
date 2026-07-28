@@ -129,10 +129,14 @@ public class ShadowBookService {
     PremiumBracketRules.Brackets brackets =
         PremiumBracketRules.resolve(
             signals.versionConfig(strategyVersionId).orElse(null), entryLtp);
+    // The leg's exchange is the instrument master's, carried on the picked candidate — the same
+    // canonical value the real ENTRY stamps. It used to be a prefix guess off the underlying's name
+    // (task_032bff42); that helper is gone, and a candidate cannot exist without an exchange because
+    // MarketOiClient drops such a leg at the chain boundary. Nothing to fall back to, by design.
     long id =
         shadows.insert(
             rejectionId, strategyVersionId, strategySlug, side, d.underlying(),
-            optionExchange(d.underlying()), leg.tradingsymbol(), leg.strike(), d.expiry(),
+            leg.exchange(), leg.tradingsymbol(), leg.strike(), d.expiry(),
             entryLtp, brackets.stopLoss(), brackets.takeProfit(), d.structuralStop(),
             signalExchange, signalTradingsymbol, d.blockingRail(), d.compositeScore(), barTime,
             variant);
@@ -141,21 +145,5 @@ public class ShadowBookService {
         variant, strategySlug, side, leg.tradingsymbol(), entryLtp, rejectionId, d.blockingRail(),
         d.compositeScore(), brackets.stopLoss(), brackets.takeProfit(), d.structuralStop());
     return id;
-  }
-
-  /**
-   * The option leg's derivatives exchange from the option root (BSE roots trade on BFO).
-   *
-   * <p>⚠️ This is a PREFIX HEURISTIC on what is now a MONEY path (it stamps
-   * {@code tradeable_exchange}, which feeds paper sizing AND live order routing). A miss is not
-   * benign: the instrument-meta lookup 404s, falls back to an equity proxy with lot 1, and produces
-   * a non-lot-aligned qty — the exact defect this was extracted to fix. The list is complete for
-   * every BFO option root that exists today (verified against {@code marketdata.instruments}:
-   * SENSEX, BANKEX, FOCIT and nothing else), but a newly listed BSE root would be silently mapped
-   * to NFO. Resolving from the instrument master instead is chipped as task_032bff42.
-   */
-  static String optionExchange(String underlying) {
-    String u = underlying == null ? "" : underlying.toUpperCase(java.util.Locale.ROOT);
-    return u.startsWith("SENSEX") || u.startsWith("BANKEX") || u.startsWith("FOCIT") ? "BFO" : "NFO";
   }
 }

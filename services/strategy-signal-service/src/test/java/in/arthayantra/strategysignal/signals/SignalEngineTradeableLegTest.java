@@ -21,6 +21,12 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
+/**
+ * The stamped tradeable leg: the option's own {@code (exchange, tradingsymbol)} + premium, all three
+ * taken from the picked candidate — i.e. from the instrument master, never from the underlying's
+ * name (task_032bff42). The end-to-end chain-JSON → candidate → stamp path, including the per-root
+ * no-op proof, lives in {@link ScalperLegExchangeFromMasterTest}.
+ */
 class SignalEngineTradeableLegTest {
 
   @Test
@@ -30,8 +36,7 @@ class SignalEngineTradeableLegTest {
             "NFO",
             "NIFTY26AUGFUT",
             new BigDecimal("24092.00"),
-            "NIFTY 50",
-            decision("NIFTY26AUG25000CE", "152.65"));
+            decision("NFO", "NIFTY26AUG25000CE", "152.65"));
     PaperEmissionGuard guard = paperGuard(65);
     StrategyDefinition.SizingSpec sizing =
         new StrategyDefinition.SizingSpec("premium_budget", Map.of("budget_inr", new BigDecimal("15000")));
@@ -50,18 +55,33 @@ class SignalEngineTradeableLegTest {
             "NFO",
             "NIFTY26AUGFUT",
             new BigDecimal("24092.00"),
-            "SENSEX",
-            decision("SENSEX26JUL76300CE", "776"));
+            decision("BFO", "SENSEX26JUL76300CE", "776"));
 
     assertThat(leg.exchange()).isEqualTo("BFO");
     assertThat(leg.tradingsymbol()).isEqualTo("SENSEX26JUL76300CE");
     assertThat(leg.premium()).isEqualByComparingTo("776");
   }
 
-  private static ScalperConfluenceGate.Decision decision(String symbol, String premium) {
+  /**
+   * The signal instrument's exchange must never leak onto the option leg: a NIFTY-future signal that
+   * picked a BFO leg stamps BFO, and the sizing lookup is keyed on that same pair.
+   */
+  @Test
+  void nonScalperKeepsTheSignalInstrumentAndScalperNeverInheritsIt() {
+    SignalEngine.TradeableLeg plain =
+        SignalEngine.tradeableLeg("NSE", "RELIANCE", new BigDecimal("1420.50"), null);
+
+    assertThat(plain.exchange()).isEqualTo("NSE");
+    assertThat(plain.tradingsymbol()).isEqualTo("RELIANCE");
+    assertThat(plain.premium()).isEqualByComparingTo("1420.50");
+  }
+
+  private static ScalperConfluenceGate.Decision decision(
+      String exchange, String symbol, String premium) {
     StrikePicker.Candidate candidate =
         new StrikePicker.Candidate(
-            symbol, new BigDecimal("25000"), OptionType.CE, new BigDecimal(premium), new BigDecimal("0.2"));
+            exchange, symbol, new BigDecimal("25000"), OptionType.CE, new BigDecimal(premium),
+            new BigDecimal("0.2"));
     return new ScalperConfluenceGate.Decision(
         OptionType.CE,
         List.of(

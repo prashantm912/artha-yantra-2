@@ -51,6 +51,8 @@ public class MarketOiClient {
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
   private final MarketCalendar calendar;
+  /** Chain legs dropped for a missing canonical exchange (see {@link #addLeg}) — a live alarm. */
+  private final io.micrometer.core.instrument.Counter legsWithoutExchange;
 
   /**
    * Short-TTL response memo (audit P1-12): every scalper passing the chart gate on the SAME bar
@@ -71,10 +73,12 @@ public class MarketOiClient {
       RestClient.Builder builder,
       ObjectMapper objectMapper,
       MarketCalendar calendar,
+      io.micrometer.core.instrument.MeterRegistry meterRegistry,
       @Value("${artha.marketdata.base-url}") String baseUrl) {
     this.restClient = builder.baseUrl(baseUrl).build();
     this.objectMapper = objectMapper;
     this.calendar = calendar;
+    this.legsWithoutExchange = meterRegistry.counter("ay_scalper_chain_leg_no_exchange_total");
     this.uriFactory = new org.springframework.web.util.DefaultUriBuilderFactory(baseUrl);
   }
 
@@ -266,13 +270,42 @@ public class MarketOiClient {
     return new ChainSnapshot(LocalDate.parse(expiryRaw), spot, forward, candidates, strikeOi);
   }
 
-  private static void addLeg(
+  /**
+   * Maps one chain-row side to a tradeable {@link StrikePicker.Candidate}, or drops it.
+   *
+   * <p>A leg is tradeable only with a live premium, a solved IV <b>and</b> its canonical
+   * {@code (exchange, tradingsymbol)} key. The exchange is taken from the payload — the instrument
+   * master is the only thing that knows it — and is NEVER inferred from the underlying's name.
+   *
+   * <p><b>Missing exchange ⇒ DROP, never guess (fail-closed).</b> This is a money path: the stamped
+   * exchange drives paper position sizing and, with {@code artha.scalper.execution=live}, real
+   * broker order routing. A wrong exchange 404s the instrument-meta lookup, falls back to an equity
+   * proxy with lot size 1, and produces a non-lot-aligned quantity that also 400s the Upstox margin
+   * call (UDAPI1104). Dropping costs at most a missed entry; guessing books a wrong-sized trade —
+   * and an entry you can always decline to take, a mis-routed one you cannot take back. If EVERY
+   * leg lacks an exchange (a market-data too old to publish it), the snapshot ends up with no
+   * candidates and {@link #toChainSnapshot} returns null, so the seam blocks exactly as it already
+   * does for an unavailable chain. The drop is loud: a WARN naming the symbol plus
+   * {@code ay_scalper_chain_leg_no_exchange_total}.
+   */
+  private void addLeg(
       List<StrikePicker.Candidate> out, BigDecimal strike, Black76.OptionType type, JsonNode leg) {
     BigDecimal ltp = decimal(leg.path("ltp"));
     BigDecimal iv = decimal(leg.path("iv"));
-    if (ltp != null && iv != null && iv.signum() > 0) {
-      out.add(new StrikePicker.Candidate(text(leg.path("tradingsymbol")), strike, type, ltp, iv));
+    if (ltp == null || iv == null || iv.signum() <= 0) {
+      return;
     }
+    String tradingsymbol = text(leg.path("tradingsymbol"));
+    String exchange = text(leg.path("exchange"));
+    if (exchange == null || exchange.isBlank()) {
+      legsWithoutExchange.increment();
+      log.warn(
+          "chain leg {} (strike {} {}) carries no exchange — dropped, NOT guessed from the root"
+              + " name; the option leg's exchange comes from the instrument master only",
+          tradingsymbol, strike, type);
+      return;
+    }
+    out.add(new StrikePicker.Candidate(exchange, tradingsymbol, strike, type, ltp, iv));
   }
 
   /**

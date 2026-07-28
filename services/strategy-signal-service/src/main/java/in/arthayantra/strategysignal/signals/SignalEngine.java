@@ -130,21 +130,27 @@ public class SignalEngine {
   /** The concrete leg used by paper/live routing and by the A12 sizing seam. */
   record TradeableLeg(String exchange, String tradingsymbol, BigDecimal premium) {}
 
-  /** Resolves a scalper's picked option leg; non-scalpers keep their keyed signal instrument. */
+  /**
+   * Resolves a scalper's picked option leg; non-scalpers keep their keyed signal instrument.
+   *
+   * <p>The option's exchange is the CANDIDATE's — i.e. the instrument master's, published per chain
+   * leg by market-data and carried through the pick untouched. It is deliberately NOT derived from
+   * the underlying's name: this value stamps {@code signals.tradeable_exchange}, which drives paper
+   * position sizing and (with {@code artha.scalper.execution=live}) live broker order routing, and a
+   * name-prefix guess silently mis-routes any newly listed BSE root. A candidate without an exchange
+   * cannot exist — {@code MarketOiClient.addLeg} drops such a leg at the chain boundary — so there is
+   * no fallback here by construction.
+   */
   static TradeableLeg tradeableLeg(
       String signalExchange,
       String signalTradingsymbol,
       BigDecimal signalPrice,
-      String optionUnderlying,
       ScalperConfluenceGate.Decision decision) {
     if (decision == null) {
       return new TradeableLeg(signalExchange, signalTradingsymbol, signalPrice);
     }
     StrikePicker.Candidate candidate = decision.pick().candidate();
-    return new TradeableLeg(
-        ShadowBookService.optionExchange(optionUnderlying),
-        candidate.tradingsymbol(),
-        candidate.ltp());
+    return new TradeableLeg(candidate.exchange(), candidate.tradingsymbol(), candidate.ltp());
   }
 
   private enum UniverseResolutionStatus {
@@ -1858,15 +1864,7 @@ public class SignalEngine {
       }
     }
     BigDecimal entryPrice = bar.close();
-    TradeableLeg tradeable =
-        tradeableLeg(
-            exchange,
-            tradingsymbol,
-            entryPrice,
-            decision == null || strategy.scalper() == null
-                ? null
-                : strategy.scalper().underlying(),
-            decision);
+    TradeableLeg tradeable = tradeableLeg(exchange, tradingsymbol, entryPrice, decision);
     // T21 review round 2 (Critical): premium_pct rules are OPTION-side bands — resolving them
     // against the INDEX entry price here produced nonsense levels (25% of a 25,000 future = a
     // 6,250-point "stop"), and for a held-PE (SHORT-direction) position that below-entry stop made
@@ -1947,7 +1945,8 @@ public class SignalEngine {
     }
     // §12.9 Track-2 side-channel: the signal is keyed on the index future; record the option the
     // confluence picked (the order/paper layer trades it) + the confluence detail, OUTSIDE the
-    // frozen score breakdown. The option's own exchange is derived from its underlying root.
+    // frozen score breakdown. The option's own exchange is the instrument master's, carried on the
+    // picked candidate — never derived from the underlying root's name (task_032bff42).
     String scalperDetail =
         decision == null
             ? null

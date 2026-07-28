@@ -1,0 +1,120 @@
+# Session learnings — 2026-07-28/29 scalper sizing + capital governors
+
+**Verdict first: six cross-vendor review rounds found six defects in one change; three of them were
+created by the fixes for the previous round's findings, and none of the six was reachable by any test
+in the suite.** The suite was green before, during, and after every one of them. That is the single
+most useful fact this session produced, and it is the reason the review gate earns its cost.
+
+Scope: PRs [#1067](https://github.com/prashantm912/artha-yantra-2/pull/1067),
+[#1071](https://github.com/prashantm912/artha-yantra-2/pull/1071),
+[#1084](https://github.com/prashantm912/artha-yantra-2/pull/1084),
+[#1086](https://github.com/prashantm912/artha-yantra-2/pull/1086) (all shipped + deployed) and
+[#1075](https://github.com/prashantm912/artha-yantra-2/pull/1075) (HELD to 2026-08-12).
+
+---
+
+## 1. The defect that repeated all night: one rule living in two places
+
+Every single defect found in this work — by review, and by me — has the same shape: **a value or a
+rule that exists in two places which can disagree.**
+
+| Defect | The two places |
+|---|---|
+| `max_lots` inert (#1084) | `PositionSizer.size()` applied it; `heroZeroSuggestedQty` overrode it |
+| `min_premium_inr` inert (#1084) | the same override, one param later |
+| replay/live/schema disagreement | replay honoured the param, live ignored it, the schema forbade it |
+| candidate valuation (self-caught) | `capitalUsed` used `usageFor` (margin); the projection used raw `price × qty` |
+| sub-account attribution | `upsertPosition` charged the EXISTING row's account; the check read the REQUESTED one |
+| lock order (#1086 r5) | `openOrder` took anchor→book; the new wrapper took book→anchor |
+
+The fix was the same every time: **one definition, read from both sides.** `belowPremiumFloor` is a
+shared predicate rather than a second check precisely because a second copy is how the gap opened
+twice in the same file.
+
+**Rule for next time:** when adding a bound, a rule, or a lock, the first question is not "is my code
+correct" but **"where else does this concept already exist, and can the two disagree?"**
+
+## 2. Adding enforcement converts previously-harmless gaps into live defects
+
+This is the corollary of #1067's *"a dead code path hides every defect downstream of it"*, and it
+fired three times in one night:
+
+- Sub-account **routing** ignored open positions. Harmless for as long as nothing capped an account —
+  the moment a ceiling existed, the second entry was *refused* at account 1 instead of routed to an
+  idle account, and five sub-accounts behaved as one.
+- Straddle legs opened in **independent transactions**. Harmless while nothing could refuse the
+  second one — the moment a cap could, a refused leg 2 left leg 1 open: a delta-neutral straddle
+  silently becoming a **naked directional position**, which is strictly worse than the cap breach the
+  refusal prevented.
+- The capital reads were **unlocked**. Harmless while nothing compared them against a hard limit.
+
+**Rule:** when you make a rule binding, re-audit everything upstream of it. The new enforcement does
+not just add a check — it changes what every existing gap *means*.
+
+## 3. Green suites, and the three false greens
+
+**Not one of the four Criticals/Majors from rounds 3–5 was reachable by the test suite.** The
+reviewer said it plainly about the parity ladder: *"The supplied green goldens do not exercise the
+Hero-Zero/floor interaction."* A green gate is evidence that known behaviours did not regress; it is
+not evidence that the change is correct.
+
+Three separate false greens appeared, each a signal that *looked* like success while measuring
+something else:
+
+1. **`-Dtest=A+B` ran ZERO tests and exited BUILD SUCCESS.** The separator is a comma; a filter
+   matching nothing plus `-DfailIfNoSpecifiedTests=false` is a green build that ran nothing. Caught
+   by counting: the file declared 9 `@Test` methods, the report claimed 6.
+2. **A 2.5-hour-old surefire report stood in for a run that never happened.** `surefire-reports/` is
+   never pruned — it is a graveyard, not a result.
+3. **A "BUILD-DONE" monitor fired on file *existence*, not build completion,** leaving jars three
+   hours stale. Deploying then would have **silently reverted the merge while reporting success.**
+
+**Rule:** if a run reports nothing, it reported nothing — not success. Trust the RUN output, never a
+report directory, and verify a deploy by fingerprinting the running artifact.
+
+## 4. What splitting a PR twice bought
+
+#1075 began as one branch carrying a money decision (`budget_inr` ₹15k→₹20k) *and* five protective
+fixes. It shipped as **two** PRs and one still-open decision:
+
+- **#1084** — cap + floor. Quantity strictly non-increasing, so it could ship while the raise waited.
+- **#1086** — the governors. **Capacity-neutral by arithmetic**: at ₹15,000 each ₹30,000 sub-account
+  holds exactly 2 and the book cap binds first at 8, so the new ceiling never fires. It also came out
+  **byte-identical in YAML to main**, which removed the republish step entirely.
+- **#1075** — one number, 60 lines. The decision, and nothing else.
+
+**Rule:** when a branch mixes a decision with corrections, the corrections are hostages. Split on
+"does this change what the system is allowed to do?" — and prove the split with arithmetic, not
+assurance.
+
+## 5. Process notes worth keeping
+
+- **The review round and the audit are two gates.** Rounds 3, 4 and 5 each found something the
+  previous round's fix introduced. Collapsing them would have shipped the deadlock.
+- **Ask the reviewer to attack the load-bearing claim.** I asked whether
+  `takenPathOpenOrderIsUngatedByDesign` really permitted validating at the writer; it did (*"it does
+  not prohibit a pure writer invariant"*), and knowing that was worth more than a generic pass.
+- **Surface your own gaps.** I flagged the untested straddle-through-listener seam myself; the
+  verdict came back block-worthy, and the branch that parses `scalper_detail.legs[]` had genuinely
+  never executed in a test.
+- **Downgrade your own evidence when it does not prove what you claimed.** One test was
+  characterization, not regression (it passed with or without the fix); another was sequential, so it
+  proved capital-aware routing, not concurrent serialization. Both are now labelled as such.
+- **Red-proof every new behaviour** by neutering the code under test and confirming *exactly* the
+  predicted test fails. It caught a test that would have passed for the wrong reason.
+
+## 6. Durable traps recorded to memory
+
+- `test-filter-false-green` — the `-Dtest` separator + stale surefire reports.
+- `advisory-lock-order-paper-path` — anchor (4801) **then** book (4802); any new entry wrapper must
+  call `lockAnchorsBeforeBook` first, or two concurrent money-path opens deadlock. Invisible to
+  tests: the suite was 38/38 green with the inversion in place.
+- `deploy-verify-by-jar-fingerprint` — written earlier the same day, and it paid off twice.
+
+## 7. Open, with dates
+
+| Item | State |
+|---|---|
+| `budget_inr` ₹15,000 → ₹20,000 (#1075) | **HELD to 2026-08-12** on owner decision; revisit task scheduled, measures real `ZERO_SIZE` rate + real peak concurrency |
+| T24 volume dot first live session | verify task 2026-07-29 16:20 IST |
+| Capital governors first live session | verify task 2026-07-29 16:35 IST — written to FALSIFY the capacity-neutral claim |

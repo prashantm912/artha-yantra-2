@@ -59,6 +59,34 @@ subset is CI-enforced).
 > via a one-time 08:50 task on 07-28 (expected: clean no-op). Owner items unchanged: B8 clock, T9
 > arming, I4 ~2026-08-09.
 
+> **CURRENCY UPDATE 2026-07-29 (supersedes the 07-28 block above for the SCALPER story):** the
+> scalper→paper path went from dead to bounded in two days, in four shipped pieces. **#1067** revived
+> it (sizing was computed against the INDEX future, so `premium_budget` floored to 0 lots on every
+> entry for three weeks, silently); **#1071** resolved the option's exchange from the instrument
+> master rather than its name (the same field feeds the UNARMED real-money path, so a SENSEX option
+> stamped NSE was a latent landmine); **#1084** added `max_lots` + `min_premium_inr` and made the LIVE
+> path honour both, closing a three-layer disagreement where *replay honoured a param, live ignored
+> it, and the schema forbade it*; **#1086** bound the capital governors at the writer — the deployment
+> cap now refuses the order that CROSSES it, a per-book advisory lock serializes check-plus-write,
+> straddle legs open atomically, and sub-account routing reads deployed capital under that same lock.
+> All four are DEPLOYED and fingerprint-verified.
+>
+> **OWNER DECISION 2026-07-29: `budget_inr` HOLDS at ₹15,000 for two weeks; the ₹20,000 raise
+> ([#1075](https://github.com/prashantm912/artha-yantra-2/pull/1075)) stays open and is revisited on
+> LIVE data on 2026-08-12** (scheduled task `revisit-scalper-budget-inr-2026-08-12`). The decision
+> turns on one arithmetic fact: the sub-account allocation is ₹30,000 and the ceiling refuses when
+> projected > allocation, so at ₹15,000 each account holds exactly 2 and the book's 80% cap binds
+> first at 8 — while ANY budget above ₹15,000 drops each account to 1 and concurrency to 5. The cliff
+> is exactly at ₹15,000, and the two numbers that should decide it (real `ZERO_SIZE` rate, real peak
+> concurrency) did not exist yet because the path had been dead.
+>
+> Also live from the same wave: **#1064** (no more phantom zero-volume 1m bars on non-trading days),
+> **#1073** (S24 expiry-day exemption covers the spurt dot), **#1076** (a close this pass did not
+> perform is no longer reported as one), **#1077** (edge-gateway Map-returning handlers typed — D3
+> slice 1), **#1082** (T24: the volume dot tests the floor the RAIL tested; verify task 07-29 16:20),
+> **#1065** (exit-equivalence fixture widened — all copies AGREE). Owner items unchanged: B8 clock,
+> T9 arming, I4 ~2026-08-09, and now budget_inr ~2026-08-12.
+
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the
 forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the sections below is the

@@ -1046,8 +1046,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StressWindow"
                 }
               }
             }
@@ -1958,6 +1957,21 @@
           }
         },
         "required" : [ "bars", "maxComposite", "reason", "sampleBreakdown", "sampleBucket", "sessionDate" ]
+      },
+      "StressWindow" : {
+        "type" : "object",
+        "properties" : {
+          "from" : {
+            "type" : [ "string", "null" ]
+          },
+          "to" : {
+            "type" : [ "string", "null" ]
+          },
+          "evidencePolicy" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "evidencePolicy", "from", "to" ]
       },
       "SavedViewsResponse" : {
         "type" : "object",

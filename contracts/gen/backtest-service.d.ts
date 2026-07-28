@@ -648,6 +648,11 @@ export interface components {
             sampleBucket: string | null;
             sampleBreakdown: components["schemas"]["JsonNode"];
         };
+        StressWindow: {
+            from: string | null;
+            to: string | null;
+            evidencePolicy: string | null;
+        };
         SavedViewsResponse: {
             items: components["schemas"]["SavedView"][];
         };
@@ -1584,9 +1589,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StressWindow"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

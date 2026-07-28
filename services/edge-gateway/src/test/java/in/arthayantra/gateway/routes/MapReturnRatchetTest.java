@@ -27,9 +27,10 @@ class MapReturnRatchetTest {
    * Frozen at the 2026-07-02 audit-fix baseline, ratcheted DOWN as handlers are converted. DOWN is
    * progress; UP fails the build.
    *
-   * <p>backtest-service 10 → 9 (2026-07-29): {@code ResultsController.results} now returns the
-   * typed {@code RunResult} — a pure retyping of the repository's LinkedHashMap, same keys in the
-   * same order, so the wire is byte-identical and only the spec gained the shape.
+   * <p>backtest-service 10 → 8 (2026-07-29): {@code ResultsController.results} now returns the
+   * typed {@code RunResult}, and {@code StressWindowController.stressWindow} the typed
+   * {@code StressWindow} — both pure retypings of a LinkedHashMap, same keys in the same order, so
+   * the wire is byte-identical and only the spec gained the shape.
    *
    * <p>edge-gateway 2 → 0 (ledger D3 slice 1, 2026-07-28): {@code AuthController.session} and
    * {@code SystemStatusController.status} now return records. Both were pure retypings — every key
@@ -42,7 +43,7 @@ class MapReturnRatchetTest {
           "edge-gateway", 0,
           "market-data-service", 30,
           "strategy-signal-service", 28,
-          "backtest-service", 9);
+          "backtest-service", 8);
 
   private static final Pattern MAP_RETURN =
       Pattern.compile("public (Mono<)?Map<String, Object>");

@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -67,6 +68,44 @@ class PaperCloseRaceReportingTest {
 
     assertThat(h.evaluator().evaluate()).isEqualTo(1);
     verify(h.staleTicks()).bracketRecovered(1L);
+  }
+
+  /**
+   * Review round 1 found three MORE callers ignoring the CAS outcome. The manual close is the worst:
+   * {@code PaperController} writes a {@code MANUAL_CLOSE} audit row off a successful return, so a
+   * lost race produced an audit entry for a close the request never performed — attributing someone
+   * else's exit to a human operator.
+   *
+   * <p>This drives the REAL path — {@code closePosition} → {@code settle} → {@code doSettle} → the
+   * CAS — with only the repository mocked, so it fails if any link stops propagating the loss.
+   */
+  @Test
+  void aManualCloseThatLostTheRaceRaises409RatherThanClaimingTheWinnersTrade() {
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    when(positions.find(7L)).thenReturn(Optional.of(open(7L)));
+    // The race: the pre-read saw OPEN, but the CAS finds the row already closed (rowcount 0).
+    when(positions.close(anyLong(), any(), anyString())).thenReturn(0);
+
+    InstrumentMetaClient instruments = mock(InstrumentMetaClient.class);
+    when(instruments.meta(anyString(), anyString()))
+        .thenReturn(
+            new InstrumentMetaClient.InstrumentMeta(
+                in.arthayantra.strategyengine.fills.InstrumentClass.OPTION, new BigDecimal("0.05"), 75));
+
+    PaperService paper =
+        new PaperService(
+            mock(PaperOrderRepository.class), positions, new PaperFillService(), mock(LastTickReader.class),
+            instruments, mock(in.arthayantra.strategysignal.signals.SignalRepository.class),
+            mock(PaperAccountService.class), mock(BookResolver.class), mock(RiskService.class),
+            mock(org.springframework.context.ApplicationEventPublisher.class),
+            mock(PaperStaleTickAlerter.class), mock(PaperOrderRejectionRecorder.class),
+            mock(org.springframework.transaction.PlatformTransactionManager.class),
+            new BigDecimal("1.0"), 15L, 60L);
+
+    assertThatThrownBy(() -> paper.closePosition(7L, new BigDecimal("100")))
+        .as("a close this request did not perform must not return the winner's trade")
+        .isInstanceOf(in.arthayantra.common.web.error.ApiException.class)
+        .hasMessageContaining("already closed");
   }
 
   @Test

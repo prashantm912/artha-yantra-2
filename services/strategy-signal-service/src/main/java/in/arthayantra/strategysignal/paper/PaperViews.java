@@ -8,16 +8,24 @@ import java.util.List;
  * The paper read-surface response shapes, typed so the contract gate can see them (ledger D3 slice
  * 1).
  *
- * <p>PURE RETYPINGS of the {@code Map.of} / {@code LinkedHashMap} bodies {@link PaperController} and
- * {@link PaperService#pnl} used to assemble. Key names and value types are unchanged — only the SPEC
- * gains the shape, because springdoc cannot enumerate a {@code Map<String, Object>} and so the
- * breaking-change gate was blind to any key rename on these three endpoints.
+ * <p>Retypings of the {@code Map.of} / {@code LinkedHashMap} bodies {@link PaperController} and
+ * {@link PaperService#pnl} used to assemble. Key NAMES, VALUE TYPES and null-vs-absent behaviour are
+ * unchanged — only the SPEC gains the shape, because springdoc cannot enumerate a {@code
+ * Map<String, Object>} and so the breaking-change gate was blind to any key rename here.
  *
- * <p><b>On key order.</b> {@link PnlSummary} mirrors a {@code LinkedHashMap}, so its component order
- * is load-bearing — Jackson emits a record in canonical-constructor order, and moving a component
- * moves the bytes. The others came from {@code Map.of}, whose iteration order is UNSPECIFIED: no
- * client could have depended on it, and a record additionally makes it deterministic. That is a
- * strict improvement, not a wire change.
+ * <p><b>On key order — this is NOT byte-identical, and the difference is worth naming.</b> Only
+ * {@link PnlSummary} came from a {@code LinkedHashMap}; its order was already fixed, so its
+ * component order is load-bearing and must stay {@code realizedTotal, trades, winRate, expectancy}
+ * or the bytes move. Every other body here came from a MULTI-KEY {@code Map.of}, whose iteration
+ * order is not merely unspecified in the javadoc but genuinely VARIES BETWEEN JVM RUNS ({@code
+ * ImmutableCollections} randomizes its probe order per JVM, so {@code EquityPoint} really did
+ * serialize as both {@code date,equity} and {@code equity,date} depending on the process). Records
+ * FIX that order.
+ *
+ * <p>So this is a deliberate normalization of previously nondeterministic key order, not a
+ * preservation of it. It is safe because JSON object members are unordered by specification and
+ * every client here binds by key — but "the wire is byte-identical" would be false, and the
+ * single-key envelopes ({@link PositionList}) are the only ones where it is trivially true.
  *
  * <p>The item types were already records ({@link PaperService.PositionDto} / {@link
  * PaperService.TradeDto}), each already carrying its own {@code types = {"x", "null"}} nullability,

@@ -72,6 +72,39 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        KiteStatus: {
+            session: string;
+            raw: string | null;
+            ticker: string;
+            /** Format: int64 */
+            lastTickAgeMs: number | null;
+            /** Format: double */
+            rateBudget: number | null;
+        };
+        MarketStatus: {
+            phase: string;
+        };
+        ServiceStatus: {
+            name: string;
+            status: string;
+        };
+        SystemStatus: {
+            overall: string;
+            status: string;
+            services: components["schemas"]["ServiceStatus"][];
+            kite: components["schemas"]["KiteStatus"];
+            market: components["schemas"]["MarketStatus"];
+            corporateActions: string;
+            jobs: {
+                [key: string]: unknown;
+            };
+            asOf: string;
+        };
+        SessionState: {
+            authenticated: boolean;
+            loginTime: string | null;
+            profile: string;
+        };
         ErrorResponse: {
             code?: string;
             message?: string;
@@ -157,9 +190,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SystemStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -188,9 +219,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SessionState"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

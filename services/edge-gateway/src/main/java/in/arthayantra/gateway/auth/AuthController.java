@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.ErrorResponse;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -109,21 +110,29 @@ public class AuthController {
 
   /** SPA boot probe: authenticated flag, login time, mock/live profile indicator (A.2.1). */
   @GetMapping("/session")
-  public Mono<Map<String, Object>> session(ServerWebExchange exchange) {
+  public Mono<SessionState> session(ServerWebExchange exchange) {
     return exchange
         .getSession()
         .map(
-            webSession -> {
-              Map<String, Object> body = new LinkedHashMap<>();
-              Object loginTime = webSession.getAttribute(LOGIN_TIME_ATTR);
-              boolean authenticated =
-                  webSession.getAttributes().containsKey("SPRING_SECURITY_CONTEXT");
-              body.put("authenticated", authenticated);
-              body.put("loginTime", loginTime);
-              body.put("profile", activeMode());
-              return body;
-            });
+            webSession ->
+                new SessionState(
+                    webSession.getAttributes().containsKey("SPRING_SECURITY_CONTEXT"),
+                    webSession.getAttribute(LOGIN_TIME_ATTR),
+                    activeMode()));
   }
+
+  /**
+   * The SPA boot probe's response (ledger D3, Map-return burn-down). A pure retyping — the three
+   * keys, their names and their types are byte-identical to the map this replaces; what changes is
+   * that springdoc can enumerate them, so a rename now drifts the spec and the breaking gate sees
+   * it. {@code loginTime} is the ISO instant stamped at login ({@code Instant.now().toString()}),
+   * absent until the owner has logged in — spelled {@code types = {"string", "null"}} because
+   * {@code @Schema(nullable = true)} is a SILENT no-op at OpenAPI 3.1.
+   */
+  public record SessionState(
+      boolean authenticated,
+      @Schema(types = {"string", "null"}) String loginTime,
+      String profile) {}
 
   private Mono<Boolean> verifyOffEventLoop(String password) {
     return Mono.fromCallable(() -> ownerAuth.verify(password))

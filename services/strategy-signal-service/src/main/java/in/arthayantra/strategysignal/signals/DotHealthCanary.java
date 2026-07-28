@@ -11,6 +11,7 @@ import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -97,12 +98,16 @@ public class DotHealthCanary {
    */
   public record DotInputAlert(String title, String message) {}
 
-  // The two OI-quadrant probes are exempt from paging on a monthly index-expiry day: MarketOiClient
-  // deliberately degrades the OI reads to NEUTRAL then (S24 — chain OI is corrupted by the expiring
-  // series' unwind), so an all-NEUTRAL window is by-design, not an outage. Keyed per root exactly
-  // like the suppression itself (NSE monthly for NIFTY, BSE Thursday monthly for SENSEX) — the
-  // window mixes both roots, so either root's suppression day exempts the pair.
-  private static final Set<String> OI_QUADRANT_DOTS = Set.of("futures_oi", "underlying_oi");
+  // Every probe fed by MarketOiClient.oi() is exempt from paging on a monthly index-expiry day: that
+  // method SKIPS the whole OI block then (S24 — chain OI is corrupted by the expiring series' unwind)
+  // and returns inert defaults, so a dead window is by-design, not an outage.
+  //
+  // The inert Oi (MarketOiClient:292-294) NEUTRALs both quadrants AND nulls the spurt magnitudes, so
+  // `oi_spurt_price` belongs here too — it was missing until 2026-07-28, when a live check read it as
+  // a plain "input dead" outage on an expiry day while its two siblings correctly read by-design.
+  // Only these three probes read /context/oi; the rest read /context/macro and are unaffected.
+  private static final Set<String> S24_SUPPRESSED_DOTS =
+      Set.of("futures_oi", "underlying_oi", "oi_spurt_price");
 
   private final SignalRejectionRepository rejections;
   private final ApplicationEventPublisher events;
@@ -144,7 +149,15 @@ public class DotHealthCanary {
         }
       }
     }
-    boolean expiryDay = expirySuppressed(now.toLocalDate());
+    // Suppression is PER OI ROOT, so it may only stand down the probes when EVERY row in the window
+    // came from a suppressed root. MarketOiClient.oi() keys on the row's own underlying
+    // (ScalperCalendars.forUnderlying — BSE Thursday monthly for SENSEX, NSE monthly for the rest),
+    // so on an NSE-only expiry day a SENSEX-rooted read is NOT suppressed and a dead OI dot there is
+    // a genuine outage. Treating either calendar's expiry as a blanket exemption would silence it.
+    // One date for the whole sweep — re-reading the clock per row could straddle IST midnight.
+    LocalDate today = now.toLocalDate();
+    boolean allRowsSuppressed =
+        !contextRows.isEmpty() && contextRows.stream().allMatch(d -> rootSuppressedToday(d, today));
     List<DotState> dots = new ArrayList<>(PROBES.size());
     for (Probe p : PROBES) {
       boolean alive = false;
@@ -155,10 +168,10 @@ public class DotHealthCanary {
         }
       }
       // `required` means "expected alive TODAY" (class javadoc). On a monthly index-expiry day the
-      // OI reads are S24-suppressed to NEUTRAL by design, so the quadrant dots are NOT expected
-      // alive — dropping the flag here keeps every consumer (paging, /status count, UI badge)
-      // agreeing with the no-outage decision instead of each needing its own exemption.
-      boolean suppressedToday = expiryDay && OI_QUADRANT_DOTS.contains(p.dot());
+      // OI reads are S24-suppressed by design, so those dots are NOT expected alive — dropping the
+      // flag here keeps every consumer (paging, /status count, UI badge) agreeing with the
+      // no-outage decision instead of each needing its own exemption.
+      boolean suppressedToday = allRowsSuppressed && S24_SUPPRESSED_DOTS.contains(p.dot());
       String detail;
       if (alive) {
         detail = "input live in the last " + contextRows.size() + " context-bearing rejections";
@@ -169,8 +182,10 @@ public class DotHealthCanary {
                 : "UNINFORMATIVE — " + scanned.size() + " rejections scanned, none carry context"
                     + " (early-rail blocks only)";
       } else if (suppressedToday) {
+        // Deliberately says "inert", not "NEUTRAL": the quadrants degrade to NEUTRAL but the spurt
+        // magnitudes degrade to NULL, and both come off the same skipped read.
         detail =
-            "NEUTRAL by design — monthly index-expiry day, OI reads S24-suppressed (not an outage)";
+            "inert by design — monthly index-expiry day, OI reads S24-suppressed (not an outage)";
       } else {
         detail = "input dead across " + contextRows.size() + " context-bearing rejections";
       }
@@ -197,14 +212,16 @@ public class DotHealthCanary {
       LocalDate today = now.toLocalDate();
       Map<String, DotState> byDot = new LinkedHashMap<>();
       health.dots().forEach(s -> byDot.put(s.dot(), s));
-      boolean expiryDay = expirySuppressed(today);
       for (String dot : required) {
         DotState state = byDot.get(dot);
         if (state == null) {
           continue;
         }
-        if (expiryDay && OI_QUADRANT_DOTS.contains(dot)) {
-          continue; // S24 suppression: NEUTRAL quadrants are by-design today, never an outage page
+        // `required` on the STATE already means "expected alive today" — evaluate() drops it for an
+        // S24-suppressed dot. Reading it here instead of recomputing the expiry test keeps paging
+        // and the endpoint on one decision (they disagreed once, per-root, before this).
+        if (!state.required()) {
+          continue;
         }
         if (!state.alive()) {
           if (!today.equals(alertedDeadOn.get(dot))) {
@@ -232,9 +249,20 @@ public class DotHealthCanary {
     }
   }
 
-  private boolean expirySuppressed(LocalDate today) {
+  /**
+   * Is THIS row's OI root S24-suppressed today? Mirrors {@code ScalperCalendars.forUnderlying} (BSE
+   * Thursday monthly for a SENSEX-rooted read, NSE monthly for everything else) — that class is
+   * package-private in {@code scalper} and signals must not reach into it, so the one-line root rule
+   * is restated rather than imported. A row with no {@code /context/underlying} falls to the NSE
+   * calendar, which on a BSE-only expiry day reads NOT-suppressed and therefore pages: fail-loud is
+   * the right default for a canary.
+   */
+  private boolean rootSuppressedToday(JsonNode diagnostic, LocalDate today) {
+    String underlying = diagnostic.at("/context/underlying").asText("");
+    MarketCalendar rootCalendar =
+        underlying.toUpperCase(Locale.ROOT).contains("SENSEX") ? bseCalendar : calendar;
     try {
-      return calendar.isMonthlyIndexExpiryDay(today) || bseCalendar.isMonthlyIndexExpiryDay(today);
+      return rootCalendar.isMonthlyIndexExpiryDay(today);
     } catch (IllegalArgumentException uncoveredYear) {
       return false; // the calendar cliff has its own canary
     }

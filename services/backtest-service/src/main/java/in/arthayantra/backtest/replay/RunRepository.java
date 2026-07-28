@@ -276,7 +276,7 @@ public class RunRepository {
   }
 
   /** The §D.5 results payload for one run. */
-  public Optional<Map<String, Object>> findResult(UUID runId) {
+  public Optional<RunResult> findResult(UUID runId) {
     return jdbc
         .query(
             // join jobs for the originating strategyId (the results header maps it to a name
@@ -289,41 +289,40 @@ public class RunRepository {
                 + "j.request->>'universeAsOf' AS universe_as_of "
                 + "FROM backtest_runs br LEFT JOIN jobs j ON j.id = br.job_id WHERE br.id=?",
             (rs, n) -> {
-              Map<String, Object> out = new LinkedHashMap<>();
               JsonNode metrics = parse(rs.getString("metrics"));
-              out.put("metrics", metrics);
-              out.put("equityCurve", parse(rs.getString("equity_curve")));
-              out.put("drawdownCurve", parse(rs.getString("drawdown_curve")));
-              out.put("benchmarkCurve", parse(rs.getString("benchmark_curve")));
-              out.put("dataHash", rs.getString("data_hash"));
-              out.put("seed", rs.getLong("seed"));
-              out.put("premiumSource", rs.getString("premium_source"));
-              // The originating strategy (UUID) + when the run finished — the results header shows the
-              // strategy name (mapped client-side) and the run date.
-              out.put("strategyId", rs.getString("strategy_id"));
-              out.put("ranAt", rs.getString("completed_at"));
-              // Stage F follow-on: the run's instrument, so the results "View on chart" deep-link
-              // and trade-mark filtering carry the right symbol instead of the persisted default.
-              out.put("exchange", rs.getString("exchange"));
-              out.put("tradingsymbol", rs.getString("tradingsymbol"));
-              // Phase 44: the pinned universe hash, so the compare view flags non-like-for-like
-              // runs (differing universe_checksum) beside the dataHash mismatch. NULL for explicit
-              // single-instrument / unpinned universes — the compare banner ignores NULLs.
-              out.put("universeChecksum", rs.getString("universe_checksum"));
-              // task_03b9f52d / task_9062b5f1: the resolved universe's asOf — the funnel-CHOSEN screen
-              // date for the swing funnel modes (which persisted screen fed the pinned universe), the
-              // constituents asOf for index_constituents, else NULL. Read from the joined job request
-              // JSONB (no dedicated column), it makes a weekend/holiday funnel run interpretable here.
-              out.put("universeAsOf", rs.getString("universe_as_of"));
-              // Audit P0-2 / R1: the engine CODE identity this run executed under — the git SHA +
-              // build image baked into the worker jar. NULL on pre-V008 rows and on a jar built
-              // without git.properties (mock/test). Lets a longitudinal comparison tell a strategy
-              // effect apart from an engine change.
-              out.put("engineSha", rs.getString("engine_sha"));
-              out.put("engineImage", rs.getString("engine_image"));
-              // §D.15: surface synthetic-premium caveats at the top level, never buried.
-              out.put("caveats", caveats(metrics));
-              return out;
+              // Component order below MUST match the old LinkedHashMap put order — Jackson emits a
+              // record in canonical-constructor order, so a reorder here moves the serialized bytes.
+              return new RunResult(
+                  metrics,
+                  parse(rs.getString("equity_curve")),
+                  parse(rs.getString("drawdown_curve")),
+                  parse(rs.getString("benchmark_curve")),
+                  rs.getString("data_hash"),
+                  rs.getLong("seed"),
+                  rs.getString("premium_source"),
+                  // The originating strategy (UUID) + when the run finished — the results header
+                  // shows the strategy name (mapped client-side) and the run date.
+                  rs.getString("strategy_id"),
+                  rs.getString("completed_at"),
+                  // Stage F follow-on: the run's instrument, so the results "View on chart"
+                  // deep-link and trade-mark filtering carry the right symbol.
+                  rs.getString("exchange"),
+                  rs.getString("tradingsymbol"),
+                  // Phase 44: the pinned universe hash, so the compare view flags non-like-for-like
+                  // runs beside the dataHash mismatch. NULL for explicit single-instrument /
+                  // unpinned universes — the compare banner ignores NULLs.
+                  rs.getString("universe_checksum"),
+                  // task_03b9f52d / task_9062b5f1: the resolved universe's asOf — the funnel-CHOSEN
+                  // screen date for the swing funnel modes, the constituents asOf for
+                  // index_constituents, else NULL. Read from the joined job request JSONB.
+                  rs.getString("universe_as_of"),
+                  // Audit P0-2 / R1: the engine CODE identity this run executed under — git SHA +
+                  // build image baked into the worker jar. NULL on pre-V008 rows and on a jar built
+                  // without git.properties (mock/test).
+                  rs.getString("engine_sha"),
+                  rs.getString("engine_image"),
+                  // §D.15: surface synthetic-premium caveats at the top level, never buried.
+                  caveats(metrics));
             },
             runId)
         .stream()

@@ -125,8 +125,8 @@ public class ExportController {
   @GetMapping("/equity")
   public ResponseEntity<String> equity(
       @PathVariable UUID runId, @RequestParam(defaultValue = "csv") String format) {
-    Map<String, Object> result = requireRun(runId);
-    Object curve = result.get("equityCurve");
+    RunResult result = requireRun(runId);
+    Object curve = result.equityCurve();
     Capped<JsonNode> capped = cap(arrayItems(curve instanceof JsonNode node ? node : null));
     ArrayNode json = objectMapper.createArrayNode();
     capped.items().forEach(json::add);
@@ -162,7 +162,7 @@ public class ExportController {
         truncated);
   }
 
-  private Map<String, Object> requireRun(UUID runId) {
+  private RunResult requireRun(UUID runId) {
     return runs
         .findResult(runId)
         .orElseThrow(

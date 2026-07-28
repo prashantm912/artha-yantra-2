@@ -43,11 +43,10 @@ public class StressWindowController {
    * LIVE_FIRST families treat any sim as smoke-only, so the clean-window pick is advisory for them.
    */
   @GetMapping("/stress-window")
-  public Map<String, Object> stressWindow(@RequestParam String strategyId) {
+  public StressWindow stressWindow(@RequestParam String strategyId) {
     OffsetDateTime latestCandle = latestCachedCandle(strategyId);
-    Map<String, Object> window = stressGuard.suggestCleanWindow(strategyId, latestCandle);
-    window.put("evidencePolicy", evidencePolicy(strategyId));
-    return window;
+    StressWindow window = stressGuard.suggestCleanWindow(strategyId, latestCandle);
+    return new StressWindow(window.from(), window.to(), evidencePolicy(strategyId));
   }
 
   /** The strategy's structural evidence policy, fail-soft ({@code null} when unresolvable). */

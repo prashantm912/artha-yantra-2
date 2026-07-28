@@ -333,8 +333,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/IndicatorRegistry"
                 }
               }
             }
@@ -715,8 +714,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RunResult"
                 }
               }
             }
@@ -1047,8 +1045,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StressWindow"
                 }
               }
             }
@@ -1821,6 +1818,119 @@
         },
         "required" : [ "jobId", "note", "tags" ]
       },
+      "IndicatorMeta" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          },
+          "label" : {
+            "type" : "string"
+          },
+          "params" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ParamMeta"
+            }
+          },
+          "outputs" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "render" : {
+            "type" : "string"
+          },
+          "pane" : {
+            "type" : "string"
+          },
+          "requiresContext" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "id", "label", "outputs", "pane", "params", "render", "requiresContext" ]
+      },
+      "IndicatorRegistry" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/IndicatorMeta"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "ParamMeta" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "defaultValue" : { }
+        },
+        "required" : [ "defaultValue", "name" ]
+      },
+      "RunResult" : {
+        "type" : "object",
+        "properties" : {
+          "metrics" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "equityCurve" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "drawdownCurve" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "benchmarkCurve" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "dataHash" : {
+            "type" : [ "string", "null" ]
+          },
+          "seed" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "premiumSource" : {
+            "type" : [ "string", "null" ]
+          },
+          "strategyId" : {
+            "type" : [ "string", "null" ]
+          },
+          "ranAt" : {
+            "type" : [ "string", "null" ]
+          },
+          "exchange" : {
+            "type" : [ "string", "null" ]
+          },
+          "tradingsymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "universeChecksum" : {
+            "type" : [ "string", "null" ]
+          },
+          "universeAsOf" : {
+            "type" : [ "string", "null" ]
+          },
+          "engineSha" : {
+            "type" : [ "string", "null" ]
+          },
+          "engineImage" : {
+            "type" : [ "string", "null" ]
+          },
+          "caveats" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "benchmarkCurve", "caveats", "dataHash", "drawdownCurve", "engineImage", "engineSha", "equityCurve", "exchange", "metrics", "premiumSource", "ranAt", "seed", "strategyId", "tradingsymbol", "universeAsOf", "universeChecksum" ]
+      },
       "SwingReportCard" : {
         "type" : "object",
         "properties" : {
@@ -1901,6 +2011,21 @@
           }
         },
         "required" : [ "bars", "maxComposite", "reason", "sampleBreakdown", "sampleBucket", "sessionDate" ]
+      },
+      "StressWindow" : {
+        "type" : "object",
+        "properties" : {
+          "from" : {
+            "type" : [ "string", "null" ]
+          },
+          "to" : {
+            "type" : [ "string", "null" ]
+          },
+          "evidencePolicy" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "evidencePolicy", "from", "to" ]
       },
       "SavedViewsResponse" : {
         "type" : "object",

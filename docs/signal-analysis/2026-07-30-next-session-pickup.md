@@ -71,7 +71,9 @@ instrument convergence depth, not to change the ceiling. `lockAnchorsBeforeBook`
 
 ## Carry-forward engineering (not from today's analysis)
 
-- **D3 Map-return burn-down** — 47 left (market-data 26, strategy-signal 14, backtest 7). Next batch
+- **D3 Map-return burn-down** — ✅ registry slice DONE 2026-07-29 ([#1114](https://github.com/prashantm912/artha-yantra-2/pull/1114) @ `4db9b1c4`, deployed + live-verified): strategy-signal **14 → 4**, all 12 `RegistryController` handlers typed at the service. **37 left** (market-data 26, strategy-signal 4, backtest 7).
+  ⚠️ Two lessons from its review, both about claims rather than code: count the ratchet with the TEST's own regex (`*Controller.java` only — a broader grep over-states it, and `isLessThanOrEqualTo` lets an over-stated floor pass green), and check every nullable operand at conversion time (`ConfigDiff.Op` published two always-present strings that are routinely null — typing a Map COMMITS to the shape, it does not merely reveal it).
+- ~~Next batch `RegistryController`~~ superseded by the above. Next batch
   `RegistryController` (10; `list` + `versions` are already-typed-item envelopes). Per-PR recipe:
   classify the source before writing the claim (`LinkedHashMap` = order load-bearing · multi-key
   `Map.of` = order NORMALIZED, never claim byte-identical · single-key = trivially identical), diff

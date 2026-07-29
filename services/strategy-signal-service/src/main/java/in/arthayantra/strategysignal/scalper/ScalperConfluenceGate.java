@@ -417,7 +417,7 @@ public class ScalperConfluenceGate {
     // floor, so the rail stays byte-identical for every shipped strategy. Computed ONCE, used by both the
     // straddle branch and the directional §0B volume check below.
     BigDecimal absVolFloor = ScalperGates.volumeFloorFor(cfg.signalIndex(), cfg.params().volumeFloor());
-    BigDecimal effVolFloor =
+    BigDecimal windowVolFloor =
         cfg.has("relative-volume-floor")
             ? ScalperGates.relativeVolumeFloor(
                 priorVolumes(bank, index, oiProps.relativeVolumeWindow().intValue()),
@@ -425,6 +425,36 @@ public class ScalperConfluenceGate {
                 oiProps.relativeVolumeMinBars().intValue(),
                 absVolFloor)
             : absVolFloor;
+    // G10 (tag time-of-day-volume-floor, default-OFF): the in-session window above is SYSTEMATICALLY
+    // biased against the open. Measured over 21 sessions, its opening-10 median runs mean 3.52x /
+    // worst 8.42x the session median and over-estimates on 19 of 21 — because the opening surge is a
+    // LEVEL SHIFT, not an outlier (07-29's first ten 3m bars had a MINIMUM of 32,760 against a session
+    // median of 15,015), and a median cannot reject a level. Consequence: bars clear the floor 11.9%
+    // of the time in the first 90 minutes vs 30.9% for the rest of the day.
+    //
+    // The fix is to compare a bar against the SAME TIME OF DAY on prior sessions, so a busy 09:18 is
+    // judged against other 09:18s. Bake-off on the same 21 sessions (open-pass / rest-pass):
+    //   status quo 11.9/30.9 (ratio 0.39)  ·  prior-session SEED 57.8/29.5 (1.96)  ·  profile 27.5/29.2 (0.94)
+    // ⚠️ The flat prior-session seed is NOT the fix — it REVERSES the bias instead of removing it,
+    // making the open the LOOSEST part of the day. Only a per-time-of-day baseline tracks the shape.
+    //
+    // Depth is deliberately shallow: the live 3m series warms 4 CALENDAR days (LiveSeriesStore
+    // .warmupDays has no 3m case, so it takes default 4), which is 2-3 sessions. That is not a
+    // limitation — 2 sessions measured the MOST uniform of all depths tried (0.94 vs 0.85 at 3 and
+    // 0.79 at 5), a shallow profile tracking the current regime more closely.
+    //
+    // Fail-safe by construction: too few prior sessions carry this offset and relativeVolumeFloor
+    // falls through to `windowVolFloor`, i.e. exactly today's behaviour. Reuses the SAME median x
+    // multiplier math as the window floor — only the SAMPLE differs.
+    BigDecimal effVolFloor =
+        cfg.has("time-of-day-volume-floor")
+            ? ScalperGates.relativeVolumeFloor(
+                timeOfDayVolumes(
+                    bank, future, index, oiProps.timeOfDayProfileSessions().intValue()),
+                oiProps.relativeVolumeMultiplier(),
+                MIN_TIME_OF_DAY_SESSIONS,
+                windowVolFloor)
+            : windowVolFloor;
     // #11 (section 3.11) Straddle: a direction-NEUTRAL volatility position trading BOTH legs of the
     // SAME ATM strike (delta≈0.5 each). It must NOT take the CE/PE directional split below — there is no
     // single side — so it branches here on the side-agnostic §0B rails (time window already passed +
@@ -1210,6 +1240,45 @@ public class ScalperConfluenceGate {
    * session bar yields a short list and {@link ScalperGates#relativeVolumeFloor} falls back to the fixed
    * §0B floor below its {@code minBars} warmup.
    */
+  /**
+   * G10: how many prior sessions must carry this time-of-day offset before the profile is trusted.
+   * Below it {@link ScalperGates#relativeVolumeFloor} falls back to the caller's window floor — so a
+   * cold boot, a fresh contract after a roll, or the first session after a long weekend all degrade
+   * to exactly today's behaviour rather than to a floor computed off one sample.
+   */
+  private static final int MIN_TIME_OF_DAY_SESSIONS = 2;
+
+  /**
+   * The volume at the SAME time-of-day offset in each of the previous {@code sessions} sessions —
+   * the G10 profile sample. Volumes come from {@code bank.builtin("volume", …)}, byte-identical to
+   * what the {@code volume} rail's own operand reads, so the profile and the operand can never drift
+   * onto different scales; {@code series} is used ONLY to walk session boundaries.
+   *
+   * <p>A session that is shorter than the current one (a half day, or a warm-up session truncated by
+   * the fetch window) simply contributes nothing at offsets it does not reach — it is skipped, never
+   * substituted, so a short session cannot drag the median down.
+   */
+  // package-private for ScalperConfluenceGateTest — the session walk is the new logic here and it
+  // deserves direct assertions rather than being inferred through a full gate evaluation.
+  static List<BigDecimal> timeOfDayVolumes(
+      BarValues bank, EngineSeries series, int index, int sessions) {
+    List<BigDecimal> out = new ArrayList<>();
+    int offset = index - series.sessionStart(index);
+    int cursor = index;
+    for (int s = 0; s < sessions; s++) {
+      int previousEnd = series.previousSessionEnd(cursor);
+      if (previousEnd < 0) {
+        break; // no earlier session covered by the warm-up window
+      }
+      int target = series.sessionStart(previousEnd) + offset;
+      if (target <= previousEnd) {
+        out.add(bank.builtin("volume", target));
+      }
+      cursor = previousEnd;
+    }
+    return out;
+  }
+
   private static List<BigDecimal> priorVolumes(BarValues bank, int index, int window) {
     List<BigDecimal> out = new ArrayList<>();
     for (int j = 1; j <= window && index - j >= 0; j++) {

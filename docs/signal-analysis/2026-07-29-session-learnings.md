@@ -139,6 +139,94 @@ Earlier in the same session I had declared §9-06 moot from a single grep of the
 reviewer produced file:line evidence that I was wrong. This time the verdict rests on both
 implementations plus arithmetic.
 
+## 8. The D3 Map-return burn-down — four review findings, all in the CLAIMS
+
+Later the same session, ledger D3 slice 1 moved **68 -> 47** Map-returning handlers across three PRs
+([#1097](https://github.com/prashantm912/artha-yantra-2/pull/1097) signals family 25->18,
+[#1098](https://github.com/prashantm912/artha-yantra-2/pull/1098) paper + journal 18->14, both merged
+and preceded by [#1094](https://github.com/prashantm912/artha-yantra-2/pull/1094)).
+
+**Every defect cross-vendor review found was in what I SAID about the change, not in the change.**
+The conversions themselves were correct all four times. This is a different failure mode from §1's
+"one rule in two places", and it is worth naming separately because no test can reach it:
+
+| Round | Finding | Class |
+|---|---|---|
+| #1097 r1 | `scalperDetail` missing its nullable union | acted on a STALE recalled fact |
+| #1098 r1 | "the wire is byte-identical" | overclaim — disproved by running it |
+| #1098 r1 | presence-assertions called a wire proof | overclaim — the instrument cannot see order |
+| #1098 r2 | "the journal list had no wire coverage" | overclaim — it had some |
+
+The suite was green before, during and after all four. A reviewer reading the *prose* against the
+*code* is the only gate that catches this class.
+
+### 8.1 `Map.of` iteration order VARIES BETWEEN JVM RUNS
+
+The load-bearing technical find. I wrote that multi-key `Map.of` order is "unspecified, so no client
+could have depended on it -- a strict improvement, **not a wire change**." That is having it both
+ways, and the reviewer settled it empirically: on the project JDK 21.0.11 the equity point serialized
+as both `{date,equity}` and `{equity,date}` **across separate JVMs**, because
+`java.util.ImmutableCollections` randomizes its probe order per JVM (a per-process SALT).
+
+So converting a multi-key `Map.of` body to a record **NORMALIZES a previously nondeterministic key
+order** -- it does not preserve one. Safe (JSON members are unordered by spec; every client here binds
+by key), but the honest claim is normalization.
+
+**Rule for the remaining ~47 handlers:** classify each source before writing the claim.
+`LinkedHashMap` -> order was fixed, is load-bearing, must be preserved component-for-component.
+Multi-key `Map.of` -> order was random per JVM, is now normalized; say so. Single-key `Map.of` ->
+trivially byte-identical.
+
+(Checked, not assumed: this does **not** falsify #1097, whose only two `Map.of` uses were
+single-key. The reviewer independently confirmed.)
+
+### 8.2 Red-proof the guard you actually claim
+
+Proving the new `/pnl` wire assertion could fail, I first renamed `PnlSummary.realizedTotal` in Java.
+The build broke -- because `TelegramCommandBot` calls the accessor. That *felt* like a pass and was
+the wrong proof: it never exercised the JSON assertion at all. A **wire-only** rename via
+`@JsonProperty` (still compiles) produced the real thing: `No value at JSON path
+"$.summary.realizedTotal"`, one test, nothing else.
+
+**Rule:** a red-proof must fail through the mechanism you are claiming coverage from. If it fails
+earlier -- at the compiler, at wiring -- you have proven a different guard.
+
+### 8.3 A pipe masks Maven's exit code, exactly like the git trap
+
+`./mvnw.cmd ... | grep -E 'Tests run|BUILD'; echo "rc=$?"` reports **grep's** exit status. Twice this
+session that turned a `BUILD FAILURE` into a reported success -- once calling a broken `test-compile`
+clean, once chaining a spec re-capture off `&&` so it ran against a failed build. CLAUDE.md already
+warns "never pipe a git command whose failure must stop a chain"; it is the same trap with a
+different binary. **Redirect to a file and read the command's own `$?`**, then grep the file.
+
+### 8.4 Typing a Map surfaces consumers nobody listed
+
+Retyping `PaperService.pnl` broke compilation in `TelegramCommandBot`, which was reading the response
+through an unchecked cast plus string map keys. Three tests also had to migrate off map-key
+assertions -- one had been stubbing `"0.75"` as a **String** where the field is a `BigDecimal`, which
+the Map silently accepted. The burn-down's real payoff is not the spec entry; it is that the compiler
+starts enforcing a contract that was previously convention.
+
+### 8.5 Two structural traps recorded in the code
+
+- **Duplicate simple names collapse to ONE springdoc schema.** `SignalRejectionRepository.RailCount`
+  and `StrategyEvidenceReader.RailCount` are different records sharing a name. Byte-identical today,
+  so no drift -- but diverging either silently rewrites the other's published schema. Both now
+  cross-warn in javadoc.
+- **`$ref` nullability is NO LONGER a carve-out.** `NullableRefCustomizer` (task_bd871971) already
+  rewrites a nullable `$ref` sibling into `anyOf: [$ref, null]`. My briefing to the reviewer said
+  otherwise from memory; the annotation was the supported path all along. A nullable `JsonNode`
+  response component takes `@Schema(types = {"object", "null"})`.
+
+### 8.6 Rebasing after a squash-merge needs `--onto`
+
+A plain `git rebase origin/main` on a stacked branch tries to replay the already-merged commits --
+squash-merge means they are not ancestors of what landed -- and conflicts. `git status -sb` showed
+`## HEAD (no branch)`, the fingerprint CLAUDE.md names. Abort, then
+`git rebase --onto origin/main <predecessor-tip> <branch>` replays only the new work. Same reason
+`tools/git-prune-merged.sh` conservatively keeps squash-merged branches: match by commit SUBJECT (the
+squash uses the PR title, i.e. the branch's FIRST commit, not its tip).
+
 ## 7. Open, with dates
 
 | Item | State |

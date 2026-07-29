@@ -86,6 +86,24 @@ subset is CI-enforced).
 > slice 1), **#1082** (T24: the volume dot tests the floor the RAIL tested; verify task 07-29 16:20),
 > **#1065** (exit-equivalence fixture widened — all copies AGREE). Owner items unchanged: B8 clock,
 > T9 arming, I4 ~2026-08-09, and now budget_inr ~2026-08-12.
+>
+> **LATE 2026-07-29 — architecture-deepening sweep + D3 slice 1 (main `195bfd1b`).** The four §9
+> candidates are resolved: **§9-02 CLOSED** ([#1094](https://github.com/prashantm912/artha-yantra-2/pull/1094),
+> one definition of the CA-adjustment factor), **§9-05** done earlier, **§9-06 DECLINED** (the two
+> 1m→N rollup anchors are mutually exclusive — IST-midnight for `time_bucket` parity vs 09:15
+> SESSION_OPEN for the grid join; 555 minutes makes them identical for 1/3/5/15m and divergent for
+> 10/30/60m, so one definition provably cannot serve both), and **§9-04 BUILT but HELD OPEN**
+> ([#1095](https://github.com/prashantm912/artha-yantra-2/pull/1095) — `PremiumLevels` gives the
+> `premium_pct` formula one home; the ledger gate reads "widen the fixture **+ owner go**", the
+> widening is met via #1065 and the go is not, so it awaits the owner and has had no review round).
+>
+> **D3 slice 1 (Map-return burn-down) moved 68 → 47 handlers**:
+> [#1097](https://github.com/prashantm912/artha-yantra-2/pull/1097) typed the whole signals family
+> (25→18) and [#1098](https://github.com/prashantm912/artha-yantra-2/pull/1098) the paper read
+> envelopes + journal list (18→14). Remaining: market-data 26, strategy-signal 14, backtest 7.
+> These are contract-visibility changes only — no engine, money, parity or migration surface — and
+> **need no deploy**: they alter the published OpenAPI shape and the generated TS client, not
+> runtime behaviour. New chip task_7f57c0d5 (`OpeningSignal`'s three nullable `JsonNode` fields).
 
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the

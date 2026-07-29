@@ -401,6 +401,34 @@ restart services, or write during market hours.
   "dead"** (added 2026-07-29, §3.21). The 07-29 midday run reported `trending_cross` **0/722** on a
   fully-live-OI day; the full session was **57/983 (5.8%)**. Escalating a partial-read 0% costs the EOD
   run a carry item and can manufacture a phantom tuning row.
+- ⚠️ **Fingerprint the JAR before attributing live behaviour to a code path** (added 2026-07-30,
+  §3.23 — this entry was PROMISED by the 07-29 rollup row and never written; the dangling reference
+  is what surfaced it). A deploy can report SUCCESS, go healthy and pass its own probe while shipping
+  a jar that omits other merged work. `docker exec ay-<svc> sh -c 'unzip -l /app/*.jar | grep -c
+  <NewClass>'` is the cheap generic check. ⚠️ Never probe a `*Test` class (never in the service jar),
+  and remember a nested `BOOT-INF/lib/*.jar` class returns 0 from the OUTER jar and looks like a
+  failed deploy. Also fingerprint a RECENT unrelated fix, to rule out a silent revert.
+- **Session REGIME classification** (added 2026-07-30, §3.24 — G15). Stamp every session row with a
+  regime so a data-gated row (G11 needs a chop day) can ever be told its observation arrived.
+  Metric: **intraday directional efficiency** `|close−open| / (high−low)` on `NIFTY 50` daily.
+  ⚠️ **Intraday, NOT close-over-prior-close** — a 30-minute time stop cannot capture an overnight
+  gap, and the two disagree exactly where it matters (2026-07-29 reads +1.10% close-over-close but
+  only +0.30% intraday, which is why it was mis-filed as a trend day). ⚠️ **Efficiency, NOT
+  close-position-in-range** — the latter saturates (14 of 21 days ≥0.65) and rates a −0.03%-on-0.87%
+  chop day at 0.676. Cuts are DERIVED from the largest gaps in the sorted distribution, not picked.
+  Table + method live in `rollup.md` §Session regime.
+- **The entry-knob counterfactual PIPELINE** (added 2026-07-30, §3.25 — the method that settled T1,
+  G13 and G10). A pass-rate delta is NOT a result. Four steps, and skipping any one has produced a
+  wrong answer:
+  1. **rows newly passing** the knob under test;
+  2. **keep only rows where that rail was the SOLE blocker** — G13's +21.7% headline collapsed to 6
+     legs here, because `volume-floor` binds 88% of blocks and `confluence-composite` binds 0.9%;
+  3. **dedupe by `(bar_time, tradingsymbol)`** — slug fan-out inflates raw counts;
+  4. **price** each leg and **test the sign's robustness + subtract costs** — G10 was +324.87 gross
+     and −305.88 excluding its top 5 legs of 265, break-even at ~0.35% round-trip.
+  ⚠️ **Standing result: all four measured loosenings of the scalper entry gate LOST money** (T1, T7,
+  G13, G10). Treat that as the prior. All four are conditional on the 30-minute `time_stop`, so if
+  G11 changes the exit they must be re-run.
 - Capture liveness: `max(bucket)` on 1m candles + snapshot counts vs wall clock.
 
 ### 4.2 Live counterfactual — "would loosening knob X have made money TODAY?"
@@ -793,6 +821,34 @@ SELECT (generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
        min((diagnostic->'context'->'macro'->>'atmIv')::numeric) mn,
        max((diagnostic->'context'->'macro'->>'atmIv')::numeric) mx
 FROM strategy.signal_rejections WHERE generated_at >= :d0 GROUP BY 1 ORDER BY 1;
+
+-- §3.24 session REGIME (G15): intraday directional efficiency on the front NIFTY future.
+-- Cuts derived from the sorted distribution's largest gaps: chop <0.29, mixed 0.29-0.61, trend >=0.61.
+WITH b AS (
+  SELECT tradingsymbol, (bucket AT TIME ZONE 'Asia/Kolkata')::date sess,
+         time_bucket('3 minutes', bucket) b3, sum(volume) vol
+  FROM marketdata.candles
+  WHERE exchange='NFO' AND interval='1m' AND tradingsymbol LIKE 'NIFTY2%FUT' AND bucket >= :d0
+  GROUP BY 1,2,3)
+SELECT to_char(bucket AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD') d,
+       round(((close-open)/open*100)::numeric,2)            net_pct,
+       round(((high-low)/open*100)::numeric,2)              range_pct,
+       round((abs(close-open)/NULLIF(high-low,0))::numeric,3) efficiency
+FROM marketdata.candles
+WHERE tradingsymbol='NIFTY 50' AND interval='1d' AND bucket >= :d0 ORDER BY bucket;
+-- ⚠️ close-over-PRIOR-close is the WRONG operand here (a 30-min stop cannot capture a gap).
+
+-- §3.25 the counterfactual PIPELINE. Step 2 is the one people skip -- which rail actually BINDS:
+SELECT blocking_rail, count(*) FROM strategy.signal_rejections
+WHERE generated_at >= :d0 AND diagnostic ? 'confluence' GROUP BY 1 ORDER BY 2 DESC;
+-- Everything needed to price a counterfactual is ALREADY on the row -- no modelling of the live side:
+--   diagnostic->>'operand'    the bar's operand as the engine saw it
+--   diagnostic->>'threshold'  the floor the engine ACTUALLY applied
+--   diagnostic->'confluence'->'dots'  every dot's weight + supports (composite is recomputable;
+--                             ⚠️ ABSENT dots are IN this array and must be excluded by hand --
+--                             validated 983/983 against the stored composite_score)
+--   diagnostic->'wouldBeLeg'  tradingsymbol / strike / expiry / optionType / entryLtp
+-- Then dedupe by (bar_time, tradingsymbol) and price via §4.2 below.
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

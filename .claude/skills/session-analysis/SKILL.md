@@ -35,6 +35,13 @@ Arguments: `post [YYYY-MM-DD]` (default: the most recent completed session) · `
    structural-vs-regime watchlist gains/clears items. Session log rows are append-only. When the
    log holds ≥5 sessions and §Proposals is still empty, run the rollup pass (below) in the same
    sitting and fill it.
+   **ALSO append one row to §Session regime** (G15) from the day's `NIFTY 50` daily bar — net %
+   (open→close), range %, `|close−open|/(high−low)`, and the label off that section's derived cuts.
+   ⚠️ Use the INTRADAY open→close move, never close-over-prior-close: a gap is not something a
+   30-minute time stop can capture, and the two disagree (2026-07-29 reads +1.10% close-over-close
+   but only +0.30% intraday). **If the label is `chop`, say so in the report and re-read ledger row
+   G11** — that observation is the row's blocker, and this stamp is the only thing that will ever
+   announce it.
 7. If you found a NEW analysis dimension or data point, append it to README §3 (numbered,
    append-only) with its SQL in §6 — that is how the method is designed to grow.
 8. Ship as a docs-only PR (squash, admin-merge allowed for docs). Report the headline verdict +

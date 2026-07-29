@@ -138,7 +138,7 @@ class TelegramCommandBotTest {
         .thenReturn(
             new DotHealthCanary.DotHealth(
                 "t", true, 40, 40,
-                List.of(new DotHealthCanary.DotState("breadth", true, true, "ok"))));
+                List.of(new DotHealthCanary.DotState("breadth", true, true, false, "ok"))));
     when(risk.entryAllowed(anyString())).thenReturn(true);
     when(paper.openPositions(null)).thenReturn(List.of());
 

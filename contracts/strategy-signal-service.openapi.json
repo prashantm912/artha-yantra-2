@@ -5240,11 +5240,14 @@
           "required" : {
             "type" : "boolean"
           },
+          "frozen" : {
+            "type" : "boolean"
+          },
           "detail" : {
             "type" : "string"
           }
         },
-        "required" : [ "alive", "detail", "dot", "required" ]
+        "required" : [ "alive", "detail", "dot", "frozen", "required" ]
       },
       "ShadowVariantListResponse" : {
         "type" : "object",

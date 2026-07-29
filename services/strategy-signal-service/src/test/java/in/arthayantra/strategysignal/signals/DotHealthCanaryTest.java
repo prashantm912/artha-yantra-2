@@ -61,14 +61,35 @@ class DotHealthCanaryTest {
   }
 
   private static SignalRejectionRepository.RejectionRow row(String contextJson) {
+    return rowAtBar(contextJson, OffsetDateTime.now());
+  }
+
+  /** A context-bearing row pinned to an explicit bar — the freeze probes count DISTINCT bars. */
+  private static SignalRejectionRepository.RejectionRow rowAtBar(
+      String contextJson, OffsetDateTime barTime) {
     try {
       return new SignalRejectionRepository.RejectionRow(
           1, null, "slug", "NFO", "FUT", "3m", "CE", "volume-floor", null, null, null, "r",
           null, null, MAPPER.readTree("{\"context\":" + contextJson + "}"),
-          OffsetDateTime.now(), OffsetDateTime.now());
+          barTime, OffsetDateTime.now());
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
+  }
+
+  /**
+   * {@code count} rows on {@code count} DISTINCT 3m bars, context rendered per bar index — enough
+   * bars to clear {@link DotHealthCanary#MIN_FROZEN_BARS} when count is 8 or more.
+   */
+  private static SignalRejectionRepository.RejectionRow[] rowsAcrossBars(
+      int count, java.util.function.IntFunction<String> contextForBar) {
+    OffsetDateTime base = OffsetDateTime.parse("2026-06-10T09:15:00+05:30");
+    SignalRejectionRepository.RejectionRow[] rows =
+        new SignalRejectionRepository.RejectionRow[count];
+    for (int i = 0; i < count; i++) {
+      rows[i] = rowAtBar(contextForBar.apply(i), base.plusMinutes(3L * i));
+    }
+    return rows;
   }
 
   private void stubRows(SignalRejectionRepository.RejectionRow... rows) {
@@ -342,6 +363,129 @@ class DotHealthCanaryTest {
       expiry = expiry.plusDays(1);
     }
     return expiry.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant();
+  }
+
+  @Test
+  void aFrozenOperandIsFlaggedEvenThoughTheDotReadsAlive() {
+    // G12: the third input state. `vixLevel` is non-null on every bar, so the alive/dead probe is
+    // right to call it live — and it carries ONE value all session, silently re-capping the
+    // composite exactly as a dead input would.
+    stubRows(rowsAcrossBars(8, i -> "{\"macro\":{\"vixLevel\":12.4,\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary.DotHealth health = canary("breadth").evaluate();
+
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("vix"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).as("non-null on every bar — liveness is genuinely true").isTrue();
+              assertThat(s.frozen()).isTrue();
+              assertThat(s.detail()).contains("FROZEN").contains("across 8 bars");
+            });
+  }
+
+  @Test
+  void aVaryingOperandIsNotFrozen() {
+    stubRows(rowsAcrossBars(8, i -> "{\"macro\":{\"vixLevel\":1" + i + ".4}}"));
+    assertThat(canary("breadth").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("vix"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.frozen()).isFalse();
+              assertThat(s.detail()).contains("input live").doesNotContain("FROZEN");
+            });
+  }
+
+  @Test
+  void oneBarFannedOutAcrossStrategiesIsNeverFrozen() {
+    // THE guard on this feature. The engine evaluates one 3m bar across ~63 scalpers, so the 40-row
+    // window can be a SINGLE bar whose macro context is identical by construction. Counting rows
+    // instead of distinct bars would read that as a session-long freeze — the same fan-out
+    // inflation that made the champion book's 24 rows look like 24 independent observations when
+    // they were ~6. Twenty identical rows, ONE bar: not frozen.
+    OffsetDateTime oneBar = OffsetDateTime.parse("2026-06-10T09:15:00+05:30");
+    SignalRejectionRepository.RejectionRow[] fanOut =
+        new SignalRejectionRepository.RejectionRow[20];
+    java.util.Arrays.setAll(
+        fanOut, i -> rowAtBar("{\"macro\":{\"vixLevel\":12.4}}", oneBar));
+    stubRows(fanOut);
+
+    assertThat(canary("breadth").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("vix"))
+        .singleElement()
+        .satisfies(s -> assertThat(s.frozen()).as("1 distinct bar < MIN_FROZEN_BARS").isFalse());
+  }
+
+  @Test
+  void theAtmIvFreezeReadsByDesignAndNeverPages() {
+    // G12's discovered case, and the reason `frozen` must not page. `atmIv` is the previous
+    // session's EOD scalar: MarketOiClient.macro() -> /market/options/iv-history.currentIv ->
+    // the last `iv_daily_summary` row, which IvRollupJob writes once a day at 16:00 IST. One value
+    // per session is CORRECT, so a paging frozen-probe would fire a false alarm every single day.
+    stubRows(rowsAcrossBars(8, i -> "{\"macro\":{\"atmIv\":0.118781,\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("iv_abs_band");
+
+    assertThat(canary.evaluate().dots())
+        .filteredOn(s -> s.dot().equals("iv_abs_band"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).isTrue();
+              assertThat(s.frozen()).isTrue();
+              assertThat(s.detail()).contains("BY DESIGN").contains("iv_daily_summary");
+            });
+
+    canary.sweep();
+    verifyNoInteractions(events); // frozen reports; only DEAD pages
+  }
+
+  @Test
+  void aDeadAndFrozenDotKeepsItsDeadMessageAndStillPages() {
+    // An all-NEUTRAL quadrant window is BOTH dead (NEUTRAL is the data-missing sentinel, T13) and
+    // frozen. The liveness half is the half that pages, so the frozen clause must be APPENDED to
+    // the dead message, never substituted for it.
+    stubRows(
+        rowsAcrossBars(
+            8,
+            i -> "{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
+                + "\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("futures_oi");
+
+    assertThat(canary.evaluate().dots())
+        .filteredOn(s -> s.dot().equals("futures_oi"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).isFalse();
+              assertThat(s.frozen()).isTrue();
+              assertThat(s.detail()).contains("input dead").contains("FROZEN");
+            });
+
+    canary.sweep();
+    verify(events, times(1)).publishEvent(alertContaining("futures_oi DEAD"));
+  }
+
+  @Test
+  void expiryDaySuppressionStandsDownTheFrozenFlagToo() {
+    // On a suppression day the OI read is not being produced at all, so its single inert value is
+    // by-design inertness rather than a freeze — flagging it would light the badge every expiry day
+    // for a state the suppression branch already explains.
+    now.set(expiryDayAt11Ist());
+    stubRows(
+        rowsAcrossBars(
+            8,
+            i -> "{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
+                + "\"macro\":{\"advances\":30,\"declines\":20},\"underlying\":\"NIFTY 50\"}"));
+
+    assertThat(canary("futures_oi").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("futures_oi"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.frozen()).isFalse();
+              assertThat(s.detail()).contains("by design").doesNotContain("FROZEN");
+            });
   }
 
   @Test

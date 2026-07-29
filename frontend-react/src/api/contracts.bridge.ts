@@ -161,7 +161,7 @@ type _DotHealth = AssertKeys<
   Schemas['DotHealth'],
   'asOf' | 'session' | 'rowsScanned' | 'rowsInspected' | 'dots'
 >;
-type _DotState = AssertKeys<Schemas['DotState'], 'dot' | 'alive' | 'required' | 'detail'>;
+type _DotState = AssertKeys<Schemas['DotState'], 'dot' | 'alive' | 'required' | 'frozen' | 'detail'>;
 
 // --- insights decision-support (INT-I1 feed / Focus / explain drawer) --------------------------
 type _Insight = AssertKeys<

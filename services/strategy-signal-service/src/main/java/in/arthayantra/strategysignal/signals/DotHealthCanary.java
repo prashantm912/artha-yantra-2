@@ -10,11 +10,13 @@ import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +32,13 @@ import org.springframework.stereotype.Component;
  * silently re-caps the composite (the 0.765 ceiling class the 2026-07-02 forensics found months
  * late). Every sweep inspects TODAY's newest rejections; a REQUIRED dot with no live input across
  * the whole window alerts once per day (newly-alive also notes once — that's a fix landing).
+ *
+ * <p>Liveness has TWO dimensions, because a null-rate probe can only see one of them (G12,
+ * 2026-07-29). A dot's input can be dead (absent/sentinel) — or present on every row and FROZEN,
+ * carrying one distinct value all session, which re-caps the composite exactly as silently while
+ * every alive/dead probe correctly reports it alive. {@code iv_abs_band} is the discovered case and
+ * its freeze is legitimate; the frozen flag therefore REPORTS and never pages, so a by-design daily
+ * operand cannot manufacture a daily false alarm.
  *
  * <p>Dot registry mirrors the findings-doc §3.7 checks. {@code required-dots} (config) lists the
  * dots expected alive TODAY — grows as fixes land (breadth after #486; iv_rank once the IV-history
@@ -50,27 +59,58 @@ public class DotHealthCanary {
   // Fetch a deeper page and keep only context-bearing rows; an all-context-less window is
   // UNINFORMATIVE, never an all-dead verdict.
   static final int FETCH_DEPTH = 200;
+  // G12: how many DISTINCT BARS must carry the operand before one distinct value is called frozen.
+  // Two bars trivially agree, so a low bar count would report every quiet stretch as a freeze; 8
+  // bars is ~24 minutes on the 3m primary. Below it the dot reports not-frozen, never "unknown" —
+  // the flag is an assertion, and an un-evidenced assertion must read false.
+  static final int MIN_FROZEN_BARS = 8;
 
-  /** One dot's input-liveness probe over a rejection's diagnostic JSON. */
-  private record Probe(String dot, Predicate<JsonNode> alive) {}
+  /** A context-bearing rejection reduced to what the probes read: its diagnostic and its bar. */
+  private record ContextRow(JsonNode diagnostic, OffsetDateTime barTime) {}
+
+  /**
+   * One dot's probes over a rejection's diagnostic JSON: {@code alive} is the per-row liveness test
+   * (OR-folded across the window), {@code operand} renders the value the dot actually scores from so
+   * the window can be tested for FREEZE (G12 — see {@link #MIN_FROZEN_ROWS}). {@code dailyByDesign}
+   * marks an operand that is a once-a-day scalar by construction, where a frozen window is correct.
+   */
+  private record Probe(
+      String dot, Predicate<JsonNode> alive, Function<JsonNode, String> operand,
+      boolean dailyByDesign) {
+
+    Probe(String dot, Predicate<JsonNode> alive, Function<JsonNode, String> operand) {
+      this(dot, alive, operand, false);
+    }
+  }
 
   private static final List<Probe> PROBES =
       List.of(
-          new Probe("breadth", d -> macroInt(d, "advances") + macroInt(d, "declines") > 0),
+          new Probe("breadth", d -> macroInt(d, "advances") + macroInt(d, "declines") > 0,
+              d -> macroInt(d, "advances") + "/" + macroInt(d, "declines")),
           new Probe("iv_rank", d -> !d.at("/context/macro/ivRank").isMissingNode()
-              && !d.at("/context/macro/ivRank").isNull()),
+              && !d.at("/context/macro/ivRank").isNull(), d -> text(d, "/context/macro/ivRank")),
           new Probe("dow", d -> !d.at("/context/macro/dowUp").isMissingNode()
-              && !d.at("/context/macro/dowUp").isNull()),
+              && !d.at("/context/macro/dowUp").isNull(), d -> text(d, "/context/macro/dowUp")),
           new Probe("fii", d -> !d.at("/context/macro/fiiLongPct").isMissingNode()
-              && !d.at("/context/macro/fiiLongPct").isNull()),
-          new Probe("oi_spurt_price", d -> d.at("/context/oi/spurtPricePct").asDouble(0) != 0),
+              && !d.at("/context/macro/fiiLongPct").isNull(),
+              d -> text(d, "/context/macro/fiiLongPct")),
+          new Probe("oi_spurt_price", d -> d.at("/context/oi/spurtPricePct").asDouble(0) != 0,
+              d -> text(d, "/context/oi/spurtPricePct")),
           new Probe("vix", d -> !d.at("/context/macro/vixLevel").isMissingNode()
-              && !d.at("/context/macro/vixLevel").isNull()),
+              && !d.at("/context/macro/vixLevel").isNull(), d -> text(d, "/context/macro/vixLevel")),
+          // G12: `iv_abs_band` (ConnectTheDotsScorer:210-213, w 0.8) had no probe at all, and it is
+          // the dot the frozen dimension was built for — `atmIv` is the EOD daily scalar described
+          // on `dailyByDesign` below, so it is non-null all session and reads alive on the old
+          // contract while being a per-day STEP FUNCTION (0/180 on 2026-07-28, 133/133 on 07-29).
+          new Probe("iv_abs_band", d -> !d.at("/context/macro/atmIv").isMissingNode()
+              && !d.at("/context/macro/atmIv").isNull(), d -> text(d, "/context/macro/atmIv"), true),
           // T13: NEUTRAL is the strategy-side "data missing" sentinel — OiInterpretation.classify is
           // a total function over four real states, so an all-NEUTRAL window means the OI read is
           // broken (the 2026-07-20 outage: 748/748 NEUTRAL, three dots dead, canary green all day).
-          new Probe("futures_oi", d -> quadrantLive(d, "futuresQuadrant")),
-          new Probe("underlying_oi", d -> quadrantLive(d, "underlyingQuadrant")));
+          new Probe("futures_oi", d -> quadrantLive(d, "futuresQuadrant"),
+              d -> text(d, "/context/oi/futuresQuadrant")),
+          new Probe("underlying_oi", d -> quadrantLive(d, "underlyingQuadrant"),
+              d -> text(d, "/context/oi/underlyingQuadrant")));
 
   private static boolean quadrantLive(JsonNode d, String field) {
     JsonNode q = d.at("/context/oi/" + field);
@@ -81,8 +121,20 @@ public class DotHealthCanary {
     return d.at("/context/macro/" + field).asInt(0);
   }
 
-  /** One dot's current verdict. */
-  public record DotState(String dot, boolean alive, boolean required, String detail) {}
+  /** The operand's rendered value, or null when the field is absent — a null never counts as a value. */
+  private static String text(JsonNode d, String pointer) {
+    JsonNode n = d.at(pointer);
+    return n.isMissingNode() || n.isNull() ? null : n.asText();
+  }
+
+  /**
+   * One dot's current verdict. {@code frozen} is the G12 dimension: the input is present on every row
+   * (so {@code alive} is true) but carries exactly ONE distinct value across the window — a state no
+   * null-rate probe can see. It never pages on its own; {@code detail} says whether the freeze is
+   * by design.
+   */
+  public record DotState(
+      String dot, boolean alive, boolean required, boolean frozen, String detail) {}
 
   /**
    * The endpoint payload. {@code rowsInspected} counts the CONTEXT-BEARING rows the probes actually
@@ -139,11 +191,11 @@ public class DotHealthCanary {
             null, null, null, null,
             now.toLocalDate().atTime(LocalTime.of(9, 15)).atZone(Ist.ZONE).toOffsetDateTime(),
             null, FETCH_DEPTH, 0);
-    List<JsonNode> contextRows = new ArrayList<>(WINDOW);
+    List<ContextRow> contextRows = new ArrayList<>(WINDOW);
     for (SignalRejectionRepository.RejectionRow row : scanned) {
       JsonNode d = row.diagnostic();
       if (d != null && !d.at("/context").isMissingNode() && d.at("/context").size() > 0) {
-        contextRows.add(d);
+        contextRows.add(new ContextRow(d, row.barTime()));
         if (contextRows.size() == WINDOW) {
           break;
         }
@@ -157,12 +209,13 @@ public class DotHealthCanary {
     // One date for the whole sweep — re-reading the clock per row could straddle IST midnight.
     LocalDate today = now.toLocalDate();
     boolean allRowsSuppressed =
-        !contextRows.isEmpty() && contextRows.stream().allMatch(d -> rootSuppressedToday(d, today));
+        !contextRows.isEmpty()
+            && contextRows.stream().allMatch(r -> rootSuppressedToday(r.diagnostic(), today));
     List<DotState> dots = new ArrayList<>(PROBES.size());
     for (Probe p : PROBES) {
       boolean alive = false;
-      for (JsonNode d : contextRows) {
-        if (p.alive().test(d)) {
+      for (ContextRow r : contextRows) {
+        if (p.alive().test(r.diagnostic())) {
           alive = true;
           break;
         }
@@ -172,6 +225,26 @@ public class DotHealthCanary {
       // flag here keeps every consumer (paging, /status count, UI badge) agreeing with the
       // no-outage decision instead of each needing its own exemption.
       boolean suppressedToday = allRowsSuppressed && S24_SUPPRESSED_DOTS.contains(p.dot());
+      // G12: distinct operand values across the window, counted PER BAR and never per row. The
+      // engine fans one 3m bar out across ~63 scalpers, so 40 rejection rows can be a single bar —
+      // counting rows would read "one distinct value" off one bar's worth of identical macro
+      // context and call a perfectly live input frozen. (Same fan-out inflation that made the
+      // champion book's best session look like 24 observations when it was ~6.) Only bars that
+      // CARRY the operand count, so a partially-null field is judged on the bars that have it.
+      Set<String> distinct = new LinkedHashSet<>();
+      Set<OffsetDateTime> carryingBars = new LinkedHashSet<>();
+      for (ContextRow r : contextRows) {
+        String value = p.operand().apply(r.diagnostic());
+        if (value != null) {
+          carryingBars.add(r.barTime());
+          distinct.add(value);
+        }
+      }
+      int carrying = carryingBars.size();
+      // An S24-suppressed read is not being produced at all today, so its single inert value is
+      // by-design inertness, not a freeze — flagging it would light the badge every expiry day for
+      // a state the suppression branch already explains.
+      boolean frozen = carrying >= MIN_FROZEN_BARS && distinct.size() == 1 && !suppressedToday;
       String detail;
       if (alive) {
         detail = "input live in the last " + contextRows.size() + " context-bearing rejections";
@@ -189,8 +262,25 @@ public class DotHealthCanary {
       } else {
         detail = "input dead across " + contextRows.size() + " context-bearing rejections";
       }
+      // APPENDED, never substituted: a dot can be dead AND frozen (an all-NEUTRAL quadrant window
+      // is both), and the liveness half is the half that pages — it must not be overwritten.
+      if (frozen) {
+        detail +=
+            p.dailyByDesign()
+                // Established by code read 2026-07-30, not inferred: the scorer's operand is
+                // MarketOiClient.macro() -> GET /api/v1/market/options/iv-history -> `currentIv`,
+                // which IvAnalyticsService resolves to the LAST `iv_daily_summary` row — a table
+                // IvRollupJob writes once per day at 16:00 IST. Intraday it is the previous
+                // session's EOD scalar and cannot move: one value per session is CORRECT here, and
+                // the defect the freeze exposes belongs to the dot, not to the feed.
+                ? " · frozen BY DESIGN — one value (" + distinct.iterator().next() + ") across "
+                    + carrying + " bars (EOD daily operand: iv_daily_summary, IvRollupJob 16:00 IST)"
+                : " · FROZEN — ONE distinct value (" + distinct.iterator().next() + ") across "
+                    + carrying + " bars; a null-rate probe cannot see this";
+      }
       dots.add(
-          new DotState(p.dot(), alive, required.contains(p.dot()) && !suppressedToday, detail));
+          new DotState(
+              p.dot(), alive, required.contains(p.dot()) && !suppressedToday, frozen, detail));
     }
     return new DotHealth(
         now.toOffsetDateTime().toString(), session, scanned.size(), contextRows.size(),

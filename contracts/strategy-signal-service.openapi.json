@@ -1257,8 +1257,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/JournalPage"
                 }
               }
             }
@@ -2694,8 +2693,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/TradePage"
                 }
               }
             }
@@ -2791,8 +2789,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/PositionList"
                 }
               }
             }
@@ -2865,8 +2862,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Pnl"
                 }
               }
             }
@@ -5262,6 +5258,84 @@
         },
         "required" : [ "items" ]
       },
+      "TradePage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TradeDto"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
+      },
+      "PositionList" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PositionDto"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "EquityPoint" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string"
+          },
+          "equity" : {
+            "type" : "number"
+          }
+        },
+        "required" : [ "date", "equity" ]
+      },
+      "Pnl" : {
+        "type" : "object",
+        "properties" : {
+          "points" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EquityPoint"
+            }
+          },
+          "summary" : {
+            "$ref" : "#/components/schemas/PnlSummary"
+          }
+        },
+        "required" : [ "points", "summary" ]
+      },
+      "PnlSummary" : {
+        "type" : "object",
+        "properties" : {
+          "realizedTotal" : {
+            "type" : "number"
+          },
+          "trades" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "winRate" : {
+            "type" : [ "number", "null" ]
+          },
+          "expectancy" : {
+            "type" : [ "number", "null" ]
+          }
+        },
+        "required" : [ "expectancy", "realizedTotal", "trades", "winRate" ]
+      },
       "MarginHeat" : {
         "type" : "object",
         "properties" : {
@@ -5517,6 +5591,26 @@
           }
         },
         "required" : [ "availableCash", "collateral", "m2mRealized", "m2mUnrealized", "status", "utilisedDebits" ]
+      },
+      "JournalPage" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Entry"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
       },
       "Insight" : {
         "type" : "object",

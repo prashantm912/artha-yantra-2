@@ -6,10 +6,10 @@
 // full structural assignability check would be red on every money field by design.
 //
 // The Map-returning endpoints are being retyped to records (ledger D3 slice 1), and each one that
-// lands moves out of "runtime-verified only" and into this file. The SIGNALS family (history page,
-// detail, take/dismiss, rejections, rail-counts) crossed over on 2026-07-29 and is bound below.
-// What is still unbound is whatever remains a `Map<String, Object>` — `MapReturnRatchetTest` holds
-// the authoritative per-service count.
+// lands moves out of "runtime-verified only" and into this file. Crossed over on 2026-07-29: the
+// SIGNALS family (history, detail, take/dismiss, rejections, rail-counts), the PAPER read envelopes
+// (positions/trades/pnl) and the JOURNAL list. What is still unbound is whatever remains a
+// `Map<String, Object>` — `MapReturnRatchetTest` holds the authoritative per-service count.
 //
 // Zero runtime: type-only imports, nothing exported, never bundled (no module imports this file);
 // `tsc -b` (the build script) still type-checks it because it sits inside the src include.
@@ -62,6 +62,33 @@ type _AccountDto = AssertKeys<
   | 'capitalUsed'
   | 'usageByClass'
   | 'marginPercents'
+>;
+
+// --- paper read envelopes (PaperPage tables + equity curve) -----------------------------------
+type _PositionList = AssertKeys<Schemas['PositionList'], 'items'>;
+type _TradePage = AssertKeys<Schemas['TradePage'], 'items' | 'limit' | 'offset'>;
+type _Pnl = AssertKeys<Schemas['Pnl'], 'points' | 'summary'>;
+type _EquityPoint = AssertKeys<Schemas['EquityPoint'], 'date' | 'equity'>;
+type _PnlSummary = AssertKeys<
+  Schemas['PnlSummary'],
+  'realizedTotal' | 'trades' | 'winRate' | 'expectancy'
+>;
+
+// --- journal (JournalPage list + entry form) ---------------------------------------------------
+type _JournalPage = AssertKeys<Schemas['JournalPage'], 'items'>;
+type _JournalEntry = AssertKeys<
+  Schemas['Entry'],
+  | 'id'
+  | 'signalId'
+  | 'paperPositionId'
+  | 'backtestRunId'
+  | 'backtestTradeId'
+  | 'note'
+  | 'tags'
+  | 'disciplineRating'
+  | 'emotionRating'
+  | 'createdAt'
+  | 'updatedAt'
 >;
 
 // --- live-broker funds (OrdersPage) -----------------------------------------------------------
@@ -168,6 +195,13 @@ export type ContractBridges = [
   _PositionDto,
   _TradeDto,
   _AccountDto,
+  _PositionList,
+  _TradePage,
+  _Pnl,
+  _EquityPoint,
+  _PnlSummary,
+  _JournalPage,
+  _JournalEntry,
   _SignalDto,
   _SignalPage,
   _RejectionRow,

@@ -50,6 +50,24 @@ class JournalIntegrationTest extends StrategySignalIntegrationTestBase {
     long id = objectMapper.readTree(body).get("id").asLong();
 
     mockMvc.perform(get("/api/v1/journal/" + id)).andExpect(status().isOk()).andExpect(jsonPath("$.note").value("rushed the entry"));
+
+    // Wire coverage for the LIST envelope after the D3 retyping (ledger D3 slice 1). The filter
+    // tests below already assert items.length() and a couple of linked-entity keys; what was
+    // missing is the SHAPE — the envelope's limit/offset and the item's core field set, including
+    // an unset rating staying PRESENT-and-null. Filtered by this test's unique tag so the shared IT
+    // database's other rows cannot mask a break.
+    mockMvc
+        .perform(get("/api/v1/journal?tag=" + tag))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items").isArray())
+        .andExpect(jsonPath("$.items[0].id").value(id))
+        .andExpect(jsonPath("$.items[0].note").value("rushed the entry"))
+        .andExpect(jsonPath("$.items[0].tags").isArray())
+        .andExpect(jsonPath("$.items[0].disciplineRating").value(2))
+        // present-and-null, not omitted: the record inherits the map's ALWAYS inclusion
+        .andExpect(jsonPath("$.items[0].emotionRating").hasJsonPath())
+        .andExpect(jsonPath("$.limit").exists())
+        .andExpect(jsonPath("$.offset").exists());
     mockMvc
         .perform(
             put("/api/v1/journal/" + id)

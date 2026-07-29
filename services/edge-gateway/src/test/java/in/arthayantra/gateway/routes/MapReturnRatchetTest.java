@@ -39,6 +39,15 @@ class MapReturnRatchetTest {
    * keys, the populated path 16 — so one record would add 11 null keys to the empty response. That is
    * a wire change, not a retyping; typing it needs a deliberate shape decision, not a refactor.
    *
+   * <p>strategy-signal-service 18 → 14 (2026-07-29, same day): the paper read surface + the
+   * journal list. {@code PaperController}'s {@code positions} / {@code trades} / {@code pnl} and
+   * {@code JournalController.list} were all envelopes whose ITEM types were ALREADY records
+   * ({@code PositionDto}, {@code TradeDto}, {@code Entry}), so typing the envelope pulls the fully
+   * enumerated item schema into the spec instead of leaving an {@code array of object}. {@code
+   * PaperService.pnl} was retyped at the SERVICE too — its {@code summary} mirrored a {@code
+   * LinkedHashMap} (component order load-bearing), its {@code points} a {@code Map.of} (order
+   * unspecified, so the record only makes it deterministic).
+   *
    * <p>strategy-signal-service 25 → 18 (2026-07-29): the whole SIGNALS surface. {@code
    * SignalsController}'s five handlers ({@code list} / {@code active} / {@code detail} / {@code
    * taken} / {@code dismiss}) all rendered through ONE private {@code dto} assembler, so retyping
@@ -59,7 +68,7 @@ class MapReturnRatchetTest {
       Map.of(
           "edge-gateway", 0,
           "market-data-service", 26,
-          "strategy-signal-service", 18,
+          "strategy-signal-service", 14,
           "backtest-service", 7);
 
   private static final Pattern MAP_RETURN =

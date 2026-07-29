@@ -1,4 +1,4 @@
-package in.arthayantra.marketdata.screener;
+package in.arthayantra.marketdata.equitydaily;
 
 /**
  * The ONE corporate-action-adjusted equity daily price plane the Minervini/Manas screeners and the

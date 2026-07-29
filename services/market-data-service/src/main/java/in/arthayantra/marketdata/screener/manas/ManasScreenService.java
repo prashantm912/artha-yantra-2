@@ -1,6 +1,6 @@
 package in.arthayantra.marketdata.screener.manas;
 
-import in.arthayantra.marketdata.screener.AdjustedEquityDailySql;
+import in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;

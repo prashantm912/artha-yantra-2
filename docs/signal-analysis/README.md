@@ -774,7 +774,7 @@ SELECT count(DISTINCT diagnostic->'context'->'macro'->>'atmIv')          atmiv_v
 FROM strategy.signal_rejections WHERE generated_at >= :d0915;
 -- `1` on a field while its neighbours show tens = a FROZEN operand (2026-07-29: atmIv = 1, four
 -- sessions running, while ceIvAvg6/peIvAvg6/vixLevel/premiumSkewPct all moved).
--- AUTOMATED 2026-07-30 (G12): DotHealthCanary now runs this per dot and reports `DotState.frozen`
+-- AUTOMATED 2026-07-29 (G12): DotHealthCanary now runs this per dot and reports `DotState.frozen`
 -- on GET /api/v1/signal-rejections/dot-health, so the hand-run below is now a cross-check, not the
 -- only way to see it. TWO DIFFERENCES from the canary, both deliberate:
 --   (a) this SQL counts DISTINCT ROWS; the canary counts DISTINCT BARS. One 3m bar fans out across
@@ -783,7 +783,7 @@ FROM strategy.signal_rejections WHERE generated_at >= :d0915;
 --   (b) atmIv's freeze is CORRECT — it resolves to the latest `iv_daily_summary` row (`iv_30d`
 --       PREFERRED, `atm_iv` only as a fallback — atm_iv is NULL on 2026-07-28 and 07-21 while both
 --       sessions still read a value), written once a day at 16:00 IST, so intraday it is the
---       previous session's scalar. See docs/signal-analysis/2026-07-30-g12-frozen-operand.md.
+--       previous session's scalar. See docs/signal-analysis/2026-07-29-g12-frozen-operand.md.
 --       Do not "fix" the feed.
 --   (c) `iv_rank` and `fii` are the same EOD shape and are classified DAILY in the canary too;
 --       only CONTINUOUS operands (breadth/vix/oi_spurt_price) page on a freeze.

@@ -1,6 +1,6 @@
 # G12 — the frozen `atmIv` operand: cause established, probe built
 
-**Written 2026-07-30.** Closes the diagnosis half of ledger row **G12** and ships the probe half.
+**Written 2026-07-29.** Closes the diagnosis half of ledger row **G12** and ships the probe half.
 
 ---
 
@@ -19,7 +19,7 @@ probe closes it for all of them at once.
 
 ---
 
-## 1. The chain, link by link (all `sourced`, read 2026-07-30)
+## 1. The chain, link by link (all `sourced`, read 2026-07-29)
 
 | # | site | what it does |
 |---|---|---|
@@ -36,7 +36,7 @@ writes it at 16:00 — so every evaluation from 09:15 to 15:30 reads the same pr
 
 ## 2. Live confirmation — four sessions, exact
 
-`iv_daily_summary` for `NIFTY 50` (live `artha`, read 2026-07-30) against the four `atmIv` values
+`iv_daily_summary` for `NIFTY 50` (live `artha`, read 2026-07-29) against the four `atmIv` values
 recorded in the 07-29 findings:
 
 | session observed | gate `atmIv` | `summary_date` | column | lag |
@@ -126,7 +126,7 @@ sampling-window bug is invisible to any test that builds its own sample.
 ## Claim labels
 
 - Links 1–5, the `iv30d`/`atmIv` fallback, and the NULL `atm_iv` days: **sourced** (file:line read
-  2026-07-30; SQL against live `artha` the same day).
+  2026-07-29; SQL against live `artha` the same day).
 - The four-session lag table: **computed** this session by joining the 07-29 findings' recorded
   values against `iv_daily_summary`.
 - "A daily IV-regime filter may be the intended design": **assumed** — no design doc states the

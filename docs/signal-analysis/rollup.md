@@ -45,7 +45,7 @@ carry null). Champion book = would-have-fired class (composite passed, some rail
 ## Session regime (derived — G15; append one row per session alongside the session-log row)
 
 **Why this exists.** G11 (the 30-minute `time_stop` cutting winners) is BLOCKED-DATA on a chop-day
-observation, and until 2026-07-30 nothing classified the session's regime — so no routine could ever
+observation, and until 2026-07-29 nothing classified the session's regime — so no routine could ever
 announce "today is the chop day G11 needs" and the row waited indefinitely by default. This table is
 the trigger. **Re-read G11 the first time a post-fix `chop` row lands here.**
 

@@ -1,6 +1,6 @@
 # G14 — capital-governor convergence depth: measured
 
-**Written 2026-07-30.** Discharges the measurement step ledger row **G14** asked for.
+**Written 2026-07-29.** Discharges the measurement step ledger row **G14** asked for.
 **No code changed** — any change to the ceiling is HOLD, and none is proposed.
 
 ---

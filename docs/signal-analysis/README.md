@@ -177,8 +177,19 @@ Run in order; each answers one question. Canned SQL in §6.
     `EXTRACT(second FROM bucket) = 0`, and the misaligned count is itself a per-session
     data-integrity probe.
 16. **Check whether the slug actually configures a premium exit BEFORE resolving any counterfactual**
-    (added 2026-07-23) — §4.2 step 4 below says "+35% premium take-profit (E9 default)". **That default
-    does not exist for most live scalpers.** Only **21 of the 63** YAMLs under
+    (added 2026-07-23) — ⚠️ **AMENDED 2026-07-29: the 21-of-63 statement below is HISTORICAL and no longer
+    describes the fleet.** T21 (owner-approved 2026-07-25, #990) added the block to every scalper YAML;
+    verified 2026-07-29 by direct count, **63 of 63**. The shipped shape is `take_profit premium_pct 35` +
+    `stop_loss premium_pct 25` + `signal_exit (close < vwap)` + `trailing_stop (supertrend_line)` +
+    `time_stop max_bars 10`, so the correct §4.2 model **from 2026-07-25 forward** is a UNIFORM
+    **+35% TP / −25% SL / 10-bar (30-minute) time stop / 15:12 square-off** — the time stop matters most
+    (on 2026-07-29 not one of 41 counterfactual legs touched either bracket; every one resolved at the
+    time stop). ⚠️ The shadow book replicates brackets + structural + square-off but **NOT** the time stop
+    or `signal_exit`, so shadow P&L and a §4.2 counterfactual on the same legs legitimately disagree — on
+    2026-07-29 they disagreed **in sign** (+₹15,260.87 vs −538.50 pts). Say which model produced which
+    number. Findings files written **between 07-23 and 07-25** carry the downward-scope bias the original
+    text describes; files before 07-23 carry the upward bias. Original text follows, for those files.
+    Only **21 of the 63** YAMLs under
     `services/strategy-signal-service/src/main/resources/scalper-strategies/` carry a `premium_pct`
     block — the `gap-theory`, `market-movers`, `hero-zero`, `btst-stbt` and `straddle` families. The
     `golden-crossover`, `connect-the-dots`, `two-candle`, `trending-oi`, `trend-change` and
@@ -285,7 +296,30 @@ Run in order; each answers one question. Canned SQL in §6.
     overload actually resolves — the rejection row records the dot's *verdict*, only the code records
     which threshold produced it. The same trap is available to any dot/rail pair sharing a name
     (`volume`, `rsi`, `vwap`, `oi_spurt`).
-21. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+21. **A dot at 0% (or 100%) in a PARTIAL-session read is not a finding — §3.6 support rates are only
+    interpretable over a COMPLETE session** (added 2026-07-29) — the 07-29 midday live run recorded
+    `trending_cross` at **0/722** on a fully-live-OI day and escalated it to the EOD run as
+    "threshold or data?". It was neither: over the full session it is **57/983 (5.8%)**. The CE-over-PE
+    dOI cross simply had not occurred yet in the sampled window. The same trap runs the other way — a dot
+    at 100% mid-session can fall back over the afternoon. **In a `live` run, write "0 so far" and give the
+    denominator + the wall-clock; never write "dead".** Only a session-complete rate belongs in a §3.6
+    table or a tuning row.
+22. **A "dead" or "free" dot may have a FROZEN operand, and no alive/dead canary probe can see it —
+    count DISTINCT operand values across the session, not just the null rate** (added 2026-07-29) —
+    `iv_abs_band` (w 0.8) read **0/180 on 07-28** and **133/133 = 100% on 07-29**, which looks like a
+    revival. It is not: `diagnostic.context.macro.atmIv` carries **exactly ONE distinct value per
+    session** — 0.130859 (07-24) / 0.135577 (07-27) / 0.121736 (07-28) / **0.118781 (07-29)** — so the
+    10–12 band test (`ConnectTheDotsScorer.java:210-213`, 0.10–0.12 on the 0..1 fraction scale) is a
+    **per-day step function**: 07-28's stamp landed just OUTSIDE 0.12, today's just inside. The dot is a
+    coin flip on one stamped number, all session, every session.
+    **Why the canary is blind to it:** `DotHealthCanary` tests whether the input is null/non-null, and a
+    frozen value is emphatically non-null — it reports `alive`. A frozen operand is a *third* state
+    alongside live and dead, and only a `count(DISTINCT …)` finds it. **Standing check whenever a dot sits
+    at 0% or ~100% for a whole session:** run the DISTINCT-count over its operand for the session (SQL in
+    §6) *before* reaching for a threshold explanation. Scope it — on 2026-07-29 the neighbouring
+    `ceIvAvg6` (41 distinct), `peIvAvg6` (44), `ceIvSlope` (100), `vixLevel` (27) and `premiumSkewPct`
+    (100) were all moving normally, so the freeze was ONE field, not the IV feed.
+23. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -317,6 +351,10 @@ restart services, or write during market hours.
   §6): the 07-24 ledger already has `ivRank` NULL 100%, `fiiLongPct` NULL 100% (both dead-data, carried
   since 07-02) and `dowUp` NULL by design (un-armed). All three are `required: false`. Only a CHANGE
   in that set — one of them alive, or a fourth dot joining them — is news.
+- ⚠️ **Dot support rates read mid-session are PROVISIONAL — write "0 so far (n=…, as of HH:MM)", never
+  "dead"** (added 2026-07-29, §3.21). The 07-29 midday run reported `trending_cross` **0/722** on a
+  fully-live-OI day; the full session was **57/983 (5.8%)**. Escalating a partial-read 0% costs the EOD
+  run a carry item and can manufacture a phantom tuning row.
 - Capture liveness: `max(bucket)` on 1m candles + snapshot counts vs wall clock.
 
 ### 4.2 Live counterfactual — "would loosening knob X have made money TODAY?"
@@ -678,6 +716,23 @@ SELECT count(*) bars, count(*) FILTER (WHERE vol >= :suspected_static_floor) cle
 -- `clearing` matching the dot's distinct supporting BUCKET count is the fingerprint.
 -- code side (the actual proof): ConnectTheDotsScorer's add(dots,"<dot>",…) line -> the ScalperGates
 -- overload it calls -> whether that overload takes a floor override at all.
+
+-- §3.22 FROZEN-operand probe: a dot stuck at 0% or ~100% may have a constant input, which every
+-- null/non-null canary reports as `alive`. Run this BEFORE reaching for a threshold explanation.
+SELECT count(DISTINCT diagnostic->'context'->'macro'->>'atmIv')          atmiv_vals,
+       count(DISTINCT diagnostic->'context'->'macro'->>'ceIvAvg6')      ce_vals,
+       count(DISTINCT diagnostic->'context'->'macro'->>'peIvAvg6')      pe_vals,
+       count(DISTINCT diagnostic->'context'->'macro'->>'vixLevel')      vix_vals,
+       count(DISTINCT diagnostic->'context'->'macro'->>'premiumSkewPct') skew_vals,
+       count(DISTINCT diagnostic->'context'->'oi'->>'futuresBasis')     basis_vals
+FROM strategy.signal_rejections WHERE generated_at >= :d0915;
+-- `1` on a field while its neighbours show tens = a FROZEN operand (2026-07-29: atmIv = 1, four
+-- sessions running, while ceIvAvg6/peIvAvg6/vixLevel/premiumSkewPct all moved). Cross-session form:
+SELECT (generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
+       count(DISTINCT diagnostic->'context'->'macro'->>'atmIv') vals,
+       min((diagnostic->'context'->'macro'->>'atmIv')::numeric) mn,
+       max((diagnostic->'context'->'macro'->>'atmIv')::numeric) mx
+FROM strategy.signal_rejections WHERE generated_at >= :d0 GROUP BY 1 ORDER BY 1;
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

@@ -221,12 +221,20 @@ public class DotHealthCanary {
             null, FETCH_DEPTH, 0);
     List<ContextRow> contextRows = new ArrayList<>(WINDOW);
     // G12 / cross-vendor review 2026-07-29: the FREEZE pass reads EVERY context-bearing row in the
-    // scan, not the 40-row liveness window. The two need different depths and the 40-row cap made
-    // the freeze flag silently inert on a third of sessions: distinct bars inside the newest 40
-    // context-bearing rejections measured 18/4/18/14/4/18/7/17 across 2026-07-20..29, so 07-21,
-    // 07-24 and 07-28 never reached MIN_FROZEN_BARS and could not have reported a freeze however
-    // frozen the operand was. The same rows at FETCH_DEPTH give 18-34 bars on every session — and
-    // they are ALREADY FETCHED, so this costs no extra query, it just stops discarding them.
+    // scan, not the 40-row liveness window. The two need different depths, and the 40-row cap made
+    // the freeze flag inert on a third of sessions. Distinct bars per session, 2026-07-20..29:
+    //
+    //   old (first 40 context-bearing rows):  18 /  4 / 18 / 14 /  4 / 18 /  7 / 17
+    //   new (all context-bearing in the scan): 22 /  7 / 25 / 20 / 10 / 20 / 11 / 21
+    //
+    // The rows are ALREADY FETCHED, so this costs no extra query — it just stops discarding them.
+    // ⚠️ It does NOT rescue every session: 2026-07-21 only reaches 7 bars, still under
+    // MIN_FROZEN_BARS, because FETCH_DEPTH scans 200 RAW rows and a thin session leaves few of them
+    // context-bearing (76 that day). The probe therefore ABSTAINS on a thin session rather than
+    // asserting a freeze off a handful of bars — the safe direction, and consistent with
+    // MIN_FROZEN_BARS' own rule that an un-evidenced assertion must read false. Raising FETCH_DEPTH
+    // would close it but doubles a 5-minutely read that MonitorSchedulingConfig deliberately bounds,
+    // so that is an owner call, not a silent widening.
     List<ContextRow> freezeRows = new ArrayList<>(FETCH_DEPTH);
     for (SignalRejectionRepository.RejectionRow row : scanned) {
       JsonNode d = row.diagnostic();

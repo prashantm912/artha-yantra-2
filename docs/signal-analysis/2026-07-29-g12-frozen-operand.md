@@ -91,13 +91,26 @@ Four design decisions worth keeping. **Two of them exist because the cross-vendo
 first version**, and both of those were invisible to a green suite:
 
 1. **The freeze pass reads the whole scan, not the 40-row liveness window.** The first version capped
-   both at `WINDOW` (40 rows). Measured across 2026-07-20…29, the distinct bars inside the newest 40
-   context-bearing rejections are **18 / 4 / 18 / 14 / 4 / 18 / 7 / 17** — so on **three of eight
-   sessions** the window never reached 8 bars and the flag could not have fired however frozen the
-   operand was. The same rows at `FETCH_DEPTH` (200) give **18–34 bars on every session**, and they
-   were already being fetched and discarded. Guarded by
+   both at `WINDOW` (40 rows), so on a third of sessions the window never reached 8 bars and the flag
+   could not have fired however frozen the operand was. Distinct bars per session, 2026-07-20…29:
+
+   | | 07-20 | 07-21 | 07-22 | 07-23 | 07-24 | 07-27 | 07-28 | 07-29 |
+   |---|---|---|---|---|---|---|---|---|
+   | old (first 40 context-bearing rows) | 18 | **4** | 18 | 14 | **4** | 18 | **7** | 17 |
+   | new (all context-bearing in the scan) | 22 | **7** | 25 | 20 | 10 | 20 | 11 | 21 |
+
+   The rows were already being fetched and discarded, so this costs no extra query. Guarded by
    `theFreezeWindowReachesPastTheFortyRowLivenessWindow`, **red-proofed**: reverting the pass to the
    40-row window fails that test and only that test.
+
+   ⚠️ **It does NOT rescue every session, and an earlier draft of this doc wrongly claimed it did**
+   ("18–34 bars on every session" — that figure was measured over 200 *context-bearing* rows, but
+   `FETCH_DEPTH` scans 200 **raw** rows, of which only 60–130 carry context). **2026-07-21 reaches
+   only 7 bars and stays under `MIN_FROZEN_BARS`.** On such a session the probe **abstains** rather
+   than asserting a freeze off a handful of bars — the safe direction, and consistent with
+   `MIN_FROZEN_BARS`' own rule that an un-evidenced assertion must read false. Raising `FETCH_DEPTH`
+   would close the gap but doubles a 5-minutely read that `MonitorSchedulingConfig` deliberately
+   bounds, so it is an owner call rather than a silent widening.
 2. **Freeze eligibility is per-operand, not uniform** (`FreezeClass`). One rule for every dot is
    simultaneously noise and blindness: eight unchanged bars is the *normal* state of a boolean
    (`dowUp`) or a four-value enum (the OI quadrants), and of anything sourced from an EOD read.

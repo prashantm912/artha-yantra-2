@@ -375,7 +375,12 @@ public class DotHealthCanary {
         // ever reaches someone who happens to open the rejections page. DAILY operands are exempt
         // by construction (their freeze is correct) and EXEMPT ones are never flagged at all, so
         // this cannot fire on `iv_abs_band`, `iv_rank` or `fii`.
-        if (state.frozen() && FREEZE_CLASS.get(dot) == FreezeClass.CONTINUOUS
+        // ⚠️ `state.alive()` is REQUIRED here, not redundant with the branch above. A dead operand
+        // can also read frozen: breadth's sentinel is 0/0, which is dead by the `alive` test but
+        // still renders a non-null operand, so eight bars of outage make it BOTH. Without this the
+        // sweep pages DEAD and then immediately pages FROZEN with a message claiming the input
+        // "reads live" — two alerts for one outage, the second contradicting the first.
+        if (state.frozen() && state.alive() && FREEZE_CLASS.get(dot) == FreezeClass.CONTINUOUS
             && !today.equals(alertedFrozenOn.get(dot))) {
           alertedFrozenOn.put(dot, today);
           log.error("dot canary: required dot '{}' input FROZEN — {}", dot, state.detail());

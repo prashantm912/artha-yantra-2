@@ -493,6 +493,20 @@ class DotHealthCanaryTest {
   }
 
   @Test
+  void aDeadContinuousOperandPagesOnceAsDeadAndNeverAlsoAsFrozen() {
+    // Cross-vendor review round 2: breadth's dead sentinel is 0/0, which fails the `alive` test but
+    // still RENDERS a non-null operand — so eight bars of outage make the dot dead AND frozen. The
+    // frozen page must therefore require alive(), or one outage emits two alerts and the second
+    // one's message ("reads live but has not changed value") contradicts the first.
+    stubRows(rowsAcrossBars(10, i -> "{\"macro\":{\"advances\":0,\"declines\":0}}"));
+    DotHealthCanary canary = canary("breadth");
+
+    canary.sweep();
+    verify(events, times(1)).publishEvent(alertContaining("breadth DEAD"));
+    verify(events, org.mockito.Mockito.never()).publishEvent(alertContaining("breadth FROZEN"));
+  }
+
+  @Test
   void expiryDaySuppressionStandsDownTheFrozenFlagToo() {
     // On a suppression day the OI read is not being produced at all, so its single inert value is
     // by-design inertness rather than a freeze. oi_spurt_price is CONTINUOUS (so it WOULD otherwise

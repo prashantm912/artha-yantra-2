@@ -778,11 +778,15 @@ FROM strategy.signal_rejections WHERE generated_at >= :d0915;
 -- on GET /api/v1/signal-rejections/dot-health, so the hand-run below is now a cross-check, not the
 -- only way to see it. TWO DIFFERENCES from the canary, both deliberate:
 --   (a) this SQL counts DISTINCT ROWS; the canary counts DISTINCT BARS. One 3m bar fans out across
---       ~63 scalpers, so over a NARROW window row-counting can read `1` off a single bar and call a
---       live input frozen. Safe here only because it runs over a whole session (:d0915).
---   (b) atmIv's freeze is CORRECT — it resolves to iv_daily_summary.iv_30d, written once a day at
---       16:00 IST, so intraday it is the previous session's scalar. See
---       docs/signal-analysis/2026-07-30-g12-frozen-operand.md. Do not "fix" the feed.
+--       many scalpers, so over a NARROW window row-counting can read `1` off a single bar and call
+--       a live input frozen. Safe here only because it runs over a whole session (:d0915).
+--   (b) atmIv's freeze is CORRECT — it resolves to the latest `iv_daily_summary` row (`iv_30d`
+--       PREFERRED, `atm_iv` only as a fallback — atm_iv is NULL on 2026-07-28 and 07-21 while both
+--       sessions still read a value), written once a day at 16:00 IST, so intraday it is the
+--       previous session's scalar. See docs/signal-analysis/2026-07-30-g12-frozen-operand.md.
+--       Do not "fix" the feed.
+--   (c) `iv_rank` and `fii` are the same EOD shape and are classified DAILY in the canary too;
+--       only CONTINUOUS operands (breadth/vix/oi_spurt_price) page on a freeze.
 -- Cross-session form:
 SELECT (generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
        count(DISTINCT diagnostic->'context'->'macro'->>'atmIv') vals,

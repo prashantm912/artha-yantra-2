@@ -1249,20 +1249,31 @@ public class ScalperConfluenceGate {
   private static final int MIN_TIME_OF_DAY_SESSIONS = 2;
 
   /**
-   * The volume at the SAME time-of-day offset in each of the previous {@code sessions} sessions —
-   * the G10 profile sample. Volumes come from {@code bank.builtin("volume", …)}, byte-identical to
-   * what the {@code volume} rail's own operand reads, so the profile and the operand can never drift
-   * onto different scales; {@code series} is used ONLY to walk session boundaries.
+   * The volume at the SAME IST TIME OF DAY in each of the previous {@code sessions} sessions — the
+   * G10 profile sample. Volumes come from {@code bank.builtin("volume", …)}, byte-identical to what
+   * the {@code volume} rail's own operand reads, so the profile and the operand can never drift onto
+   * different scales; {@code series} is used ONLY to walk session boundaries.
    *
-   * <p>A session that is shorter than the current one (a half day, or a warm-up session truncated by
-   * the fetch window) simply contributes nothing at offsets it does not reach — it is skipped, never
-   * substituted, so a short session cannot drag the median down.
+   * <p>⚠️ Matched on the WALL-CLOCK bucket time, never on the ordinal bar offset within the session
+   * (cross-vendor review, 2026-07-30 — the first version matched by offset and was wrong). {@link
+   * LiveSeriesStore} warms from an exact {@code now.minusDays(4)} instant, so the OLDEST covered
+   * session routinely starts MID-SESSION: after a Monday 10:30 restart the Thursday slice begins at
+   * 10:30, and its "offset 25" is 11:45, not 10:30. Offset matching silently sampled the wrong
+   * bucket, and because the truncated session still yielded a value it satisfied {@link
+   * #MIN_TIME_OF_DAY_SESSIONS} and the fail-safe never fired — a wrong floor with no signal.
+   *
+   * <p>The common case stays O(1): every ordinary session starts 09:15, so the offset-derived
+   * candidate already carries the right bucket time and is accepted on the first check. Only a
+   * truncated or gapped session falls through to the bounded scan, and a session with no bar at that
+   * exact time contributes NOTHING — skipped, never substituted, so neither a half day nor a
+   * mid-session warm-up start can drag the median.
    */
   // package-private for ScalperConfluenceGateTest — the session walk is the new logic here and it
   // deserves direct assertions rather than being inferred through a full gate evaluation.
   static List<BigDecimal> timeOfDayVolumes(
       BarValues bank, EngineSeries series, int index, int sessions) {
     List<BigDecimal> out = new ArrayList<>();
+    java.time.LocalTime wanted = istBucketTime(series, index);
     int offset = index - series.sessionStart(index);
     int cursor = index;
     for (int s = 0; s < sessions; s++) {
@@ -1270,13 +1281,34 @@ public class ScalperConfluenceGate {
       if (previousEnd < 0) {
         break; // no earlier session covered by the warm-up window
       }
-      int target = series.sessionStart(previousEnd) + offset;
-      if (target <= previousEnd) {
-        out.add(bank.builtin("volume", target));
+      int previousStart = series.sessionStart(previousEnd);
+      int match = -1;
+      int candidate = previousStart + offset; // O(1) hit whenever both sessions open at 09:15
+      if (candidate <= previousEnd && wanted.equals(istBucketTime(series, candidate))) {
+        match = candidate;
+      } else {
+        for (int i = previousStart; i <= previousEnd; i++) {
+          if (wanted.equals(istBucketTime(series, i))) {
+            match = i;
+            break;
+          }
+        }
+      }
+      if (match >= 0) {
+        out.add(bank.builtin("volume", match));
       }
       cursor = previousEnd;
     }
     return out;
+  }
+
+  /** A bar's IST wall-clock bucket time — the key the G10 profile matches prior sessions on. */
+  private static java.time.LocalTime istBucketTime(EngineSeries series, int index) {
+    return series
+        .candle(index)
+        .bucketStart()
+        .withOffsetSameInstant(EngineSeries.IST)
+        .toLocalTime();
   }
 
   private static List<BigDecimal> priorVolumes(BarValues bank, int index, int window) {

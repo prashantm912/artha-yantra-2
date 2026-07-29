@@ -725,3 +725,70 @@ evidence resolved every one of them.
   is still **−₹19,892.76**. One good session does not reverse the book.
 - This run was **read-only**: SELECTs, `docker logs`, in-container actuator/health GETs, and source reads.
   No restart, deploy, write or config change. No strategy knob was altered.
+
+---
+
+## Addendum — 2026-07-29, added while opening the group-G ledger rows (corrects §2.3 and T24)
+
+**§2.3 and T24's "open sub-question" are WRONG and are withdrawn. T24 was FIXED, MERGED and DEPLOYED on
+2026-07-28 ([#1082](https://github.com/prashantm912/artha-yantra-2/pull/1082) `b98244ed`), and 2026-07-29
+is its FIRST LIVE SESSION** — which is exactly what the "unreconciled arithmetic" was measuring. The main
+body reasoned from the *pre-fix* code path and never asked whether the fix had shipped; ledger row **G6**
+already carried it as DONE + deployed, with a one-time 16:20 IST task scheduled to verify it on this very
+session.
+
+**Verification, run for this addendum:**
+
+- The running jar carries the fix — `unzip -p /app/*.jar …/ConnectTheDotsScorer.class | strings | grep -c
+  volumeFloor` = **1** (the threaded resolved floor). The container booted 2026-07-29 01:54 IST,
+  **after** the 07-28 deploy.
+- **The discriminating query.** Split today's 983 scored rows by whether the `volume` dot supported, and
+  read the bar volume behind each group:
+
+  | `volume` dot | rows | min vol | median vol | max vol | rows ≥125,000 |
+  |---|---|---|---|---|---|
+  | supports | **227** | **14,040** | 28,015 | 139,360 | **5** |
+  | does not | 756 | 3,900 | 11,570 | 64,025 | 0 |
+
+  Under the **pre-fix** static NIFTY floor of 125,000, at most **5** of those 227 rows could have
+  supported. **222 of the 227 supports are reachable only with the banded relative floor.** Verified on
+  data, not on a jar fingerprint alone.
+- **Dot and rail are now the same test:** the 756 non-supporting rows are exactly the 756 `volume-floor`
+  first-blocks (§1). Before #1082 the two used different thresholds by construction; they now agree
+  row-for-row.
+
+**The correct reading of §2.3 therefore inverts.** `volume` at **23.1%** is not an anomaly needing an
+explanation — it is **T24's fix working**, and this is the first session in this folder where the dot could
+reach its own operand's real distribution. The two "undiscriminated candidates" offered in §2.3 (a
+`sensex-*` 50,000 default, or an in-memory/DB divergence) are **unnecessary** and are withdrawn. **G6 is
+VERIFIED, not open.**
+
+**Method lesson → README §3.23:** *check what is DEPLOYED before explaining live behaviour from source.*
+The main body read `ConnectTheDotsScorer.java` on the branch, found the 07-28 root cause still described
+there, and reasoned forward — without asking whether the fix for it had already shipped. The jar
+fingerprint is the cheap generic check and it is one command. (Same family as the standing
+deploy-verify-by-jar-fingerprint trap, applied to *analysis* rather than to deploys.)
+
+⚠ **This addendum disturbs nothing else in the file.** T24 was not load-bearing for T1, T3, T27, T28 or
+T29, and no other section depends on §2.3.
+
+### Addendum, part 2 — the §7 group-G rows now EXIST
+
+§7's ledger note says the BUILD rows "are not created in this docs-only PR … flagged here as the next
+action". **They have since been created**, in
+[`../superpowers/plans/2026-07-02-remaining-items.md`](../superpowers/plans/2026-07-02-remaining-items.md)
+**§0 group G**, and that ledger — not this table — is the authoritative status from here:
+
+| this file | ledger row | tier | status |
+|---|---|---|---|
+| **T27** relative-floor window | **G10** `T27-relative-floor-opening-surge` | HOLD (changes which signals fire) | OPEN |
+| **T29** scalper `time_stop` | **G11** `T29-scalper-time-stop-cuts-winners` | OWNER (exit doctrine) | OPEN, **BLOCKED-DATA on a chop-day observation** |
+| **T28** frozen `atmIv` + canary probe | **G12** `T28-frozen-atmiv-and-canary-blind-spot` | clean (diagnosis first) | OPEN |
+| **T3** re-scope (drop-or-redefine `iv_pair`) | **G13** `T3-iv-pair-dot-drop-or-redefine` | HOLD | OPEN |
+| **T24** | **G6** — already existed | HOLD | ✅ **VERIFIED, closed** (part 1 above) |
+| **T26** | **G8** — already existed | data | OPEN, re-characterised (uniform ~17 s) |
+| **T23** | **G9** — already existed | clean | OPEN, re-narrowed to a tolerance row |
+| **T1 / T2 / T3 / T5 / T7** | **G1** | data | ✅ **CLOSED — quota met, all five resolved** |
+
+**G1 is closed.** T1 REJECTED, T7 REJECTED, T3 re-scoped into G13, T5 superseded by G12, T2 carried inside
+the row. None was resolved by being applied.

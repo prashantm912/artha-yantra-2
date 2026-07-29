@@ -66,10 +66,9 @@ class GraduationIntegrationTest extends StrategySignalIntegrationTestBase {
   private UUID publishStrategy(String tag) {
     String slug = tag + "-" + UUID.randomUUID().toString().substring(0, 8);
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create("Grad IT " + slug, null, List.of("it"), CONFIG.replace("id: grad-it", "id: " + slug))
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     return strategyId;
   }

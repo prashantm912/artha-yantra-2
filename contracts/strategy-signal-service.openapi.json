@@ -32,8 +32,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StrategyDetail"
                 }
               }
             }
@@ -78,8 +77,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/DraftVersionResponse"
                 }
               }
             }
@@ -431,8 +429,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StrategyListResponse"
                 }
               }
             }
@@ -468,8 +465,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/DraftVersionResponse"
                 }
               }
             }
@@ -516,8 +512,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RollbackResponse"
                 }
               }
             }
@@ -563,8 +558,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/PublishResponse"
                 }
               }
             }
@@ -760,8 +754,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ArchiveResponse"
                 }
               }
             }
@@ -799,8 +792,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ValidateResponse"
                 }
               }
             }
@@ -1507,8 +1499,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/NotificationsResponse"
                 }
               }
             }
@@ -1610,8 +1601,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/VersionListResponse"
                 }
               }
             }
@@ -1655,8 +1645,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StrategyDetail"
                 }
               }
             }
@@ -1752,8 +1741,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/DiffResponse"
                 }
               }
             }
@@ -3597,6 +3585,25 @@
           }
         }
       },
+      "DraftVersionResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "version" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "checksum" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "checksum", "id", "status", "version" ]
+      },
       "JsonNode" : { },
       "UpdateBody" : {
         "type" : "object",
@@ -3789,6 +3796,25 @@
           }
         }
       },
+      "RollbackResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "newVersion" : {
+            "type" : "string"
+          },
+          "copiedFrom" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "copiedFrom", "id", "newVersion", "status" ]
+      },
       "PublishRequest" : {
         "type" : "object",
         "properties" : {
@@ -3805,6 +3831,26 @@
             "type" : "string"
           }
         }
+      },
+      "PublishResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "version" : {
+            "type" : "string"
+          },
+          "versionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "status", "version", "versionId" ]
       },
       "ToggleResult" : {
         "type" : "object",
@@ -3849,6 +3895,19 @@
         },
         "required" : [ "id", "slug", "status", "version" ]
       },
+      "ArchiveResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "status" ]
+      },
       "ValidateRequest" : {
         "type" : "object",
         "properties" : {
@@ -3856,6 +3915,39 @@
             "type" : "string"
           }
         }
+      },
+      "ValidateResponse" : {
+        "type" : "object",
+        "properties" : {
+          "valid" : {
+            "type" : "boolean"
+          },
+          "errors" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ValidationIssue"
+            }
+          },
+          "warnings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ValidationIssue"
+            }
+          }
+        },
+        "required" : [ "errors", "valid", "warnings" ]
+      },
+      "ValidationIssue" : {
+        "type" : "object",
+        "properties" : {
+          "path" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "message", "path" ]
       },
       "TakenRequest" : {
         "type" : "object",
@@ -4467,6 +4559,22 @@
           }
         }
       },
+      "NotificationsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "notificationsEnabled" : {
+            "type" : "boolean"
+          },
+          "notificationChannel" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "id", "notificationChannel", "notificationsEnabled" ]
+      },
       "BracketBody" : {
         "type" : "object",
         "properties" : {
@@ -4678,6 +4786,226 @@
           }
         },
         "required" : [ "advisedLots", "avgEntryPrice", "book", "closeReason", "closedAt", "exchange", "id", "marginPct", "marginSnapshot", "markPrice", "openedAt", "openingSignal", "openingSignalId", "orders", "qty", "realizedPnl", "side", "status", "stopLoss", "subaccountIdx", "takeProfit", "tradingsymbol", "unrealizedPnl" ]
+      },
+      "StrategyListItem" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "slug" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "currentVersion" : {
+            "type" : [ "string", "null" ]
+          },
+          "publishedVersion" : {
+            "type" : [ "string", "null" ]
+          },
+          "currentVersionId" : {
+            "type" : [ "string", "null" ]
+          },
+          "publishedVersionId" : {
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "author" : {
+            "type" : "string"
+          },
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "notificationsEnabled" : {
+            "type" : "boolean"
+          },
+          "notificationChannel" : {
+            "type" : [ "string", "null" ]
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "author", "currentVersion", "currentVersionId", "enabled", "id", "name", "notificationChannel", "notificationsEnabled", "publishedVersion", "publishedVersionId", "slug", "status", "tags", "updatedAt" ]
+      },
+      "StrategyListResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrategyListItem"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
+      },
+      "StrategyDetail" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "versionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "publishedVersionId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "publishedVersion" : {
+            "type" : [ "string", "null" ]
+          },
+          "slug" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : [ "string", "null" ]
+          },
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "version" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "config" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "configYaml" : {
+            "type" : "string"
+          },
+          "checksum" : {
+            "type" : "string"
+          },
+          "notes" : {
+            "type" : [ "string", "null" ]
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "notificationsEnabled" : {
+            "type" : "boolean"
+          },
+          "notificationChannel" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "checksum", "config", "configYaml", "createdAt", "description", "enabled", "id", "name", "notes", "notificationChannel", "notificationsEnabled", "publishedVersion", "publishedVersionId", "slug", "status", "tags", "updatedAt", "version", "versionId" ]
+      },
+      "VersionListItem" : {
+        "type" : "object",
+        "properties" : {
+          "versionId" : {
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "checksum" : {
+            "type" : "string"
+          },
+          "author" : {
+            "type" : "string"
+          },
+          "notes" : {
+            "type" : [ "string", "null" ]
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "author", "checksum", "createdAt", "notes", "status", "version", "versionId" ]
+      },
+      "VersionListResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/VersionListItem"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "DiffResponse" : {
+        "type" : "object",
+        "properties" : {
+          "structured" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Op"
+            }
+          },
+          "yamlFrom" : {
+            "type" : "string"
+          },
+          "yamlTo" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "structured", "yamlFrom", "yamlTo" ]
+      },
+      "Op" : {
+        "type" : "object",
+        "properties" : {
+          "path" : {
+            "type" : "string"
+          },
+          "op" : {
+            "type" : "string"
+          },
+          "before" : {
+            "type" : "string"
+          },
+          "after" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "after", "before", "op", "path" ]
       },
       "AuditLogResponse" : {
         "type" : "object",

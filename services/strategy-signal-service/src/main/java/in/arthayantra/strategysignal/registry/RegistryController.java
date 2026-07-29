@@ -2,7 +2,6 @@ package in.arthayantra.strategysignal.registry;
 
 import in.arthayantra.strategyschema.StrategySchemaV1;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -72,21 +71,22 @@ public class RegistryController {
 
   /** Paged list with filters. */
   @GetMapping
-  public Map<String, Object> list(
+  public RegistryViews.StrategyListResponse list(
       @RequestParam(required = false) String status,
       @RequestParam(required = false) String tag,
       @RequestParam(required = false, name = "q") String query,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(defaultValue = "0") int offset) {
     int boundedLimit = Math.min(Math.max(limit, 1), 500);
-    List<Map<String, Object>> items =
-        service.list(status, tag, query, boundedLimit, Math.max(offset, 0));
-    return Map.of("items", items, "limit", boundedLimit, "offset", Math.max(offset, 0));
+    return new RegistryViews.StrategyListResponse(
+        service.list(status, tag, query, boundedLimit, Math.max(offset, 0)),
+        boundedLimit,
+        Math.max(offset, 0));
   }
 
   /** Create as draft 1.0.0. */
   @PostMapping
-  public ResponseEntity<Map<String, Object>> create(@RequestBody CreateRequest request) {
+  public ResponseEntity<RegistryViews.DraftVersionResponse> create(@RequestBody CreateRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(
             service.create(
@@ -96,14 +96,15 @@ public class RegistryController {
 
   /** Full detail (latest or explicit version). */
   @GetMapping("/{id}")
-  public Map<String, Object> get(
+  public RegistryViews.StrategyDetail get(
       @PathVariable UUID id, @RequestParam(required = false) String version) {
     return service.detail(id, version);
   }
 
   /** New draft version (auto patch-bump; checksum dedupe). */
   @PutMapping("/{id}")
-  public Map<String, Object> update(@PathVariable UUID id, @RequestBody UpdateRequest request) {
+  public RegistryViews.DraftVersionResponse update(
+      @PathVariable UUID id, @RequestBody UpdateRequest request) {
     return service.update(
         id, request.config(), request.versionBump(), request.notes(), request.createdBy());
   }
@@ -117,22 +118,24 @@ public class RegistryController {
 
   /** Version history. */
   @GetMapping("/{id}/versions")
-  public Map<String, Object> versions(
+  public RegistryViews.VersionListResponse versions(
       @PathVariable UUID id,
       @RequestParam(defaultValue = "50") int limit,
       @RequestParam(defaultValue = "0") int offset) {
-    return Map.of("items", service.versions(id, Math.min(Math.max(limit, 1), 500), Math.max(offset, 0)));
+    return new RegistryViews.VersionListResponse(
+        service.versions(id, Math.min(Math.max(limit, 1), 500), Math.max(offset, 0)));
   }
 
   /** Full config at one version. */
   @GetMapping("/{id}/versions/{version}")
-  public Map<String, Object> version(@PathVariable UUID id, @PathVariable String version) {
+  public RegistryViews.StrategyDetail version(
+      @PathVariable UUID id, @PathVariable String version) {
     return service.detail(id, version);
   }
 
   /** Publish a draft. */
   @PostMapping("/{id}/publish")
-  public Map<String, Object> publish(
+  public RegistryViews.PublishResponse publish(
       @PathVariable UUID id, @RequestBody(required = false) PublishRequest request) {
     boolean cas = request != null && Boolean.TRUE.equals(request.cas());
     return service.publish(
@@ -145,7 +148,7 @@ public class RegistryController {
 
   /** Copy-forward rollback. */
   @PostMapping("/{id}/rollback")
-  public ResponseEntity<Map<String, Object>> rollback(
+  public ResponseEntity<RegistryViews.RollbackResponse> rollback(
       @PathVariable UUID id, @RequestBody RollbackRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(
@@ -155,13 +158,13 @@ public class RegistryController {
 
   /** Archive (signal engine unloads). */
   @PostMapping("/{id}/archive")
-  public Map<String, Object> archive(@PathVariable UUID id) {
+  public RegistryViews.ArchiveResponse archive(@PathVariable UUID id) {
     return service.archive(id);
   }
 
   /** Toggle notification opt-in (Phase 41) — strategy-level, never mints a version. */
   @PatchMapping("/{id}/notifications")
-  public Map<String, Object> notifications(
+  public RegistryViews.NotificationsResponse notifications(
       @PathVariable UUID id, @RequestBody NotificationRequest request) {
     return service.updateNotifications(id, Boolean.TRUE.equals(request.enabled()), request.channel());
   }
@@ -198,14 +201,14 @@ public class RegistryController {
 
   /** Server-side structured diff. */
   @GetMapping("/{id}/diff")
-  public Map<String, Object> diff(
+  public RegistryViews.DiffResponse diff(
       @PathVariable UUID id, @RequestParam String from, @RequestParam String to) {
     return service.diff(id, from, to);
   }
 
   /** Stateless validation (the editor's keystroke-debounced companion). */
   @PostMapping("/validate")
-  public Map<String, Object> validate(@RequestBody ValidateRequest request) {
+  public RegistryViews.ValidateResponse validate(@RequestBody ValidateRequest request) {
     return service.validate(request.config());
   }
 

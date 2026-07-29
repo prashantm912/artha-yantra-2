@@ -151,12 +151,11 @@ class SwingCatchUpIdempotencyIntegrationTest extends StrategySignalIntegrationTe
     }
     String config = yaml.replace("id: manas-arora-breakout", "id: cuidem-it-" + uid);
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create(
                     "CUIDEM IT " + uid, null,
                     List.of("manas-arora", "swing", "equity", "breakout"), config)
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     return strategyRepo.latestVersion(strategyId).orElseThrow().id();
   }

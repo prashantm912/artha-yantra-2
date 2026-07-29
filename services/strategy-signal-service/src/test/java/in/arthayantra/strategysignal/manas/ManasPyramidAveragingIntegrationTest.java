@@ -185,14 +185,13 @@ class ManasPyramidAveragingIntegrationTest extends StrategySignalIntegrationTest
     }
     String config = yaml.replace("id: manas-arora-breakout", "id: mpa-it-" + uid);
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create(
                     "MPA IT " + uid,
                     null,
                     List.of("manas-arora", "swing", "equity", "breakout"),
                     config)
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     return strategyRepo.latestVersion(strategyId).orElseThrow().id();
   }

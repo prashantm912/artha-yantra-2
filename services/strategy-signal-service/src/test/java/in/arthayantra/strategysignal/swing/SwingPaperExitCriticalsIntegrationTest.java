@@ -411,14 +411,13 @@ class SwingPaperExitCriticalsIntegrationTest extends StrategySignalIntegrationTe
     String config =
         yaml.replace("id: manas-arora-breakout", "id: r4-man" + uid.toLowerCase(Locale.ROOT));
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create(
                     "R4 Manas " + uid,
                     null,
                     List.of("manas-arora", "swing", "equity", "breakout"),
                     config)
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     return strategyRepo.latestVersion(strategyId).orElseThrow().id();
   }

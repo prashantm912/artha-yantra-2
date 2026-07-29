@@ -96,14 +96,13 @@ class PaperSignalTakeFreshnessIntegrationTest extends StrategySignalIntegrationT
   void setUp() {
     String slug = "freshness-it-" + UUID.randomUUID().toString().substring(0, 8);
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create(
                     "Freshness IT " + slug,
                     null,
                     List.of("it"),
                     CONFIG.replace("id: freshness-it", "id: " + slug))
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     versionId = strategyRepo.latestVersion(strategyId).orElseThrow().id();
     // Disable every entry-veto rail on the books under test so the fresh/exempt open is never vetoed

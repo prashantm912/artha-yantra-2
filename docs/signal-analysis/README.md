@@ -339,7 +339,33 @@ Run in order; each answers one question. Canned SQL in §6.
     125,000 floor, which is impossible under the pre-fix code and is therefore positive proof the new
     path ran. Cross-check the forward ledger (`2026-07-02-remaining-items.md` §0) for the row before
     filing a new one — G6 already carried this as DONE.
-24. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+24. **DEDUPE the shadow book by `(bar_time, tradingsymbol)` before quoting any count, W/L or per-close
+    figure — slug fan-out inflates every raw total** (added 2026-07-29) — every live scalper evaluates the
+    **same 3m signal series** and resolves its leg through the **same `StrikeLegPicker`**, so one
+    qualifying bar opens the *same option leg at the same entry LTP* across every slug whose rails agreed.
+    On 2026-07-29 the champion book's **24 closes collapse to 6 bar times / 12 distinct
+    `(bar, leg, entry_ltp)` events**, and the **09:48 cluster alone carried +₹15,444.70 of the +₹19,547.61
+    square-off gain (79%) and +₹14,625.93 of the +₹15,260.87 session net (95.8%)**. Reported raw, that
+    session reads as "24 closes, 14W/10L, the book's best ever"; deduped it is **one bar** carrying the
+    session, on an effective independent sample of ~6. **A raw shadow total is a fan-out count, not an
+    observation count.**
+    ```sql
+    SELECT to_char(bar_time AT TIME ZONE 'Asia/Kolkata','HH24:MI') bar, tradingsymbol, entry_ltp,
+           count(*) rows, count(DISTINCT close_reason) exits,
+           string_agg(DISTINCT close_reason,' / ') reasons, round(sum(pnl_net),2) net
+    FROM strategy.shadow_positions
+    WHERE variant='champion' AND opened_at >= :d0915 GROUP BY 1,2,3 ORDER BY 1,2;
+    ```
+    ✅ **The same fan-out is an ASSET for exit analysis, and this is the reusable half.** A cluster where
+    `count(DISTINCT close_reason) > 1` on ONE `(bar, leg, entry_ltp)` is a **controlled exit experiment**:
+    entry is held constant to the paisa and the slugs' exit configs are the only variable. 2026-07-29's
+    09:48 cluster had `scalp-market-movers-*` stopping out at 09:52 while five other slugs held to the
+    15:12 square-off — `NIFTY2680423950CE` @318.60 → **−3.80 vs +16.85 ×5**, `SENSEX26JUL77000CE` @613.90
+    → **−20.85 vs +107.70 ×5**. That is stronger evidence than a shadow-vs-paper comparison, which is
+    always confounded by the two books trading different entries (§2). **Query the multi-exit clusters
+    first whenever an exit question is open** — they cost nothing and they are already in the table.
+
+25. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

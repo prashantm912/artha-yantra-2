@@ -792,3 +792,63 @@ action". **They have since been created**, in
 
 **G1 is closed.** T1 REJECTED, T7 REJECTED, T3 re-scoped into G13, T5 superseded by G12, T2 carried inside
 the row. None was resolved by being applied.
+
+### Addendum, part 3 — §5.1's "24 closes" is SLUG FAN-OUT, and the same cluster is a CONTROLLED exit experiment
+
+Prompted by a row-level read of the champion book after this file was written. **Two corrections, pulling
+in opposite directions, from the same twelve rows.**
+
+#### (a) ⚠ The champion book's +₹15,260.87 is NOT 24 independent observations — it is essentially ONE BAR
+
+The 24 rows collapse to **6 bar times / 12 distinct `(bar, leg, entry_ltp)` entry events**. Every live
+scalper shares **one 3m NIFTY-future signal series and one `StrikeLegPicker`**, so a single qualifying bar
+opens the same leg at the same price across every slug whose rails agreed:
+
+| bar | leg | entry | rows | exits seen | net ₹ |
+|---|---|---|---|---|---|
+| **09:48** | `NIFTY2680423950CE` | 318.60 | **6** | SQUARE_OFF / STRUCTURAL_STOP | +4,707.71 |
+| **09:48** | `SENSEX26JUL77000CE` | 613.90 | **6** | SQUARE_OFF / STRUCTURAL_STOP | +9,918.22 |
+| 09:54 | `NIFTY2680423950CE` / `SENSEX26JUL77000CE` | 315.15 / 595.35 | 1 + 1 | STRUCTURAL_STOP | −1,046.84 |
+| 10:06 | `NIFTY2680423950CE` / `SENSEX26JUL77100CE` | 319.00 / 534.85 | 2 + 2 | SQUARE_OFF | +5,686.36 |
+| 10:18 | `NIFTY2680424000CE` / `SENSEX26JUL77100CE` | 282.50 / 565.40 | 1 + 1 | STRUCTURAL_STOP | −1,673.90 |
+| 12:06 | `NIFTY2680424000CE` / `SENSEX26JUL77200CE` | 285.70 / 480.70 | 1 + 1 | STRUCTURAL_STOP | −747.23 |
+| 14:30 | `NIFTY2680424150CE` / `SENSEX26JUL77900CE` | 202.90 / 144.20 | 1 + 1 | SQUARE_OFF | −1,583.45 |
+
+**The 09:48 cluster alone carries +₹15,444.70 of the +₹19,547.61 square-off gain (79%) and +₹14,625.93 of
+the +₹15,260.87 session net (95.8%).** §5.1 called it "the champion book's best session on record" and §8
+caveated it as "a single session on a trend day" — **both understate it. It is a single BAR, replicated ten
+times by slug fan-out.** The effective independent sample is ~6, not 24.
+
+⚠ **This inflation is not specific to 07-29** — it is structural to the shadow book, and every cumulative
+league number on it (`docs/signal-analysis/rollup.md` §Per-variant league) inherits it. Deduping by
+`(bar_time, tradingsymbol)` before quoting a W/L or a per-close figure is the correct handling. *(The
+rollup already applies this instinct in places — the 07-27 row reads "deduped it is 9W/12L over 21
+events" — but it is not applied consistently, and this file did not apply it at all.)*
+
+#### (b) ✅ The SAME cluster is a controlled exit experiment — and it is better evidence for T29/G11 than what §5.2 used
+
+§5.2 caveats its shadow-vs-paper comparison because *"the two books do not trade the same entries"*. **The
+09:48 cluster has no such confound.** Six slugs, two roots, identical leg, identical bar, identical entry
+LTP to the paisa. **`scalp-market-movers-*` alone carries a structural stop; it fired at 09:52. The other
+five slugs held to the 15:12 square-off.**
+
+| leg | entry | market-movers (stopped 09:52) | the other five (square-off 15:12) |
+|---|---|---|---|
+| `NIFTY2680423950CE` | **318.60** | **−3.80** / −₹332.34 | **+16.85** / +₹1,008.01 each |
+| `SENSEX26JUL77000CE` | **613.90** | **−20.85** / −₹486.43 | **+107.70** / +₹2,080.93 each |
+
+**Entry held constant, exit config the only variable, opposite sign.** That is the controlled comparison
+§5.2 said it lacked, and it required no new data — it was sitting in the shadow table the whole time.
+
+⚠ **Three limits, all load-bearing:**
+
+1. **It does not unblock G11.** Still ONE trend-up bar. A stop that cuts winners on trend is precisely what
+   should *pay* on chop, and this comparison structurally cannot supply the chop-day observation.
+2. **It is not the `time_stop`.** The 09:52 exit is a **STRUCTURAL** stop (index-side), so it evidences the
+   general claim *"exit config dominated 07-29's P&L"*, not the specific `max_bars: 10` knob. The
+   `time_stop` evidence remains §5.2's paper book and §4.2's counterfactual.
+3. **(a) and (b) pull against each other and both are true.** The fan-out that makes the +₹15,260.87
+   headline weak is the *same* fan-out that makes the exit comparison strong — one bar producing many
+   config-varied rows is bad for sample size and good for controls.
+
+Both corrections are filed onto ledger row **G11**, which is the authoritative status.

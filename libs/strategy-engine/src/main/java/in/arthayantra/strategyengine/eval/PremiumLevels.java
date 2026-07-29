@@ -11,15 +11,25 @@ import java.math.RoundingMode;
  * a paise value, so this rounding is the thing that makes a premium-pct STOP/TARGET fire at the
  * IDENTICAL bar in backtest and in paper (audit AY-SL-06).
  *
- * <p><b>Why this class exists.</b> The formula lived in two places — {@code
- * PremiumExitEvaluator.level} (backtest replay) and {@code PremiumBracketRules.resolve} (the live
- * signals slice) — kept in agreement only by a javadoc promising "the SAME derivation" and by the
- * shared {@code contracts/fixtures/exit-equivalence.json} fixture. A comment is not an enforcement
- * mechanism. Both now call this.
+ * <p><b>Why this class exists.</b> The formula lived in FOUR places, kept in agreement only by
+ * javadocs promising "the SAME derivation" and by the shared {@code
+ * contracts/fixtures/exit-equivalence.json} fixture. A comment is not an enforcement mechanism.
+ * All four now call this:
  *
- * <p>It lives in {@code libs/strategy-engine} because that is the ONLY place both callers can reach:
- * they sit in different SERVICES, and the live copy sits in the {@code signals} Modulith slice, which
- * may not import the {@code paper} slice. A shared library crosses neither boundary — which is why
+ * <ul>
+ *   <li>{@code PremiumExitEvaluator.level} — the backtest's exit levels.
+ *   <li>{@code OptionsPremiumReplay.level} — the protective levels RECORDED on the {@code Trade}
+ *       row, so a backtest trade card shows what the identical paper trade would.
+ *   <li>{@code PaperSignalListener.premiumBrackets} — the real paper-OPEN path. The fixture's own
+ *       header called this a "genuine THIRD copy".
+ *   <li>{@code PremiumBracketRules.resolve} — the SHADOW book. Despite the name it is not the live
+ *       bracket chain, which is what {@code PaperSignalListener} feeds; the first cut of this
+ *       consolidation missed two copies by believing otherwise (cross-vendor review, round 1).
+ * </ul>
+ *
+ * <p>It lives in {@code libs/strategy-engine} because that is the ONLY place every caller can reach:
+ * they sit in different SERVICES and in different Modulith slices ({@code signals} may not import
+ * {@code paper}). A shared library crosses neither boundary — which is why
  * the original "duplicated because Modulith forbids the import" rationale does not apply to it.
  *
  * <p><b>Do NOT route the backtest's trailing-arm maths through here.</b> {@code

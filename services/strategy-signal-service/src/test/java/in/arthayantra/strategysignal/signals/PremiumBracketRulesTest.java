@@ -31,10 +31,11 @@ class PremiumBracketRulesTest {
    * Pins the ROUNDING MODE, which the case above cannot: {@code 100.00} produces exact levels, so it
    * stays green under any rounding mode and says nothing about AY-SL-06's paise rounding.
    *
-   * <p>That mattered when the live formula and the backtest's {@code PremiumExitEvaluator.level} were
-   * two copies (ledger §9-04): flipping HALF_UP to DOWN failed the shared {@code
-   * exit-equivalence.json} suites while THIS test stayed green — so the live side had no independent
-   * guard on the one property that makes a premium-pct stop fire on the same bar in both engines.
+   * <p>That mattered when the formula existed as FOUR copies (ledger §9-04): flipping HALF_UP to
+   * DOWN failed the shared {@code exit-equivalence.json} suites while THIS test stayed green — so
+   * this side had no independent guard on the one property that makes a premium-pct stop fire on the
+   * same bar in every engine. (Note this class covers the SHADOW book; the real paper-open path is
+   * {@code PaperSignalListener.premiumBrackets}. All four now share {@code PremiumLevels}.)
    *
    * <p>It takes BOTH assertions together to pin HALF_UP uniquely, which is why neither is redundant.
    * The stop lands on {@code 61.725}, an EXACT half: HALF_UP gives 61.73 while HALF_EVEN, HALF_DOWN,

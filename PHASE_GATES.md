@@ -71,6 +71,24 @@ subset is CI-enforced).
 > straddle legs open atomically, and sub-account routing reads deployed capital under that same lock.
 > All four are DEPLOYED and fingerprint-verified.
 >
+> **CURRENCY UPDATE 2026-07-30 (the entry-gate track has a verdict; the frontier moves to the EXIT):**
+> the 07-29/30 run closed the pickup-sheet G-rows (#1111–#1119, live at `f6ba4dab`) and produced one
+> finding that reorders the board: **every measured loosening of the scalper ENTRY gate has lost
+> money — T1 (multiplier, 2W/9L), T7 (threshold, worst book), G13 (IV bloc, undecidable at 6 legs),
+> G10 (time-of-day volume profile, 265 legs, +324.87 gross but −590.95 after 1% cost).** Four tests,
+> three knobs, one direction. G10's profile IS built and reviewed but stays **default-OFF** —
+> recommendation is not to arm. ⚠️ **All four are conditional on the 30-minute `time_stop`, which G11
+> says is itself the dominant term in scalper P&L — so G11 (exit doctrine) is now the highest-leverage
+> open row, and if its exit changes every one of the four must be re-run.** G11 is data-gated on a
+> chop-day observation; **G15 shipped the detector that will announce one** (regime label on each
+> `rollup.md` session row, base rate ~29% ⇒ ~3–4 sessions), which converts an indefinite wait into a
+> short clock. Also closed: **G12** (frozen-operand probe; the `atmIv` freeze turned out to be
+> CORRECT-by-construction — a daily EOD scalar — so the defect belongs to the dot, not the feed) and
+> **G14** (convergence measured: 5–7 strategies on one option key on 6 of 7 sessions, not binding at
+> today's fire rate but directly in the path of any rise). Infrastructure: a required check had been
+> **masking a live Modulith cycle on main** since #1094 by filing a deterministic failure as a flake
+> (#1115 pins structural tests to zero retries; #1116 broke the cycle). D3 burn-down 47 → **37**.
+>
 > **OWNER DECISION 2026-07-29: `budget_inr` HOLDS at ₹15,000 for two weeks; the ₹20,000 raise
 > ([#1075](https://github.com/prashantm912/artha-yantra-2/pull/1075)) stays open and is revisited on
 > LIVE data on 2026-08-12** (scheduled task `revisit-scalper-budget-inr-2026-08-12`). The decision

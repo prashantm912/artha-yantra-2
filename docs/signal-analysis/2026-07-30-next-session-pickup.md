@@ -1,5 +1,10 @@
 # Next-session pickup — written 2026-07-29 evening
 
+> ✅ **CONSUMED — this sheet was worked in full on 2026-07-29/30 (PRs #1111–#1119, live at
+> `f6ba4dab`). Superseded by `2026-07-31-next-session-pickup.md`.** Kept for provenance; every row
+> below now has a verdict in the ledger, and three of its recommendations were overturned by
+> measurement (G12's cause, G10's fix, G13's method). Do not pick work from this file.
+
 **Owner instruction: take ALL of these next session.** This is the single sheet; each item points at
 its authority. Written after the 07-29 close, with the live stack deployed at `c24c7242` and the
 repo clean.

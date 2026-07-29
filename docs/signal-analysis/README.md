@@ -319,7 +319,27 @@ Run in order; each answers one question. Canned SQL in §6.
     §6) *before* reaching for a threshold explanation. Scope it — on 2026-07-29 the neighbouring
     `ceIvAvg6` (41 distinct), `peIvAvg6` (44), `ceIvSlope` (100), `vixLevel` (27) and `premiumSkewPct`
     (100) were all moving normally, so the freeze was ONE field, not the IV feed.
-23. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+23. **Check what is DEPLOYED before explaining live behaviour from source — fingerprint the jar, do not
+    read the branch** (added 2026-07-29) — the 07-29 post run explained the `volume` dot's 23.1% support
+    rate by reasoning forward from the code path the 07-28 file had root-caused, and filed an "open
+    sub-question" about arithmetic that would not reconcile. The arithmetic did not reconcile because
+    **the fix had already shipped**: [#1082](https://github.com/prashantm912/artha-yantra-2/pull/1082)
+    merged and deployed 2026-07-28, and 07-29 was its first live session. A session file's own tuning
+    ledger is written against the code as it stood THAT day; a later session that re-reads the same source
+    on a branch — or worse, re-reads the prior file's narrative — will re-derive a stale explanation.
+    **Standing check before attributing any live behaviour to a code path:**
+    ```bash
+    docker exec ay-strategy-signal-service sh -c \
+      'unzip -p /app/*.jar BOOT-INF/classes/<pkg>/<Class>.class' | strings | grep -c <newSymbol>
+    docker inspect ay-strategy-signal-service --format '{{.State.StartedAt}} {{.RestartCount}}'
+    ```
+    and confirm the boot time PRECEDES the session but FOLLOWS the deploy. **Then discriminate on data,
+    not on the fingerprint alone** — split the session's rows by the dot's verdict and read the operand
+    behind each group: on 07-29, 222 of the 227 supporting rows carried a bar volume BELOW the old static
+    125,000 floor, which is impossible under the pre-fix code and is therefore positive proof the new
+    path ran. Cross-check the forward ledger (`2026-07-02-remaining-items.md` §0) for the row before
+    filing a new one — G6 already carried this as DONE.
+24. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

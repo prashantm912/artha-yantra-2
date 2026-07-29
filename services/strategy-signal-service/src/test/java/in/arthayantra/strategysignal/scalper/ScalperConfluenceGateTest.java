@@ -1976,4 +1976,168 @@ class ScalperConfluenceGateTest {
     assertThat(decision.get().side()).isEqualTo(CE);
     assertThat(decision.get().legs()).hasSize(1);
   }
+
+  // ---- G10 time-of-day volume profile (tag time-of-day-volume-floor, default-OFF) --------------
+
+  /** A series of {@code sessions} sessions x {@code barsPerSession} bars; volume = sessionIdx*100+bar. */
+  private static EngineSeries profileSeries(int sessions, int barsPerSession) {
+    List<EngineCandle> candles = new java.util.ArrayList<>();
+    for (int d = 0; d < sessions; d++) {
+      java.time.OffsetDateTime open =
+          java.time.OffsetDateTime.of(
+              LocalDate.of(2026, 7, 6).plusDays(d), LocalTime.of(9, 15), EngineSeries.IST);
+      for (int b = 0; b < barsPerSession; b++) {
+        candles.add(
+            new EngineCandle(
+                open.plusMinutes(3L * b), BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
+                BigDecimal.ONE, d * 100L + b));
+      }
+    }
+    return EngineSeries.of(new SeriesKey("NFO", "NIFTY-FUT", "3m"), candles);
+  }
+
+  /** Mirrors production: builtin("volume", i) is the primary series' own volume at i. */
+  private static BarValues volumesOf(EngineSeries series) {
+    return new BarValues() {
+      @Override public BigDecimal valueAt(String alias, int i) { return null; }
+      @Override public BigDecimal previousValueAt(String alias, int i) { return null; }
+      @Override public BigDecimal builtin(String name, int i) {
+        return "volume".equals(name) ? BigDecimal.valueOf(series.candle(i).volume()) : null;
+      }
+    };
+  }
+
+  @Test
+  void timeOfDayProfileSamplesTheSameOffsetInEachPriorSession() {
+    // 3 sessions x 10 bars. Evaluating bar 4 of session 3 (index 24) must sample bar 4 of sessions
+    // 2 and 1 — volumes 104 and 4 — NOT the trailing in-session bars, which is the whole point.
+    EngineSeries series = profileSeries(3, 10);
+    List<BigDecimal> sample =
+        ScalperConfluenceGate.timeOfDayVolumes(volumesOf(series), series, 24, 5);
+
+    assertThat(sample).containsExactly(BigDecimal.valueOf(104), BigDecimal.valueOf(4));
+  }
+
+  @Test
+  void timeOfDayProfileRespectsTheSessionCap() {
+    // 4 sessions available, cap 1 -> only the immediately previous session contributes.
+    EngineSeries series = profileSeries(4, 10);
+    assertThat(ScalperConfluenceGate.timeOfDayVolumes(volumesOf(series), series, 34, 1))
+        .containsExactly(BigDecimal.valueOf(204));
+  }
+
+  @Test
+  void timeOfDayProfileSkipsAPriorSessionTooShortToReachTheOffset() {
+    // Session 1 is a half day (3 bars), session 2 full. Evaluating offset 5 of session 3: session 2
+    // supplies it, session 1 cannot -- and must be SKIPPED, never substituted with its last bar,
+    // which would silently drag the median toward a short session's tail.
+    List<EngineCandle> candles = new java.util.ArrayList<>();
+    int[] lengths = {3, 10, 10};
+    for (int d = 0; d < lengths.length; d++) {
+      java.time.OffsetDateTime open =
+          java.time.OffsetDateTime.of(
+              LocalDate.of(2026, 7, 6).plusDays(d), LocalTime.of(9, 15), EngineSeries.IST);
+      for (int b = 0; b < lengths[d]; b++) {
+        candles.add(
+            new EngineCandle(
+                open.plusMinutes(3L * b), BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
+                BigDecimal.ONE, d * 100L + b));
+      }
+    }
+    EngineSeries series = EngineSeries.of(new SeriesKey("NFO", "NIFTY-FUT", "3m"), candles);
+
+    // index 13+5 = 18 is offset 5 of the third session
+    assertThat(ScalperConfluenceGate.timeOfDayVolumes(volumesOf(series), series, 18, 5))
+        .containsExactly(BigDecimal.valueOf(105));
+  }
+
+  @Test
+  void timeOfDayProfileMatchesWallClockNotOrdinalOffsetOnTruncatedSession() {
+    // Cross-vendor review 2026-07-30, CRITICAL. LiveSeriesStore warms from an exact now.minusDays(4)
+    // instant, so the OLDEST covered session routinely starts MID-SESSION. Here session 1 begins at
+    // 10:30 (a truncated warm-up slice) while sessions 2 and 3 open at 09:15.
+    //
+    // Evaluating 10:30 on session 3: session 2 supplies its real 10:30 bar. Session 1's bar at the
+    // same ORDINAL OFFSET would be 11:45 -- the wrong bucket -- and the first version of this method
+    // sampled exactly that, silently producing a wrong floor. Worse, it still returned a value, so
+    // MIN_TIME_OF_DAY_SESSIONS was satisfied and the fail-safe never fired.
+    //
+    // Correct behaviour: match on the WALL-CLOCK bucket time. Session 1 DOES have a 10:30 bar (its
+    // first), so it contributes that one -- not its 25th.
+    List<EngineCandle> candles = new java.util.ArrayList<>();
+    // session 1: truncated, starts 10:30, 40 bars -> volumes 1000..1039.
+    // ⚠️ It must be LONG ENOUGH that ordinal offset 25 lands on a REAL bar (11:45, volume 1025).
+    // With a short session the offset falls out of range and the buggy code merely SKIPS -- the safe
+    // symptom. The dangerous one is a wrong VALUE, so the fixture has to reach it.
+    java.time.OffsetDateTime s1 =
+        java.time.OffsetDateTime.of(LocalDate.of(2026, 7, 6), LocalTime.of(10, 30), EngineSeries.IST);
+    for (int b = 0; b < 40; b++) {
+      candles.add(new EngineCandle(s1.plusMinutes(3L * b), BigDecimal.ONE, BigDecimal.ONE,
+          BigDecimal.ONE, BigDecimal.ONE, 1000L + b));
+    }
+    // sessions 2 and 3: full, start 09:15, 40 bars -> volumes d*100 + bar
+    for (int d = 1; d <= 2; d++) {
+      java.time.OffsetDateTime open = java.time.OffsetDateTime.of(
+          LocalDate.of(2026, 7, 6).plusDays(d), LocalTime.of(9, 15), EngineSeries.IST);
+      for (int b = 0; b < 40; b++) {
+        candles.add(new EngineCandle(open.plusMinutes(3L * b), BigDecimal.ONE, BigDecimal.ONE,
+            BigDecimal.ONE, BigDecimal.ONE, d * 100L + b));
+      }
+    }
+    EngineSeries series = EngineSeries.of(new SeriesKey("NFO", "NIFTY-FUT", "3m"), candles);
+
+    // 10:30 is offset 25 from 09:15. Session 3 starts at index 80, so index 105 is its 10:30 bar.
+    assertThat(series.candle(105).bucketStart().toLocalTime()).isEqualTo(LocalTime.of(10, 30));
+    List<BigDecimal> sample =
+        ScalperConfluenceGate.timeOfDayVolumes(volumesOf(series), series, 105, 5);
+
+    // session 2's 10:30 bar is index 40+25=65 -> volume 125; session 1's 10:30 bar is index 0 -> 1000.
+    // The OLD offset-matching code took session 1 index 25 -- 11:45, volume 1025 -- a WRONG VALUE,
+    // not a skip, and it still satisfied MIN_TIME_OF_DAY_SESSIONS so nothing flagged it.
+    assertThat(sample).containsExactly(BigDecimal.valueOf(125), BigDecimal.valueOf(1000));
+    assertThat(sample).doesNotContain(BigDecimal.valueOf(1025));
+  }
+
+  @Test
+  void timeOfDayProfileSkipsPriorSessionWithNoBarAtWallClockTime() {
+    // The other half: a prior session that does not reach the wanted time at all contributes
+    // NOTHING rather than a substitute. Session 1 is truncated to 10:30-11:00; evaluating 14:00 on
+    // session 2 must find no session-1 match and return only session 2's own history (none here).
+    List<EngineCandle> candles = new java.util.ArrayList<>();
+    java.time.OffsetDateTime s1 =
+        java.time.OffsetDateTime.of(LocalDate.of(2026, 7, 6), LocalTime.of(10, 30), EngineSeries.IST);
+    for (int b = 0; b < 10; b++) {
+      candles.add(new EngineCandle(s1.plusMinutes(3L * b), BigDecimal.ONE, BigDecimal.ONE,
+          BigDecimal.ONE, BigDecimal.ONE, 1000L + b));
+    }
+    java.time.OffsetDateTime s2 =
+        java.time.OffsetDateTime.of(LocalDate.of(2026, 7, 7), LocalTime.of(9, 15), EngineSeries.IST);
+    for (int b = 0; b < 100; b++) {
+      candles.add(new EngineCandle(s2.plusMinutes(3L * b), BigDecimal.ONE, BigDecimal.ONE,
+          BigDecimal.ONE, BigDecimal.ONE, 200L + b));
+    }
+    EngineSeries series = EngineSeries.of(new SeriesKey("NFO", "NIFTY-FUT", "3m"), candles);
+
+    // 14:00 is offset 95 from 09:15 -> index 10+95 = 105 in session 2.
+    assertThat(series.candle(105).bucketStart().toLocalTime()).isEqualTo(LocalTime.of(14, 0));
+    assertThat(ScalperConfluenceGate.timeOfDayVolumes(volumesOf(series), series, 105, 5)).isEmpty();
+  }
+
+  @Test
+  void timeOfDayProfileDegradesToTheCallersFloorWhenHistoryIsTooThin() {
+    // THE fail-safe: on the FIRST covered session there is no prior session at all, so the sample is
+    // empty and relativeVolumeFloor returns the caller's floor unchanged -- i.e. exactly today's
+    // behaviour. A cold boot, a fresh contract after a roll and the first session after a long
+    // weekend all land here, and none of them may invent a floor from one sample.
+    EngineSeries series = profileSeries(1, 10);
+    List<BigDecimal> sample =
+        ScalperConfluenceGate.timeOfDayVolumes(volumesOf(series), series, 5, 3);
+
+    assertThat(sample).isEmpty();
+    assertThat(
+            ScalperGates.relativeVolumeFloor(
+                sample, new BigDecimal("1.5"), 2, new BigDecimal("87799")))
+        .isEqualByComparingTo("87799");
+  }
+
 }

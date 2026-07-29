@@ -21,7 +21,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * FID P0-4 / audit-H6 equality IT for the CA-adjusted screener + geometry price plane
- * ({@link AdjustedEquityDailySql}). The live screener/geometry used to read split/bonus-UNADJUSTED
+ * ({@link in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql}). The live screener/geometry used to read split/bonus-UNADJUSTED
  * bhavcopy while the deep-sim/hit-rate plane reads broker-adjusted {@code candles}@1d — so a split
  * inside the window opened a false price cliff and the two planes disagreed.
  *

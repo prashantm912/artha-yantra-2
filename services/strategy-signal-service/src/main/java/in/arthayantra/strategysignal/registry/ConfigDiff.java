@@ -14,8 +14,19 @@ import java.util.Set;
  */
 public final class ConfigDiff {
 
-  /** One structured operation. */
-  public record Op(String path, String op, String before, String after) {}
+  /**
+   * One structured operation. {@code before} is null on an ADD and {@code after} is null on a
+   * REMOVE — see {@link #walk}. That was invisible while this rode inside an opaque
+   * {@code Map<String,Object>}; now that {@code DiffResponse} publishes it, the schema has to say
+   * so, or the contract asserts two always-present strings that are routinely null (cross-vendor
+   * review, 2026-07-29). Spelled as a 3.1 type array because {@code @Schema(nullable = true)} is a
+   * silent no-op there.
+   */
+  public record Op(
+      String path,
+      String op,
+      @io.swagger.v3.oas.annotations.media.Schema(types = {"string", "null"}) String before,
+      @io.swagger.v3.oas.annotations.media.Schema(types = {"string", "null"}) String after) {}
 
   private ConfigDiff() {}
 

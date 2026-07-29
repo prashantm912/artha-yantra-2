@@ -56,7 +56,7 @@ public class RegistryService {
    * self-invocation — Spring's proxy is bypassed, so the tx must start at THIS entry point.
    */
   @Transactional
-  public Map<String, Object> create(
+  public RegistryViews.DraftVersionResponse create(
       String name, String description, List<String> tags, String configYaml) {
     return create(name, description, tags, configYaml, null);
   }
@@ -68,7 +68,7 @@ public class RegistryService {
    * A machine writer (e.g. {@code 'evo:{campaignId}'}) passes its identity explicitly.
    */
   @Transactional
-  public Map<String, Object> create(
+  public RegistryViews.DraftVersionResponse create(
       String name, String description, List<String> tags, String configYaml, String createdBy) {
     String actor = actorOrOwner(createdBy);
     StrategyDocuments.Parsed parsed = parseOrThrow(configYaml);
@@ -88,12 +88,8 @@ public class RegistryService {
         strategyId, "1.0.0", configYaml, parsed.canonicalJson(),
         StrategySchemaV1.SCHEMA_VERSION, parsed.checksum(), "draft", null, actor);
     repository.audit(strategyId, "CREATE", null, "1.0.0", "created as draft 1.0.0", actor);
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("id", strategyId);
-    response.put("version", "1.0.0");
-    response.put("status", "draft");
-    response.put("checksum", parsed.checksum());
-    return response;
+    return new RegistryViews.DraftVersionResponse(
+        strategyId, "1.0.0", "draft", parsed.checksum());
   }
 
   /**
@@ -119,10 +115,9 @@ public class RegistryService {
           422, ErrorCodes.VALIDATION_FAILED,
           "could not set the clone id to '" + slug + "' — the source config has no top-level id");
     }
-    Map<String, Object> created = create(name, source.description(), source.tags(), clonedYaml);
-    return new CloneResult(
-        (UUID) created.get("id"), slug, (String) created.get("version"),
-        (String) created.get("status"));
+    RegistryViews.DraftVersionResponse created =
+        create(name, source.description(), source.tags(), clonedYaml);
+    return new CloneResult(created.id(), slug, created.version(), created.status());
   }
 
   /**
@@ -130,7 +125,8 @@ public class RegistryService {
    * {@code @Transactional} here too — the delegation is a self-invocation past the proxy.
    */
   @Transactional
-  public Map<String, Object> update(UUID id, String configYaml, String versionBump, String notes) {
+  public RegistryViews.DraftVersionResponse update(
+      UUID id, String configYaml, String versionBump, String notes) {
     return update(id, configYaml, versionBump, notes, null);
   }
 
@@ -141,7 +137,7 @@ public class RegistryService {
    * blank/null resolves to {@code 'owner'}.
    */
   @Transactional
-  public Map<String, Object> update(
+  public RegistryViews.DraftVersionResponse update(
       UUID id, String configYaml, String versionBump, String notes, String createdBy) {
     String actor = actorOrOwner(createdBy);
     StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
@@ -179,12 +175,7 @@ public class RegistryService {
     List<ConfigDiff.Op> ops = ConfigDiff.diff(latest.config(), parsed.config());
     repository.audit(
         id, "UPDATE_DRAFT", latest.version(), next, ConfigDiff.summary(ops), actor);
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("id", id);
-    response.put("version", next);
-    response.put("status", "draft");
-    response.put("checksum", parsed.checksum());
-    return response;
+    return new RegistryViews.DraftVersionResponse(id, next, "draft", parsed.checksum());
   }
 
   /**
@@ -195,7 +186,7 @@ public class RegistryService {
    * The inner call to the shared body runs within THIS transaction.
    */
   @Transactional
-  public Map<String, Object> publish(UUID id, String targetVersion, String notes) {
+  public RegistryViews.PublishResponse publish(UUID id, String targetVersion, String notes) {
     return publish(id, targetVersion, notes, false, null);
   }
 
@@ -209,7 +200,7 @@ public class RegistryService {
    * identical to the legacy behaviour.
    */
   @Transactional
-  public Map<String, Object> publish(
+  public RegistryViews.PublishResponse publish(
       UUID id, String targetVersion, String notes, boolean cas, String expectedPublishedVersionId) {
     StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
     StrategyRepository.VersionRow target =
@@ -260,20 +251,18 @@ public class RegistryService {
         id, "PUBLISH", previousVersion, target.version(),
         notes != null ? notes : "published " + target.version(), "owner");
     changedPublisher.publish(id, strategy.slug(), "PUBLISH", target.version());
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("id", id);
-    response.put("version", target.version());
-    // PF-01 round-6 #1: the EXACT version UUID that was published — the caller records THIS as the
-    // champion, never a subsequent unversioned `detail` read (which returns latestVersion and could
-    // be a concurrent promoter's draft).
-    response.put("versionId", target.id());
-    response.put("status", "published");
+    // PF-01 round-6 #1 (below): the EXACT version UUID that was published.
+    RegistryViews.PublishResponse response =
+        new RegistryViews.PublishResponse(id, target.version(), target.id(), "published");
+    // The caller records THIS as the champion, never a subsequent unversioned `detail` read
+    // (which returns latestVersion and could be a concurrent promoter's draft).
     return response;
   }
 
   /** POST /{id}/rollback — copy-forward, never history rewrite. */
   @Transactional
-  public Map<String, Object> rollback(UUID id, String sourceVersion, boolean andPublish) {
+  public RegistryViews.RollbackResponse rollback(
+      UUID id, String sourceVersion, boolean andPublish) {
     StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
     StrategyRepository.VersionRow source =
         repository.findVersion(id, sourceVersion).orElseThrow(() -> versionNotFound(sourceVersion));
@@ -291,17 +280,13 @@ public class RegistryService {
     if (andPublish) {
       publish(id, next, provenance);
     }
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("id", id);
-    response.put("newVersion", next);
-    response.put("copiedFrom", source.version());
-    response.put("status", andPublish ? "published" : "draft");
-    return response;
+    return new RegistryViews.RollbackResponse(
+        id, next, source.version(), andPublish ? "published" : "draft");
   }
 
   /** POST /{id}/archive — unload from the signal engine. */
   @Transactional
-  public Map<String, Object> archive(UUID id) {
+  public RegistryViews.ArchiveResponse archive(UUID id) {
     StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
     String archivedVersion = null;
     if (strategy.publishedVersionId() != null) {
@@ -320,7 +305,7 @@ public class RegistryService {
       repository.audit(id, "ARCHIVE", archivedVersion, null, "archived", "owner");
       changedPublisher.publish(id, strategy.slug(), "ARCHIVE", archivedVersion);
     }
-    return Map.of("id", id, "status", "archived");
+    return new RegistryViews.ArchiveResponse(id, "archived");
   }
 
   /**
@@ -382,7 +367,7 @@ public class RegistryService {
   }
 
   /** GET /{id}/diff?from=&to= — SERVER-side structured diff + raw YAML pair. */
-  public Map<String, Object> diff(UUID id, String from, String to) {
+  public RegistryViews.DiffResponse diff(UUID id, String from, String to) {
     strategyOrThrow(id);
     if (from.equals(to)) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "from and to are the same version");
@@ -392,15 +377,11 @@ public class RegistryService {
     StrategyRepository.VersionRow toRow =
         repository.findVersion(id, to).orElseThrow(() -> versionNotFound(to));
     List<ConfigDiff.Op> ops = ConfigDiff.diff(fromRow.config(), toRow.config());
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("structured", ops);
-    response.put("yamlFrom", fromRow.configYaml());
-    response.put("yamlTo", toRow.configYaml());
-    return response;
+    return new RegistryViews.DiffResponse(ops, fromRow.configYaml(), toRow.configYaml());
   }
 
   /** POST /strategies/validate — stateless; schema + semantics + advisory server checks. */
-  public Map<String, Object> validate(String configYaml) {
+  public RegistryViews.ValidateResponse validate(String configYaml) {
     ValidationResult result;
     try {
       result = StrategyDocuments.validate(configYaml);
@@ -412,11 +393,7 @@ public class RegistryService {
       JsonNode config = parseOrThrow(configYaml).config();
       warnings.addAll(advisoryServerChecks(config));
     }
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("valid", result.valid());
-    response.put("errors", result.errors());
-    response.put("warnings", warnings);
-    return response;
+    return new RegistryViews.ValidateResponse(result.valid(), result.errors(), warnings);
   }
 
   /**
@@ -424,10 +401,11 @@ public class RegistryService {
    * set BEFORE limit/offset, so pagination bounds the FILTERED result — applying LIMIT/OFFSET in
    * SQL first would silently truncate matches and make filtered page boundaries meaningless.
    */
-  public List<Map<String, Object>> list(String status, String tag, String query, int limit, int offset) {
+  public List<RegistryViews.StrategyListItem> list(
+      String status, String tag, String query, int limit, int offset) {
     String tagLower = tag == null ? null : tag.toLowerCase(Locale.ROOT);
     String queryLower = query == null ? null : query.toLowerCase(Locale.ROOT);
-    List<Map<String, Object>> items = new ArrayList<>();
+    List<RegistryViews.StrategyListItem> items = new ArrayList<>();
     int skipped = 0;
     for (StrategyRepository.StrategyRow row : repository.listAll()) {
       String derived = derivedStatus(row);
@@ -449,98 +427,86 @@ public class RegistryService {
       if (items.size() >= limit) {
         break;
       }
-      Map<String, Object> item = new LinkedHashMap<>();
-      item.put("id", row.id());
-      item.put("slug", row.slug());
-      item.put("name", row.name());
       Optional<StrategyRepository.VersionRow> latest = repository.latestVersion(row.id());
-      item.put("currentVersion", latest.map(StrategyRepository.VersionRow::version).orElse(null));
-      item.put(
-          "publishedVersion",
-          row.publishedVersionId() == null
-              ? null
-              : repository.findVersionById(row.publishedVersionId())
-                  .map(StrategyRepository.VersionRow::version)
-                  .orElse(null));
       // version UUIDs let the strategy list fetch each row's last-backtest summary from
       // backtest-service (keyed by strategy_version_id) — the cross-schema join done client-side.
-      item.put(
-          "currentVersionId",
-          latest.map(StrategyRepository.VersionRow::id).map(UUID::toString).orElse(null));
-      item.put(
-          "publishedVersionId",
-          row.publishedVersionId() == null ? null : row.publishedVersionId().toString());
-      item.put("status", derived);
-      item.put("tags", row.tags());
-      item.put("author", row.author());
-      item.put("enabled", row.enabled());
-      item.put("notificationsEnabled", row.notificationsEnabled());
-      item.put("notificationChannel", row.notificationChannel());
-      item.put("updatedAt", row.updatedAt());
-      items.add(item);
+      items.add(
+          new RegistryViews.StrategyListItem(
+              row.id(),
+              row.slug(),
+              row.name(),
+              latest.map(StrategyRepository.VersionRow::version).orElse(null),
+              row.publishedVersionId() == null
+                  ? null
+                  : repository.findVersionById(row.publishedVersionId())
+                      .map(StrategyRepository.VersionRow::version)
+                      .orElse(null),
+              latest.map(StrategyRepository.VersionRow::id).map(UUID::toString).orElse(null),
+              row.publishedVersionId() == null ? null : row.publishedVersionId().toString(),
+              derived,
+              row.tags(),
+              row.author(),
+              row.enabled(),
+              row.notificationsEnabled(),
+              row.notificationChannel(),
+              row.updatedAt()));
     }
     return items;
   }
 
   /** Full detail at a version (latest by default). */
-  public Map<String, Object> detail(UUID id, String version) {
+  public RegistryViews.StrategyDetail detail(UUID id, String version) {
     StrategyRepository.StrategyRow strategy = strategyOrThrow(id);
     StrategyRepository.VersionRow row =
         version != null
             ? repository.findVersion(id, version).orElseThrow(() -> versionNotFound(version))
             : repository.latestVersion(id).orElseThrow(() -> versionNotFound("latest"));
     verifyChecksumOnRead(row);
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("id", strategy.id());
-    response.put("versionId", row.id());
-    // PF-01 round-7/8 #1: the LIVE published-version pointer + its SEMVER (distinct from
-    // ``versionId``/``version``, which are the requested/latest row). The optimizer captures BOTH as
-    // the immutable champion a promote is decided against — the CAS expects the unchanging UUID, and
-    // the promote reads THAT exact version's config by its semver (never the latest row, which could
-    // be a newer manual/orphan draft).
-    response.put("publishedVersionId", strategy.publishedVersionId());
-    response.put(
-        "publishedVersion",
+    // PF-01 round-7/8 #1: `publishedVersionId` + `publishedVersion` are the LIVE published pointer
+    // and its SEMVER, distinct from `versionId`/`version` (the requested/latest row). The optimizer
+    // captures BOTH as the immutable champion a promote is decided against — the CAS expects the
+    // unchanging UUID, and the promote reads THAT exact version's config by its semver, never the
+    // latest row, which could be a newer manual/orphan draft.
+    return new RegistryViews.StrategyDetail(
+        strategy.id(),
+        row.id(),
+        strategy.publishedVersionId(),
         strategy.publishedVersionId() == null
             ? null
             : repository
                 .findVersionById(strategy.publishedVersionId())
                 .map(StrategyRepository.VersionRow::version)
-                .orElse(null));
-    response.put("slug", strategy.slug());
-    response.put("name", strategy.name());
-    response.put("description", strategy.description());
-    response.put("tags", strategy.tags());
-    response.put("enabled", strategy.enabled());
-    response.put("version", row.version());
-    response.put("status", row.status());
-    response.put("config", row.config());
-    response.put("configYaml", row.configYaml());
-    response.put("checksum", row.checksum());
-    response.put("notes", row.notes());
-    response.put("createdAt", row.createdAt());
-    response.put("updatedAt", strategy.updatedAt());
-    response.put("notificationsEnabled", strategy.notificationsEnabled());
-    response.put("notificationChannel", strategy.notificationChannel());
-    return response;
+                .orElse(null),
+        strategy.slug(),
+        strategy.name(),
+        strategy.description(),
+        strategy.tags(),
+        strategy.enabled(),
+        row.version(),
+        row.status(),
+        row.config(),
+        row.configYaml(),
+        row.checksum(),
+        row.notes(),
+        row.createdAt(),
+        strategy.updatedAt(),
+        strategy.notificationsEnabled(),
+        strategy.notificationChannel());
   }
 
   /**
    * Toggle notification opt-in (Phase 41 / E-14). Strategy-level metadata — NEVER mints a version
    * or perturbs a D18 checksum (asserted by an IT). A valid channel is required when enabling.
    */
-  public Map<String, Object> updateNotifications(UUID id, boolean enabled, String channel) {
+  public RegistryViews.NotificationsResponse updateNotifications(
+      UUID id, boolean enabled, String channel) {
     strategyOrThrow(id);
     if (enabled && channel != null && !channel.equals("NTFY") && !channel.equals("TELEGRAM")) {
       throw new ApiException(
           422, ErrorCodes.VALIDATION_FAILED, "notification_channel must be NTFY or TELEGRAM");
     }
     repository.updateNotifications(id, enabled, enabled ? channel : null);
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("id", id);
-    response.put("notificationsEnabled", enabled);
-    response.put("notificationChannel", enabled ? channel : null);
-    return response;
+    return new RegistryViews.NotificationsResponse(id, enabled, enabled ? channel : null);
   }
 
   /**
@@ -592,21 +558,21 @@ public class RegistryService {
   }
 
   /** Version history page. */
-  public List<Map<String, Object>> versions(UUID id, int limit, int offset) {
+  public List<RegistryViews.VersionListItem> versions(UUID id, int limit, int offset) {
     strategyOrThrow(id);
-    List<Map<String, Object>> items = new ArrayList<>();
+    List<RegistryViews.VersionListItem> items = new ArrayList<>();
     for (StrategyRepository.VersionRow row : repository.versions(id, limit, offset)) {
-      Map<String, Object> item = new LinkedHashMap<>();
       // The version-row UUID — lets the UI fetch each version's last-backtest summary (keyed by
       // strategyVersionId) when expanding old versions on the strategies list.
-      item.put("versionId", row.id().toString());
-      item.put("version", row.version());
-      item.put("status", row.status());
-      item.put("checksum", row.checksum());
-      item.put("author", row.createdBy());
-      item.put("notes", row.notes());
-      item.put("createdAt", row.createdAt());
-      items.add(item);
+      items.add(
+          new RegistryViews.VersionListItem(
+              row.id().toString(),
+              row.version(),
+              row.status(),
+              row.checksum(),
+              row.createdBy(),
+              row.notes(),
+              row.createdAt()));
     }
     return items;
   }

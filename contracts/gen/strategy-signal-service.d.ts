@@ -1198,6 +1198,13 @@ export interface components {
             notes?: string;
             createdBy?: string;
         };
+        DraftVersionResponse: {
+            /** Format: uuid */
+            id: string;
+            version: string;
+            status: string;
+            checksum: string;
+        };
         JsonNode: unknown;
         UpdateBody: {
             book?: string;
@@ -1274,11 +1281,26 @@ export interface components {
             version?: string;
             andPublish?: boolean;
         };
+        RollbackResponse: {
+            /** Format: uuid */
+            id: string;
+            newVersion: string;
+            copiedFrom: string;
+            status: string;
+        };
         PublishRequest: {
             targetVersion?: string;
             notes?: string;
             cas?: boolean;
             expectedPublishedVersionId?: string;
+        };
+        PublishResponse: {
+            /** Format: uuid */
+            id: string;
+            version: string;
+            /** Format: uuid */
+            versionId: string;
+            status: string;
         };
         ToggleResult: {
             /** Format: uuid */
@@ -1296,8 +1318,22 @@ export interface components {
             version: string;
             status: string;
         };
+        ArchiveResponse: {
+            /** Format: uuid */
+            id: string;
+            status: string;
+        };
         ValidateRequest: {
             config?: string;
+        };
+        ValidateResponse: {
+            valid: boolean;
+            errors: components["schemas"]["ValidationIssue"][];
+            warnings: components["schemas"]["ValidationIssue"][];
+        };
+        ValidationIssue: {
+            path: string;
+            message: string;
         };
         TakenRequest: {
             fillPrice?: string;
@@ -1529,6 +1565,12 @@ export interface components {
             enabled?: boolean;
             channel?: string;
         };
+        NotificationsResponse: {
+            /** Format: uuid */
+            id: string;
+            notificationsEnabled: boolean;
+            notificationChannel: string | null;
+        };
         BracketBody: {
             stopLoss?: number;
             takeProfit?: number;
@@ -1606,6 +1648,81 @@ export interface components {
             openingSignalId: number | null;
             openingSignal: components["schemas"]["OpeningSignal"] | null;
             orders: components["schemas"]["OrderLeg"][];
+        };
+        StrategyListItem: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            currentVersion: string | null;
+            publishedVersion: string | null;
+            currentVersionId: string | null;
+            publishedVersionId: string | null;
+            status: string;
+            tags: string[];
+            author: string;
+            enabled: boolean;
+            notificationsEnabled: boolean;
+            notificationChannel: string | null;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        StrategyListResponse: {
+            items: components["schemas"]["StrategyListItem"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
+        StrategyDetail: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            versionId: string;
+            /** Format: uuid */
+            publishedVersionId: string | null;
+            publishedVersion: string | null;
+            slug: string;
+            name: string;
+            description: string | null;
+            tags: string[];
+            enabled: boolean;
+            version: string;
+            status: string;
+            config: components["schemas"]["JsonNode"];
+            configYaml: string;
+            checksum: string;
+            notes: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            notificationsEnabled: boolean;
+            notificationChannel: string | null;
+        };
+        VersionListItem: {
+            versionId: string;
+            version: string;
+            status: string;
+            checksum: string;
+            author: string;
+            notes: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        VersionListResponse: {
+            items: components["schemas"]["VersionListItem"][];
+        };
+        DiffResponse: {
+            structured: components["schemas"]["Op"][];
+            yamlFrom: string;
+            yamlTo: string;
+        };
+        Op: {
+            path: string;
+            op: string;
+            before: string | null;
+            after: string | null;
         };
         AuditLogResponse: {
             items: components["schemas"]["AuditRow"][];
@@ -2156,9 +2273,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StrategyDetail"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2193,9 +2308,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["DraftVersionResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2486,9 +2599,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StrategyListResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2521,9 +2632,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["DraftVersionResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2558,9 +2667,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RollbackResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2595,9 +2702,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["PublishResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2758,9 +2863,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ArchiveResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2793,9 +2896,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ValidateResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3352,9 +3453,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["NotificationsResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3423,9 +3522,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["VersionListResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3457,9 +3554,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StrategyDetail"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3528,9 +3623,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["DiffResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

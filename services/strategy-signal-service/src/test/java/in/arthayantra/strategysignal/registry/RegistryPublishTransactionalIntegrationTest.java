@@ -71,7 +71,7 @@ class RegistryPublishTransactionalIntegrationTest extends StrategySignalIntegrat
 
   @Test
   void threeArgPublishIsTransactionalAndRollsBackOnFailure() {
-    UUID id = (UUID) service.create("PF01 TX Walk", "tx IT", List.of("test"), YAML).get("id");
+    UUID id = service.create("PF01 TX Walk", "tx IT", List.of("test"), YAML).id();
     service.publish(id, null, null); // 1.0.0 published (the champion)
     service.update(id, YAML.replace("period: 9", "period: 11"), null, "draft"); // draft 1.0.1
 

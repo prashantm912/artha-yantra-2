@@ -240,14 +240,13 @@ class PaperManualTicketAnchorIntegrationTest extends StrategySignalIntegrationTe
     // Shared singleton IT DB, no per-method cleanup: unique slug + name + symbol per method.
     String slug = "btst-anchor-it-" + UUID.randomUUID().toString().substring(0, 8);
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create(
                     "BTST Anchor IT " + slug,
                     null,
                     List.of("it"),
                     BTST_CONFIG.replace("id: btst-anchor-it", "id: " + slug))
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     UUID versionId = strategyRepo.latestVersion(strategyId).orElseThrow().id();
 

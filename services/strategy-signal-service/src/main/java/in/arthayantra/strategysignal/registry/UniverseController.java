@@ -32,7 +32,7 @@ public class UniverseController {
   @GetMapping("/{id}/universe")
   public Map<String, Object> universe(
       @PathVariable UUID id, @RequestParam(required = false) String version) {
-    JsonNode config = (JsonNode) registry.detail(id, version).get("config");
+    JsonNode config = registry.detail(id, version).config();
     UniverseResolver.ResolvedUniverse u = resolver.resolve(config);
     Map<String, Object> out = new LinkedHashMap<>();
     out.put("mode", u.mode());

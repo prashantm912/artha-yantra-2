@@ -222,7 +222,7 @@ class ScalpAlertServiceIntegrationTest extends StrategySignalIntegrationTestBase
    */
   private UUID create(String slug, String name) {
     String config = CONFIG.replace("id: scalp-alert-it", "id: " + slug);
-    return (UUID) registry.create(name, null, List.of("it"), config).get("id");
+    return registry.create(name, null, List.of("it"), config).id();
   }
 
   private long insertSignal(UUID versionId) {

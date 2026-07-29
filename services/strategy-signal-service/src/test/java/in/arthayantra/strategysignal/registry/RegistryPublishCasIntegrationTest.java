@@ -77,7 +77,7 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
 
   @Test
   void casPublishGuardsTheLivePointer() {
-    UUID id = (UUID) service.create("PF01 CAS Walk", "cas IT", List.of("test"), YAML).get("id");
+    UUID id = service.create("PF01 CAS Walk", "cas IT", List.of("test"), YAML).id();
     // publish 1.0.0 (unconditional, legacy behaviour) — the champion V0.
     service.publish(id, null, null);
     UUID v0 = versionId(id, "1.0.0");
@@ -86,20 +86,20 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
     // immutable champion its promote CAS-publishes against). round-8 #A: it ALSO exposes that
     // version's SEMVER (publishedVersion) — the optimizer reads the champion config by THIS semver,
     // never the latest row (which could be a newer manual/orphan draft).
-    assertThat(service.detail(id, null).get("publishedVersionId")).isEqualTo(v0);
-    assertThat(service.detail(id, null).get("publishedVersion")).isEqualTo("1.0.0");
+    assertThat(service.detail(id, null).publishedVersionId()).isEqualTo(v0);
+    assertThat(service.detail(id, null).publishedVersion()).isEqualTo("1.0.0");
 
     // a CAS publish of 1.0.1 against the CURRENT champion V0 WINS — the pointer moves to V1.
     service.update(id, withPeriod(11), null, "tune");
-    Map<String, Object> won = service.publish(id, "1.0.1", null, true, v0.toString());
-    assertThat(won.get("status")).isEqualTo("published");
+    var won = service.publish(id, "1.0.1", null, true, v0.toString());
+    assertThat(won.status()).isEqualTo("published");
     UUID v1 = versionId(id, "1.0.1");
     // round-6 #1: the publish response carries the EXACT published version UUID (not latestVersion).
-    assertThat(won.get("versionId")).isEqualTo(v1);
+    assertThat(won.versionId()).isEqualTo(v1);
     assertThat(repository.findVersionById(v1).orElseThrow().status()).isEqualTo("published");
     assertThat(repository.findVersionById(v0).orElseThrow().status()).isEqualTo("archived");
     // round-8 #A: the published-version pointer + its semver both moved to V1 (1.0.1).
-    assertThat(service.detail(id, null).get("publishedVersion")).isEqualTo("1.0.1");
+    assertThat(service.detail(id, null).publishedVersion()).isEqualTo("1.0.1");
 
     // a CAS publish of 1.0.2 against the now-STALE expected V0 is REJECTED (a concurrent promoter
     // already moved the pointer to V1) — 409, and the pointer + the 1.0.2 draft are UNCHANGED.
@@ -115,8 +115,8 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
     assertThat(repository.findVersion(id, "1.0.2").orElseThrow().status()).isEqualTo("draft");
 
     // a CAS publish against the CURRENT champion V1 wins — the pointer moves to 1.0.2.
-    Map<String, Object> won2 = service.publish(id, "1.0.2", null, true, v1.toString());
-    assertThat(won2.get("status")).isEqualTo("published");
+    var won2 = service.publish(id, "1.0.2", null, true, v1.toString());
+    assertThat(won2.status()).isEqualTo("published");
     assertThat(repository.findVersion(id, "1.0.2").orElseThrow().status()).isEqualTo("published");
   }
 
@@ -129,16 +129,16 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
     // across create + both updates (the config id must stay the strategy's slug).
     String base =
         YAML.replace("id: pf01-cas-walk", "id: pf01-cas-named").replace("PF01 CAS Walk", "PF01 CAS Named");
-    UUID id = (UUID) service.create("PF01 CAS Named", "named IT", List.of("test"), base).get("id");
+    UUID id = service.create("PF01 CAS Named", "named IT", List.of("test"), base).id();
     service.publish(id, null, null); // champion V0 = 1.0.0
     UUID v0 = versionId(id, "1.0.0");
     service.update(id, base.replace("period: 9", "period: 21"), null, "A"); // A → draft 1.0.1
     service.update(id, base.replace("period: 9", "period: 22"), null, "B"); // B → draft 1.0.2 (newest)
 
     // A CAS-publishes ITS version 1.0.1 (NOT the newest 1.0.2).
-    Map<String, Object> won = service.publish(id, "1.0.1", null, true, v0.toString());
-    assertThat(won.get("version")).isEqualTo("1.0.1");
-    assertThat(won.get("versionId")).isEqualTo(versionId(id, "1.0.1")); // A's exact version, not B's
+    var won = service.publish(id, "1.0.1", null, true, v0.toString());
+    assertThat(won.version()).isEqualTo("1.0.1");
+    assertThat(won.versionId()).isEqualTo(versionId(id, "1.0.1")); // A's exact version, not B's
     assertThat(repository.findVersion(id, "1.0.1").orElseThrow().status()).isEqualTo("published");
     assertThat(repository.findVersion(id, "1.0.2").orElseThrow().status()).isEqualTo("draft"); // B untouched
   }
@@ -147,12 +147,12 @@ class RegistryPublishCasIntegrationTest extends StrategySignalIntegrationTestBas
   void firstPublishCasAgainstNullExpectedWins() {
     // FIRST-CHAMPION: a CAS publish onto a never-published strategy (expected = null) wins.
     UUID id =
-        (UUID) service.create("PF01 CAS First", "cas first IT", List.of("test"),
+        service.create("PF01 CAS First", "cas first IT", List.of("test"),
                 withPeriod(15).replace("id: pf01-cas-walk", "id: pf01-cas-first")
                     .replace("PF01 CAS Walk", "PF01 CAS First"))
-            .get("id");
-    Map<String, Object> won = service.publish(id, "1.0.0", null, true, null);
-    assertThat(won.get("status")).isEqualTo("published");
+            .id();
+    var won = service.publish(id, "1.0.0", null, true, null);
+    assertThat(won.status()).isEqualTo("published");
     assertThat(repository.findVersion(id, "1.0.0").orElseThrow().status()).isEqualTo("published");
   }
 }

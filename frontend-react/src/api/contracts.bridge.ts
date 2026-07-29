@@ -163,6 +163,75 @@ type _DotHealth = AssertKeys<
 >;
 type _DotState = AssertKeys<Schemas['DotState'], 'dot' | 'alive' | 'required' | 'frozen' | 'detail'>;
 
+// --- registry CRUD (D3: the whole surface was Map-returning, so the spec had no shape at all) ---
+type _StrategyListItem = AssertKeys<
+  Schemas['StrategyListItem'],
+  | 'id'
+  | 'slug'
+  | 'name'
+  | 'currentVersion'
+  | 'publishedVersion'
+  | 'currentVersionId'
+  | 'publishedVersionId'
+  | 'status'
+  | 'tags'
+  | 'author'
+  | 'enabled'
+  | 'notificationsEnabled'
+  | 'notificationChannel'
+  | 'updatedAt'
+>;
+type _StrategyListResponse = AssertKeys<
+  Schemas['StrategyListResponse'],
+  'items' | 'limit' | 'offset'
+>;
+type _StrategyDetail = AssertKeys<
+  Schemas['StrategyDetail'],
+  | 'id'
+  | 'versionId'
+  | 'publishedVersionId'
+  | 'publishedVersion'
+  | 'slug'
+  | 'name'
+  | 'description'
+  | 'tags'
+  | 'enabled'
+  | 'version'
+  | 'status'
+  | 'config'
+  | 'configYaml'
+  | 'checksum'
+  | 'notes'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'notificationsEnabled'
+  | 'notificationChannel'
+>;
+type _DraftVersionResponse = AssertKeys<
+  Schemas['DraftVersionResponse'],
+  'id' | 'version' | 'status' | 'checksum'
+>;
+type _PublishResponse = AssertKeys<
+  Schemas['PublishResponse'],
+  'id' | 'version' | 'versionId' | 'status'
+>;
+type _RollbackResponse = AssertKeys<
+  Schemas['RollbackResponse'],
+  'id' | 'newVersion' | 'copiedFrom' | 'status'
+>;
+type _ArchiveResponse = AssertKeys<Schemas['ArchiveResponse'], 'id' | 'status'>;
+type _NotificationsResponse = AssertKeys<
+  Schemas['NotificationsResponse'],
+  'id' | 'notificationsEnabled' | 'notificationChannel'
+>;
+type _VersionListItem = AssertKeys<
+  Schemas['VersionListItem'],
+  'versionId' | 'version' | 'status' | 'checksum' | 'author' | 'notes' | 'createdAt'
+>;
+type _VersionListResponse = AssertKeys<Schemas['VersionListResponse'], 'items'>;
+type _DiffResponse = AssertKeys<Schemas['DiffResponse'], 'structured' | 'yamlFrom' | 'yamlTo'>;
+type _ValidateResponse = AssertKeys<Schemas['ValidateResponse'], 'valid' | 'errors' | 'warnings'>;
+
 // --- insights decision-support (INT-I1 feed / Focus / explain drawer) --------------------------
 type _Insight = AssertKeys<
   Schemas['Insight'],
@@ -212,6 +281,18 @@ export type ContractBridges = [
   _VariantSummary,
   _DotHealth,
   _DotState,
+  _StrategyListItem,
+  _StrategyListResponse,
+  _StrategyDetail,
+  _DraftVersionResponse,
+  _PublishResponse,
+  _RollbackResponse,
+  _ArchiveResponse,
+  _NotificationsResponse,
+  _VersionListItem,
+  _VersionListResponse,
+  _DiffResponse,
+  _ValidateResponse,
   _Insight,
   _InsightListResponse,
   _FocusResponse,

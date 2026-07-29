@@ -102,7 +102,7 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
             .replace("Lifecycle Walk", "Tags Source")
             .replace("version: 1.0.0", "version: 1.0.0\ntags: [scalper, two-candle-pattern]");
     UUID id =
-        (UUID) service.create("Tags Source", null, List.of("scalper", "two-candle-pattern"), base).get("id");
+        service.create("Tags Source", null, List.of("scalper", "two-candle-pattern"), base).id();
     assertThat(repository.findById(id).orElseThrow().tags())
         .containsExactly("scalper", "two-candle-pattern");
 
@@ -135,15 +135,15 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
         BASE_YAML
             .replace("lifecycle-walk", "actor-plumb-walk")
             .replace("Lifecycle Walk", "Actor Plumb Walk");
-    UUID id = (UUID) service.create("Actor Plumb Walk", null, List.of("test"), base).get("id");
+    UUID id = service.create("Actor Plumb Walk", null, List.of("test"), base).id();
     assertThat(repository.findVersion(id, "1.0.0").orElseThrow().createdBy()).isEqualTo("owner");
 
     // A machine writer (the optimizer promote path / future EVO) passes a prefixed actor explicitly →
     // it lands on the NEW version's created_by column, not a free-text note.
     String tuned = base.replace("period: 9", "period: 12");
-    Map<String, Object> promoted =
+    var promoted =
         service.update(id, tuned, null, "promoted trial 3", "optimizer:sweep-xyz");
-    assertThat(repository.findVersion(id, (String) promoted.get("version")).orElseThrow().createdBy())
+    assertThat(repository.findVersion(id, promoted.version()).orElseThrow().createdBy())
         .isEqualTo("optimizer:sweep-xyz");
   }
 
@@ -151,24 +151,24 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
   @Order(1)
   void fullLifecycleWithAuditTrail() {
     // CREATE -> draft 1.0.0
-    Map<String, Object> created =
+    var created =
         service.create("Lifecycle Walk", "IT walk", List.of("test"), BASE_YAML);
-    strategyId = (UUID) created.get("id");
-    assertThat(created.get("version")).isEqualTo("1.0.0");
-    assertThat(created.get("status")).isEqualTo("draft");
+    strategyId = created.id();
+    assertThat(created.version()).isEqualTo("1.0.0");
+    assertThat(created.status()).isEqualTo("draft");
 
     // EDIT (draft -> draft, patch bump)
-    Map<String, Object> edited = service.update(strategyId, withPeriod(11), null, "tune fast ema");
-    assertThat(edited.get("version")).isEqualTo("1.0.1");
+    var edited = service.update(strategyId, withPeriod(11), null, "tune fast ema");
+    assertThat(edited.version()).isEqualTo("1.0.1");
 
     // PUBLISH 1.0.1
-    Map<String, Object> published = service.publish(strategyId, null, null);
-    assertThat(published.get("version")).isEqualTo("1.0.1");
-    assertThat(published.get("status")).isEqualTo("published");
+    var published = service.publish(strategyId, null, null);
+    assertThat(published.version()).isEqualTo("1.0.1");
+    assertThat(published.status()).isEqualTo("published");
 
     // EDIT on published -> NEW draft 1.0.2 (published row untouched)
-    Map<String, Object> redrafted = service.update(strategyId, withPeriod(13), null, null);
-    assertThat(redrafted.get("version")).isEqualTo("1.0.2");
+    var redrafted = service.update(strategyId, withPeriod(13), null, null);
+    assertThat(redrafted.version()).isEqualTo("1.0.2");
     assertThat(repository.findVersion(strategyId, "1.0.1").orElseThrow().status())
         .isEqualTo("published");
 
@@ -180,8 +180,8 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
         .isEqualTo("published");
 
     // ROLLBACK to 1.0.1 content -> new draft 1.0.3, byte-identical copy
-    Map<String, Object> rolledBack = service.rollback(strategyId, "1.0.1", false);
-    assertThat(rolledBack.get("newVersion")).isEqualTo("1.0.3");
+    var rolledBack = service.rollback(strategyId, "1.0.1", false);
+    assertThat(rolledBack.newVersion()).isEqualTo("1.0.3");
     StrategyRepository.VersionRow v101 = repository.findVersion(strategyId, "1.0.1").orElseThrow();
     StrategyRepository.VersionRow v103 = repository.findVersion(strategyId, "1.0.3").orElseThrow();
     assertThat(v103.checksum()).isEqualTo(v101.checksum());
@@ -207,10 +207,10 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
   @Test
   @Order(3)
   void diffIsComputedServerSide() {
-    Map<String, Object> diff = service.diff(strategyId, "1.0.0", "1.0.1");
+    var diff = service.diff(strategyId, "1.0.0", "1.0.1");
 
     @SuppressWarnings("unchecked")
-    List<ConfigDiff.Op> ops = (List<ConfigDiff.Op>) diff.get("structured");
+    List<ConfigDiff.Op> ops = (List<ConfigDiff.Op>) diff.structured();
     assertThat(ops)
         .anySatisfy(
             op -> {
@@ -219,8 +219,8 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
               assertThat(op.before()).isEqualTo("9");
               assertThat(op.after()).isEqualTo("11");
             });
-    assertThat(diff.get("yamlFrom").toString()).contains("period: 9");
-    assertThat(diff.get("yamlTo").toString()).contains("period: 11");
+    assertThat(diff.yamlFrom().toString()).contains("period: 9");
+    assertThat(diff.yamlTo().toString()).contains("period: 11");
 
     assertThatThrownBy(() -> service.diff(strategyId, "1.0.1", "1.0.1"))
         .isInstanceOfSatisfying(
@@ -246,14 +246,14 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
                   mode: index_constituents
                   index: "NIFTY 100"
                 """);
-    Map<String, Object> created =
+    var created =
         service.create("Constituents Guard", null, null, constituents);
-    UUID id = (UUID) created.get("id");
+    UUID id = created.id();
 
     // Phase 44: the publish guard is LIFTED — index_constituents now publishes (the resolver pins
     // membership by copy at submission). Previously this threw 422 STRATEGY_UNIVERSE_UNSUPPORTED.
     service.publish(id, null, null);
-    assertThat(service.detail(id, null).get("status")).isEqualTo("published");
+    assertThat(service.detail(id, null).status()).isEqualTo("published");
   }
 
   @Test
@@ -276,7 +276,7 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
             .replace("id: lifecycle-walk", "id: ghost-context")
             .replace("name: \"Lifecycle Walk\"", "name: \"Ghost Context\"")
             .replace(rsiOnly, vixOverride);
-    UUID id = (UUID) service.create("Ghost Context", null, null, ghost).get("id");
+    UUID id = service.create("Ghost Context", null, null, ghost).id();
 
     assertThatThrownBy(() -> service.publish(id, null, null))
         .isInstanceOfSatisfying(
@@ -292,15 +292,14 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
   void deleteIsDraftsOnlyOtherwiseArchives() {
     // drafts-only strategy hard-deletes
     UUID draftOnly =
-        (UUID)
-            service.create(
+                    service.create(
                     "Draft Only",
                     null,
                     null,
                     BASE_YAML
                         .replace("id: lifecycle-walk", "id: draft-only")
                         .replace("name: \"Lifecycle Walk\"", "name: \"Draft Only\""))
-                .get("id");
+                .id();
     assertThat(service.delete(draftOnly)).isTrue();
     assertThat(repository.findById(draftOnly)).isEmpty();
 
@@ -408,16 +407,15 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
               .replace("name: \"Lifecycle Walk\"", "name: \"Pager Noise " + i + "\""));
     }
 
-    List<Map<String, Object>> page1 = service.list(null, "pgtest", null, 2, 0);
-    List<Map<String, Object>> page2 = service.list(null, "pgtest", null, 2, 2);
+    var page1 = service.list(null, "pgtest", null, 2, 0);
+    var page2 = service.list(null, "pgtest", null, 2, 2);
 
     assertThat(page1).hasSize(2); // FILTERED page, not a pre-truncated unfiltered page (= 0 in the bug)
     assertThat(page2).hasSize(1); // exactly three matched, paginated over the filtered set
-    assertThat(page1)
-        .allSatisfy(m -> assertThat(((List<?>) m.get("tags")).contains("pgtest")).isTrue());
+    assertThat(page1).allSatisfy(m -> assertThat(m.tags()).contains("pgtest"));
     java.util.Set<Object> ids = new java.util.HashSet<>();
-    page1.forEach(m -> ids.add(m.get("id")));
-    page2.forEach(m -> ids.add(m.get("id")));
+    page1.forEach(m -> ids.add(m.id()));
+    page2.forEach(m -> ids.add(m.id()));
     assertThat(ids).as("no overlap; union covers all three matches").hasSize(3);
   }
 
@@ -425,14 +423,13 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
   @Order(12)
   void reDeletingAnArchivedStrategyWritesNoPhantomAudit() {
     UUID id =
-        (UUID)
-            service
+                    service
                 .create(
                     "Archive Idem", null, null,
                     BASE_YAML
                         .replace("id: lifecycle-walk", "id: archive-idem")
                         .replace("name: \"Lifecycle Walk\"", "name: \"Archive Idem\""))
-                .get("id");
+                .id();
     service.publish(id, null, null);
 
     // first delete demotes the published version (archived:true, 409)
@@ -460,14 +457,13 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
   @Order(30)
   void enableDisableToggleWritesAuditRowsIsIdempotentAndReadsBack() throws Exception {
     UUID id =
-        (UUID)
-            service
+                    service
                 .create(
                     "Toggle Walk", null, null,
                     BASE_YAML
                         .replace("id: lifecycle-walk", "id: toggle-walk")
                         .replace("name: \"Lifecycle Walk\"", "name: \"Toggle Walk\""))
-                .get("id");
+                .id();
     assertThat(repository.findById(id).orElseThrow().enabled()).isTrue(); // identity-row default
 
     // DISABLE via REST → {enabled:false} + a DISABLE audit row on the append-only log
@@ -508,14 +504,13 @@ class RegistryLifecycleIntegrationTest extends StrategySignalIntegrationTestBase
   @Order(31)
   void cloneCopiesLatestConfigIntoANewDraftAnd409sOnDuplicates() throws Exception {
     UUID source =
-        (UUID)
-            service
+                    service
                 .create(
                     "Clone Source", "orig desc", List.of("clonetag"),
                     BASE_YAML
                         .replace("id: lifecycle-walk", "id: clone-source")
                         .replace("name: \"Lifecycle Walk\"", "name: \"Clone Source\""))
-                .get("id");
+                .id();
 
     RegistryService.CloneResult clone = service.clone(source, "Clone Target", "clone-target");
     assertThat(clone.slug()).isEqualTo("clone-target");

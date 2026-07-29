@@ -5,7 +5,7 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.marketdata.constituents.StockSectorMap;
 import in.arthayantra.marketdata.freshness.DataFreshness;
-import in.arthayantra.marketdata.screener.AdjustedEquityDailySql;
+import in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;

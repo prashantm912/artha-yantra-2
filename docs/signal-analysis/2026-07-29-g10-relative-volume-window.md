@@ -1,6 +1,6 @@
 # G10 — the relative volume floor's opening window: code read + reconciliation
 
-**Written 2026-07-30.** Discharges the code-read step the ledger row **G10** made a precondition.
+**Written 2026-07-29.** Discharges the code-read step the ledger row **G10** made a precondition.
 **No code changed** — the fix is HOLD tier (it changes which signals fire) and is not proposed here.
 
 ---
@@ -20,7 +20,7 @@ The exact live parameters are now pinned, and one observed threshold reconciles 
 
 ---
 
-## 1. The window, resolved (all `sourced`, read 2026-07-30)
+## 1. The window, resolved (all `sourced`, read 2026-07-29)
 
 | site | what it establishes |
 |---|---|
@@ -115,7 +115,7 @@ uniformly, including the 10:42-onward regime where it is already correct — it 
 ## Claim labels
 
 - Every table in §1, and the three "no override" checks: **sourced** (file:line and live container
-  env, read 2026-07-30).
+  env, read 2026-07-29).
 - §2 and §3 numbers: **computed** this session from `marketdata.candles` on live `artha`.
 - §4's rejection of the exclude-the-open fix: **computed** — it follows from `minBars` + the
   absolute fallback, both sourced above.

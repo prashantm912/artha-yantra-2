@@ -73,7 +73,7 @@ public class DotHealthCanary {
    * How a dot's operand is EXPECTED to behave across a session — this decides whether "one distinct
    * value" is evidence of anything at all. Judging every operand by one rule makes the flag noise:
    * eight unchanged bars is the NORMAL state of a boolean, of a small enum, and of anything sourced
-   * from an EOD read (cross-vendor review, 2026-07-30).
+   * from an EOD read (cross-vendor review, 2026-07-29).
    */
   private enum FreezeClass {
     /** Varies intraday. One value across the window is a real defect — PAGES when required. */
@@ -220,7 +220,7 @@ public class DotHealthCanary {
             now.toLocalDate().atTime(LocalTime.of(9, 15)).atZone(Ist.ZONE).toOffsetDateTime(),
             null, FETCH_DEPTH, 0);
     List<ContextRow> contextRows = new ArrayList<>(WINDOW);
-    // G12 / cross-vendor review 2026-07-30: the FREEZE pass reads EVERY context-bearing row in the
+    // G12 / cross-vendor review 2026-07-29: the FREEZE pass reads EVERY context-bearing row in the
     // scan, not the 40-row liveness window. The two need different depths and the 40-row cap made
     // the freeze flag silently inert on a third of sessions: distinct bars inside the newest 40
     // context-bearing rejections measured 18/4/18/14/4/18/7/17 across 2026-07-20..29, so 07-21,
@@ -310,7 +310,7 @@ public class DotHealthCanary {
       if (frozen) {
         detail +=
             p.freeze() == FreezeClass.DAILY
-                // Established by code read 2026-07-30, not inferred: `atmIv` comes from
+                // Established by code read 2026-07-29, not inferred: `atmIv` comes from
                 // MarketOiClient.macro() -> GET /api/v1/market/options/iv-history -> `currentIv`,
                 // which IvAnalyticsService resolves to the LAST `iv_daily_summary` row — a table
                 // IvRollupJob writes once per day at 16:00 IST. Intraday it is the previous
@@ -369,7 +369,7 @@ public class DotHealthCanary {
         } else if (deadNow.remove(dot)) {
           send("ArthaYantra dot canary recovered", "dot '" + dot + "' input is live again");
         }
-        // G12 / cross-vendor review 2026-07-30: a CONTINUOUS operand stuck on one value for the
+        // G12 / cross-vendor review 2026-07-29: a CONTINUOUS operand stuck on one value for the
         // whole window is an outage the `alive` probe cannot see — the field is populated, so the
         // dot reads live while contributing a constant. It must page, or the freeze dimension only
         // ever reaches someone who happens to open the rejections page. DAILY operands are exempt

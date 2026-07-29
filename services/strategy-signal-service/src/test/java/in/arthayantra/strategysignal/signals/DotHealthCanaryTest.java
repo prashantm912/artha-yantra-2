@@ -444,7 +444,7 @@ class DotHealthCanaryTest {
 
   @Test
   void aLowCardinalityOperandIsNeverFreezeJudged() {
-    // Cross-vendor review 2026-07-30: the quadrants are a 4-value enum and `dowUp` is a boolean, so
+    // Cross-vendor review 2026-07-29: the quadrants are a 4-value enum and `dowUp` is a boolean, so
     // eight bars carrying the same value is their NORMAL state and says nothing. Judging them by
     // the continuous rule made the flag noise. The all-NEUTRAL OUTAGE is still caught — by `alive`,
     // which is the probe that pages.
@@ -531,7 +531,7 @@ class DotHealthCanaryTest {
 
   @Test
   void theFreezeWindowReachesPastTheFortyRowLivenessWindow() {
-    // Cross-vendor review 2026-07-30, the finding that made the feature real: the freeze pass reads
+    // Cross-vendor review 2026-07-29, the finding that made the feature real: the freeze pass reads
     // EVERY context-bearing row in the scan, not the 40-row liveness window. Live fan-out put only
     // 4-7 distinct bars inside the newest 40 rows on 3 of 8 sessions (07-21/07-24/07-28), so a
     // 40-row-capped freeze pass was silently inert on a third of sessions however frozen the

@@ -82,26 +82,44 @@ degenerate for a different reason, and they want one coordinated read, not three
 `DotHealthCanary` gains a second liveness dimension. Every probe in the registry now carries an
 `operand` extractor alongside its `alive` predicate; the sweep counts **distinct operand values over
 distinct bars** and flags `frozen` when ≥ `MIN_FROZEN_BARS` (8) bars carry the operand and they all
-agree. Surfaced on `DotState.frozen` (`GET /api/v1/signal-rejections/dot-health`) and as a chip on
-the rejections page.
-
-Three design decisions worth keeping:
-
-1. **Counted per BAR, never per row.** The engine fans one 3m bar across ~63 scalpers, so the 40-row
-   window can be a *single* bar whose macro context is identical by construction — counting rows
-   would call a perfectly live input frozen. This is the same fan-out inflation that made the
-   champion shadow book's 24 rows read as 24 independent observations when the effective sample was
-   ~6. Guarded by `oneBarFannedOutAcrossStrategiesIsNeverFrozen`, which was **red-proofed**: with the
-   counter switched to rows, that test and only that test fails.
-2. **Frozen reports, never pages.** `iv_abs_band` freezes legitimately every single session, so a
-   paging frozen-probe would emit a guaranteed daily false alarm. Paging still keys on `alive` alone.
-   `Probe.dailyByDesign` marks the by-design case so its detail line says so instead of crying wolf.
-3. **Appended to the detail, never substituted.** A dot can be dead *and* frozen — an all-`NEUTRAL`
-   quadrant window is both — and the liveness half is the half that pages, so it must not be
-   overwritten. An S24-suppressed read stands the frozen flag down entirely: on a monthly index
-   expiry the OI block is skipped by design, and its single inert value is inertness, not a freeze.
+agree. Surfaced on `DotState.frozen` (`GET /api/v1/signal-rejections/dot-health`), on the Telegram
+`/status` line, and as a chip on the rejections page.
 
 `iv_abs_band` also gains a probe — **it had none at all**, which is why nothing ever reported on it.
+
+Four design decisions worth keeping. **Two of them exist because the cross-vendor review rejected the
+first version**, and both of those were invisible to a green suite:
+
+1. **The freeze pass reads the whole scan, not the 40-row liveness window.** The first version capped
+   both at `WINDOW` (40 rows). Measured across 2026-07-20…29, the distinct bars inside the newest 40
+   context-bearing rejections are **18 / 4 / 18 / 14 / 4 / 18 / 7 / 17** — so on **three of eight
+   sessions** the window never reached 8 bars and the flag could not have fired however frozen the
+   operand was. The same rows at `FETCH_DEPTH` (200) give **18–34 bars on every session**, and they
+   were already being fetched and discarded. Guarded by
+   `theFreezeWindowReachesPastTheFortyRowLivenessWindow`, **red-proofed**: reverting the pass to the
+   40-row window fails that test and only that test.
+2. **Freeze eligibility is per-operand, not uniform** (`FreezeClass`). One rule for every dot is
+   simultaneously noise and blindness: eight unchanged bars is the *normal* state of a boolean
+   (`dowUp`) or a four-value enum (the OI quadrants), and of anything sourced from an EOD read.
+   - `CONTINUOUS` — `breadth`, `vix`, `oi_spurt_price`. Varies intraday; frozen is a real outage
+     and **pages when required**.
+   - `DAILY` — `iv_abs_band`, `iv_rank`, `fii`. Once-a-day scalars by construction; frozen is
+     correct, so it reports and never pages.
+   - `EXEMPT` — `dow`, `futures_oi`, `underlying_oi`. Repetition carries no information; not judged.
+3. **Counted per BAR, never per row.** The engine fans one 3m bar across many scalpers, so a row
+   count would read "one distinct value" off a single bar's identical macro context and call a live
+   input frozen — the same fan-out inflation that made the champion shadow book's 24 rows read as 24
+   independent observations when the effective sample was ~6. Guarded by
+   `oneBarFannedOutAcrossStrategiesIsNeverFrozen`, also red-proofed.
+4. **Appended to the detail, never substituted.** A dot can be dead *and* frozen, and the liveness
+   half is the half that pages, so it must not be overwritten. An S24-suppressed read stands the
+   frozen flag down entirely: on a monthly index expiry the OI block is skipped by design, and its
+   single inert value is inertness, not a freeze.
+
+⚠️ **The first version would have shipped a feature that was inert on a third of sessions and silent
+on the one outage class it was built to catch.** The suite was green for it — 18/18 — because the
+tests synthesised one row per bar, which is not how the live table looks. Worth remembering: a
+sampling-window bug is invisible to any test that builds its own sample.
 
 ---
 

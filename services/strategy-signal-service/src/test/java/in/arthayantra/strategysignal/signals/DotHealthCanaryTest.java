@@ -433,33 +433,37 @@ class DotHealthCanaryTest {
             s -> {
               assertThat(s.alive()).isTrue();
               assertThat(s.frozen()).isTrue();
-              assertThat(s.detail()).contains("BY DESIGN").contains("iv_daily_summary");
+              assertThat(s.detail()).contains("BY DESIGN").contains("EOD daily operand");
             });
 
     canary.sweep();
-    verifyNoInteractions(events); // frozen reports; only DEAD pages
+    // A DAILY operand freezes every session by construction, so paging on it would be a guaranteed
+    // daily false alarm. Only CONTINUOUS freezes page.
+    verifyNoInteractions(events);
   }
 
   @Test
-  void aDeadAndFrozenDotKeepsItsDeadMessageAndStillPages() {
-    // An all-NEUTRAL quadrant window is BOTH dead (NEUTRAL is the data-missing sentinel, T13) and
-    // frozen. The liveness half is the half that pages, so the frozen clause must be APPENDED to
-    // the dead message, never substituted for it.
+  void aLowCardinalityOperandIsNeverFreezeJudged() {
+    // Cross-vendor review 2026-07-30: the quadrants are a 4-value enum and `dowUp` is a boolean, so
+    // eight bars carrying the same value is their NORMAL state and says nothing. Judging them by
+    // the continuous rule made the flag noise. The all-NEUTRAL OUTAGE is still caught — by `alive`,
+    // which is the probe that pages.
     stubRows(
         rowsAcrossBars(
-            8,
+            10,
             i -> "{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
-                + "\"macro\":{\"advances\":30,\"declines\":20}}"));
+                + "\"macro\":{\"advances\":30,\"declines\":20,\"dowUp\":true}}"));
     DotHealthCanary canary = canary("futures_oi");
 
     assertThat(canary.evaluate().dots())
+        .filteredOn(s -> s.dot().equals("futures_oi") || s.dot().equals("dow"))
+        .allSatisfy(s -> assertThat(s.frozen()).isFalse())
         .filteredOn(s -> s.dot().equals("futures_oi"))
         .singleElement()
         .satisfies(
             s -> {
-              assertThat(s.alive()).isFalse();
-              assertThat(s.frozen()).isTrue();
-              assertThat(s.detail()).contains("input dead").contains("FROZEN");
+              assertThat(s.alive()).as("the T13 outage is still caught").isFalse();
+              assertThat(s.detail()).contains("input dead").doesNotContain("FROZEN");
             });
 
     canary.sweep();
@@ -467,24 +471,75 @@ class DotHealthCanaryTest {
   }
 
   @Test
+  void aFrozenContinuousRequiredOperandPagesOncePerDay() {
+    // The other half of the review finding: a CONTINUOUS operand stuck on one value is an outage
+    // `alive` cannot see (the field is populated), so without this it would only ever reach someone
+    // who opened the rejections page. breadth is CONTINUOUS and required by default.
+    stubRows(rowsAcrossBars(10, i -> "{\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("breadth");
+
+    assertThat(canary.evaluate().dots())
+        .filteredOn(s -> s.dot().equals("breadth"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).as("populated on every bar").isTrue();
+              assertThat(s.frozen()).isTrue();
+            });
+
+    canary.sweep();
+    canary.sweep(); // same day — one page only
+    verify(events, times(1)).publishEvent(alertContaining("breadth FROZEN"));
+  }
+
+  @Test
   void expiryDaySuppressionStandsDownTheFrozenFlagToo() {
     // On a suppression day the OI read is not being produced at all, so its single inert value is
-    // by-design inertness rather than a freeze — flagging it would light the badge every expiry day
-    // for a state the suppression branch already explains.
+    // by-design inertness rather than a freeze. oi_spurt_price is CONTINUOUS (so it WOULD otherwise
+    // be freeze-judged) and is in the S24 set, which makes it the probe that proves this branch.
     now.set(expiryDayAt11Ist());
     stubRows(
         rowsAcrossBars(
-            8,
-            i -> "{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
-                + "\"macro\":{\"advances\":30,\"declines\":20},\"underlying\":\"NIFTY 50\"}"));
+            10,
+            i -> "{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\","
+                + "\"spurtPricePct\":0},\"macro\":{\"advances\":30,\"declines\":20},"
+                + "\"underlying\":\"NIFTY 50\"}"));
 
-    assertThat(canary("futures_oi").evaluate().dots())
-        .filteredOn(s -> s.dot().equals("futures_oi"))
+    assertThat(canary("oi_spurt_price").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
         .singleElement()
         .satisfies(
             s -> {
               assertThat(s.frozen()).isFalse();
               assertThat(s.detail()).contains("by design").doesNotContain("FROZEN");
+            });
+  }
+
+  @Test
+  void theFreezeWindowReachesPastTheFortyRowLivenessWindow() {
+    // Cross-vendor review 2026-07-30, the finding that made the feature real: the freeze pass reads
+    // EVERY context-bearing row in the scan, not the 40-row liveness window. Live fan-out put only
+    // 4-7 distinct bars inside the newest 40 rows on 3 of 8 sessions (07-21/07-24/07-28), so a
+    // 40-row-capped freeze pass was silently inert on a third of sessions however frozen the
+    // operand was. Here: 60 rows of fan-out on 2 bars, then 8 further bars behind them. Capped at
+    // 40 rows the probe sees 2 bars and cannot flag; reading the whole scan it sees 10.
+    OffsetDateTime base = OffsetDateTime.parse("2026-06-10T09:15:00+05:30");
+    List<SignalRejectionRepository.RejectionRow> rows = new java.util.ArrayList<>();
+    for (int i = 0; i < 60; i++) {
+      rows.add(rowAtBar("{\"macro\":{\"vixLevel\":12.4}}", base.plusMinutes(3L * (i % 2))));
+    }
+    for (int b = 2; b < 10; b++) {
+      rows.add(rowAtBar("{\"macro\":{\"vixLevel\":12.4}}", base.plusMinutes(3L * b)));
+    }
+    stubRows(rows.toArray(new SignalRejectionRepository.RejectionRow[0]));
+
+    assertThat(canary("breadth").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("vix"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.frozen()).isTrue();
+              assertThat(s.detail()).contains("across 10 bars");
             });
   }
 

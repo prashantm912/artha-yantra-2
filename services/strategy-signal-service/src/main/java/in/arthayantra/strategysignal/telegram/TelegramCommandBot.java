@@ -209,8 +209,13 @@ public class TelegramCommandBot {
           .append(" rejections scanned, 0 carry context)\n");
     } else {
       long dead = dots.dots().stream().filter(d -> d.required() && !d.alive()).count();
+      // G12: a frozen required input reads ALIVE, so a dead-only count reported "required dots
+      // alive" while an operand sat on one value all session. Frozen is a distinct verdict, not a
+      // flavour of dead — the endpoint only flags it where a freeze is genuinely anomalous.
+      long frozen = dots.dots().stream().filter(d -> d.required() && d.alive() && d.frozen()).count();
       out.append("dot canary: ")
           .append(dead == 0 ? "required dots alive" : dead + " REQUIRED dot(s) DEAD")
+          .append(frozen == 0 ? "" : ", " + frozen + " FROZEN")
           .append(" (").append(dots.rowsInspected()).append(" context-bearing rejections inspected)\n");
     }
     out.append("entries: ")

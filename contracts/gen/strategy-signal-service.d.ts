@@ -1807,6 +1807,7 @@ export interface components {
             dot: string;
             alive: boolean;
             required: boolean;
+            frozen: boolean;
             detail: string;
         };
         ShadowVariantListResponse: {

@@ -159,6 +159,13 @@ export interface DotState {
   alive: boolean;
   /** True when the dot is on the `required-dots` list — expected alive today (a dead one pages). */
   required: boolean;
+  /**
+   * True when the input is present but carries ONE distinct value across today's bars (G12). A frozen
+   * dot re-caps the composite as silently as a dead one while every alive/dead probe reports it alive.
+   * Reported, never paged — `iv_abs_band` freezes legitimately (its operand is an EOD daily scalar),
+   * so `detail` says whether the freeze is by design.
+   */
+  frozen: boolean;
   /** Human liveness detail ("input live in the last N rejections" / "input dead across N" / "no rejections yet today"). */
   detail: string;
 }

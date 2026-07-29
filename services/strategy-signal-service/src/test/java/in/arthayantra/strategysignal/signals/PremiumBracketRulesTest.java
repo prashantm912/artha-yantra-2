@@ -36,9 +36,12 @@ class PremiumBracketRulesTest {
    * exit-equivalence.json} suites while THIS test stayed green — so the live side had no independent
    * guard on the one property that makes a premium-pct stop fire on the same bar in both engines.
    *
-   * <p>Both inputs are chosen so the mode is decidable. The stop lands on {@code 61.725}, an EXACT
-   * half, which separates HALF_UP (61.73) from HALF_EVEN and HALF_DOWN (61.72) as well as from
-   * DOWN/FLOOR; the target lands on {@code 164.1885}, separating HALF_UP (164.19) from DOWN (164.18).
+   * <p>It takes BOTH assertions together to pin HALF_UP uniquely, which is why neither is redundant.
+   * The stop lands on {@code 61.725}, an EXACT half: HALF_UP gives 61.73 while HALF_EVEN, HALF_DOWN,
+   * DOWN and FLOOR all give 61.72 — but UP and CEILING also give 61.73, so the stop alone is not
+   * enough. The target lands on {@code 162.954}: HALF_UP gives 162.95 and UP/CEILING give 162.96.
+   * HALF_UP is the only mode producing 61.73 AND 162.95. (Cross-vendor review caught the first
+   * version of this test, whose 33% target left UP and CEILING indistinguishable from HALF_UP.)
    */
   @Test
   void premiumLevelsArePaiseRoundedHalfUp() throws Exception {
@@ -47,15 +50,15 @@ class PremiumBracketRulesTest {
             """
             {"exit_rules":[
               {"type":"stop_loss","params":{"basis":"premium_pct","value":50}},
-              {"type":"take_profit","params":{"basis":"premium_pct","value":33}}
+              {"type":"take_profit","params":{"basis":"premium_pct","value":32}}
             ]}
             """);
     var b = PremiumBracketRules.resolve(config, new BigDecimal("123.45"));
 
     // 123.45 x 0.50 = 61.725 exactly -> HALF_UP = 61.73 (HALF_EVEN/HALF_DOWN/DOWN would give 61.72)
     assertThat(b.stopLoss()).isEqualByComparingTo("61.73");
-    // 123.45 x 1.33 = 164.1885 -> HALF_UP = 164.19 (DOWN would give 164.18)
-    assertThat(b.takeProfit()).isEqualByComparingTo("164.19");
+    // 123.45 x 1.32 = 162.954 -> HALF_UP = 162.95 (UP and CEILING would give 162.96)
+    assertThat(b.takeProfit()).isEqualByComparingTo("162.95");
     // and the levels really are 2dp, not full precision carried through
     assertThat(b.stopLoss().scale()).isEqualTo(2);
     assertThat(b.takeProfit().scale()).isEqualTo(2);

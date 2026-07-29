@@ -34,10 +34,17 @@ public final class PremiumLevels {
   private PremiumLevels() {}
 
   /**
-   * The paise-rounded premium level, or {@code null} when {@code pct} is absent.
+   * The paise-rounded premium level, or {@code null} when EITHER input is absent.
    *
-   * @param entry the option's entry premium
-   * @param pct the {@code premium_pct} percentage (e.g. {@code 35} for +35%)
+   * <p>The null-on-absent-{@code entry} branch is defensive: today's callers cannot reach it
+   * ({@code PremiumBracketRules.resolve} returns {@code Brackets.NONE} for a null entry one line
+   * earlier, and the replay paths dereference the entry premium in their sizing arithmetic above the
+   * call). It is here so a future caller gets a null level rather than a {@code NullPointerException}
+   * out of a shared helper.
+   *
+   * @param entry the option's entry premium; {@code null} yields {@code null}
+   * @param pct the {@code premium_pct} percentage (e.g. {@code 35} for +35%); {@code null} yields
+   *     {@code null}, which is how "this rule is not configured" is expressed
    * @param up {@code true} for a target (entry × (1 + pct/100)), {@code false} for a stop
    */
   public static BigDecimal paiseRounded(BigDecimal entry, BigDecimal pct, boolean up) {

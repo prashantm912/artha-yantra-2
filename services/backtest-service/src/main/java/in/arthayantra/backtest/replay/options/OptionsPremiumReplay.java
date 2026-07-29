@@ -11,6 +11,7 @@ import in.arthayantra.backtest.replay.options.OptionContractSelector.OptionContr
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
+import in.arthayantra.strategyengine.eval.PremiumLevels;
 import in.arthayantra.strategyengine.fills.FeeConstants;
 import in.arthayantra.strategyengine.fills.FillSimulator;
 import in.arthayantra.strategyengine.fills.FillSimulator.Fees;
@@ -1009,15 +1010,11 @@ public class OptionsPremiumReplay {
   }
 
   // The recorded entry-time protective levels on the Trade row: paise-rounded (2dp HALF_UP) to match
-  // the LIVE bracket (PremiumBracketRules.resolve) and PremiumExitEvaluator's exit levels — audit
-  // AY-SL-06, so a scalper's backtest trade card shows the SAME SL/TP the identical paper trade records.
+  // the live bracket and PremiumExitEvaluator's exit levels — audit AY-SL-06, so a scalper's backtest
+  // trade card shows the SAME SL/TP the identical paper trade records. §9-04: this WAS a fourth
+  // character-identical copy of the formula; it now shares the one definition, so "match" is
+  // enforced rather than asserted.
   private static BigDecimal level(BigDecimal entry, BigDecimal pct, boolean up) {
-    if (pct == null) {
-      return null;
-    }
-    BigDecimal frac = pct.divide(new BigDecimal("100"), 6, RoundingMode.HALF_UP);
-    return entry
-        .multiply(up ? BigDecimal.ONE.add(frac) : BigDecimal.ONE.subtract(frac))
-        .setScale(2, RoundingMode.HALF_UP);
+    return PremiumLevels.paiseRounded(entry, pct, up);
   }
 }

@@ -13,9 +13,11 @@ import java.util.UUID;
  * blind to it — a renamed or removed key on any of these routes was previously undetectable.
  *
  * <p>Component order matches the {@code LinkedHashMap} insertion order it replaces, so the rendered
- * JSON key order is unchanged. The ONE exception is {@link ArchiveResponse}, whose source was a
- * multi-key {@code Map.of} — that order is JVM-salted and was never stable, so this record
- * NORMALISES it rather than preserving it. Same for the {@code list} envelope.
+ * JSON key order is unchanged. TWO exceptions — {@link ArchiveResponse} and {@link
+ * StrategyListResponse} — came from MULTI-key {@code Map.of}, whose iteration order is JVM-salted
+ * and was never stable: those records NORMALISE the order rather than preserving it, and must not
+ * be called byte-identical. {@link VersionListResponse}'s source was a SINGLE-key {@code Map.of},
+ * which is trivially stable, so it is in neither camp.
  *
  * <p>Nullability is spelled {@code @Schema(types = {"…","null"})}: {@code @Schema(nullable = true)}
  * is a silent no-op at OpenAPI 3.1 because swagger-core's 3.1 serializer drops the keyword.

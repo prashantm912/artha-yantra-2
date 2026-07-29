@@ -4999,10 +4999,10 @@
             "type" : "string"
           },
           "before" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "after" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "after", "before", "op", "path" ]

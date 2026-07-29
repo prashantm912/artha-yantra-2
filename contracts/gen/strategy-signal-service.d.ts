@@ -1721,8 +1721,8 @@ export interface components {
         Op: {
             path: string;
             op: string;
-            before: string;
-            after: string;
+            before: string | null;
+            after: string | null;
         };
         AuditLogResponse: {
             items: components["schemas"]["AuditRow"][];

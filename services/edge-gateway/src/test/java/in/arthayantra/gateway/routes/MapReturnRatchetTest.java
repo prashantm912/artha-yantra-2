@@ -39,14 +39,23 @@ class MapReturnRatchetTest {
    * keys, the populated path 16 — so one record would add 11 null keys to the empty response. That is
    * a wire change, not a retyping; typing it needs a deliberate shape decision, not a refactor.
    *
-   * <p>strategy-signal-service 14 → 6 (2026-07-29, same day): the whole REGISTRY CRUD surface —
-   * all 13 {@code RegistryController} handlers, typed at the SERVICE (see {@code RegistryViews}) so
-   * the records are the single source of truth rather than a controller-side re-mapping. Every
-   * source was a {@code LinkedHashMap} whose insertion order the record components now mirror, so
-   * key ORDER is unchanged; the two exceptions are {@code archive} and the {@code list} envelope,
-   * built from multi-key {@code Map.of} whose iteration order is JVM-salted — those are NORMALISED,
-   * not preserved, and must not be described as byte-identical. No conditional keys existed on any
-   * of the 13 (every null was {@code put} explicitly), so no response gained or lost a key.
+   * <p>strategy-signal-service 14 → 4 (2026-07-29, same day): the whole REGISTRY CRUD surface —
+   * all <b>12</b> {@code RegistryController} handlers, typed at the SERVICE (see {@code
+   * RegistryViews}) so the records are the single source of truth rather than a controller-side
+   * re-mapping. Most sources were a {@code LinkedHashMap} whose insertion order the record
+   * components now mirror, so key ORDER is unchanged. Two exceptions: {@code archive} and the
+   * {@code list} envelope came from MULTI-key {@code Map.of}, whose iteration order is JVM-salted —
+   * those are NORMALISED, not preserved, and must not be described as byte-identical. The {@code
+   * versions} envelope was a SINGLE-key {@code Map.of}, which is trivially stable, so it belongs in
+   * neither camp. No conditional keys existed on any of the 12 (every null was {@code put}
+   * explicitly), so no response gained or lost a key.
+   *
+   * <p>⚠️ The threshold is 4 because this test counts only {@code *Controller.java}. A shell grep
+   * over all of {@code src/main} returns 6 — it also catches two {@code describe()} methods on
+   * pyramid POLICY classes, which are not handlers. The assertion is {@code
+   * isLessThanOrEqualTo}, so an over-stated threshold passes while silently leaving room for new
+   * opaque handlers; the first version of this row said 6 and would have let two through
+   * (cross-vendor review, 2026-07-29). Count with the test's own regex, not a broader one.
    *
    * <p>strategy-signal-service 18 → 14 (2026-07-29, same day): the paper read surface + the
    * journal list. {@code PaperController}'s {@code positions} / {@code trades} / {@code pnl} and
@@ -77,7 +86,7 @@ class MapReturnRatchetTest {
       Map.of(
           "edge-gateway", 0,
           "market-data-service", 26,
-          "strategy-signal-service", 6,
+          "strategy-signal-service", 4,
           "backtest-service", 7);
 
   private static final Pattern MAP_RETURN =

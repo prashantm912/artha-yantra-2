@@ -456,9 +456,22 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   and the local leftovers are what actually bite (see the next bullet). After any merge run
   **`bash tools/git-prune-merged.sh`** (add `--dry` to preview): it removes worktrees + local
   branches whose upstream is GONE and whose tree is CLEAN, and refuses to touch `main`, a
-  never-pushed local WIP branch, a dirty worktree, or a branch still holding commits main lacks —
-  so the parked `worktree-agent-abb02bf43adbb895d` swing catch-up (1 genuinely unmerged commit)
-  survives it.
+  never-pushed local WIP branch, a dirty worktree, or a branch **whose own changes are not yet in
+  main** — so the parked `worktree-agent-abb02bf43adbb895d` swing catch-up (1 genuinely unmerged
+  commit) survives it. ⚠️ **That last clause used to read "still holding commits main lacks", and as
+  written the script was INERT — it never deleted anything** (fixed 2026-07-30). Under SQUASH-merge
+  the squash is a brand-new commit, so a merged branch's own commits are never ancestors of main and
+  `git rev-list --count origin/main..<branch>` is ALWAYS > 0; since squash is this repo's only merge
+  mode, the check vetoed 100% of candidates. It now compares **only the paths the branch touched**:
+  a squash puts identical content on main, so that diff is empty however many commits it collapsed
+  and however far main has moved on other files, while genuinely-unmerged work still differs on its
+  own paths. Two plausible-looking alternatives are wrong and were measured: a two-dot
+  `git diff origin/main..<branch>` conflates "behind main" with "has unmerged content", and
+  `git cherry`/patch-id can't match because the squash collapsed N commits into one. If a LATER
+  commit on main touched one of those paths the test is inconclusive, and it asks `gh` (authoritative)
+  before keeping — the failure direction is deliberately a false KEEP, never a false delete.
+  `tools/git-prune-merged-test.sh` pins all of it, including that the old check fails ONLY the
+  squash case.
 - **`gh pr merge --delete-branch` can fail its LOCAL step while the merge SUCCEEDS** — with a
   concurrent session holding `main` in a worktree it aborts with `fatal: 'main' is already used by
   worktree at …` and no other output. **Same failure when a worktree holds the BRANCH BEING MERGED**

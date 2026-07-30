@@ -515,6 +515,18 @@ restart services, or write during market hours.
   ⚠️ **Standing result: all four measured loosenings of the scalper entry gate LOST money** (T1, T7,
   G13, G10). Treat that as the prior. All four are conditional on the 30-minute `time_stop`, so if
   G11 changes the exit they must be re-run.
+- ⚠ **On an expiry day the suppression lands on whichever instrument ROLE touches the expiring
+  chain — and §3.19's OI-root query CANNOT see it** (added 2026-07-30, §3.27; this entry was claimed
+  as promoted by the 07-30 findings and was NOT actually written — the second dangling promotion in
+  two sessions, after §3.23). §3.19 answers only the OI question. On 2026-07-30 (BSE monthly) every
+  S24 discriminator read *no suppression* and was CORRECT — `context.underlying` was `NIFTY 50` on
+  814/814, quadrants NEUTRAL 0/814, basis live 814/814 — because the `sensex-niftyoi` slugs read
+  NIFTY OI **by design**. The expiry instead surfaced in `strike-pick`: 405 fails on **16 of 16
+  SENSEX-rooted slugs and ZERO NIFTY-rooted ones**. Matched root-swap control across three sessions:
+  07-28 (NSE monthly) 534 fails, all NIFTY-rooted → 07-29 (non-expiry) ZERO → 07-30 (BSE monthly) 405,
+  all SENSEX-rooted. **Check the EXECUTION root, not just the OI root** — they are different
+  instruments under ADR-0003's three-way decoupling. ⚠ 07-24 (Friday, no expiry, 550 SENSEX fails)
+  does not fit, so the claim is *an expiry saturates the expiring root*, NOT *only an expiry can*.
 - ⚠ **A dot at 0% is THREE explanations deep now, and the third one has no probe** (added 2026-07-30,
   §3.28): a dead input (null — the canary sees it), a **frozen** input (one distinct value — #1111's
   probe sees it), or a **live, moving operand that never crosses its threshold** (nothing sees it).

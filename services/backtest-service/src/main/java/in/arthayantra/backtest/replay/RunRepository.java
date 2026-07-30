@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -337,6 +338,37 @@ public class RunRepository {
    * strings) for a sparkline. Versions with no runs are simply absent. Empty input ⇒ empty list.
    */
   public List<Map<String, Object>> findLatestSummaries(List<UUID> versionIds) {
+    return queryLatestSummaries(
+        versionIds,
+        (rs, n) -> {
+          Map<String, Object> row = new LinkedHashMap<>();
+          row.put("strategyVersionId", rs.getString("strategy_version_id"));
+          row.put("runId", rs.getString("id"));
+          row.put("sharpe", plain(rs.getBigDecimal("sharpe")));
+          row.put("totalReturn", plain(rs.getBigDecimal("total_return")));
+          row.put("maxDrawdown", plain(rs.getBigDecimal("max_drawdown")));
+          row.put("completedAt", ist(rs.getObject("completed_at", OffsetDateTime.class)));
+          row.put("equity", compactEquity(parse(rs.getString("equity_curve")), 32));
+          return row;
+        });
+  }
+
+  /** The typed summary rows exposed by {@code GET /backtests/summary}. */
+  public List<BacktestViews.BacktestSummaryItem> findLatestSummaryItems(List<UUID> versionIds) {
+    return queryLatestSummaries(
+        versionIds,
+        (rs, n) ->
+            new BacktestViews.BacktestSummaryItem(
+                rs.getString("strategy_version_id"),
+                rs.getString("id"),
+                plain(rs.getBigDecimal("sharpe")),
+                plain(rs.getBigDecimal("total_return")),
+                plain(rs.getBigDecimal("max_drawdown")),
+                ist(rs.getObject("completed_at", OffsetDateTime.class)),
+                compactEquity(parse(rs.getString("equity_curve")), 32)));
+  }
+
+  private <T> List<T> queryLatestSummaries(List<UUID> versionIds, RowMapper<T> mapper) {
     if (versionIds == null || versionIds.isEmpty()) {
       return List.of();
     }
@@ -349,17 +381,7 @@ public class RunRepository {
             + ") ORDER BY strategy_version_id, completed_at DESC";
     return jdbc.query(
         sql,
-        (rs, n) -> {
-          Map<String, Object> row = new LinkedHashMap<>();
-          row.put("strategyVersionId", rs.getString("strategy_version_id"));
-          row.put("runId", rs.getString("id"));
-          row.put("sharpe", plain(rs.getBigDecimal("sharpe")));
-          row.put("totalReturn", plain(rs.getBigDecimal("total_return")));
-          row.put("maxDrawdown", plain(rs.getBigDecimal("max_drawdown")));
-          row.put("completedAt", ist(rs.getObject("completed_at", OffsetDateTime.class)));
-          row.put("equity", compactEquity(parse(rs.getString("equity_curve")), 32));
-          return row;
-        },
+        mapper,
         versionIds.toArray());
   }
 

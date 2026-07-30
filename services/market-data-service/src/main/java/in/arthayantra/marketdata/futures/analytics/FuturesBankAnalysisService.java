@@ -41,26 +41,36 @@ public class FuturesBankAnalysisService {
       String bank,
       @Schema(types = {"number", "null"}) BigDecimal ltpPct,
       @Schema(types = {"number", "null"}) BigDecimal oiPct,
+      // ⚠️ KNOWN SPEC-LEVEL INCONSISTENCY, no springdoc-expressible fix (review 2026-07-30).
+      // `interp` is null for each bank's FIRST point (line ~118: `interp = null` unless prev != null)
+      // inside an otherwise non-null cell, so this genuinely IS nullable. The annotation emits
+      // `type: ["string","null"]` WITH `enum: [4 values]`. Under JSON Schema 2020-12 BOTH keywords
+      // apply, so a strict validator rejects null because null is not among the enum members — the
+      // canonical form would be `enum: [..., null]`, which swagger-core does not emit for a Java enum.
+      // Three forms were tried: this one; `@ArraySchema`-style unions (N/A here); and
+      // `@Schema(anyOf = {OiInterpretation.class}, types = {...})`, which is STRICTLY WORSE — it emits
+      // type + anyOf + enum together and the enum still excludes null.
+      // Kept because the only real consumer is correct: openapi-typescript renders
+      // `"LONG_BUILDUP" | ... | null`. Dropping the annotation instead would make the TS claim the
+      // field is never null, which is a worse lie than an over-strict enum.
       @Schema(types = {"string", "null"}) OiInterpretation interpretation) {}
 
   /**
    * One matrix row: a snapshot bucket + a cell per bank in the configured column order.
    *
-   * <p>⚠️ KNOWN CONTRACT GAP, deliberate: {@code cells} contains NULL ELEMENTS — line ~123 does
+   * <p>{@code cells} contains NULL ELEMENTS by design — line ~123 does
    * {@code cells.add(byBank.get(bank).get(b))}, which is null when that bank has no point at this
-   * bucket, and positional alignment with {@code banks} is the whole point of the matrix so the nulls
-   * cannot be filtered out. The emitted schema says {@code items: $ref BankAnalysisCell}, i.e. it
-   * claims every element is present. That is WRONG at runtime.
+   * bucket, and positional alignment with {@code banks} is the whole point of the matrix so the
+   * nulls cannot be filtered out. That IS expressed in the contract, just not on {@code items}:
+   * {@link BankAnalysisCell} is annotated nullable at the RECORD level, so the captured schema is
+   * {@code items: $ref BankAnalysisCell} where BankAnalysisCell itself is {@code type:
+   * ["object","null"]}, and the generated TS reads {@code BankAnalysisCell: {...} | null}.
    *
-   * <p>It is left wrong ON PURPOSE. The only annotation that expresses element-nullability here,
-   * {@code @ArraySchema(schema = @Schema(types = {"object","null"}))}, was tried and it DESTROYS the
-   * $ref — items collapse to a bare {@code {"type":["object","null"]}} and the entire
-   * BankAnalysisCell shape disappears from the spec and the generated TS. That trades a wrong
-   * nullability claim for total blindness about the element, which is the exact blindness this D3
-   * conversion exists to remove. Keeping the $ref is the better of two imperfect options.
-   *
-   * <p>Consumers must treat a cell as possibly null. If springdoc later supports a $ref-preserving
-   * nullable-items form, fix it here.
+   * <p>⚠️ Do NOT "fix" this with {@code @ArraySchema(schema = @Schema(types = {"object","null"}))}.
+   * That was tried (2026-07-30) and it DESTROYS the $ref — items collapse to a bare
+   * {@code {"type":["object","null"]}} and the entire BankAnalysisCell shape disappears from the
+   * spec and the generated TS, trading a precise contract for total blindness about the element.
+   * Nullability on the referenced record is the correct seam here.
    */
   public record BankAnalysisRow(OffsetDateTime bucket, List<BankAnalysisCell> cells) {}
 

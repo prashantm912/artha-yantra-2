@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
 import java.math.BigDecimal;
@@ -30,8 +31,11 @@ public class ScreenerService {
       BigDecimal latestClose,
       BigDecimal pastClose,
       BigDecimal value,
+      @Schema(types = {"number", "null"})
       BigDecimal avgVolume,
+      @Schema(types = {"number", "null"})
       BigDecimal distanceFromHigh52w,
+      @Schema(types = {"string", "null"})
       String label) {}
 
   /** The B-1 explicit-filter set (all optional). */

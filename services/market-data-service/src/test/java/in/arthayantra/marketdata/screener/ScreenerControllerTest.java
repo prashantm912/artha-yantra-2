@@ -8,7 +8,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -27,7 +26,7 @@ class ScreenerControllerTest {
 
   @Test
   void clampsNegativeLimitAndOffsetToZero() {
-    Map<String, Object> result = screen(-5, -10);
+    ScreenerController.ScreenerResponse result = screen(-5, -10);
     ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
     ArgumentCaptor<Integer> offset = ArgumentCaptor.forClass(Integer.class);
 
@@ -35,12 +34,13 @@ class ScreenerControllerTest {
 
     assertThat(limit.getValue()).isZero();
     assertThat(offset.getValue()).isZero();
-    assertThat(result).containsEntry("limit", 0).containsEntry("offset", 0);
+    assertThat(result.limit()).isZero();
+    assertThat(result.offset()).isZero();
   }
 
   @Test
   void passesLimitAndOffsetWithinBoundsThrough() {
-    Map<String, Object> result = screen(25, 50);
+    ScreenerController.ScreenerResponse result = screen(25, 50);
     ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
     ArgumentCaptor<Integer> offset = ArgumentCaptor.forClass(Integer.class);
 
@@ -48,12 +48,13 @@ class ScreenerControllerTest {
 
     assertThat(limit.getValue()).isEqualTo(25);
     assertThat(offset.getValue()).isEqualTo(50);
-    assertThat(result).containsEntry("limit", 25).containsEntry("offset", 50);
+    assertThat(result.limit()).isEqualTo(25);
+    assertThat(result.offset()).isEqualTo(50);
   }
 
   @Test
   void clampsLimitAboveMaximumToFiveHundred() {
-    Map<String, Object> result = screen(1000, 0);
+    ScreenerController.ScreenerResponse result = screen(1000, 0);
     ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
     ArgumentCaptor<Integer> offset = ArgumentCaptor.forClass(Integer.class);
 
@@ -61,10 +62,11 @@ class ScreenerControllerTest {
 
     assertThat(limit.getValue()).isEqualTo(500);
     assertThat(offset.getValue()).isZero();
-    assertThat(result).containsEntry("limit", 500).containsEntry("offset", 0);
+    assertThat(result.limit()).isEqualTo(500);
+    assertThat(result.offset()).isZero();
   }
 
-  private Map<String, Object> screen(int limit, int offset) {
+  private ScreenerController.ScreenerResponse screen(int limit, int offset) {
     return controller.screen(
         null, null, null, null, null, null, null, null, null, limit, offset);
   }

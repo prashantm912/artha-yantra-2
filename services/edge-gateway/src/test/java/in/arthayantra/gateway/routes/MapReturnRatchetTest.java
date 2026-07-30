@@ -81,11 +81,48 @@ class MapReturnRatchetTest {
    * name, nesting level and value type unchanged — so the wire is identical and only the SPEC
    * gained the shape. The two comments the old assembler carried ("Map return ⇒ this key never
    * drifts the contract") described exactly the blindness this ratchet exists to remove.
+   *
+   * <p>market-data-service 26 → 16 (2026-07-30): every SINGLE-handler controller — {@code
+   * WorldIndices} / {@code UpstoxEntitlement} / {@code FuturesPreOpen} / {@code
+   * ContinuousFuturesAdmin} / {@code OiBuzz} / {@code Announcement} / {@code IvAnalytics} /
+   * {@code Subscriptions} / {@code Screener} / {@code OptionsChain.history}. All ten were
+   * UNCONDITIONAL (every key {@code put} on every path), so no response gained or lost a key.
+   * TWO needed no new record at all — {@code UpstoxAnalyticsClient.Entitlement} and {@code
+   * FuturesPreOpen} already carried exactly the same components, by name and type, in the same
+   * sequence the old {@code Map.of} listed them, so that call was a field-for-field re-emission of
+   * a record that already existed.
+   *
+   * <p>⚠️ SECOND-ORDER EFFECT, missed on the first cut and caught by cross-vendor review: typing an
+   * ENVELOPE pulls its ITEM schema into the spec for the first time. Those item records had never
+   * been enumerated, so none of them declared nullability, and five ({@code PreOpenRow},
+   * {@code WorldIndex}, {@code ScreenerService.Row}, {@code Announcement},
+   * {@code OptionsSnapshotRepository.SnapshotRow}) would have published nullable fields as
+   * NON-NULLABLE — a lie in the generated TS, not merely a missing annotation. Precisely: a record
+   * component is always PRESENT, so {@code required} is correct and must stay; what was wrong was
+   * the TYPE, which claimed a value can never be null. The fix is the 3.1 type union, never
+   * dropping {@code required}. They now carry
+   * {@code @Schema(types = {"X", "null"})} on every genuinely nullable component, scoped from the
+   * construction sites and, for {@code SnapshotRow}, from the V006 DDL's NOT NULL set. When
+   * converting an envelope, check the ITEM type's nullability too, not just the envelope's.
+   *
+   * <p>Order: SEVEN came from MULTI-key {@code Map.of}, whose iteration order is JVM-salted — those
+   * are NORMALISED, not preserved, and must not be called byte-identical. The record components
+   * mirror the {@code Map.of} ARGUMENT SEQUENCE, which is not the same thing as an emitted order:
+   * there was no stable emitted order to preserve. {@code WorldIndices},
+   * {@code OiBuzz} and {@code IvAnalytics} were single-key (trivially stable). {@code
+   * Announcement} is the one to watch on any future edit: its wire form deliberately DIFFERS from
+   * {@code AnnouncementService.Feed} — {@code from}/{@code to} are the {@code LocalDate.toString()}
+   * STRING and a null {@code symbol} is emitted as {@code ""} — so the record pins those, rather
+   * than returning {@code Feed} and quietly changing two values.
+   *
+   * <p>The remaining 16 are the two 6-handler analytics controllers ({@code OptionsAnalytics},
+   * {@code FuturesAnalytics}) plus {@code PreOpen} and {@code MarketSurface}. Not yet assessed for
+   * conditional keys — do that BEFORE converting, per the {@code HeroZeroPremium} precedent above.
    */
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
-          "market-data-service", 26,
+          "market-data-service", 16,
           "strategy-signal-service", 4,
           "backtest-service", 7);
 

@@ -2384,6 +2384,11 @@ export interface components {
             priority?: string;
             subscriber?: string;
         };
+        SubscribeResponse: {
+            exchange: string;
+            tradingsymbol: string;
+            effectiveMode: string;
+        };
         PortfolioStat: {
             /** Format: int32 */
             slots: number;
@@ -2628,6 +2633,10 @@ export interface components {
             /** Format: date */
             to?: string;
         };
+        IvRollupResponse: {
+            /** Format: int32 */
+            recomputed: number;
+        };
         MarginLeg: {
             exchange?: string;
             underlying?: string;
@@ -2716,6 +2725,12 @@ export interface components {
             /** Format: date */
             date?: string;
         };
+        ContinuousBackfillResponse: {
+            root: string;
+            contSymbol: string;
+            /** Format: int32 */
+            contracts: number;
+        };
         DownloadRequest: {
             exchange?: string;
             symbol?: string;
@@ -2759,6 +2774,25 @@ export interface components {
             /** Format: date-time */
             tokenValidUntil: string;
         };
+        WorldIndex: {
+            name: string | null;
+            country: string | null;
+            key: string;
+            tradingSymbol: string | null;
+            ltp: number | null;
+            prevClose: number | null;
+            netChange: number | null;
+            changePct: number | null;
+            open: number | null;
+            high: number | null;
+            low: number | null;
+            /** Format: date-time */
+            asOf: string | null;
+            latency: string | null;
+        };
+        WorldIndicesResponse: {
+            items: components["schemas"]["WorldIndex"][];
+        };
         VixQuote: {
             ltp: number;
             dayHigh: number | null;
@@ -2794,6 +2828,23 @@ export interface components {
             priority: "PINNED_INDEX" | "STRATEGY" | "UI" | "SPECULATIVE";
             /** Format: int32 */
             subscribers: number;
+        };
+        Row: {
+            exchange: string;
+            tradingsymbol: string;
+            latestClose: number;
+            pastClose: number;
+            value: number;
+            avgVolume: number | null;
+            distanceFromHigh52w: number | null;
+            label: string | null;
+        };
+        ScreenerResponse: {
+            items: components["schemas"]["Row"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
         };
         MinerviniBacktestResult: {
             status: string;
@@ -3292,6 +3343,44 @@ export interface components {
             ce: components["schemas"]["Leg"];
             pe: components["schemas"]["Leg"];
         };
+        ChainHistoryResponse: {
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            /** Format: date-time */
+            ts: string;
+            rows: components["schemas"]["SnapshotRow"][];
+        };
+        SnapshotRow: {
+            /** Format: date-time */
+            ts: string;
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            strike: number;
+            optionType: string;
+            tradingsymbol: string;
+            ltp: number | null;
+            bid: number | null;
+            ask: number | null;
+            /** Format: int64 */
+            volume: number | null;
+            /** Format: int64 */
+            oi: number | null;
+            /** Format: int64 */
+            oiChange: number | null;
+            spotPrice: number | null;
+            iv: number | null;
+            delta: number | null;
+            gamma: number | null;
+            theta: number | null;
+            vega: number | null;
+            rho: number | null;
+            ivReason: string | null;
+            priceSource: string | null;
+            forwardPrice: number | null;
+            riskFreeRate: number | null;
+        };
         ChainTable: {
             underlying: string;
             /** Format: date */
@@ -3580,6 +3669,31 @@ export interface components {
             /** Format: date-time */
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
+        };
+        FuturesPreOpen: {
+            phase: string;
+            preOpen: boolean;
+            /** Format: date-time */
+            asOf: string;
+            /** Format: int32 */
+            advances: number;
+            /** Format: int32 */
+            declines: number;
+            /** Format: int32 */
+            unchanged: number;
+            stocks: components["schemas"]["PreOpenRow"][];
+            indices: components["schemas"]["PreOpenRow"][];
+        };
+        PreOpenRow: {
+            symbol: string;
+            preOpenPrice: number | null;
+            prevClose: number | null;
+            change: number | null;
+            changePct: number | null;
+            prevDayBreak: string | null;
+        };
+        OiBuzzIndicesResponse: {
+            items: string[];
         };
         MoverRow: {
             tradingsymbol: string;
@@ -3889,6 +4003,21 @@ export interface components {
             deliveryQty: number | null;
             /** Format: int64 */
             totalTradedQty: number | null;
+        };
+        Announcement: {
+            date: string;
+            time: string;
+            symbol: string;
+            company: string | null;
+            subject: string | null;
+            detail: string | null;
+            fileLink: string | null;
+        };
+        AnnouncementsResponse: {
+            items: components["schemas"]["Announcement"][];
+            from: string;
+            to: string;
+            symbol: string;
         };
         BhavcopyBackfillStatus: {
             jobId: string | null;
@@ -4398,6 +4527,12 @@ export interface components {
             /** Format: int32 */
             remaining: number;
         };
+        Entitlement: {
+            covered: boolean;
+            /** Format: int32 */
+            httpStatus: number;
+            detail: string;
+        };
         OiBackfillStatus: {
             jobId: string | null;
             state: string;
@@ -4875,9 +5010,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SubscribeResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5295,9 +5428,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["IvRollupResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5621,9 +5752,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ContinuousBackfillResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5879,9 +6008,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["WorldIndicesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6015,9 +6142,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ScreenerResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7272,9 +7397,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ChainHistoryResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7827,9 +7950,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FuturesPreOpen"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7895,9 +8016,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OiBuzzIndicesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8723,9 +8842,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["AnnouncementsResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -9171,9 +9288,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Entitlement"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

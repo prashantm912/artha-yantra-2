@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.options;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
@@ -26,22 +27,39 @@ public class OptionsSnapshotRepository {
       BigDecimal strike,
       String optionType,
       String tradingsymbol,
+      @Schema(types = {"number", "null"})
       BigDecimal ltp,
+      @Schema(types = {"number", "null"})
       BigDecimal bid,
+      @Schema(types = {"number", "null"})
       BigDecimal ask,
+      @Schema(types = {"integer", "null"})
       Long volume,
+      @Schema(types = {"integer", "null"})
       Long oi,
+      @Schema(types = {"integer", "null"})
       Long oiChange,
+      @Schema(types = {"number", "null"})
       BigDecimal spotPrice,
+      @Schema(types = {"number", "null"})
       BigDecimal iv,
+      @Schema(types = {"number", "null"})
       BigDecimal delta,
+      @Schema(types = {"number", "null"})
       BigDecimal gamma,
+      @Schema(types = {"number", "null"})
       BigDecimal theta,
+      @Schema(types = {"number", "null"})
       BigDecimal vega,
+      @Schema(types = {"number", "null"})
       BigDecimal rho,
+      @Schema(types = {"string", "null"})
       String ivReason,
+      @Schema(types = {"string", "null"})
       String priceSource,
+      @Schema(types = {"number", "null"})
       BigDecimal forwardPrice,
+      @Schema(types = {"number", "null"})
       BigDecimal riskFreeRate) {}
 
   private final JdbcTemplate jdbc;

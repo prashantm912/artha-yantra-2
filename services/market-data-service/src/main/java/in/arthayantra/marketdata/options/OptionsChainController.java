@@ -53,7 +53,7 @@ public class OptionsChainController {
 
   /** The stored snapshot nearest to {@code at} (defaults to now). */
   @GetMapping("/chain/history")
-  public Map<String, Object> history(
+  public ChainHistoryResponse history(
       @RequestParam String underlying,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
           LocalDate expiry,
@@ -71,9 +71,19 @@ public class OptionsChainController {
                         "no stored snapshot for " + underlying + " " + resolvedExpiry));
     List<OptionsSnapshotRepository.SnapshotRow> rows =
         snapshotRepository.rowsAt(underlying, resolvedExpiry, ts);
-    return Map.of(
-        "underlying", underlying, "expiry", resolvedExpiry, "ts", ts, "rows", rows);
+    return new ChainHistoryResponse(underlying, resolvedExpiry, ts, rows);
   }
+
+  /**
+   * One stored chain snapshot. {@code expiry}/{@code ts} were emitted as the raw
+   * {@code LocalDate}/{@code OffsetDateTime} (Jackson-serialised), so the types are unchanged.
+   * Multi-key {@code Map.of} before D3 — order NORMALISED, not preserved.
+   */
+  public record ChainHistoryResponse(
+      String underlying,
+      LocalDate expiry,
+      OffsetDateTime ts,
+      List<OptionsSnapshotRepository.SnapshotRow> rows) {}
 
   /** Manual snapshot trigger — 202 + jobId. */
   @PostMapping("/snapshot")

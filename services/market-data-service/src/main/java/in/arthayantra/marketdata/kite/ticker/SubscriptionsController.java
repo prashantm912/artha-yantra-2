@@ -38,7 +38,7 @@ public class SubscriptionsController {
 
   /** Adds (or raises) a hold; defaults: mode quote, priority UI, subscriber "ui". */
   @PostMapping
-  public Map<String, Object> subscribe(@RequestBody SubscribeRequest request) {
+  public SubscribeResponse subscribe(@RequestBody SubscribeRequest request) {
     SubscriptionMode mode =
         SubscriptionMode.fromWireName(request.mode() == null ? "quote" : request.mode());
     if (mode == null) {
@@ -66,11 +66,15 @@ public class SubscriptionsController {
             new InstrumentKey(request.exchange(), request.tradingsymbol()),
             mode,
             priority);
-    return Map.of(
-        "exchange", request.exchange(),
-        "tradingsymbol", request.tradingsymbol(),
-        "effectiveMode", effective.wireName());
+    return new SubscribeResponse(
+        request.exchange(), request.tradingsymbol(), effective.wireName());
   }
+
+  /**
+   * Subscribe receipt. {@code effectiveMode} is the mode the registry actually granted, which can
+   * differ from the requested one. Multi-key {@code Map.of} before D3 — order NORMALISED.
+   */
+  public record SubscribeResponse(String exchange, String tradingsymbol, String effectiveMode) {}
 
   /** Releases one subscriber's hold. */
   @DeleteMapping

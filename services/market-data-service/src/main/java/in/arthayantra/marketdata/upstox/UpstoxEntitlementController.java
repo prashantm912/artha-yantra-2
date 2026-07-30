@@ -2,7 +2,6 @@ package in.arthayantra.marketdata.upstox;
 
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
-import java.util.Map;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,7 +28,7 @@ public class UpstoxEntitlementController {
 
   /** Probes the live Upstox Market-Information entitlement — {@code {covered, httpStatus, detail}}. */
   @GetMapping("/upstox-entitlement")
-  public Map<String, Object> entitlement() {
+  public UpstoxAnalyticsClient.Entitlement entitlement() {
     UpstoxAnalyticsClient resolved = client.getIfAvailable();
     if (resolved == null) {
       throw new ApiException(
@@ -37,7 +36,6 @@ public class UpstoxEntitlementController {
           ErrorCodes.NOT_CONFIGURED,
           "Upstox analytics not configured (needs the live profile + artha.upstox.analytics.enabled=true)");
     }
-    UpstoxAnalyticsClient.Entitlement e = resolved.probe();
-    return Map.of("covered", e.covered(), "httpStatus", e.httpStatus(), "detail", e.detail());
+    return resolved.probe();
   }
 }

@@ -328,8 +328,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SubscribeResponse"
                 }
               }
             }
@@ -879,8 +878,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/IvRollupResponse"
                 }
               }
             }
@@ -1262,8 +1260,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ContinuousBackfillResponse"
                 }
               }
             }
@@ -1537,8 +1534,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/WorldIndicesResponse"
                 }
               }
             }
@@ -1746,8 +1742,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ScreenerResponse"
                 }
               }
             }
@@ -3798,8 +3793,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/ChainHistoryResponse"
                 }
               }
             }
@@ -4611,8 +4605,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/FuturesPreOpen"
                 }
               }
             }
@@ -4707,8 +4700,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/OiBuzzIndicesResponse"
                 }
               }
             }
@@ -5869,8 +5861,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/AnnouncementsResponse"
                 }
               }
             }
@@ -6494,8 +6485,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Entitlement"
                 }
               }
             }
@@ -7256,6 +7246,21 @@
           }
         }
       },
+      "SubscribeResponse" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "effectiveMode" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "effectiveMode", "exchange", "tradingsymbol" ]
+      },
       "PortfolioStat" : {
         "type" : "object",
         "properties" : {
@@ -7917,6 +7922,16 @@
           }
         }
       },
+      "IvRollupResponse" : {
+        "type" : "object",
+        "properties" : {
+          "recomputed" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "recomputed" ]
+      },
       "MarginLeg" : {
         "type" : "object",
         "properties" : {
@@ -8155,6 +8170,22 @@
           }
         }
       },
+      "ContinuousBackfillResponse" : {
+        "type" : "object",
+        "properties" : {
+          "root" : {
+            "type" : "string"
+          },
+          "contSymbol" : {
+            "type" : "string"
+          },
+          "contracts" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "contSymbol", "contracts", "root" ]
+      },
       "DownloadRequest" : {
         "type" : "object",
         "properties" : {
@@ -8267,6 +8298,64 @@
         },
         "required" : [ "connected", "kiteUserId", "tokenValidUntil" ]
       },
+      "WorldIndex" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : [ "string", "null" ]
+          },
+          "country" : {
+            "type" : [ "string", "null" ]
+          },
+          "key" : {
+            "type" : "string"
+          },
+          "tradingSymbol" : {
+            "type" : [ "string", "null" ]
+          },
+          "ltp" : {
+            "type" : [ "number", "null" ]
+          },
+          "prevClose" : {
+            "type" : [ "number", "null" ]
+          },
+          "netChange" : {
+            "type" : [ "number", "null" ]
+          },
+          "changePct" : {
+            "type" : [ "number", "null" ]
+          },
+          "open" : {
+            "type" : [ "number", "null" ]
+          },
+          "high" : {
+            "type" : [ "number", "null" ]
+          },
+          "low" : {
+            "type" : [ "number", "null" ]
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "latency" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "asOf", "changePct", "country", "high", "key", "latency", "low", "ltp", "name", "netChange", "open", "prevClose", "tradingSymbol" ]
+      },
+      "WorldIndicesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorldIndex"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
       "VixQuote" : {
         "type" : "object",
         "properties" : {
@@ -8356,6 +8445,56 @@
           }
         },
         "required" : [ "exchange", "instrumentToken", "mode", "priority", "subscribers", "tradingsymbol" ]
+      },
+      "Row" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "latestClose" : {
+            "type" : "number"
+          },
+          "pastClose" : {
+            "type" : "number"
+          },
+          "value" : {
+            "type" : "number"
+          },
+          "avgVolume" : {
+            "type" : [ "number", "null" ]
+          },
+          "distanceFromHigh52w" : {
+            "type" : [ "number", "null" ]
+          },
+          "label" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "avgVolume", "distanceFromHigh52w", "exchange", "label", "latestClose", "pastClose", "tradingsymbol", "value" ]
+      },
+      "ScreenerResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Row"
+            }
+          },
+          "limit" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "offset" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "items", "limit", "offset" ]
       },
       "MinerviniBacktestResult" : {
         "type" : "object",
@@ -9785,6 +9924,109 @@
         },
         "required" : [ "ce", "pe", "strike" ]
       },
+      "ChainHistoryResponse" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "ts" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SnapshotRow"
+            }
+          }
+        },
+        "required" : [ "expiry", "rows", "ts", "underlying" ]
+      },
+      "SnapshotRow" : {
+        "type" : "object",
+        "properties" : {
+          "ts" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "strike" : {
+            "type" : "number"
+          },
+          "optionType" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : [ "number", "null" ]
+          },
+          "bid" : {
+            "type" : [ "number", "null" ]
+          },
+          "ask" : {
+            "type" : [ "number", "null" ]
+          },
+          "volume" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "spotPrice" : {
+            "type" : [ "number", "null" ]
+          },
+          "iv" : {
+            "type" : [ "number", "null" ]
+          },
+          "delta" : {
+            "type" : [ "number", "null" ]
+          },
+          "gamma" : {
+            "type" : [ "number", "null" ]
+          },
+          "theta" : {
+            "type" : [ "number", "null" ]
+          },
+          "vega" : {
+            "type" : [ "number", "null" ]
+          },
+          "rho" : {
+            "type" : [ "number", "null" ]
+          },
+          "ivReason" : {
+            "type" : [ "string", "null" ]
+          },
+          "priceSource" : {
+            "type" : [ "string", "null" ]
+          },
+          "forwardPrice" : {
+            "type" : [ "number", "null" ]
+          },
+          "riskFreeRate" : {
+            "type" : [ "number", "null" ]
+          }
+        },
+        "required" : [ "ask", "bid", "delta", "expiry", "forwardPrice", "gamma", "iv", "ivReason", "ltp", "oi", "oiChange", "optionType", "priceSource", "rho", "riskFreeRate", "spotPrice", "strike", "theta", "tradingsymbol", "ts", "underlying", "vega", "volume" ]
+      },
       "ChainTable" : {
         "type" : "object",
         "properties" : {
@@ -10602,6 +10844,82 @@
           }
         },
         "required" : [ "asOf", "items" ]
+      },
+      "FuturesPreOpen" : {
+        "type" : "object",
+        "properties" : {
+          "phase" : {
+            "type" : "string"
+          },
+          "preOpen" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "advances" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "declines" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "unchanged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "stocks" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PreOpenRow"
+            }
+          },
+          "indices" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PreOpenRow"
+            }
+          }
+        },
+        "required" : [ "advances", "asOf", "declines", "indices", "phase", "preOpen", "stocks", "unchanged" ]
+      },
+      "PreOpenRow" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "preOpenPrice" : {
+            "type" : [ "number", "null" ]
+          },
+          "prevClose" : {
+            "type" : [ "number", "null" ]
+          },
+          "change" : {
+            "type" : [ "number", "null" ]
+          },
+          "changePct" : {
+            "type" : [ "number", "null" ]
+          },
+          "prevDayBreak" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "change", "changePct", "preOpenPrice", "prevClose", "prevDayBreak", "symbol" ]
+      },
+      "OiBuzzIndicesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "items" ]
       },
       "MoverRow" : {
         "type" : "object",
@@ -11501,6 +11819,54 @@
           }
         },
         "required" : [ "close", "date", "dayRange", "dayRangePct", "deliveryPct", "deliveryQty", "high", "low", "ltpChangePct", "open", "totalTradedQty" ]
+      },
+      "Announcement" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string"
+          },
+          "time" : {
+            "type" : "string"
+          },
+          "symbol" : {
+            "type" : "string"
+          },
+          "company" : {
+            "type" : [ "string", "null" ]
+          },
+          "subject" : {
+            "type" : [ "string", "null" ]
+          },
+          "detail" : {
+            "type" : [ "string", "null" ]
+          },
+          "fileLink" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "company", "date", "detail", "fileLink", "subject", "symbol", "time" ]
+      },
+      "AnnouncementsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Announcement"
+            }
+          },
+          "from" : {
+            "type" : "string"
+          },
+          "to" : {
+            "type" : "string"
+          },
+          "symbol" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "from", "items", "symbol", "to" ]
       },
       "BhavcopyBackfillStatus" : {
         "type" : "object",
@@ -12963,6 +13329,22 @@
           }
         },
         "required" : [ "max", "remaining", "used", "window" ]
+      },
+      "Entitlement" : {
+        "type" : "object",
+        "properties" : {
+          "covered" : {
+            "type" : "boolean"
+          },
+          "httpStatus" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "detail" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "covered", "detail", "httpStatus" ]
       },
       "OiBackfillStatus" : {
         "type" : "object",

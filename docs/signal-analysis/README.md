@@ -25,7 +25,9 @@ and as new sections in the findings template, so later sessions measure them too
 | when | what |
 |---|---|
 | **During market hours (optional, live)** | Data-health spot-checks + live counterfactual watch (§4). Read-only — never restart services / never write to live tables during a session. |
-| **After every session (EOD)** | Run the §3 standard pass → write `YYYY-MM-DD-session-findings.md` from the template (§5). ~30 min. |
+| **After every session (EOD)** | FIRST run the two mechanical pre-checks (below), then the §3 standard pass → write `YYYY-MM-DD-session-findings.md` from the template (§5). ~30 min. |
+| **EOD pre-check 1** | `python tools/ledger-consistency-check.py` — cross-greps the ledger, newest pickup sheet and recent findings docs for contradictions (an item claimed startable that already shipped, a chip OPEN here and DONE there, a promotion that never landed). Copy any REVIEW lines into findings §6 and resolve or explain them. Exists because a false STARTABLE sat in the ledger for 19 days (§9-03/B17) and cost a work lane before being caught by hand. |
+| **EOD pre-check 2** | `python tools/published-config-drift.py` — every published strategy's tags + exit_rules vs the repo YAML, plus latest-row≠published (the #1016 signal). Findings go to §7 as republish PROPOSALS with the GAINS/LOSES diff — the routine never publishes. Exists because task_76d8f2a4 ran a months-stale config silently. |
 | **Every ~5 sessions (or on owner ask)** | Multi-session rollup: stack the per-session tables, look for rails/dots that are dead or binding across ALL sessions (structural) vs day-dependent (regime). Structural → tune now; regime → collect more. |
 | **Periodic tuning pass (owner-gated)** | Apply the tunes (YAML `scalper.params.*` / `artha.scalper.oi.*` props / code where needed) one PR per knob-family, then measure the NEXT sessions against the tuned baseline. Record before/after in the rollup. |
 
@@ -440,7 +442,55 @@ Run in order; each answers one question. Canned SQL in §6.
     WHERE r.generated_at >= :d0 AND r.diagnostic->'context'->'macro'->>:field IS NOT NULL
     GROUP BY 1 ORDER BY 1;
     ```
-29. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+29. **UNEXERCISED-PATH audit** (added 2026-07-31) — which ARMED exit rules and gates have NEVER
+    fired? An armed-but-never-fired path is unverified code sitting on the money path: T24's exit
+    radius was armed for weeks with zero `CONFLUENCE_FLIP` closes platform-wide, and on 2026-07-30
+    `take_profit` was armed on **36** published strategies with **ZERO** TP closes since 07-01 (the
+    T21 +35% bracket never once paid in a month — that is a strategy-data finding, not a bug).
+    Compare armed exit types (published configs) against the fired vocabulary:
+
+    ```sql
+    -- fired vocabulary over the window
+    SELECT close_reason, count(*) FROM strategy.paper_positions
+    WHERE closed_at >= :d0 GROUP BY 1 ORDER BY 2 DESC;
+    -- armed exit types across ENABLED published configs
+    SELECT r->>'type' AS armed_type, count(*) AS strategies
+    FROM strategy.strategies s
+    JOIN strategy.strategy_versions v ON v.id = s.published_version_id,
+         jsonb_array_elements((v.config->'exit_rules')::jsonb) r
+    WHERE s.enabled GROUP BY 1 ORDER BY 2 DESC;
+    ```
+
+    Report the SET DIFFERENCE (armed type with zero fires) every post-market run, with the day's
+    delta. Type→reason mapping is mostly `UPPER(type)`; `oi-confluence-exit` fires as
+    `CONFLUENCE_FLIP`. A type that has never fired is either (a) genuinely unreachable this regime
+    (say so, with the nearest-miss distance), (b) mis-wired (the T24 class), or (c) shadowed by an
+    earlier rule that always wins (`time_stop` at 30 min ate every exit in the G11 analysis) —
+    distinguish, never just count.
+
+30. **Sub-account FREEZE telemetry** (added 2026-07-31) — the #1086 capital governors freeze a
+    sub-account for the rest of the session after a loss threshold; on their FIRST live day 3 of 5
+    froze by 13:40 and a 6th entry would have found 4/5 frozen. Whether that is protection or
+    capacity starvation is a data question, and it needs a daily row, not an anecdote:
+
+    ```sql
+    -- per sub-account: last open, entries, realized PnL — a "last open" hours before close on a
+    -- day with later would-have-fired rows = frozen capacity
+    SELECT subaccount_idx,
+           count(*) FILTER (WHERE opened_at >= :d0)                    AS opens,
+           to_char(max(opened_at) AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS last_open_ist,
+           round(sum(realized_pnl) FILTER (WHERE closed_at >= :d0), 2) AS day_pnl
+    FROM strategy.paper_positions
+    WHERE opened_at >= :d0 OR closed_at >= :d0
+    GROUP BY 1 ORDER BY 1;
+    ```
+
+    Track `frozen-by` time per idx across sessions. If the median freeze lands before 13:00 for a
+    week, the governors are the binding entry constraint — that goes to the owner as a
+    capacity-vs-protection decision with the counterfactual P&L of the entries they blocked
+    (§3.26 pipeline), not as a tuning proposal.
+
+31. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

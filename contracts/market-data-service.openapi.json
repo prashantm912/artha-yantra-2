@@ -4667,8 +4667,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/FutOiChart"
                 }
               }
             }
@@ -4804,8 +4803,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/FutAnalysisResponse"
                 }
               }
             }
@@ -4869,8 +4867,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/FutAnalysisSeriesResponse"
                 }
               }
             }
@@ -4991,8 +4988,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/Screen"
                 }
               }
             }
@@ -5042,8 +5038,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/EodResponse"
                 }
               }
             }
@@ -5271,8 +5266,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/BankAnalysisResponse"
                 }
               }
             }
@@ -11042,6 +11036,65 @@
         },
         "required" : [ "change", "changePct", "preOpenPrice", "prevClose", "prevDayBreak", "symbol" ]
       },
+      "FutOiCandle" : {
+        "type" : "object",
+        "properties" : {
+          "time" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "open" : {
+            "type" : "number"
+          },
+          "high" : {
+            "type" : "number"
+          },
+          "low" : {
+            "type" : "number"
+          },
+          "close" : {
+            "type" : "number"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          }
+        },
+        "required" : [ "close", "high", "low", "oi", "open", "time", "volume" ]
+      },
+      "FutOiChart" : {
+        "type" : "object",
+        "properties" : {
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FutOiCandle"
+            }
+          }
+        },
+        "required" : [ "asOf", "expiry", "interval", "items", "tradingsymbol", "underlying" ]
+      },
       "OiBuzzIndicesResponse" : {
         "type" : "object",
         "properties" : {
@@ -11053,6 +11106,87 @@
           }
         },
         "required" : [ "items" ]
+      },
+      "FutAnalysisResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FutPoint"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "FutPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : [ "number", "null" ]
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "dayOpen" : {
+            "type" : [ "number", "null" ]
+          },
+          "dayHigh" : {
+            "type" : [ "number", "null" ]
+          },
+          "dayLow" : {
+            "type" : [ "number", "null" ]
+          },
+          "prevClose" : {
+            "type" : [ "number", "null" ]
+          },
+          "volume" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        },
+        "required" : [ "bucket", "dayHigh", "dayLow", "dayOpen", "expiry", "ltp", "oi", "oiChange", "prevClose", "tradingsymbol", "underlying", "volume" ]
+      },
+      "FutAnalysisSeriesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FutPoint"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "interval", "items", "underlying" ]
       },
       "MoverRow" : {
         "type" : "object",
@@ -11109,6 +11243,122 @@
           }
         },
         "required" : [ "asOf", "gainers", "losers" ]
+      },
+      "Screen" : {
+        "type" : "object",
+        "properties" : {
+          "longCandidates" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ScreenerRow"
+            }
+          },
+          "shortCandidates" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ScreenerRow"
+            }
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "longCandidates", "shortCandidates" ]
+      },
+      "ScreenerRow" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : "number"
+          },
+          "pricePct" : {
+            "type" : [ "number", "null" ]
+          },
+          "oiPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "interpretation" : {
+            "type" : "string",
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          },
+          "breakoutDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openHigh" : {
+            "type" : "boolean"
+          },
+          "openLow" : {
+            "type" : "boolean"
+          },
+          "dailyRsi" : {
+            "type" : [ "number", "null" ]
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "longCandidate" : {
+            "type" : "boolean"
+          },
+          "shortCandidate" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "breakoutDays", "dailyRsi", "interpretation", "longCandidate", "ltp", "oiPct", "openHigh", "openLow", "pricePct", "shortCandidate", "symbol", "volume" ]
+      },
+      "EodResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EodRow"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "EodRow" : {
+        "type" : "object",
+        "properties" : {
+          "tradingsymbol" : {
+            "type" : "string"
+          },
+          "tradeDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "open" : {
+            "type" : [ "number", "null" ]
+          },
+          "high" : {
+            "type" : [ "number", "null" ]
+          },
+          "low" : {
+            "type" : [ "number", "null" ]
+          },
+          "close" : {
+            "type" : [ "number", "null" ]
+          },
+          "oiClose" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "close", "high", "low", "oiChange", "oiClose", "open", "tradeDate", "tradingsymbol", "volume" ]
       },
       "BuzzMatrix" : {
         "type" : "object",
@@ -11245,6 +11495,66 @@
           }
         },
         "required" : [ "expiry", "interpretation", "ltp", "oi", "oiChange", "oiPct", "pricePct", "tradingsymbol", "underlying" ]
+      },
+      "BankAnalysisCell" : {
+        "type" : [ "object", "null" ],
+        "properties" : {
+          "bank" : {
+            "type" : "string"
+          },
+          "ltpPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "oiPct" : {
+            "type" : [ "number", "null" ]
+          },
+          "interpretation" : {
+            "type" : [ "string", "null" ],
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+          }
+        },
+        "required" : [ "bank", "interpretation", "ltpPct", "oiPct" ]
+      },
+      "BankAnalysisResponse" : {
+        "type" : "object",
+        "properties" : {
+          "banks" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "rows" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BankAnalysisRow"
+            }
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "banks", "interval", "rows" ]
+      },
+      "BankAnalysisRow" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "cells" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BankAnalysisCell"
+            }
+          }
+        },
+        "required" : [ "bucket", "cells" ]
       },
       "EquityFundamentals" : {
         "type" : "object",

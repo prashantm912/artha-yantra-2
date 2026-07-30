@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.futures.analytics;
 
 import in.arthayantra.marketdata.options.OiInterpretation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -35,15 +36,51 @@ public class FuturesBankAnalysisService {
   private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
   /** One bank's cell at one interval: cumulative LTP% / OI% + the per-interval 4-state interpretation. */
+  @Schema(types = {"object", "null"})
   public record BankAnalysisCell(
-      String bank, BigDecimal ltpPct, BigDecimal oiPct, OiInterpretation interpretation) {}
+      String bank,
+      @Schema(types = {"number", "null"}) BigDecimal ltpPct,
+      @Schema(types = {"number", "null"}) BigDecimal oiPct,
+      @Schema(types = {"string", "null"}) OiInterpretation interpretation) {}
 
-  /** One matrix row: a snapshot bucket + a cell per bank in the configured column order (null = absent). */
+  /**
+   * One matrix row: a snapshot bucket + a cell per bank in the configured column order.
+   *
+   * <p>⚠️ KNOWN CONTRACT GAP, deliberate: {@code cells} contains NULL ELEMENTS — line ~123 does
+   * {@code cells.add(byBank.get(bank).get(b))}, which is null when that bank has no point at this
+   * bucket, and positional alignment with {@code banks} is the whole point of the matrix so the nulls
+   * cannot be filtered out. The emitted schema says {@code items: $ref BankAnalysisCell}, i.e. it
+   * claims every element is present. That is WRONG at runtime.
+   *
+   * <p>It is left wrong ON PURPOSE. The only annotation that expresses element-nullability here,
+   * {@code @ArraySchema(schema = @Schema(types = {"object","null"}))}, was tried and it DESTROYS the
+   * $ref — items collapse to a bare {@code {"type":["object","null"]}} and the entire
+   * BankAnalysisCell shape disappears from the spec and the generated TS. That trades a wrong
+   * nullability claim for total blindness about the element, which is the exact blindness this D3
+   * conversion exists to remove. Keeping the $ref is the better of two imperfect options.
+   *
+   * <p>Consumers must treat a cell as possibly null. If springdoc later supports a $ref-preserving
+   * nullable-items form, fix it here.
+   */
   public record BankAnalysisRow(OffsetDateTime bucket, List<BankAnalysisCell> cells) {}
 
   /** The matrix: the ordered bank columns + the newest-first rows + the latest bucket. */
   public record BankAnalysisMatrix(
-      List<String> banks, List<BankAnalysisRow> rows, OffsetDateTime asOf) {}
+      List<String> banks,
+      List<BankAnalysisRow> rows,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
+
+  /** The banks-analysis response, adding the selected interval to the matrix. */
+  public record BankAnalysisResponse(
+      List<String> banks,
+      List<BankAnalysisRow> rows,
+      String interval,
+      @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
+
+  /** Adds the requested interval without moving response-shape assembly into the controller. */
+  public BankAnalysisResponse response(BankAnalysisMatrix matrix, String interval) {
+    return new BankAnalysisResponse(matrix.banks(), matrix.rows(), interval, matrix.asOf());
+  }
 
   /**
    * Pivots a multi-underlying day series into the bank matrix. {@code banks} drives BOTH the column set

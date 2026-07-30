@@ -181,9 +181,9 @@ public class PaperService {
       @Schema(types = {"number", "null"}) BigDecimal target,
       BigDecimal compositeScore,
       OffsetDateTime generatedAt,
-      JsonNode scalperDetail,
-      JsonNode minerviniDetail,
-      JsonNode manasAroraDetail) {}
+      @Schema(types = {"object", "null"}) JsonNode scalperDetail,
+      @Schema(types = {"object", "null"}) JsonNode minerviniDetail,
+      @Schema(types = {"object", "null"}) JsonNode manasAroraDetail) {}
 
   /**
    * The full provenance of one paper position (Phase-2 §6.4/§6.5): the position + live MTM, its F9

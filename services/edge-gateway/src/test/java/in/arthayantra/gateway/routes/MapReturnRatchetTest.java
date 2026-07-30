@@ -115,14 +115,35 @@ class MapReturnRatchetTest {
    * STRING and a null {@code symbol} is emitted as {@code ""} — so the record pins those, rather
    * than returning {@code Feed} and quietly changing two values.
    *
-   * <p>The remaining 16 are the two 6-handler analytics controllers ({@code OptionsAnalytics},
-   * {@code FuturesAnalytics}) plus {@code PreOpen} and {@code MarketSurface}. Not yet assessed for
-   * conditional keys — do that BEFORE converting, per the {@code HeroZeroPremium} precedent above.
+   * <p>market-data-service 16 → 12 (2026-07-30): {@code PreOpenController} status/preOpen and
+   * {@code MarketSurfaceController} status/holidays. {@code preOpen} has TWO return paths but both
+   * emit the SAME three keys, so it is not conditional; it now returns the client's own
+   * {@code UpstoxMarketStatusClient.PreOpen}, which already carried exactly those components, with
+   * the not-configured branch as that same shape empty. {@code MarketSurfaceStatus} keeps its three
+   * {@code ""}-for-null date ternaries verbatim — the pre-D3 {@code Map.of} would have THROWN on a
+   * null, which is why they exist, so those components are correctly non-nullable.
+   *
+   * <p>{@code holidays} is the one worth noting: its ITEM was itself an anonymous
+   * {@code Map<String,Object>}, so a holiday row published as a bare object and NOTHING about it was
+   * enumerated. Now {@code HolidayEntry}. Per the item-schema lesson above, the two newly exposed
+   * item records were audited first: {@code MarketStatus.asOf} is null on the {@code unknown()}
+   * degrade path, and {@code PreOpenIndex}'s four numerics are null when the live tick does not
+   * resolve — both annotated BEFORE their envelopes were typed.
+   *
+   * <p>The remaining 12: {@code FuturesAnalytics} (6) and {@code OptionsAnalytics} (6). ASSESSED
+   * 2026-07-30 — all six FuturesAnalytics handlers and four OptionsAnalytics handlers are
+   * unconditional and convertible (every early exit THROWS rather than returning a partial). TWO are
+   * DELIBERATE STOPS of the {@code HeroZeroPremium} kind, both in {@code OptionsAnalytics}:
+   * {@code oiExpiry} emits 3 keys on the empty path and 4 when populated ({@code asOf}), and
+   * {@code openHighStrategy} emits 3 vs 5 ({@code spot}, {@code asOf}). A record would ADD those
+   * keys as nulls to the empty response — a wire change on a live OI page needing a deliberate
+   * shape decision, not a refactor. {@code openHighStrategy} says so itself: "nullable off-hours
+   * (LinkedHashMap permits null; Map.of would not)". So the floor can reach 2, not 0.
    */
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
-          "market-data-service", 16,
+          "market-data-service", 12,
           "strategy-signal-service", 4,
           "backtest-service", 7);
 

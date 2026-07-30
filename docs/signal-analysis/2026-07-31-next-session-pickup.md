@@ -24,7 +24,9 @@ the board, not the entry track.
 ## Clean, unblocked, startable
 
 - ~~**§9-03 trial-metrics catalog**~~ — **NOT startable; it shipped 2026-07-11** (ledger row B17, PR #712 @ `8e5793bc`; `contracts/metrics/trial-metrics-catalog.json`, 23 metrics). This line was copied forward from a stale ledger claim — verified and corrected 2026-07-30. §9 has no remaining startables.
-- **D3 Map-return burn-down** — counts move nightly; the LEDGER's D3 row is the only authority (hardcoded counts here went stale twice — flagged by tools/ledger-consistency-check.py). Recipe in
+- **D3 Map-return burn-down** — counts move nightly; the LEDGER's D3 row is the only authority (hardcoded counts here went stale twice — flagged by tools/ledger-consistency-check.py). State as of 2026-07-31 morning, in the ledger's words: 8 convertible left (OptionsAnalytics 4 + strategy-signal 4, the latter unblocked now #1137 merged) + 4 assessed HeroZeroPremium-class stops = terminal floor 4.
+- **task_06ad72b6 bhavcopy deadlock** — root-caused (the #1016 fix was mis-scoped; cross-context cached-writer race), fix in PR #1141. If unmerged when you read this, it is review-complete-or-close; check the PR.
+- **E2E-01 runs TODAY 16:20 IST** (scheduled task `e2e-orchestrated-post-close-20260731`; plan doc is the authority). T1 is LOOK-ONLY tonight — mock/live share one compose project, so interactive mutations are a weekend item (T1b). The post-market 15:47 routine now ALSO runs the two new tools + §3.29/§3.30 — expect its summary to carry ledger-consistency, config-drift, never-fired-exit and freeze-telemetry verdicts for the first time. Recipe in
   the D3 ledger row; ⚠️ count the ratchet with `MapReturnRatchetTest`'s own `*Controller.java` regex
   and red-proof the floor (an over-stated one passes green — cost a review round this session).
 - **`task_7f57c0d5`** — `OpeningSignal`'s three nullable `JsonNode` fields.

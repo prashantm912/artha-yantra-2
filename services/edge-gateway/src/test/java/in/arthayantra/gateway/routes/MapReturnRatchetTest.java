@@ -81,11 +81,32 @@ class MapReturnRatchetTest {
    * name, nesting level and value type unchanged — so the wire is identical and only the SPEC
    * gained the shape. The two comments the old assembler carried ("Map return ⇒ this key never
    * drifts the contract") described exactly the blindness this ratchet exists to remove.
+   *
+   * <p>market-data-service 26 → 16 (2026-07-30): every SINGLE-handler controller — {@code
+   * WorldIndices} / {@code UpstoxEntitlement} / {@code FuturesPreOpen} / {@code
+   * ContinuousFuturesAdmin} / {@code OiBuzz} / {@code Announcement} / {@code IvAnalytics} /
+   * {@code Subscriptions} / {@code Screener} / {@code OptionsChain.history}. All ten were
+   * UNCONDITIONAL (every key {@code put} on every path), so no response gained or lost a key.
+   * TWO needed no new record at all — {@code UpstoxAnalyticsClient.Entitlement} and {@code
+   * FuturesPreOpen} already carried exactly the emitted components in the emitted order, so the
+   * old {@code Map.of} was a field-for-field re-emission of a record that already existed.
+   *
+   * <p>Order: eight came from MULTI-key {@code Map.of}, whose iteration order is JVM-salted — those
+   * are NORMALISED, not preserved, and must not be called byte-identical. {@code WorldIndices},
+   * {@code OiBuzz} and {@code IvAnalytics} were single-key (trivially stable). {@code
+   * Announcement} is the one to watch on any future edit: its wire form deliberately DIFFERS from
+   * {@code AnnouncementService.Feed} — {@code from}/{@code to} are the {@code LocalDate.toString()}
+   * STRING and a null {@code symbol} is emitted as {@code ""} — so the record pins those, rather
+   * than returning {@code Feed} and quietly changing two values.
+   *
+   * <p>The remaining 16 are the two 6-handler analytics controllers ({@code OptionsAnalytics},
+   * {@code FuturesAnalytics}) plus {@code PreOpen} and {@code MarketSurface}. Not yet assessed for
+   * conditional keys — do that BEFORE converting, per the {@code HeroZeroPremium} precedent above.
    */
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
-          "market-data-service", 26,
+          "market-data-service", 16,
           "strategy-signal-service", 4,
           "backtest-service", 7);
 

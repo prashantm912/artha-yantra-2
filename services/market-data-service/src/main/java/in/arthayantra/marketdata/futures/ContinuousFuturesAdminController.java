@@ -25,11 +25,14 @@ public class ContinuousFuturesAdminController {
 
   /** Rebuilds {@code {root}-FUT-CONT} — {@code {root, contSymbol, contracts}}. */
   @PostMapping("/futures/continuous-backfill")
-  public Map<String, Object> continuousBackfill(
+  public ContinuousBackfillResponse continuousBackfill(
       @RequestParam(defaultValue = "NIFTY") String root,
       @RequestParam(name = "underlyingExchange", defaultValue = "NSE") String underlyingExchange,
       @RequestParam(name = "underlying", defaultValue = "NIFTY 50") String underlyingDisplay) {
     int contracts = backfill.backfill(root, underlyingExchange, underlyingDisplay);
-    return Map.of("root", root, "contSymbol", root + "-FUT-CONT", "contracts", contracts);
+    return new ContinuousBackfillResponse(root, root + "-FUT-CONT", contracts);
   }
+
+  /** Backfill receipt. Multi-key {@code Map.of} before D3 — order NORMALISED, not preserved. */
+  public record ContinuousBackfillResponse(String root, String contSymbol, int contracts) {}
 }

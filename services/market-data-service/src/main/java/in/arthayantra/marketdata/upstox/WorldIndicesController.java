@@ -31,9 +31,12 @@ public class WorldIndicesController {
 
   /** {@code {items:[WorldIndex...]}} — empty when the Upstox global client is not wired. */
   @GetMapping("/world-indices")
-  public Map<String, Object> worldIndices() {
+  public WorldIndicesResponse worldIndices() {
     UpstoxGlobalInstrumentsClient resolved = client.getIfAvailable();
     List<WorldIndex> items = resolved == null ? List.of() : resolved.worldIndices();
-    return Map.of("items", items);
+    return new WorldIndicesResponse(items);
   }
+
+  /** The {items} envelope. Single-key {@code Map.of} before D3, so key order was never in play. */
+  public record WorldIndicesResponse(List<WorldIndex> items) {}
 }

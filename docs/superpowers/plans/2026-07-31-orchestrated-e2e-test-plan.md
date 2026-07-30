@@ -32,22 +32,37 @@ spec matches main — but do NOT gate the run on them; test what is live. Record
 
 ---
 
-## Track T1 — mock-stack interactive E2E (feature gaps + bugs)
+## Track T1 — application E2E (feature gaps + bugs)
 
-Environment: mock stack (`artha_mock` / redis-1, `ay` CLI with mock profile). Free to click,
-submit, and create data — it is isolated by design. Never point any T1 tool at :8080-live.
+⚠️ **SINGLE-STACK REALITY (plan revision, review round 1 + Architect check):** mock and live are
+the SAME compose project (`name: arthayantra`, pinned container names) — they CANNOT run
+side-by-side, and mock-vs-live is `SPRING_PROFILES_ACTIVE` in `.env`. On a trading evening the
+stack IS live (EOD batches, 21:15 reconcilers) and switching it to mock would take live DOWN.
+Therefore T1 splits:
 
-1. **Baseline:** run the existing Playwright suite (`e2e/`, `E2E_OWNER_PASSWORD=...`) — it must
+- **T1a — TONIGHT, against the live stack, LOOK-ONLY.** Route walk and render checks only: no
+  form submits, no action buttons, no publish/disable, no paper open/close, nothing under
+  `/data-ops` actions. Page loads trigger the app's normal cache-first tail refresh — the same
+  writes any owner browse causes — which is why this waits for post-close and why data-ops
+  ACTION buttons stay untouched.
+- **T1b — WEEKEND, mock profile, full interactive mutations** (flows in step 3 below). Requires
+  the owner (or a weekend run) to switch the stack to mock via `ay`.
+- **FAIL-CLOSED PREFLIGHT before ANY mutation** (review finding — the boundary was prose-only):
+  `docker inspect ay-edge-gateway` env must show `SPRING_PROFILES_ACTIVE=mock`,
+  `ARTHA_DB_NAME=artha_mock`, `ARTHA_REDIS_DB=1`. Any mismatch, or any doubt → the mutation
+  flows DO NOT RUN. Passing this preflight is the ONLY thing that authorizes step 1 and step 3.
+
+1. **Baseline (T1b only, after the preflight):** run the existing Playwright suite (`e2e/`, `E2E_OWNER_PASSWORD=...`) — it must
    be green before exploratory work, else fix-or-file first.
-2. **Full route walk:** every SPA route (enumerate from `frontend-react` router config, not from
+2. **Full route walk (T1a tonight, look-only; repeated interactively in T1b):** every SPA route (enumerate from `frontend-react` router config, not from
    memory). Per page: renders without console errors; primary data loads (no permanent skeleton);
    empty-state vs populated-state both reachable; mobile viewport (~480px, S24 target) has no
    horizontal scroll; obvious a11y (axe pass on the 10 highest-traffic pages).
-3. **Form/flow probes:** strategy create→draft→publish→disable; backtest submit→job→results→
+3. **Form/flow probes (T1b only — gated by the preflight above):** strategy create→draft→publish→disable; backtest submit→job→results→
    export; watchlist/journal CRUD; paper manual open/close; data-ops console actions (mock).
    Each flow: happy path + one invalid-input path (expect 4xx surfaced in UI, not a silent fail).
-4. **API surface probe:** for every path in the four `contracts/*.openapi.json` specs, one GET
-   (or safe POST with `{}` where documented) against the mock gateway — assert status is in the
+4. **API surface probe (T1b only, mock):** for every path in the four `contracts/*.openapi.json`
+   specs, one GET (or safe POST with `{}` where documented) against the MOCK gateway — assert status is in the
    spec, response parses, and REQUIRED keys are present. This is the cheap spec-vs-server sweep
    the ratchet work enabled; Map-return endpoints (the 6 assessed stops) are exempt from key
    assertions.
@@ -62,9 +77,17 @@ Hard rules: no restarts, no writes, no `.env` reads printed, no Kite/Upstox dire
 1. **Health sweep:** `/api/v1/market/health/data`, `/health/ingest`, `/signal-rejections/dot-health`,
    actuator per-service (8081/8082), heartbeat/dead-man state, canary logs for the day.
 2. **Contract-vs-runtime nullability sampler** (deferred here from the 07-31 routine work, where
-   it was judged too heavy for a daily routine): sample ~15 read endpoints across the four
-   services via in-container wget; for each response, diff observed-null fields against the
-   spec's nullable sets in `contracts/*.openapi.json`. A field observed null but published
+   it was judged too heavy for a daily routine): sample read endpoints via in-container wget and
+   diff observed-null fields against the spec's nullable sets in `contracts/*.openapi.json`.
+   ⚠️ **GET does NOT mean read-only on this platform** (review finding): cache-first candle GETs
+   re-fetch from Kite and perform authoritative UPSERTS. The sampler uses ONLY this explicit
+   side-effect-free allowlist — anything not on it belongs in T1b against mock:
+   `/actuator/health|info|prometheus` (per-service ports) · `/api/v1/market/health/*` ·
+   `/api/v1/signal-rejections*` (incl. `/dot-health`) · `/api/v1/signals*` (list/active/detail) ·
+   `/api/v1/paper/positions|trades|pnl` · `/api/v1/strategies` (list/detail — GET only) ·
+   `/api/v1/insights*` · `/api/v1/backtests/*/results|trades` (DB reads keyed by run id).
+   **EXCLUDED by name:** `/api/v1/market/candles` (cache-first write-through), everything under
+   `/data-ops`, `/api/v1/market/margin` (posts a basket to Upstox), any POST/PUT/DELETE. A field observed null but published
    non-nullable is exactly the OpeningSignal/WorldIndex defect class review caught 4× this week —
    this makes it mechanical. Report per-endpoint: keys seen, nulls seen, spec disagreements.
 3. **Cross-source data integrity SQL:** candle coverage vs snapshots (per root, per day, last 5
@@ -117,7 +140,9 @@ output is verdicts + owner decisions, per the four-loosenings prior (T1/T7/G13/G
 
 - Live stack unhealthy at start (canaries red, heartbeat stale) → park T2, run T1/T3/T4, report
   the health failure as finding #1.
-- Any T2 probe that turns out to be non-read-only → stop that probe, record it, continue.
+- Any T2 probe that turns out to be non-read-only → stop that probe, record it, continue. The
+  allowlist above is the authority; discovering side effects mid-probe means the ALLOWLIST was
+  wrong, and that itself is a finding.
 - 21:15–21:35 IST: pause T2/T3 SQL against live (reconciler window).
 
 ## Deliverables

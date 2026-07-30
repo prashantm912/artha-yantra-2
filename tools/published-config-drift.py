@@ -72,8 +72,12 @@ def db_rows() -> list[dict]:
          "-t", "-A", "-c", QUERY],
         capture_output=True, text=True, encoding="utf-8")
     if proc.returncode != 0:
-        print(f"DB query failed: {proc.stderr.strip()[:300]}", file=sys.stderr)
-        sys.exit(0)  # stack down = skip gracefully, same doctrine as the routine
+        # STDOUT and a distinct exit code, deliberately. Review finding (2026-07-31): a
+        # stderr-only skip with exit 0 makes a broken run indistinguishable from a clean one —
+        # the sampling-window trap, in a tool built to prevent it. The routine asserts on the
+        # INCOMPLETE marker / exit code, never on "no findings printed".
+        print(f"INCOMPLETE — DB query failed, NOTHING was checked: {proc.stderr.strip()[:300]}")
+        sys.exit(2)
     return [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
 
 
@@ -99,6 +103,8 @@ def main() -> int:
     yamls = yaml_by_slug()
     findings: list[str] = []
     clean = 0
+    db_only: list[str] = []  # published in DB, no repo YAML — cannot drift-check, NOT "clean"
+    matched = 0
 
     for row in rows:
         slug = row["slug"]
@@ -112,8 +118,7 @@ def main() -> int:
                 f"something newer exists that is NOT live")
 
         if y is None:
-            # DB-only strategy (UI-created); no repo YAML to drift from
-            pass
+            db_only.append(slug)  # counted separately below — unmatched is not clean
         elif "__parse_error__" in y:
             marks.append(f"YAML-PARSE-FAIL: {y['__parse_error__']}")
         else:
@@ -144,16 +149,23 @@ def main() -> int:
                     detail.append("ORDER differs (first stop_loss is the initial-risk basis)")
                 marks.append("EXIT-DRIFT: " + "; ".join(detail))
 
+        if y is not None:
+            matched += 1
         if marks:
             flag = "ENABLED " if row.get("enabled") else "disabled"
             findings.append(f"{slug} [{flag}, published {row['published_version']}]")
             findings.extend(f"    {m}" for m in marks)
-        else:
+        elif y is not None:
             clean += 1
 
-    print(f"published-config-drift: {len(rows)} published strategies checked, "
-          f"{clean} clean, {len(rows) - clean} with findings "
-          f"({len(yamls)} repo YAMLs)")
+    yaml_only = sorted(set(yamls) - {r["slug"] for r in rows})
+    print(f"published-config-drift: {len(rows)} published — {matched} matched to YAML "
+          f"({clean} clean, {matched - clean} drifted), {len(db_only)} DB-only (UNCHECKED), "
+          f"{len(yaml_only)} YAML-only (repo YAML with NO published strategy — a seeder/publish gap?)")
+    if db_only:
+        print(f"  DB-only (no repo YAML): {', '.join(db_only)}")
+    if yaml_only:
+        print(f"  YAML-only (never published): {', '.join(yaml_only)}")
     if findings:
         print("\n".join(findings))
         print("\nRepublish doctrine (CLAUDE.md): judge each by what it GAINS vs LOSES; "

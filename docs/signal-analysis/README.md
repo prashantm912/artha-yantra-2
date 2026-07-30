@@ -453,20 +453,31 @@ Run in order; each answers one question. Canned SQL in §6.
     -- fired vocabulary over the window
     SELECT close_reason, count(*) FROM strategy.paper_positions
     WHERE closed_at >= :d0 GROUP BY 1 ORDER BY 2 DESC;
-    -- armed exit types across ENABLED published configs
-    SELECT r->>'type' AS armed_type, count(*) AS strategies
+    -- armed exit PATHS across ENABLED published configs: (type, basis), DISTINCT strategies.
+    -- Per (type,basis), not bare type — one fired STOP_LOSS must not mask an unexercised
+    -- premium/index/structural stop path (review finding, 2026-07-31).
+    SELECT r->>'type' AS armed_type, r->'params'->>'basis' AS basis,
+           count(DISTINCT s.id) AS strategies
     FROM strategy.strategies s
     JOIN strategy.strategy_versions v ON v.id = s.published_version_id,
          jsonb_array_elements((v.config->'exit_rules')::jsonb) r
-    WHERE s.enabled GROUP BY 1 ORDER BY 2 DESC;
+    WHERE s.enabled GROUP BY 1, 2 ORDER BY 3 DESC;
+    -- TAG-armed exits are NOT in exit_rules and the exit_rules query CANNOT see them —
+    -- oi-confluence-exit (fires as CONFLUENCE_FLIP) is a TAG:
+    SELECT count(DISTINCT s.id) AS confluence_exit_armed
+    FROM strategy.strategies s
+    JOIN strategy.strategy_versions v ON v.id = s.published_version_id
+    WHERE s.enabled AND (v.config->'tags')::jsonb ? 'oi-confluence-exit';
     ```
 
-    Report the SET DIFFERENCE (armed type with zero fires) every post-market run, with the day's
-    delta. Type→reason mapping is mostly `UPPER(type)`; `oi-confluence-exit` fires as
-    `CONFLUENCE_FLIP`. A type that has never fired is either (a) genuinely unreachable this regime
-    (say so, with the nearest-miss distance), (b) mis-wired (the T24 class), or (c) shadowed by an
-    earlier rule that always wins (`time_stop` at 30 min ate every exit in the G11 analysis) —
-    distinguish, never just count.
+    Report the SET DIFFERENCE (armed path with zero fires) every post-market run, with the day's
+    delta. Known type→`close_reason` map (VERIFY the fired vocabulary each run — do not assume):
+    `stop_loss`→`STOP_LOSS`/`STRUCTURAL_STOP` (by basis), `trailing_stop`→`TRAILING_STOP`,
+    `time_stop`→`TIME_STOP`, `take_profit`→`TAKE_PROFIT`, tag `oi-confluence-exit`→
+    `CONFLUENCE_FLIP`; `MANUAL` maps to no armed path. A path that has never fired is either
+    (a) genuinely unreachable this regime (say so, with the nearest-miss distance), (b) mis-wired
+    (the T24 class), or (c) shadowed by an earlier rule that always wins (`time_stop` at 30 min ate
+    every exit in the G11 analysis) — distinguish, never just count.
 
 30. **Sub-account FREEZE telemetry** (added 2026-07-31) — the #1086 capital governors freeze a
     sub-account for the rest of the session after a loss threshold; on their FIRST live day 3 of 5
@@ -474,14 +485,21 @@ Run in order; each answers one question. Canned SQL in §6.
     capacity starvation is a data question, and it needs a daily row, not an anecdote:
 
     ```sql
-    -- per sub-account: last open, entries, realized PnL — a "last open" hours before close on a
-    -- day with later would-have-fired rows = frozen capacity
-    SELECT subaccount_idx,
-           count(*) FILTER (WHERE opened_at >= :d0)                    AS opens,
-           to_char(max(opened_at) AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS last_open_ist,
-           round(sum(realized_pnl) FILTER (WHERE closed_at >= :d0), 2) AS day_pnl
+    -- ENTRIES come from paper_events, not positions (review finding, 2026-07-31): pyramiding
+    -- AVERAGES INTO the open row — qty and avg price move, opened_at does NOT — while
+    -- paper_events records one OPENED per open-or-average-in (V038). Position-row counting
+    -- under-counts entries and mis-times the freeze.
+    SELECT p.subaccount_idx,
+           count(e.id) AS entries,
+           to_char(max(e.created_at) AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS last_entry_ist
+    FROM strategy.paper_events e
+    JOIN strategy.paper_positions p ON p.id = e.position_id
+    WHERE e.kind = 'OPENED' AND e.created_at >= :d0 AND p.subaccount_idx IS NOT NULL
+    GROUP BY 1 ORDER BY 1;
+    -- day PnL SEPARATELY (a position joined through its events would count once per event)
+    SELECT subaccount_idx, round(sum(realized_pnl), 2) AS day_pnl
     FROM strategy.paper_positions
-    WHERE opened_at >= :d0 OR closed_at >= :d0
+    WHERE closed_at >= :d0 AND subaccount_idx IS NOT NULL
     GROUP BY 1 ORDER BY 1;
     ```
 

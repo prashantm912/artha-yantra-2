@@ -55,7 +55,9 @@ ITEM_ID = re.compile(r"\b([GT]\d{1,2})\b")
 # this tool (caught during the tool's own red-proof). One hyphen + length beats hyphen count.
 SLUG = re.compile(r"\b([a-z][a-z0-9]+(?:-[a-z0-9]+)+)\b")
 MIN_SLUG_LEN = 10
-PROMOTE = re.compile(r"promot", re.I)
+# The real dangling promotions of 2026-07-30 did not say "promoted" — they said
+# "Needs a §0 group-G row" (review finding: /promot/ alone found ZERO of them).
+PROMOTE = re.compile(r"promot|needs a §0|§0 group|group-G row|needs a ledger row", re.I)
 
 # generic slugs that appear everywhere and identify nothing
 SLUG_STOPLIST = {

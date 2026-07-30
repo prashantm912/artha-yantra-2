@@ -1,6 +1,7 @@
 package in.arthayantra.backtest.replay;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.time.Ist;
 import java.time.OffsetDateTime;
@@ -107,6 +108,68 @@ public class TradeRepository {
       String symbol,
       OffsetDateTime from,
       OffsetDateTime to) {
+    TradeQuery query = tradeQuery(runId, limit, offset, symbol, from, to);
+    return jdbc.query(
+        query.sql(),
+        (rs, n) -> {
+          Map<String, Object> row = new LinkedHashMap<>();
+          row.put("seq", rs.getInt("seq"));
+          row.put("side", rs.getString("side"));
+          row.put("qty", rs.getLong("qty"));
+          row.put("entryTs", ist(rs.getObject("entry_ts", OffsetDateTime.class)));
+          row.put("entryPrice", rs.getBigDecimal("entry_price"));
+          row.put("exitTs", ist(rs.getObject("exit_ts", OffsetDateTime.class)));
+          row.put("exitPrice", rs.getBigDecimal("exit_price"));
+          row.put("pnl", rs.getBigDecimal("pnl"));
+          row.put("pnlPct", rs.getBigDecimal("pnl_pct"));
+          row.put("exitReason", rs.getString("exit_reason"));
+          row.put("barsHeld", rs.getInt("bars_held"));
+          row.put("touchBasis", rs.getString("touch_basis"));
+          row.put("contributions", parse(rs.getString("contributions")));
+          row.put("exchange", rs.getString("exchange"));
+          row.put("tradingsymbol", rs.getString("tradingsymbol"));
+          row.put("stopLoss", rs.getBigDecimal("stop_loss"));
+          row.put("takeProfit", rs.getBigDecimal("take_profit"));
+          return row;
+        },
+        query.args().toArray());
+  }
+
+  /** The typed trade rows exposed by {@code GET /backtests/{id}/trades}. */
+  public List<BacktestViews.BacktestTradeItem> findByRunItems(
+      UUID runId,
+      int limit,
+      int offset,
+      String symbol,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    TradeQuery query = tradeQuery(runId, limit, offset, symbol, from, to);
+    return jdbc.query(
+        query.sql(),
+        (rs, n) ->
+            new BacktestViews.BacktestTradeItem(
+                rs.getInt("seq"),
+                rs.getString("side"),
+                rs.getLong("qty"),
+                ist(rs.getObject("entry_ts", OffsetDateTime.class)),
+                rs.getBigDecimal("entry_price"),
+                ist(rs.getObject("exit_ts", OffsetDateTime.class)),
+                rs.getBigDecimal("exit_price"),
+                rs.getBigDecimal("pnl"),
+                rs.getBigDecimal("pnl_pct"),
+                rs.getString("exit_reason"),
+                rs.getInt("bars_held"),
+                rs.getString("touch_basis"),
+                parse(rs.getString("contributions")),
+                rs.getString("exchange"),
+                rs.getString("tradingsymbol"),
+                rs.getBigDecimal("stop_loss"),
+                rs.getBigDecimal("take_profit")),
+        query.args().toArray());
+  }
+
+  private static TradeQuery tradeQuery(
+      UUID runId, int limit, int offset, String symbol, OffsetDateTime from, OffsetDateTime to) {
     StringBuilder sql =
         new StringBuilder(
             "SELECT seq, side, qty, entry_ts, entry_price, exit_ts, exit_price, pnl, pnl_pct, "
@@ -129,30 +192,7 @@ public class TradeRepository {
     sql.append(" ORDER BY seq LIMIT ? OFFSET ?");
     args.add(limit);
     args.add(offset);
-    return jdbc.query(
-        sql.toString(),
-        (rs, n) -> {
-          Map<String, Object> row = new LinkedHashMap<>();
-          row.put("seq", rs.getInt("seq"));
-          row.put("side", rs.getString("side"));
-          row.put("qty", rs.getLong("qty"));
-          row.put("entryTs", ist(rs.getObject("entry_ts", OffsetDateTime.class)));
-          row.put("entryPrice", rs.getBigDecimal("entry_price"));
-          row.put("exitTs", ist(rs.getObject("exit_ts", OffsetDateTime.class)));
-          row.put("exitPrice", rs.getBigDecimal("exit_price"));
-          row.put("pnl", rs.getBigDecimal("pnl"));
-          row.put("pnlPct", rs.getBigDecimal("pnl_pct"));
-          row.put("exitReason", rs.getString("exit_reason"));
-          row.put("barsHeld", rs.getInt("bars_held"));
-          row.put("touchBasis", rs.getString("touch_basis"));
-          row.put("contributions", parse(rs.getString("contributions")));
-          row.put("exchange", rs.getString("exchange"));
-          row.put("tradingsymbol", rs.getString("tradingsymbol"));
-          row.put("stopLoss", rs.getBigDecimal("stop_loss"));
-          row.put("takeProfit", rs.getBigDecimal("take_profit"));
-          return row;
-        },
-        args.toArray());
+    return new TradeQuery(sql.toString(), args);
   }
 
   /**
@@ -176,7 +216,7 @@ public class TradeRepository {
     }
   }
 
-  private Object parse(String raw) {
+  private JsonNode parse(String raw) {
     if (raw == null) {
       return null;
     }
@@ -192,4 +232,6 @@ public class TradeRepository {
         ? null
         : timestamp.withOffsetSameInstant(Ist.OFFSET).format(Ist.FORMATTER);
   }
+
+  private record TradeQuery(String sql, List<Object> args) {}
 }

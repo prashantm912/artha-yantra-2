@@ -60,6 +60,27 @@ Twice this session:
   real-but-**wrong** bar. **The regression was written for the wrong failure mode** and would have
   passed against the defect indefinitely.
 
+**Third instance — and the one that matters, because by then this rule was already written down
+above.** Closing the §9b `ExitEvaluator` row I proposed a "hardening" to `SwingSellDecisionService`,
+restored the old `Math.max(entryIndex, 0)` clamp expecting the new test to fail, watched it stay
+green — and wrote that up as *evidence of byte-identity*. It was the opposite. Cross-vendor review
+returned a **Major**: `SwingSellDecisionService` is a SHARED service dispatched through
+`SwingDoctrine`, and the implementations are asymmetric. Manas's stop is `atr_multiple`, which
+resolves `ATR.valueAt(0)` = null for want of warmup, so null was already the behaviour there.
+Minervini's stop is `basis: percent` off `entryPrice()` and its trail is sma50 at `lastIndex` —
+**neither reads the entry index at all** — so my guard would have silently suppressed a valid 8%
+stop and 50-day trail on the sell-decisions page. My test and my red-proof were both Manas-only.
+Change reverted; production code unchanged.
+
+The failure was not the missing test, it was the direction of the inference: I proved "the
+index-DEPENDENT basis yields null at index 0" and then ran it backwards, which is false for the
+index-INDEPENDENT ones. A green red-proof reads as confirmation precisely when you already believe
+the conclusion — which is why the rule has to be mechanical: **a green red-proof is never promoted to
+positive evidence.** And for anything behind a doctrine/policy/strategy interface, enumerate the
+implementations and check the claim against each; the one that IGNORES the parameter is the one most
+likely to break when you start guarding it. Same session also produced the corollary that the
+`SwingSellDecisionService` Minervini path has **no test at all** — chip `task_de025c5f`.
+
 ### 5. A sampling window is invisible to tests that build their own sample.
 
 G12's frozen-operand probe shipped **18/18 green while inert on a third of sessions** — the tests

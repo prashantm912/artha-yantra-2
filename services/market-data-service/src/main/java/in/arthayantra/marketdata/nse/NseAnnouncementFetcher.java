@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.nse;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -21,9 +22,13 @@ public interface NseAnnouncementFetcher {
       String date,
       String time,
       String symbol,
+      @Schema(types = {"string", "null"})
       String company,
+      @Schema(types = {"string", "null"})
       String subject,
+      @Schema(types = {"string", "null"})
       String detail,
+      @Schema(types = {"string", "null"})
       String fileLink) {}
 
   /**

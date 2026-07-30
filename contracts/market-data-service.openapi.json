@@ -8314,28 +8314,28 @@
             "type" : "string"
           },
           "ltp" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "prevClose" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "netChange" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "changePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "open" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "high" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "low" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "asOf" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "format" : "date-time"
           },
           "latency" : {
@@ -8465,13 +8465,13 @@
             "type" : "number"
           },
           "avgVolume" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "distanceFromHigh52w" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "label" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "avgVolume", "distanceFromHigh52w", "exchange", "label", "latestClose", "pastClose", "tradingsymbol", "value" ]
@@ -9971,58 +9971,58 @@
             "type" : "string"
           },
           "ltp" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "bid" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "ask" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "volume" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "oi" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "oiChange" : {
-            "type" : "integer",
+            "type" : [ "integer", "null" ],
             "format" : "int64"
           },
           "spotPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "iv" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "delta" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "gamma" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "theta" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "vega" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "rho" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "ivReason" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "priceSource" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "forwardPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "riskFreeRate" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           }
         },
         "required" : [ "ask", "bid", "delta", "expiry", "forwardPrice", "gamma", "iv", "ivReason", "ltp", "oi", "oiChange", "optionType", "priceSource", "rho", "riskFreeRate", "spotPrice", "strike", "theta", "tradingsymbol", "ts", "underlying", "vega", "volume" ]
@@ -10892,19 +10892,19 @@
             "type" : "string"
           },
           "preOpenPrice" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "prevClose" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "change" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "changePct" : {
-            "type" : "number"
+            "type" : [ "number", "null" ]
           },
           "prevDayBreak" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "change", "changePct", "preOpenPrice", "prevClose", "prevDayBreak", "symbol" ]
@@ -11833,16 +11833,16 @@
             "type" : "string"
           },
           "company" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "subject" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "detail" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "fileLink" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "company", "date", "detail", "fileLink", "subject", "symbol", "time" ]

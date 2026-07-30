@@ -2779,15 +2779,15 @@ export interface components {
             country: string;
             key: string;
             tradingSymbol: string;
-            ltp: number;
-            prevClose: number;
-            netChange: number;
-            changePct: number;
-            open: number;
-            high: number;
-            low: number;
+            ltp: number | null;
+            prevClose: number | null;
+            netChange: number | null;
+            changePct: number | null;
+            open: number | null;
+            high: number | null;
+            low: number | null;
             /** Format: date-time */
-            asOf: string;
+            asOf: string | null;
             latency: string;
         };
         WorldIndicesResponse: {
@@ -2835,9 +2835,9 @@ export interface components {
             latestClose: number;
             pastClose: number;
             value: number;
-            avgVolume: number;
-            distanceFromHigh52w: number;
-            label: string;
+            avgVolume: number | null;
+            distanceFromHigh52w: number | null;
+            label: string | null;
         };
         ScreenerResponse: {
             items: components["schemas"]["Row"][];
@@ -3360,26 +3360,26 @@ export interface components {
             strike: number;
             optionType: string;
             tradingsymbol: string;
-            ltp: number;
-            bid: number;
-            ask: number;
+            ltp: number | null;
+            bid: number | null;
+            ask: number | null;
             /** Format: int64 */
-            volume: number;
+            volume: number | null;
             /** Format: int64 */
-            oi: number;
+            oi: number | null;
             /** Format: int64 */
-            oiChange: number;
-            spotPrice: number;
-            iv: number;
-            delta: number;
-            gamma: number;
-            theta: number;
-            vega: number;
-            rho: number;
-            ivReason: string;
-            priceSource: string;
-            forwardPrice: number;
-            riskFreeRate: number;
+            oiChange: number | null;
+            spotPrice: number | null;
+            iv: number | null;
+            delta: number | null;
+            gamma: number | null;
+            theta: number | null;
+            vega: number | null;
+            rho: number | null;
+            ivReason: string | null;
+            priceSource: string | null;
+            forwardPrice: number | null;
+            riskFreeRate: number | null;
         };
         ChainTable: {
             underlying: string;
@@ -3686,11 +3686,11 @@ export interface components {
         };
         PreOpenRow: {
             symbol: string;
-            preOpenPrice: number;
-            prevClose: number;
-            change: number;
-            changePct: number;
-            prevDayBreak: string;
+            preOpenPrice: number | null;
+            prevClose: number | null;
+            change: number | null;
+            changePct: number | null;
+            prevDayBreak: string | null;
         };
         OiBuzzIndicesResponse: {
             items: string[];
@@ -4008,10 +4008,10 @@ export interface components {
             date: string;
             time: string;
             symbol: string;
-            company: string;
-            subject: string;
-            detail: string;
-            fileLink: string;
+            company: string | null;
+            subject: string | null;
+            detail: string | null;
+            fileLink: string | null;
         };
         AnnouncementsResponse: {
             items: components["schemas"]["Announcement"][];

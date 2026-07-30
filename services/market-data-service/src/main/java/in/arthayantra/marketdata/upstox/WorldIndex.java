@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.upstox;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
@@ -20,12 +21,20 @@ public record WorldIndex(
     String country,
     String key,
     String tradingSymbol,
+    @Schema(types = {"number", "null"})
     BigDecimal ltp,
+    @Schema(types = {"number", "null"})
     BigDecimal prevClose,
+    @Schema(types = {"number", "null"})
     BigDecimal netChange,
+    @Schema(types = {"number", "null"})
     BigDecimal changePct,
+    @Schema(types = {"number", "null"})
     BigDecimal open,
+    @Schema(types = {"number", "null"})
     BigDecimal high,
+    @Schema(types = {"number", "null"})
     BigDecimal low,
+    @Schema(types = {"string", "null"})
     OffsetDateTime asOf,
     String latency) {}

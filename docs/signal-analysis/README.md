@@ -471,10 +471,14 @@ Run in order; each answers one question. Canned SQL in §6.
     ```
 
     Report the SET DIFFERENCE (armed path with zero fires) every post-market run, with the day's
-    delta. Known type→`close_reason` map (VERIFY the fired vocabulary each run — do not assume):
+    delta. Known type→`close_reason` map (VERIFY the fired vocabulary each run — do not assume;
+    the engine uppercases the exit TYPE at `SignalEngine:1466`, so every armed type maps):
     `stop_loss`→`STOP_LOSS`/`STRUCTURAL_STOP` (by basis), `trailing_stop`→`TRAILING_STOP`,
-    `time_stop`→`TIME_STOP`, `take_profit`→`TAKE_PROFIT`, tag `oi-confluence-exit`→
-    `CONFLUENCE_FLIP`; `MANUAL` maps to no armed path. A path that has never fired is either
+    `time_stop`→`TIME_STOP`, `take_profit`→`TAKE_PROFIT`, `signal_exit`→`SIGNAL_EXIT`,
+    `square_off`→`SQUARE_OFF`, tag `oi-confluence-exit`→`CONFLUENCE_FLIP`; `MANUAL` maps to no
+    armed path. ⚠️ An incomplete map here labels a HEALTHY armed path "never fired" — the first
+    draft omitted `signal_exit` (armed on 38) and `square_off` (armed on 2), which the review
+    caught; a wrong never-fired verdict is exactly the false alarm this dimension must not raise. A path that has never fired is either
     (a) genuinely unreachable this regime (say so, with the nearest-miss distance), (b) mis-wired
     (the T24 class), or (c) shadowed by an earlier rule that always wins (`time_stop` at 30 min ate
     every exit in the G11 analysis) — distinguish, never just count.

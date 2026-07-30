@@ -47,10 +47,17 @@ Therefore T1 splits:
   ACTION buttons stay untouched.
 - **T1b — WEEKEND, mock profile, full interactive mutations** (flows in step 3 below). Requires
   the owner (or a weekend run) to switch the stack to mock via `ay`.
-- **FAIL-CLOSED PREFLIGHT before ANY mutation** (review finding — the boundary was prose-only):
-  `docker inspect ay-edge-gateway` env must show `SPRING_PROFILES_ACTIVE=mock`,
-  `ARTHA_DB_NAME=artha_mock`, `ARTHA_REDIS_DB=1`. Any mismatch, or any doubt → the mutation
-  flows DO NOT RUN. Passing this preflight is the ONLY thing that authorizes step 1 and step 3.
+- **FAIL-CLOSED PREFLIGHT before ANY mutation** (review finding — the boundary was prose-only;
+  round 2 then caught that the first preflight checked variables the container does not EXPOSE —
+  `ARTHA_DB_NAME`/`ARTHA_REDIS_DB` are compose-file inputs translated away before the container —
+  so it would have failed closed FOREVER, making T1b structurally unrunnable. The variables below
+  are the ones `docker inspect` actually shows, verified against the running stack 2026-07-31):
+  1. `docker inspect ay-edge-gateway` env shows `SPRING_PROFILES_ACTIVE=mock` AND
+     `SPRING_DATA_REDIS_DATABASE=1` (live shows `live` / `0`);
+  2. `docker inspect ay-strategy-signal-service` env shows `SPRING_DATASOURCE_URL` containing
+     `/artha_mock?` (live shows `/artha?`).
+  Any mismatch, or any doubt → the mutation flows DO NOT RUN. Passing this preflight is the ONLY
+  thing that authorizes step 1 and step 3.
 
 1. **Baseline (T1b only, after the preflight):** run the existing Playwright suite (`e2e/`, `E2E_OWNER_PASSWORD=...`) — it must
    be green before exploratory work, else fix-or-file first.

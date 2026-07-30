@@ -27,8 +27,10 @@ import org.springframework.stereotype.Component;
  * with catch-up on, and this listener's fire-and-forget write can land while any test's DELETE
  * runs — the hazard is any cached-context writer vs any test, not this test vs itself. The
  * property is therefore defaulted OFF for the whole module on
- * {@code MarketDataIntegrationTestBase} (the substrate all 67 IT contexts extend); a test that
- * wants this path must override via its own {@code @DynamicPropertySource}.
+ * {@code MarketDataIntegrationTestBase} (the substrate all 67 IT contexts extend), along with the
+ * 19:30-IST eod-cron (14:00 UTC — prime CI hours, the same race through the scheduled door). There
+ * is NO in-hierarchy opt-out — subclass {@code @DynamicPropertySource} runs BEFORE the base's, so
+ * the base wins; a test that wants this path must not extend the shared substrate.
  *
  * <p>Production behaviour is unchanged: the property defaults to on via {@code matchIfMissing}.
  */

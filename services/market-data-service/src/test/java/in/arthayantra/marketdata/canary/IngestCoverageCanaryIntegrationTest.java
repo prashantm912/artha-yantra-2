@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import in.arthayantra.marketdata.bhavcopy.BhavcopyStartupCatchup;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
@@ -20,7 +21,6 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
-import in.arthayantra.marketdata.bhavcopy.BhavcopyStartupCatchup;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
@@ -65,6 +65,12 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     org.assertj.core.api.Assertions.assertThat(context.getBeansOfType(BhavcopyStartupCatchup.class))
         .as("the substrate default must disable the catch-up bean in EVERY base-extending context")
         .isEmpty();
+    // the SCHEDULED writer is the same race through a different door — 19:30 IST is 14:00 UTC,
+    // prime CI hours (review round 1). The bean legitimately exists, so the pin is the property.
+    org.assertj.core.api.Assertions.assertThat(
+            context.getEnvironment().getProperty("artha.bhavcopy.eod-cron"))
+        .as("the substrate must disable the eod-cron in EVERY base-extending context")
+        .isEqualTo("-");
   }
 
 

@@ -7,10 +7,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-import in.arthayantra.marketdata.bhavcopy.BhavcopyStartupCatchup;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
+import in.arthayantra.marketdata.bhavcopy.BhavcopyStartupCatchup;
 import in.arthayantra.marketdata.canary.IngestCoverageCanary.IngestCoverageReport;
 import in.arthayantra.marketdata.canary.IngestCoverageCanary.SourceCoverage;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;

@@ -3736,8 +3736,59 @@ export interface components {
             changePct: number | null;
             prevDayBreak: string | null;
         };
+        FutOiCandle: {
+            /** Format: date-time */
+            time: string;
+            open: number;
+            high: number;
+            low: number;
+            close: number;
+            /** Format: int64 */
+            volume: number;
+            /** Format: int64 */
+            oi: number | null;
+        };
+        FutOiChart: {
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            tradingsymbol: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
+            items: components["schemas"]["FutOiCandle"][];
+        };
         OiBuzzIndicesResponse: {
             items: string[];
+        };
+        FutAnalysisResponse: {
+            items: components["schemas"]["FutPoint"][];
+        };
+        FutPoint: {
+            /** Format: date-time */
+            bucket: string;
+            underlying: string;
+            tradingsymbol: string;
+            ltp: number | null;
+            /** Format: int64 */
+            oi: number | null;
+            /** Format: int64 */
+            oiChange: number | null;
+            dayOpen: number | null;
+            dayHigh: number | null;
+            dayLow: number | null;
+            prevClose: number | null;
+            /** Format: int64 */
+            volume: number | null;
+            /** Format: date */
+            expiry: string;
+        };
+        FutAnalysisSeriesResponse: {
+            items: components["schemas"]["FutPoint"][];
+            underlying: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
         };
         MoverRow: {
             tradingsymbol: string;
@@ -3756,6 +3807,47 @@ export interface components {
             /** Format: date-time */
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
+        };
+        Screen: {
+            longCandidates: components["schemas"]["ScreenerRow"][];
+            shortCandidates: components["schemas"]["ScreenerRow"][];
+            /** Format: date-time */
+            asOf: string;
+        };
+        ScreenerRow: {
+            symbol: string;
+            ltp: number;
+            pricePct: number | null;
+            oiPct: number | null;
+            /** @enum {string} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            /** Format: int32 */
+            breakoutDays: number;
+            openHigh: boolean;
+            openLow: boolean;
+            dailyRsi: number | null;
+            /** Format: int64 */
+            volume: number;
+            longCandidate: boolean;
+            shortCandidate: boolean;
+        };
+        EodResponse: {
+            items: components["schemas"]["EodRow"][];
+        };
+        EodRow: {
+            tradingsymbol: string;
+            /** Format: date */
+            tradeDate: string;
+            open: number | null;
+            high: number | null;
+            low: number | null;
+            close: number | null;
+            /** Format: int64 */
+            oiClose: number;
+            /** Format: int64 */
+            oiChange: number;
+            /** Format: int64 */
+            volume: number;
         };
         BuzzMatrix: {
             contracts: string[];
@@ -3802,6 +3894,25 @@ export interface components {
             oiPct: number | null;
             /** @enum {string|null} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING" | null;
+        };
+        BankAnalysisCell: {
+            bank: string;
+            ltpPct: number | null;
+            oiPct: number | null;
+            /** @enum {string|null} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING" | null;
+        } | null;
+        BankAnalysisResponse: {
+            banks: string[];
+            rows: components["schemas"]["BankAnalysisRow"][];
+            interval: string;
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        BankAnalysisRow: {
+            /** Format: date-time */
+            bucket: string;
+            cells: components["schemas"]["BankAnalysisCell"][];
         };
         EquityFundamentals: {
             symbol: string;
@@ -8021,9 +8132,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FutOiChart"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8119,9 +8228,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FutAnalysisResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8156,9 +8263,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FutAnalysisSeriesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8227,9 +8332,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Screen"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8262,9 +8365,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["EodResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8400,9 +8501,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BankAnalysisResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

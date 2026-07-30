@@ -102,6 +102,15 @@ public class NullableRefCustomizer implements GlobalOpenApiCustomizer, Ordered {
       return schema;
     }
 
+    // A nullable ENUM needs null in the enum LIST too, not merely in `types`. Under JSON Schema
+    // 2020-12 (which OpenAPI 3.1 uses) `type` and `enum` BOTH apply, so `type: ["string","null"]`
+    // beside `enum: [<4 strings>]` REJECTS null — the type admits it and the enum forbids it, and a
+    // strict validator refuses a response the server legitimately emits. swagger-core does not emit
+    // the null member for a Java enum, so it is appended here. Found on the BankAnalysisCell
+    // interpretation field (cross-vendor review, 2026-07-30), which is null for each bank's first
+    // point. Response-only, same doctrine as the $ref rewrite above.
+    appendNullEnumMember(schema);
+
     schema.setItems(rewriteSchema(schema.getItems()));
     if (schema.getAdditionalProperties() instanceof Schema<?> additionalProperties) {
       schema.setAdditionalProperties(rewriteSchema(additionalProperties));
@@ -112,6 +121,19 @@ public class NullableRefCustomizer implements GlobalOpenApiCustomizer, Ordered {
     rewriteSchemas(schema.getAnyOf());
     rewriteSchemas(schema.getOneOf());
     return schema;
+  }
+
+  /** Adds a literal {@code null} to a nullable schema's enum list; no-op when it is absent or present. */
+  @SuppressWarnings("unchecked")
+  private static void appendNullEnumMember(Schema<?> schema) {
+    Set<String> types = schema.getTypes();
+    List<?> values = schema.getEnum();
+    if (types == null || !types.contains("null") || values == null || values.isEmpty()) {
+      return;
+    }
+    if (!values.contains(null)) {
+      ((Schema<Object>) schema).addEnumItemObject(null);
+    }
   }
 
   private static void rewriteProperties(Map<String, Schema> properties) {

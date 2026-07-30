@@ -27,12 +27,19 @@ class MapReturnRatchetTest {
    * Frozen at the 2026-07-02 audit-fix baseline, ratcheted DOWN as handlers are converted. DOWN is
    * progress; UP fails the build.
    *
-   * <p>backtest-service 10 → 7 (2026-07-29): {@code ResultsController.results} now returns the
+   * <p>backtest-service 10 → 2 (2026-07-30): {@code ResultsController.results} now returns the
    * typed {@code RunResult}, and {@code StressWindowController.stressWindow} the typed
    * {@code StressWindow} — both pure retypings of a LinkedHashMap, same keys in the same order, so
    * the wire is byte-identical and only the spec gained the shape. {@code IndicatorsController.list}
    * followed ({@code IndicatorRegistry}) — its ITEM type was already typed, so the envelope was the
    * only opaque part.
+   *
+   * <p>The D3 backtest slice converted the five unconditional handlers: {@code
+   * ResultsController.trades}/{@code summary}, {@code JobsController.jobs}/{@code job}, and
+   * {@code IndicatorsController.series}. The two multi-key {@code Map.of} envelopes are
+   * normalized into deterministic record order; the job detail record mirrors its old
+   * {@code LinkedHashMap} order. {@code OiAttributionController.attribution} remains a deliberate
+   * conditional Map because its empty path emits fewer keys than its populated path.
    *
    * <p>DELIBERATELY still a Map, assessed 2026-07-29 and not a miss: {@code
    * HeroZeroPremiumController.heroZeroPremium}. Its response is POLYMORPHIC — the empty path emits 5
@@ -130,7 +137,12 @@ class MapReturnRatchetTest {
    * degrade path, and {@code PreOpenIndex}'s four numerics are null when the live tick does not
    * resolve — both annotated BEFORE their envelopes were typed.
    *
-   * <p>The remaining 12: {@code FuturesAnalytics} (6) and {@code OptionsAnalytics} (6). ASSESSED
+   * <p>market-data-service 12 → 6 (D3 futures analytics slice, 2026-07-30): all six
+   * {@code FuturesAnalyticsController} handlers were unconditional and now return service-owned
+   * records. {@code oiChart} and {@code moversScreen} return the existing {@code FutOiChart} and
+   * {@code Screen} records directly; the other four use envelopes owned by their existing services.
+   * The newly exposed item records were audited for genuinely nullable components before capture.
+   * The remaining 6 are the {@code OptionsAnalytics} handlers. ASSESSED
    * 2026-07-30 — all six FuturesAnalytics handlers and four OptionsAnalytics handlers are
    * unconditional and convertible (every early exit THROWS rather than returning a partial). TWO are
    * DELIBERATE STOPS of the {@code HeroZeroPremium} kind, both in {@code OptionsAnalytics}:
@@ -143,9 +155,9 @@ class MapReturnRatchetTest {
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
-          "market-data-service", 12,
+          "market-data-service", 6,
           "strategy-signal-service", 4,
-          "backtest-service", 7);
+          "backtest-service", 2);
 
   private static final Pattern MAP_RETURN =
       Pattern.compile("public (Mono<)?Map<String, Object>");

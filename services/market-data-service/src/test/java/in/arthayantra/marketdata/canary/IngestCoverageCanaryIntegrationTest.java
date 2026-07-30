@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.alerts.NtfyClient;
+import in.arthayantra.marketdata.bhavcopy.BhavcopyStartupCatchup;
 import in.arthayantra.marketdata.canary.IngestCoverageCanary.IngestCoverageReport;
 import in.arthayantra.marketdata.canary.IngestCoverageCanary.SourceCoverage;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
@@ -22,6 +23,7 @@ import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.env.MockEnvironment;
 
@@ -47,6 +49,30 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
   private static final MarketCalendar CAL = MarketCalendar.nse();
 
   @Autowired JdbcTemplate jdbc;
+  @Autowired ApplicationContext context;
+
+  /**
+   * Pins the {@code MarketDataIntegrationTestBase} substrate default
+   * {@code artha.bhavcopy.startup-catchup=false} (task_06ad72b6). This class deliberately does NOT
+   * set the property itself — that is the point: a cached context booted for ANY test used to fire
+   * the catch-up's fire-and-forget write to {@code nse_eod_bhavcopy}, which deadlocked against
+   * another test's whole-table DELETE 3-of-3 surefire attempts on the 2-core runner. The bean being
+   * ABSENT here proves the substrate default reaches contexts that never asked for it — remove the
+   * default and this goes red in any base-extending context.
+   */
+  @Test
+  void bhavcopyStartupCatchupIsAbsentViaTheSharedSubstrateDefault() {
+    org.assertj.core.api.Assertions.assertThat(context.getBeansOfType(BhavcopyStartupCatchup.class))
+        .as("the substrate default must disable the catch-up bean in EVERY base-extending context")
+        .isEmpty();
+    // the SCHEDULED writer is the same race through a different door — 19:30 IST is 14:00 UTC,
+    // prime CI hours (review round 1). The bean legitimately exists, so the pin is the property.
+    org.assertj.core.api.Assertions.assertThat(
+            context.getEnvironment().getProperty("artha.bhavcopy.eod-cron"))
+        .as("the substrate must disable the eod-cron in EVERY base-extending context")
+        .isEqualTo("-");
+  }
+
 
   // ---- evaluate(): per-source policy verdicts -------------------------------------------------
 

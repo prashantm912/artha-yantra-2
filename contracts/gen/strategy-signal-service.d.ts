@@ -1595,9 +1595,9 @@ export interface components {
             compositeScore: number;
             /** Format: date-time */
             generatedAt: string;
-            scalperDetail: components["schemas"]["JsonNode"];
-            minerviniDetail: components["schemas"]["JsonNode"];
-            manasAroraDetail: components["schemas"]["JsonNode"];
+            scalperDetail: components["schemas"]["JsonNode"] | null;
+            minerviniDetail: components["schemas"]["JsonNode"] | null;
+            manasAroraDetail: components["schemas"]["JsonNode"] | null;
         };
         OrderLeg: {
             /** Format: int64 */
@@ -2060,7 +2060,7 @@ export interface components {
             explanation: string;
             evidence: components["schemas"]["JsonNode"];
             priority: number | null;
-            priorityDetail: components["schemas"]["JsonNode"];
+            priorityDetail: components["schemas"]["JsonNode"] | null;
             dataTrust: string;
             trustReasons: string[];
             dedupeKey: string;

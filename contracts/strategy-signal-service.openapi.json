@@ -4643,13 +4643,25 @@
             "format" : "date-time"
           },
           "scalperDetail" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
           },
           "minerviniDetail" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
           },
           "manasAroraDetail" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
           }
         },
         "required" : [ "compositeScore", "entryPrice", "generatedAt", "manasAroraDetail", "minerviniDetail", "scalperDetail", "side", "signalId", "status", "stopLoss", "target" ]
@@ -5976,7 +5988,11 @@
             "type" : [ "number", "null" ]
           },
           "priorityDetail" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
           },
           "dataTrust" : {
             "type" : "string"

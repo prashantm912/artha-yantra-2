@@ -615,6 +615,46 @@ export interface components {
             name: string;
             defaultValue: unknown;
         };
+        IndicatorSeriesResponse: {
+            series: components["schemas"]["NamedSeries"][];
+        };
+        NamedSeries: {
+            name: string;
+            points: components["schemas"]["Point"][];
+        };
+        Point: {
+            time: string;
+            value: string;
+        };
+        BacktestTradeItem: {
+            /** Format: int32 */
+            seq: number;
+            side: string;
+            /** Format: int64 */
+            qty: number;
+            entryTs: string;
+            entryPrice: number;
+            exitTs: string | null;
+            exitPrice: number | null;
+            pnl: number;
+            pnlPct: number;
+            exitReason: string | null;
+            /** Format: int32 */
+            barsHeld: number;
+            touchBasis: string | null;
+            contributions: components["schemas"]["JsonNode"] | null;
+            exchange: string | null;
+            tradingsymbol: string | null;
+            stopLoss: number | null;
+            takeProfit: number | null;
+        };
+        BacktestTradePage: {
+            items: components["schemas"]["BacktestTradeItem"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
         RunResult: {
             metrics: components["schemas"]["JsonNode"];
             equityCurve: components["schemas"]["JsonNode"];
@@ -664,6 +704,18 @@ export interface components {
             sampleBucket: string | null;
             sampleBreakdown: components["schemas"]["JsonNode"];
         };
+        BacktestSummaryItem: {
+            strategyVersionId: string | null;
+            runId: string;
+            sharpe: string;
+            totalReturn: string;
+            maxDrawdown: string;
+            completedAt: string;
+            equity: string[];
+        };
+        BacktestSummaryPage: {
+            items: components["schemas"]["BacktestSummaryItem"][];
+        };
         StressWindow: {
             from: string | null;
             to: string | null;
@@ -699,6 +751,46 @@ export interface components {
             engineSha: string | null;
             evidencePolicy: string | null;
             staleEpochs: components["schemas"]["DatasetEpoch"][];
+        };
+        BacktestJobPage: {
+            items: components["schemas"]["BacktestJobSummary"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
+        BacktestJobSummary: {
+            jobId: string;
+            kind: string;
+            status: string;
+            /** Format: int32 */
+            progress: number;
+            /** Format: date-time */
+            createdAt: string;
+            strategyId: string | null;
+            strategyVersion: string | null;
+            totalReturn: string | null;
+            testFrom: string | null;
+            testTo: string | null;
+            interval: string | null;
+            initialCapital: string | null;
+            /** Format: int64 */
+            seed: number | null;
+            tags: string[];
+            note: string | null;
+        };
+        BacktestJobDetail: {
+            jobId: string;
+            kind: string;
+            status: string;
+            /** Format: int32 */
+            progress: number;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            finishedAt: string | null;
+            error: string | null;
+            resultRef: string | null;
         };
         ExperimentListResponse: {
             items: components["schemas"]["ExperimentSummary"][];
@@ -1138,9 +1230,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["IndicatorSeriesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1310,9 +1400,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestTradePage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1570,9 +1658,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestSummaryPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1704,9 +1790,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestJobPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1737,9 +1821,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestJobDetail"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

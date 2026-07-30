@@ -6,7 +6,6 @@ import in.arthayantra.backtest.replay.RunRepository;
 import in.arthayantra.backtest.replay.counterfactual.CounterfactualRunRepository;
 import in.arthayantra.common.web.http.ArthaHeaders;
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -88,7 +87,7 @@ public class JobsController {
 
   /** Paged job list with optional status + strategyId filters. */
   @GetMapping("/jobs")
-  public Map<String, Object> jobs(
+  public JobViews.BacktestJobPage jobs(
       @RequestParam(required = false) String status,
       @RequestParam(required = false) String strategyId,
       @RequestParam(required = false) String strategyIds,
@@ -115,14 +114,14 @@ public class JobsController {
     // without an N+1 per-row fetch.
     Map<UUID, String> returns =
         runs.findReturnsByJobIds(jobs.stream().map(Job::id).toList());
-    List<Map<String, Object>> items =
+    List<JobViews.BacktestJobSummary> items =
         jobs.stream().map(job -> summary(job, returns.get(job.id()))).toList();
-    return Map.of("items", items, "limit", boundedLimit, "offset", boundedOffset);
+    return new JobViews.BacktestJobPage(items, boundedLimit, boundedOffset);
   }
 
   /** Single job status/progress. */
   @GetMapping("/jobs/{jobId}")
-  public Map<String, Object> job(@PathVariable UUID jobId) {
+  public JobViews.BacktestJobDetail job(@PathVariable UUID jobId) {
     Job job = service.get(jobId);
     return detail(job, resultRef(job));
   }
@@ -179,49 +178,54 @@ public class JobsController {
     return ResponseEntity.accepted().body(Map.of("status", "cancelling"));
   }
 
-  private static Map<String, Object> summary(Job job, String totalReturn) {
-    Map<String, Object> map = new LinkedHashMap<>();
-    map.put("jobId", job.id().toString());
-    map.put("kind", job.kind().name());
-    map.put("status", job.status().db());
-    map.put("progress", job.progress());
-    map.put("createdAt", job.createdAt());
+  private static JobViews.BacktestJobSummary summary(Job job, String totalReturn) {
     // The originating strategy (UUID; the UI maps it to a name) + the completed run's total return
     // (plain decimal string, null until a run exists) so the list shows strategy + returns columns.
-    map.put("strategyId", job.request() == null ? null : job.request().path("strategyId").asText(null));
+    String strategyId =
+        job.request() == null ? null : job.request().path("strategyId").asText(null);
     // The resolved version this job ran (pinned into the request JSONB at submit, JobsService.submit);
     // the UI compares it to the strategy's latest version to flag is-latest + filter old-version jobs.
-    map.put("strategyVersion", job.request() == null ? null : job.request().path("strategyVersion").asText(null));
-    map.put("totalReturn", totalReturn);
+    String strategyVersion =
+        job.request() == null ? null : job.request().path("strategyVersion").asText(null);
     // The tested window [from, to] (the "date the test was run over") — a plain date or full
     // offset date-time as the request carries it; the UI slices to the date for the Start/End columns.
-    map.put("testFrom", job.request() == null ? null : job.request().path("from").asText(null));
-    map.put("testTo", job.request() == null ? null : job.request().path("to").asText(null));
-    map.put("interval", job.request() == null ? null : job.request().path("interval").asText(null));
-    map.put(
-        "initialCapital",
-        job.request() == null ? null : job.request().path("initialCapital").asText(null));
-    map.put(
-        "seed",
+    String testFrom = job.request() == null ? null : job.request().path("from").asText(null);
+    String testTo = job.request() == null ? null : job.request().path("to").asText(null);
+    String interval = job.request() == null ? null : job.request().path("interval").asText(null);
+    String initialCapital =
+        job.request() == null ? null : job.request().path("initialCapital").asText(null);
+    Long seed =
         job.request() == null || !job.request().hasNonNull("seed")
             ? null
-            : job.request().path("seed").asLong());
-    map.put("tags", job.tags());
-    map.put("note", job.note());
-    return map;
+            : job.request().path("seed").asLong();
+    return new JobViews.BacktestJobSummary(
+        job.id().toString(),
+        job.kind().name(),
+        job.status().db(),
+        job.progress(),
+        job.createdAt(),
+        strategyId,
+        strategyVersion,
+        totalReturn,
+        testFrom,
+        testTo,
+        interval,
+        initialCapital,
+        seed,
+        job.tags(),
+        job.note());
   }
 
-  private static Map<String, Object> detail(Job job, String resultRef) {
-    Map<String, Object> map = new LinkedHashMap<>();
-    map.put("jobId", job.id().toString());
-    map.put("kind", job.kind().name());
-    map.put("status", job.status().db());
-    map.put("progress", job.progress());
-    map.put("startedAt", job.startedAt());
-    map.put("finishedAt", job.finishedAt());
-    map.put("error", job.error());
-    map.put("resultRef", resultRef);
-    return map;
+  private static JobViews.BacktestJobDetail detail(Job job, String resultRef) {
+    return new JobViews.BacktestJobDetail(
+        job.id().toString(),
+        job.kind().name(),
+        job.status().db(),
+        job.progress(),
+        job.startedAt(),
+        job.finishedAt(),
+        job.error(),
+        resultRef);
   }
 
   /** PATCH body for mutable job annotations. */

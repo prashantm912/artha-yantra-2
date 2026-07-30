@@ -23,7 +23,7 @@ the board, not the entry track.
 
 ## Clean, unblocked, startable
 
-- **§9-03 trial-metrics catalog** — the only remaining startable in §9 (02/04/05/06 closed).
+- ~~**§9-03 trial-metrics catalog**~~ — **NOT startable; it shipped 2026-07-11** (ledger row B17, PR #712 @ `8e5793bc`; `contracts/metrics/trial-metrics-catalog.json`, 23 metrics). This line was copied forward from a stale ledger claim — verified and corrected 2026-07-30. §9 has no remaining startables.
 - **D3 Map-return burn-down — 37 left** (market-data 26, strategy-signal 4, backtest 7). Recipe in
   the D3 ledger row; ⚠️ count the ratchet with `MapReturnRatchetTest`'s own `*Controller.java` regex
   and red-proof the floor (an over-stated one passes green — cost a review round this session).

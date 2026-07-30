@@ -11419,7 +11419,7 @@
           },
           "interpretation" : {
             "type" : [ "string", "null" ],
-            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING", null ]
           }
         },
         "required" : [ "basis", "expiry", "interpretation", "ltp", "oi", "oiChange", "tradingsymbol" ]
@@ -11491,7 +11491,7 @@
           },
           "interpretation" : {
             "type" : [ "string", "null" ],
-            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING", null ]
           }
         },
         "required" : [ "expiry", "interpretation", "ltp", "oi", "oiChange", "oiPct", "pricePct", "tradingsymbol", "underlying" ]
@@ -11510,7 +11510,7 @@
           },
           "interpretation" : {
             "type" : [ "string", "null" ],
-            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING" ]
+            "enum" : [ "LONG_BUILDUP", "SHORT_BUILDUP", "SHORT_COVERING", "LONG_UNWINDING", null ]
           }
         },
         "required" : [ "bank", "interpretation", "ltpPct", "oiPct" ]

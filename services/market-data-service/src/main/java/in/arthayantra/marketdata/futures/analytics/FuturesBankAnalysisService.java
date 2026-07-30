@@ -41,24 +41,22 @@ public class FuturesBankAnalysisService {
       String bank,
       @Schema(types = {"number", "null"}) BigDecimal ltpPct,
       @Schema(types = {"number", "null"}) BigDecimal oiPct,
-      // ⚠️ KNOWN SPEC-LEVEL INCONSISTENCY, no springdoc-expressible fix (review 2026-07-30).
-      // `interp` is null for each bank's FIRST point (line ~118: `interp = null` unless prev != null)
-      // inside an otherwise non-null cell, so this genuinely IS nullable. The annotation emits
-      // `type: ["string","null"]` WITH `enum: [4 values]`. Under JSON Schema 2020-12 BOTH keywords
-      // apply, so a strict validator rejects null because null is not among the enum members — the
-      // canonical form would be `enum: [..., null]`, which swagger-core does not emit for a Java enum.
-      // Three forms were tried: this one; `@ArraySchema`-style unions (N/A here); and
-      // `@Schema(anyOf = {OiInterpretation.class}, types = {...})`, which is STRICTLY WORSE — it emits
-      // type + anyOf + enum together and the enum still excludes null.
-      // Kept because the only real consumer is correct: openapi-typescript renders
-      // `"LONG_BUILDUP" | ... | null`. Dropping the annotation instead would make the TS claim the
-      // field is never null, which is a worse lie than an over-strict enum.
+      // NULLABLE ENUM — this annotation is only HALF the contract (cross-vendor review, 2026-07-30).
+      // `interp` is declared null and assigned only when `prev != null`, so it IS null for each
+      // bank's FIRST point, inside an otherwise non-null cell.
+      //
+      // The annotation supplies `type: ["string","null"]`. That alone is NOT enough: under JSON
+      // Schema 2020-12 `type` and `enum` BOTH apply, so a four-member enum still REJECTS null and a
+      // strict validator refuses a response the server legitimately emits. swagger-core does not
+      // emit the null member for a Java enum, so `NullableRefCustomizer.appendNullEnumMember` adds
+      // it at assembly time — response-only, and pinned by NullableRefCustomizerTest.
+      // Do NOT "simplify" by dropping either half; each is load-bearing.
       @Schema(types = {"string", "null"}) OiInterpretation interpretation) {}
 
   /**
    * One matrix row: a snapshot bucket + a cell per bank in the configured column order.
    *
-   * <p>{@code cells} contains NULL ELEMENTS by design — line ~123 does
+   * <p>{@code cells} contains NULL ELEMENTS by design — the row loop does
    * {@code cells.add(byBank.get(bank).get(b))}, which is null when that bank has no point at this
    * bucket, and positional alignment with {@code banks} is the whole point of the matrix so the
    * nulls cannot be filtered out. That IS expressed in the contract, just not on {@code items}:

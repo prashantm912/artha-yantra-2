@@ -82,21 +82,48 @@ done < <(git worktree list --porcelain | awk '/^worktree /{print $2}')
 # paths, the diff is non-empty and we keep a branch that was in fact merged. A false "keep" costs one
 # manual `git branch -D`; a false "delete" costs work. `gh` below recovers most of those anyway.
 branch_work_is_in_main() {
-  local branch="$1" base paths
+  local branch="$1" base tmp
   base="$(git merge-base origin/main "$branch" 2>/dev/null)" || return 1
-  # Paths the branch itself changed, NUL-separated so spaces/quotes in filenames survive.
-  mapfile -d '' -t paths < <(git diff --name-only -z "$base" "$branch" -- 2>/dev/null)
-  # A branch that changed nothing relative to the merge base has no work to lose.
+
+  # ⚠️ --no-renames is LOAD-BEARING, not tidiness (review R1). With rename detection on (the
+  # default) a rename collapses to ONE entry and --name-only prints only the DESTINATION. The
+  # branch's deletion of the source path would then never be compared: if main happens to have the
+  # destination but still carries the source, the scoped diff is quiet and we delete a branch whose
+  # deletion never landed. Listing both sides keeps the deletion in the comparison.
+  #
+  # ⚠️ The producer's exit status is captured EXPLICITLY (review R3). `mapfile < <(cmd)` does NOT
+  # propagate cmd's failure — a failed `git diff` yields an empty array, which the length-0 branch
+  # below would read as "nothing to lose, therefore merged" and DELETE the branch. Redirect to a
+  # file and check the status first, so failure is refusal rather than deletion.
+  tmp="$(mktemp)" || return 1
+  if ! git diff --no-renames --name-only -z "$base" "$branch" -- >"$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    return 1
+  fi
+  local paths=()
+  mapfile -d '' -t paths <"$tmp"
+  rm -f "$tmp"
+
+  # Genuinely empty now means what it says: the branch changed nothing since the merge base.
   [ "${#paths[@]}" -eq 0 ] && return 0
-  git diff --quiet origin/main "$branch" -- "${paths[@]}" 2>/dev/null
+  git diff --no-renames --quiet origin/main "$branch" -- "${paths[@]}" 2>/dev/null
 }
 
 # GitHub is authoritative and cheap; it also rescues the false "keep" above. Only consulted when the
 # content test was inconclusive, so the common path stays offline and network-free.
+#
+# ⚠️ Matching on branch NAME alone is not enough (review R2). Branch names get reused: merge
+# `fix/foo`, then later recreate `fix/foo` locally with new work and push it. `gh pr list --head
+# fix/foo --state merged` still returns the OLD merged PR, and we would force-delete the NEW commits.
+# Require the merged PR's headRefOid to be the branch's CURRENT tip — that is what makes the answer
+# about THIS work rather than about a name.
 gh_says_merged() {
-  local branch="$1"
+  local branch="$1" tip oid
   command -v gh >/dev/null 2>&1 || return 1
-  [ -n "$(gh pr list --head "$branch" --state merged --json number --jq '.[0].number' 2>/dev/null)" ]
+  tip="$(git rev-parse "$branch" 2>/dev/null)" || return 1
+  oid="$(gh pr list --head "$branch" --state merged --json headRefOid \
+           --jq '.[].headRefOid' 2>/dev/null | grep -Fx "$tip")" || return 1
+  [ -n "$oid" ]
 }
 
 # 2) Local branches whose upstream is gone (git marks these "[gone]").

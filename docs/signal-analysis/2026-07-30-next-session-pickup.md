@@ -84,7 +84,7 @@ instrument convergence depth, not to change the ceiling. `lockAnchorsBeforeBook`
   `Map.of` = order NORMALIZED, never claim byte-identical · single-key = trivially identical), diff
   generated-vs-committed spec, add the `Contract break: APPROVED` line, extend `contracts.bridge.ts`,
   ratchet down in `MapReturnRatchetTest`.
-- **§9-03 trial-metrics catalog** — the only remaining startable in §9 (02/04/05/06 all closed).
+- ~~**§9-03 trial-metrics catalog**~~ — **NOT startable; it shipped 2026-07-11** (ledger row B17, PR #712 @ `8e5793bc`; `contracts/metrics/trial-metrics-catalog.json`, 23 metrics). This line was copied forward from a stale ledger claim — verified and corrected 2026-07-30. §9 has no remaining startables.
 - **task_7f57c0d5** — `OpeningSignal`'s three nullable `JsonNode` fields, same defect review caught in
   #1097.
 - **task_d16e9d86** — CLOSED by #1104.

@@ -1629,8 +1629,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/MarketSurfaceStatus"
                 }
               }
             }
@@ -2460,8 +2459,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/PreOpen"
                 }
               }
             }
@@ -4252,8 +4250,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/MarketStatusesResponse"
                 }
               }
             }
@@ -4281,8 +4278,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/HolidaysResponse"
                 }
               }
             }
@@ -8446,6 +8442,36 @@
         },
         "required" : [ "exchange", "instrumentToken", "mode", "priority", "subscribers", "tradingsymbol" ]
       },
+      "MarketSurfaceStatus" : {
+        "type" : "object",
+        "properties" : {
+          "serverTime" : {
+            "type" : "string"
+          },
+          "tradingDay" : {
+            "type" : "boolean"
+          },
+          "marketOpen" : {
+            "type" : "boolean"
+          },
+          "sessionOpen" : {
+            "type" : "string"
+          },
+          "sessionClose" : {
+            "type" : "string"
+          },
+          "nextTradingDay" : {
+            "type" : "string"
+          },
+          "previousTradingDay" : {
+            "type" : "string"
+          },
+          "lastTradingDay" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "lastTradingDay", "marketOpen", "nextTradingDay", "previousTradingDay", "serverTime", "sessionClose", "sessionOpen", "tradingDay" ]
+      },
       "Row" : {
         "type" : "object",
         "properties" : {
@@ -9165,6 +9191,52 @@
           }
         },
         "required" : [ "baseWeeks", "footprint", "pivot", "rejectReason", "setupType", "valid" ]
+      },
+      "PreOpen" : {
+        "type" : "object",
+        "properties" : {
+          "phase" : {
+            "type" : "string"
+          },
+          "preOpen" : {
+            "type" : "boolean"
+          },
+          "indices" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/PreOpenIndex"
+            }
+          }
+        },
+        "required" : [ "indices", "phase", "preOpen" ]
+      },
+      "PreOpenIndex" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "key" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : [ "number", "null" ]
+          },
+          "prevClose" : {
+            "type" : [ "number", "null" ]
+          },
+          "netChange" : {
+            "type" : [ "number", "null" ]
+          },
+          "changePct" : {
+            "type" : [ "number", "null" ]
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "changePct", "key", "ltp", "name", "netChange", "prevClose" ]
       },
       "DataFreshness" : {
         "type" : "object",
@@ -10411,6 +10483,67 @@
           }
         },
         "required" : [ "ceOi", "peOi", "strike" ]
+      },
+      "MarketStatus" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "preOpen" : {
+            "type" : "boolean"
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "exchange", "preOpen", "status" ]
+      },
+      "MarketStatusesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MarketStatus"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "HolidayEntry" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string"
+          },
+          "day" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "date", "day", "description" ]
+      },
+      "HolidaysResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/HolidayEntry"
+            }
+          },
+          "asOf" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "asOf", "items" ]
       },
       "CrossSourceReport" : {
         "type" : "object",

@@ -8302,16 +8302,16 @@
         "type" : "object",
         "properties" : {
           "name" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "country" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "key" : {
             "type" : "string"
           },
           "tradingSymbol" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "ltp" : {
             "type" : [ "number", "null" ]
@@ -8339,7 +8339,7 @@
             "format" : "date-time"
           },
           "latency" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "asOf", "changePct", "country", "high", "key", "latency", "low", "ltp", "name", "netChange", "open", "prevClose", "tradingSymbol" ]

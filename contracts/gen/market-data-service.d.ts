@@ -2775,10 +2775,10 @@ export interface components {
             tokenValidUntil: string;
         };
         WorldIndex: {
-            name: string;
-            country: string;
+            name: string | null;
+            country: string | null;
             key: string;
-            tradingSymbol: string;
+            tradingSymbol: string | null;
             ltp: number | null;
             prevClose: number | null;
             netChange: number | null;
@@ -2788,7 +2788,7 @@ export interface components {
             low: number | null;
             /** Format: date-time */
             asOf: string | null;
-            latency: string;
+            latency: string | null;
         };
         WorldIndicesResponse: {
             items: components["schemas"]["WorldIndex"][];

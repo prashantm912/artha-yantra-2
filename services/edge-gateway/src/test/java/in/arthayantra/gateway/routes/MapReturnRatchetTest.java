@@ -97,7 +97,10 @@ class MapReturnRatchetTest {
    * been enumerated, so none of them declared nullability, and five ({@code PreOpenRow},
    * {@code WorldIndex}, {@code ScreenerService.Row}, {@code Announcement},
    * {@code OptionsSnapshotRepository.SnapshotRow}) would have published nullable fields as
-   * always-present — a lie in the generated TS, not merely a missing annotation. They now carry
+   * NON-NULLABLE — a lie in the generated TS, not merely a missing annotation. Precisely: a record
+   * component is always PRESENT, so {@code required} is correct and must stay; what was wrong was
+   * the TYPE, which claimed a value can never be null. The fix is the 3.1 type union, never
+   * dropping {@code required}. They now carry
    * {@code @Schema(types = {"X", "null"})} on every genuinely nullable component, scoped from the
    * construction sites and, for {@code SnapshotRow}, from the V006 DDL's NOT NULL set. When
    * converting an envelope, check the ITEM type's nullability too, not just the envelope's.

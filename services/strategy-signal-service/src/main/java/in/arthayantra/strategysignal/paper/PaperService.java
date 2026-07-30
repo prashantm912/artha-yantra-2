@@ -935,12 +935,32 @@ public class PaperService {
   }
 
   /**
-   * The shared close path (manual close, the 15:45 sweep, bracket SL/TP, engine exit). {@code
-   * @Transactional} + public so the ONE external caller that isn't already in a transaction — {@link
-   * PaperBracketEvaluator} on the @Scheduled thread — runs in a transaction; without it the
-   * {@code PaperPositionClosed} event was published outside any tx and its AFTER_COMMIT listeners
-   * (the TAKEN-anchor resolver + auto-journal) silently never fired. Self-invoking
-   * callers (closePosition/closeForSignal/markToCloseIntraday) simply join their own tx.
+   * The shared close path (manual close, the 15:45 sweep, bracket SL/TP, engine exit, expiry).
+   *
+   * <p><b>THE INVARIANT: every close must run inside a transaction.</b> Without one the {@code
+   * PaperPositionClosed} event publishes outside any tx and its AFTER_COMMIT listeners — the
+   * TAKEN-anchor resolver and auto-journal — <b>silently never fire</b>. Nothing throws; the close
+   * simply loses its side effects, which is why this is spelled out rather than left to the
+   * annotation.
+   *
+   * <p>⚠️ {@code @Transactional} here covers EXTERNAL callers only, because Spring's proxy is
+   * bypassed on self-invocation (the same trap that silently dropped a tx in {@code RegistryService},
+   * PF-01 round-6 #2). So the rule for adding a caller is:
+   * <ul>
+   *   <li><b>External</b> (another bean, e.g. {@link PaperBracketEvaluator} on the @Scheduled thread,
+   *       or {@code PaperExpiryService}) — nothing to do, the proxy applies. An expiry batch
+   *       deliberately gets one tx PER position so a single refusal cannot roll back the rest.</li>
+   *   <li><b>Self-invoking</b> (a sibling method on this class) — <b>that method MUST carry its own
+   *       {@code @Transactional}</b>, because this one's is bypassed entirely.</li>
+   * </ul>
+   *
+   * <p>Verified 2026-07-30 across all 10 call sites (§9b close-out): the four self-invoking callers
+   * — {@code closePosition}, {@code closeForSignal}, {@code closeForPosition}, {@code
+   * markToCloseIntraday} — are each {@code @Transactional}, and both external callers go through the
+   * proxy. Stated as a RULE rather than a caller list because the previous list had already drifted:
+   * it named three self-invoking callers when there were four, and called
+   * {@code PaperBracketEvaluator} "the ONE external caller" after {@code PaperExpiryService} became
+   * a second.
    *
    * <p><b>Returns empty when THIS call did not perform the close</b> — a concurrent closer won the
    * CAS below. That distinction used to be invisible: the realized amount came back either way, so a

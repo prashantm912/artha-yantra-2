@@ -172,7 +172,20 @@
              it — so whether any given PR sees an architecture regression was luck.
 
              A structural check is deterministic by construction and can never be legitimately
-             flaky, so it gets its own execution pinned to zero retries. The POM's explicit value
+             flaky, so it gets its own execution pinned to zero retries.
+
+             ⚠️ SCOPE, measured 2026-07-30 (task_fbc8e4bd) — do NOT widen this list reflexively.
+             The masking is NOT a property of "structural tests" in general; it is a property of
+             Spring Modulith's STATIC CACHE of the computed ApplicationModules, which makes the
+             retry skip recomputation. Tests that re-derive their verdict every run cannot be
+             masked, and adding them here is config for an impossible case.
+             VERIFIED by breaking MapReturnRatchetTest's floor and running it with
+             -Dsurefire.rerunFailingTestsCount=2 WITHOUT the exemption: it ran 3 times, failed all
+             3, and the build FAILED with no `Flakes:` marker. Same reasoning covers
+             GatewayRouteAllowlistTest (pure file scan) and ContractCaptureTest (recomputes the
+             spec each run, and its Spring context is a LEGITIMATE flake source, so exempting it
+             would convert infrastructure noise into hard failures).
+             Before adding a test here, ask: does it CACHE its verdict across runs in one JVM? The POM's explicit value
              wins over the `-D` user property, which only supplies a default. Split so the two
              cannot drift: the default execution EXCLUDES these, the pinned one INCLUDES them, and
              the same pattern list drives both. -->

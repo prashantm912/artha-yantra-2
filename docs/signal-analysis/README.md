@@ -389,7 +389,58 @@ Run in order; each answers one question. Canned SQL in §6.
     modelling. ⚠️ **Standing result: all four measured loosenings of the scalper entry gate LOST money**
     (T1, T7, G13, G10). Treat that as the prior. All four are conditional on the 30-minute `time_stop`,
     so if G11 changes the exit they must be re-run.
-27. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+27. **On an expiry day the suppression lands on whichever instrument ROLE touches the expiring chain —
+    §3.19's OI-root query answers ONLY the OI question** (added 2026-07-30) — a scalper carries up to
+    three independent instrument roles (ADR-0003: `signal_underlying` / `strike_reference` /
+    `underlying`), so "which root is expiring" has a different answer per role. On the **BSE monthly
+    expiry of 2026-07-30** every §3.19 discriminator read *no suppression*, correctly: `context.underlying`
+    was `NIFTY 50` on **814/814** rows (the 16 `sensex-niftyoi` slugs read NIFTY OI by design), quadrants
+    NEUTRAL **0/814**, `spurtPricePct` NULL **0/814**, `futuresBasis` LIVE **814/814** — NSE was not
+    expiring, so no NIFTY-rooted OI read could be suppressed. **The expiry hit the EXECUTION root
+    instead, through `strike-pick`:** 405 fails, reason `no strike met the delta/premium band`, on **16 of
+    16** sensex-rooted slugs and **ZERO** NIFTY-rooted ones. The three-session control is clean —
+    07-28 (NSE monthly) **534 fails, all NIFTY-rooted**; 07-29 (non-expiry) **ZERO**; 07-30 (BSE monthly)
+    **405, all SENSEX-rooted**. **So on an expiry day, check `strike-pick` and the `wouldBeLeg` symbols,
+    not only the quadrants** — and mark the expiring root's family REGIME for that session even when the
+    OI bloc is fully live. ⚠️ The rule is *an expiry saturates the expiring root's `strike-pick`*, **not**
+    *only an expiry can*: 2026-07-24 was a Friday with no expiry on either exchange and 550 sensex-rooted
+    fails (a thin or freshly-rolled chain is the unexcluded alternative).
+    ```sql
+    SELECT (r.generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
+           CASE WHEN r.strategy_slug LIKE '%sensex%' THEN 'sensex-rooted' ELSE 'nifty-rooted' END fam,
+           count(*) strike_pick_fails, count(DISTINCT r.strategy_slug) slugs
+    FROM strategy.signal_rejections r, jsonb_array_elements(r.diagnostic->'checks') c
+    WHERE r.generated_at >= :d0 AND c->>'rail'='strike-pick' AND (c->>'pass')::boolean=false
+    GROUP BY 1,2 ORDER BY 1,2;
+    ```
+28. **A dot at 0% (or 100%) on a LIVE, MOVING operand is a FOURTH state — "never crosses" — that neither
+    the alive/dead nor the frozen probe can see; check the operand's own min/max against the dot's
+    threshold before classifying** (added 2026-07-30) — `breadth` (w **1.0**, the canary's only required
+    non-OI probe) read **0/814** on 2026-07-30 with the input emphatically healthy: 0 nulls, 0 zero-pairs,
+    **10 distinct values**, range **23–32**. Its own reason string is the rule — `advances/declines > 32` —
+    and the session maximum was **exactly 32** against a strictly-greater test, the **second** such session
+    (07-28's max was also exactly 32; 07-21's was 31). **The cross-session shape is the finding:** over
+    2026-07-21…07-30 the dot is **0% on five sessions, ~100% on two, 0.2% on one — never in between**,
+    because `advances` is a market-wide scalar shared by every row of a session and moves slowly. A fixed
+    threshold on such an operand is therefore **not a per-bar discriminator but a per-session bias** —
+    here ±**1.0/18.80 = 5.3 pp** on every composite in the session. `DotHealthCanary` reports
+    `alive=true, frozen=false, required=true`, which is correct on both axes and still misses it (§3.22's
+    frozen probe needs ONE distinct value; this operand has ten). **Standing check when a dot sits at 0%
+    or ~100% over a COMPLETE session (§3.21) and §3.22's DISTINCT-count comes back >1:** pull the operand's
+    session min/max and place the dot's own threshold on it, then repeat across sessions — an operand that
+    sits wholly on one side of the threshold every session is a step function, not a signal.
+    ```sql
+    -- the dot's rule is in its own reason string; read it, then bracket the operand
+    SELECT (r.generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
+           min((r.diagnostic->'context'->'macro'->>:field)::numeric) mn,
+           max((r.diagnostic->'context'->'macro'->>:field)::numeric) mx,
+           count(*) FILTER (WHERE (r.diagnostic->'context'->'macro'->>:field)::numeric > :threshold) crossing,
+           count(*) rows
+    FROM strategy.signal_rejections r
+    WHERE r.generated_at >= :d0 AND r.diagnostic->'context'->'macro'->>:field IS NOT NULL
+    GROUP BY 1 ORDER BY 1;
+    ```
+29. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -464,6 +515,12 @@ restart services, or write during market hours.
   ⚠️ **Standing result: all four measured loosenings of the scalper entry gate LOST money** (T1, T7,
   G13, G10). Treat that as the prior. All four are conditional on the 30-minute `time_stop`, so if
   G11 changes the exit they must be re-run.
+- ⚠ **A dot at 0% is THREE explanations deep now, and the third one has no probe** (added 2026-07-30,
+  §3.28): a dead input (null — the canary sees it), a **frozen** input (one distinct value — #1111's
+  probe sees it), or a **live, moving operand that never crosses its threshold** (nothing sees it).
+  `breadth` on 2026-07-30 was the third: 0/814 with 10 distinct values over 23–32, against a `> 32`
+  rule whose session max was exactly 32. In a `live` run do not classify at all (§3.21); at EOD place
+  the dot's own threshold on the operand's session min/max **before** reaching for a data explanation.
 - Capture liveness: `max(bucket)` on 1m candles + snapshot counts vs wall clock.
 
 ### 4.2 Live counterfactual — "would loosening knob X have made money TODAY?"

@@ -2829,6 +2829,16 @@ export interface components {
             /** Format: int32 */
             subscribers: number;
         };
+        MarketSurfaceStatus: {
+            serverTime: string;
+            tradingDay: boolean;
+            marketOpen: boolean;
+            sessionOpen: string;
+            sessionClose: string;
+            nextTradingDay: string;
+            previousTradingDay: string;
+            lastTradingDay: string;
+        };
         Row: {
             exchange: string;
             tradingsymbol: string;
@@ -3075,6 +3085,21 @@ export interface components {
             /** Format: int32 */
             baseWeeks: number | null;
             rejectReason: string | null;
+        };
+        PreOpen: {
+            phase: string;
+            preOpen: boolean;
+            indices: components["schemas"]["PreOpenIndex"][];
+        };
+        PreOpenIndex: {
+            name: string;
+            key: string;
+            ltp: number | null;
+            prevClose: number | null;
+            netChange: number | null;
+            changePct: number | null;
+            /** Format: date-time */
+            asOf: string;
         };
         DataFreshness: {
             /** Format: date-time */
@@ -3514,6 +3539,25 @@ export interface components {
             ceOi: number;
             /** Format: int64 */
             peOi: number;
+        };
+        MarketStatus: {
+            exchange: string;
+            status: string;
+            preOpen: boolean;
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        MarketStatusesResponse: {
+            items: components["schemas"]["MarketStatus"][];
+        };
+        HolidayEntry: {
+            date: string;
+            day: string;
+            description: string;
+        };
+        HolidaysResponse: {
+            items: components["schemas"]["HolidayEntry"][];
+            asOf: string;
         };
         CrossSourceReport: {
             status: string;
@@ -6099,9 +6143,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["MarketSurfaceStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6679,9 +6721,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["PreOpen"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7642,9 +7682,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["MarketStatusesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7673,9 +7711,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["HolidaysResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

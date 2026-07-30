@@ -137,7 +137,7 @@ public class MarketSurfaceController {
 
   /** Calendar status: session open/closed, trading day, next trading day. */
   @GetMapping("/status")
-  public Map<String, Object> status() {
+  public MarketSurfaceStatus status() {
     OffsetDateTime now = OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET);
     LocalDate today = now.toLocalDate();
     boolean tradingDay;
@@ -160,16 +160,31 @@ public class MarketSurfaceController {
       previousTradingDay = null;
       lastTradingDay = null;
     }
-    return Map.of(
-        "serverTime", now.toString(),
-        "tradingDay", tradingDay,
-        "marketOpen", open,
-        "sessionOpen", MarketCalendar.SESSION_OPEN.toString(),
-        "sessionClose", MarketCalendar.SESSION_CLOSE.toString(),
-        "nextTradingDay", nextTradingDay == null ? "" : nextTradingDay.toString(),
-        "previousTradingDay", previousTradingDay == null ? "" : previousTradingDay.toString(),
-        "lastTradingDay", lastTradingDay == null ? "" : lastTradingDay.toString());
+    return new MarketSurfaceStatus(
+        now.toString(),
+        tradingDay,
+        open,
+        MarketCalendar.SESSION_OPEN.toString(),
+        MarketCalendar.SESSION_CLOSE.toString(),
+        nextTradingDay == null ? "" : nextTradingDay.toString(),
+        previousTradingDay == null ? "" : previousTradingDay.toString(),
+        lastTradingDay == null ? "" : lastTradingDay.toString());
   }
+
+  /**
+   * Calendar surface for the SPA. Every date is the {@code LocalDate.toString()} STRING, and the
+   * uncovered-year fallback emits {@code ""} — never null — so all three stay non-nullable. The
+   * pre-D3 {@code Map.of} would have thrown on a null, which is exactly why those ternaries exist.
+   */
+  public record MarketSurfaceStatus(
+      String serverTime,
+      boolean tradingDay,
+      boolean marketOpen,
+      String sessionOpen,
+      String sessionClose,
+      String nextTradingDay,
+      String previousTradingDay,
+      String lastTradingDay) {}
 
   /**
    * NSE trading holidays the bundled calendar covers, date-ascending. Each row carries the ISO date, the
@@ -177,16 +192,27 @@ public class MarketSurfaceController {
    * today. Map-envelope (springdoc does not enumerate it); the calendar covers only the resource's years.
    */
   @GetMapping("/holidays")
-  public Map<String, Object> holidays() {
-    List<Map<String, Object>> items =
+  public HolidaysResponse holidays() {
+    List<HolidayEntry> items =
         calendar.holidayList().stream()
             .map(
                 h ->
-                    Map.<String, Object>of(
-                        "date", h.date().toString(),
-                        "day", h.date().getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH),
-                        "description", h.name()))
+                    new HolidayEntry(
+                        h.date().toString(),
+                        h.date().getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.ENGLISH),
+                        h.name()))
             .toList();
-    return Map.of("items", items, "asOf", OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET).toString());
+    return new HolidaysResponse(
+        items, OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET).toString());
   }
+
+  /**
+   * One holiday row. ⚠️ The ITEM was itself an anonymous {@code Map<String,Object>}, so it published
+   * as a bare object and NOTHING about a holiday was enumerated — the exact blindness this
+   * conversion removes. All three components are computed, non-null.
+   */
+  public record HolidayEntry(String date, String day, String description) {}
+
+  /** The {items, asOf} envelope. Multi-key {@code Map.of} before D3 — order NORMALISED. */
+  public record HolidaysResponse(List<HolidayEntry> items, String asOf) {}
 }

@@ -101,14 +101,18 @@ describe('FreshnessBadge', () => {
   });
 
   it('still omits the date for a same-IST-day stale read even across the UTC midnight boundary', () => {
-    // 23:00 IST is 17:30Z the SAME IST day; a UTC-date comparison would wrongly call this yesterday.
+    // The capture and the read sit on the SAME IST day but on OPPOSITE sides of 00:00 UTC:
+    // 05:00 IST = 23:30Z the PREVIOUS UTC day, 06:00 IST = 00:30Z the next. A UTC-date comparison
+    // would therefore call the capture "yesterday" and wrongly print a date. (An earlier version of
+    // this test used 23:00-23:40 IST = 17:30-18:10Z, which never crosses UTC midnight at all and so
+    // could not fail for the reason it claimed — caught by cross-vendor review.)
     render(
       <FreshnessBadge
-        freshness={fresh({ asOf: '2026-07-11T23:00:00+05:30', complete: false })}
-        now={Date.parse('2026-07-11T23:40:00+05:30')}
+        freshness={fresh({ asOf: '2026-07-11T05:00:00+05:30', complete: false })}
+        now={Date.parse('2026-07-11T06:00:00+05:30')}
       />,
     );
-    expect(screen.getByText('as of 23:00')).toBeInTheDocument();
+    expect(screen.getByText('as of 05:00')).toBeInTheDocument();
   });
 
   it('renders an EOD read as the date, muted, never coloured alone', () => {

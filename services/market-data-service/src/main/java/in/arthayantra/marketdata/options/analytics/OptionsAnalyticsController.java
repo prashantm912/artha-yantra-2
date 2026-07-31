@@ -807,13 +807,11 @@ public class OptionsAnalyticsController {
       @RequestParam BigDecimal strike,
       @RequestParam(required = false, defaultValue = "CE") String optionType,
       @RequestParam(required = false) String nearExpiry,
-      @RequestParam(required = false) String farExpiry,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate farExpiry,
       @RequestParam(required = false, defaultValue = "3") int interval) {
     OiQuery q = OiQuery.of(mode, name, date, null, nearExpiry);
-    java.time.LocalDate far =
-        farExpiry == null || farExpiry.isBlank() ? null : java.time.LocalDate.parse(farExpiry);
     return calendarSpreadChartService.chart(
-        q.name(), strike, optionType, q.expiry(), far, interval, q.date());
+        q.name(), strike, optionType, q.expiry(), farExpiry, interval, q.date());
   }
 
   /**
@@ -938,11 +936,11 @@ public class OptionsAnalyticsController {
       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate expiry,
       @RequestParam(required = false) Integer window,
       @RequestParam(required = false) Integer interval,
-      @RequestParam(required = false) String session) {
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate session) {
     LocalDate exp = expiry;
     int win = window == null ? 3 : window;
     int intervalMinutes = interval == null ? defaultSessionIntervalMinutes : interval;
-    LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : LocalDate.parse(session);
+    LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : session;
 
     List<OptionsSnapshotReader.PerStrikeSessionStat> stats =
         reader.sessionStats(underlying, exp, sess, intervalMinutes);

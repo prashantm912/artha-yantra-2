@@ -5,10 +5,32 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/optimizations/run": {
       "post": {
         "summary": "Run",
-        "description": "Submit a sweep \u2192 202 {jobId, status:\"queued\"}.",
+        "description": "Submit a sweep \u2192 202 {jobId, status:\"queued\"}; 400 on a bad/missing field or a\nclosed-grammar parameter path.",
         "operationId": "run_api_v1_optimizations_run_post",
         "requestBody": {
           "content": {
@@ -35,12 +57,68 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_FAILED / INVALID_PARAMETER_PATH"
+          },
           "422": {
-            "description": "Validation Error",
+            "description": "Validation failed (shared error envelope)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimizations/jobs": {
+      "get": {
+        "summary": "Jobs",
+        "description": "List optimizer sweeps (OPTIMIZATION jobs), newest first \u2014 the sweep-native listing surface\n(previously sweeps were only discoverable via the shared backtest jobs table).",
+        "operationId": "jobs_api_v1_optimizations_jobs_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Jobs Api V1 Optimizations Jobs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -51,7 +129,7 @@
     "/api/v1/optimizations/jobs/{job_id}": {
       "get": {
         "summary": "Job",
-        "description": "Sweep status / progress / trials completed.",
+        "description": "Sweep status / progress / trials completed. UUID-typed so a malformed id is refused at the\nboundary (422) instead of reaching the UUID-typed ``jobs.id`` column as an uncaught Postgres\nparse error; a well-formed but unknown id still 404s.",
         "operationId": "job_api_v1_optimizations_jobs__job_id__get",
         "parameters": [
           {
@@ -60,6 +138,7 @@
             "required": true,
             "schema": {
               "type": "string",
+              "format": "uuid",
               "title": "Job Id"
             }
           }
@@ -78,11 +157,11 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Validation failed (shared error envelope)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -118,11 +197,11 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Validation failed (shared error envelope)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -196,11 +275,11 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Validation failed (shared error envelope)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -258,11 +337,11 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Validation failed (shared error envelope)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -307,11 +386,11 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Validation failed (shared error envelope)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -322,7 +401,7 @@
     "/api/v1/optimizations/{sweep_id}/promote": {
       "post": {
         "summary": "Promote",
-        "description": "Promote a COMPLETE trial's params to a new draft version (\u00a7D.9); 409 if not promotable.",
+        "description": "Promote a COMPLETE trial's params to a new draft version (\u00a7D.9); 409 if not promotable.\nModelled like ``/probes`` below, so a body missing ``trialId`` is a 422 rather than a KeyError\nescaping as a bare 500.",
         "operationId": "promote_api_v1_optimizations__sweep_id__promote_post",
         "parameters": [
           {
@@ -332,6 +411,325 @@
             "schema": {
               "type": "string",
               "title": "Sweep Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Promote Api V1 Optimizations  Sweep Id  Promote Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimizations/{sweep_id}/probes": {
+      "post": {
+        "summary": "Probes",
+        "description": "Submit the plateau top-K's missing \u00b11-step neighbours as ordinary trials of this COMPLETED\nsweep, so a later ``/best`` read MEASURES ``neighborCount`` (\u00a73.2.3 / \u00a711). Body is optional\n(``topK`` default 5, ``maxProbes`` default 40). 404 unknown or non-sweep job; 409 unless the\nsweep is completed.",
+        "operationId": "probes_api_v1_optimizations__sweep_id__probes_post",
+        "parameters": [
+          {
+            "name": "sweep_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sweep Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ProbeRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeReceipt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns": {
+      "get": {
+        "summary": "Campaigns",
+        "description": "List evolution campaigns, newest first.",
+        "operationId": "campaigns_api_v1_evolution_campaigns_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Campaign",
+        "description": "Create an evolution campaign (status ACTIVE); 422 on an unknown evidencePolicy.",
+        "operationId": "create_campaign_api_v1_evolution_campaigns_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}": {
+      "get": {
+        "summary": "Campaign",
+        "description": "One campaign with its generations; 404 if unknown.",
+        "operationId": "campaign_api_v1_evolution_campaigns__campaign_id__get",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/candidates": {
+      "get": {
+        "summary": "Candidates",
+        "description": "The campaign's candidates (incl. the scorecard JSONB); 404 if the campaign is unknown.",
+        "operationId": "candidates_api_v1_evolution_campaigns__campaign_id__candidates_get",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/retro-score/{sweep_job_id}": {
+      "get": {
+        "summary": "Retro Score",
+        "description": "Score an existing sweep's trials as a cohort (\u00a76 gates + RobustScore); 404 if unknown.",
+        "operationId": "retro_score_api_v1_evolution_retro_score__sweep_job_id__get",
+        "parameters": [
+          {
+            "name": "sweep_job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sweep Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetroScoreResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/generations": {
+      "post": {
+        "summary": "Record Generation",
+        "description": "Record a completed sweep as this campaign's next generation, scoring its cohort into\ncandidate scorecards. 404 unknown campaign / sweep; 409 if the sweep is already recorded; 422 if\nthe campaign's evidence policy forbids sim scoring (SIM_BLOCKED).",
+        "operationId": "record_generation_api_v1_evolution_campaigns__campaign_id__generations_post",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
             }
           }
         ],
@@ -353,19 +751,17 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Promote Api V1 Optimizations  Sweep Id  Promote Post"
+                  "$ref": "#/components/schemas/GenerationRecorded"
                 }
               }
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Validation failed (shared error envelope)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorEnvelope"
                 }
               }
             }
@@ -373,10 +769,1116 @@
         }
       }
     },
-    "/health": {
+    "/api/v1/evolution/campaigns/{campaign_id}/generations/{n}/select": {
+      "post": {
+        "summary": "Select Survivors",
+        "description": "Run the \u00a78.1 SELECT step over generation ``n``: promote the gate-passing top-K candidates by\nRobustScore to SURVIVOR and RETIRE the rest, recording the rationale on each scorecard. Body\n``{topK}`` optional (default 15, bounded 1..50). Idempotent \u2014 a re-run recomputes the same split\nand writes only rows that changed. 404 unknown campaign / generation. NOTHING self-arms:\nSURVIVOR only makes a candidate ELIGIBLE for a PUBLISH_PAPER proposal; the owner still approves\nand executes it.",
+        "operationId": "select_survivors_api_v1_evolution_campaigns__campaign_id__generations__n__select_post",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          },
+          {
+            "name": "n",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "N"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/insights/{sweep_job_id}": {
       "get": {
-        "summary": "Health",
-        "operationId": "health_health_get",
+        "summary": "Insights",
+        "description": "Parameter-effect analytics over an existing sweep \u2014 importance tornado, brittleness map, and\n2-D interaction slices (existing trials only). 404 for an unknown / non-OPTIMIZATION job; 200\nwith empty arrays + a ``notes`` entry when there is too little data to analyze.",
+        "operationId": "insights_api_v1_evolution_insights__sweep_job_id__get",
+        "parameters": [
+          {
+            "name": "sweep_job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sweep Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InsightsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/generations/{generation_id}/stress": {
+      "post": {
+        "summary": "Stress",
+        "description": "Re-run a generation's plateau top-K at 2\u00d7/4\u00d7 slippage (design \u00a73.2.5), measuring the\nobjective degradation slope that feeds \u00a76.2 ``cost_resilience``. Body optional (``topK`` 5,\n``multipliers`` default ``[2, 4]``). 404 unknown generation; 422 SIM_BLOCKED / no SCORED\ncandidates / no source sweep; 409 if a round is already in flight.",
+        "operationId": "stress_api_v1_evolution_generations__generation_id__stress_post",
+        "parameters": [
+          {
+            "name": "generation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Generation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StressRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StressReceipt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/reconciliations": {
+      "post": {
+        "summary": "Create Reconciliation",
+        "description": "Compute a backtest-vs-live reconciliation for a version over a lived window (design \u00a77.1).\nBody ``{versionId, from, to}``. Submits the matched-window re-sim (``purpose: reconcile``) and\nreturns a 202 receipt; the gap row lands asynchronously (GET ?versionId=). 400 missing field;\n404 unknown version; 409 if a reconciliation for (version, window) exists or is in flight.",
+        "operationId": "create_reconciliation_api_v1_evolution_reconciliations_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationReceipt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Reconciliations",
+        "description": "A version's reconciliations, newest-first (design \u00a77.1.4 / \u00a711 endpoint list) \u2014 the typed\n``{items: [...]}`` envelope the FE backtest-vs-paper view renders.",
+        "operationId": "list_reconciliations_api_v1_evolution_reconciliations_get",
+        "parameters": [
+          {
+            "name": "versionId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Versionid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/proposals": {
+      "post": {
+        "summary": "Generate Proposals",
+        "description": "Generate/refresh PUBLISH_PAPER proposals for a campaign's eligible candidates (\u00a78.2 bar).\nIdempotent \u2014 one OPEN proposal per (candidate, kind); regeneration refreshes. 404 unknown\ncampaign. NOTHING self-arms: a proposal is an owner-inbox item, not an armed action.",
+        "operationId": "generate_proposals_api_v1_evolution_campaigns__campaign_id__proposals_post",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateProposalsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/proposals": {
+      "get": {
+        "summary": "List Proposals",
+        "description": "The owner inbox \u2014 proposals newest-first, filterable by status / kind / campaign.",
+        "operationId": "list_proposals_api_v1_evolution_proposals_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "campaignId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Campaignid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/proposals/{proposal_id}/approve": {
+      "post": {
+        "summary": "Approve Proposal",
+        "description": "Approve a PENDING proposal \u2014 marks status APPROVED + actor + decided_at, and returns the\nslice-2 ``nextSteps`` it WOULD trigger (honest that the publish is not yet wired; nothing arms).\n404 unknown proposal; 409 if already decided/expired.",
+        "operationId": "approve_proposal_api_v1_evolution_proposals__proposal_id__approve_post",
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalDecision"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/proposals/{proposal_id}/reject": {
+      "post": {
+        "summary": "Reject Proposal",
+        "description": "Reject a PENDING proposal \u2014 marks status REJECTED + actor + decided_at (\u00a78.3 rejection is\npersisted, never silent). 404 unknown proposal; 409 if already decided/expired.",
+        "operationId": "reject_proposal_api_v1_evolution_proposals__proposal_id__reject_post",
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalDecision"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/proposals/{proposal_id}/execute": {
+      "post": {
+        "summary": "Execute Proposal",
+        "description": "Execute an APPROVED proposal (\u00a78.2 items 12-13), dispatched by kind: PUBLISH_PAPER \u2192\ncreate+publish the sibling evo paper-lane clone; PROMOTE \u2192 publish the candidate onto the base\nstrategy (champion move) + register the demoted-champion counterfactual; ROLLBACK \u2192 copy-forward\nroll the base back to the demoted champion. The ONLY registry-mutating path \u2014 explicit +\nowner-clicked; approval alone arms nothing; no real-order path exists. 404 unknown proposal /\ncandidate / campaign; 409 not-approved / already-executed / per-family cap / registry collision;\n422 unexecutable kind (RETIRE) / unresolved base lineage; 502 registry fault.",
+        "operationId": "execute_proposal_api_v1_evolution_proposals__proposal_id__execute_post",
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/take-eligible": {
+      "post": {
+        "summary": "Assess Take Eligible",
+        "description": "Assess the campaign's PAPER candidates against the \u00a78.2 TAKE_ELIGIBLE bar over each evo\nclone's live paper book (F7 thresholds + \u00a77.2 live-gap gate), advancing the eligible ones to\nTAKE_ELIGIBLE and generating/refreshing an owner-inbox PROMOTE proposal. 404 unknown campaign.\nNOTHING self-arms \u2014 the PROMOTE ACTION stays owner-clicked (approve + execute).",
+        "operationId": "assess_take_eligible_api_v1_evolution_campaigns__campaign_id__take_eligible_post",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/rollback-check": {
+      "post": {
+        "summary": "Assess Rollback",
+        "description": "Assess the campaign's PROMOTED candidates against the \u00a78.2 ROLLBACK trigger rules over their\nlive evidence (this slice: DIVERGENT \u00d72, \u00a77.3), generating/refreshing an owner-inbox ROLLBACK\nproposal for each that triggers. 404 unknown campaign. NOTHING self-arms \u2014 the ROLLBACK ACTION\nstays owner-clicked (approve + execute).",
+        "operationId": "assess_rollback_api_v1_evolution_campaigns__campaign_id__rollback_check_post",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/ablations": {
+      "post": {
+        "summary": "Register Ablation",
+        "description": "Pre-register a structure-mutation ablation (\u00a75.2). Body ``{mutation, parentCandidateId?,\ncreatedBy?}``. 400 missing/invalid mutation; 404 unknown campaign / parent; 409 graveyarded or\nalready pre-registered.",
+        "operationId": "register_ablation_api_v1_evolution_campaigns__campaign_id__ablations_post",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AblationModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Ablations",
+        "description": "A campaign's ablations (pre-registered + evaluated), newest first; 404 unknown campaign.",
+        "operationId": "list_ablations_api_v1_evolution_campaigns__campaign_id__ablations_get",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AblationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/ablations/{ablation_id}/evaluate": {
+      "post": {
+        "summary": "Evaluate Ablation Endpoint",
+        "description": "Evaluate a pre-registered ablation against paired identical-fold evidence (\u00a75.2). Body\n``{parent, candidate}``. ACCEPT is fail-closed (incomplete trade/regime/DOF evidence \u2192\nREJECTED_INCOMPLETE_EVIDENCE, recorded but not buried); disproof rejections bury the structure\n(never re-proposed) and a REJECTED_IS_ONLY also mints a REVIEW_GATE proposal. 400/422 bad\nevidence; 404 unknown; 409 already evaluated.",
+        "operationId": "evaluate_ablation_endpoint_api_v1_evolution_ablations__ablation_id__evaluate_post",
+        "parameters": [
+          {
+            "name": "ablation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ablation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluatedAblation"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/graveyard": {
+      "get": {
+        "summary": "List Graveyard",
+        "description": "A campaign's graveyard \u2014 the rejected structures never re-proposed silently (\u00a78.3); 404\nunknown campaign.",
+        "operationId": "list_graveyard_api_v1_evolution_campaigns__campaign_id__graveyard_get",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraveyardListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/suggestions": {
+      "post": {
+        "summary": "Generate Suggestions",
+        "description": "Run the \u00a75.1.2 gate-candidate suggesters (rejection-forensics + regime-gate [emit-only] +\nunused-indicator) over supplied forensics evidence, suppress graveyarded structures, and persist\nthe survivors as REVIEW_GATE proposals. Body ``{candidates?, railStats?, usedIndicators?,\nlibraryIndicators?}``. 404 unknown campaign. NOTHING self-arms \u2014 proposals are inbox records the\nowner reviews; the regime gate wires nothing (regimes frozen, \u00a75.1.2).",
+        "operationId": "generate_suggestions_api_v1_evolution_campaigns__campaign_id__suggestions_post",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestionsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/scheduler/tick": {
+      "post": {
+        "summary": "Scheduler Tick",
+        "description": "Run ONE scheduler cycle NOW (owner/ops-triggered supervised advance): expire stale proposals,\nthen advance every ENROLLED + ACTIVE campaign by at most one step. This advances RESEARCH only\n(launch a sweep, probe/record/stress/select a completed one, mint proposals) \u2014 NOTHING self-arms\nor self-publishes (publish/promote stay owner-clicked via the proposal execute path). Serialized\nagainst the background driver by the in-process tick lock.",
+        "operationId": "scheduler_tick_api_v1_evolution_scheduler_tick_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerTickResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/proposals/expire": {
+      "post": {
+        "summary": "Expire Proposals",
+        "description": "Sweep the proposal inbox for PENDING proposals past their \u00a78.2 7-day expiry and mark them\nEXPIRED. Idempotent; DB-clock-anchored. (The scheduler tick also runs this; the endpoint is the\nstandalone ops surface.)",
+        "operationId": "expire_proposals_api_v1_evolution_proposals_expire_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpireResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/scheduler/enroll": {
+      "post": {
+        "summary": "Enroll Campaign",
+        "description": "Enroll this campaign into scheduler autonomy (owner-clicked, per-campaign consent): NULL /\nEXHAUSTED \u2192 IDLE. Idempotent for already-enrolled states. 404 unknown campaign. The global\nARTHA_EVO_SCHEDULER_ENABLED flag arms only the background driver \u2014 nothing advances without\nBOTH the flag (or a manual tick) AND this per-campaign enrollment.",
+        "operationId": "enroll_campaign_api_v1_evolution_campaigns__campaign_id__scheduler_enroll_post",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/scheduler/withdraw": {
+      "post": {
+        "summary": "Withdraw Campaign",
+        "description": "Withdraw this campaign from scheduler autonomy: scheduler_state \u2192 NULL; a pending sweep is\nabandoned (completes as an ordinary sweep, recordable manually). Idempotent. 404 unknown.",
+        "operationId": "withdraw_campaign_api_v1_evolution_campaigns__campaign_id__scheduler_withdraw_post",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/scheduler/status": {
+      "get": {
+        "summary": "Scheduler Status",
+        "description": "The scheduler heartbeat: when the last tick ran (manual or driver). None = no tick since\nboot \u2014 with the driver armed, a persistently-None/stale value means the loop is not running.",
+        "operationId": "scheduler_status_api_v1_evolution_scheduler_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evolution/campaigns/{campaign_id}/report": {
+      "get": {
+        "summary": "Campaign Report",
+        "description": "The per-campaign evolution report: generations, scores, survivors, proposals, budget spend,\nand the \u00a78.3 graveyard. 404 if the campaign is unknown.",
+        "operationId": "campaign_report_api_v1_evolution_campaigns__campaign_id__report_get",
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Campaign Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shared error envelope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Metrics",
+        "description": "Endpoint that serves Prometheus metrics.",
+        "operationId": "metrics_metrics_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -392,58 +1894,2948 @@
   },
   "components": {
     "schemas": {
-      "HTTPValidationError": {
+      "AblationListResponse": {
         "properties": {
-          "detail": {
+          "items": {
             "items": {
-              "$ref": "#/components/schemas/ValidationError"
+              "$ref": "#/components/schemas/AblationModel"
             },
             "type": "array",
-            "title": "Detail"
-          }
-        },
-        "type": "object",
-        "title": "HTTPValidationError"
-      },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
+            "title": "Items"
           }
         },
         "type": "object",
         "required": [
-          "loc",
-          "msg",
-          "type"
+          "items"
         ],
-        "title": "ValidationError"
+        "title": "AblationListResponse"
+      },
+      "AblationModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "parentCandidateId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parentcandidateid"
+          },
+          "mutation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mutation"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "evaluation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdby"
+          },
+          "preRegisteredAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preregisteredat"
+          },
+          "evaluatedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "campaignId",
+          "fingerprint",
+          "status"
+        ],
+        "title": "AblationModel",
+        "description": "One ``evo_ablations`` row (V016) \u2014 the pre-registered structure-mutation hypothesis + (once\nevaluated) its verdict/evaluation."
+      },
+      "AssessmentResponse": {
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "assessed": {
+            "type": "integer",
+            "title": "Assessed"
+          },
+          "eligible": {
+            "type": "integer",
+            "title": "Eligible"
+          },
+          "generated": {
+            "type": "integer",
+            "title": "Generated"
+          },
+          "refreshed": {
+            "type": "integer",
+            "title": "Refreshed"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProposalModel"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "campaignId",
+          "assessed",
+          "eligible",
+          "generated",
+          "refreshed",
+          "items"
+        ],
+        "title": "AssessmentResponse",
+        "description": "The result of an assessment pass (TAKE_ELIGIBLE over PAPER candidates, or ROLLBACK over\nPROMOTED ones): how many candidates were assessed, how many met the bar / triggered, how many\nproposals were newly minted vs refreshed in place, and the affected proposal rows. NOTHING\nself-arms \u2014 an assessment only advances state to TAKE_ELIGIBLE (autonomous, no owner gate up to\nthat point) and mints an inbox proposal; the PROMOTE/ROLLBACK action stays owner-clicked."
+      },
+      "BrittlenessItem": {
+        "properties": {
+          "param": {
+            "type": "string",
+            "title": "Param"
+          },
+          "importance": {
+            "type": "number",
+            "title": "Importance"
+          },
+          "localVariance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Localvariance"
+          },
+          "brittle": {
+            "type": "boolean",
+            "title": "Brittle"
+          }
+        },
+        "type": "object",
+        "required": [
+          "param",
+          "importance",
+          "brittle"
+        ],
+        "title": "BrittlenessItem",
+        "description": "A parameter \u00d7 stability cell. ``importance`` is the same |rho| reused from the tornado;\n``localVariance`` is the mean per-neighbor-pair objective variance (None if no neighbor pair\nvaries this param); ``brittle`` flags high-importance + high-local-variance."
+      },
+      "BudgetSpend": {
+        "properties": {
+          "maxGenerations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxgenerations"
+          },
+          "generationsUsed": {
+            "type": "integer",
+            "title": "Generationsused"
+          },
+          "maxTrialsPerGen": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxtrialspergen"
+          },
+          "cadenceSeconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cadenceseconds"
+          },
+          "holdoutTouches": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdouttouches"
+          },
+          "holdoutTouchesUsed": {
+            "type": "integer",
+            "title": "Holdouttouchesused"
+          },
+          "stressTouchesUsed": {
+            "type": "integer",
+            "title": "Stresstouchesused"
+          },
+          "candidatesScored": {
+            "type": "integer",
+            "title": "Candidatesscored"
+          },
+          "schedulerState": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedulerstate"
+          },
+          "pendingSweepJobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pendingsweepjobid"
+          },
+          "lastScheduledAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastscheduledat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generationsUsed",
+          "holdoutTouchesUsed",
+          "stressTouchesUsed",
+          "candidatesScored"
+        ],
+        "title": "BudgetSpend",
+        "description": "The campaign's budget caps vs. what has been spent, plus the scheduler sub-state (V017).\n``holdoutTouches`` is the configured cap; ``holdoutTouchesUsed`` is the realized spend (one per\ncandidate carrying a consumed ``holdout_run_id`` \u2014 the \u00a71.4.2 one-shot budget);\n``stressTouchesUsed`` is the realized cost-stress touch count summed across generations."
+      },
+      "CampaignAdvance": {
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "sweepJobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sweepjobid"
+          },
+          "generationN": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generationn"
+          },
+          "liveWatch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Livewatch"
+          }
+        },
+        "type": "object",
+        "required": [
+          "campaignId",
+          "action",
+          "reason"
+        ],
+        "title": "CampaignAdvance",
+        "description": "One campaign's outcome for a tick. ``action`` is the step taken (or refused); ``reason`` is a\nhuman-readable trace; ``sweepJobId`` / ``generationN`` populate when the step touched them;\n``liveWatch`` records the \u00a77.3 take-eligible/rollback assessment pass when it ran."
+      },
+      "CampaignDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "strategyId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategyid"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "evidencePolicy": {
+            "type": "string",
+            "title": "Evidencepolicy"
+          },
+          "objectiveSpec": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objectivespec"
+          },
+          "searchSpace": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searchspace"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "championVersionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Championversionid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "generations": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationModel"
+            },
+            "type": "array",
+            "title": "Generations",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "evidencePolicy",
+          "status"
+        ],
+        "title": "CampaignDetail",
+        "description": "A campaign plus its generations (the ``/campaigns/{id}`` detail shape)."
+      },
+      "CampaignListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CampaignModel"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CampaignListResponse"
+      },
+      "CampaignModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "strategyId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategyid"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "evidencePolicy": {
+            "type": "string",
+            "title": "Evidencepolicy"
+          },
+          "objectiveSpec": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objectivespec"
+          },
+          "searchSpace": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searchspace"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "championVersionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Championversionid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "evidencePolicy",
+          "status"
+        ],
+        "title": "CampaignModel",
+        "description": "A long-lived evolution program for one base strategy (``evo_campaigns``)."
+      },
+      "CampaignReport": {
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "strategyId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategyid"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "evidencePolicy": {
+            "type": "string",
+            "title": "Evidencepolicy"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "championVersionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Championversionid"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetSpend"
+          },
+          "generations": {
+            "items": {
+              "$ref": "#/components/schemas/GenerationSummary"
+            },
+            "type": "array",
+            "title": "Generations"
+          },
+          "candidateStates": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Candidatestates"
+          },
+          "survivors": {
+            "type": "integer",
+            "title": "Survivors"
+          },
+          "holdoutPendingSurvivors": {
+            "type": "integer",
+            "title": "Holdoutpendingsurvivors"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/ProposalTally"
+            },
+            "type": "array",
+            "title": "Proposals"
+          },
+          "graveyard": {
+            "items": {
+              "$ref": "#/components/schemas/GraveyardEntry"
+            },
+            "type": "array",
+            "title": "Graveyard"
+          }
+        },
+        "type": "object",
+        "required": [
+          "campaignId",
+          "evidencePolicy",
+          "status",
+          "budget",
+          "generations",
+          "candidateStates",
+          "survivors",
+          "holdoutPendingSurvivors",
+          "proposals",
+          "graveyard"
+        ],
+        "title": "CampaignReport",
+        "description": "The full per-campaign report shape (\u00a712 E6 item 16)."
+      },
+      "CandidateListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateModel"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CandidateListResponse"
+      },
+      "CandidateModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "generationId": {
+            "type": "string",
+            "title": "Generationid"
+          },
+          "versionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versionid"
+          },
+          "parentCandidateId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parentcandidateid"
+          },
+          "mutationKind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mutationkind"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "structureDiff": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structurediff"
+          },
+          "sweepJobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sweepjobid"
+          },
+          "holdoutRunId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdoutrunid"
+          },
+          "scorecard": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scorecard"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "generationId"
+        ],
+        "title": "CandidateModel",
+        "description": "One concrete version under evaluation (``evo_candidates``); ``scorecard`` is the\n\u00a76 gates/RobustScore JSONB passed through verbatim."
+      },
+      "ComponentScore": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "z": {
+            "type": "number",
+            "title": "Z"
+          },
+          "raw": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Raw",
+            "default": {}
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "z"
+        ],
+        "title": "ComponentScore",
+        "description": "One \u00a76.2 RobustScore component: its cohort z-score + the raw constituents that fed it."
+      },
+      "EnrollmentResult": {
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "schedulerState": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedulerstate"
+          },
+          "previousState": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previousstate"
+          },
+          "pendingSweepJobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pendingsweepjobid"
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "campaignId",
+          "changed"
+        ],
+        "title": "EnrollmentResult",
+        "description": "The outcome of an enroll/withdraw click: the campaign's autonomy sub-state before and after.\n``schedulerState`` None = NOT ENROLLED (the default for every campaign)."
+      },
+      "EvaluatedAblation": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "parentCandidateId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parentcandidateid"
+          },
+          "mutation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mutation"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict"
+          },
+          "evaluation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation"
+          },
+          "createdBy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdby"
+          },
+          "preRegisteredAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preregisteredat"
+          },
+          "evaluatedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluatedat"
+          },
+          "buried": {
+            "type": "boolean",
+            "title": "Buried",
+            "default": false
+          },
+          "reviewGateProposalId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewgateproposalid"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "campaignId",
+          "fingerprint",
+          "status",
+          "note"
+        ],
+        "title": "EvaluatedAblation",
+        "description": "The evaluate response: the now-EVALUATED ablation plus what the verdict triggered \u2014 whether\na NEW grave was written (idempotent), and the REVIEW_GATE proposal id minted for a\nREJECTED_IS_ONLY (the \u00a75.2 institutional-memory trail)."
+      },
+      "Evidence": {
+        "properties": {
+          "simRuns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Simruns",
+            "default": []
+          },
+          "holdoutRun": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdoutrun"
+          },
+          "liveWindow": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Livewindow"
+          }
+        },
+        "type": "object",
+        "title": "Evidence",
+        "description": "The evidence chain behind a scorecard (\u00a76.3). Retro has sim runs only \u2014 no holdout/live."
+      },
+      "ExpireResult": {
+        "properties": {
+          "expired": {
+            "type": "integer",
+            "title": "Expired"
+          },
+          "proposalIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Proposalids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expired",
+          "proposalIds"
+        ],
+        "title": "ExpireResult",
+        "description": "The outcome of a standalone proposal-expiry sweep (\u00a78.2 7-day expiry)."
+      },
+      "GateResult": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "GateResult",
+        "description": "One \u00a76.1 hard gate: PASS / FAIL / SKIPPED / UNKNOWN / NOT_IMPLEMENTED + assessed value."
+      },
+      "GenerateProposalsResponse": {
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "generated": {
+            "type": "integer",
+            "title": "Generated"
+          },
+          "refreshed": {
+            "type": "integer",
+            "title": "Refreshed"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProposalModel"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "campaignId",
+          "generated",
+          "refreshed",
+          "items"
+        ],
+        "title": "GenerateProposalsResponse",
+        "description": "The result of a generation pass over a campaign's candidates: how many proposals were newly\nminted vs refreshed in place (idempotent regeneration), plus the affected rows."
+      },
+      "GenerationModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal"
+          },
+          "searchSpaceHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searchspacehash"
+          },
+          "engineSha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enginesha"
+          },
+          "dataEpoch": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataepoch"
+          },
+          "stressTouches": {
+            "type": "integer",
+            "title": "Stresstouches"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "campaignId",
+          "n",
+          "stressTouches"
+        ],
+        "title": "GenerationModel",
+        "description": "One propose\u2192evaluate\u2192select iteration within a campaign (``evo_generations``)."
+      },
+      "GenerationRecorded": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal"
+          },
+          "searchSpaceHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searchspacehash"
+          },
+          "engineSha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enginesha"
+          },
+          "dataEpoch": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataepoch"
+          },
+          "stressTouches": {
+            "type": "integer",
+            "title": "Stresstouches"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          },
+          "candidatesRecorded": {
+            "type": "integer",
+            "title": "Candidatesrecorded"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "campaignId",
+          "n",
+          "stressTouches",
+          "candidatesRecorded"
+        ],
+        "title": "GenerationRecorded",
+        "description": "The recorder's response: the persisted generation (``evo_generations`` shape) plus the count\nof scorecards it wrote \u2014 the candidates themselves surface through GET\n/campaigns/{id}/candidates (this PR adds no new read shape)."
+      },
+      "GenerationSummary": {
+        "properties": {
+          "n": {
+            "type": "integer",
+            "title": "N"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "candidateCount": {
+            "type": "integer",
+            "title": "Candidatecount"
+          },
+          "survivorCount": {
+            "type": "integer",
+            "title": "Survivorcount"
+          },
+          "stressTouches": {
+            "type": "integer",
+            "title": "Stresstouches"
+          },
+          "bestRobustScore": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bestrobustscore"
+          },
+          "engineSha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enginesha"
+          },
+          "dataEpoch": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataepoch"
+          },
+          "searchSpaceHash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searchspacehash"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finishedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n",
+          "candidateCount",
+          "survivorCount",
+          "stressTouches"
+        ],
+        "title": "GenerationSummary",
+        "description": "One generation's roll-up: how many candidates it scored, how many survived selection, its\ncost-stress touch count, its best RobustScore (the plateau leader), and the \u00a71.3 comparability\nprovenance (engineSha / dataEpoch / searchSpaceHash \u2014 rankings must refuse to compare across a\ndiffering engine SHA or data epoch, so the report surfaces them per generation)."
+      },
+      "GraveyardEntry": {
+        "properties": {
+          "candidateId": {
+            "type": "string",
+            "title": "Candidateid"
+          },
+          "generationN": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generationn"
+          },
+          "robustScore": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Robustscore"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "candidateId"
+        ],
+        "title": "GraveyardEntry",
+        "description": "One RETIRED candidate and WHY it was retired (\u00a78.3) \u2014 the recorded selection reason (a\nhard-gate fail / dominated), so the report proves the search is not cherry-picking."
+      },
+      "GraveyardListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GraveyardModel"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "GraveyardListResponse"
+      },
+      "GraveyardModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "ablationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ablationid"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "mutation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mutation"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
+          "buriedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buriedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "campaignId",
+          "fingerprint",
+          "verdict"
+        ],
+        "title": "GraveyardModel",
+        "description": "One ``evo_graveyard`` row (V016) \u2014 a buried structure. Its ``fingerprint`` is what the\nsuggesters check to never re-propose it (\u00a78.3)."
+      },
+      "ImportanceItem": {
+        "properties": {
+          "param": {
+            "type": "string",
+            "title": "Param"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "param",
+          "score"
+        ],
+        "title": "ImportanceItem",
+        "description": "One parameter's tornado entry. ``score`` = |Spearman rho| (0..1); ``direction`` is the SIGN\nof the param\u2194objective relationship on the RAW objective metric \u2014 ``positive`` (higher param \u2192\nhigher metric), ``negative``, or ``flat`` \u2014 independent of the maximize/minimize goal."
+      },
+      "InsightsResponse": {
+        "properties": {
+          "sweepJobId": {
+            "type": "string",
+            "title": "Sweepjobid"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction"
+          },
+          "importance": {
+            "items": {
+              "$ref": "#/components/schemas/ImportanceItem"
+            },
+            "type": "array",
+            "title": "Importance"
+          },
+          "brittleness": {
+            "items": {
+              "$ref": "#/components/schemas/BrittlenessItem"
+            },
+            "type": "array",
+            "title": "Brittleness"
+          },
+          "slices": {
+            "items": {
+              "$ref": "#/components/schemas/InteractionSlice"
+            },
+            "type": "array",
+            "title": "Slices"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "sweepJobId",
+          "metric",
+          "direction",
+          "importance",
+          "brittleness",
+          "slices"
+        ],
+        "title": "InsightsResponse",
+        "description": "The parameter-effect analytics for one sweep. ``direction`` here is the sweep's OPTIMIZE\ndirection (maximize/minimize) \u2014 distinct from each importance item's effect ``direction``.\n``notes`` carries every honest-degradation caveat (too few trials, a non-varying param, a param\nwith no local neighbor variation, skipped slices)."
+      },
+      "InteractionSlice": {
+        "properties": {
+          "paramX": {
+            "type": "string",
+            "title": "Paramx"
+          },
+          "paramY": {
+            "type": "string",
+            "title": "Paramy"
+          },
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/SliceCell"
+            },
+            "type": "array",
+            "title": "Cells"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paramX",
+          "paramY",
+          "cells"
+        ],
+        "title": "InteractionSlice",
+        "description": "A 2-D plateau slice over two parameters \u2014 a grid of existing trials, no new runs."
+      },
+      "NextSteps": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "status",
+          "note"
+        ],
+        "title": "NextSteps",
+        "description": "What the approved proposal WOULD trigger \u2014 named honestly as not-yet-wired substrate."
+      },
+      "Penalties": {
+        "properties": {
+          "dof": {
+            "type": "number",
+            "title": "Dof"
+          },
+          "caveats": {
+            "type": "number",
+            "title": "Caveats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dof",
+          "caveats"
+        ],
+        "title": "Penalties",
+        "description": "\u00a76.2 subtractive penalties: ``dof`` = 0.03 per tuned param over 4 + 0.06 per structure gate\n(E2, design \u00a712 item 6); ``caveats`` = 0.05 per unresolved data caveat / sub-80% oiCoverage."
+      },
+      "ProbeReceipt": {
+        "properties": {
+          "submitted": {
+            "type": "integer",
+            "title": "Submitted"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "trials": {
+            "items": {
+              "$ref": "#/components/schemas/ProbeTrial"
+            },
+            "type": "array",
+            "title": "Trials"
+          }
+        },
+        "type": "object",
+        "required": [
+          "submitted",
+          "skipped",
+          "trials"
+        ],
+        "title": "ProbeReceipt",
+        "description": "Receipt for a neighbor-probe submission (\u00a73.2.3): probe trials dispatched as ordinary trials\nof the sweep, plus how many candidate cells were skipped (already evaluated or over the cap)."
+      },
+      "ProbeRequest": {
+        "properties": {
+          "topK": {
+            "type": "integer",
+            "title": "Topk",
+            "default": 5
+          },
+          "maxProbes": {
+            "type": "integer",
+            "title": "Maxprobes",
+            "default": 40
+          }
+        },
+        "type": "object",
+        "title": "ProbeRequest",
+        "description": "Neighbor-probe options: how many plateau leaders to fill around, and the batch ceiling."
+      },
+      "ProbeTrial": {
+        "properties": {
+          "trialNumber": {
+            "type": "integer",
+            "title": "Trialnumber"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          },
+          "trialJobId": {
+            "type": "string",
+            "title": "Trialjobid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trialNumber",
+          "params",
+          "trialJobId"
+        ],
+        "title": "ProbeTrial"
+      },
+      "PromoteRequest": {
+        "properties": {
+          "trialId": {
+            "type": "integer",
+            "title": "Trialid"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trialId"
+        ],
+        "title": "PromoteRequest",
+        "description": "Which COMPLETE trial to materialize as a new draft, plus the optional human note."
+      },
+      "ProposalDecision": {
+        "properties": {
+          "proposal": {
+            "$ref": "#/components/schemas/ProposalModel"
+          },
+          "nextSteps": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NextSteps"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "proposal"
+        ],
+        "title": "ProposalDecision",
+        "description": "The approve/reject response: the decided row + (for approve) the nextSteps."
+      },
+      "ProposalListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProposalModel"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ProposalListResponse"
+      },
+      "ProposalModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "candidateId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidateid"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "decidedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decidedat"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expiresat"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "campaignId",
+          "kind",
+          "status"
+        ],
+        "title": "ProposalModel",
+        "description": "One ``evo_proposals`` row (V011) \u2014 the inbox card. ``evidence`` is the \u00a710 proposal-card\nJSONB passed through verbatim."
+      },
+      "ProposalTally": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "status",
+          "count"
+        ],
+        "title": "ProposalTally",
+        "description": "One (kind, status) proposal bucket and its count (the owner-inbox census)."
+      },
+      "ReconciliationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReconciliationModel"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ReconciliationListResponse"
+      },
+      "ReconciliationModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "versionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versionid"
+          },
+          "strategyId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategyid"
+          },
+          "windowFrom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windowfrom"
+          },
+          "windowTo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windowto"
+          },
+          "simJobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simjobid"
+          },
+          "simRunId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simrunid"
+          },
+          "gap": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gap"
+          },
+          "gapZ": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gapz"
+          },
+          "pairedTrades": {
+            "type": "integer",
+            "title": "Pairedtrades"
+          },
+          "evidenceFloorMet": {
+            "type": "boolean",
+            "title": "Evidencefloormet"
+          },
+          "verdict": {
+            "type": "string",
+            "title": "Verdict"
+          },
+          "diagnosis": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnosis"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "pairedTrades",
+          "evidenceFloorMet",
+          "verdict"
+        ],
+        "title": "ReconciliationModel",
+        "description": "One persisted reconciliation (``reconciliations`` row, V012) \u2014 the GET ?versionId= shape."
+      },
+      "ReconciliationReceipt": {
+        "properties": {
+          "versionId": {
+            "type": "string",
+            "title": "Versionid"
+          },
+          "windowFrom": {
+            "type": "string",
+            "title": "Windowfrom"
+          },
+          "windowTo": {
+            "type": "string",
+            "title": "Windowto"
+          },
+          "simJobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simjobid"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "liveTrades": {
+            "type": "integer",
+            "title": "Livetrades"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "computing"
+          },
+          "caveats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caveats",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "versionId",
+          "windowFrom",
+          "windowTo",
+          "mode",
+          "liveTrades"
+        ],
+        "title": "ReconciliationReceipt",
+        "description": "The 202 receipt for a dispatched reconciliation (design \u00a77.1): the matched-window re-sim was\nsubmitted (``simJobId``); the gap row lands on the async drain's completion and is read back via\nGET ?versionId=. ``caveats`` surfaces the honest degradations known at dispatch (the scalper\n\u00a77.2 structural divergence, the funnel single-pick portfolio-effect)."
+      },
+      "RetroScoreResponse": {
+        "properties": {
+          "sweepJobId": {
+            "type": "string",
+            "title": "Sweepjobid"
+          },
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction"
+          },
+          "policy": {
+            "type": "string",
+            "title": "Policy"
+          },
+          "caveats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caveats",
+            "default": []
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Scorecard"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sweepJobId",
+          "metric",
+          "direction",
+          "policy",
+          "items"
+        ],
+        "title": "RetroScoreResponse",
+        "description": "The scored cohort for one sweep \u2014 the ``{items: [...]}`` envelope plus the objective/policy\ncontext the FE leaderboard needs to render the ranking. ``caveats`` carries response-level\nwarnings (e.g. a cohort truncated at the trial cap \u2014 its z-scores are over a partial cohort)."
+      },
+      "SchedulerStatus": {
+        "properties": {
+          "lastTickAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lasttickat"
+          }
+        },
+        "type": "object",
+        "title": "SchedulerStatus",
+        "description": "The scheduler heartbeat: when the last tick ran (None = no tick since boot). In-memory by\ndesign \u2014 a restart resets it, and the armed driver's next tick re-stamps it within one interval,\nso a stale/None value IS the signal the loop is not running."
+      },
+      "SchedulerTickResult": {
+        "properties": {
+          "ranAt": {
+            "type": "string",
+            "title": "Ranat"
+          },
+          "expiredProposals": {
+            "type": "integer",
+            "title": "Expiredproposals"
+          },
+          "campaigns": {
+            "items": {
+              "$ref": "#/components/schemas/CampaignAdvance"
+            },
+            "type": "array",
+            "title": "Campaigns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ranAt",
+          "expiredProposals",
+          "campaigns"
+        ],
+        "title": "SchedulerTickResult",
+        "description": "The outcome of one scheduler tick: when it ran, how many stale proposals it expired, and the\nper-campaign advances. The owner-triggered POST /scheduler/tick returns this; the background\ndriver logs a summary of it."
+      },
+      "Scorecard": {
+        "properties": {
+          "trialNumber": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trialnumber"
+          },
+          "runId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runid"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "policy": {
+            "type": "string",
+            "title": "Policy"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction"
+          },
+          "robustScore": {
+            "type": "number",
+            "title": "Robustscore"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "rankable": {
+            "type": "boolean",
+            "title": "Rankable"
+          },
+          "stageReadiness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StageReadiness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provenance"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Weights"
+          },
+          "gates": {
+            "items": {
+              "$ref": "#/components/schemas/GateResult"
+            },
+            "type": "array",
+            "title": "Gates"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/ComponentScore"
+            },
+            "type": "array",
+            "title": "Components"
+          },
+          "penalties": {
+            "$ref": "#/components/schemas/Penalties"
+          },
+          "flags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Flags",
+            "default": []
+          },
+          "caveats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caveats",
+            "default": []
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/Evidence"
+          },
+          "liveGap": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Livegap"
+          },
+          "comparator": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparator"
+          }
+        },
+        "type": "object",
+        "required": [
+          "policy",
+          "direction",
+          "robustScore",
+          "rankable",
+          "weights",
+          "gates",
+          "components",
+          "penalties",
+          "evidence"
+        ],
+        "title": "Scorecard",
+        "description": "A \u00a76.3 scorecard for one sweep trial, cohort-normalized. Extends the ``/best`` leaderboard\nidentity (trialNumber/runId/params) with the gates + RobustScore + penalties, rather than\nreplacing it (audit \u00a713.11)."
+      },
+      "SelectionResult": {
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "generationN": {
+            "type": "integer",
+            "title": "Generationn"
+          },
+          "generationId": {
+            "type": "string",
+            "title": "Generationid"
+          },
+          "topK": {
+            "type": "integer",
+            "title": "Topk"
+          },
+          "survivors": {
+            "type": "integer",
+            "title": "Survivors"
+          },
+          "retired": {
+            "type": "integer",
+            "title": "Retired"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "retireAcks": {
+            "type": "integer",
+            "title": "Retireacks",
+            "default": 0
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateModel"
+            },
+            "type": "array",
+            "title": "Items",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "campaignId",
+          "generationN",
+          "generationId",
+          "topK",
+          "survivors",
+          "retired",
+          "updated"
+        ],
+        "title": "SelectionResult",
+        "description": "The outcome of one SELECT pass over a generation: the survivor/retired split, how many rows\nactually changed (idempotent re-run \u2192 0), and the affected candidate rows (updated state +\nthe ``selection`` rationale now on each scorecard)."
+      },
+      "SliceCell": {
+        "properties": {
+          "x": {
+            "title": "X"
+          },
+          "y": {
+            "title": "Y"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "title": "SliceCell",
+        "description": "One existing-trials cell of a 2-D interaction slice: the (x, y) param values, the median\nobjective of the trials at that combination, and how many there are."
+      },
+      "StageReadiness": {
+        "properties": {
+          "evidencePolicy": {
+            "type": "string",
+            "title": "Evidencepolicy"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "requiredGates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Requiredgates",
+            "default": []
+          },
+          "blockedBy": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blockedby",
+            "default": []
+          },
+          "staleSignature": {
+            "type": "boolean",
+            "title": "Stalesignature",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "evidencePolicy",
+          "stage",
+          "ready"
+        ],
+        "title": "StageReadiness",
+        "description": "The audit-PF-01 promotion-admission verdict for the SCORED\u2192SURVIVOR stage, PER evidencePolicy\n(design \u00a71.2) \u2014 fail-closed, DISTINCT from the descriptive ``rankable``. ``ready`` gates\nSURVIVOR selection; ``blockedBy`` names the required gates that FAILed or were never\naffirmatively evaluated. A typed field (not a loose dict) so the read never strips it (#7)."
+      },
+      "StressCandidateDispatch": {
+        "properties": {
+          "candidateId": {
+            "type": "string",
+            "title": "Candidateid"
+          },
+          "trialNumber": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trialnumber"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/StressRunRef"
+            },
+            "type": "array",
+            "title": "Runs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "candidateId",
+          "runs"
+        ],
+        "title": "StressCandidateDispatch"
+      },
+      "StressReceipt": {
+        "properties": {
+          "generationId": {
+            "type": "string",
+            "title": "Generationid"
+          },
+          "dispatched": {
+            "type": "integer",
+            "title": "Dispatched"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "multipliers": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Multipliers"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/StressCandidateDispatch"
+            },
+            "type": "array",
+            "title": "Candidates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generationId",
+          "dispatched",
+          "skipped",
+          "multipliers",
+          "candidates"
+        ],
+        "title": "StressReceipt",
+        "description": "202 receipt for a dispatched cost-stress round (\u00a73.2.5): the BACKTEST re-runs submitted per\ntop-K candidate, and how many SCORED candidates were not selected (beyond top-K / not rankable /\nno params). The degradation slopes + re-score land asynchronously on the candidate cards."
+      },
+      "StressRequest": {
+        "properties": {
+          "topK": {
+            "type": "integer",
+            "title": "Topk",
+            "default": 5
+          },
+          "multipliers": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Multipliers",
+            "default": [
+              2,
+              4
+            ]
+          }
+        },
+        "type": "object",
+        "title": "StressRequest",
+        "description": "Cost-stress options: how many plateau leaders to re-run, at which slippage multipliers."
+      },
+      "StressRunRef": {
+        "properties": {
+          "multiplier": {
+            "type": "number",
+            "title": "Multiplier"
+          },
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "multiplier",
+          "jobId"
+        ],
+        "title": "StressRunRef"
+      },
+      "SuggestionModel": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "suggestion": {
+            "type": "string",
+            "title": "Suggestion"
+          },
+          "mutation": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Mutation"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "REVIEW_GATE"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
+          "caveats": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caveats",
+            "default": []
+          },
+          "wires": {
+            "type": "boolean",
+            "title": "Wires",
+            "default": false
+          },
+          "proposalId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposalid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "suggestion",
+          "mutation",
+          "fingerprint"
+        ],
+        "title": "SuggestionModel",
+        "description": "One gate-candidate suggestion (persisted as a REVIEW_GATE proposal). ``wires`` is always\nFalse \u2014 suggesters SUGGEST; nothing self-arms. ``proposalId`` is the persisted evo_proposals\nrow it minted/refreshed."
+      },
+      "SuggestionsResponse": {
+        "properties": {
+          "campaignId": {
+            "type": "string",
+            "title": "Campaignid"
+          },
+          "generated": {
+            "type": "integer",
+            "title": "Generated"
+          },
+          "refreshed": {
+            "type": "integer",
+            "title": "Refreshed"
+          },
+          "suppressed": {
+            "type": "integer",
+            "title": "Suppressed"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SuggestionModel"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "campaignId",
+          "generated",
+          "refreshed",
+          "suppressed",
+          "items"
+        ],
+        "title": "SuggestionsResponse",
+        "description": "A suggester pass over a campaign's forensics evidence: how many REVIEW_GATE proposals were\nnewly minted vs refreshed in place (idempotent on fingerprint), how many suggestions were\nSUPPRESSED because their structure is already graveyarded (\u00a78.3), and the surviving suggestions\n(each carrying its persisted proposalId)."
+      },
+      "ErrorEnvelope": {
+        "description": "The shared error envelope (COMMON \u00a78.3) every optimizer error response carries.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "details"
+        ],
+        "title": "ErrorEnvelope",
+        "type": "object"
       }
     }
   }

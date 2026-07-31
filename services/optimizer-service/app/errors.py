@@ -12,6 +12,7 @@ from fastapi import Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 log = logging.getLogger("optimizer")
 
@@ -19,6 +20,23 @@ log = logging.getLogger("optimizer")
 #: inbound request and forwards it upstream (RequestIdWebFilter, A.2.4), so a request that arrived
 #: through the gateway carries one already.
 REQUEST_ID_HEADER = "X-Request-Id"
+
+ERROR_ENVELOPE_REF = "#/components/schemas/ErrorEnvelope"
+
+_HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
+
+
+# The OpenAPI counterpart of `api_error_handler`. Published so the spec cannot advertise a shape
+# the service does not return — FastAPI's stock `HTTPValidationError` (`{"detail": [...]}`) became
+# exactly that lie once the 422 was enveloped. All three keys are ALWAYS written by the handler, so
+# all three are required here. NOTE: this docstring IS the published schema description — keep it
+# client-facing; rationale belongs in comments like this one.
+class ErrorEnvelope(BaseModel):
+    """The shared error envelope (COMMON §8.3) every optimizer error response carries."""
+
+    code: str
+    message: str
+    details: dict[str, Any]
 
 
 class ApiError(Exception):
@@ -66,6 +84,31 @@ async def validation_error_handler(request: Request, exc: Exception) -> JSONResp
             422, "VALIDATION_FAILED", summary or "request validation failed", {"errors": errors}
         ),
     )
+
+
+def envelope_validation_responses(schema: dict[str, Any]) -> dict[str, Any]:
+    """Rewrite every auto-generated 422 in an OpenAPI document to the shared envelope.
+
+    FastAPI attaches a stock ``HTTPValidationError`` 422 to EVERY route carrying a validated param
+    or body, so once :func:`validation_error_handler` envelopes that body the published spec
+    becomes a documented-but-false shape. This is service-wide by construction — a per-route
+    ``responses=`` would have to be repeated on each decorator and silently forgotten on the next
+    one — so it runs once over the finished document. The stock components are dropped afterwards:
+    leaving them would keep advertising a shape nothing returns."""
+    components = schema.setdefault("components", {}).setdefault("schemas", {})
+    components["ErrorEnvelope"] = ErrorEnvelope.model_json_schema()
+    for path_item in schema.get("paths", {}).values():
+        for method, operation in path_item.items():
+            if method.lower() not in _HTTP_METHODS:
+                continue  # skip path-level "parameters"/"summary" siblings (as _surface() does)
+            response = (operation.get("responses") or {}).get("422")
+            if response is None:
+                continue
+            response["description"] = "Validation failed (shared error envelope)"
+            response["content"] = {"application/json": {"schema": {"$ref": ERROR_ENVELOPE_REF}}}
+    for orphan in ("HTTPValidationError", "ValidationError"):
+        components.pop(orphan, None)
+    return schema
 
 
 def _correlation_id(request: Request) -> str:

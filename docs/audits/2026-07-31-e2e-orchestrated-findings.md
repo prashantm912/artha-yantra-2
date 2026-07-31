@@ -33,6 +33,8 @@
 
 `docker logs ay-market-data-service` 2026-07-30 11:30:47Z / 11:52:37Z: ERROR "corporate-action rebuild failed for CHEVIOT" (and ULTRACEMCO) — `CALL public.refresh_continuous_aggregate('candles_5m', '2015-01-04'..'2015-04-14')` aborts with `ERROR: tuple decompression limit exceeded by operation`. This is a **new** Timescale failure shape (not the known 2.18.2 sorted-merge planner bug): the full-history cagg refresh over compressed 2015 chunks trips the decompression-limit GUC. Risk: base `candles` rows may be CA-adjusted while the 5m/15m/1h/1d/1w caggs were NOT refreshed — split-brain between base and aggregates for both symbols (both swing-universe equities). Chip filed (fix = chunked refresh windows or `SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0` around the rebuild, then re-run for both symbols and verify base-vs-cagg agreement).
 
+⚠️ **UPGRADED 2026-07-31 late — this section UNDERSTATES the finding on three counts. See the §13 addendum.** The "risk" is a confirmed, measured data loss; it is **13 symbols, not 2**; the trigger is a dated regression (V049/#940 compressed the caggs on 2026-07-19); and **it is still occurring** — a fresh symbol failed today. Fix in [#1151](https://github.com/prashantm912/artha-yantra-2/pull/1151).
+
 ### 1.2 `/multiframe-chart` 4th pane permanently broken for index symbols — hardcoded `30m` interval the candles API rejects
 
 Default load (NSE:NIFTY 50): pane 4 issues `GET /api/v1/market/candles?...&interval=30m` → **400** (twice, console errors), renders "No candles.", and the interval select mis-displays `1m` (30m is not among its options). Source: `MultiframeChartPage.tsx:17` `INDEX_DEFAULT_INTERVALS = ['15m','5m','3m','30m']` vs `api/charts.ts:14` `CHART_INTERVALS` which has no 30m. Bonus: the "indices have no 1m candles" premise behind the 30m default is stale — the same page's 1m fetch returned 200 WITH data this session. Chip filed (fix the default; consider taking audit FG-03 single-symbol parity in the same touch — same file, see §2).
@@ -481,3 +483,78 @@ loading". Under compose the conditional does **not** gate loading: `ARTHA_HEARTB
 bean does load today and the early return is what actually keeps it inert. Behaviour is correct and the
 cost is one no-op call per 10 minutes; only the comment's reasoning is off. Recorded rather than
 patched — a docs-only touch on a live money-path service is not worth a deploy.
+
+---
+
+## 13 Addendum — §1.1 upgraded: confirmed data loss, 13 symbols, caused by V049, still occurring
+
+**Date:** 2026-07-31 late (main loop, read-only against the live `artha` DB). Fix: [#1151](https://github.com/prashantm912/artha-yantra-2/pull/1151).
+
+§1.1 recorded a *risk* of base-vs-cagg split-brain for two symbols. Measured, it is a confirmed loss
+across thirteen, with a dated cause and an open wound.
+
+### 13.1 It is real, and it is total
+
+Comparing base 1m rolled to 5m against `candles_5m` for ULTRACEMCO over §1.1's own failing window:
+**3,596 buckets compared, 3,071 missing from the cagg, 0 value mismatches.** A coverage hole, not
+corruption — which is the good news, because a re-run fully repairs it.
+
+Whole-history damage against a control symbol:
+
+| cagg | ULTRACEMCO | CHEVIOT | INFY (control) | GAIL (control) |
+|---|---|---|---|---|
+| `candles_5m` | 2,850 | 2,223 | 211,783 | 210,672 |
+| `candles_15m` | 775 | 770 | 70,602 | 70,231 |
+| `candles_1h` | 214 | 214 | 19,782 | 19,678 |
+| `candles_1d` | 32 | 32 | 2,837 | 2,821 |
+| `candles_1w` | 6 | 6 | 59 | 55 |
+
+Roughly **1%** of a healthy symbol. The residue is only what the ongoing refresh policy has
+re-materialised in its recent window (32 daily buckets ≈ 6 weeks), which matches the 6 weekly buckets
+exactly. Everything older is gone from the aggregates while base retains it.
+
+### 13.2 Thirteen symbols, and the correlation is perfect
+
+| population | wiped 5m cagg |
+|---|---|
+| symbols with a FAILED corporate-action event, having base data (107) | **13** |
+| symbols with **no** failed CA event (27 control) | **0** |
+
+Zero false positives in the control. The wiped set: EXPLEOSOL, ULTRACEMCO, ZENSARTECH, ABBOTINDIA,
+DBCORP, ICRA, SARVESHWAR, CHEVIOT, ABSLAMC, INDOBORAX, POCL, JLHL (+1). Note EXPLEOSOL sits at **0.0%**
+of expected — the worst of the set, and it is not one of the two the audit named.
+
+### 13.3 The cause is dated, and it is a regression
+
+**Every one of the wiped symbols has its FAILED event dated on or after 2026-07-21.** V049 (#940) made
+all five caggs compressed hypertables on **2026-07-19**. A cagg refresh is DELETE-then-reinsert — DML
+on compressed chunks — which is exactly what `timescaledb.max_tuples_decompressed_per_dml_transaction`
+caps at 100,000. Before V049 the same refresh was free.
+
+This is why the 92-day chunking already in `CandleRepository` did not prevent it: that windowing bounds
+*materialization* work (the 2026-07-10 SIGKILLs), a different mechanism entirely from DML
+decompression. The chunking is correct and was left untouched.
+
+The rebuild **purges before it refreshes**, which is what converts an abort into data loss rather than
+mere staleness.
+
+### 13.4 It is not historical
+
+175 FAILED corporate-action events span 2026-06-23 → 2026-07-31 across 166 distinct symbols, and
+**EXPLEOSOL failed today**. Not every failure wipes caggs — 94 of the 107 are healthy, consistent with
+the wipe requiring the post-V049 decompression abort specifically — but the failing path is live and
+will keep claiming symbols until #1151 deploys.
+
+### 13.5 Post-merge action owed (main loop)
+
+Deploy #1151, then re-run the rebuild for **all 13** symbols, not the 2 named. Acceptance is concrete
+and checkable: each symbol's cagg counts should approach the control's ~211k / 70k / 19.7k / 2.8k / 59.
+Until then, any 5m/15m/1h/1d/1w read for these symbols older than ~6 weeks silently returns nothing —
+and since several are swing-universe equities, a backtest over them is quietly running on missing data.
+
+### 13.6 Method note
+
+The control group is what makes this a finding rather than an anecdote. "13 symbols have sparse caggs"
+alone proves nothing — caggs are legitimately sparse for backfilled history until refreshed. It only
+became evidence once the same measurement over symbols with **no** failed CA event returned **zero**.
+Any future coverage claim of this shape should carry its control the same way.

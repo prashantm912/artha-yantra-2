@@ -1,6 +1,8 @@
 package in.arthayantra.marketdata.candles;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.OffsetDateTime;
 import java.time.Period;
@@ -8,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -40,6 +43,28 @@ public class CandleRepository {
    * earlier window; a bucket re-refreshed inside the overlap is idempotent.
    */
   static final int REFRESH_WINDOW_OVERLAP_DAYS = 8;
+
+  /**
+   * TimescaleDB's per-DML decompression cap (default 100000), UNBOUNDED for the pinned refresh
+   * connection only. Since V049 (2026-07-19) the five candle caggs are themselves COMPRESSED
+   * hypertables, and {@code refresh_continuous_aggregate} DELETEs a window's existing materialized
+   * rows before re-inserting them — a DML whose {@code ModifyHypertable} node decompresses every
+   * touched batch and errors {@code tuple decompression limit exceeded by operation} past the cap.
+   * On a fully-compressed 2015 window that aborted the CHEVIOT + ULTRACEMCO corporate-action
+   * rebuilds (2026-07-30), leaving base {@code candles} CA-adjusted while the caggs stayed stale.
+   *
+   * <p>{@code 0} = unlimited, and that is the honest bound here: the real ceiling is the
+   * ≤{@link #MAX_REFRESH_WINDOW_DAYS}+{@link #REFRESH_WINDOW_OVERLAP_DAYS}-day window each CALL
+   * covers, while any fixed tuple count would have to be guessed from how many symbols happen to
+   * hold history in that window — a guess that silently re-breaks the rebuild (= the same
+   * base-vs-cagg split-brain) as backfills deepen. The 2026-07-10 OOM this file's windows exist for
+   * came from the materialization GROUP BY over a 12-year span, NOT from DML decompression, and the
+   * windows still bound that. Scope stays tight: the SET rides ONE connection and is RESET on the
+   * way out, so the pool-wide 100k guard that {@link #PURGE_WINDOW_MONTHS} deliberately relies on is
+   * untouched.
+   */
+  static final String MAX_TUPLES_DECOMPRESSED_GUC =
+      "timescaledb.max_tuples_decompressed_per_dml_transaction";
 
   /**
    * Purge DELETE window span. A naive {@code DELETE FROM candles WHERE exchange=? AND
@@ -303,15 +328,43 @@ public class CandleRepository {
    * vanish from 5m/15m/1h/1d/1w reads. Parents refresh before children (1d before 1w); the ±8-day
    * pad guarantees every view sees at least one full bucket. Runs on autocommit — {@code CALL}
    * refuses transactions.
+   *
+   * <p>Every statement rides ONE pinned connection ({@link ConnectionCallback}) so the
+   * {@link #MAX_TUPLES_DECOMPRESSED_GUC} raise actually covers the CALLs: {@code JdbcTemplate}
+   * takes a pooled connection PER {@code execute}, so a {@code SET} issued as its own
+   * {@code jdbc.execute(...)} could land on a session that never runs the refresh — the code would
+   * read correct and change nothing. The session-level {@code SET} (never {@code SET LOCAL} —
+   * {@code refresh_continuous_aggregate} commits internally) survives those internal transactions,
+   * and the {@code RESET} runs on the exception path too so no pooled connection is handed back
+   * with the cap disabled.
    */
   public void refreshDerivedAggregates(OffsetDateTime from, OffsetDateTime to) {
     OffsetDateTime start = from.minusDays(8);
     OffsetDateTime end = to.plusDays(8);
     List<Window> windows =
         refreshWindows(start, end, MAX_REFRESH_WINDOW_DAYS, REFRESH_WINDOW_OVERLAP_DAYS);
+    jdbc.execute(
+        (ConnectionCallback<Void>)
+            connection -> {
+              try (Statement st = connection.createStatement()) {
+                st.execute("SET " + MAX_TUPLES_DECOMPRESSED_GUC + " = 0");
+                try {
+                  refreshEachView(st, windows, start, end);
+                } finally {
+                  st.execute("RESET " + MAX_TUPLES_DECOMPRESSED_GUC);
+                }
+              }
+              return null;
+            });
+  }
+
+  /** The view × window CALL grid, on the caller's pinned statement. */
+  private static void refreshEachView(
+      Statement st, List<Window> windows, OffsetDateTime start, OffsetDateTime end)
+      throws SQLException {
     for (String view : List.of("candles_5m", "candles_15m", "candles_1h", "candles_1d", "candles_1w")) {
       for (Window w : windows) {
-        jdbc.execute(
+        st.execute(
             "CALL public.refresh_continuous_aggregate('"
                 + view
                 + "', '"

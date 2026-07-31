@@ -42,6 +42,7 @@ const chain = {
   riskFreeRate: null,
   pcr: null,
   stale: false,
+  lastCaptured: false,
   asOf: '2026-07-02T10:00:00Z',
   interval: '3m',
   rows: [{ strike: '24150.00', ce: leg('NIFTY26707 24150 CE', '138.05'), pe: leg('NIFTY26707 24150 PE', '96.10') }],

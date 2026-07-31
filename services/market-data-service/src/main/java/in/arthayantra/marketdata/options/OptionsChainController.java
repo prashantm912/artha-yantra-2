@@ -42,13 +42,17 @@ public class OptionsChainController {
     this.clock = clock;
   }
 
-  /** The live chain (expiry defaults to nearest). */
+  /**
+   * The live chain (expiry defaults to nearest). A read path, so it degrades to the last captured
+   * chain ({@code lastCaptured: true} + the capture {@code asOf}) when no live spot quote exists,
+   * rather than refusing off-hours; 503 {@code DATA_STALE} only when nothing was ever captured.
+   */
   @GetMapping("/chain")
   public OptionsChainService.Chain chain(
       @RequestParam String underlying,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
           LocalDate expiry) {
-    return chainService.chain(underlying, expiry);
+    return chainService.chainOrLastCaptured(underlying, expiry);
   }
 
   /** The stored snapshot nearest to {@code at} (defaults to now). */

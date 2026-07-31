@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.candles;
 
 import java.math.BigDecimal;
+import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -45,26 +46,47 @@ public class CandleRepository {
   static final int REFRESH_WINDOW_OVERLAP_DAYS = 8;
 
   /**
-   * TimescaleDB's per-DML decompression cap (default 100000), UNBOUNDED for the pinned refresh
-   * connection only. Since V049 (2026-07-19) the five candle caggs are themselves COMPRESSED
-   * hypertables, and {@code refresh_continuous_aggregate} DELETEs a window's existing materialized
-   * rows before re-inserting them — a DML whose {@code ModifyHypertable} node decompresses every
-   * touched batch and errors {@code tuple decompression limit exceeded by operation} past the cap.
-   * On a fully-compressed 2015 window that aborted the CHEVIOT + ULTRACEMCO corporate-action
-   * rebuilds (2026-07-30), leaving base {@code candles} CA-adjusted while the caggs stayed stale.
+   * TimescaleDB's per-DML decompression cap (default 100000). Since V049 (2026-07-19) the five
+   * candle caggs are themselves COMPRESSED hypertables, and {@code refresh_continuous_aggregate}
+   * DELETEs a window's existing materialized rows before re-inserting them — a DML whose
+   * {@code ModifyHypertable} node decompresses every touched batch and errors
+   * {@code tuple decompression limit exceeded by operation} past the cap. On a fully-compressed 2015
+   * window that aborted the CHEVIOT + ULTRACEMCO corporate-action rebuilds (2026-07-30), leaving
+   * base {@code candles} CA-adjusted while the caggs stayed stale.
    *
-   * <p>{@code 0} = unlimited, and that is the honest bound here: the real ceiling is the
-   * ≤{@link #MAX_REFRESH_WINDOW_DAYS}+{@link #REFRESH_WINDOW_OVERLAP_DAYS}-day window each CALL
-   * covers, while any fixed tuple count would have to be guessed from how many symbols happen to
-   * hold history in that window — a guess that silently re-breaks the rebuild (= the same
-   * base-vs-cagg split-brain) as backfills deepen. The 2026-07-10 OOM this file's windows exist for
-   * came from the materialization GROUP BY over a 12-year span, NOT from DML decompression, and the
-   * windows still bound that. Scope stays tight: the SET rides ONE connection and is RESET on the
-   * way out, so the pool-wide 100k guard that {@link #PURGE_WINDOW_MONTHS} deliberately relies on is
-   * untouched.
+   * <p>ONLY {@link #refreshDerivedAggregatesForRebuild} touches this. The default refresh path keeps
+   * the DB's guard in force — gap backfill and the futures roller refresh RECENT windows, which sit
+   * inside every cagg's uncompressed hot window (5m/15m/1h compress after 30d, 1d 90d, 1w 180d) and
+   * so decompress nothing. Raising it for them would weaken the same guard
+   * {@link #PURGE_WINDOW_MONTHS} deliberately preserves, on the far more frequent caller.
    */
   static final String MAX_TUPLES_DECOMPRESSED_GUC =
       "timescaledb.max_tuples_decompressed_per_dml_transaction";
+
+  /**
+   * The raised — but FINITE — decompression cap for a corporate-action rebuild, ~50× the 100000
+   * default. NOT {@code 0}/unlimited: a ≤{@link #MAX_REFRESH_WINDOW_DAYS}+{@link
+   * #REFRESH_WINDOW_OVERLAP_DAYS}-day window bounds TIME, not tuples or memory, so unlimited would
+   * let one DML decompress an arbitrarily large window into the row store — the 2026-07-10 SIGKILL
+   * class of failure, and a refresh killed mid-flight leaves the window DELETED but not
+   * re-materialized (the procedure commits across several transactions), i.e. an empty cagg range:
+   * exactly the damage being repaired.
+   *
+   * <p>Sized from the densest CALL. Every cagg reads {@code WHERE "interval" = '1m'} (V004), so only
+   * symbols with 1m history count. {@code candles_5m} dominates at 375 trading minutes / 5 = 75
+   * buckets per symbol per session × ~69 sessions in a 100-day window ≈ 5175 rows per symbol, so
+   * 5000000 covers ~960 such symbols in one window — comfortably past the deep-history (2015)
+   * windows that actually failed, where only CA-remediated equities carry 1m bars at all. At ~100
+   * bytes per cagg row that is ~500 MB of decompression churn per DML, survivable on the 4 GB
+   * database.
+   *
+   * <p>The symbol count in a DENSE recent window is NOT measured — that number is not derivable from
+   * the repo, and this ceiling is deliberately the kind that fails loudly rather than churns
+   * silently: TimescaleDB's error carries {@code errdetail("… tuples decompressed: %lld")}, so the
+   * first trip hands us the real figure to re-size against, with the rebuild's existing FAILED
+   * status + urgent ntfy already surfacing it.
+   */
+  static final int REBUILD_DECOMPRESSED_TUPLE_CEILING = 5_000_000;
 
   /**
    * Purge DELETE window span. A naive {@code DELETE FROM candles WHERE exchange=? AND
@@ -329,16 +351,35 @@ public class CandleRepository {
    * pad guarantees every view sees at least one full bucket. Runs on autocommit — {@code CALL}
    * refuses transactions.
    *
-   * <p>Every statement rides ONE pinned connection ({@link ConnectionCallback}) so the
-   * {@link #MAX_TUPLES_DECOMPRESSED_GUC} raise actually covers the CALLs: {@code JdbcTemplate}
-   * takes a pooled connection PER {@code execute}, so a {@code SET} issued as its own
-   * {@code jdbc.execute(...)} could land on a session that never runs the refresh — the code would
-   * read correct and change nothing. The session-level {@code SET} (never {@code SET LOCAL} —
-   * {@code refresh_continuous_aggregate} commits internally) survives those internal transactions,
-   * and the {@code RESET} runs on the exception path too so no pooled connection is handed back
-   * with the cap disabled.
+   * <p>Leaves {@link #MAX_TUPLES_DECOMPRESSED_GUC} at the database default: this path serves gap
+   * backfill and the futures roller over RECENT windows, which decompress nothing. Only the
+   * corporate-action rebuild reaches back into compressed chunks — see
+   * {@link #refreshDerivedAggregatesForRebuild}.
    */
   public void refreshDerivedAggregates(OffsetDateTime from, OffsetDateTime to) {
+    refresh(from, to, false);
+  }
+
+  /**
+   * {@link #refreshDerivedAggregates} for the corporate-action rebuild, which spans ~12 years and so
+   * re-materializes windows whose cagg chunks are COMPRESSED — decompressing far past the 100000
+   * default and aborting the rebuild (CHEVIOT + ULTRACEMCO, 2026-07-30). The EXPLICIT opt-in raises
+   * the cap to {@link #REBUILD_DECOMPRESSED_TUPLE_CEILING} for this refresh only; every other caller
+   * keeps the database guard.
+   */
+  public void refreshDerivedAggregatesForRebuild(OffsetDateTime from, OffsetDateTime to) {
+    refresh(from, to, true);
+  }
+
+  /**
+   * The shared refresh. Every statement rides ONE pinned connection ({@link ConnectionCallback}) so
+   * that a raised cap actually covers the CALLs: {@code JdbcTemplate} takes a pooled connection PER
+   * {@code execute}, so a {@code SET} issued as its own {@code jdbc.execute(...)} could land on a
+   * session that never runs the refresh — the code would read correct and change nothing. The
+   * session-level {@code SET} (never {@code SET LOCAL} — {@code refresh_continuous_aggregate}
+   * commits internally) survives those internal transactions.
+   */
+  private void refresh(OffsetDateTime from, OffsetDateTime to, boolean raiseDecompressionCap) {
     OffsetDateTime start = from.minusDays(8);
     OffsetDateTime end = to.plusDays(8);
     List<Window> windows =
@@ -347,15 +388,44 @@ public class CandleRepository {
         (ConnectionCallback<Void>)
             connection -> {
               try (Statement st = connection.createStatement()) {
-                st.execute("SET " + MAX_TUPLES_DECOMPRESSED_GUC + " = 0");
+                if (!raiseDecompressionCap) {
+                  refreshEachView(st, windows, start, end);
+                  return null;
+                }
+                st.execute(
+                    "SET " + MAX_TUPLES_DECOMPRESSED_GUC + " = " + REBUILD_DECOMPRESSED_TUPLE_CEILING);
+                Exception primary = null;
                 try {
                   refreshEachView(st, windows, start, end);
+                } catch (SQLException | RuntimeException e) {
+                  primary = e;
+                  throw e;
                 } finally {
-                  st.execute("RESET " + MAX_TUPLES_DECOMPRESSED_GUC);
+                  try {
+                    st.execute("RESET " + MAX_TUPLES_DECOMPRESSED_GUC);
+                  } catch (SQLException | RuntimeException cleanup) {
+                    // the session still carries the raised cap and cleanup could not be confirmed:
+                    // kill the physical connection so the pool can never hand it on, and never let
+                    // the cleanup failure hide the refresh failure that caused it
+                    abortQuietly(connection);
+                    if (primary == null) {
+                      throw cleanup;
+                    }
+                    primary.addSuppressed(cleanup);
+                  }
                 }
               }
               return null;
             });
+  }
+
+  /** Destroys the physical connection whose {@link #MAX_TUPLES_DECOMPRESSED_GUC} could not be reset. */
+  private static void abortQuietly(Connection connection) {
+    try {
+      connection.abort(Runnable::run);
+    } catch (SQLException | RuntimeException e) {
+      log.error("could not abort the connection after a failed {} reset", MAX_TUPLES_DECOMPRESSED_GUC, e);
+    }
   }
 
   /** The view × window CALL grid, on the caller's pinned statement. */

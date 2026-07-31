@@ -317,9 +317,13 @@ public class CorporateActionJob {
         });
   }
 
-  /** The chunked cagg refresh over the rebuilt 1m window (CandleRepository slices it ≤92-day). */
+  /**
+   * The chunked cagg refresh over the rebuilt 1m window (CandleRepository slices it ≤92-day). Uses
+   * the rebuild variant: this span reaches back years into COMPRESSED cagg chunks, so it needs the
+   * raised per-DML decompression cap that every other refresh caller deliberately does without.
+   */
   private void refreshRebuiltAggregates(LocalDate today, OffsetDateTime now) {
-    candles.refreshDerivedAggregates(
+    candles.refreshDerivedAggregatesForRebuild(
         today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now);
   }
 

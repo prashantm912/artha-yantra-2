@@ -512,7 +512,33 @@ Run in order; each answers one question. Canned SQL in §6.
     capacity-vs-protection decision with the counterfactual P&L of the entries they blocked
     (§3.26 pipeline), not as a tuning proposal.
 
-31. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+31. **A sub-account discipline freeze TRUNCATES the rejection stream — discriminate it from a stall
+    via the eval-outcome buckets, and treat every post-freeze table as partial-session** (added
+    2026-07-31) — the §12.7 five-account discipline (`ScalperAccountModel.scalperEntryAllowed`:
+    an account freezes for the day on its FIRST losing close OR on banking ~1% of its ₹30,000
+    allocation; all 5 frozen ⇒ no fresh scalper entry) is consulted in `SignalEngine.scalperEntry`
+    **BEFORE the confluence gate**, returning `DISCIPLINE_PAUSED` — so a fully-frozen fleet writes
+    **zero rejection rows** for the rest of the session while the engine is completely alive. First
+    live observation 2026-07-31: all 5 subs frozen by 13:34 (2 profit-locks + 3 first-losses),
+    `discipline-paused` counter 224 (first non-zero ever), rejections end 13:34 sharp, gauges fresh
+    to the close. **The discriminator vs a stall:**
+
+    ```sql
+    SELECT to_char(bucket_time AT TIME ZONE 'Asia/Kolkata','HH24:MI') ist,
+           sum(eval_count) FILTER (WHERE outcome='discipline-paused')  paused,
+           sum(eval_count) FILTER (WHERE outcome='confluence-blocked') confl,
+           sum(eval_count) FILTER (WHERE outcome='chart-gate-failed')  chart
+    FROM strategy.signal_eval_outcomes
+    WHERE bucket_time >= :d0 GROUP BY 1 ORDER BY 1;
+    ```
+
+    `paused > 0` while `chart` keeps advancing = freeze (healthy); everything at 0 with stale
+    gauges = stall. ⚠️ Consequences for analysis: (a) every §3.3/§3.6 table on a freeze day is a
+    **partial session** (§3.21 class) — say so; (b) §3.10 coverage counts shrink mechanically;
+    (c) the freeze is ALSO §3.30's telemetry subject — log frozen-by times per sub and which rail
+    (profit-lock vs first-loss) froze each. A profit-lock freeze banking a green day is the design
+    working, not starvation.
+32. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

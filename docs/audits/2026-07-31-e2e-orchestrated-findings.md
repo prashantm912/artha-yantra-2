@@ -545,12 +545,41 @@ mere staleness.
 the wipe requiring the post-V049 decompression abort specifically — but the failing path is live and
 will keep claiming symbols until #1151 deploys.
 
-### 13.5 Post-merge action owed (main loop)
+### 13.5 Post-merge action owed (main loop) — and the trap in the obvious version of it
 
-Deploy #1151, then re-run the rebuild for **all 13** symbols, not the 2 named. Acceptance is concrete
-and checkable: each symbol's cagg counts should approach the control's ~211k / 70k / 19.7k / 2.8k / 59.
-Until then, any 5m/15m/1h/1d/1w read for these symbols older than ~6 weeks silently returns nothing —
-and since several are swing-universe equities, a backtest over them is quietly running on missing data.
+Until repaired, any 5m/15m/1h/1d/1w read for these symbols older than ~6 weeks silently returns
+nothing. Several are swing-universe equities, so a backtest over them is quietly running on missing
+data.
+
+⚠️ **"Deploy #1151 and re-run the rebuild" does not work, and it is worth knowing why before anyone
+tries it.** The 13 symbols are **permanently stranded** by the job's own control flow:
+
+- The sweep's **resume checkpoint fires only when the latest event status is `BASE_REBUILT`** — the
+  "crashed after the base was committed but before the cagg refresh finished" case. Our 13 are
+  `FAILED`, so the checkpoint skips them.
+- **Fresh detection will never re-fire either**, and `CorporateActionJob`'s own javadoc says so: the
+  base *was* rebuilt before the refresh aborted, so the cache now equals Kite, there is no divergence,
+  and therefore no new `DETECTED` row. The comment calls the checkpoint scan "the SOLE resume trigger"
+  — which is exactly the problem when a symbol never reaches the state that trigger looks for.
+- Scoping the sweep with `artha.corporate-actions.symbols` does **not** help: it narrows *which*
+  symbols are examined, not *what* the examination concludes. Those symbols would still show no
+  divergence and still be skipped.
+
+So the repair is: deploy #1151 first (otherwise the resume hits the same decompression limit and
+re-fails), then **flip each stranded symbol's latest event from `FAILED` to `BASE_REBUILT`** so the
+next sweep's checkpoint picks it up and runs `submitRefreshOnly` — which is precisely the right
+operation, since it skips the purge and re-prefetch and does only the chunked cagg refresh. That uses
+the system's own resume mechanism rather than hand-running SQL refreshes against a live compressed
+hypertable, which is the safer of the two by a wide margin.
+
+Acceptance is concrete: each symbol's cagg counts should approach the control's
+~211k / 70k / 19.7k / 2.8k / 59.
+
+**Design gap worth a chip, separate from #1151:** a `FAILED` corporate-action event is unresumable by
+construction. The job can recover from a crash (`BASE_REBUILT`) but not from an error, even though the
+error leaves the symbol in a strictly worse state than the crash does — caggs purged and not rebuilt,
+with nothing that will ever retry. A `FAILED` row whose base is already rebuilt should be resumable on
+the same path.
 
 ### 13.6 Method note
 

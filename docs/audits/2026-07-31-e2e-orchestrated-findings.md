@@ -427,3 +427,57 @@ Both this and §10's 45× row-count error are the same failure: **a count taken 
 history into one table, and the provenance column is the only thing separating "what we captured live"
 from "what we fetched afterwards". Any future breadth or coverage claim about candles must state its
 `source` filter, or it is not a claim about capture.
+
+---
+
+## 12 Addendum — session heartbeat: nothing to build, one owner step remains
+
+**Date:** 2026-07-31 late (main loop, read-only).
+
+§4.4 flagged that the session-level external heartbeat is dormant, and the owner approved "wire it
+through and document the arming step". On inspection **the wiring is already complete** — this is an
+arming decision, not a build:
+
+| layer | state |
+|---|---|
+| the bean | `SessionLivenessHeartbeat` (strategy-signal), built and tested (`SessionLivenessHeartbeatTest`) |
+| load gate | `@ConditionalOnProperty("artha.heartbeat.session-url")` + shares `SignalEngine`'s lifecycle |
+| schedule | `artha.heartbeat.session-cron`, default `0 */10 9-15 * * MON-FRI` (Asia/Kolkata) |
+| compose passthrough | `ARTHA_HEARTBEAT_SESSION_URL` at `deploy/docker-compose.yml:601` — name verified to match the property under relaxed binding |
+| `.env` | **the only gap** — carries `ARTHA_HEARTBEAT_URL` (the 20:15 swing ping, already armed) but no `ARTHA_HEARTBEAT_SESSION_URL` |
+
+### 12.1 The one step (owner-only — deliberately not done here)
+
+Add `ARTHA_HEARTBEAT_SESSION_URL=<your ping URL>` to `.env` and restart strategy-signal. A ping URL is
+a credential-equivalent (anyone holding it can forge liveness), so it is not handled here.
+
+⚠️ **Edit `.env` IN PLACE.** Do not use `sed -i`, or any write-temp-then-rename editor: that recreates
+the file, which drops its hardened ACL and lets inherited broad-principal write grants back in. SEC-01
+then fail-closed refuses to start the live stack. This is not hypothetical — it happened during
+tonight's own T1b profile flip (§T1b.6), and recovery needed `icacls /inheritance:r` re-tightening
+before `ay up` would run. If the ACL is disturbed, re-tighten to owner + SYSTEM + Administrators only,
+mirroring `deploy\secrets`.
+
+### 12.2 What arming buys, precisely
+
+The already-armed `SwingBatchHeartbeat` pings once at 20:15 IST and proves only that the evening swing
+batch ran. **A stack dead across the entire 09:15–15:30 live session but recovered by 20:15 pings that
+monitor happily** — which is exactly the failure mode observed today: the stack was down 02:29–08:56
+IST, and the machine demonstrably boots minutes before the open. The session heartbeat closes that
+window by pinging a *separate* monitor every ~10 min, but only while candles are actually arriving.
+
+Note the design and do not "improve" it: **absence is the alarm.** It pings only when healthy and stays
+silent otherwise, so the withheld ping is the signal — never a status payload. Health is gated solely
+on candle-receipt liveness, never on rejections or signal counts, which are direction- and
+window-confounded and would false-alarm on a healthy-but-quiet leg (the same reasoning that retired an
+earlier gate-output-keyed heartbeat).
+
+### 12.3 One inaccuracy found while verifying, not worth a code change
+
+`beat()` carries a blank-URL early return commented "belt-and-braces; the conditional already gates
+loading". Under compose the conditional does **not** gate loading: `ARTHA_HEARTBEAT_SESSION_URL:
+"${ARTHA_HEARTBEAT_SESSION_URL:-}"` makes the property *present but empty* when unset, and
+`@ConditionalOnProperty` with no `havingValue` matches any present value that is not `false`. So the
+bean does load today and the early return is what actually keeps it inert. Behaviour is correct and the
+cost is one no-op call per 10 minutes; only the comment's reasoning is off. Recorded rather than
+patched — a docs-only touch on a live money-path service is not worth a deploy.

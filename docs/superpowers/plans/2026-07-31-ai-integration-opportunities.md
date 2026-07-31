@@ -5,6 +5,12 @@
 incorporated?" · **Method:** read-only recon (one Explore agent over the full tree + direct reads of
 the INT/EVO design docs, PHASE_GATES, DEFERRED_BACKLOG); every load-bearing claim cites file:line.
 
+> ⚠️ **OWNER-PULL ONLY (standing rule, 2026-07-31).** Nothing in this memo is queued work. The
+> items here — including every BUILD verdict — are to be considered **only when the owner
+> explicitly asks** for a specific item by name. Do NOT promote any row into the remaining-items
+> ledger, a session pickup sheet, an autonomous run, or any agent's "what's next" enumeration.
+> The BUILD/DEFER/SKIP verdicts rank *feasibility if asked*, not priority against the live board.
+
 ---
 
 ## 0. The standing constraint this memo must respect

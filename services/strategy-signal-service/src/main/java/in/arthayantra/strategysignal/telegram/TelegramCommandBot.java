@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.telegram;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import in.arthayantra.strategysignal.paper.PaperService;
+import in.arthayantra.strategysignal.paper.PaperViews;
 import in.arthayantra.strategysignal.paper.RiskService;
 import in.arthayantra.strategysignal.paper.RiskSettingsRepository;
 import in.arthayantra.strategysignal.signals.DotHealthCanary;
@@ -208,8 +209,13 @@ public class TelegramCommandBot {
           .append(" rejections scanned, 0 carry context)\n");
     } else {
       long dead = dots.dots().stream().filter(d -> d.required() && !d.alive()).count();
+      // G12: a frozen required input reads ALIVE, so a dead-only count reported "required dots
+      // alive" while an operand sat on one value all session. Frozen is a distinct verdict, not a
+      // flavour of dead — the endpoint only flags it where a freeze is genuinely anomalous.
+      long frozen = dots.dots().stream().filter(d -> d.required() && d.alive() && d.frozen()).count();
       out.append("dot canary: ")
           .append(dead == 0 ? "required dots alive" : dead + " REQUIRED dot(s) DEAD")
+          .append(frozen == 0 ? "" : ", " + frozen + " FROZEN")
           .append(" (").append(dots.rowsInspected()).append(" context-bearing rejections inspected)\n");
     }
     out.append("entries: ")
@@ -237,13 +243,12 @@ public class TelegramCommandBot {
     }
   }
 
-  @SuppressWarnings("unchecked")
   private String pnl() {
-    Map<String, Object> summary = (Map<String, Object>) paper.pnl(null).get("summary");
-    return "realized total: ₹" + summary.get("realizedTotal")
-        + "\ntrades: " + summary.get("trades")
-        + "\nwin rate: " + orDash(summary.get("winRate"))
-        + "\nexpectancy: ₹" + orDash(summary.get("expectancy"));
+    PaperViews.PnlSummary summary = paper.pnl(null).summary();
+    return "realized total: ₹" + summary.realizedTotal()
+        + "\ntrades: " + summary.trades()
+        + "\nwin rate: " + orDash(summary.winRate())
+        + "\nexpectancy: ₹" + orDash(summary.expectancy());
   }
 
   private String positions() {

@@ -73,6 +73,10 @@ function renderPage() {
 }
 
 describe('OiExpiryStrategyPage', () => {
+  // 2026-07-27: this heavy double-table render measured 4.8-5.9s under FULL-SUITE worker
+  // contention — within ~5% of the default 5s budget, so any suite growth tips it over (it reds
+  // reproducibly whenever a new spec file lands, while passing every isolated run). Explicit
+  // budget, not a behaviour change.
   it('renders the CE + PE leg tables for every basket strike', () => {
     useOiExpiry.mockReturnValue({ data: items, isFetching: false, isLoading: false, refetch: () => {} });
     renderPage();
@@ -82,7 +86,7 @@ describe('OiExpiryStrategyPage', () => {
     expect(screen.getAllByLabelText('Long Build Up').length).toBeGreaterThan(0);
     // the strike-basket multi-select is present (single available strike → "1 selected").
     expect(screen.getByRole('button', { name: /1 selected/ })).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('defaultBasket spreads 5 strikes across the ATM window', () => {
     const strikes = Array.from({ length: 21 }, (_, i) => String(22000 + 100 * i));

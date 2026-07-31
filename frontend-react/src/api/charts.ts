@@ -87,8 +87,8 @@ export function useCandles(symbol: string, interval: string) {
   return useQuery({
     queryKey: ['candles', symbol, interval, lastDay ?? null],
     // Auto-refresh the series during the IST cash session so intraday candles advance without a
-    // manual reload (the streaming datafeed is still deferred — this is the polite-poll bridge, the
-    // documented sole consumer of isMarketHoursIst). ~10s picks up each newly-completed bar and
+    // manual reload (the streaming datafeed is still deferred — this is the polite-poll bridge).
+    // ~10s picks up each newly-completed bar and
     // refreshes the still-forming one; daily/weekly and off-hours stay a one-shot fetch. Since queryFn
     // recomputes `to = now` each run, every poll advances the window to the latest bar.
     refetchInterval: intraday ? () => (isMarketHoursIst() ? 10_000 : false) : false,

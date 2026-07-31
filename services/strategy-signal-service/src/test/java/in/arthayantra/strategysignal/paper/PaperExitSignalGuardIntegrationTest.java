@@ -187,7 +187,7 @@ class PaperExitSignalGuardIntegrationTest extends StrategySignalIntegrationTestB
         new BigDecimal("0.80"),
         "{}",
         generatedAt,
-        generatedAt.plusHours(1));
+        generatedAt.plusHours(1), null);
   }
 
   private UUID seedSwingVersion() {

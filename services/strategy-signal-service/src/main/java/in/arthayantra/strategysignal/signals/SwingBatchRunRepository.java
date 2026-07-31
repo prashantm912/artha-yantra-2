@@ -13,8 +13,8 @@ import org.springframework.stereotype.Repository;
 
 /**
  * The {@code swing_batch_runs} dead-man marker (V025, audit P0-4/H10): each swing batch records
- * one row per IST run date; {@code SwingBatchCanary} reads the watermark next morning and alerts
- * when an armed batch has no row for the last NSE trading day.
+ * one row per IST run date; {@code SwingBatchCanary} checks the exact historical session next
+ * morning and alerts when a schedule-time armed batch has no matching row.
  *
  * <p>Since V034 (ledger F3) the same row also carries the batch's admission PROBE — the slot-cap
  * exceedance + the RS-ordered names the cap dropped ({@link #recentProbes}); the probe columns are
@@ -36,28 +36,33 @@ public class SwingBatchRunRepository {
 
   /**
    * Upserts the marker + admission probe for one batch run (re-runs on the same date re-stamp the
-   * counters). {@code droppedByCap} is serialized to the {@code dropped_by_cap} JSONB.
+   * counters). {@code droppedByCap} is serialized to the {@code dropped_by_cap} JSONB. Returns {@code
+   * true} iff the canonical row was written — the catch-up marks a session terminally DONE only when
+   * this is true (a fail-soft-swallowed write must leave the session repairable, not stuck DONE with
+   * no marker; 2026-07-17 review Major).
    */
-  public void record(
+  public boolean record(
       String batch, LocalDate runDate, int strategies, int candidates, int entries, int exits,
       int exitSkipped, int openAtStart, int wouldEnter, int admitted, int capExceedance,
       boolean capBound, List<DroppedCandidate> droppedByCap) {
-    jdbc.update(
-        """
-        INSERT INTO swing_batch_runs
-            (batch, run_date, ran_at, strategies, candidates, entries, exits, exit_skipped,
-             open_at_start, would_enter, admitted, cap_exceedance, cap_bound, dropped_by_cap)
-        VALUES (?, ?, now(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
-        ON CONFLICT (batch, run_date) DO UPDATE SET
-            ran_at = now(), strategies = EXCLUDED.strategies, candidates = EXCLUDED.candidates,
-            entries = EXCLUDED.entries, exits = EXCLUDED.exits,
-            exit_skipped = EXCLUDED.exit_skipped, open_at_start = EXCLUDED.open_at_start,
-            would_enter = EXCLUDED.would_enter, admitted = EXCLUDED.admitted,
-            cap_exceedance = EXCLUDED.cap_exceedance, cap_bound = EXCLUDED.cap_bound,
-            dropped_by_cap = EXCLUDED.dropped_by_cap
-        """,
-        batch, java.sql.Date.valueOf(runDate), strategies, candidates, entries, exits, exitSkipped,
-        openAtStart, wouldEnter, admitted, capExceedance, capBound, writeDropped(droppedByCap));
+    int rows =
+        jdbc.update(
+            """
+            INSERT INTO swing_batch_runs
+                (batch, run_date, ran_at, strategies, candidates, entries, exits, exit_skipped,
+                 open_at_start, would_enter, admitted, cap_exceedance, cap_bound, dropped_by_cap)
+            VALUES (?, ?, now(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+            ON CONFLICT (batch, run_date) DO UPDATE SET
+                ran_at = now(), strategies = EXCLUDED.strategies, candidates = EXCLUDED.candidates,
+                entries = EXCLUDED.entries, exits = EXCLUDED.exits,
+                exit_skipped = EXCLUDED.exit_skipped, open_at_start = EXCLUDED.open_at_start,
+                would_enter = EXCLUDED.would_enter, admitted = EXCLUDED.admitted,
+                cap_exceedance = EXCLUDED.cap_exceedance, cap_bound = EXCLUDED.cap_bound,
+                dropped_by_cap = EXCLUDED.dropped_by_cap
+            """,
+            batch, java.sql.Date.valueOf(runDate), strategies, candidates, entries, exits, exitSkipped,
+            openAtStart, wouldEnter, admitted, capExceedance, capBound, writeDropped(droppedByCap));
+    return rows > 0;
   }
 
   /** The latest recorded run date for a batch — empty when the batch has never recorded. */
@@ -65,6 +70,19 @@ public class SwingBatchRunRepository {
     return Optional.ofNullable(
         jdbc.queryForObject(
             "SELECT max(run_date) FROM swing_batch_runs WHERE batch = ?", LocalDate.class, batch));
+  }
+
+  /**
+   * Whether a batch recorded a run for EXACTLY this IST session — the catch-up's completeness signal
+   * and the detector's run-marker probe (the on-time run, or a COMPLETE catch-up, stamps one row per
+   * session). {@code lastRunDate} tracks only the max, so it cannot answer "did session X run" when a
+   * later session ran but X was skipped.
+   */
+  public boolean hasRun(String batch, LocalDate sessionDate) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM swing_batch_runs WHERE batch = ? AND run_date = ?)",
+            Boolean.class, batch, java.sql.Date.valueOf(sessionDate)));
   }
 
   /**

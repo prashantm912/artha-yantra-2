@@ -63,6 +63,48 @@ class ConnectTheDotsScorerTest {
           OiQuadrant.NEUTRAL, OiQuadrant.NEUTRAL, null, null, bd("5"), null, null, null,
           false, false, null, null, null);
 
+  /**
+   * T24 — the {@code volume} DOT must test the SAME floor the rail tested (root-caused 2026-07-28).
+   *
+   * <p>The dot called the two-argument {@code ScalperGates.volume}, which resolves the STATIC
+   * per-index default (NIFTY 125,000), while the {@code relative-volume-floor} tag substitutes a
+   * banded floor at the RAIL call site only. The tag has been armed on all 21 NIFTY scalpers since
+   * #605, so 1.0 of weight was gated at roughly p95 of its own operand: on 2026-07-27 the 3m series
+   * max was 117,000 — no bar could clear 125,000 and the dot scored 0/909.
+   *
+   * <p>The numbers below are that session's real shape: a 30,420-volume bar (the 07-28 3m median)
+   * against a relative floor of 45,630 (k=1.5 × median) versus the static 125,000.
+   */
+  @Test
+  void volumeDotTestsTheResolvedFloorNotTheStaticDefault() {
+    Chart thinTape = new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("30420"));
+    ScalperGateContext c = ctx(thinTape, BULL_OI, BULL_MACRO);
+
+    // No override ⇒ the static NIFTY default (125,000). 30,420 cannot clear it — the live behaviour
+    // that produced nine sessions of a permanently dead dot.
+    assertThat(dot(ConnectTheDotsScorer.score(c, CE, 1, T, P, true, false, false, false), "volume"))
+        .as("static 125,000 default — the pre-T24 reading")
+        .isFalse();
+
+    // The RESOLVED floor the armed rail actually used: k=1.5 × a 20,280 median = 30,420 → met.
+    assertThat(
+            dot(
+                ConnectTheDotsScorer.score(
+                    c, CE, 1, T, P, true, false, false, false, bd("30420")),
+                "volume"))
+        .as("the dot now agrees with the rail it is supposed to mirror")
+        .isTrue();
+    // A floor the bar genuinely misses still withholds support — the fix threads the value through,
+    // it does not make the dot permissive.
+    assertThat(
+            dot(
+                ConnectTheDotsScorer.score(
+                    c, CE, 1, T, P, true, false, false, false, bd("45630")),
+                "volume"))
+        .as("a real miss is still a miss")
+        .isFalse();
+  }
+
   @Test
   void allDotsAlignedFiresBullishCe() {
     Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, 1, T, P, true);

@@ -100,7 +100,9 @@ describe('OrdersPage', () => {
     expect(within(strip).getByText('1087.50')).toBeInTheDocument(); // sum of the single position's MTM
     expect(within(strip).getByText('1 / 0')).toBeInTheDocument(); // one long, no short
     expect(within(strip).getByText('10125.00')).toBeInTheDocument(); // net exposure = 75 * 135.00
-  });
+    // 2026-07-27: four-table render measured 5.7-5.9s under FULL-SUITE worker contention — right at
+    // the default 5s budget; reds on any suite growth while green in isolation. Explicit budget.
+  }, 15_000);
 
   it('shows empty states and a not-configured funds notice when nothing is wired', () => {
     state.orderbook = [];

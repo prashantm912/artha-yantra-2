@@ -36,6 +36,9 @@ public class PaperPositionRepository {
       "id, exchange, tradingsymbol, side, qty, avg_entry_price, realized_pnl, status,"
           + " opened_at, closed_at, close_reason, stop_loss, take_profit, book";
 
+  /** Advisory-lock namespace for per-book capital serialization ({@link #lockBookCapital}). */
+  private static final int BOOK_CAPITAL_LOCK_NAMESPACE = 4802;
+
   private final JdbcTemplate jdbc;
 
   /** Wires the strategy datasource. */
@@ -80,6 +83,14 @@ public class PaperPositionRepository {
   public Optional<PositionRow> find(long id) {
     return jdbc
         .query("SELECT " + COLUMNS + " FROM paper_positions WHERE id=?", PaperPositionRepository::map, id)
+        .stream()
+        .findFirst();
+  }
+
+  /** The local book key for one position, without loading detail-pane or instrument-provenance columns. */
+  public Optional<String> findBook(long id) {
+    return jdbc
+        .query("SELECT book FROM paper_positions WHERE id=?", (rs, n) -> rs.getString("book"), id)
         .stream()
         .findFirst();
   }
@@ -563,6 +574,78 @@ public class PaperPositionRepository {
         .query(
             "SELECT idx, capital_fraction FROM scalper_subaccount",
             (rs, n) -> java.util.Map.entry(rs.getInt("idx"), rs.getBigDecimal("capital_fraction")))
+        .stream()
+        .collect(
+            java.util.stream.Collectors.toMap(
+                java.util.Map.Entry::getKey, java.util.Map.Entry::getValue));
+  }
+
+  /**
+   * Transaction-scoped advisory lock serializing a book's capital check-plus-write.
+   *
+   * <p>Without it the deployment cap and the sub-account ceiling are read-check-write races: both read
+   * unlocked aggregates BEFORE the position is persisted, so two concurrent opens on the same book can
+   * each observe the same pre-write usage, both pass, and both commit past the cap. A hard limit that
+   * two callers can straddle is not a limit. Same shape — and same fix — as the anchor TOCTOU in
+   * {@code SignalRepository.lockAnchors}.
+   *
+   * <p>Keyed on the BOOK, which is the granularity both caps are denominated in (the sub-account
+   * ceiling is a partition of one book's capital, so the book lock covers it too). Held to commit, so
+   * for a straddle — whose two legs share one transaction — it spans BOTH legs.
+   */
+  public void lockBookCapital(String book) {
+    // queryForList, not update: pg_advisory_xact_lock is a SELECT and returns a row, so executeUpdate
+    // fails with "A result was returned when none was expected". Same call shape as
+    // SignalRepository.lockAnchors.
+    jdbc.queryForList(
+        "SELECT pg_advisory_xact_lock(?, ?)", BOOK_CAPITAL_LOCK_NAMESPACE, book == null ? 0 : book.hashCode());
+  }
+
+  /**
+   * The sub-account an OPEN position on this key is already charged to, if one exists.
+   *
+   * <p>A dedicated query rather than a field on {@link PositionRow}: the compact row deliberately omits
+   * the provenance columns, and widening it would touch every mapper for one caller. Empty means no
+   * open position on the key — the fill will INSERT, so the request's own idx applies.
+   */
+  public Optional<Integer> openSubAccountIdx(
+      String book, String exchange, String tradingsymbol, String side) {
+    return jdbc
+        .query(
+            "SELECT subaccount_idx FROM paper_positions WHERE book=? AND exchange=? AND tradingsymbol=?"
+                + " AND side=? AND status='OPEN'",
+            (rs, n) -> rs.getObject("subaccount_idx", Integer.class),
+            book,
+            exchange,
+            tradingsymbol,
+            side)
+        .stream()
+        .filter(java.util.Objects::nonNull)
+        .findFirst();
+  }
+
+  /**
+   * CAPITAL currently deployed per sub-account in a book's OPEN positions — {@code Σ qty × avg_entry_price},
+   * grouped by {@code subaccount_idx}.
+   *
+   * <p>Deliberately capital, NOT a row count. A count answers "how many positions does this account
+   * hold", which is not the question a ₹-denominated allocation asks: two ₹20,000 adds and two ₹500
+   * adds are the same number of rows and a 40× different exposure. Rows are why the picker could
+   * believe load was distributed while one account sat well past its allocation.
+   *
+   * <p>NULL-idx rows (non-scalper / legacy) are excluded — they belong to no sub-account, so charging
+   * them to one would invent exposure.
+   */
+  public java.util.Map<Integer, BigDecimal> openCapitalBySubAccount(String book) {
+    return jdbc
+        .query(
+            "SELECT subaccount_idx AS idx, SUM(qty * avg_entry_price) AS deployed"
+                + " FROM paper_positions"
+                + " WHERE status = 'OPEN' AND subaccount_idx IS NOT NULL AND (?::text IS NULL OR book = ?)"
+                + " GROUP BY subaccount_idx",
+            (rs, n) -> java.util.Map.entry(rs.getInt("idx"), rs.getBigDecimal("deployed")),
+            book,
+            book)
         .stream()
         .collect(
             java.util.stream.Collectors.toMap(

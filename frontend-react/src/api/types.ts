@@ -375,8 +375,16 @@ export interface LegDeltas {
   interpretation: OiInterpretation;
 }
 
-/** A full live chain leg — IV + all 5 greeks computed server-side in black76 (decimal strings). */
+/**
+ * A full live chain leg — IV + all 5 greeks computed server-side in black76 (decimal strings).
+ *
+ * `(exchange, tradingsymbol)` is the canonical instrument key (docs/symbol-normalization.md): the
+ * exchange comes from the instrument master, published as a pair so no consumer has to guess the
+ * derivatives exchange from the root's name. Null only on the captured-snapshot projection, which
+ * has no instrument row.
+ */
 export interface ChainLeg {
+  exchange: string | null;
   tradingsymbol: string;
   ltp: string | null;
   bid: string | null;
@@ -415,7 +423,14 @@ export interface ChainTable {
   forwardSource: string | null;
   riskFreeRate: string | null;
   pcr: string | null;
+  /** The market is not open. Orthogonal to `lastCaptured` — a live chain computed off-hours is live. */
   stale: boolean;
+  /**
+   * LIVE mode had no spot quote, so `rows` are the most recent CAPTURED chain and `asOf` is the
+   * CAPTURE time rather than now (the server degrades instead of 503-ing after close). The server
+   * also folds this into `freshness.complete=false`, which is what drives the staleness badge.
+   */
+  lastCaptured: boolean;
   asOf: string;
   interval: string;
   rows: ChainTableRow[];

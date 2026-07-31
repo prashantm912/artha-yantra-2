@@ -101,7 +101,7 @@ class ShadowVariantRegistryIntegrationTest extends StrategySignalIntegrationTest
         null, null, "NIFTY 50", LocalDate.now().plusDays(5),
         new StrikePicker.Pick(
             new StrikePicker.Candidate(
-                optSym, new BigDecimal("24250"), OptionType.CE, new BigDecimal("100.00"),
+                "NFO", optSym, new BigDecimal("24250"), OptionType.CE, new BigDecimal("100.00"),
                 new BigDecimal("0.12")),
             new BigDecimal("0.55")),
         null);

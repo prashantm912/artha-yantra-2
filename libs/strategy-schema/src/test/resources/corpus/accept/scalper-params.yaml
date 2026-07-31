@@ -40,7 +40,9 @@ exit_rules:
   - { type: time_stop,   params: { max_bars: 15 } }
 
 risk:
-  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  # max_lots bounds the lot COUNT a fixed budget can buy — the schema forbade it until now, which
+  # made the backtest replay's long-standing reader unreachable from any valid strategy.
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000, max_lots: 5, min_premium_inr: 1.0 } }
   max_positions: 2
   session:
     style: intraday

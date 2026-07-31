@@ -116,7 +116,7 @@ class ManasPyramidAveragingIntegrationTest extends StrategySignalIntegrationTest
         signals.insert(
             versionId, "NSE", sym, "1d", "ENTRY", "BUY",
             new BigDecimal("142"), new BigDecimal("137"), new BigDecimal("170"),
-            new BigDecimal("0.80"), "{}", bar(19), bar(19).plusDays(1));
+            new BigDecimal("0.80"), "{}", bar(19), bar(19).plusDays(1), null);
     signals.transition(lot1, "TAKEN");
     events.publishEvent(new SignalTaken(lot1, 10, new BigDecimal("142")));
     PositionRow afterLot1 =
@@ -185,14 +185,13 @@ class ManasPyramidAveragingIntegrationTest extends StrategySignalIntegrationTest
     }
     String config = yaml.replace("id: manas-arora-breakout", "id: mpa-it-" + uid);
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create(
                     "MPA IT " + uid,
                     null,
                     List.of("manas-arora", "swing", "equity", "breakout"),
                     config)
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     return strategyRepo.latestVersion(strategyId).orElseThrow().id();
   }

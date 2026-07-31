@@ -129,9 +129,9 @@ public class MinerviniBacktestService {
       int symbolsScanned,
       int totalTrades,
       List<SetupStat> setups,
-      PortfolioStat portfolio,
-      PortfolioStat portfolioRsPriority,
-      PortfolioStat portfolioRsPriorityNet,
+      @Schema(types = {"object", "null"}) PortfolioStat portfolio,
+      @Schema(types = {"object", "null"}) PortfolioStat portfolioRsPriority,
+      @Schema(types = {"object", "null"}) PortfolioStat portfolioRsPriorityNet,
       @Schema(types = {"string", "null"}) String note) {}
 
   /**
@@ -183,7 +183,7 @@ public class MinerviniBacktestService {
       List<Report> variants,
       List<SweepCell> sweep,
       List<SlotCell> slotSweep,
-      RotationResult rotation,
+      @Schema(types = {"object", "null"}) RotationResult rotation,
       String note) {}
 
   /** The full-filter variant (the live-funnel analogue) — the one the plain GET returns. */

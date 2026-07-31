@@ -127,6 +127,104 @@ public class SignalEngine {
       ScalperConfig scalper,
       String book) {}
 
+  /** The concrete leg used by paper/live routing and by the A12 sizing seam. */
+  record TradeableLeg(String exchange, String tradingsymbol, BigDecimal premium) {}
+
+  /**
+   * Resolves a scalper's picked option leg; non-scalpers keep their keyed signal instrument.
+   *
+   * <p>The option's exchange is the CANDIDATE's — i.e. the instrument master's, published per chain
+   * leg by market-data and carried through the pick untouched. It is deliberately NOT derived from
+   * the underlying's name: this value stamps {@code signals.tradeable_exchange}, which drives paper
+   * position sizing and (with {@code artha.scalper.execution=live}) live broker order routing, and a
+   * name-prefix guess silently mis-routes any newly listed BSE root.
+   *
+   * <p>Returns {@code null} when the picked candidate has no exchange — the ENTRY is then refused by
+   * the caller. That is the LAST of three chances to get it right, and the only one that may say no:
+   * market-data publishes it per leg, {@code OptionExchangeResolver} re-reads the master when an
+   * older market-data omits it, and only then does the candidate arrive here unresolved. Refusing
+   * costs one missed entry; stamping a guess books a wrong-sized, possibly mis-routed trade.
+   */
+  static TradeableLeg tradeableLeg(
+      String signalExchange,
+      String signalTradingsymbol,
+      BigDecimal signalPrice,
+      ScalperConfluenceGate.Decision decision) {
+    if (decision == null) {
+      return new TradeableLeg(signalExchange, signalTradingsymbol, signalPrice);
+    }
+    StrikePicker.Candidate candidate = decision.pick().candidate();
+    if (candidate.exchange() == null || candidate.exchange().isBlank()) {
+      // TRADE eligibility, separate from analytical eligibility (cross-vendor review Critical 1).
+      // The candidate is retained upstream so the read-only confluence-flip EXIT oracle still sees
+      // the true market side, but it is not tradeable: without the master's exchange the
+      // instrument-meta lookup 404s to a lot-1 equity proxy and mis-sizes the position. Refuse the
+      // ENTRY here, where refusing costs one missed entry rather than one un-exitable position.
+      return null;
+    }
+    return new TradeableLeg(candidate.exchange(), candidate.tradingsymbol(), candidate.ltp());
+  }
+
+  /**
+   * Whether EVERY leg of a decision carries a master-sourced exchange.
+   *
+   * <p>{@link #tradeableLeg} only inspects the PRIMARY candidate, which is the whole story for a
+   * directional scalp but not for a neutral straddle: those serialize a {@code legs[]} array that
+   * the order/paper layer routes from leg by leg. The legs are separate contracts and nothing
+   * guarantees they resolve alike, so the primary's exchange is not evidence about the other's.
+   */
+  static boolean allLegsHaveAnExchange(ScalperConfluenceGate.Decision decision) {
+    return decision.legs().stream()
+        .map(leg -> leg.pick().candidate().exchange())
+        .allMatch(e -> e != null && !e.isBlank());
+  }
+
+  /**
+   * Returns {@code decision} with any exchange-less leg re-keyed from the instrument master, or
+   * unchanged when nothing is missing (the overwhelmingly common case — market-data publishes the
+   * exchange, so this returns on the first check without touching the network).
+   *
+   * <p>A leg that STILL cannot be resolved keeps its null and is refused downstream, by design: the
+   * two callers of this method both treat null as "do not enter". Fail-soft throughout — the
+   * resolver never throws into the eval loop.
+   */
+  static ScalperConfluenceGate.Decision resolveMissingLegExchanges(
+      ScalperConfluenceGate.Decision decision,
+      String slug,
+      in.arthayantra.strategysignal.scalper.OptionExchangeResolver exchangeResolver) {
+    if (decision == null || exchangeResolver == null || allLegsHaveAnExchange(decision)) {
+      return decision;
+    }
+    List<ScalperConfluenceGate.Leg> rekeyed = new java.util.ArrayList<>(decision.legs().size());
+    for (ScalperConfluenceGate.Leg leg : decision.legs()) {
+      StrikePicker.Candidate c = leg.pick().candidate();
+      if (c.exchange() != null && !c.exchange().isBlank()) {
+        rekeyed.add(leg);
+        continue;
+      }
+      String resolved = exchangeResolver.resolve(c.tradingsymbol());
+      if (resolved == null) {
+        rekeyed.add(leg);
+        continue;
+      }
+      log.warn(
+          "{}: leg {} carried no exchange from market-data — resolved {} from the instrument master."
+              + " market-data is older than this build; deploy it to restore the zero-lookup path",
+          slug, c.tradingsymbol(), resolved);
+      rekeyed.add(
+          new ScalperConfluenceGate.Leg(
+              leg.optionType(),
+              new StrikePicker.Pick(
+                  new StrikePicker.Candidate(
+                      resolved, c.tradingsymbol(), c.strike(), c.type(), c.ltp(), c.iv()),
+                  leg.pick().delta())));
+    }
+    return new ScalperConfluenceGate.Decision(
+        decision.side(), rekeyed, decision.confluence(), decision.expiry(),
+        decision.structuralStop(), decision.ohTier(), decision.oiImbalancePct(),
+        decision.vixLevel());
+  }
+
   private enum UniverseResolutionStatus {
     /** Resolved to at least one tradable instrument. */
     RESOLVED,
@@ -173,7 +271,12 @@ public class SignalEngine {
    *     of the other two, which is exactly how a totally dead engine used to report "0 loaded,
    *     0 unresolved" and be read as success
    */
-  private record ReloadOutcome(int loadedCount, int unresolvedDrops, int loadErrors) {
+  private record ReloadOutcome(
+      int loadedCount,
+      int unresolvedDrops,
+      int loadErrors,
+      long coverageGeneration,
+      Map<String, StrategyCoverageSnapshot.Classification> coverageClassifications) {
 
     /**
      * The ONLY success signal: NOTHING failed in a way a retry could fix.
@@ -219,6 +322,21 @@ public class SignalEngine {
   // under threshold (V044 composite_rejections). Bounded ASYNC writer so a DB stall can never park
   // the sole signal-eval thread (#866 class).
   private final CompositeRejectionWriter compositeRejections;
+
+  /**
+   * Last-resort exchange resolution for a leg market-data did not key (see {@link
+   * in.arthayantra.strategysignal.scalper.OptionExchangeResolver}). Consulted ONLY here, on the
+   * entry path — at most once or twice per entry attempt.
+   *
+   * <p>It used to run inside the chain parse, which cross-vendor review round 2 correctly called a
+   * Critical: {@code MarketOiClient}'s memo caches the response BODY, so the parse — and therefore
+   * every per-leg lookup — re-runs for EVERY strategy on EVERY bar. A dozen CE variants over a
+   * ~14-leg chain turned "one lookup per leg" into hundreds, each able to burn the client timeout,
+   * on the single evaluation thread that also drives EXITS. Resolving the selected leg instead
+   * costs the same protection at a fraction of a percent of the calls, and keeps a slow master from
+   * ever delaying a confluence-flip exit.
+   */
+  private final in.arthayantra.strategysignal.scalper.OptionExchangeResolver exchangeResolver;
   // T15: durable reload ledger (strategy.engine_reloads, V046) — null in harnesses that construct
   // without it; the record call is skipped, never a substitute no-op bean.
   private final EngineReloadLedger reloadLedger;
@@ -379,6 +497,16 @@ public class SignalEngine {
 
   private volatile List<Loaded> loaded = List.of();
 
+  // T9: a total load-coverage snapshot, published only after a reload reaches a terminal
+  // classification. The IN_FLIGHT marker is published before the reload body starts, so an abort
+  // cannot be mistaken for the last healthy snapshot still in memory.
+  private volatile StrategyCoverageSnapshot coverageSnapshot;
+
+  // The generation the CONNECTED retry chain owns, held for the chain's whole life so every attempt
+  // republishes the SAME marker instead of resetting the SNAPSHOT_MISSING grace clock. Written only
+  // from the serial evalExecutor chain; cleared when the chain terminalizes.
+  private volatile Long connectedChainGeneration;
+
   // Subscriber-liveness heartbeat: wall-clock (clock) millis of the last candle message RECEIVED on
   // any candles.1m.* channel. SubscriberHealthCanary compares this against market-data's ticks:last-at
   // to catch a SILENT Redis subscription drop (feed alive, but this consumer stopped receiving) — the
@@ -438,6 +566,7 @@ public class SignalEngine {
       MeterRegistry meterRegistry,
       java.util.Optional<EmissionGuard> emissionGuard,
       java.util.Optional<ScalperConfluenceGate> scalperGate,
+      java.util.Optional<in.arthayantra.strategysignal.scalper.OptionExchangeResolver> exchangeResolver,
       RejectionWriter rejectionWriter,
       RiskSuppressionWriter riskSuppressions,
       CompositeRejectionWriter compositeRejections,
@@ -446,6 +575,7 @@ public class SignalEngine {
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes,
       @Value("${artha.signals.record-composite-rejections:true}") boolean recordCompositeRejections) {
     this.compositeRejections = compositeRejections;
+    this.exchangeResolver = exchangeResolver.orElse(null);
     this.reloadLedger = reloadLedger.orElse(null);
     this.recordCompositeRejections = recordCompositeRejections;
     this.registry = registry;
@@ -581,15 +711,35 @@ public class SignalEngine {
    * @return what this reload COMPUTED (installed or not), or null when the engine is stopped
    */
   private synchronized ReloadOutcome reload(boolean keepBest) {
+    return reload(keepBest, true);
+  }
+
+  /**
+   * (Re)loads published+enabled strategies with explicit coverage terminalization.
+   *
+   * <p>The CONNECTED retry chain keeps each completed unsuccessful attempt {@code IN_FLIGHT}; it
+   * owns the final terminalization after the chain either becomes healthy or exhausts its attempts.
+   * A thrown attempt remains {@code IN_FLIGHT} as an aborted reload. Direct reload callers retain
+   * the historical immediate terminalization behavior.
+   */
+  private ReloadOutcome reload(boolean keepBest, boolean terminalizeCoverage) {
+    return reload(keepBest, terminalizeCoverage, null);
+  }
+
+  /** As above; {@code chainGeneration} makes a retry REUSE its chain's generation + grace clock. */
+  private synchronized ReloadOutcome reload(
+      boolean keepBest, boolean terminalizeCoverage, Long chainGeneration) {
     if (stopped.get()) {
       return null;
     }
+    long coverageGeneration = beginCoverageReload(chainGeneration);
     reloadRequested.set(false);
     List<Loaded> fresh = new ArrayList<>();
     int unresolvedDrops = 0;
     int loadErrors = 0;
     int retained = 0;
     List<StrategyRepository.StrategyRow> all = registry.listAll();
+    Map<String, StrategyCoverageSnapshot.Classification> classifications = new LinkedHashMap<>();
     for (StrategyRepository.StrategyRow strategy : all) {
       if (!strategy.enabled() || strategy.publishedVersionId() == null) {
         continue;
@@ -597,6 +747,8 @@ public class SignalEngine {
       Optional<StrategyRepository.VersionRow> versionRow =
           registry.findVersionById(strategy.publishedVersionId());
       if (versionRow.isEmpty()) {
+        classifications.put(
+            strategy.slug(), StrategyCoverageSnapshot.Classification.MISSING_VERSION_ROW);
         continue;
       }
       try {
@@ -624,6 +776,8 @@ public class SignalEngine {
               "scalper {} has no engine-fireable bounding exit (time_stop / index-side stop_loss)"
                   + " — not loaded (§0B hard-SL rule)",
               strategy.slug());
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.NO_BOUNDING_EXIT);
           continue;
         }
         // Phase-9: swing strategies (session.style=swing, 1d primary) are driven by the daily
@@ -631,6 +785,8 @@ public class SignalEngine {
         // them here cleanly (not an error) so the batch owns them and the ROLLABLE check below never
         // logs a spurious "not live-rollable" warning for a strategy that is working as designed.
         if ("swing".equals(definition.session().style())) {
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.NOT_APPLICABLE_SWING);
           continue;
         }
         // A non-rollable primary (e.g. '1d' on a non-btst strategy) used to silently degrade to
@@ -642,12 +798,16 @@ public class SignalEngine {
           log.warn(
               "strategy {} primary '{}' is not live-rollable (needs 1m/3m/5m/15m/1h) — not loaded",
               strategy.slug(), definition.primaryTimeframe());
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.NOT_ROLLABLE_PRIMARY);
           continue;
         }
         UniverseResolution resolution = resolveUniverse(config);
         if (resolution.status() == UniverseResolutionStatus.UNRESOLVED) {
           unresolvedDrops++;
           retained += retainLastGood(fresh, strategy.id(), keepBest);
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.UNRESOLVED);
           log.warn("strategy {} has an unresolved universe — not loaded", strategy.slug());
           continue;
         }
@@ -658,6 +818,8 @@ public class SignalEngine {
           // with the engine still reporting "0 dropped on an unresolved universe".
           log.warn(
               "strategy {} universe mode is not live-resolvable — not loaded", strategy.slug());
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.NOT_LIVE_RESOLVABLE);
           continue;
         }
         if (resolution.status() == UniverseResolutionStatus.RESOLVED_EMPTY) {
@@ -667,6 +829,8 @@ public class SignalEngine {
           // neither block the retry chain from completing nor make the engine look degraded.
           log.info(
               "strategy {} resolves to an empty universe — standing aside today", strategy.slug());
+          classifications.put(
+              strategy.slug(), StrategyCoverageSnapshot.Classification.RESOLVED_EMPTY);
           continue;
         }
         List<StrategyDefinition.InstrumentRef> universe = resolution.instruments();
@@ -706,6 +870,7 @@ public class SignalEngine {
                 strategy.id(), versionRow.get().id(), strategy.slug(), strategy.name(),
                 versionRow.get().version(), versionRow.get().checksum(), definition,
                 universe, keys, scalper, Books.fromTags(strategy.tags())));
+        classifications.put(strategy.slug(), StrategyCoverageSnapshot.Classification.RESOLVED);
       } catch (RuntimeException e) {
         // RETRYABLE by construction: this catch spans the market-data-dependent work (universe
         // resolution, series warm-up), so a transient upstream fault lands here — and a boot where
@@ -714,6 +879,7 @@ public class SignalEngine {
         // trade, because the alternative is a silently dead engine.
         loadErrors++;
         retained += retainLastGood(fresh, strategy.id(), keepBest);
+        classifications.put(strategy.slug(), StrategyCoverageSnapshot.Classification.LOAD_ERROR);
         log.error("strategy {} failed to load — skipped: {}", strategy.slug(), e.getMessage());
       }
     }
@@ -724,7 +890,9 @@ public class SignalEngine {
               + "never leave the engine holding less than it already did",
           retained, unresolvedDrops, loadErrors);
     }
-    ReloadOutcome outcome = new ReloadOutcome(fresh.size(), unresolvedDrops, loadErrors);
+    ReloadOutcome outcome =
+        new ReloadOutcome(
+            fresh.size(), unresolvedDrops, loadErrors, coverageGeneration, classifications);
     Set<LoadedIdentity> freshIdentities = identitiesOf(fresh);
     Set<LoadedIdentity> installedIdentities = identitiesOf(loaded);
 
@@ -748,6 +916,9 @@ public class SignalEngine {
       if (reloadLedger != null) {
         reloadLedger.record(fresh.size(), unresolvedDrops, loadErrors, false);
       }
+      if (terminalizeCoverage) {
+        completeCoverageReload(coverageGeneration, classifications);
+      }
       return outcome;
     }
     bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
@@ -765,7 +936,67 @@ public class SignalEngine {
     if (reloadLedger != null) {
       reloadLedger.record(fresh.size(), unresolvedDrops, loadErrors, true);
     }
+    if (terminalizeCoverage) {
+      completeCoverageReload(coverageGeneration, classifications);
+    }
     return outcome;
+  }
+
+  /** Current T9 snapshot; volatile publication makes the reload thread the sole snapshot writer. */
+  public StrategyCoverageSnapshot strategyCoverageSnapshot() {
+    return coverageSnapshot;
+  }
+
+  private long beginCoverageReload() {
+    return beginCoverageReload(null);
+  }
+
+  /**
+   * Publishes the pre-body IN_FLIGHT marker and returns the generation this reload owns.
+   *
+   * <p><b>A retry chain must REUSE its generation, not mint a fresh one per attempt.</b> Each call
+   * allocates a generation AND stamps {@code reloadTimestamp} with the current instant, and
+   * {@code StrategyCoverageWatchdog.sweepMissing()} measures the SNAPSHOT_MISSING grace from that
+   * stamp. So a chain retrying every ~35 s used to reset its own grace clock on every attempt: the
+   * marker never aged past the 180 s grace, and a chain that was logically incomplete for its entire
+   * ~245 s window — or ~9 minutes with slower production attempts — stayed invisible to predicate B.
+   * That is the precise blindness predicate B exists to prevent. Passing the chain's existing
+   * generation republishes the SAME marker with its ORIGINAL timestamp, so the grace clock runs from
+   * when the chain actually started. (Cross-vendor review Major, 2026-07-26.)
+   */
+  private long beginCoverageReload(Long chainGeneration) {
+    StrategyCoverageSnapshot current = coverageSnapshot;
+    long completedGeneration = current == null ? 0L : current.completedGeneration();
+    if (chainGeneration != null
+        && current != null
+        && current.requestedGeneration() == chainGeneration) {
+      // Same chain, later attempt: republish unchanged so reloadTimestamp keeps the chain start time.
+      coverageSnapshot =
+          StrategyCoverageSnapshot.inFlight(
+              chainGeneration, completedGeneration, current.reloadTimestamp());
+      return chainGeneration;
+    }
+    long nextGeneration = current == null ? 1L : current.requestedGeneration() + 1L;
+    coverageSnapshot =
+        StrategyCoverageSnapshot.inFlight(
+            nextGeneration, completedGeneration, OffsetDateTime.ofInstant(clock.instant(), Ist.ZONE));
+    return nextGeneration;
+  }
+
+  private void completeCoverageReload(
+      long generation, Map<String, StrategyCoverageSnapshot.Classification> classifications) {
+    boolean abnormal = classifications.values().stream().anyMatch(
+        StrategyCoverageSnapshot.Classification::abnormal);
+    coverageSnapshot =
+        new StrategyCoverageSnapshot(
+            generation,
+            generation,
+            generation,
+            OffsetDateTime.ofInstant(clock.instant(), Ist.ZONE),
+            abnormal
+                ? StrategyCoverageSnapshot.TerminalState.DEGRADED_TERMINAL
+                : StrategyCoverageSnapshot.TerminalState.HEALTHY,
+            classifications);
   }
 
   /** The {@link LoadedIdentity} of every entry — what the engine would LOSE by not installing. */
@@ -1722,6 +1953,32 @@ public class SignalEngine {
       }
     }
     BigDecimal entryPrice = bar.close();
+    // LAST resort before refusing: an older market-data publishes no exchange on any chain leg, and
+    // refusing every entry until it is deployed is a worse failure than the mis-routing being fixed
+    // — it is indistinguishable from a quiet tape. Resolve the SELECTED leg(s) from the master here,
+    // where it costs one or two calls per entry attempt, never a call per leg per strategy per bar.
+    decision = resolveMissingLegExchanges(decision, strategy.slug(), exchangeResolver);
+    TradeableLeg tradeable = tradeableLeg(exchange, tradingsymbol, entryPrice, decision);
+    if (tradeable == null) {
+      // The picked leg carries no master exchange, so it cannot be sized or routed. Refuse the
+      // ENTRY loudly rather than stamping a key that would 404 into a lot-1 equity proxy
+      // (cross-vendor review Critical 1). The position's EXIT rails are unaffected — the candidate
+      // is still visible to the read-only confluence-flip oracle upstream.
+      log.warn(
+          "ENTRY suppressed: picked option leg for {} {}:{} has no instrument-master exchange",
+          strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
+    // A neutral (straddle) decision routes off the legs[] side-channel, not the primary stamp, so
+    // validating only the primary would leave the second leg unchecked — the exact hole the
+    // single-leg guard above closes. Every leg must resolve or the whole entry is refused: a
+    // straddle is one position, and half of one is a directional trade nobody asked for.
+    if (decision != null && decision.neutral() && !allLegsHaveAnExchange(decision)) {
+      log.warn(
+          "ENTRY suppressed: a straddle leg for {} {}:{} has no instrument-master exchange",
+          strategy.slug(), exchange, tradingsymbol);
+      return;
+    }
     // T21 review round 2 (Critical): premium_pct rules are OPTION-side bands — resolving them
     // against the INDEX entry price here produced nonsense levels (25% of a 25,000 future = a
     // 6,250-point "stop"), and for a held-PE (SHORT-direction) position that below-entry stop made
@@ -1769,8 +2026,8 @@ public class SignalEngine {
     // Computed BEFORE the insert (it may call market-data REST) so the row + its stamps commit in
     // one tight transaction below — never a DB txn held open across an HTTP call.
     BigDecimal suggestedQty = null;
+    BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
     if (emissionGuard.isPresent()) {
-      BigDecimal stopDistance = stopLoss == null ? null : entryPrice.subtract(stopLoss).abs();
       // E8 §3.2: a probability-graded size multiplier off the confluence aggregate — scalper decisions
       // only (null for non-scalper signals → ungraded). Applied + lot-rounded inside the paper adapter;
       // defaults to 1.0 so the stamped qty is byte-identical until a weak-vs-strong spread is present.
@@ -1781,7 +2038,8 @@ public class SignalEngine {
                   decision.confluence().aggregate(), decision.oiImbalancePct(), decision.vixLevel());
       suggestedQty =
           emissionGuard.get().suggestedQty(
-              strategy.definition().sizing(), exchange, tradingsymbol, entryPrice, stopDistance,
+              strategy.definition().sizing(), tradeable.exchange(), tradeable.tradingsymbol(),
+              tradeable.premium(), stopDistance,
               sizeMultiplier, strategy.book());
       // E9/§3.7 hero-zero profit-funded sizing: the expiry-day hero-zero leg deploys ~10% of accumulated
       // realised PROFIT ("play with house money, never capital") with a ₹2.5k floor when profits are thin
@@ -1793,9 +2051,8 @@ public class SignalEngine {
           && decision.pick().candidate().ltp() != null) {
         BigDecimal hzQty =
             emissionGuard.get().heroZeroSuggestedQty(
-                exchange,
-                decision.pick().candidate().tradingsymbol(),
-                decision.pick().candidate().ltp());
+                strategy.definition().sizing(), tradeable.exchange(), tradeable.tradingsymbol(),
+                tradeable.premium());
         if (hzQty != null) {
           suggestedQty = hzQty;
         }
@@ -1803,9 +2060,12 @@ public class SignalEngine {
     }
     // §12.9 Track-2 side-channel: the signal is keyed on the index future; record the option the
     // confluence picked (the order/paper layer trades it) + the confluence detail, OUTSIDE the
-    // frozen score breakdown. Options trade on the same derivatives exchange as the index future.
+    // frozen score breakdown. The option's own exchange is the instrument master's, carried on the
+    // picked candidate — never derived from the underlying root's name (task_032bff42).
     String scalperDetail =
-        decision == null ? null : scalperDetailJson(decision, strategy.scalper(), exchange);
+        decision == null
+            ? null
+            : scalperDetailJson(decision, strategy.scalper());
     // INT §13 row 19 / FID P1-8 fired-side rail-operand side-channel: serialize the confluence gate's full
     // condition matrix (built from the SAME evaluation the Decision came from — never re-evaluated, so it
     // is deterministic) mirroring signal_rejections.diagnostic's shape. Built HERE (not inside the tx) so a
@@ -1835,17 +2095,34 @@ public class SignalEngine {
                   signals.insert(
                       strategy.versionId(), exchange, tradingsymbol, interval, "ENTRY", side,
                       entryPrice, stopLevel, target, evaluation.breakdown().composite(),
-                      breakdownJson, generatedAt, expiresAt);
+                      breakdownJson, generatedAt, expiresAt, null); // ENTRY carries no exit reason
               if (stampQty != null) {
                 signals.stampSuggestedQty(newId, stampQty);
               }
               if (scalperDetail != null) {
                 signals.stampScalperDetail(
-                    newId, exchange, decision.pick().candidate().tradingsymbol(), scalperDetail);
+                    newId, tradeable.exchange(), tradeable.tradingsymbol(), scalperDetail);
               }
               return newId;
             });
     stampEmissionLatency(id);
+    if (suggestedQty == null
+        && decision != null
+        && tradeable.premium() != null
+        && emissionGuard.isPresent()) {
+      emissionGuard
+          .get()
+          .recordZeroSizedEntry(
+              id,
+              strategy.slug(),
+              strategy.definition().sizing(),
+              strategy.book(),
+              tradeable.exchange(),
+              tradeable.tradingsymbol(),
+              tradeable.premium(),
+              stopDistance,
+              side);
+    }
     emitted.increment();
     // Best-effort post-commit stamp of the fired-side diagnostic (§13 row 19): NOT inside the tx above —
     // a scalper contrast diagnostic must never roll back / break the real ENTRY (mirrors recordRejection's
@@ -1907,7 +2184,7 @@ public class SignalEngine {
    * strike, option_ltp, iv, delta}) — the two-leg carrier the order/paper layer reads.
    */
   private String scalperDetailJson(
-      ScalperConfluenceGate.Decision d, ScalperConfig cfg, String tradeableExchange) {
+      ScalperConfluenceGate.Decision d, ScalperConfig cfg) {
     StrikePicker.Candidate c = d.pick().candidate();
     ObjectNode root = objectMapper.createObjectNode();
     root.put("side", d.neutral() ? "NEUTRAL" : d.side().name());
@@ -1940,7 +2217,13 @@ public class SignalEngine {
       for (ScalperConfluenceGate.Leg leg : d.legs()) {
         StrikePicker.Candidate lc = leg.pick().candidate();
         ObjectNode n = legs.addObject();
-        n.put("exchange", tradeableExchange);
+        // EACH leg carries its OWN master-sourced exchange. Copying the primary's onto both was the
+        // same mis-routing defect this change removes, surviving in the two-leg path: a straddle's
+        // legs are separate contracts and nothing guarantees they resolve alike, yet the order/paper
+        // layer routes off exactly this field. `emitEntry` refuses a neutral entry unless every leg
+        // resolved, so a null can never reach here — but stamp the leg's own value regardless, so
+        // the invariant is expressed where the value is written and not only where it is checked.
+        n.put("exchange", lc.exchange());
         n.put("tradingsymbol", lc.tradingsymbol());
         n.put("side", "BUY"); // long straddle = both legs BUY (short = SELL is SPAN-deferred)
         n.put("option_type", leg.optionType().name());
@@ -2136,7 +2419,7 @@ public class SignalEngine {
                       strategy.versionId(), exchange, tradingsymbol, interval, type, side,
                       bar.close(), null, null, anchor.compositeScore(),
                       anchor.scoreBreakdown().toString(), generatedAt,
-                      generatedAt.plusMinutes(signalTtlMinutes));
+                      generatedAt.plusMinutes(signalTtlMinutes), exitReason);
               signals.transition(anchor.id(), "EXPIRED"); // the entry resolved — the pair is closed
               return newId;
             });
@@ -2260,9 +2543,27 @@ public class SignalEngine {
       ReloadOutcome outcome = null;
       try {
         // keep-best: a RETRY must never leave the engine holding less than it already does.
-        outcome = reload(true);
+        // Keep coverage IN_FLIGHT until this coordinator knows whether the chain converged or
+        // exhausted. An exception still leaves the pre-body marker in place so an aborted attempt
+        // cannot be mistaken for the last completed snapshot.
+        // Reuse the chain's generation so the SNAPSHOT_MISSING grace clock runs from when the CHAIN
+        // started, not from this attempt — otherwise every retry resets it and predicate B goes blind
+        // for the whole retry window.
+        outcome = reload(true, false, connectedChainGeneration);
       } catch (RuntimeException e) {
         log.warn("kite.status reload attempt {} failed: {}", attempt, e.toString());
+      } finally {
+        // ALWAYS adopt the generation this attempt actually published — never only when the field is
+        // null. A direct reload (hot-swap, morning reload, the 20 s reconcile) can land in the ~35 s
+        // retry gap and terminalize a NEWER generation; the chain's stored value then no longer
+        // matches the snapshot, so beginCoverageReload mints a fresh one, and a null-only adopt would
+        // leave the stale value in place and repeat that mismatch on EVERY later attempt — resetting
+        // the grace clock exactly as before. Re-adopting each pass keeps the chain tracking reality.
+        // Works when the attempt THREW too, since beginCoverageReload published the marker first.
+        StrategyCoverageSnapshot published = coverageSnapshot;
+        if (published != null) {
+          connectedChainGeneration = published.requestedGeneration();
+        }
       }
       ReloadOutcome first = attempt == 1 ? outcome : firstOutcome;
 
@@ -2272,6 +2573,10 @@ public class SignalEngine {
       // took an UNCOUNTED skip reports 0 drops over a DEAD engine. ReloadOutcome.healthy rejects
       // both, so success can never be reported while the engine holds zero usable strategies. A
       // legitimately all-swing registry has no live candidates ⇒ healthy on attempt 1.
+      if (outcome != null && (outcome.healthy() || attempt >= KITE_CONNECTED_RELOAD_MAX_ATTEMPTS)) {
+        completeCoverageReload(outcome.coverageGeneration(), outcome.coverageClassifications());
+        connectedChainGeneration = null; // chain over — the next one starts a fresh grace clock
+      }
       if (outcome != null && outcome.healthy()) {
         log.info(
             "kite.status reload attempt {} resolved every universe ({} loaded) — retry complete",

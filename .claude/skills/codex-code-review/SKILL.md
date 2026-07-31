@@ -88,6 +88,19 @@ name the branch, and point at `git diff origin/main...<branch>` (or the state-fi
 
 ## Notes
 
+- ⚠️ **Every state op must run from the SAME cwd as `start.sh` — in practice the repo root.**
+  `STATE_DIR` is exported RELATIVE by these instructions, and `_common.sh` canonicalizes it with
+  `cd "$STATE_DIR" && pwd` — so it resolves against the INVOKING directory. Call `resume`/
+  `synthesize`/`reset`/`show` from a git worktree and it resolves to THAT worktree's own
+  `.claude/skills/.../state`, which EXISTS (`.claude` is tracked) and is empty — reporting
+  `no session for <target>` while the real `.thread` sits in the root's state dir, minutes old.
+  Hit twice on 2026-07-28, ~20 minutes apart. **It is NOT the per-target key**: for a label target
+  `target_key` hashes the label string, identical from any cwd — the DIRECTORY moved, not the key.
+  Subshell the worktree step so the harness call itself stays at the root:
+  `(cd <worktree> && git diff origin/main...HEAD > "$STATE_DIR/<key>.diff")`.
+  Since 2026-07-28 the error names where it looked and, when it can find the session in the main
+  checkout, says so outright — but the discipline above is what avoids the round trip.
+
 - `--sandbox read-only`. Safe to invoke autonomously (no writes, no commits).
 - Model/effort from `.claude/skills/codex/scripts/_common.sh` (reviews → gpt-5.6-sol, effort xhigh);
   override per run via `CODEX_MODEL` / `CODEX_EFFORT`.

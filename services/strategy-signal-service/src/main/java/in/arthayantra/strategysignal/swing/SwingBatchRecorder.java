@@ -7,7 +7,9 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -31,35 +33,153 @@ public class SwingBatchRecorder {
   private static final Logger log = LoggerFactory.getLogger(SwingBatchRecorder.class);
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
 
+  /**
+   * When the {@code swing_batch_runs} completeness marker is stamped. The scheduled / on-demand path
+   * ALWAYS records (its historical behaviour). The catch-up records ON_COMPLETE — only when the exit
+   * pass fully evaluated ({@code exitSkipped == 0}) — so a partial catch-up (a held anchor's bar was
+   * missing) does NOT mark the session done and stays retryable (2026-07-17 review, Critical 1).
+   */
+  public enum MarkerPolicy {
+    ALWAYS,
+    ON_COMPLETE
+  }
+
+  /**
+   * The result of a run: the {@link SwingBatchEngine.SwingRun} plus whether the canonical {@code
+   * swing_batch_runs} completeness marker was actually written. The catch-up marks a session terminally
+   * DONE only when BOTH the exit pass fully evaluated AND {@code markerRecorded} — a marker write that
+   * fail-soft-swallowed must leave the session repairable, never stuck DONE-without-marker (2026-07-17
+   * review Major).
+   */
+  public record RunOutcome(SwingBatchEngine.SwingRun run, boolean markerRecorded) {}
+
   private final SwingBatchEngine engine;
   private final SwingBatchRunRepository runs;
   private final SwingSellDecisionService sellDecisions;
   private final FlagSnapshotService flagSnapshots;
+  private final SwingRunMutex mutex;
   private final ApplicationEventPublisher events;
   private final Clock clock;
 
-  /** Wires the shared engine, the marker repo, the sell-decision store, the flag ledger, and the bus. */
+  /** Wires the shared engine, the marker repo, the sell-decision store, the flag ledger, the run mutex, and the bus. */
   public SwingBatchRecorder(
       SwingBatchEngine engine,
       SwingBatchRunRepository runs,
       SwingSellDecisionService sellDecisions,
       FlagSnapshotService flagSnapshots,
+      SwingRunMutex mutex,
       ApplicationEventPublisher events,
       Clock clock) {
     this.engine = engine;
     this.runs = runs;
     this.sellDecisions = sellDecisions;
     this.flagSnapshots = flagSnapshots;
+    this.mutex = mutex;
     this.events = events;
     this.clock = clock;
   }
 
   /** Runs one daily batch for a family, records the marker, and pushes the summary. Propagates. */
   public SwingBatchEngine.SwingRun runAndRecord(SwingDoctrine doctrine) {
-    LocalDate runDate = LocalDate.now(clock.withZone(IST));
-    SwingBatchEngine.SwingRun result = engine.runDaily(doctrine);
-    if (!doctrine.enabled()) {
-      return result; // disarmed no-op — nothing ran, nothing to record or announce
+    return runAndRecord(doctrine, null, true, MarkerPolicy.ALWAYS).run();
+  }
+
+  /**
+   * Runs one daily batch PINNED to a past session ({@link SwingBatchCatchUp}), or the ordinary
+   * same-evening batch when {@code sessionDate} is null. The whole run is serialized per family via
+   * {@link SwingRunMutex} so it can never emit concurrently with another run path (a manual
+   * {@code POST /run} on a request thread) and double a fill.
+   *
+   * <p>Three things are load-bearing on the pinned catch-up path:
+   *
+   * <ol>
+   *   <li>The {@code swing_batch_runs} marker is stamped under the SESSION's date, not today's. Stamping
+   *       today would tell the P0-4 canary that today's batch ran — masking the NEXT miss — while leaving
+   *       the session it actually caught up still looking missed.
+   *   <li>The engine is pinned to that session's daily bar (see {@code SwingBatchEngine#runDaily}), so a
+   *       catch-up can only ever decide off the bar the on-time run would have read.
+   *   <li>{@code markerPolicy=ON_COMPLETE} records the marker only when the exit pass fully evaluated, so
+   *       a partial run stays retryable rather than being recorded "done" (Critical 1).
+   * </ol>
+   */
+  public RunOutcome runAndRecord(
+      SwingDoctrine doctrine, LocalDate sessionDate, boolean entriesEnabled, MarkerPolicy markerPolicy) {
+    ReentrantLock lock = mutex.lockFor(doctrine.batchName());
+    lock.lock();
+    try {
+      if (!doctrine.enabled()) {
+        return runLocked(
+            doctrine, sessionDate, entriesEnabled, markerPolicy, null, false, null);
+      }
+      SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
+      return runLocked(
+          doctrine,
+          sessionDate,
+          entriesEnabled,
+          markerPolicy,
+          read == null ? null : read.snapshot(),
+          doctrine.enabled(), null);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  /** Runs from the exact funnel snapshot already read by the catch-up readiness gate. */
+  public RunOutcome runAndRecord(
+      SwingDoctrine doctrine,
+      LocalDate sessionDate,
+      boolean entriesEnabled,
+      MarkerPolicy markerPolicy,
+      Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot) {
+    ReentrantLock lock = mutex.lockFor(doctrine.batchName());
+    lock.lock();
+    try {
+      // This overload is used by catch-up after it has read the historical schedule intent. The
+      // current doctrine flag may have changed since that session, so it is deliberately not the gate.
+      return runLocked(doctrine, sessionDate, entriesEnabled, markerPolicy, candidateSnapshot, true, null);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  /** Runs from the catch-up snapshot with a deadline checked before the marker is written. */
+  public RunOutcome runAndRecord(
+      SwingDoctrine doctrine,
+      LocalDate sessionDate,
+      boolean entriesEnabled,
+      MarkerPolicy markerPolicy,
+      Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
+      SwingBatchEngine.RunDeadline deadline) {
+    ReentrantLock lock = mutex.lockFor(doctrine.batchName());
+    lock.lock();
+    try {
+      return runLocked(
+          doctrine, sessionDate, entriesEnabled, markerPolicy, candidateSnapshot, true, deadline);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  private RunOutcome runLocked(
+      SwingDoctrine doctrine,
+      LocalDate sessionDate,
+      boolean entriesEnabled,
+      MarkerPolicy markerPolicy,
+      Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot,
+      boolean executionArmed,
+      SwingBatchEngine.RunDeadline deadline) {
+    LocalDate runDate = sessionDate != null ? sessionDate : LocalDate.now(clock.withZone(IST));
+    SwingBatchEngine.SwingRun result =
+        candidateSnapshot == null
+            ? deadline == null
+                ? engine.runDaily(doctrine, sessionDate, entriesEnabled)
+                : engine.runDaily(doctrine, sessionDate, entriesEnabled, deadline)
+            : deadline == null
+                ? engine.runDaily(doctrine, sessionDate, entriesEnabled, candidateSnapshot, executionArmed)
+                : engine.runDaily(
+                    doctrine, sessionDate, entriesEnabled, candidateSnapshot, executionArmed, deadline);
+    if (!executionArmed) {
+      return new RunOutcome(result, false); // disarmed no-op — nothing ran, nothing recorded
     }
     // P1-7: snapshot the out-of-YAML flag regime that governed THIS run (the pyramiding env flags) keyed to
     // the swing_batch_runs natural key (batch:runDate). capture() is fail-soft — an observability write must
@@ -69,14 +189,23 @@ public class SwingBatchRecorder {
     doctrine.pyramid().describe().forEach((k, v) -> flags.put("pyramid." + k, v));
     flagSnapshots.capture(
         FlagSnapshotService.SWING_BATCH, doctrine.batchName() + ":" + runDate, doctrine.book(), flags);
-    try {
-      SwingBatchEngine.AdmissionProbe probe = result.admission();
-      runs.record(
-          doctrine.batchName(), runDate, result.strategies(), result.candidates(), result.entries(),
-          result.exits(), result.exitSkipped(), probe.openAtStart(), probe.wouldEnter(),
-          probe.admitted(), probe.capExceedance(), probe.capBound(), probe.droppedByCap());
-    } catch (RuntimeException e) {
-      log.warn("{} swing run-marker record failed: {}", doctrine.batchName(), e.getMessage());
+    boolean markerRecorded = false;
+    boolean snapshotAvailable = candidateSnapshot == null || candidateSnapshot.isPresent();
+    if (snapshotAvailable
+        && !result.deadlineReached()
+        && result.refusalReasons().isEmpty()
+        && (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0)) {
+      try {
+        SwingBatchEngine.AdmissionProbe probe = result.admission();
+        markerRecorded =
+            runs.record(
+                doctrine.batchName(), runDate, result.strategies(), result.candidates(),
+                result.entries(), result.exits(), result.exitSkipped(), probe.openAtStart(),
+                probe.wouldEnter(), probe.admitted(), probe.capExceedance(), probe.capBound(),
+                probe.droppedByCap());
+      } catch (RuntimeException e) {
+        log.warn("{} swing run-marker record failed: {}", doctrine.batchName(), e.getMessage());
+      }
     }
     // Persist the sell-decision triad snapshot (V037) — fail-soft: this batch is the swing positions'
     // only exit evaluator, and the entry/exit passes already committed above, so a persist defect must
@@ -93,13 +222,18 @@ public class SwingBatchRecorder {
             + result.strategies() + " strategies)";
     publishQuietly(
         doctrine.batchName(),
-        result.exitSkipped() > 0
+        !result.refusalReasons().isEmpty()
+            ? new SwingBatchAlert(
+                doctrine.batchName(),
+                doctrine.alertLabel() + " batch REFUSED",
+                summary + " — " + String.join(", ", result.refusalReasons()))
+            : result.exitSkipped() > 0
             ? new SwingBatchAlert(
                 doctrine.batchName(),
                 doctrine.alertLabel() + ": " + result.exitSkipped() + " exit(s) NOT evaluated",
                 summary + " — see the STOP NOT EVALUATED TODAY errors in the service log.")
             : new SwingBatchAlert(doctrine.batchName(), doctrine.alertLabel() + " batch done", summary));
-    return result;
+    return new RunOutcome(result, markerRecorded);
   }
 
   /**

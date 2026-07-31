@@ -752,4 +752,125 @@ class ExitEvaluatorTest {
         .as("below one lot sizes to zero")
         .isEqualTo(0);
   }
+
+  /**
+   * {@code min_premium_inr} — the premium below which this is not a trade worth sizing.
+   *
+   * <p>A near-worthless option makes {@code lots = budget / premium} explode, so the per-lot cost
+   * stack dwarfs the budget. {@code OptionsPremiumReplay} has SKIPPED such entries since it was
+   * written; live had no floor, and the schema forbade declaring one — three layers disagreeing
+   * about a param no valid strategy could set. Returning 0 here is the faithful mirror of the
+   * replay's skip: no position either way.
+   *
+   * <p><b>Absent must stay a no-op.</b> Adopting the replay's ₹1 default here would silently
+   * re-size every existing config and move the goldens, so a floor binds only when asked for.
+   */
+  @Test
+  void premiumBudgetHonoursTheOptionalPremiumFloor() {
+    // premium ₹2.00, lot 75 -> ₹150/lot; a ₹500 budget affords 3 lots = 225 units.
+    var cheap =
+        new PositionSizer.Inputs(
+            new BigDecimal("1000000"), new BigDecimal("2.00"), new BigDecimal("5.00"), 75);
+
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget", Map.of("budget_inr", new BigDecimal("500"))),
+                cheap))
+        .as("no floor declared ⇒ unchanged — what keeps the goldens byte-identical")
+        .isEqualTo(225);
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget",
+                    Map.of("budget_inr", new BigDecimal("500"),
+                           "min_premium_inr", new BigDecimal("5.00"))),
+                cheap))
+        .as("₹2.00 premium is below a ₹5.00 floor ⇒ no position, mirroring the replay's skip")
+        .isZero();
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget",
+                    Map.of("budget_inr", new BigDecimal("500"),
+                           "min_premium_inr", new BigDecimal("2.00"))),
+                cheap))
+        .as("EXACTLY at the floor is above it — the bound is strict-below")
+        .isEqualTo(225);
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget",
+                    Map.of("budget_inr", new BigDecimal("500"),
+                           "min_premium_inr", new BigDecimal("1.00"))),
+                cheap))
+        .as("comfortably above the floor ⇒ unchanged")
+        .isEqualTo(225);
+    // The floor composes with the lot cap rather than replacing it.
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget",
+                    Map.of("budget_inr", new BigDecimal("500"),
+                           "min_premium_inr", new BigDecimal("1.00"),
+                           "max_lots", 2)),
+                cheap))
+        .as("floor passed, cap still binds")
+        .isEqualTo(150);
+  }
+
+  /**
+   * {@code max_lots} bounds the lot COUNT, because a fixed budget buys the most lots exactly when
+   * the premium is cheapest — the expiry-day, thinnest, most gamma-exposed contract of the month.
+   *
+   * <p>These same semantics (0/absent ⇒ unlimited) have been honoured by the backtest replay since
+   * it was written ({@code OptionsPremiumReplay.maxLots}); LIVE ignored the param, so the two sized
+   * differently for any config that set one. Absent MUST stay a no-op or that divergence is simply
+   * inverted — hence the explicit unchanged-when-absent leg below, which is what keeps every
+   * existing golden byte-identical.
+   */
+  @Test
+  void premiumBudgetHonoursTheOptionalLotCap() {
+    // A cheap premium: 500/(2.00*75) = 3 lots uncapped.
+    var cheap =
+        new PositionSizer.Inputs(
+            new BigDecimal("1000000"), new BigDecimal("2.00"), new BigDecimal("5.00"), 75);
+
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget", Map.of("budget_inr", new BigDecimal("500"))),
+                cheap))
+        .as("no cap declared ⇒ unchanged, which is what keeps the goldens byte-identical")
+        .isEqualTo(225);
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget", Map.of("budget_inr", new BigDecimal("500"), "max_lots", 2)),
+                cheap))
+        .as("capped at 2 lots")
+        .isEqualTo(150);
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget", Map.of("budget_inr", new BigDecimal("500"), "max_lots", 9)),
+                cheap))
+        .as("a cap above the affordable count never INFLATES the position")
+        .isEqualTo(225);
+    // YAML and JSON round-trips hand the same literal back as Integer, Long or BigDecimal depending
+    // on the path, so a config's meaning must not depend on which one arrived.
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget",
+                    Map.of("budget_inr", new BigDecimal("500"), "max_lots", new BigDecimal("2"))),
+                cheap))
+        .isEqualTo(150);
+    assertThat(
+            PositionSizer.size(
+                new StrategyDefinition.SizingSpec(
+                    "premium_budget", Map.of("budget_inr", new BigDecimal("500"), "max_lots", 2L)),
+                cheap))
+        .isEqualTo(150);
+  }
 }

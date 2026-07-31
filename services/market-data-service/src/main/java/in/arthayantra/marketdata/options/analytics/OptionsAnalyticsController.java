@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -176,12 +177,21 @@ public class OptionsAnalyticsController {
       OiInterpretation interpretation) {}
 
   /** A live chain leg (greeks/IV/OI/LTP from {@code /chain}) plus its interval deltas (or null). */
-  public record ChainTableLeg(OptionsChainService.Leg leg, LegDeltas deltas) {}
+  public record ChainTableLeg(
+      OptionsChainService.Leg leg, @Schema(types = {"object", "null"}) LegDeltas deltas) {}
 
   /** One faithful-chain row: CE | strike | PE, each leg enriched with deltas. */
   public record ChainTableRow(BigDecimal strike, ChainTableLeg ce, ChainTableLeg pe) {}
 
-  /** The faithful Options Chain feed: the live chain header + enriched rows + the delta interval. */
+  /**
+   * The faithful Options Chain feed: the live chain header + enriched rows + the delta interval.
+   *
+   * <p>{@code lastCaptured} mirrors {@link OptionsChainService.Chain}: true ⇒ LIVE mode had no spot
+   * quote and the rows are the most recent CAPTURED chain, with {@code asOf} = the capture time —
+   * render it as an explicit staleness badge. It is orthogonal to {@code stale} (market not open),
+   * and always false in HISTORY mode, which is an explicit request for a past session rather than a
+   * degraded live read.
+   */
   public record ChainTable(
       String underlying,
       LocalDate expiry,
@@ -191,6 +201,7 @@ public class OptionsAnalyticsController {
       BigDecimal riskFreeRate,
       @Schema(types = {"number", "null"}) BigDecimal pcr,
       boolean stale,
+      boolean lastCaptured,
       OffsetDateTime asOf,
       String interval,
       List<ChainTableRow> rows,
@@ -476,7 +487,7 @@ public class OptionsAnalyticsController {
     if (!q.live() && q.date() != null) {
       return historicalChainTable(q, exp, deltas);
     }
-    OptionsChainService.Chain chain = chainService.chain(q.name(), exp);
+    OptionsChainService.Chain chain = chainService.chainOrLastCaptured(q.name(), exp);
     List<ChainTableRow> rows = new ArrayList<>(chain.rows().size());
     for (OptionsChainService.StrikeRow r : chain.rows()) {
       rows.add(
@@ -494,12 +505,19 @@ public class OptionsAnalyticsController {
         chain.riskFreeRate(),
         chain.pcr(),
         chain.stale(),
+        chain.lastCaptured(),
         chain.asOf(),
         q.interval().token(),
         rows,
-        // Live black76 chain — complete unless the underlying quote is stale (off-hours / feed gap).
+        // Live black76 chain — complete unless the market is closed OR the chain degraded to the
+        // last captured book (no live spot); asOf is then the capture time, so staleSeconds is real.
         DataFreshness.of(
-            chain.asOf(), DataFreshness.LIVE, "capture", null, !chain.stale(), clock));
+            chain.asOf(),
+            DataFreshness.LIVE,
+            "capture",
+            null,
+            !chain.stale() && !chain.lastCaptured(),
+            clock));
   }
 
   /**
@@ -805,13 +823,11 @@ public class OptionsAnalyticsController {
       @RequestParam BigDecimal strike,
       @RequestParam(required = false, defaultValue = "CE") String optionType,
       @RequestParam(required = false) String nearExpiry,
-      @RequestParam(required = false) String farExpiry,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate farExpiry,
       @RequestParam(required = false, defaultValue = "3") int interval) {
     OiQuery q = OiQuery.of(mode, name, date, null, nearExpiry);
-    java.time.LocalDate far =
-        farExpiry == null || farExpiry.isBlank() ? null : java.time.LocalDate.parse(farExpiry);
     return calendarSpreadChartService.chart(
-        q.name(), strike, optionType, q.expiry(), far, interval, q.date());
+        q.name(), strike, optionType, q.expiry(), farExpiry, interval, q.date());
   }
 
   /**
@@ -927,20 +943,26 @@ public class OptionsAnalyticsController {
 
   /**
    * /strike-session-stats: per-strike session OH/OL grading (Siva #2) for the {@code 2*window+1}
-   * strikes nearest the ATM. {@code window} default 3; {@code interval} (minutes) default = the
-   * snapshot capture cadence; {@code session} default = today IST. Empty items -> 200 (no error).
+   * strikes nearest the ATM. {@code window} default 3, must be {@code >= 0} (a negative value
+   * would make {@code Stream.limit} reject it, so it 400s here instead); {@code window=0} is a
+   * valid, distinct case — just the single nearest (ATM) strike. {@code interval} (minutes)
+   * default = the snapshot capture cadence; {@code session} default = today IST. Empty items ->
+   * 200 (no error).
    */
   @GetMapping("/strike-session-stats")
   public OpenHighStatsService.StrikeSessionStats strikeSessionStats(
       @RequestParam String underlying,
-      @RequestParam String expiry,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate expiry,
       @RequestParam(required = false) Integer window,
       @RequestParam(required = false) Integer interval,
-      @RequestParam(required = false) String session) {
-    LocalDate exp = LocalDate.parse(expiry);
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate session) {
+    if (window != null && window < 0) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "window must be >= 0");
+    }
+    LocalDate exp = expiry;
     int win = window == null ? 3 : window;
     int intervalMinutes = interval == null ? defaultSessionIntervalMinutes : interval;
-    LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : LocalDate.parse(session);
+    LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : session;
 
     List<OptionsSnapshotReader.PerStrikeSessionStat> stats =
         reader.sessionStats(underlying, exp, sess, intervalMinutes);
@@ -1232,7 +1254,7 @@ public class OptionsAnalyticsController {
             ? null
             : BigDecimal.valueOf(peOi).divide(BigDecimal.valueOf(ceOi), 4, RoundingMode.HALF_UP);
     return new ChainTable(
-        q.name(), exp, spot, null, null, null, pcr, false, asOf, q.interval().token(), rows,
+        q.name(), exp, spot, null, null, null, pcr, false, false, asOf, q.interval().token(), rows,
         oiFreshness(q, asOf, latest, true));
   }
 
@@ -1245,9 +1267,11 @@ public class OptionsAnalyticsController {
     if (p == null) {
       return null;
     }
+    // exchange + tradingsymbol are both null here: a captured snapshot point carries no instrument
+    // row, so this projection has neither half of the canonical key (unchanged for tradingsymbol).
     OptionsChainService.Leg leg =
         new OptionsChainService.Leg(
-            null, p.ltp(), null, null, p.volume(), p.oi(), null, p.iv(),
+            null, null, p.ltp(), null, null, p.volume(), p.oi(), null, p.iv(),
             null, null, null, null, null, null, null, null, null, null, null, null, null);
     return new ChainTableLeg(leg, deltas.get(deltaKey(strike, optionType)));
   }

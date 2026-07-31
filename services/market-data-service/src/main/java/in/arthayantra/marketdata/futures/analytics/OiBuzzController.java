@@ -2,7 +2,6 @@ package in.arthayantra.marketdata.futures.analytics;
 
 import in.arthayantra.marketdata.constituents.StaticIndexConstituents;
 import java.time.LocalDate;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -26,11 +25,12 @@ public class OiBuzzController {
 
   /** The index selector options (the seeded constituent reference keys). */
   @GetMapping("/oi-buzz-indices")
-  public Map<String, Object> indices() {
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("items", List.copyOf(constituents.indices()));
-    return response;
+  public OiBuzzIndicesResponse indices() {
+    return new OiBuzzIndicesResponse(List.copyOf(constituents.indices()));
   }
+
+  /** The {items} envelope — the seeded constituent reference keys. */
+  public record OiBuzzIndicesResponse(List<String> items) {}
 
   /**
    * The constituent heatmap for one index: tiles (gainers first) + advance/decline + feed time.

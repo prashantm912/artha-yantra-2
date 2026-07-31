@@ -46,7 +46,7 @@ public class IvAnalyticsController {
 
   /** Retroactive recompute over the archive (idempotent upserts; bumps {@code computed_at}). */
   @PostMapping("/iv-rollup")
-  public Map<String, Object> rollup(@RequestBody(required = false) RollupRequest request) {
+  public IvRollupResponse rollup(@RequestBody(required = false) RollupRequest request) {
     List<String> targets =
         request != null && request.underlying() != null
             ? List.of(request.underlying())
@@ -57,6 +57,9 @@ public class IvAnalyticsController {
     for (String underlying : targets) {
       total += analytics.recompute(underlying, from, to);
     }
-    return Map.of("recomputed", total);
+    return new IvRollupResponse(total);
   }
+
+  /** Rollup receipt — the number of IV rows recomputed. Single-key {@code Map.of} before D3. */
+  public record IvRollupResponse(int recomputed) {}
 }

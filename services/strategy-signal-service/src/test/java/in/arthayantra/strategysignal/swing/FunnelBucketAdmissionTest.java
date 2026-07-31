@@ -1,17 +1,19 @@
 package in.arthayantra.strategysignal.swing;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.containsString;
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyschema.StrategyDocuments;
 import in.arthayantra.strategysignal.manas.ManasDoctrine;
@@ -34,10 +36,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClient;
@@ -59,6 +62,18 @@ import org.springframework.web.client.RestClient;
 class FunnelBucketAdmissionTest {
 
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
+  private WireMockServer wireMock;
+
+  @BeforeEach
+  void setUp() {
+    wireMock = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
+    wireMock.start();
+  }
+
+  @AfterEach
+  void tearDown() {
+    wireMock.stop();
+  }
 
   // ---- the live-path admission decision (the defect) -------------------------------------------
 
@@ -94,10 +109,10 @@ class FunnelBucketAdmissionTest {
   @Test
   void theManasClientTagsEachCandidateWithItsFunnelBucket() {
     RestClient.Builder builder = RestClient.builder();
-    stubFunnel(builder, "manas-arora", "RELIANCE", "TESTCO");
+    stubFunnel("manas-arora", "RELIANCE", "TESTCO");
 
     List<ManasFunnelClient.Candidate> out =
-        new ManasFunnelClient(builder, new ObjectMapper(), "http://market-data:8081")
+        new ManasFunnelClient(builder, new ObjectMapper(), wireMock.baseUrl(), 2_000, 30_000)
             .buyableAndOnDeck();
 
     assertThat(out).extracting(ManasFunnelClient.Candidate::symbol).containsExactly("RELIANCE", "TESTCO");
@@ -107,21 +122,23 @@ class FunnelBucketAdmissionTest {
   @Test
   void theMinerviniClientTagsEachCandidateWithItsFunnelBucket() {
     RestClient.Builder builder = RestClient.builder();
-    stubFunnel(builder, "minervini", "INFY", "WIPRO");
+    stubFunnel("minervini", "INFY", "WIPRO");
 
     List<MinerviniFunnelClient.Candidate> out =
-        new MinerviniFunnelClient(builder, new ObjectMapper(), "http://market-data:8081")
+        new MinerviniFunnelClient(builder, new ObjectMapper(), wireMock.baseUrl(), 2_000, 30_000)
             .buyableAndOnDeck();
 
     assertThat(out).extracting(MinerviniFunnelClient.Candidate::symbol).containsExactly("INFY", "WIPRO");
     assertThat(out).extracting(MinerviniFunnelClient.Candidate::onDeck).containsExactly(false, true);
   }
 
-  private static void stubFunnel(RestClient.Builder builder, String family, String buyable, String onDeck) {
-    MockRestServiceServer.bindTo(builder)
-        .build()
-        .expect(requestTo(containsString("/api/v1/market/screener/" + family + "/funnel")))
-        .andRespond(withSuccess(funnelJson(family, buyable, onDeck), MediaType.APPLICATION_JSON));
+  private void stubFunnel(String family, String buyable, String onDeck) {
+    wireMock.stubFor(
+        get(urlPathEqualTo("/api/v1/market/screener/" + family + "/funnel"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                    .withBody(funnelJson(family, buyable, onDeck))));
   }
 
   // ---- harness ---------------------------------------------------------------------------------
@@ -152,12 +169,12 @@ class FunnelBucketAdmissionTest {
 
     SignalRepository signals = mock(SignalRepository.class);
     when(signals.activeEntries()).thenReturn(List.of()); // nothing held → a FRESH entry
-    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(55L);
 
     RestClient.Builder builder = RestClient.builder();
     stubFunnel(
-        builder, "manas-arora", candidateOnDeck ? "RELIANCE" : "TESTCO",
+        "manas-arora", candidateOnDeck ? "RELIANCE" : "TESTCO",
         candidateOnDeck ? "TESTCO" : "RELIANCE");
 
     MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
@@ -171,7 +188,7 @@ class FunnelBucketAdmissionTest {
             new ObjectMapper(), Clock.systemUTC());
     ManasDoctrine doctrine =
         new ManasDoctrine(
-            new ManasFunnelClient(builder, new ObjectMapper(), "http://market-data:8081"), signals,
+            new ManasFunnelClient(builder, new ObjectMapper(), wireMock.baseUrl(), 2_000, 30_000), signals,
             new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
             new ObjectMapper(), true, 520, 10, 1440);
 

@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.paper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -147,6 +148,43 @@ class PaperPositionDetailIntegrationTest extends StrategySignalIntegrationTestBa
     var closed = positions.find(id).orElseThrow();
     assertThat(closed.status()).isEqualTo("CLOSED");
     assertThat(closed.closeReason()).isEqualTo("STOP_LOSS");
+  }
+
+  @Test
+  void manualCloseIsAuditedWithTheBookPriceAndRealizedPnl() throws Exception {
+    // Noticed 2026-07-20 while hand-closing a position the outaged 07-17 swing batch never exited: the
+    // manual close wrote NO paper_admin_audit row, so an owner override of the strategy's own exit rule
+    // was indistinguishable from a routine engine/bracket close. A discretionary close is exactly the
+    // kind of action the trail exists for.
+    String sym = "TESTOPT-" + UUID.randomUUID();
+    long id =
+        paper
+            .openOrder(
+                new PaperService.OrderRequest(
+                    null, "NFO", sym, "BUY", 50, new BigDecimal("100.00"), null, null, null,
+                    "manual", null))
+            .id();
+
+    mockMvc
+        .perform(
+            post("/api/v1/paper/positions/" + id + "/close")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("price", "108.00"))))
+        .andExpect(status().isOk());
+
+    Map<String, Object> audit =
+        jdbc.queryForMap(
+            "SELECT action, book, detail FROM paper_admin_audit"
+                + " WHERE action='MANUAL_CLOSE' AND (detail->>'positionId')::bigint=?"
+                + " ORDER BY id DESC LIMIT 1",
+            id);
+    assertThat(audit.get("action")).isEqualTo("MANUAL_CLOSE");
+    assertThat(audit.get("book")).as("keyed by the closed position's book").isEqualTo("manual");
+    var detail = objectMapper.readTree(audit.get("detail").toString());
+    assertThat(detail.get("requestedPrice").asText()).isEqualTo("108.00");
+    assertThat(detail.get("realizedPnl").asText())
+        .as("the P&L the settle actually booked, not a recomputation")
+        .isEqualTo(positions.find(id).orElseThrow().realizedPnl().toPlainString());
   }
 
   @Test

@@ -1,6 +1,8 @@
 # T9 — strategy-coverage watchdog (design, rev 3)
 
-**Status:** DESIGN ONLY — no code written. Ledger row **G2**. Build is a separate PR.
+**Status: BUILT + SHIPPED; kept ACTIVE pending the owner's arming decision (corrected 2026-07-29).** The build merged as [#1035](https://github.com/prashantm912/artha-yantra-2/pull/1035) and is DEPLOYED **disabled**; arming is a standing owner decision (ledger row **G2**). This document is the as-designed record, kept for the reasoning — in particular why the filed emitting/published-ratio one-liner was REFUSED as structurally confounded and replaced by the per-strategy `lastSeenPerSlug` stamp. The remaining forward work is the ARMING decision only (channel / re-page cadence / OBSERVE_ONLY duration); the ledger row is authoritative for status.
+
+*(Original header: DESIGN ONLY — no code written. Build is a separate PR.)*
 **Date:** 2026-07-26. **Author:** main loop (Opus 5), grounded against the tree at `034110ef`.
 **Review history:** rev 1 `NEEDS_REWORK`, rev 2 `REQUEST_CHANGES` — both from cross-vendor review
 (Codex/gpt-5.6-sol, xhigh). **Every finding in both rounds was verified against the code by the

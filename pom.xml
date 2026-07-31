@@ -159,6 +159,67 @@
         </executions>
       </plugin>
       <plugin>
+        <!-- STRUCTURAL tests must never be rerun-eligible (2026-07-29). CI runs the whole reactor
+             with `-Dsurefire.rerunFailingTestsCount=2` so the Testcontainers/awaitility ITs can
+             survive a 2-core timeout, and that step's comment claimed a "genuinely failing test
+             still fails after the retries". That is FALSE for ApplicationModules.verify(): on main
+             run 30465321004 `marketdata.ModularityTest.modulesVerify` failed on Run 1 with a real
+             cycle (bhavcopy -> nse -> screener -> bhavcopy), passed on the retry, and was filed
+             under `[WARNING] Flakes:` — the shard reported SUCCESS with a live architecture
+             violation on main. (It retries green because Spring Modulith caches the computed
+             ApplicationModules, so the second attempt does not recompute the verdict.) The same
+             violation reproduces DETERMINISTICALLY on a clean local build, and PR #1114 went red on
+             it — so whether any given PR sees an architecture regression was luck.
+
+             A structural check is deterministic by construction and can never be legitimately
+             flaky, so it gets its own execution pinned to zero retries.
+
+             ⚠️ SCOPE, measured 2026-07-30 (task_fbc8e4bd) — do NOT widen this list reflexively.
+             The masking is NOT a property of "structural tests" in general; it is a property of
+             Spring Modulith's STATIC CACHE of the computed ApplicationModules, which makes the
+             retry skip recomputation. Tests that re-derive their verdict every run cannot be
+             masked, and adding them here is config for an impossible case.
+             VERIFIED by breaking MapReturnRatchetTest's floor and running it with
+             -Dsurefire.rerunFailingTestsCount=2 WITHOUT the exemption: it ran 3 times, failed all
+             3, and the build FAILED with no `Flakes:` marker. Same reasoning covers
+             GatewayRouteAllowlistTest (pure file scan) and ContractCaptureTest (recomputes the
+             spec each run, and its Spring context is a LEGITIMATE flake source, so exempting it
+             would convert infrastructure noise into hard failures).
+             Before adding a test here, ask: does it CACHE its verdict across runs in one JVM? The POM's explicit value
+             wins over the `-D` user property, which only supplies a default. Split so the two
+             cannot drift: the default execution EXCLUDES these, the pinned one INCLUDES them, and
+             the same pattern list drives both. -->
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>default-test</id>
+            <configuration>
+              <excludes>
+                <exclude>**/ModularityTest.java</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>structural-tests-no-rerun</id>
+            <phase>test</phase>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <rerunFailingTestsCount>0</rerunFailingTestsCount>
+              <includes>
+                <include>**/ModularityTest.java</include>
+              </includes>
+              <!-- a module with no ModularityTest (libs, and any service that has not added one)
+                   must not fail this execution for having nothing to run -->
+              <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
+              <failIfNoTests>false</failIfNoTests>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
         <!-- H9 stale-jar guard: bake the git sha into every jar (git.properties) so a
              running service reveals the exact commit it was built from at /actuator/info,
              and a stale-jar deploy (the mutable :dev tag trap) is mechanically detectable

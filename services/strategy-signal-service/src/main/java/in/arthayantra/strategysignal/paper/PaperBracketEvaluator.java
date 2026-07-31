@@ -60,7 +60,16 @@ public class PaperBracketEvaluator {
         continue;
       }
       try {
-        paper.settle(pos, ltp, reason);
+        // EMPTY ⇒ a concurrent closer (an engine exit, a manual close, the expiry sweep) won the CAS
+        // and this pass closed nothing. Counting or logging it anyway asserted an exit that did not
+        // happen, at a price that was not the settlement price — a confident, wrong audit record for
+        // anyone reconstructing why a position left the book, and an inflated
+        // "auto-exit closed N position(s)" in PaperScheduler (§9-05).
+        if (paper.settle(pos, ltp, reason).isEmpty()) {
+          log.debug(
+              "paper bracket lost the close race for position {} — already closed elsewhere", pos.id());
+          continue;
+        }
         staleTicks.bracketRecovered(pos.id());
         closed++;
         log.info(

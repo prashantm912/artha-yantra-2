@@ -33,8 +33,8 @@ public class IndicatorsController {
 
   /** The registry list: id, label, params+defaults, output series, render + pane hints. */
   @GetMapping
-  public Map<String, Object> list() {
-    return Map.of("items", service.registry());
+  public IndicatorRegistry list() {
+    return new IndicatorRegistry(service.registry());
   }
 
   /**
@@ -42,7 +42,7 @@ public class IndicatorsController {
    * {@code EXCHANGE:TRADINGSYMBOL}; {@code params} is URL-encoded JSON (defaults applied when absent).
    */
   @GetMapping("/{id}/series")
-  public Map<String, Object> series(
+  public IndicatorSeriesResponse series(
       @PathVariable String id,
       @RequestParam String symbol,
       @RequestParam String interval,
@@ -55,8 +55,7 @@ public class IndicatorsController {
     }
     String exchange = symbol.substring(0, sep);
     String tradingsymbol = symbol.substring(sep + 1);
-    return Map.of(
-        "series",
+    return new IndicatorSeriesResponse(
         service.series(id, exchange, tradingsymbol, interval, from, to, parseParams(params)));
   }
 

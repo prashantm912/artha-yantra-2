@@ -123,13 +123,13 @@ public class PaperController {
 
   /** Open positions with mark-to-market P&amp;L ({@code book} absent → all books). */
   @GetMapping("/positions")
-  public Map<String, Object> positions(@RequestParam(required = false) String book) {
-    return Map.of("items", paper.openPositions(book));
+  public PaperViews.PositionList positions(@RequestParam(required = false) String book) {
+    return new PaperViews.PositionList(paper.openPositions(book));
   }
 
   /** The closed-trade ledger (optional {@code book} + {@code symbol}); feeds the chart marks. */
   @GetMapping("/trades")
-  public Map<String, Object> trades(
+  public PaperViews.TradePage trades(
       @RequestParam(required = false) String book,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime from,
@@ -142,12 +142,9 @@ public class PaperController {
         symbol == null ? null : symbol.contains(":") ? symbol.substring(symbol.indexOf(':') + 1) : symbol;
     int boundedLimit = Math.min(Math.max(limit, 1), 500);
     int boundedOffset = Math.max(offset, 0);
-    return Map.of(
-        "items",
+    return new PaperViews.TradePage(
         paper.trades(book, from, to, tradingsymbol, boundedLimit, boundedOffset),
-        "limit",
         boundedLimit,
-        "offset",
         boundedOffset);
   }
 
@@ -182,7 +179,7 @@ public class PaperController {
 
   /** Daily equity + win rate / expectancy for a book ({@code book} absent → all books). */
   @GetMapping("/pnl")
-  public Map<String, Object> pnl(@RequestParam(required = false) String book) {
+  public PaperViews.Pnl pnl(@RequestParam(required = false) String book) {
     return paper.pnl(book);
   }
 
@@ -259,10 +256,22 @@ public class PaperController {
     }
   }
 
-  /** Close a position at market (or a stated price). */
+  /**
+   * Close a position at market (or a stated price). Written to the {@code paper_admin_audit} trail as a
+   * MANUAL_CLOSE — an owner-initiated close is a discretionary override of the strategy's own exit rule,
+   * and without the row it was indistinguishable from a routine engine/bracket close (noticed 2026-07-20
+   * while hand-closing a position the outaged 07-17 swing batch never exited). The book is read BEFORE
+   * the close via a lightweight local query because the audit is keyed by book and the trade DTO does
+   * not carry it. Full position-detail enrichment is deliberately not on this urgent path; the audit
+   * write remains after the close.
+   */
   @PostMapping("/positions/{id}/close")
   public PaperService.TradeDto close(@PathVariable long id, @RequestBody(required = false) CloseBody body) {
-    return paper.closePosition(id, body == null ? null : body.price());
+    String book = paper.positionBook(id);
+    BigDecimal requestedPrice = body == null ? null : body.price();
+    PaperService.TradeDto trade = paper.closePosition(id, requestedPrice);
+    adminAudit.recordManualClose(book, id, requestedPrice, trade.realizedPnl());
+    return trade;
   }
 
   /**

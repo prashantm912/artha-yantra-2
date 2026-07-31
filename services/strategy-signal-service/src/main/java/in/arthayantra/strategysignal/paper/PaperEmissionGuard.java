@@ -2,11 +2,14 @@ package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.eval.PositionSizer;
+import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.signals.EmissionGuard;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -16,6 +19,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class PaperEmissionGuard implements EmissionGuard {
+
+  private static final Logger log = LoggerFactory.getLogger(PaperEmissionGuard.class);
 
   // §3.7 hero-zero profit-funded sizing: deploy ~10% of accumulated realised PROFIT (mode a, "play with
   // house money, never capital"), floored to a ₹2,500 minimum deploy (mode b — the ₹2-3k midpoint) when
@@ -28,6 +33,7 @@ public class PaperEmissionGuard implements EmissionGuard {
   private final InstrumentMetaClient instruments;
   private final ScalperAccountModel scalperAccounts;
   private final PaperPositionRepository positions;
+  private final PaperOrderRejectionRecorder rejections;
 
   /** Wires the risk gate + capital model + the scalper 5-account discipline + the position ledger. */
   public PaperEmissionGuard(
@@ -35,12 +41,14 @@ public class PaperEmissionGuard implements EmissionGuard {
       PaperAccountService account,
       InstrumentMetaClient instruments,
       ScalperAccountModel scalperAccounts,
-      PaperPositionRepository positions) {
+      PaperPositionRepository positions,
+      PaperOrderRejectionRecorder rejections) {
     this.risk = risk;
     this.account = account;
     this.instruments = instruments;
     this.scalperAccounts = scalperAccounts;
     this.positions = positions;
+    this.rejections = rejections;
   }
 
   @Override
@@ -109,6 +117,16 @@ public class PaperEmissionGuard implements EmissionGuard {
       BigDecimal multiplier,
       String book) {
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
+    // FAIL CLOSED on an unresolved derivatives instrument (cross-vendor review C2). A meta lookup
+    // failure — market-data restarting mid-session, or a newly listed weekly strike the master has
+    // not picked up yet — returns the EQUITY_PROXY with lot=1. Before this PR that produced 0 lots
+    // and no position; now it would produce a REAL one at a non-lot-aligned qty (15000/776 = 19
+    // units of a 20-lot SENSEX option), auto-taken and silently wrong. An option that does not
+    // resolve as an OPTION is not sizable: refuse, and let the ZERO_SIZE trace make the miss
+    // visible. A safety gate must fail closed (checklist, Money/data fidelity).
+    if (unresolvedDerivative(exchange, tradingsymbol, meta)) {
+      return null;
+    }
     long lot = Math.max(1, meta.lotSize());
     long base =
         PositionSizer.size(
@@ -132,18 +150,85 @@ public class PaperEmissionGuard implements EmissionGuard {
   }
 
   @Override
-  public BigDecimal heroZeroSuggestedQty(String exchange, String tradingsymbol, BigDecimal premium) {
+  public BigDecimal heroZeroSuggestedQty(
+      StrategyDefinition.SizingSpec sizing, String exchange, String tradingsymbol, BigDecimal premium) {
     if (premium == null || premium.signum() <= 0) {
       return null;
     }
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
+    if (unresolvedDerivative(exchange, tradingsymbol, meta)) {
+      return null; // same fail-closed rule as suggestedQty (review C2) — hero-zero is options-only
+    }
+    // The declared min_premium_inr binds here too. This quantity OVERRIDES the ordinary sized one,
+    // so a floor enforced only inside PositionSizer.size left hero-zero unfloored — the SAME defect
+    // already fixed for max_lots, repeated one param later (cross-vendor review, #1084). Floor ₹10 /
+    // premium ₹5 / lot 75 / cap 5 gave 375 live units where the replay skips the entry outright.
+    // Null (not 0) so the caller keeps its ordinary advisory qty, which the floor has already
+    // zeroed — hero-zero must not resurrect a trade the sizer refused.
+    if (PositionSizer.belowPremiumFloor(sizing, premium)) {
+      return null;
+    }
     long lot = Math.max(1, meta.lotSize());
     // Hero-zero is a scalper (expiry-day options) concept — funded off the scalper book's realised P&L.
     BigDecimal budget = heroZeroDeployBudget(account.realisedProfit(BookResolver.SCALPER));
     BigDecimal perLotCost = premium.multiply(BigDecimal.valueOf(lot));
     long affordableLots = budget.divide(perLotCost, 0, RoundingMode.DOWN).longValueExact();
     long lots = Math.max(1L, affordableLots); // a fired entry deploys at least one lot (advisory)
+    // The declared max_lots binds HERE too. This quantity overrides the ordinary suggestedQty, so a
+    // cap enforced only inside PositionSizer left hero-zero uncapped: the config said 5 while live
+    // deployed whatever the profit pot afforded and the backtest replay capped at 5 — a live-vs-sim
+    // divergence introduced by the very change meant to remove one (cross-vendor review, #1075).
+    long maxLots = PositionSizer.maxLots(sizing);
+    if (maxLots > 0 && lots > maxLots) {
+      lots = maxLots;
+    }
     return BigDecimal.valueOf(lots * lot);
+  }
+
+  @Override
+  public void recordZeroSizedEntry(
+      long signalId,
+      String strategySlug,
+      StrategyDefinition.SizingSpec sizing,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      BigDecimal premium,
+      BigDecimal stopDistance,
+      String side) {
+    try {
+      InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
+      long lot = Math.max(1, meta.lotSize());
+      long computedQty =
+          PositionSizer.size(
+              sizing,
+              new PositionSizer.Inputs(account.equity(book), premium, stopDistance, meta.lotSize()));
+      long computedLots = computedQty / lot;
+      BigDecimal budget = budgetInr(sizing);
+      String detail =
+          "strategy=" + strategySlug
+              + "; premium=" + premium.toPlainString()
+              + "; lot=" + lot
+              + "; budget_inr=" + (budget == null ? "n/a" : budget.toPlainString())
+              + "; computed_lots=" + computedLots;
+      log.warn(
+          "paper ENTRY zero-sized: strategy={} book={} symbol={}:{} premium={} lot={} budget={} computedLots={}",
+          strategySlug, book, exchange, tradingsymbol, premium, lot, budget, computedLots);
+      rejections.recordZeroSize(signalId, book, exchange, tradingsymbol, side, detail);
+    } catch (RuntimeException e) {
+      log.warn(
+          "paper_order_rejections (zero-size) not written for {}:{}: {}",
+          exchange,
+          tradingsymbol,
+          e.getMessage());
+    }
+  }
+
+  private static BigDecimal budgetInr(StrategyDefinition.SizingSpec sizing) {
+    Object value = sizing.params().get("budget_inr");
+    return value == null
+        ? null
+        : value instanceof BigDecimal bd ? bd : new BigDecimal(value.toString());
   }
 
   /**
@@ -155,5 +240,30 @@ public class PaperEmissionGuard implements EmissionGuard {
     BigDecimal tenPct =
         realisedProfit == null ? BigDecimal.ZERO : realisedProfit.multiply(HERO_ZERO_PROFIT_PCT);
     return tenPct.compareTo(HERO_ZERO_MIN_DEPLOY_INR) > 0 ? tenPct : HERO_ZERO_MIN_DEPLOY_INR;
+  }
+
+  /**
+   * True when a derivatives symbol did not resolve as an OPTION — i.e. the instrument-meta lookup
+   * fell back to the EQUITY_PROXY (lot 1) because market-data was unreachable or the master has not
+   * picked the contract up yet.
+   *
+   * <p>FAIL CLOSED (cross-vendor review C2). Before the option-leg sizing fix this state produced
+   * 0 lots and no position; with it, a lot-1 proxy yields a NON-LOT-ALIGNED quantity — 15000/776 =
+   * 19 units of a 20-lot SENSEX option — auto-taken and silently wrong, which is the exact defect
+   * that fix exists to remove. Refusing costs one missed entry; filling costs a position that cannot
+   * be traded and that a live broker would reject.
+   */
+  private boolean unresolvedDerivative(String exchange, String tradingsymbol, InstrumentMeta meta) {
+    if (!"NFO".equals(exchange) && !"BFO".equals(exchange)) {
+      return false;
+    }
+    if (meta.instrumentClass() == InstrumentClass.OPTION) {
+      return false;
+    }
+    log.warn(
+        "refusing to size {}:{} — derivatives symbol did not resolve as an OPTION (class={}, lot={});"
+            + " instrument meta is unavailable or stale",
+        exchange, tradingsymbol, meta.instrumentClass(), meta.lotSize());
+    return true;
   }
 }

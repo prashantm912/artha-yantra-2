@@ -57,6 +57,9 @@ class StompWsBridgeIntegrationTest {
   @Autowired private WebTestClient webTestClient;
   @Autowired private StringRedisTemplate redis;
 
+  /** Same package, so the conflation test can read the real flush interval instead of assuming one. */
+  @Autowired private StompWebSocketHandler handler;
+
   private String login() {
     return Objects.requireNonNull(
             webTestClient
@@ -131,13 +134,18 @@ class StompWsBridgeIntegrationTest {
     // give the Redis-side subscriptions a beat to attach
     sleep(500);
 
-    // burst: 1000 ticks on the subscribed symbol + noise on another within ~1s
+    // burst: 1000 ticks on the subscribed symbol + noise on another. These are SYNCHRONOUS Redis
+    // round-trips, so how long the loop takes is a property of the machine's Docker networking, not
+    // of the code under test — which is why the frame-count bound below is DERIVED from the measured
+    // duration rather than hardcoded (see the assertion comment).
+    long burstStartNanos = System.nanoTime();
     for (int i = 1; i <= 1000; i++) {
       redis.convertAndSend("ticks.NSE.TEST", "{\"lastPrice\":\"" + i + ".00\",\"seq\":" + i + "}");
       if (i % 20 == 0) {
         redis.convertAndSend("ticks.NSE.OTHER", "{\"seq\":" + i + "}");
       }
     }
+    long burstMillis = (System.nanoTime() - burstStartNanos) / 1_000_000L;
     // 5 signals — every one must arrive
     for (int i = 1; i <= 5; i++) {
       redis.convertAndSend("signals", "{\"signal\":" + i + "}");
@@ -158,9 +166,33 @@ class StompWsBridgeIntegrationTest {
 
     // only the subscribed symbol — never the firehose
     assertThat(otherFrames).isZero();
-    // conflation: a 1000-tick burst yields a bounded number of frames, latest price last
-    assertThat(tickFrames).isNotEmpty().hasSizeLessThanOrEqualTo(30);
+
+    // CONFLATION. The bound is DERIVED, not hardcoded (task_d16e9d86). The handler flushes on a
+    // fixed interval, so the number of frames a burst produces is roughly
+    // (how long the burst took) / (flush interval) — i.e. it scales with how fast this machine can
+    // push 1000 synchronous publishes through Redis, which on Docker-for-Windows is measurably
+    // slower than on a native CI runner. The old `<= 30` therefore passed in CI and FAILED locally
+    // (34-35 frames) on identical code: red for every developer on hardware unlike the runner's,
+    // which is the direction that trains people to ignore a real red. Raising 30 to 40 would only
+    // re-encode the same assumption one machine later.
+    long flushMs = handler.flushIntervalMs();
+    // + 3: the in-flight window when the burst starts, the drain flush after it ends, and the
+    // trailing flush during the 500 ms settle above.
+    long maxFrames = burstMillis / flushMs + 3;
+    assertThat(tickFrames)
+        .as(
+            "conflated frames for a 1000-tick burst that took %d ms at a %d ms flush interval",
+            burstMillis, flushMs)
+        .isNotEmpty()
+        .hasSizeLessThanOrEqualTo((int) maxFrames);
+    // ...and conflation must actually be COLLAPSING, not merely bounded: a derived ceiling alone
+    // would still pass if every tick came through on a slow enough machine.
+    assertThat(tickFrames.size()).isLessThan(1000 / 4);
+
+    // latest value wins, and frames stay in order (never a stale price after a fresh one)
     assertThat(tickFrames.get(tickFrames.size() - 1)).contains("\"lastPrice\":\"1000.00\"");
+    assertThat(seqNumbers(tickFrames)).isSorted();
+
     // signals are never conflated
     assertThat(signalFrames).isEqualTo(5);
   }
@@ -314,6 +346,22 @@ class StompWsBridgeIntegrationTest {
         .header("Sec-WebSocket-Version", "13")
         .exchange()
         .expectStatus().isUnauthorized();
+  }
+
+  /**
+   * The {@code seq} of each conflated frame, in delivery order. Conflation may DROP values (that is
+   * the point) but must never REORDER them — a stale price arriving after a fresh one would be a
+   * real defect that a frame COUNT cannot see.
+   */
+  private static final java.util.regex.Pattern SEQ =
+      java.util.regex.Pattern.compile("\"seq\":(\\d+)");
+
+  private static List<Integer> seqNumbers(List<String> frames) {
+    return frames.stream()
+        .map(SEQ::matcher)
+        .filter(java.util.regex.Matcher::find)
+        .map(m -> Integer.parseInt(m.group(1)))
+        .toList();
   }
 
   private static long countBodies(List<String> frames, String marker) {

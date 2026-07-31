@@ -3,9 +3,13 @@
 // springdoc-generated schema. A backend rename/remove on a typed endpoint now fails `tsc -b`
 // instead of rendering "—" at runtime. Key-presence only, deliberately: springdoc types
 // BigDecimal money as number while the wire (and our types, C-2.25) carries JSON strings, so a
-// full structural assignability check would be red on every money field by design. Map-returning
-// endpoints (signals list, backtest results, …) are not enumerated in the spec and stay
-// runtime-verified — see the register entry for the accepted boundary.
+// full structural assignability check would be red on every money field by design.
+//
+// The Map-returning endpoints are being retyped to records (ledger D3 slice 1), and each one that
+// lands moves out of "runtime-verified only" and into this file. Crossed over on 2026-07-29: the
+// SIGNALS family (history, detail, take/dismiss, rejections, rail-counts), the PAPER read envelopes
+// (positions/trades/pnl) and the JOURNAL list. What is still unbound is whatever remains a
+// `Map<String, Object>` — `MapReturnRatchetTest` holds the authoritative per-service count.
 //
 // Zero runtime: type-only imports, nothing exported, never bundled (no module imports this file);
 // `tsc -b` (the build script) still type-checks it because it sits inside the src include.
@@ -60,11 +64,91 @@ type _AccountDto = AssertKeys<
   | 'marginPercents'
 >;
 
+// --- paper read envelopes (PaperPage tables + equity curve) -----------------------------------
+type _PositionList = AssertKeys<Schemas['PositionList'], 'items'>;
+type _TradePage = AssertKeys<Schemas['TradePage'], 'items' | 'limit' | 'offset'>;
+type _Pnl = AssertKeys<Schemas['Pnl'], 'points' | 'summary'>;
+type _EquityPoint = AssertKeys<Schemas['EquityPoint'], 'date' | 'equity'>;
+type _PnlSummary = AssertKeys<
+  Schemas['PnlSummary'],
+  'realizedTotal' | 'trades' | 'winRate' | 'expectancy'
+>;
+
+// --- journal (JournalPage list + entry form) ---------------------------------------------------
+type _JournalPage = AssertKeys<Schemas['JournalPage'], 'items'>;
+type _JournalEntry = AssertKeys<
+  Schemas['Entry'],
+  | 'id'
+  | 'signalId'
+  | 'paperPositionId'
+  | 'backtestRunId'
+  | 'backtestTradeId'
+  | 'note'
+  | 'tags'
+  | 'disciplineRating'
+  | 'emotionRating'
+  | 'createdAt'
+  | 'updatedAt'
+>;
+
 // --- live-broker funds (OrdersPage) -----------------------------------------------------------
 type _Funds = AssertKeys<
   Schemas['Funds'],
   'status' | 'availableCash' | 'collateral' | 'm2mRealized' | 'm2mUnrealized' | 'utilisedDebits'
 >;
+
+// --- signals family (SignalsPage history + detail drawer + take/dismiss) ----------------------
+// Only the REST-carried keys. The app's `SignalDto` additionally declares `strategyName`,
+// `strategyId`, `version`, `checksum` and `book`, which the STOMP `/topic/signals` frame supplies
+// and the REST snapshot does not — asserting them here would fail against the true wire shape.
+type _SignalDto = AssertKeys<
+  Schemas['SignalDto'],
+  | 'id'
+  | 'strategyVersionId'
+  | 'exchange'
+  | 'tradingsymbol'
+  | 'interval'
+  | 'signalType'
+  | 'side'
+  | 'entryPrice'
+  | 'stopLoss'
+  | 'target'
+  | 'compositeScore'
+  | 'scoreBreakdown'
+  | 'status'
+  | 'generatedAt'
+  | 'expiresAt'
+  | 'suggestedQty'
+  | 'tradeableExchange'
+  | 'tradeableTradingsymbol'
+  | 'scalperDetail'
+>;
+type _SignalPage = AssertKeys<Schemas['SignalPage'], 'items' | 'limit' | 'offset'>;
+
+// --- rejection diagnostics (RejectionsPage table + rail rollup) --------------------------------
+type _RejectionRow = AssertKeys<
+  Schemas['RejectionRow'],
+  | 'id'
+  | 'strategyVersionId'
+  | 'strategySlug'
+  | 'exchange'
+  | 'tradingsymbol'
+  | 'interval'
+  | 'side'
+  | 'blockingRail'
+  | 'blockingOperand'
+  | 'blockingThreshold'
+  | 'blockingMargin'
+  | 'blockingReason'
+  | 'compositeScore'
+  | 'compositeThreshold'
+  | 'diagnostic'
+  | 'barTime'
+  | 'generatedAt'
+>;
+type _RejectionPage = AssertKeys<Schemas['RejectionPage'], 'items'>;
+type _RailCount = AssertKeys<Schemas['RailCount'], 'rail' | 'count'>;
+type _RailCountList = AssertKeys<Schemas['RailCountList'], 'items'>;
 
 // --- shadow-variant league (RejectionsPage strip / rollup) ------------------------------------
 type _VariantSummary = AssertKeys<
@@ -77,7 +161,76 @@ type _DotHealth = AssertKeys<
   Schemas['DotHealth'],
   'asOf' | 'session' | 'rowsScanned' | 'rowsInspected' | 'dots'
 >;
-type _DotState = AssertKeys<Schemas['DotState'], 'dot' | 'alive' | 'required' | 'detail'>;
+type _DotState = AssertKeys<Schemas['DotState'], 'dot' | 'alive' | 'required' | 'frozen' | 'detail'>;
+
+// --- registry CRUD (D3: the whole surface was Map-returning, so the spec had no shape at all) ---
+type _StrategyListItem = AssertKeys<
+  Schemas['StrategyListItem'],
+  | 'id'
+  | 'slug'
+  | 'name'
+  | 'currentVersion'
+  | 'publishedVersion'
+  | 'currentVersionId'
+  | 'publishedVersionId'
+  | 'status'
+  | 'tags'
+  | 'author'
+  | 'enabled'
+  | 'notificationsEnabled'
+  | 'notificationChannel'
+  | 'updatedAt'
+>;
+type _StrategyListResponse = AssertKeys<
+  Schemas['StrategyListResponse'],
+  'items' | 'limit' | 'offset'
+>;
+type _StrategyDetail = AssertKeys<
+  Schemas['StrategyDetail'],
+  | 'id'
+  | 'versionId'
+  | 'publishedVersionId'
+  | 'publishedVersion'
+  | 'slug'
+  | 'name'
+  | 'description'
+  | 'tags'
+  | 'enabled'
+  | 'version'
+  | 'status'
+  | 'config'
+  | 'configYaml'
+  | 'checksum'
+  | 'notes'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'notificationsEnabled'
+  | 'notificationChannel'
+>;
+type _DraftVersionResponse = AssertKeys<
+  Schemas['DraftVersionResponse'],
+  'id' | 'version' | 'status' | 'checksum'
+>;
+type _PublishResponse = AssertKeys<
+  Schemas['PublishResponse'],
+  'id' | 'version' | 'versionId' | 'status'
+>;
+type _RollbackResponse = AssertKeys<
+  Schemas['RollbackResponse'],
+  'id' | 'newVersion' | 'copiedFrom' | 'status'
+>;
+type _ArchiveResponse = AssertKeys<Schemas['ArchiveResponse'], 'id' | 'status'>;
+type _NotificationsResponse = AssertKeys<
+  Schemas['NotificationsResponse'],
+  'id' | 'notificationsEnabled' | 'notificationChannel'
+>;
+type _VersionListItem = AssertKeys<
+  Schemas['VersionListItem'],
+  'versionId' | 'version' | 'status' | 'checksum' | 'author' | 'notes' | 'createdAt'
+>;
+type _VersionListResponse = AssertKeys<Schemas['VersionListResponse'], 'items'>;
+type _DiffResponse = AssertKeys<Schemas['DiffResponse'], 'structured' | 'yamlFrom' | 'yamlTo'>;
+type _ValidateResponse = AssertKeys<Schemas['ValidateResponse'], 'valid' | 'errors' | 'warnings'>;
 
 // --- insights decision-support (INT-I1 feed / Focus / explain drawer) --------------------------
 type _Insight = AssertKeys<
@@ -111,10 +264,35 @@ export type ContractBridges = [
   _PositionDto,
   _TradeDto,
   _AccountDto,
+  _PositionList,
+  _TradePage,
+  _Pnl,
+  _EquityPoint,
+  _PnlSummary,
+  _JournalPage,
+  _JournalEntry,
+  _SignalDto,
+  _SignalPage,
+  _RejectionRow,
+  _RejectionPage,
+  _RailCount,
+  _RailCountList,
   _Funds,
   _VariantSummary,
   _DotHealth,
   _DotState,
+  _StrategyListItem,
+  _StrategyListResponse,
+  _StrategyDetail,
+  _DraftVersionResponse,
+  _PublishResponse,
+  _RollbackResponse,
+  _ArchiveResponse,
+  _NotificationsResponse,
+  _VersionListItem,
+  _VersionListResponse,
+  _DiffResponse,
+  _ValidateResponse,
   _Insight,
   _InsightListResponse,
   _FocusResponse,

@@ -125,14 +125,13 @@ class TakenSignalExitIntegrationTest extends StrategySignalIntegrationTestBase {
   private Seed seedTakenSignalWithPosition(String tag) {
     String slug = "taken-exit-it-" + tag + "-" + UUID.randomUUID().toString().substring(0, 8);
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create(
                     "Taken Exit IT " + slug,
                     null,
                     List.of("it"),
                     CONFIG.replace("id: taken-exit-it", "id: " + slug))
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     UUID versionId = strategyRepo.latestVersion(strategyId).orElseThrow().id();
 
@@ -142,7 +141,7 @@ class TakenSignalExitIntegrationTest extends StrategySignalIntegrationTestBase {
         signals.insert(
             versionId, "NFO", sym, "1m", "ENTRY", "BUY",
             new BigDecimal("80.00"), new BigDecimal("40.00"), new BigDecimal("120.00"),
-            new BigDecimal("0.80"), "{}", now, now.plusHours(1));
+            new BigDecimal("0.80"), "{}", now, now.plusHours(1), null);
     signals.transition(signalId, "TAKEN");
     // The PaperSignalListener path (SignalTaken → openSingle) opens the primary leg + brackets.
     events.publishEvent(new SignalTaken(signalId, 50, new BigDecimal("80.00")));

@@ -225,6 +225,11 @@ artha:
     snapshot-underlyings: NIFTY 50,NIFTY BANK,NIFTY FIN SERVICE,NIFTY MID SELECT,SENSEX,BANKEX
     snapshot-interval-ms: 60000
     snapshot-expiry-horizon-days: 90
+    # Live premium 1m capture: nearest expiry, ATM +/- configured width, both CE and PE.
+    atm-pinner:
+      underlyings: ${ARTHA_OPTIONS_ATM_PINNER_UNDERLYINGS:NIFTY 50,SENSEX}
+      strike-width: ${ARTHA_OPTIONS_ATM_PINNER_STRIKE_WIDTH:5}
+      expiry-horizon-days: ${ARTHA_OPTIONS_ATM_PINNER_EXPIRY_HORIZON_DAYS:7}
   data-quality:
     # FID P2-4: settled-day per-symbol completeness (chain capture, primary 1m, NSE EQ bhavcopy).
     eod-cron: "0 50 19 * * MON-FRI"

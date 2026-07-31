@@ -57,11 +57,11 @@ class NotifierIntegrationTest extends StrategySignalIntegrationTestBase {
   void togglingNotificationsDoesNotPerturbTheVersionChecksum() {
     UUID id = create("notifier-it-checksum", "Notifier IT Checksum");
     registry.publish(id, null, null);
-    String before = (String) registry.detail(id, null).get("checksum");
+    String before = registry.detail(id, null).checksum();
 
     registry.updateNotifications(id, true, "NTFY");
 
-    String after = (String) registry.detail(id, null).get("checksum");
+    String after = registry.detail(id, null).checksum();
     assertThat(after).isEqualTo(before);
   }
 
@@ -126,7 +126,7 @@ class NotifierIntegrationTest extends StrategySignalIntegrationTestBase {
    */
   private UUID create(String slug, String name) {
     String config = CONFIG.replace("id: notifier-it", "id: " + slug);
-    return (UUID) registry.create(name, null, List.of("it"), config).get("id");
+    return registry.create(name, null, List.of("it"), config).id();
   }
 
   private long insertSignal(UUID versionId) {
@@ -134,6 +134,6 @@ class NotifierIntegrationTest extends StrategySignalIntegrationTestBase {
     return signalRepo.insert(
         versionId, "NSE", "RELIANCE", "1m", "ENTRY", "BUY",
         new BigDecimal("100.00"), new BigDecimal("95.00"), new BigDecimal("110.00"),
-        new BigDecimal("0.80"), "{}", now, now.plusHours(1));
+        new BigDecimal("0.80"), "{}", now, now.plusHours(1), null);
   }
 }

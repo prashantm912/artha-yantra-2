@@ -43,6 +43,42 @@ class ScalperAccountModelTest {
     return new ScalperAccountModel(repo, account, CLOCK);
   }
 
+  @Test
+  void nextFreeAccountRoutesByDeployedCapitalNotClosedTradeCountAlone() {
+    // #1075 cross-vendor round 3. Closed tallies are blind to OPEN positions, so with nothing closed
+    // yet every entry picked account 1. Harmless while nothing enforced a per-account ceiling; once
+    // one exists, the second entry would be REFUSED at account 1's allocation instead of routed to an
+    // idle account — five sub-accounts behaving as one until trades close.
+    //
+    // Account 1 already holds 20,000 of OPEN capital and no closed trades. Routing must skip it.
+    PaperPositionRepository repo = mock(PaperPositionRepository.class);
+    when(repo.winLossOn(any(), any())).thenReturn(new WinLoss(0, 0));
+    when(repo.subAccountTalliesOn(any())).thenReturn(List.of());
+    when(repo.subAccountCapitalFractions())
+        .thenReturn(Map.of(1, FRACTION, 2, FRACTION, 3, FRACTION, 4, FRACTION, 5, FRACTION));
+    when(repo.openCapitalBySubAccount(any())).thenReturn(Map.of(1, new BigDecimal("20000")));
+    PaperAccountService account = mock(PaperAccountService.class);
+    when(account.startingCapital("scalper")).thenReturn(STARTING_CAPITAL);
+
+    assertThat(new ScalperAccountModel(repo, account, CLOCK).nextFreeAccount()).isNotEqualTo(1);
+  }
+
+  @Test
+  void nextFreeAccountFallsBackToTradeCountWhenNothingIsDeployed() {
+    // With every account equally (un)deployed the original closed-trade tie-break still decides, so
+    // the routing change is a refinement of the old behaviour, not a replacement for it.
+    PaperPositionRepository repo = mock(PaperPositionRepository.class);
+    when(repo.winLossOn(any(), any())).thenReturn(new WinLoss(0, 0));
+    when(repo.subAccountTalliesOn(any())).thenReturn(List.of());
+    when(repo.subAccountCapitalFractions())
+        .thenReturn(Map.of(1, FRACTION, 2, FRACTION, 3, FRACTION, 4, FRACTION, 5, FRACTION));
+    when(repo.openCapitalBySubAccount(any())).thenReturn(Map.of());
+    PaperAccountService account = mock(PaperAccountService.class);
+    when(account.startingCapital("scalper")).thenReturn(STARTING_CAPITAL);
+
+    assertThat(new ScalperAccountModel(repo, account, CLOCK).nextFreeAccount()).isEqualTo(1);
+  }
+
   private static SubAccountTally loss(int idx) {
     return new SubAccountTally(idx, 0, 1);
   }

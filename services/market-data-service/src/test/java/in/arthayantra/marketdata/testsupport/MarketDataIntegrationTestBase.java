@@ -96,6 +96,24 @@ public abstract class MarketDataIntegrationTestBase {
     // migrations are applied above via the REAL deploy/flyway lineages; Boot's
     // Flyway auto-config (woken by the test-scoped flyway-core) must stay off
     registry.add("spring.flyway.enabled", () -> "false");
+    // ⚠️ Bhavcopy startup catch-up is OFF for EVERY context that shares this substrate
+    // (task_06ad72b6, 2026-07-31). The first fix for the catch-up deadlock scoped the property to
+    // "tests that manipulate bhavcopy tables" — BhavcopyBackfillIntegrationTest sets it — and that
+    // was the WRONG SCOPE: Spring caches contexts, every OTHER context boots with catch-up ON, and
+    // runIfFree() is fire-and-forget on the service's own executor, so a recently-booted cached
+    // context can still be mid-write to nse_eod_bhavcopy when ANY test's whole-table DELETE runs.
+    // On the 2-core CI runner that re-deadlocked 3-of-3 surefire attempts (PR #1138's shard) with
+    // the property "fix" already in place. The hazard is any-writer-vs-any-test, so the default
+    // lives here, on the shared substrate all 67 IT contexts extend. ⚠️ There is NO in-hierarchy
+    // opt-out (review round 1): subclass @DynamicPropertySource methods run BEFORE this one, so
+    // this registration wins LAST, and @SpringBootTest(properties=...) loses to DynamicPropertySource
+    // too — both fail SILENTLY toward disabled. A test that genuinely wants the catch-up/cron path
+    // must NOT extend this base (own substrate), which is the right amount of friction.
+    registry.add("artha.bhavcopy.startup-catchup", () -> "false");
+    // ...and the SCHEDULED writer too (review round 1): the 19:30 IST eod-cron is 14:00 UTC —
+    // prime CI hours — so a run crossing it re-creates the identical cached-context-writer race
+    // the line above closes. Spring cron "-" = disabled.
+    registry.add("artha.bhavcopy.eod-cron", () -> "-");
   }
 
   /** Connection details for raw-JDBC assertions (grant tests connect as other roles). */

@@ -128,6 +128,32 @@ public class ManasDoctrine implements SwingDoctrine {
     return funnel.buyableAndOnDeck().stream().map(this::toCandidate).toList();
   }
 
+  @Override
+  public SwingDoctrine.CandidateSnapshotRead candidateSnapshot() {
+    java.util.Optional<ManasFunnelClient.Snapshot> snapshot = funnel.snapshot();
+    if (snapshot != null) {
+      return new SwingDoctrine.CandidateSnapshotRead(
+          snapshot.map(s -> new SwingDoctrine.CandidateSnapshot(
+              s.screenDate(), s.candidates().stream().map(this::toCandidate).toList())));
+    }
+    // Compatibility for existing test doubles that predate the combined funnel read. The live client
+    // always returns a non-null Optional from snapshot().
+    java.util.Optional<java.time.LocalDate> screenDate = funnel.screenDate();
+    List<ManasFunnelClient.Candidate> rows = funnel.buyableAndOnDeck();
+    return new SwingDoctrine.CandidateSnapshotRead(
+        java.util.Optional.of(
+            new SwingDoctrine.CandidateSnapshot(
+                screenDate == null ? null : screenDate.orElse(null),
+                (rows == null ? List.<ManasFunnelClient.Candidate>of() : rows).stream()
+                    .map(this::toCandidate)
+                    .toList())));
+  }
+
+  @Override
+  public java.util.Optional<java.time.LocalDate> inputsAsOf() {
+    return funnel.screenDate();
+  }
+
   private SwingCandidate toCandidate(ManasFunnelClient.Candidate c) {
     // Seed ONLY the non-null pivot contexts — a 0-filled breakout/VCP context would make its crossover
     // gate (px > pivot) pass on every symbol.

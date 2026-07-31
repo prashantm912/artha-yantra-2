@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.futures.analytics;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.options.OiInterval;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalDate;
@@ -32,27 +33,49 @@ public class FuturesSnapshotReader {
       OffsetDateTime bucket,
       String underlying,
       String tradingsymbol,
+      @Schema(types = {"number", "null"})
       BigDecimal ltp,
+      @Schema(types = {"integer", "null"})
       Long oi,
+      @Schema(types = {"integer", "null"})
       Long oiChange,
+      @Schema(types = {"number", "null"})
       BigDecimal dayOpen,
+      @Schema(types = {"number", "null"})
       BigDecimal dayHigh,
+      @Schema(types = {"number", "null"})
       BigDecimal dayLow,
+      @Schema(types = {"number", "null"})
       BigDecimal prevClose,
+      @Schema(types = {"integer", "null"})
       Long volume,
       LocalDate expiry) {}
+
+  /** The single-contract futures OI-analysis envelope. */
+  public record FutAnalysisResponse(List<FutPoint> items) {}
+
+  /** The single-contract futures OI-analysis-series envelope. */
+  public record FutAnalysisSeriesResponse(
+      List<FutPoint> items, String underlying, String interval, OffsetDateTime asOf) {}
 
   /** One contract's per-IST-day EOD rollup (from the intraday snapshots). */
   public record EodRow(
       String tradingsymbol,
       LocalDate tradeDate,
+      @Schema(types = {"number", "null"})
       BigDecimal open,
+      @Schema(types = {"number", "null"})
       BigDecimal high,
+      @Schema(types = {"number", "null"})
       BigDecimal low,
+      @Schema(types = {"number", "null"})
       BigDecimal close,
       long oiClose,
       long oiChange,
       long volume) {}
+
+  /** The per-contract daily futures OHLC + OI rollup envelope. */
+  public record EodResponse(List<EodRow> items) {}
 
   public List<FutPoint> series(
       String underlying, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {

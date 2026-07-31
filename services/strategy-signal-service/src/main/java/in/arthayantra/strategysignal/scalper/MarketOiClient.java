@@ -51,6 +51,19 @@ public class MarketOiClient {
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
   private final MarketCalendar calendar;
+  /** Chain legs with no resolvable canonical exchange (see {@link #addLeg}) — a live alarm. */
+  private final io.micrometer.core.instrument.Counter legsWithoutExchange;
+
+  /**
+   * The runtime capability handshake (cross-vendor review Major 3). True while the market-data we
+   * are talking to publishes {@code exchange} on chain legs; false the moment one arrives without
+   * it — i.e. market-data is older than this build and every leg is costing an extra master lookup.
+   * Exposed as {@code ay_scalper_chain_exchange_capability} so the degraded path is a dashboard
+   * fact, not something inferred from a suddenly quiet tape. Tracks the LAST leg observed, so it
+   * self-clears as soon as a newer market-data is deployed — no restart needed.
+   */
+  private final java.util.concurrent.atomic.AtomicBoolean chainPublishesExchange =
+      new java.util.concurrent.atomic.AtomicBoolean(true);
 
   /**
    * Short-TTL response memo (audit P1-12): every scalper passing the chart gate on the SAME bar
@@ -71,10 +84,18 @@ public class MarketOiClient {
       RestClient.Builder builder,
       ObjectMapper objectMapper,
       MarketCalendar calendar,
+      io.micrometer.core.instrument.MeterRegistry meterRegistry,
       @Value("${artha.marketdata.base-url}") String baseUrl) {
     this.restClient = builder.baseUrl(baseUrl).build();
     this.objectMapper = objectMapper;
     this.calendar = calendar;
+    this.legsWithoutExchange = meterRegistry.counter("ay_scalper_chain_leg_no_exchange_total");
+    io.micrometer.core.instrument.Gauge.builder(
+            "ay_scalper_chain_exchange_capability",
+            chainPublishesExchange,
+            b -> b.get() ? 1d : 0d)
+        .description("1 while market-data publishes the canonical exchange on each chain leg")
+        .register(meterRegistry);
     this.uriFactory = new org.springframework.web.util.DefaultUriBuilderFactory(baseUrl);
   }
 
@@ -85,9 +106,10 @@ public class MarketOiClient {
    *
    * @param underlying index name as market-data knows it (e.g. {@code "NIFTY 50"})
    * @param istTime the bar's IST wall-clock (drives the time-window gate)
-   * @param eodDate the trade date for the EOD reads (breadth/FII). This is bhavcopy-sourced, so for
-   *     a live intraday bar the caller should pass the most-recent COMPLETED session — today's date
-   *     422s until the post-close bhavcopy lands, degrading breadth/FII to their inert defaults.
+   * @param eodDate the LIVE BAR's IST date for the EOD-sourced reads (breadth/FII). Pass the bar's
+   *     own date: {@link #macro} resolves the last SETTLED session from it internally. It used to be
+   *     the caller's job to subtract a session, and all three call sites passed today instead —
+   *     which reads empty all session, every session, because NSE publishes this data post-close.
    * @param expiry the option expiry the scalp will trade (options analytics require it)
    * @param tradeDate the live bar's IST date — drives the monthly-expiry OI suppression (S24 caveat)
    * @param chart the chart dots already computed by the engine {@code IndicatorBank}
@@ -265,13 +287,52 @@ public class MarketOiClient {
     return new ChainSnapshot(LocalDate.parse(expiryRaw), spot, forward, candidates, strikeOi);
   }
 
-  private static void addLeg(
+  /**
+   * Maps one chain-row side to a {@link StrikePicker.Candidate}, resolving its canonical exchange.
+   *
+   * <p>A leg needs a live premium and a solved IV to be a candidate at all. Its canonical
+   * {@code (exchange, tradingsymbol)} key is what makes it <b>tradeable</b>, and the exchange comes
+   * from the instrument master — published on the payload by market-data, which already resolved
+   * the instrument to quote it — and is NEVER inferred from the underlying's name. A name-prefix
+   * guess silently mis-routes any newly listed BSE root, and downstream that means a 404'd
+   * instrument-meta lookup, a lot-1 equity proxy and a non-lot-aligned quantity that also 400s the
+   * Upstox margin call (UDAPI1104).
+   *
+   * <p><b>Absent ⇒ KEEP the candidate with a NULL exchange</b> (cross-vendor review
+   * Critical 1). Dropping it here was an ENTRY-safety reflex applied to a path that also serves
+   * EXITS: this same snapshot feeds the read-only confluence-flip exit oracle, and an absent
+   * decision reads as "do not exit" ({@code SignalEngine.confluenceFlipExit} → {@code
+   * now.isPresent()}), so an open position would have silently lost its CONFLUENCE_FLIP rail. That
+   * inverts the project doctrine: entries need FRESH truth (you can always not enter), exits need
+   * the BEST AVAILABLE truth (you cannot refuse to leave forever). Analytical eligibility and TRADE
+   * eligibility are separate concerns — the null travels with the candidate and {@code
+   * SignalEngine.tradeableLeg} refuses the ENTRY there — and only there does {@code
+   * OptionExchangeResolver} get consulted, because this parse re-runs for every strategy on every
+   * bar (the memo caches the response BODY, not the parsed snapshot), so a per-leg lookup here would
+   * multiply into hundreds of synchronous calls on the single evaluation thread that also drives
+   * EXITS. Loud either way: a WARN naming the symbol plus
+   * {@code ay_scalper_chain_leg_no_exchange_total}.
+   */
+  private void addLeg(
       List<StrikePicker.Candidate> out, BigDecimal strike, Black76.OptionType type, JsonNode leg) {
     BigDecimal ltp = decimal(leg.path("ltp"));
     BigDecimal iv = decimal(leg.path("iv"));
-    if (ltp != null && iv != null && iv.signum() > 0) {
-      out.add(new StrikePicker.Candidate(text(leg.path("tradingsymbol")), strike, type, ltp, iv));
+    if (ltp == null || iv == null || iv.signum() <= 0) {
+      return;
     }
+    String tradingsymbol = text(leg.path("tradingsymbol"));
+    String exchange = text(leg.path("exchange"));
+    boolean fromPayload = exchange != null && !exchange.isBlank();
+    chainPublishesExchange.set(fromPayload);
+    if (!fromPayload) {
+      exchange = null; // a blank is as unkeyed as a missing one — never an empty-string key
+      legsWithoutExchange.increment();
+      log.warn(
+          "chain leg {} (strike {} {}) carries no exchange — retained for read-only exit/confluence"
+              + " evaluation; the entry path resolves it from the instrument master or refuses",
+          tradingsymbol, strike, type);
+    }
+    out.add(new StrikePicker.Candidate(exchange, tradingsymbol, strike, type, ltp, iv));
   }
 
   /**
@@ -412,8 +473,38 @@ public class MarketOiClient {
         "futures/term-structure");
   }
 
+  /**
+   * The most recent session whose EOD data can exist, given a bar on {@code tradeDate}.
+   *
+   * <p>NSE publishes FII/participant and bhavcopy data AFTER the close, so for a live intraday bar
+   * the EOD reads must ask for the PREVIOUS session — asking for today returns nothing all session,
+   * every session. This is resolved here, once, rather than at each call site: the parameter callers
+   * pass is the live bar's date (they cannot know which session has settled data), and a caller that
+   * has to remember to subtract a day is a caller that will eventually forget. Three call sites had
+   * already forgotten.
+   *
+   * <p>It also removes a latent LOOKAHEAD on any replay path: reading a session's own FII data while
+   * that session is still running would consume numbers published after its close.
+   *
+   * <p>Past the bundled holiday-CSV horizon the calendar throws; degrade to the bar date rather than
+   * take the gate down — that reproduces the stale-read behaviour but never breaks evaluation.
+   */
+  private LocalDate lastSettledSession(LocalDate tradeDate) {
+    try {
+      return calendar.previousTradingDay(tradeDate);
+    } catch (RuntimeException uncoveredYear) {
+      log.warn(
+          "EOD reads falling back to the bar date {} — NSE calendar does not cover it"
+              + " (CD-2 cliff); breadth/FII will read empty",
+          tradeDate);
+      return tradeDate;
+    }
+  }
+
   /** The macro confluence half: ATM IV + rank, breadth, FII positioning (VIX is a v1 gap → null). */
   public Macro macro(String underlying, LocalDate tradeDate, LocalDate expiry) {
+    // Every EOD-sourced read below asks for the last SETTLED session, never the live bar's own date.
+    LocalDate eodDate = lastSettledSession(tradeDate);
     JsonNode ivHistory =
         get(
             uri ->
@@ -430,30 +521,29 @@ public class MarketOiClient {
     BigDecimal rank = decimal(ivHistory.path("rank"));
     BigDecimal ivRank = rank == null ? null : rank.multiply(HUNDRED);
 
-    // F3.1 live breadth: the "advances > 32" rule is a NIFTY-50-universe rule, and the EOD
-    // bhavcopy read is 0/0 all session (no bhavcopy for today until post-close) — so the dot was
-    // structurally dead live. Prefer the intraday constituent fold (the index-contribution page's
-    // source, counts of ~50); fall back to the EOD date read (history / quotes unavailable).
+    // F3.1 live breadth: the "advances > 32" rule is a NIFTY-50-universe rule, so the operand MUST be
+    // the ~50-name constituent fold. `/breadth/live` serves exactly that and already falls back to an
+    // EOD read WITHIN the same universe (its `live` flag reports which it used), so one read is enough.
+    //
+    // The old `/breadth?date=` second fallback is REMOVED, not re-dated. That endpoint counts the whole
+    // NSE EQ bhavcopy — thousands of names, not fifty — so a >32 test against it is satisfied by
+    // essentially any session and would support BOTH sides at once, manufacturing entries and flip
+    // exits out of a breadth outage. It was inert only because it was being asked for TODAY (0/0 until
+    // the post-close bhavcopy lands); pointing it at a settled date would have armed a scale mismatch
+    // that market-data's own BreadthController javadoc warns about. Degrade to 0/0 instead: a dead
+    // breadth read must never confirm a side.
     int[] breadth =
         get(
             uri -> uri.path("/api/v1/market/breadth/live").queryParam("index", "NIFTY 50").build(),
             this::advanceDecline,
-            null,
+            new int[] {0, 0},
             "breadth-live");
-    if (breadth == null) {
-      breadth =
-          get(
-              uri -> uri.path("/api/v1/market/breadth").queryParam("date", tradeDate).build(),
-              this::advanceDecline,
-              new int[] {0, 0},
-              "breadth");
-    }
 
     BigDecimal fiiLongPct =
         get(
             uri ->
                 uri.path("/api/v1/market/fii-dii/long-short")
-                    .queryParam("from", tradeDate)
+                    .queryParam("from", eodDate)
                     .build(),
             this::latestFiiLongPct,
             null,
@@ -514,7 +604,7 @@ public class MarketOiClient {
     // completed session's tradeDate. null on a participant-OI gap → the fii-dii-gate degrades to pass.
     BigDecimal fiiBiasSign =
         get(
-            uri -> uri.path("/api/v1/market/fii-dii/bias").queryParam("date", tradeDate).build(),
+            uri -> uri.path("/api/v1/market/fii-dii/bias").queryParam("date", eodDate).build(),
             json -> decimal(json.path("biasSign")),
             null,
             "fii-dii/bias");

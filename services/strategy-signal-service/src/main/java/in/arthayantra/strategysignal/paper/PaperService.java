@@ -89,6 +89,13 @@ public class PaperService {
       this(signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, subaccountIdx, null, null);
     }
 
+    /** A copy charged to {@code idx} — used when the sub-account is assigned under the book lock. */
+    OrderRequest withSubaccountIdx(Integer idx) {
+      return new OrderRequest(
+          signalId, exchange, tradingsymbol, side, qty, price, stopLoss, takeProfit, idx, book,
+          clientOrderId);
+    }
+
     /** Pre-E10 8-arg form: no sub-account (manual / non-scalper order leaves the ledger key NULL). */
     public OrderRequest(
         Long signalId,
@@ -174,9 +181,9 @@ public class PaperService {
       @Schema(types = {"number", "null"}) BigDecimal target,
       BigDecimal compositeScore,
       OffsetDateTime generatedAt,
-      JsonNode scalperDetail,
-      JsonNode minerviniDetail,
-      JsonNode manasAroraDetail) {}
+      @Schema(types = {"object", "null"}) JsonNode scalperDetail,
+      @Schema(types = {"object", "null"}) JsonNode minerviniDetail,
+      @Schema(types = {"object", "null"}) JsonNode manasAroraDetail) {}
 
   /**
    * The full provenance of one paper position (Phase-2 §6.4/§6.5): the position + live MTM, its F9
@@ -206,7 +213,7 @@ public class PaperService {
       @Schema(types = {"number", "null"}) BigDecimal marginPct,
       @Schema(types = {"integer", "null"}) Integer subaccountIdx,
       @Schema(types = {"integer", "null"}) Long openingSignalId,
-      OpeningSignal openingSignal,
+      @Schema(types = {"object", "null"}) OpeningSignal openingSignal,
       List<OrderLeg> orders) {}
 
   /** The result of a bracket edit: the previous levels (for the audit trail) + the refreshed detail. */
@@ -222,6 +229,7 @@ public class PaperService {
   private final PaperAccountService accountService;
   private final BookResolver books;
   private final RiskService risk;
+  private final ScalperAccountModel accounts;
   private final ApplicationEventPublisher events;
   private final PaperStaleTickAlerter staleTicks;
   private final PaperOrderRejectionRecorder rejections;
@@ -247,6 +255,7 @@ public class PaperService {
       PaperAccountService accountService,
       BookResolver books,
       RiskService risk,
+      ScalperAccountModel accounts,
       ApplicationEventPublisher events,
       PaperStaleTickAlerter staleTicks,
       PaperOrderRejectionRecorder rejections,
@@ -267,6 +276,7 @@ public class PaperService {
     this.accountService = accountService;
     this.books = books;
     this.risk = risk;
+    this.accounts = accounts;
     this.events = events;
     this.staleTicks = staleTicks;
     this.rejections = rejections;
@@ -501,6 +511,92 @@ public class PaperService {
     return BookResolver.MINERVINI.equals(book) || BookResolver.MANAS_ARORA.equals(book);
   }
 
+  /**
+   * Opens a scalper entry, assigning its E10 sub-account UNDER the same book lock and transaction that
+   * validates and writes it.
+   *
+   * <p>Selecting first and locking later is a race in its own right: two concurrent takes both read an
+   * idle account 1, both pick it, and the writer — now correctly serialized — REFUSES the second
+   * against account 1's allocation instead of routing it to idle account 2 (cross-vendor round 4). A
+   * capital-aware picker only helps if it reads capital nobody else is about to claim, so the pick has
+   * to happen inside the same critical section as the check and the write.
+   */
+  @Transactional
+  public PositionDto openScalperOrder(OrderRequest request) {
+    lockAnchorsBeforeBook(request);
+    return openOrder(request.withSubaccountIdx(assignScalperSubAccount()));
+  }
+
+  /**
+   * The straddle form of {@link #openScalperOrder}: assigns the sub-account ONCE and charges BOTH legs
+   * to it.
+   *
+   * <p>Assigning per leg would re-route leg 2 — leg 1's capital is already visible inside this
+   * transaction, so a capital-aware picker would deliberately send leg 2 somewhere else, breaking the
+   * documented invariant that a straddle's two legs share one sub-account (they are one position).
+   */
+  @Transactional
+  public List<PositionDto> openScalperPair(OrderRequest first, OrderRequest second) {
+    lockAnchorsBeforeBook(first, second);
+    int idx = assignScalperSubAccount();
+    return openPair(first.withSubaccountIdx(idx), second.withSubaccountIdx(idx));
+  }
+
+  /**
+   * Takes the SIGNAL-ANCHOR lock before anything here touches the BOOK lock — the one global lock
+   * order for every entry path.
+   *
+   * <p>{@code openOrder} already takes the anchor lock (for the swing-exit TOCTOU) and then the book
+   * lock. These scalper wrappers acquire the book lock first, to assign the sub-account inside it, so
+   * without this they would run {@code book → anchor} while a signal-linked manual open runs
+   * {@code anchor → book}. Two concurrent entries on the same scalper signal would then deadlock and
+   * PostgreSQL would abort one of them — on the money path (cross-vendor round 5). Ordering is the
+   * only defence: taking the anchor first here makes every wrapper agree.
+   *
+   * <p>Re-taking the same advisory lock later in {@code openOrder} is free — it is transaction-scoped
+   * and re-entrant within the session.
+   */
+  private void lockAnchorsBeforeBook(OrderRequest... requests) {
+    List<Long> anchors = new ArrayList<>();
+    for (OrderRequest r : requests) {
+      if (r.signalId() != null) {
+        anchors.add(r.signalId());
+      }
+    }
+    if (!anchors.isEmpty()) {
+      // lockAnchors distincts + sorts internally, so a pair sharing one signal locks once.
+      signals.lockAnchors(anchors);
+    }
+  }
+
+  /** Takes the book lock, then picks the least-deployed unfrozen sub-account inside it. */
+  private int assignScalperSubAccount() {
+    positions.lockBookCapital(BookResolver.SCALPER);
+    return accounts.nextFreeAccount();
+  }
+
+  /**
+   * Opens BOTH legs of a two-leg pair (the #11 straddle) ATOMICALLY — either both positions exist or
+   * neither does.
+   *
+   * <p>Load-bearing, and it is the capital caps that made it so. The legs used to open through two
+   * independent transactions, which was survivable while nothing could refuse the second one. Once
+   * {@code openOrder} enforces the deployment cap and the sub-account ceiling, a refused SECOND leg
+   * would leave the FIRST one open — turning a delta-neutral straddle into an unintended NAKED
+   * directional position. That is strictly worse than the cap breach the refusal prevents: a breach is
+   * a sizing error, a naked leg is a different strategy (cross-vendor round 3).
+   *
+   * <p>Both calls are in-class, so they BYPASS the proxy and simply join this transaction (the same
+   * self-invocation property {@code openManualOrder} documents). Two consequences, both wanted: leg 2's
+   * cap check sees leg 1's uncommitted write, so the pair is projected cumulatively; and the per-book
+   * advisory lock {@code openOrder} takes is held to commit, so no third order can interleave between
+   * the legs.
+   */
+  @Transactional
+  public List<PositionDto> openPair(OrderRequest first, OrderRequest second) {
+    return List.of(openOrder(first), openOrder(second));
+  }
+
   /** Simulates an entry; fills via {@code ltp_slippage/v1} against the next-tick LTP + cost model. */
   @Transactional
   public PositionDto openOrder(OrderRequest request) {
@@ -510,10 +606,25 @@ public class PaperService {
     BigDecimal signalEntry = null;
     OffsetDateTime signalGeneratedAt = null;
     if (request.signalId() != null) {
+      // Serialize against the swing EXIT's target discovery BEFORE reading the anchor (cross-vendor
+      // round 4 TOCTOU): both sides take the same per-anchor advisory lock inside their transaction,
+      // so this open either commits before the exit's discovery reads (the exit binds this position)
+      // or blocks until the exit committed — and then sees the EXPIRED anchor below and refuses,
+      // instead of opening a position whose only exit path has already run.
+      signals.lockAnchors(List.of(request.signalId()));
       SignalRepository.SignalRow signal =
           signals
               .find(request.signalId())
               .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_SIGNAL, "no such signal"));
+      if ("EXPIRED".equals(signal.status())) {
+        throw new ApiException(
+            422,
+            ErrorCodes.VALIDATION_FAILED,
+            "signal #" + request.signalId()
+                + " is EXPIRED — its exit already settled, so a position opened now could never be"
+                + " closed by the engine",
+            Map.of("signalId", request.signalId(), "status", signal.status()));
+      }
       // STRUCTURAL INVARIANT — an EXIT never opens exposure. The callers are guarded too
       // (openManualOrder + SignalsController.taken), but this is the layer that actually WRITES the
       // position, so the assert belongs here: a future SignalTaken publisher or a direct openOrder
@@ -584,6 +695,77 @@ public class PaperService {
     String book = bookFor(request);
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
+    // The deployment cap, projected against what this fill ACTUALLY costs. Placed here — at the sole
+    // writer, after the fill is struck — because this is the first and only point where all three
+    // inputs exist together: the resolved instrument, the final quantity, and the SLIPPAGE-ADJUSTED
+    // fill price. Gating at emission cannot use any of them (the leg and size do not exist yet), and
+    // gating in openManualOrder covers one of the four doors.
+    //
+    // Being at the writer is what makes the straddle correct for free: each leg opens through its own
+    // openOrder call in its own transaction, so leg 2 projects against a capitalUsed that ALREADY
+    // includes committed leg 1. A projection computed once at emission prices one leg and admits two.
+    //
+    // This is NOT a re-run of the governor — see RiskService.deploymentWouldCross. It is a pure
+    // read-and-compare with no audit row, no ntfy and no dedup, so the taken path stays ungated in the
+    // sense that test pins (nothing is double-charged).
+    // Valued the SAME way capitalUsed values every open position — accountService.usageFor applies
+    // SPAN (or the flat margin-pct fallback) to futures and SHORT options, the premium to long
+    // options, full notional to equities. Raw `price × qty` would be wrong here: it compares a
+    // notional candidate against a margin-based sum, overstating a short option ~8× (0.12) and a
+    // future ~6.7× (0.15). Long options and equities are identical either way, which is exactly why
+    // the scalper path and every test still passed with the naive form.
+    //
+    // Computed ONCE and reused for the buying-power warning below, which already made this same call
+    // on every open — so this is one FEWER external SPAN round-trip per fill, not one more.
+    BigDecimal projectedCost =
+        accountService.usageFor(
+            meta, exchange, tradingsymbol, side, fill.fillPrice(), request.qty());
+    // Serialize this book's check-plus-write. Both caps below read UNLOCKED aggregates before the
+    // position is persisted, so without this two concurrent opens on the same book each observe the
+    // same pre-write usage, both pass, and both commit past the cap — a hard limit two callers can
+    // straddle is not a limit (cross-vendor round 3). Transaction-scoped, so for a straddle (whose
+    // legs share one transaction) it is held across BOTH legs.
+    positions.lockBookCapital(book);
+    if (risk.deploymentWouldCross(book, projectedCost)) {
+      String detail =
+          "projected " + projectedCost.toPlainString()
+              + " would cross cap "
+              + risk.deploymentCap(book).map(BigDecimal::toPlainString).orElse("n/a");
+      // Durable like every other refusal on this path: REQUIRES_NEW + fail-soft, so the trace survives
+      // the rollback this throw causes and can never mask the 422 itself.
+      recordDeploymentBlockedQuietly(request, exchange, tradingsymbol, side, detail);
+      throw new ApiException(
+          422,
+          ErrorCodes.RISK_ENTRY_BLOCKED,
+          "entry blocked by risk governor (" + RiskService.MAX_DEPLOYMENT_PCT + ") on book " + book
+              + " — " + detail,
+          Map.of("book", book, "rail", RiskService.MAX_DEPLOYMENT_PCT));
+    }
+    // The per-sub-account allocation, against the EFFECTIVE account — the one this fill will actually
+    // be charged to. For an add onto an open key that is the EXISTING row's sub-account, not the
+    // request's: upsertPosition averages into that row and keeps its original idx, so validating the
+    // requested idx would check an account the money never reaches. That mismatch is what let two
+    // correlated adds sit past one account's ceiling while the picker believed load was spread.
+    Integer effectiveSubAccount =
+        positions
+            .openSubAccountIdx(book, exchange, tradingsymbol, side)
+            .orElse(request.subaccountIdx());
+    if (effectiveSubAccount != null
+        && accounts.wouldExceedSubAccount(book, effectiveSubAccount, projectedCost)) {
+      String detail =
+          "projected " + projectedCost.toPlainString()
+              + " would cross sub-account " + effectiveSubAccount + " allocation "
+              + accounts.subAccountAllocation(book, effectiveSubAccount).toPlainString();
+      recordDeploymentBlockedQuietly(request, exchange, tradingsymbol, side, detail);
+      throw new ApiException(
+          422,
+          ErrorCodes.RISK_ENTRY_BLOCKED,
+          "entry blocked by risk governor (sub_account_allocation) on book " + book + " — " + detail,
+          Map.of(
+              "book", book,
+              "rail", "sub_account_allocation",
+              "subaccountIdx", effectiveSubAccount));
+    }
     orders.insertFilled(
         book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
         fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId(), refSource,
@@ -601,15 +783,28 @@ public class PaperService {
       events.publishEvent(
           new PaperPositionOpened(row.id(), book, exchange, tradingsymbol, side, row.qty()));
     }
-    String warning =
-        accountService.buyingPowerWarning(
-            book,
-            accountService.usageFor(
-                meta, exchange, tradingsymbol, side, fill.fillPrice(), request.qty()));
+    // Same projected usage the deployment/sub-account checks above already computed — reused rather
+    // than recomputed, so the SPAN client is called once per fill instead of twice.
+    String warning = accountService.buyingPowerWarning(book, projectedCost);
     return positions
         .findOpen(book, exchange, tradingsymbol, side)
         .map(row -> toPositionDto(row).withWarning(warning))
         .orElseThrow(() -> new ApiException(500, ErrorCodes.INTERNAL_ERROR, "position not opened"));
+  }
+
+  /**
+   * Read-back quantity for one signal's open paper legs. Swing effect retries use this immediately
+   * before claiming and after attempting an open so a fill-then-throw cannot be averaged again.
+   */
+  @Transactional(readOnly = true)
+  public long openQuantityForSignal(long signalId) {
+    return positions.openForSignal(signalId).stream().mapToLong(PositionRow::qty).sum();
+  }
+
+  /** True when no open paper leg remains linked to the signal. */
+  @Transactional(readOnly = true)
+  public boolean hasOpenForSignal(long signalId) {
+    return !positions.openForSignal(signalId).isEmpty();
   }
 
   private void upsertPosition(
@@ -690,6 +885,18 @@ public class PaperService {
   }
 
   /** P1-4 reject capture (fail-soft): no reference price was available to strike the entry fill. */
+  private void recordDeploymentBlockedQuietly(
+      OrderRequest request, String exchange, String tradingsymbol, String side, String detail) {
+    try {
+      rejections.recordDeploymentBlocked(
+          request.signalId(), bookFor(request), exchange, tradingsymbol, side, request.qty(), detail);
+    } catch (RuntimeException e) {
+      log.warn(
+          "paper_order_rejections (deployment-blocked) not written for {}:{}: {}",
+          exchange, tradingsymbol, e.getMessage());
+    }
+  }
+
   private void recordNoPriceRejectQuietly(
       OrderRequest request, String exchange, String tradingsymbol, String side) {
     try {
@@ -708,29 +915,67 @@ public class PaperService {
     if (!"OPEN".equals(pos.status())) {
       throw new ApiException(409, ErrorCodes.CONFLICT_POSITION_CLOSED, "position already closed");
     }
-    settle(pos, price, "MANUAL");
+    if (settle(pos, price, "MANUAL").isEmpty()) {
+      // Lost the CAS between the status read above and the close. Returning the winner's trade here
+      // made PaperController write a MANUAL_CLOSE audit row for a close this request never performed
+      // — the same 409 the pre-read would have raised a moment earlier, just later (§9-05 review).
+      throw new ApiException(409, ErrorCodes.CONFLICT_POSITION_CLOSED, "position already closed");
+    }
     return positions
         .find(id)
         .map(this::toTradeDto)
         .orElseThrow(() -> new ApiException(500, ErrorCodes.INTERNAL_ERROR, "close failed"));
   }
 
+  /** Reads only the local book key needed by the manual-close audit, without detail enrichment or HTTP. */
+  public String positionBook(long id) {
+    return positions
+        .findBook(id)
+        .orElseThrow(() -> new NotFoundException(ErrorCodes.NOT_FOUND_RESOURCE, "no such position"));
+  }
+
   /**
-   * The shared close path (manual close, the 15:45 sweep, bracket SL/TP, engine exit). {@code
-   * @Transactional} + public so the ONE external caller that isn't already in a transaction — {@link
-   * PaperBracketEvaluator} on the @Scheduled thread — runs in a transaction; without it the
-   * {@code PaperPositionClosed} event was published outside any tx and its AFTER_COMMIT listeners
-   * (the TAKEN-anchor resolver + auto-journal) silently never fired. Self-invoking
-   * callers (closePosition/closeForSignal/markToCloseIntraday) simply join their own tx.
+   * The shared close path (manual close, the 15:45 sweep, bracket SL/TP, engine exit, expiry).
+   *
+   * <p><b>THE INVARIANT: every close must run inside a transaction.</b> Without one the {@code
+   * PaperPositionClosed} event publishes outside any tx and its AFTER_COMMIT listeners — the
+   * TAKEN-anchor resolver and auto-journal — <b>silently never fire</b>. Nothing throws; the close
+   * simply loses its side effects, which is why this is spelled out rather than left to the
+   * annotation.
+   *
+   * <p>⚠️ {@code @Transactional} here covers EXTERNAL callers only, because Spring's proxy is
+   * bypassed on self-invocation (the same trap that silently dropped a tx in {@code RegistryService},
+   * PF-01 round-6 #2). So the rule for adding a caller is:
+   * <ul>
+   *   <li><b>External</b> (another bean, e.g. {@link PaperBracketEvaluator} on the @Scheduled thread,
+   *       or {@code PaperExpiryService}) — nothing to do, the proxy applies. An expiry batch
+   *       deliberately gets one tx PER position so a single refusal cannot roll back the rest.</li>
+   *   <li><b>Self-invoking</b> (a sibling method on this class) — <b>that method MUST carry its own
+   *       {@code @Transactional}</b>, because this one's is bypassed entirely.</li>
+   * </ul>
+   *
+   * <p>Verified 2026-07-30 across all 10 call sites (§9b close-out): the four self-invoking callers
+   * — {@code closePosition}, {@code closeForSignal}, {@code closeForPosition}, {@code
+   * markToCloseIntraday} — are each {@code @Transactional}, and both external callers go through the
+   * proxy. Stated as a RULE rather than a caller list because the previous list had already drifted:
+   * it named three self-invoking callers when there were four, and called
+   * {@code PaperBracketEvaluator} "the ONE external caller" after {@code PaperExpiryService} became
+   * a second.
+   *
+   * <p><b>Returns empty when THIS call did not perform the close</b> — a concurrent closer won the
+   * CAS below. That distinction used to be invisible: the realized amount came back either way, so a
+   * caller could not tell "I closed it" from "someone else already had". {@link
+   * PaperBracketEvaluator} consequently counted and logged closes it never performed (architecture
+   * candidate §9-05, the CAS-leaks-onto-callers interface leak).
    */
   @Transactional
-  public BigDecimal settle(PositionRow pos, BigDecimal price, String closeReason) {
+  public Optional<BigDecimal> settle(PositionRow pos, BigDecimal price, String closeReason) {
     return doSettle(pos, price, closeReason, false);
   }
 
   /** Expiry settlement at intrinsic/spot — exercise STT leg, no slippage (Phase 43B). Tx: see {@link #settle}. */
   @Transactional
-  public BigDecimal settleExpiry(PositionRow pos, BigDecimal reference, boolean exercise) {
+  public Optional<BigDecimal> settleExpiry(PositionRow pos, BigDecimal reference, boolean exercise) {
     return doSettle(pos, reference, "EXPIRY_SETTLEMENT", exercise);
   }
 
@@ -747,7 +992,8 @@ public class PaperService {
    * refuse: counter + ntfy + 422 DATA_STALE, leaving the position OPEN for the next pass (the
    * automated callers catch + log; the manual close surfaces the 422).
    */
-  private BigDecimal doSettle(PositionRow pos, BigDecimal price, String closeReason, boolean exercise) {
+  private Optional<BigDecimal> doSettle(
+      PositionRow pos, BigDecimal price, String closeReason, boolean exercise) {
     InstrumentMeta meta = instruments.meta(pos.exchange(), pos.tradingsymbol());
     Side exitSide = "BUY".equals(pos.side()) ? Side.SELL : Side.BUY;
     // P1-5 fill-reference provenance on the EXIT leg too: CALLER = an explicit settle price (manual
@@ -756,6 +1002,7 @@ public class PaperService {
     BigDecimal reference = price;
     String refSource = reference != null ? "CALLER" : null;
     Long refTickAgeMs = null;
+    Duration staleAge = null;
     if (reference == null) {
       Optional<LastTickReader.TickView> tick = lastTick.lastTick(pos.exchange(), pos.tradingsymbol());
       if (tick.isEmpty()) {
@@ -771,9 +1018,10 @@ public class PaperService {
       refSource = "LIVE_TICK";
       Duration age = tick.get().age();
       refTickAgeMs = age == null ? null : age.toMillis();
-      if (age != null && age.compareTo(tickMaxAge) > 0) {
-        staleTicks.staleSettleUsed(pos, closeReason, age);
-      }
+      // NOT alerted here: the "settled off a stale tick" record is only true if this call goes on to
+      // WIN the CAS below. Emitting it first made a race loser report a stale settlement it never
+      // performed (§9-05 review) — the same class of false record this change exists to remove.
+      staleAge = age != null && age.compareTo(tickMaxAge) > 0 ? age : null;
     }
     Fill exit =
         exercise
@@ -785,7 +1033,12 @@ public class PaperService {
     // fill + fires the closed event. A concurrent closer (e.g. the 15s bracket poll racing an engine
     // exit) that lost the CAS returns without inserting a duplicate exit order or double-publishing.
     if (positions.close(pos.id(), realized, closeReason) == 0) {
-      return realized;
+      // Lost the CAS — EMPTY, not the realized amount. The caller must be able to tell that it did
+      // not close this position, or it reports someone else's exit as its own (§9-05).
+      return Optional.empty();
+    }
+    if (staleAge != null) {
+      staleTicks.staleSettleUsed(pos, closeReason, staleAge);
     }
     orders.insertFilled(
         pos.book(), null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
@@ -793,7 +1046,7 @@ public class PaperService {
     // Auto-journal hook: the journal module listens AFTER_COMMIT (so a journal failure can never
     // roll back the close). Publishing inside the close tx is fine — delivery is deferred to commit.
     events.publishEvent(new PaperPositionClosed(pos.id(), realized, closeReason));
-    return realized;
+    return Optional.of(realized);
   }
 
   /** Open positions with mark-to-market P&amp;L ({@code book} null → all books; unrealized never stored). */
@@ -932,7 +1185,7 @@ public class PaperService {
   }
 
   /** Daily realized-equity curve + win rate / expectancy over a book's closed trades (null → all). */
-  public Map<String, Object> pnl(String book) {
+  public PaperViews.Pnl pnl(String book) {
     List<PositionRow> closed = positions.listClosed(book, null, null, null, 500, 0);
     // listClosed is newest-first; walk oldest-first for the cumulative curve
     List<PositionRow> chrono = new ArrayList<>(closed);
@@ -948,21 +1201,24 @@ public class PaperService {
       LocalDate day = row.closedAt() == null ? LocalDate.now(IST) : row.closedAt().atZoneSameInstant(IST).toLocalDate();
       byDay.merge(day, row.realizedPnl(), BigDecimal::add);
     }
-    List<Map<String, Object>> points = new ArrayList<>();
+    List<PaperViews.EquityPoint> points = new ArrayList<>();
     BigDecimal cumulative = BigDecimal.ZERO;
     for (Map.Entry<LocalDate, BigDecimal> entry : byDay.entrySet()) {
       cumulative = cumulative.add(entry.getValue());
-      points.add(Map.of("date", entry.getKey().toString(), "equity", cumulative));
+      points.add(new PaperViews.EquityPoint(entry.getKey().toString(), cumulative));
     }
     int total = chrono.size();
-    Map<String, Object> summary = new LinkedHashMap<>();
-    summary.put("realizedTotal", realizedTotal.setScale(2, RoundingMode.HALF_UP));
-    summary.put("trades", total);
-    summary.put("winRate", total == 0 ? null : BigDecimal.valueOf(wins).divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP));
-    summary.put(
-        "expectancy",
-        total == 0 ? null : realizedTotal.divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP));
-    return Map.of("points", points, "summary", summary);
+    PaperViews.PnlSummary summary =
+        new PaperViews.PnlSummary(
+            realizedTotal.setScale(2, RoundingMode.HALF_UP),
+            total,
+            total == 0
+                ? null
+                : BigDecimal.valueOf(wins).divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP),
+            total == 0
+                ? null
+                : realizedTotal.divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP));
+    return new PaperViews.Pnl(points, summary);
   }
 
   /** How many positions + orders a {@link #reset} wiped — carried to the paper-admin audit row (V14). */
@@ -1004,13 +1260,38 @@ public class PaperService {
     int closed = 0;
     for (PositionRow pos : positions.openForSignal(signalId)) {
       try {
-        settle(pos, price, closeReason);
-        closed++;
+        // Count only what THIS pass closed — a lost CAS is someone else's exit (§9-05 review).
+        if (settle(pos, price, closeReason).isPresent()) {
+          closed++;
+        }
       } catch (Exception e) {
         log.warn("signal-exit close failed for position {}: {}", pos.id(), e.getMessage());
       }
     }
     return closed;
+  }
+
+  /**
+   * Closes one exact paper-position id for a durable swing effect. Unlike {@link #closeForSignal}, this
+   * path never resolves the target through the reusable book/symbol/side key, so a later re-entry cannot
+   * be settled by an old effect. Returns one when the target is already closed or this call settles it.
+   */
+  @Transactional
+  public int closeForPosition(long positionId, String closeReason, BigDecimal price) {
+    PositionRow pos = positions.find(positionId).orElse(null);
+    if (pos == null) {
+      return 0;
+    }
+    if (!"OPEN".equals(pos.status())) {
+      return 1;
+    }
+    try {
+      settle(pos, price, closeReason);
+      return 1;
+    } catch (Exception e) {
+      log.warn("exact paper-position close failed for {}: {}", positionId, e.getMessage());
+      return 0;
+    }
   }
 
   /** 15:45 IST mark-to-close: settle every OPEN intraday position so it does not carry overnight. */
@@ -1019,8 +1300,10 @@ public class PaperService {
     int closed = 0;
     for (PositionRow pos : positions.intradayOpen()) {
       try {
-        settle(pos, null, "INTRADAY_MTM");
-        closed++;
+        // Count only what THIS pass closed — a lost CAS is someone else's exit (§9-05 review).
+        if (settle(pos, null, "INTRADAY_MTM").isPresent()) {
+          closed++;
+        }
       } catch (Exception e) {
         log.warn("mark-to-close failed for position {}: {}", pos.id(), e.getMessage());
       }

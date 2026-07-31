@@ -23,17 +23,20 @@ import in.arthayantra.strategysignal.signals.SignalExited;
 import in.arthayantra.strategysignal.signals.SignalPublisher;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchEngine;
+import in.arthayantra.strategysignal.swing.SwingDoctrine;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -88,8 +91,30 @@ class ManasAroraSwingEngineTest {
     assertThat(run.exits()).as("ONE symbol closed (not one-per-lot)").isEqualTo(1);
     verify(h.signals).transition(42L, "EXPIRED");
     verify(h.signals).transition(43L, "EXPIRED");
-    verify(h.events).publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 42L));
-    verify(h.events).publishEvent(argThat((Object e) -> e instanceof SignalExited s && s.anchorSignalId() == 43L));
+
+    // V048 propagation guard through the REAL engine path: the EXIT row's persisted reason must be
+    // the SAME string the SignalExited events carry — the repository IT alone would stay green if
+    // the engine regressed to inserting null (cross-vendor review, round 1).
+    ArgumentCaptor<String> exitReason = ArgumentCaptor.forClass(String.class);
+    verify(h.signals)
+        .insert(
+            any(), any(), any(), any(), eq("EXIT"), any(), any(), any(), any(), any(), any(),
+            any(), any(), exitReason.capture());
+    assertThat(exitReason.getValue()).as("the engine's computed reason reaches the row").isNotNull();
+    verify(h.events)
+        .publishEvent(
+            argThat(
+                (Object e) ->
+                    e instanceof SignalExited s
+                        && s.anchorSignalId() == 42L
+                        && exitReason.getValue().equals(s.reason())));
+    verify(h.events)
+        .publishEvent(
+            argThat(
+                (Object e) ->
+                    e instanceof SignalExited s
+                        && s.anchorSignalId() == 43L
+                        && exitReason.getValue().equals(s.reason())));
   }
 
   @Test
@@ -126,10 +151,87 @@ class ManasAroraSwingEngineTest {
     verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
   }
 
+  @Test
+  void aLotOpenedAfterThePinnedSessionIsNotEvaluated() throws IOException {
+    ExitHarness h = new ExitHarness();
+    h.stubAnchors(h.anchor(42L, h.series.get(25).bucketStart())); // 2026-06-26, after the pin
+
+    SwingBatchEngine.SwingRun run =
+        h.engine().runDaily(h.doctrine(false), LocalDate.of(2026, 6, 25), false);
+
+    assertThat(run.exits()).isZero();
+    assertThat(run.exitSkipped()).as("a future lot is not an approximate exit").isZero();
+    verify(h.candles, never()).fetch(any(), any(), any(), any(), any());
+    verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalExited));
+  }
+
+  @Test
+  void aPositionWithPreAndPostSessionLotsIsRefusedWithoutAFalseMissingBarSkip() throws IOException {
+    ExitHarness h = new ExitHarness();
+    h.stubAnchors(
+        h.anchor(42L, h.series.get(24).bucketStart()), // 2026-06-25, before/equal to the pin
+        h.anchor(43L, h.series.get(25).bucketStart())); // 2026-06-26, after the pin
+
+    SwingBatchEngine.SwingRun run =
+        h.engine().runDaily(h.doctrine(false), LocalDate.of(2026, 6, 25), false);
+
+    assertThat(run.exits()).isZero();
+    assertThat(run.exitSkipped()).as("mixed lots are refused, never partially evaluated").isZero();
+    assertThat(run.refusalReasons()).containsExactly("MIXED_PRE_POST_LOTS:TESTCO");
+    verify(h.candles, never()).fetch(any(), any(), any(), any(), any());
+    verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalExited));
+  }
+
+  @Test
+  void aDeadlineCrossedDuringEvaluationStopsBeforeTheNextMoneyEffect() throws IOException {
+    ExitHarness h = new ExitHarness();
+    AtomicInteger checks = new AtomicInteger();
+    SwingBatchEngine.SwingRun run =
+        h.engine()
+            .runDaily(
+                h.doctrine(false), LocalDate.of(2026, 6, 28), false, Optional.empty(), true,
+                () -> checks.incrementAndGet() > 1);
+
+    assertThat(run.exits()).isZero();
+    assertThat(run.deadlineReached()).isTrue();
+    verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalExited));
+  }
+
+  @Test
+  void aPostSessionLotCannotQualifyAnEntryOrPyramidAdd() throws IOException {
+    LocalDate session = LocalDate.of(2026, 6, 25);
+    AddResult r = runPyramidAdd(new BigDecimal("10000"), session.plusDays(1), session);
+
+    assertThat(r.run().entries()).as("a future lot must not be treated as an as-of pyramid position").isZero();
+    verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+  }
+
+  @Test
+  void oneFunnelSnapshotReachesTheEngineWithoutASecondFunnelRead() throws IOException {
+    ExitHarness h = new ExitHarness();
+    ManasDoctrine doctrine = h.doctrine(false);
+    when(h.funnel.snapshot())
+        .thenReturn(Optional.of(new ManasFunnelClient.Snapshot(LocalDate.of(2026, 6, 25), List.of())));
+
+    Optional<SwingDoctrine.CandidateSnapshot> snapshot = doctrine.candidateSnapshot().snapshot();
+    assertThat(snapshot).isPresent();
+
+    h.engine().runDaily(doctrine, LocalDate.of(2026, 6, 25), true, snapshot, true);
+
+    verify(h.funnel).snapshot();
+    verify(h.funnel, never()).buyableAndOnDeck();
+    verify(h.funnel, never()).screenDate();
+  }
+
   private record AddResult(
       SwingBatchEngine.SwingRun run, SignalRepository signals, ApplicationEventPublisher events) {}
 
   private AddResult runPyramidAdd(BigDecimal existingOpenRiskInr) throws IOException {
+    return runPyramidAdd(existingOpenRiskInr, null, null);
+  }
+
+  private AddResult runPyramidAdd(
+      BigDecimal existingOpenRiskInr, LocalDate anchorDate, LocalDate requiredBarDate) throws IOException {
     UUID strategyId = UUID.randomUUID();
     UUID publishedVersion = UUID.randomUUID();
     JsonNode config = breakoutConfig();
@@ -140,8 +242,10 @@ class ManasAroraSwingEngineTest {
 
     List<EngineCandle> series = craft(3_000L);
     SignalRepository signals = mock(SignalRepository.class);
+    OffsetDateTime anchorAt =
+        anchorDate == null ? series.get(19).bucketStart() : anchorDate.atStartOfDay().atOffset(IST);
     when(signals.activeEntries())
-        .thenReturn(List.of(anchor(42L, publishedVersion, new BigDecimal("142"), series.get(19).bucketStart())));
+        .thenReturn(List.of(anchor(42L, publishedVersion, new BigDecimal("142"), anchorAt)));
     stubInsert(signals, 55L);
 
     ManasFunnelClient funnel = mock(ManasFunnelClient.class);
@@ -167,7 +271,7 @@ class ManasAroraSwingEngineTest {
             funnel, signals, new ManasPyramidPolicy(true, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
             new ObjectMapper(), true, 520, 10, 1440);
 
-    return new AddResult(engine.runDaily(doctrine), signals, events);
+    return new AddResult(engine.runDaily(doctrine, requiredBarDate), signals, events);
   }
 
   // ---- harness --------------------------------------------------------------------------------
@@ -222,7 +326,7 @@ class ManasAroraSwingEngineTest {
   }
 
   private static void stubInsert(SignalRepository signals, long id) {
-    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+    when(signals.insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
         .thenReturn(id);
   }
 
@@ -241,7 +345,7 @@ class ManasAroraSwingEngineTest {
       long id, UUID versionId, BigDecimal entryPrice, OffsetDateTime at) {
     return new SignalRepository.SignalRow(
         id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
-        new ObjectMapper().createObjectNode(), "TAKEN", at, at.plusDays(1), null, null, null, null, null, null);
+        new ObjectMapper().createObjectNode(), "TAKEN", at, at.plusDays(1), null, null, null, null, null, null, null);
   }
 
   private static JsonNode breakoutConfig() throws IOException {

@@ -69,10 +69,9 @@ class PaperIntradayMtmIntegrationTest extends StrategySignalIntegrationTestBase 
     // Shared singleton IT DB: unique slug + name per method, unique symbol per run.
     String slug = "mtm-sweep-it-" + UUID.randomUUID().toString().substring(0, 8);
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create("MTM Sweep IT " + slug, null, List.of("it"), CONFIG.replace("id: mtm-sweep-it", "id: " + slug))
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     UUID versionId = strategyRepo.latestVersion(strategyId).orElseThrow().id();
 
@@ -82,7 +81,7 @@ class PaperIntradayMtmIntegrationTest extends StrategySignalIntegrationTestBase 
         signalRepo.insert(
             versionId, "NFO", sym, "1m", "ENTRY", "BUY",
             new BigDecimal("80.00"), new BigDecimal("40.00"), new BigDecimal("120.00"),
-            new BigDecimal("0.80"), "{}", now, now.plusHours(1));
+            new BigDecimal("0.80"), "{}", now, now.plusHours(1), null);
 
     paper.openOrder(
         new PaperService.OrderRequest(

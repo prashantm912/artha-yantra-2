@@ -8,7 +8,6 @@ import in.arthayantra.strategysignal.journal.JournalRepository.Entry;
 import in.arthayantra.strategysignal.journal.JournalRepository.EntryInput;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -42,6 +41,17 @@ public class JournalController {
       Integer disciplineRating,
       Integer emotionRating) {}
 
+  /**
+   * {@code GET /api/v1/journal} — the paged review list (ledger D3 slice 1).
+   *
+   * <p>A PURE RETYPING of {@code Map.of("items", …, "limit", …, "offset", …)}. {@link Entry} was
+   * already a record, so the envelope was the only part springdoc could not enumerate — typing it
+   * pulls the item schema into the spec instead of leaving an {@code array of object}. {@code Map.of}
+   * iteration order is unspecified, so no client could depend on it; the record additionally makes it
+   * deterministic.
+   */
+  public record JournalPage(List<Entry> items, int limit, int offset) {}
+
   private final JournalRepository repository;
 
   /** Wires the repository. */
@@ -51,7 +61,7 @@ public class JournalController {
 
   /** Paged review list with tag / window / min-rating / linked-entity filters. */
   @GetMapping
-  public Map<String, Object> list(
+  public JournalPage list(
       @RequestParam(required = false) String tag,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime from,
@@ -65,7 +75,7 @@ public class JournalController {
     int boundedOffset = Math.max(offset, 0);
     List<Entry> items =
         repository.list(tag, from, to, minRating, linkedTo, boundedLimit, boundedOffset);
-    return Map.of("items", items, "limit", boundedLimit, "offset", boundedOffset);
+    return new JournalPage(items, boundedLimit, boundedOffset);
   }
 
   /**

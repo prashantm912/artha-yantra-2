@@ -85,16 +85,16 @@ public class EquityDigestService {
   /** The equity context digest. {@code dataTrust} = OK/DEGRADED/BLOCKED. */
   public record EquityDigest(
       @Schema(types = {"string", "null"}) LocalDate tradeDate,
-      AdvanceDecline advanceDecline,
-      AboveMa aboveMa,
-      BreadthThrust breadthThrust,
+      @Schema(types = {"object", "null"}) AdvanceDecline advanceDecline,
+      @Schema(types = {"object", "null"}) AboveMa aboveMa,
+      @Schema(types = {"object", "null"}) BreadthThrust breadthThrust,
       List<SectorRotation> topSectors,
       List<SectorRotation> bottomSectors,
       List<DeliveryOutlier> deliveryOutliers,
       @Schema(types = {"string", "null"}) String returnsWindow,
       List<ReturnLeader> returnWinners,
       List<ReturnLeader> returnLosers,
-      IndexConcentration indexConcentration,
+      @Schema(types = {"object", "null"}) IndexConcentration indexConcentration,
       @Schema(types = {"string", "null"}) OffsetDateTime asOf,
       String dataTrust,
       List<String> trustReasons) {

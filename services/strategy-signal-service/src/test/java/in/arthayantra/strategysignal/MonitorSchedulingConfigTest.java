@@ -9,10 +9,14 @@ import in.arthayantra.strategysignal.signals.PartialBucketCanary;
 import in.arthayantra.strategysignal.signals.RiskSuppressionPruneJob;
 import in.arthayantra.strategysignal.signals.SignalEvalOutcomeRollupJob;
 import in.arthayantra.strategysignal.signals.SubscriberHealthCanary;
+import in.arthayantra.strategysignal.signals.StrategyCoverageWatchdog;
+import in.arthayantra.strategysignal.swing.SwingBatchCanary;
+import in.arthayantra.strategysignal.swing.SwingBatchCatchUp;
 import in.arthayantra.strategysignal.telegram.TelegramCommandBot;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.task.TaskSchedulingAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -68,6 +72,60 @@ class MonitorSchedulingConfigTest {
     assertBoundToMonitorScheduler(SubscriberHealthCanary.class, "sweep");
     assertBoundToMonitorScheduler(PartialBucketCanary.class, "sweep");
     assertBoundToMonitorScheduler(DotHealthCanary.class, "sweep");
+    assertBoundToMonitorScheduler(StrategyCoverageWatchdog.class, "sweep");
+  }
+
+  @Test
+  void strategyCoverageWatchdogKeepsItsPublishedCadenceAndGraceIndependentOfDefaultPool()
+      throws NoSuchMethodException {
+    Scheduled scheduled =
+        StrategyCoverageWatchdog.class.getDeclaredMethod("sweep").getAnnotation(Scheduled.class);
+    assertThat(scheduled).isNotNull();
+    assertThat(scheduled.scheduler()).isEqualTo("monitorTaskScheduler");
+    assertThat(scheduled.fixedDelay()).isEqualTo(60_000L);
+    assertThat(scheduled.initialDelay()).isEqualTo(120_000L);
+  }
+
+  @Test
+  void strategyCoverageWatchdogIsGuardedByTheEngineLifecycleFlag() {
+    ConditionalOnProperty guard =
+        StrategyCoverageWatchdog.class.getAnnotation(ConditionalOnProperty.class);
+    assertThat(guard).isNotNull();
+    assertThat(guard.name()).containsExactly("artha.signals.engine-enabled");
+    assertThat(guard.havingValue()).isEqualTo("true");
+    assertThat(guard.matchIfMissing()).isTrue();
+  }
+
+  /** The missed-batch detector must not share the default or fenced monitor pool. */
+  @Test
+  void theSwingMissedBatchDetectorOwnsItsOwnScheduler() throws NoSuchMethodException {
+    Scheduled scheduled =
+        SwingBatchCanary.class.getDeclaredMethod("check").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("SwingBatchCanary.check is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler()).isEqualTo("swingDetectorTaskScheduler");
+    ConditionalOnProperty guard =
+        SwingBatchCanary.class.getAnnotation(ConditionalOnProperty.class);
+    assertThat(guard).as("missed-batch paging ships dormant").isNotNull();
+    assertThat(guard.name())
+        .containsExactly("artha.signals.swing-missed-batch-detector.enabled");
+    assertThat(guard.havingValue()).isEqualTo("true");
+    assertThat(guard.matchIfMissing()).isFalse();
+  }
+
+  /** The dedicated swing detector pool is distinct from every existing scheduler class. */
+  @Test
+  void theSwingDetectorSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("swingDetectorTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler).isNotSameAs(context.getBean("taskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("evalOutcomeTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("maintenanceTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("telegramTaskScheduler"));
+        });
   }
 
   private static void assertBoundToMonitorScheduler(Class<?> type, String method)
@@ -199,6 +257,34 @@ class MonitorSchedulingConfigTest {
     assertThat(scheduled.scheduler())
         .as("bracketEvaluation keeps Boot's default scheduler")
         .isEqualTo("");
+  }
+
+  /** The catch-up must not share the default paper SL/TP pool or the fenced detector pool. */
+  @Test
+  void theSwingCatchUpOwnsItsOwnScheduler() throws NoSuchMethodException {
+    Scheduled scheduled =
+        SwingBatchCatchUp.class.getDeclaredMethod("catchUp").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("SwingBatchCatchUp.catchUp is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler())
+        .as("catch-up must not share the default pool with paper SL/TP evaluation")
+        .isEqualTo("swingCatchUpTaskScheduler");
+  }
+
+  /** The catch-up pool is distinct from both default money-adjacent work and fenced detectors. */
+  @Test
+  void theSwingCatchUpSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("swingCatchUpTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler)
+              .as("a distinct pool from the default scheduling pool")
+              .isNotSameAs(context.getBean("taskScheduler"));
+          assertThat(scheduler)
+              .as("a distinct pool from the fenced monitor detectors")
+              .isNotSameAs(context.getBean("monitorTaskScheduler"));
+        });
   }
 
   /** The bean the poller names must exist, distinct from all three siblings and the default pool. */

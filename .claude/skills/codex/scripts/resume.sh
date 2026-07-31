@@ -50,6 +50,7 @@ EVENTS_FILE="$(events_file "$TARGET")"
 
 if [ ! -f "$THREAD_FILE" ]; then
     echo "error: no session for $TARGET — run start.sh first." >&2
+    explain_missing_session "$TARGET"
     exit 2
 fi
 THREAD_ID="$(cat "$THREAD_FILE")"

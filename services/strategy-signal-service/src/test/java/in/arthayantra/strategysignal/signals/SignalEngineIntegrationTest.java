@@ -333,8 +333,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     listener.start();
     try {
       strategyId =
-          (UUID)
-              registryService.create("Engine IT Momentum", null, null, STRATEGY_YAML).get("id");
+                        registryService.create("Engine IT Momentum", null, null, STRATEGY_YAML).id();
       registryService.publish(strategyId, null, null);
 
       await()
@@ -506,7 +505,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     // set but NOT the loaded set. The 20s reconcile must compare the published set against the
     // last-reload SNAPSHOT (which includes it), NOT the loaded subset — otherwise loaded < published
     // reads as perpetual "drift" and the engine reloads all strategies every 20s forever.
-    UUID swingId = (UUID) registryService.create("Engine IT Swing", null, null, SWING_YAML).get("id");
+    UUID swingId = (UUID) registryService.create("Engine IT Swing", null, null, SWING_YAML).id();
     registryService.publish(swingId, null, null);
     engine.reload();
 
@@ -521,14 +520,13 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     // reconcile filters on (enabled && publishedVersionId). Trace: publish → loaded → DISABLE →
     // audit row + unloaded + reconcile CONVERGES (must not regress the #579 loop) → ENABLE → reloaded.
     UUID id =
-        (UUID)
-            registryService
+                    registryService
                 .create(
                     "Engine IT Toggle", null, null,
                     STRATEGY_YAML
                         .replace("id: engine-it-momentum", "id: engine-it-toggle")
                         .replace("name: \"Engine IT Momentum\"", "name: \"Engine IT Toggle\""))
-                .get("id");
+                .id();
     registryService.publish(id, null, null);
     engine.reload();
     assertThat(engine.loadedSlugs()).contains("engine-it-toggle"); // enabled + published → loaded
@@ -559,10 +557,9 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   void kiteConnectedRetriesUntilAColdStartUniverseBecomesAvailable() {
     FUTURES_UNIVERSE_AVAILABLE.set(false);
     UUID id =
-        (UUID)
-            registryService
+                    registryService
                 .create("Engine IT Coldstart Retry", null, null, COLD_START_RETRY_YAML)
-                .get("id");
+                .id();
     registryService.publish(id, null, null);
     StrategyRepository.StrategyRow strategy = repository.findById(id).orElseThrow();
     StrategyRepository.VersionRow version =
@@ -595,6 +592,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
             meterRegistry,
             Optional.empty(),
             Optional.empty(),
+            java.util.Optional.empty(),
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
             mock(CompositeRejectionWriter.class),
@@ -634,8 +632,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   void kiteConnectedReloadsStrategiesSkippedDuringColdStartButTokenExpiredDoesNot() {
     FUTURES_UNIVERSE_AVAILABLE.set(false);
     UUID id =
-        (UUID)
-            registryService.create("Engine IT Coldstart", null, null, COLD_START_YAML).get("id");
+                    registryService.create("Engine IT Coldstart", null, null, COLD_START_YAML).id();
     registryService.publish(id, null, null);
     engine.reload();
 
@@ -1264,7 +1261,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   private StrategyRepository.StrategyRow publishedRow(String yaml, String name) {
-    UUID id = (UUID) registryService.create("Engine IT Coldstart " + name, null, null, yaml).get("id");
+    UUID id = (UUID) registryService.create("Engine IT Coldstart " + name, null, null, yaml).id();
     registryService.publish(id, null, null);
     return repository.findById(id).orElseThrow();
   }
@@ -1292,9 +1289,9 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     // and EVERY bar keeps taking the entry branch — that is what makes evaluations == bars×2.
     String yamlA = SUM_YAML.formatted(slugA, "Engine IT Sum A " + suffix, symbol, "close > 1");
     String yamlB = SUM_YAML.formatted(slugB, "Engine IT Sum B " + suffix, symbol, "close > 100000");
-    UUID idA = (UUID) registryService.create("Engine IT Sum A " + suffix, null, null, yamlA).get("id");
+    UUID idA = (UUID) registryService.create("Engine IT Sum A " + suffix, null, null, yamlA).id();
     registryService.publish(idA, null, null);
-    UUID idB = (UUID) registryService.create("Engine IT Sum B " + suffix, null, null, yamlB).get("id");
+    UUID idB = (UUID) registryService.create("Engine IT Sum B " + suffix, null, null, yamlB).id();
     registryService.publish(idB, null, null);
 
     await()
@@ -1399,7 +1396,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         STRATEGY_YAML
             .replace("id: engine-it-momentum", "id: " + slug)
             .replace("name: \"Engine IT Momentum\"", "name: \"" + name + "\"");
-    UUID id = (UUID) registryService.create(name, null, null, yaml).get("id");
+    UUID id = (UUID) registryService.create(name, null, null, yaml).id();
     registryService.publish(id, null, null);
     UUID versionId = repository.findById(id).orElseThrow().publishedVersionId();
     engine.reload();
@@ -1493,6 +1490,7 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         meterRegistry,
         Optional.empty(),
         Optional.empty(),
+        java.util.Optional.empty(),
         mock(RejectionWriter.class),
         mock(RiskSuppressionWriter.class),
         mock(CompositeRejectionWriter.class),

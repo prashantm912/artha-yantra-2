@@ -7,11 +7,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 vi.mock('../../components/FilterBar.tsx', () => ({ FilterBar: () => null }));
 const useChainTable = vi.fn();
 vi.mock('../../api/oiAnalytics.ts', () => ({ useChainTable: () => useChainTable() }));
+const marginMutate = vi.fn();
+vi.mock('../../api/margin.ts', () => ({ useMarginQuote: () => ({ mutate: marginMutate, isPending: false, data: undefined }) }));
 
 import { RiskCalculatorPage } from './RiskCalculatorPage.tsx';
 
-const leg = (tradingsymbol: string, ltp: string | null) => ({
+const leg = (tradingsymbol: string, ltp: string | null, exchange: string | null = 'NFO') => ({
   leg: {
+    exchange,
     tradingsymbol,
     ltp,
     bid: null,
@@ -39,6 +42,7 @@ const chain = {
   riskFreeRate: null,
   pcr: null,
   stale: false,
+  lastCaptured: false,
   asOf: '2026-07-02T10:00:00Z',
   interval: '3m',
   rows: [{ strike: '24150.00', ce: leg('NIFTY26707 24150 CE', '138.05'), pe: leg('NIFTY26707 24150 PE', '96.10') }],
@@ -69,5 +73,37 @@ describe('RiskCalculatorPage option picker', () => {
     });
     renderPage();
     expect(screen.getByRole('button', { name: /Use LTP/ })).toBeDisabled();
+  });
+
+  // The discriminating case: the underlying is "NIFTY 50" and the symbol starts with NIFTY, so the
+  // old `/SENSEX|BANKEX/i.test(name) ? 'BFO' : 'NFO'` guess returns NFO. Only reading the leg's own
+  // master-sourced exchange produces BFO — and the SPAN quote must price the contract that exists.
+  it('prices the margin against the leg exchange, not a guess off the underlying name', async () => {
+    useChainTable.mockReturnValue({
+      data: {
+        ...chain,
+        rows: [{ strike: '24150.00', ce: leg('NIFTY26707 24150 CE', '138.05', 'BFO'), pe: null }],
+      },
+      isFetching: false,
+      isLoading: false,
+    });
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /Check SPAN margin/ }));
+    expect(marginMutate).toHaveBeenCalledWith([
+      expect.objectContaining({ exchange: 'BFO', tradingsymbol: 'NIFTY26707 24150 CE' }),
+    ]);
+  });
+
+  it('disables the margin check when the leg has no master exchange', () => {
+    useChainTable.mockReturnValue({
+      data: {
+        ...chain,
+        rows: [{ strike: '24150.00', ce: leg('NIFTY26707 24150 CE', '138.05', null), pe: null }],
+      },
+      isFetching: false,
+      isLoading: false,
+    });
+    renderPage();
+    expect(screen.getByRole('button', { name: /Check SPAN margin/ })).toBeDisabled();
   });
 });

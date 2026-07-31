@@ -61,14 +61,35 @@ class DotHealthCanaryTest {
   }
 
   private static SignalRejectionRepository.RejectionRow row(String contextJson) {
+    return rowAtBar(contextJson, OffsetDateTime.now());
+  }
+
+  /** A context-bearing row pinned to an explicit bar — the freeze probes count DISTINCT bars. */
+  private static SignalRejectionRepository.RejectionRow rowAtBar(
+      String contextJson, OffsetDateTime barTime) {
     try {
       return new SignalRejectionRepository.RejectionRow(
           1, null, "slug", "NFO", "FUT", "3m", "CE", "volume-floor", null, null, null, "r",
           null, null, MAPPER.readTree("{\"context\":" + contextJson + "}"),
-          OffsetDateTime.now(), OffsetDateTime.now());
+          barTime, OffsetDateTime.now());
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
+  }
+
+  /**
+   * {@code count} rows on {@code count} DISTINCT 3m bars, context rendered per bar index — enough
+   * bars to clear {@link DotHealthCanary#MIN_FROZEN_BARS} when count is 8 or more.
+   */
+  private static SignalRejectionRepository.RejectionRow[] rowsAcrossBars(
+      int count, java.util.function.IntFunction<String> contextForBar) {
+    OffsetDateTime base = OffsetDateTime.parse("2026-06-10T09:15:00+05:30");
+    SignalRejectionRepository.RejectionRow[] rows =
+        new SignalRejectionRepository.RejectionRow[count];
+    for (int i = 0; i < count; i++) {
+      rows[i] = rowAtBar(contextForBar.apply(i), base.plusMinutes(3L * i));
+    }
+    return rows;
   }
 
   private void stubRows(SignalRejectionRepository.RejectionRow... rows) {
@@ -205,11 +226,7 @@ class DotHealthCanaryTest {
     // day BY DESIGN (S24) — the quadrant dots are then not "expected alive today": required must
     // drop so paging, /status and the UI badge all agree it is not an outage. Date discovered from
     // the bundled calendar so the test tracks the real CSV set.
-    java.time.LocalDate expiry = java.time.LocalDate.of(2026, 1, 1);
-    while (!in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(expiry)) {
-      expiry = expiry.plusDays(1);
-    }
-    now.set(expiry.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant());
+    now.set(expiryDayAt11Ist());
     stubRows(
         row("{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
             + "\"macro\":{\"advances\":30,\"declines\":20}}"));
@@ -226,6 +243,318 @@ class DotHealthCanaryTest {
 
     canary.sweep();
     verifyNoInteractions(events);
+  }
+
+  @Test
+  void expiryDaySuppressionCoversTheSpurtProbeNotJustTheQuadrants() {
+    // 2026-07-28 live check: MarketOiClient.oi() SKIPS the whole OI block on a monthly index-expiry
+    // day and returns an inert Oi (MarketOiClient:292-294) that NEUTRALs both quadrants AND nulls
+    // the spurt magnitudes. The exemption set held only the two quadrant dots, so `oi_spurt_price`
+    // reported "input dead across 16 context-bearing rejections" — a false outage — while its two
+    // siblings correctly reported by-design. All three come off the SAME skipped read.
+    now.set(expiryDayAt11Ist());
+    stubRows(
+        row("{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\","
+            + "\"spurtPricePct\":null},\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("futures_oi,underlying_oi,oi_spurt_price");
+
+    DotHealthCanary.DotHealth health = canary.evaluate();
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).isFalse();
+              assertThat(s.required()).as("not expected alive on the suppression day").isFalse();
+              assertThat(s.detail()).contains("by design").doesNotContain("input dead");
+            });
+
+    canary.sweep();
+    verifyNoInteractions(events); // the whole OI trio is by-design today — nothing pages
+  }
+
+  @Test
+  void aDeadSpurtProbeStillPagesOnAnOrdinaryDay() {
+    // The other half of the exemption: widening it must not blind the probe on a NON-expiry day,
+    // when a null spurt magnitude is a real outage.
+    java.time.LocalDate ordinary = java.time.LocalDate.of(2026, 6, 10); // Wednesday, no monthly
+    assertThat(in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(ordinary))
+        .as("fixture day must not be an NSE monthly expiry")
+        .isFalse();
+    assertThat(in.arthayantra.marketcalendar.MarketCalendar.bse().isMonthlyIndexExpiryDay(ordinary))
+        .as("fixture day must not be a BSE monthly expiry")
+        .isFalse();
+    now.set(ordinary.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant());
+    stubRows(
+        row("{\"oi\":{\"spurtPricePct\":null},\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("oi_spurt_price");
+
+    DotHealthCanary.DotHealth health = canary.evaluate();
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.required()).isTrue();
+              assertThat(s.detail()).contains("input dead");
+            });
+
+    canary.sweep();
+    verify(events, times(1)).publishEvent(alertContaining("oi_spurt_price DEAD"));
+  }
+
+  @Test
+  void oneCalendarExpiringDoesNotSuppressTheOtherRootsRows() {
+    // codex review: MarketOiClient.oi() keys suppression on the ROW'S OWN underlying
+    // (ScalperCalendars.forUnderlying — BSE Thursday monthly for SENSEX, NSE monthly otherwise), so
+    // on an NSE-only expiry day a SENSEX-rooted OI read is NOT suppressed and a dead OI dot there is
+    // a genuine outage. Treating either calendar's expiry as a blanket exemption silences it.
+    java.time.LocalDate nseOnly = nseOnlyMonthlyExpiry2026();
+    now.set(nseOnly.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant());
+    String deadOi = "\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\","
+        + "\"spurtPricePct\":null},\"macro\":{\"advances\":30,\"declines\":20}";
+
+    // (a) window mixes a suppressed NIFTY root with a LIVE SENSEX root — must NOT stand down
+    stubRows(
+        row("{" + deadOi + ",\"underlying\":\"NIFTY 50\"}"),
+        row("{" + deadOi + ",\"underlying\":\"SENSEX\"}"));
+    DotHealthCanary mixed = canary("oi_spurt_price");
+    assertThat(mixed.evaluate().dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.required()).as("SENSEX root is not expiring — still expected").isTrue();
+              assertThat(s.detail()).contains("input dead");
+            });
+    mixed.sweep();
+    verify(events, times(1)).publishEvent(alertContaining("oi_spurt_price DEAD"));
+
+    // (b) same DAY, all rows on the expiring NIFTY root — proves (a) is not passing merely because
+    // the fixture date is wrong.
+    stubRows(row("{" + deadOi + ",\"underlying\":\"NIFTY 50\"}"));
+    assertThat(canary("oi_spurt_price").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.required()).isFalse();
+              assertThat(s.detail()).contains("by design");
+            });
+  }
+
+  /** A 2026 day that is an NSE monthly index expiry but NOT a BSE one (NSE Tuesday vs BSE Thursday). */
+  private static java.time.LocalDate nseOnlyMonthlyExpiry2026() {
+    java.time.LocalDate d = java.time.LocalDate.of(2026, 1, 1);
+    while (!(in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(d)
+        && !in.arthayantra.marketcalendar.MarketCalendar.bse().isMonthlyIndexExpiryDay(d))) {
+      d = d.plusDays(1);
+      if (d.getYear() > 2026) {
+        throw new IllegalStateException("no NSE-only monthly expiry in 2026 — calendar changed");
+      }
+    }
+    return d;
+  }
+
+  /** The bundled calendar's first NSE monthly index-expiry day of 2026, at 11:00 IST. */
+  private static Instant expiryDayAt11Ist() {
+    java.time.LocalDate expiry = java.time.LocalDate.of(2026, 1, 1);
+    while (!in.arthayantra.marketcalendar.MarketCalendar.nse().isMonthlyIndexExpiryDay(expiry)) {
+      expiry = expiry.plusDays(1);
+    }
+    return expiry.atTime(11, 0).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant();
+  }
+
+  @Test
+  void aFrozenOperandIsFlaggedEvenThoughTheDotReadsAlive() {
+    // G12: the third input state. `vixLevel` is non-null on every bar, so the alive/dead probe is
+    // right to call it live — and it carries ONE value all session, silently re-capping the
+    // composite exactly as a dead input would.
+    stubRows(rowsAcrossBars(8, i -> "{\"macro\":{\"vixLevel\":12.4,\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary.DotHealth health = canary("breadth").evaluate();
+
+    assertThat(health.dots())
+        .filteredOn(s -> s.dot().equals("vix"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).as("non-null on every bar — liveness is genuinely true").isTrue();
+              assertThat(s.frozen()).isTrue();
+              assertThat(s.detail()).contains("FROZEN").contains("across 8 bars");
+            });
+  }
+
+  @Test
+  void aVaryingOperandIsNotFrozen() {
+    stubRows(rowsAcrossBars(8, i -> "{\"macro\":{\"vixLevel\":1" + i + ".4}}"));
+    assertThat(canary("breadth").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("vix"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.frozen()).isFalse();
+              assertThat(s.detail()).contains("input live").doesNotContain("FROZEN");
+            });
+  }
+
+  @Test
+  void oneBarFannedOutAcrossStrategiesIsNeverFrozen() {
+    // THE guard on this feature. The engine evaluates one 3m bar across ~63 scalpers, so the 40-row
+    // window can be a SINGLE bar whose macro context is identical by construction. Counting rows
+    // instead of distinct bars would read that as a session-long freeze — the same fan-out
+    // inflation that made the champion book's 24 rows look like 24 independent observations when
+    // they were ~6. Twenty identical rows, ONE bar: not frozen.
+    OffsetDateTime oneBar = OffsetDateTime.parse("2026-06-10T09:15:00+05:30");
+    SignalRejectionRepository.RejectionRow[] fanOut =
+        new SignalRejectionRepository.RejectionRow[20];
+    java.util.Arrays.setAll(
+        fanOut, i -> rowAtBar("{\"macro\":{\"vixLevel\":12.4}}", oneBar));
+    stubRows(fanOut);
+
+    assertThat(canary("breadth").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("vix"))
+        .singleElement()
+        .satisfies(s -> assertThat(s.frozen()).as("1 distinct bar < MIN_FROZEN_BARS").isFalse());
+  }
+
+  @Test
+  void theAtmIvFreezeReadsByDesignAndNeverPages() {
+    // G12's discovered case, and the reason `frozen` must not page. `atmIv` is the previous
+    // session's EOD scalar: MarketOiClient.macro() -> /market/options/iv-history.currentIv ->
+    // the last `iv_daily_summary` row, which IvRollupJob writes once a day at 16:00 IST. One value
+    // per session is CORRECT, so a paging frozen-probe would fire a false alarm every single day.
+    stubRows(rowsAcrossBars(8, i -> "{\"macro\":{\"atmIv\":0.118781,\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("iv_abs_band");
+
+    assertThat(canary.evaluate().dots())
+        .filteredOn(s -> s.dot().equals("iv_abs_band"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).isTrue();
+              assertThat(s.frozen()).isTrue();
+              assertThat(s.detail()).contains("BY DESIGN").contains("EOD daily operand");
+            });
+
+    canary.sweep();
+    // A DAILY operand freezes every session by construction, so paging on it would be a guaranteed
+    // daily false alarm. Only CONTINUOUS freezes page.
+    verifyNoInteractions(events);
+  }
+
+  @Test
+  void aLowCardinalityOperandIsNeverFreezeJudged() {
+    // Cross-vendor review 2026-07-29: the quadrants are a 4-value enum and `dowUp` is a boolean, so
+    // eight bars carrying the same value is their NORMAL state and says nothing. Judging them by
+    // the continuous rule made the flag noise. The all-NEUTRAL OUTAGE is still caught — by `alive`,
+    // which is the probe that pages.
+    stubRows(
+        rowsAcrossBars(
+            10,
+            i -> "{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\"},"
+                + "\"macro\":{\"advances\":30,\"declines\":20,\"dowUp\":true}}"));
+    DotHealthCanary canary = canary("futures_oi");
+
+    assertThat(canary.evaluate().dots())
+        .filteredOn(s -> s.dot().equals("futures_oi") || s.dot().equals("dow"))
+        .allSatisfy(s -> assertThat(s.frozen()).isFalse())
+        .filteredOn(s -> s.dot().equals("futures_oi"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).as("the T13 outage is still caught").isFalse();
+              assertThat(s.detail()).contains("input dead").doesNotContain("FROZEN");
+            });
+
+    canary.sweep();
+    verify(events, times(1)).publishEvent(alertContaining("futures_oi DEAD"));
+  }
+
+  @Test
+  void aFrozenContinuousRequiredOperandPagesOncePerDay() {
+    // The other half of the review finding: a CONTINUOUS operand stuck on one value is an outage
+    // `alive` cannot see (the field is populated), so without this it would only ever reach someone
+    // who opened the rejections page. breadth is CONTINUOUS and required by default.
+    stubRows(rowsAcrossBars(10, i -> "{\"macro\":{\"advances\":30,\"declines\":20}}"));
+    DotHealthCanary canary = canary("breadth");
+
+    assertThat(canary.evaluate().dots())
+        .filteredOn(s -> s.dot().equals("breadth"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.alive()).as("populated on every bar").isTrue();
+              assertThat(s.frozen()).isTrue();
+            });
+
+    canary.sweep();
+    canary.sweep(); // same day — one page only
+    verify(events, times(1)).publishEvent(alertContaining("breadth FROZEN"));
+  }
+
+  @Test
+  void aDeadContinuousOperandPagesOnceAsDeadAndNeverAlsoAsFrozen() {
+    // Cross-vendor review round 2: breadth's dead sentinel is 0/0, which fails the `alive` test but
+    // still RENDERS a non-null operand — so eight bars of outage make the dot dead AND frozen. The
+    // frozen page must therefore require alive(), or one outage emits two alerts and the second
+    // one's message ("reads live but has not changed value") contradicts the first.
+    stubRows(rowsAcrossBars(10, i -> "{\"macro\":{\"advances\":0,\"declines\":0}}"));
+    DotHealthCanary canary = canary("breadth");
+
+    canary.sweep();
+    verify(events, times(1)).publishEvent(alertContaining("breadth DEAD"));
+    verify(events, org.mockito.Mockito.never()).publishEvent(alertContaining("breadth FROZEN"));
+  }
+
+  @Test
+  void expiryDaySuppressionStandsDownTheFrozenFlagToo() {
+    // On a suppression day the OI read is not being produced at all, so its single inert value is
+    // by-design inertness rather than a freeze. oi_spurt_price is CONTINUOUS (so it WOULD otherwise
+    // be freeze-judged) and is in the S24 set, which makes it the probe that proves this branch.
+    now.set(expiryDayAt11Ist());
+    stubRows(
+        rowsAcrossBars(
+            10,
+            i -> "{\"oi\":{\"futuresQuadrant\":\"NEUTRAL\",\"underlyingQuadrant\":\"NEUTRAL\","
+                + "\"spurtPricePct\":0},\"macro\":{\"advances\":30,\"declines\":20},"
+                + "\"underlying\":\"NIFTY 50\"}"));
+
+    assertThat(canary("oi_spurt_price").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("oi_spurt_price"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.frozen()).isFalse();
+              assertThat(s.detail()).contains("by design").doesNotContain("FROZEN");
+            });
+  }
+
+  @Test
+  void theFreezeWindowReachesPastTheFortyRowLivenessWindow() {
+    // Cross-vendor review 2026-07-29, the finding that made the feature real: the freeze pass reads
+    // EVERY context-bearing row in the scan, not the 40-row liveness window. Live fan-out put only
+    // 4-7 distinct bars inside the newest 40 rows on 3 of 8 sessions (07-21/07-24/07-28), so a
+    // 40-row-capped freeze pass was silently inert on a third of sessions however frozen the
+    // operand was. Here: 60 rows of fan-out on 2 bars, then 8 further bars behind them. Capped at
+    // 40 rows the probe sees 2 bars and cannot flag; reading the whole scan it sees 10.
+    OffsetDateTime base = OffsetDateTime.parse("2026-06-10T09:15:00+05:30");
+    List<SignalRejectionRepository.RejectionRow> rows = new java.util.ArrayList<>();
+    for (int i = 0; i < 60; i++) {
+      rows.add(rowAtBar("{\"macro\":{\"vixLevel\":12.4}}", base.plusMinutes(3L * (i % 2))));
+    }
+    for (int b = 2; b < 10; b++) {
+      rows.add(rowAtBar("{\"macro\":{\"vixLevel\":12.4}}", base.plusMinutes(3L * b)));
+    }
+    stubRows(rows.toArray(new SignalRejectionRepository.RejectionRow[0]));
+
+    assertThat(canary("breadth").evaluate().dots())
+        .filteredOn(s -> s.dot().equals("vix"))
+        .singleElement()
+        .satisfies(
+            s -> {
+              assertThat(s.frozen()).isTrue();
+              assertThat(s.detail()).contains("across 10 bars");
+            });
   }
 
   @Test

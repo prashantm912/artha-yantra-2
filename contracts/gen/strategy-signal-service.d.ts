@@ -660,6 +660,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signals/minervini-swing/catchup-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["catchUpStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signals/minervini-swing/admission-probe": {
         parameters: {
             query?: never;
@@ -684,6 +700,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["sellDecisions_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signals/manas-arora-swing/catchup-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["catchUpStatus_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1166,6 +1198,13 @@ export interface components {
             notes?: string;
             createdBy?: string;
         };
+        DraftVersionResponse: {
+            /** Format: uuid */
+            id: string;
+            version: string;
+            status: string;
+            checksum: string;
+        };
         JsonNode: unknown;
         UpdateBody: {
             book?: string;
@@ -1242,11 +1281,26 @@ export interface components {
             version?: string;
             andPublish?: boolean;
         };
+        RollbackResponse: {
+            /** Format: uuid */
+            id: string;
+            newVersion: string;
+            copiedFrom: string;
+            status: string;
+        };
         PublishRequest: {
             targetVersion?: string;
             notes?: string;
             cas?: boolean;
             expectedPublishedVersionId?: string;
+        };
+        PublishResponse: {
+            /** Format: uuid */
+            id: string;
+            version: string;
+            /** Format: uuid */
+            versionId: string;
+            status: string;
         };
         ToggleResult: {
             /** Format: uuid */
@@ -1264,14 +1318,54 @@ export interface components {
             version: string;
             status: string;
         };
+        ArchiveResponse: {
+            /** Format: uuid */
+            id: string;
+            status: string;
+        };
         ValidateRequest: {
             config?: string;
+        };
+        ValidateResponse: {
+            valid: boolean;
+            errors: components["schemas"]["ValidationIssue"][];
+            warnings: components["schemas"]["ValidationIssue"][];
+        };
+        ValidationIssue: {
+            path: string;
+            message: string;
         };
         TakenRequest: {
             fillPrice?: string;
             /** Format: int32 */
             qty?: number;
             note?: string;
+        };
+        SignalDto: {
+            /** Format: int64 */
+            id: number;
+            /** Format: uuid */
+            strategyVersionId: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
+            signalType: string;
+            side: string;
+            entryPrice: number | null;
+            stopLoss: number | null;
+            target: number | null;
+            compositeScore: number;
+            scoreBreakdown: components["schemas"]["JsonNode"];
+            status: string;
+            /** Format: date-time */
+            generatedAt: string;
+            /** Format: date-time */
+            expiresAt: string | null;
+            suggestedQty: number | null;
+            tradeableExchange: string | null;
+            tradeableTradingsymbol: string | null;
+            scalperDetail: components["schemas"]["JsonNode"] | null;
+            exitReason: string | null;
         };
         SellDecisionRow: {
             /** Format: int64 */
@@ -1331,6 +1425,8 @@ export interface components {
             /** Format: int32 */
             exitSkipped: number;
             admission: components["schemas"]["AdmissionProbe"];
+            refusalReasons: string[];
+            deadlineReached: boolean;
         };
         RegisterRequest: {
             name?: string;
@@ -1469,6 +1565,12 @@ export interface components {
             enabled?: boolean;
             channel?: string;
         };
+        NotificationsResponse: {
+            /** Format: uuid */
+            id: string;
+            notificationsEnabled: boolean;
+            notificationChannel: string | null;
+        };
         BracketBody: {
             stopLoss?: number;
             takeProfit?: number;
@@ -1493,9 +1595,9 @@ export interface components {
             compositeScore: number;
             /** Format: date-time */
             generatedAt: string;
-            scalperDetail: components["schemas"]["JsonNode"];
-            minerviniDetail: components["schemas"]["JsonNode"];
-            manasAroraDetail: components["schemas"]["JsonNode"];
+            scalperDetail: components["schemas"]["JsonNode"] | null;
+            minerviniDetail: components["schemas"]["JsonNode"] | null;
+            manasAroraDetail: components["schemas"]["JsonNode"] | null;
         };
         OrderLeg: {
             /** Format: int64 */
@@ -1544,8 +1646,83 @@ export interface components {
             subaccountIdx: number | null;
             /** Format: int64 */
             openingSignalId: number | null;
-            openingSignal: components["schemas"]["OpeningSignal"];
+            openingSignal: components["schemas"]["OpeningSignal"] | null;
             orders: components["schemas"]["OrderLeg"][];
+        };
+        StrategyListItem: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            currentVersion: string | null;
+            publishedVersion: string | null;
+            currentVersionId: string | null;
+            publishedVersionId: string | null;
+            status: string;
+            tags: string[];
+            author: string;
+            enabled: boolean;
+            notificationsEnabled: boolean;
+            notificationChannel: string | null;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        StrategyListResponse: {
+            items: components["schemas"]["StrategyListItem"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
+        StrategyDetail: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            versionId: string;
+            /** Format: uuid */
+            publishedVersionId: string | null;
+            publishedVersion: string | null;
+            slug: string;
+            name: string;
+            description: string | null;
+            tags: string[];
+            enabled: boolean;
+            version: string;
+            status: string;
+            config: components["schemas"]["JsonNode"];
+            configYaml: string;
+            checksum: string;
+            notes: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            notificationsEnabled: boolean;
+            notificationChannel: string | null;
+        };
+        VersionListItem: {
+            versionId: string;
+            version: string;
+            status: string;
+            checksum: string;
+            author: string;
+            notes: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        VersionListResponse: {
+            items: components["schemas"]["VersionListItem"][];
+        };
+        DiffResponse: {
+            structured: components["schemas"]["Op"][];
+            yamlFrom: string;
+            yamlTo: string;
+        };
+        Op: {
+            path: string;
+            op: string;
+            before: string | null;
+            after: string | null;
         };
         AuditLogResponse: {
             items: components["schemas"]["AuditRow"][];
@@ -1606,6 +1783,13 @@ export interface components {
             sharpe: number | null;
             maxDrawdownPct: number | null;
         };
+        SignalPage: {
+            items: components["schemas"]["SignalDto"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
         SellDecisions: {
             items: components["schemas"]["SellDecisionRow"][];
         };
@@ -1633,6 +1817,17 @@ export interface components {
             asOf: string;
             items: components["schemas"]["SwingSellDecision"][];
         };
+        SwingCatchUpStatus: {
+            batch: string;
+            /** Format: date */
+            sessionDate: string | null;
+            status: string | null;
+            /** Format: int32 */
+            attempts: number | null;
+            reason: string | null;
+            /** Format: date-time */
+            updatedAt: string | null;
+        };
         AdmissionProbes: {
             items: components["schemas"]["ProbeRow"][];
         };
@@ -1657,6 +1852,39 @@ export interface components {
             capBound: boolean;
             droppedByCap: components["schemas"]["DroppedCandidate"][];
         };
+        SignalFeed: {
+            items: components["schemas"]["SignalDto"][];
+        };
+        RejectionPage: {
+            items: components["schemas"]["RejectionRow"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
+        RejectionRow: {
+            /** Format: int64 */
+            id: number;
+            /** Format: uuid */
+            strategyVersionId: string;
+            strategySlug: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
+            side: string | null;
+            blockingRail: string;
+            blockingOperand: number | null;
+            blockingThreshold: number | null;
+            blockingMargin: number | null;
+            blockingReason: string | null;
+            compositeScore: number | null;
+            compositeThreshold: number | null;
+            diagnostic: components["schemas"]["JsonNode"];
+            /** Format: date-time */
+            barTime: string;
+            /** Format: date-time */
+            generatedAt: string;
+        };
         ShadowSummaryResponse: {
             items: components["schemas"]["VariantSummary"][];
         };
@@ -1675,6 +1903,14 @@ export interface components {
             /** Format: int64 */
             unpriced: number;
         };
+        RailCount: {
+            rail: string;
+            /** Format: int64 */
+            count: number;
+        };
+        RailCountList: {
+            items: components["schemas"]["RailCount"][];
+        };
         DotHealth: {
             asOf: string;
             session: boolean;
@@ -1688,10 +1924,36 @@ export interface components {
             dot: string;
             alive: boolean;
             required: boolean;
+            frozen: boolean;
             detail: string;
         };
         ShadowVariantListResponse: {
             items: components["schemas"]["ShadowVariantView"][];
+        };
+        TradePage: {
+            items: components["schemas"]["TradeDto"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
+        PositionList: {
+            items: components["schemas"]["PositionDto"][];
+        };
+        EquityPoint: {
+            date: string;
+            equity: number;
+        };
+        Pnl: {
+            points: components["schemas"]["EquityPoint"][];
+            summary: components["schemas"]["PnlSummary"];
+        };
+        PnlSummary: {
+            realizedTotal: number;
+            /** Format: int32 */
+            trades: number;
+            winRate: number | null;
+            expectancy: number | null;
         };
         MarginHeat: {
             priced: boolean;
@@ -1728,6 +1990,49 @@ export interface components {
         PaperEventsResponse: {
             items: components["schemas"]["PaperEventDto"][];
         };
+        Tradebook: {
+            items: components["schemas"]["TradebookEntry"][];
+        };
+        TradebookEntry: {
+            symbol: string;
+            exchange: string;
+            action: string;
+            qty: number;
+            price: number;
+            tradeValue: number;
+            product: string;
+            orderId: string;
+            tradeTime: string;
+        };
+        PositionEntry: {
+            symbol: string;
+            exchange: string;
+            side: string;
+            qty: number;
+            product: string;
+            avgPrice: number;
+            ltp: number;
+            mtmPnl: number;
+        };
+        Positions: {
+            items: components["schemas"]["PositionEntry"][];
+        };
+        Orderbook: {
+            items: components["schemas"]["OrderbookEntry"][];
+        };
+        OrderbookEntry: {
+            symbol: string;
+            exchange: string;
+            action: string;
+            qty: number;
+            price: number;
+            triggerPrice: number;
+            pricetype: string;
+            product: string;
+            orderId: string;
+            status: string;
+            timestamp: string;
+        };
         Funds: {
             status: string;
             availableCash: number | null;
@@ -1735,6 +2040,13 @@ export interface components {
             m2mRealized: number | null;
             m2mUnrealized: number | null;
             utilisedDebits: number | null;
+        };
+        JournalPage: {
+            items: components["schemas"]["Entry"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
         };
         Insight: {
             /** Format: uuid */
@@ -1748,7 +2060,7 @@ export interface components {
             explanation: string;
             evidence: components["schemas"]["JsonNode"];
             priority: number | null;
-            priorityDetail: components["schemas"]["JsonNode"];
+            priorityDetail: components["schemas"]["JsonNode"] | null;
             dataTrust: string;
             trustReasons: string[];
             dedupeKey: string;
@@ -1821,11 +2133,6 @@ export interface components {
             verdict: string;
             unrealizedPct: number | null;
             acknowledged: boolean;
-        };
-        RailCount: {
-            rail: string;
-            /** Format: int64 */
-            count: number;
         };
         NotificationEventRow: {
             /** Format: int64 */
@@ -1966,9 +2273,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StrategyDetail"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2003,9 +2308,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["DraftVersionResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2296,9 +2599,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StrategyListResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2331,9 +2632,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["DraftVersionResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2368,9 +2667,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RollbackResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2405,9 +2702,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["PublishResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2568,9 +2863,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ArchiveResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2603,9 +2896,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ValidateResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2640,9 +2931,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalDto"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2673,9 +2962,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalDto"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2722,7 +3009,9 @@ export interface operations {
     };
     run: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2751,7 +3040,9 @@ export interface operations {
     };
     run_1: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2962,9 +3253,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["JournalPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3164,9 +3453,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["NotificationsResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3235,9 +3522,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["VersionListResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3269,9 +3554,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StrategyDetail"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3340,9 +3623,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["DiffResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3502,9 +3783,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3535,9 +3814,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalDto"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3614,6 +3891,35 @@ export interface operations {
             };
         };
     };
+    catchUpStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SwingCatchUpStatus"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     admissionProbe: {
         parameters: {
             query?: {
@@ -3661,6 +3967,35 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["SwingSellReport"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    catchUpStatus_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SwingCatchUpStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3757,9 +4092,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SignalFeed"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3797,9 +4130,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RejectionPage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3865,9 +4196,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RailCountList"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3932,9 +4261,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["TradePage"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3999,9 +4326,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["PositionList"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4063,9 +4388,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Pnl"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4160,9 +4483,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Tradebook"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4191,9 +4512,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Positions"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -4222,9 +4541,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Orderbook"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

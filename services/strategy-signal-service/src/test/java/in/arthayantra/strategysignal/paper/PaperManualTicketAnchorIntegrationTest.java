@@ -240,14 +240,13 @@ class PaperManualTicketAnchorIntegrationTest extends StrategySignalIntegrationTe
     // Shared singleton IT DB, no per-method cleanup: unique slug + name + symbol per method.
     String slug = "btst-anchor-it-" + UUID.randomUUID().toString().substring(0, 8);
     UUID strategyId =
-        (UUID)
-            registry
+                    registry
                 .create(
                     "BTST Anchor IT " + slug,
                     null,
                     List.of("it"),
                     BTST_CONFIG.replace("id: btst-anchor-it", "id: " + slug))
-                .get("id");
+                .id();
     registry.publish(strategyId, null, null);
     UUID versionId = strategyRepo.latestVersion(strategyId).orElseThrow().id();
 
@@ -257,7 +256,7 @@ class PaperManualTicketAnchorIntegrationTest extends StrategySignalIntegrationTe
         signalRepo.insert(
             versionId, "NFO", symbol, "1m", "ENTRY", "BUY",
             new BigDecimal("80.00"), new BigDecimal("40.00"), new BigDecimal("120.00"),
-            new BigDecimal("0.80"), "{}", now, now.plusHours(1));
+            new BigDecimal("0.80"), "{}", now, now.plusHours(1), null);
     assertThat(signalRepo.find(signalId).orElseThrow().status()).isEqualTo("ACTIVE");
 
     // Pin the premise the whole orphan rests on: this strategy's style is swept by expireAllActive

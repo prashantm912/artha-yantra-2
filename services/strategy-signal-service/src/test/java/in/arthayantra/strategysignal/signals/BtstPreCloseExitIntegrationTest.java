@@ -245,7 +245,7 @@ class BtstPreCloseExitIntegrationTest extends StrategySignalIntegrationTestBase 
                     null,
                     List.of("it"),
                     CONFIG.replace("id: btst-exit-it", "id: " + slug).replace("BTSTIT", sym))
-                .get("id");
+                .id();
     UUID versionId = strategyRepo.latestVersion(strategyId).orElseThrow().id();
     StrategyDefinition definition =
         StrategyCompiler.compile(signals.versionConfig(versionId).orElseThrow());
@@ -274,7 +274,7 @@ class BtstPreCloseExitIntegrationTest extends StrategySignalIntegrationTestBase 
         signals.insert(
             versionId, "NFO", sym, "1d", "ENTRY", "BUY",
             new BigDecimal("100.00"), null, null, new BigDecimal("0.80"), "{}",
-            entryPreClose, entryPreClose.plusHours(48));
+            entryPreClose, entryPreClose.plusHours(48), null);
     signals.transition(signalId, "TAKEN");
     events.publishEvent(new SignalTaken(signalId, 50, new BigDecimal("100.00")));
     assertThat(openCount(sym)).isEqualTo(1);

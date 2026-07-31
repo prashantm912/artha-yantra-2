@@ -51,4 +51,30 @@ public class PaperOrderRejectionRecorder {
         signalId, book, exchange, tradingsymbol, side, qty, "NO_PRICE",
         "no price available to fill", null);
   }
+
+  /** DEPLOYMENT_BLOCKED: filling this order would push the book past its max-deployment cap. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void recordDeploymentBlocked(
+      Long signalId,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      String detail) {
+    repo.insert(
+        signalId, book, exchange, tradingsymbol, side, qty, "DEPLOYMENT_BLOCKED", detail, null);
+  }
+
+  /** ZERO_SIZE: the emitted entry was unaffordable at its option premium and opened no order. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void recordZeroSize(
+      Long signalId,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      String detail) {
+    repo.insert(signalId, book, exchange, tradingsymbol, side, 0L, "ZERO_SIZE", detail, null);
+  }
 }

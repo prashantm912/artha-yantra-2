@@ -323,12 +323,21 @@ class ScalperStrategyLoadTest {
           .as(id + " volume-pump armed iff gap-theory")
           .isEqualTo(isGapTheory);
 
-      // E3 fii-bias + constituent-gate (§4.6): armed on the scalp-trend-change family (a reversal
-      // confirmed by FII flow + the index heavyweights' net push, both cited in trend-change.md).
+      // E3 constituent-gate (§4.6): armed on the scalp-trend-change family (a reversal confirmed by
+      // the index heavyweights' net push, cited in trend-change.md).
       boolean isTrendChange = id.startsWith("scalp-trend-change-");
+      // E3 fii-bias (§4.6): the trend-change family's OTHER §4.6 confirm — but PE-SIDE ONLY (owner
+      // decision 2026-07-27). The gate passes CE only when the FII index-future LONG share is >= 50%,
+      // and measured over 11 recent sessions that share ran 8.1-15.7%: FII net-short in index futures
+      // is the structural norm, not a bearish signal. On a CE strategy the gate is therefore an
+      // unconditional off switch, not a directional filter. PE keeps it — `<= 50` passes today and
+      // still bites if FII ever flips genuinely net-long. This only became observable when the EOD
+      // read was fixed to ask for the last SETTLED session; before that `Macro.fiiLongPct` was null
+      // on every bar and the gate degraded to pass, so it had never actually run.
+      boolean armsFiiBias = isTrendChange && id.endsWith("-pe");
       assertThat(tags.contains("fii-bias"))
-          .as(id + " fii-bias armed iff trend-change")
-          .isEqualTo(isTrendChange);
+          .as(id + " fii-bias armed iff trend-change AND PE side")
+          .isEqualTo(armsFiiBias);
       assertThat(tags.contains("constituent-gate"))
           .as(id + " constituent-gate armed iff trend-change")
           .isEqualTo(isTrendChange);

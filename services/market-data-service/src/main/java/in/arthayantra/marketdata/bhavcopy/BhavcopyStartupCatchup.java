@@ -18,8 +18,19 @@ import org.springframework.stereotype.Component;
  * {@code PessimisticLockingFailureException: deadlock detected}, two transactions each holding what
  * the other wanted. It reproduced ONLY on the 2-core CI runner (locally the startup run finishes
  * long before the test reaches its DELETE), which is why it passed every PR shard while turning
- * {@code push:main} red from #1016 onward. Tests that manipulate bhavcopy tables set
- * {@code artha.bhavcopy.startup-catchup=false} and the race cannot occur.
+ * {@code push:main} red from #1016 onward.
+ *
+ * <p>⚠️ The first mitigation — "tests that manipulate bhavcopy tables set
+ * {@code artha.bhavcopy.startup-catchup=false}" — was the WRONG SCOPE and the deadlock came back
+ * (task_06ad72b6, 2026-07-31: 3-of-3 surefire attempts on PR #1138's shard, with the failing test
+ * carrying the property). Spring CACHES test contexts: every OTHER context in the module boots
+ * with catch-up on, and this listener's fire-and-forget write can land while any test's DELETE
+ * runs — the hazard is any cached-context writer vs any test, not this test vs itself. The
+ * property is therefore defaulted OFF for the whole module on
+ * {@code MarketDataIntegrationTestBase} (the substrate all 67 IT contexts extend), along with the
+ * 19:30-IST eod-cron (14:00 UTC — prime CI hours, the same race through the scheduled door). There
+ * is NO in-hierarchy opt-out — subclass {@code @DynamicPropertySource} runs BEFORE the base's, so
+ * the base wins; a test that wants this path must not extend the shared substrate.
  *
  * <p>Production behaviour is unchanged: the property defaults to on via {@code matchIfMissing}.
  */

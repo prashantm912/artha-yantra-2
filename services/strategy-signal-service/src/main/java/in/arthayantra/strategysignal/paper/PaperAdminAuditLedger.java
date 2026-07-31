@@ -31,6 +31,8 @@ public class PaperAdminAuditLedger {
   public static final String ACTION_CAPITAL_CHANGE = "CAPITAL_CHANGE";
   /** A manual owner override of an OPEN position's stop-loss / take-profit (PATCH .../brackets). */
   public static final String ACTION_BRACKET_EDIT = "BRACKET_EDIT";
+  /** An owner-initiated close of an OPEN position (POST .../positions/{id}/close). */
+  public static final String ACTION_MANUAL_CLOSE = "MANUAL_CLOSE";
 
   private static final Logger log = LoggerFactory.getLogger(PaperAdminAuditLedger.class);
 
@@ -77,6 +79,21 @@ public class PaperAdminAuditLedger {
     detail.put("newStopLoss", plain(newStopLoss));
     detail.put("newTakeProfit", plain(newTakeProfit));
     record(ACTION_BRACKET_EDIT, book, detail);
+  }
+
+  /**
+   * Record an owner-initiated position close (the manual-close endpoint). Without this a hand close was
+   * INDISTINGUISHABLE from a routine engine/bracket close in the trail — noticed 2026-07-20 while
+   * closing position 29 by hand after the 07-17 batch outage. {@code requestedPrice} is null when the
+   * caller let it settle at the last real tick; {@code realizedPnl} is what the settle actually booked.
+   */
+  public void recordManualClose(
+      String book, long positionId, BigDecimal requestedPrice, BigDecimal realizedPnl) {
+    Map<String, Object> detail = new LinkedHashMap<>();
+    detail.put("positionId", positionId);
+    detail.put("requestedPrice", plain(requestedPrice));
+    detail.put("realizedPnl", plain(realizedPnl));
+    record(ACTION_MANUAL_CLOSE, book, detail);
   }
 
   private static String plain(BigDecimal v) {

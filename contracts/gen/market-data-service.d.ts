@@ -2384,6 +2384,11 @@ export interface components {
             priority?: string;
             subscriber?: string;
         };
+        SubscribeResponse: {
+            exchange: string;
+            tradingsymbol: string;
+            effectiveMode: string;
+        };
         PortfolioStat: {
             /** Format: int32 */
             slots: number;
@@ -2415,9 +2420,9 @@ export interface components {
             /** Format: int32 */
             totalTrades: number;
             setups: components["schemas"]["SetupStat"][];
-            portfolio: components["schemas"]["PortfolioStat"];
-            portfolioRsPriority: components["schemas"]["PortfolioStat"];
-            portfolioRsPriorityNet: components["schemas"]["PortfolioStat"];
+            portfolio: components["schemas"]["PortfolioStat"] | null;
+            portfolioRsPriority: components["schemas"]["PortfolioStat"] | null;
+            portfolioRsPriorityNet: components["schemas"]["PortfolioStat"] | null;
             note: string | null;
         };
         SetupStat: {
@@ -2628,6 +2633,10 @@ export interface components {
             /** Format: date */
             to?: string;
         };
+        IvRollupResponse: {
+            /** Format: int32 */
+            recomputed: number;
+        };
         MarginLeg: {
             exchange?: string;
             underlying?: string;
@@ -2685,13 +2694,13 @@ export interface components {
             bse: components["schemas"]["BhavcopyExchangeResult"];
         };
         RefreshRequest: {
-            exchange?: string;
-            tradingsymbol?: string;
-            interval?: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
             /** Format: date-time */
-            from?: string;
+            from: string;
             /** Format: date-time */
-            to?: string;
+            to: string;
         };
         QueryRequest: {
             sql?: string;
@@ -2715,6 +2724,12 @@ export interface components {
             expiry?: string;
             /** Format: date */
             date?: string;
+        };
+        ContinuousBackfillResponse: {
+            root: string;
+            contSymbol: string;
+            /** Format: int32 */
+            contracts: number;
         };
         DownloadRequest: {
             exchange?: string;
@@ -2759,6 +2774,25 @@ export interface components {
             /** Format: date-time */
             tokenValidUntil: string;
         };
+        WorldIndex: {
+            name: string | null;
+            country: string | null;
+            key: string;
+            tradingSymbol: string | null;
+            ltp: number | null;
+            prevClose: number | null;
+            netChange: number | null;
+            changePct: number | null;
+            open: number | null;
+            high: number | null;
+            low: number | null;
+            /** Format: date-time */
+            asOf: string | null;
+            latency: string | null;
+        };
+        WorldIndicesResponse: {
+            items: components["schemas"]["WorldIndex"][];
+        };
         VixQuote: {
             ltp: number;
             dayHigh: number | null;
@@ -2795,6 +2829,33 @@ export interface components {
             /** Format: int32 */
             subscribers: number;
         };
+        MarketSurfaceStatus: {
+            serverTime: string;
+            tradingDay: boolean;
+            marketOpen: boolean;
+            sessionOpen: string;
+            sessionClose: string;
+            nextTradingDay: string;
+            previousTradingDay: string;
+            lastTradingDay: string;
+        };
+        Row: {
+            exchange: string;
+            tradingsymbol: string;
+            latestClose: number;
+            pastClose: number;
+            value: number;
+            avgVolume: number | null;
+            distanceFromHigh52w: number | null;
+            label: string | null;
+        };
+        ScreenerResponse: {
+            items: components["schemas"]["Row"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+        };
         MinerviniBacktestResult: {
             status: string;
             /** Format: date */
@@ -2803,7 +2864,7 @@ export interface components {
             variants: components["schemas"]["Report"][];
             sweep: components["schemas"]["SweepCell"][];
             slotSweep: components["schemas"]["SlotCell"][];
-            rotation: components["schemas"]["RotationResult"];
+            rotation: components["schemas"]["RotationResult"] | null;
             note: string;
         };
         RotationResult: {
@@ -3024,6 +3085,21 @@ export interface components {
             /** Format: int32 */
             baseWeeks: number | null;
             rejectReason: string | null;
+        };
+        PreOpen: {
+            phase: string;
+            preOpen: boolean;
+            indices: components["schemas"]["PreOpenIndex"][];
+        };
+        PreOpenIndex: {
+            name: string;
+            key: string;
+            ltp: number | null;
+            prevClose: number | null;
+            netChange: number | null;
+            changePct: number | null;
+            /** Format: date-time */
+            asOf: string;
         };
         DataFreshness: {
             /** Format: date-time */
@@ -3256,11 +3332,13 @@ export interface components {
             riskFreeRate: number;
             pcr: number | null;
             stale: boolean;
+            lastCaptured: boolean;
             /** Format: date-time */
             asOf: string;
             rows: components["schemas"]["StrikeRow"][];
         };
         Leg: {
+            exchange: string | null;
             tradingsymbol: string;
             ltp: number | null;
             bid: number | null;
@@ -3291,6 +3369,44 @@ export interface components {
             ce: components["schemas"]["Leg"];
             pe: components["schemas"]["Leg"];
         };
+        ChainHistoryResponse: {
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            /** Format: date-time */
+            ts: string;
+            rows: components["schemas"]["SnapshotRow"][];
+        };
+        SnapshotRow: {
+            /** Format: date-time */
+            ts: string;
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            strike: number;
+            optionType: string;
+            tradingsymbol: string;
+            ltp: number | null;
+            bid: number | null;
+            ask: number | null;
+            /** Format: int64 */
+            volume: number | null;
+            /** Format: int64 */
+            oi: number | null;
+            /** Format: int64 */
+            oiChange: number | null;
+            spotPrice: number | null;
+            iv: number | null;
+            delta: number | null;
+            gamma: number | null;
+            theta: number | null;
+            vega: number | null;
+            rho: number | null;
+            ivReason: string | null;
+            priceSource: string | null;
+            forwardPrice: number | null;
+            riskFreeRate: number | null;
+        };
         ChainTable: {
             underlying: string;
             /** Format: date */
@@ -3301,6 +3417,7 @@ export interface components {
             riskFreeRate: number;
             pcr: number | null;
             stale: boolean;
+            lastCaptured: boolean;
             /** Format: date-time */
             asOf: string;
             interval: string;
@@ -3309,7 +3426,7 @@ export interface components {
         };
         ChainTableLeg: {
             leg: components["schemas"]["Leg"];
-            deltas: components["schemas"]["LegDeltas"];
+            deltas: components["schemas"]["LegDeltas"] | null;
         };
         ChainTableRow: {
             strike: number;
@@ -3425,6 +3542,25 @@ export interface components {
             /** Format: int64 */
             peOi: number;
         };
+        MarketStatus: {
+            exchange: string;
+            status: string;
+            preOpen: boolean;
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        MarketStatusesResponse: {
+            items: components["schemas"]["MarketStatus"][];
+        };
+        HolidayEntry: {
+            date: string;
+            day: string;
+            description: string;
+        };
+        HolidaysResponse: {
+            items: components["schemas"]["HolidayEntry"][];
+            asOf: string;
+        };
         CrossSourceReport: {
             status: string;
             /** Format: date-time */
@@ -3477,7 +3613,7 @@ export interface components {
             /** Format: int32 */
             missingDays: number;
             days: components["schemas"]["DayVerdict"][];
-            lastRun: components["schemas"]["LastRun"];
+            lastRun: components["schemas"]["LastRun"] | null;
         };
         CanaryReport: {
             status: string;
@@ -3580,6 +3716,82 @@ export interface components {
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
         };
+        FuturesPreOpen: {
+            phase: string;
+            preOpen: boolean;
+            /** Format: date-time */
+            asOf: string;
+            /** Format: int32 */
+            advances: number;
+            /** Format: int32 */
+            declines: number;
+            /** Format: int32 */
+            unchanged: number;
+            stocks: components["schemas"]["PreOpenRow"][];
+            indices: components["schemas"]["PreOpenRow"][];
+        };
+        PreOpenRow: {
+            symbol: string;
+            preOpenPrice: number | null;
+            prevClose: number | null;
+            change: number | null;
+            changePct: number | null;
+            prevDayBreak: string | null;
+        };
+        FutOiCandle: {
+            /** Format: date-time */
+            time: string;
+            open: number;
+            high: number;
+            low: number;
+            close: number;
+            /** Format: int64 */
+            volume: number;
+            /** Format: int64 */
+            oi: number | null;
+        };
+        FutOiChart: {
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            tradingsymbol: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
+            items: components["schemas"]["FutOiCandle"][];
+        };
+        OiBuzzIndicesResponse: {
+            items: string[];
+        };
+        FutAnalysisResponse: {
+            items: components["schemas"]["FutPoint"][];
+        };
+        FutPoint: {
+            /** Format: date-time */
+            bucket: string;
+            underlying: string;
+            tradingsymbol: string;
+            ltp: number | null;
+            /** Format: int64 */
+            oi: number | null;
+            /** Format: int64 */
+            oiChange: number | null;
+            dayOpen: number | null;
+            dayHigh: number | null;
+            dayLow: number | null;
+            prevClose: number | null;
+            /** Format: int64 */
+            volume: number | null;
+            /** Format: date */
+            expiry: string;
+        };
+        FutAnalysisSeriesResponse: {
+            items: components["schemas"]["FutPoint"][];
+            underlying: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
+        };
         MoverRow: {
             tradingsymbol: string;
             ltp: number | null;
@@ -3597,6 +3809,47 @@ export interface components {
             /** Format: date-time */
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
+        };
+        Screen: {
+            longCandidates: components["schemas"]["ScreenerRow"][];
+            shortCandidates: components["schemas"]["ScreenerRow"][];
+            /** Format: date-time */
+            asOf: string;
+        };
+        ScreenerRow: {
+            symbol: string;
+            ltp: number;
+            pricePct: number | null;
+            oiPct: number | null;
+            /** @enum {string} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+            /** Format: int32 */
+            breakoutDays: number;
+            openHigh: boolean;
+            openLow: boolean;
+            dailyRsi: number | null;
+            /** Format: int64 */
+            volume: number;
+            longCandidate: boolean;
+            shortCandidate: boolean;
+        };
+        EodResponse: {
+            items: components["schemas"]["EodRow"][];
+        };
+        EodRow: {
+            tradingsymbol: string;
+            /** Format: date */
+            tradeDate: string;
+            open: number | null;
+            high: number | null;
+            low: number | null;
+            close: number | null;
+            /** Format: int64 */
+            oiClose: number;
+            /** Format: int64 */
+            oiChange: number;
+            /** Format: int64 */
+            volume: number;
         };
         BuzzMatrix: {
             contracts: string[];
@@ -3644,6 +3897,25 @@ export interface components {
             /** @enum {string|null} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING" | null;
         };
+        BankAnalysisCell: {
+            bank: string;
+            ltpPct: number | null;
+            oiPct: number | null;
+            /** @enum {string|null} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING" | null;
+        } | null;
+        BankAnalysisResponse: {
+            banks: string[];
+            rows: components["schemas"]["BankAnalysisRow"][];
+            interval: string;
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        BankAnalysisRow: {
+            /** Format: date-time */
+            bucket: string;
+            cells: components["schemas"]["BankAnalysisCell"][];
+        };
         EquityFundamentals: {
             symbol: string;
             isin: string | null;
@@ -3658,6 +3930,76 @@ export interface components {
             revenuePrevCr: number | null;
             /** Format: date */
             asOf: string | null;
+        };
+        ParticipantOi: {
+            items: components["schemas"]["ParticipantOiRow"][];
+        };
+        ParticipantOiRow: {
+            /** Format: date */
+            tradeDate: string;
+            clientType: string;
+            /** Format: int64 */
+            futureIndexLong: number;
+            /** Format: int64 */
+            futureIndexShort: number;
+            /** Format: int64 */
+            futureStockLong: number;
+            /** Format: int64 */
+            futureStockShort: number;
+            /** Format: int64 */
+            optionIndexCallLong: number;
+            /** Format: int64 */
+            optionIndexPutLong: number;
+            /** Format: int64 */
+            optionIndexCallShort: number;
+            /** Format: int64 */
+            optionIndexPutShort: number;
+            /** Format: int64 */
+            optionStockCallLong: number;
+            /** Format: int64 */
+            optionStockPutLong: number;
+            /** Format: int64 */
+            optionStockCallShort: number;
+            /** Format: int64 */
+            optionStockPutShort: number;
+            /** Format: int64 */
+            totalLongContracts: number;
+            /** Format: int64 */
+            totalShortContracts: number;
+        };
+        LongShort: {
+            items: components["schemas"]["LongShortRow"][];
+        };
+        LongShortRow: {
+            /** Format: date */
+            tradeDate: string;
+            /** Format: int64 */
+            fiiLong: number;
+            /** Format: int64 */
+            fiiShort: number;
+            ratio: number;
+        };
+        DerivativeStats: {
+            items: components["schemas"]["FiiDerivativeRow"][];
+        };
+        FiiDerivativeRow: {
+            /** Format: date */
+            tradeDate: string;
+            segment: string;
+            buyValue: number;
+            sellValue: number;
+            netValue: number;
+        };
+        Cash: {
+            items: components["schemas"]["FiiDiiRow"][];
+        };
+        FiiDiiRow: {
+            /** Format: date */
+            tradeDate: string;
+            category: string;
+            buyValue: number;
+            sellValue: number;
+            netValue: number;
         };
         Bias: {
             /** Format: date */
@@ -3819,6 +4161,21 @@ export interface components {
             /** Format: int64 */
             totalTradedQty: number | null;
         };
+        Announcement: {
+            date: string;
+            time: string;
+            symbol: string;
+            company: string | null;
+            subject: string | null;
+            detail: string | null;
+            fileLink: string | null;
+        };
+        AnnouncementsResponse: {
+            items: components["schemas"]["Announcement"][];
+            from: string;
+            to: string;
+            symbol: string;
+        };
         BhavcopyBackfillStatus: {
             jobId: string | null;
             state: string;
@@ -3865,14 +4222,14 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            pcr: components["schemas"]["Pcr"];
-            maxPain: components["schemas"]["MaxPain"];
+            pcr: components["schemas"]["Pcr"] | null;
+            maxPain: components["schemas"]["MaxPain"] | null;
             oiGainers: components["schemas"]["StrikeMove"][];
             oiLosers: components["schemas"]["StrikeMove"][];
-            activeStrikes: components["schemas"]["ActiveStrikeMigration"];
-            atmStraddle: components["schemas"]["Straddle"];
-            atmIv: components["schemas"]["AtmIv"];
-            oiStructure: components["schemas"]["OiStructure"];
+            activeStrikes: components["schemas"]["ActiveStrikeMigration"] | null;
+            atmStraddle: components["schemas"]["Straddle"] | null;
+            atmIv: components["schemas"]["AtmIv"] | null;
+            oiStructure: components["schemas"]["OiStructure"] | null;
             /** Format: date-time */
             asOf: string | null;
             dataTrust: string;
@@ -3907,8 +4264,8 @@ export interface components {
         };
         FuturesDigest: {
             underlyings: components["schemas"]["UnderlyingQuadrant"][];
-            banks: components["schemas"]["BanksSummary"];
-            termStructure: components["schemas"]["TermStructureState"];
+            banks: components["schemas"]["BanksSummary"] | null;
+            termStructure: components["schemas"]["TermStructureState"] | null;
             /** Format: date-time */
             asOf: string | null;
             dataTrust: string;
@@ -3960,11 +4317,11 @@ export interface components {
             reason: string | null;
         };
         FiiDigest: {
-            cash: components["schemas"]["FiiCash"];
-            dii: components["schemas"]["DiiDivergence"];
-            futuresLongShort: components["schemas"]["FiiFuturesLongShort"];
-            participant: components["schemas"]["ParticipantPositioning"];
-            derivative: components["schemas"]["FiiDerivativeAvailability"];
+            cash: components["schemas"]["FiiCash"] | null;
+            dii: components["schemas"]["DiiDivergence"] | null;
+            futuresLongShort: components["schemas"]["FiiFuturesLongShort"] | null;
+            participant: components["schemas"]["ParticipantPositioning"] | null;
+            derivative: components["schemas"]["FiiDerivativeAvailability"] | null;
             /** Format: date-time */
             asOf: string | null;
             dataTrust: string;
@@ -4083,16 +4440,16 @@ export interface components {
         EquityDigest: {
             /** Format: date */
             tradeDate: string | null;
-            advanceDecline: components["schemas"]["AdvanceDecline"];
-            aboveMa: components["schemas"]["AboveMa"];
-            breadthThrust: components["schemas"]["BreadthThrust"];
+            advanceDecline: components["schemas"]["AdvanceDecline"] | null;
+            aboveMa: components["schemas"]["AboveMa"] | null;
+            breadthThrust: components["schemas"]["BreadthThrust"] | null;
             topSectors: components["schemas"]["SectorRotation"][];
             bottomSectors: components["schemas"]["SectorRotation"][];
             deliveryOutliers: components["schemas"]["DeliveryOutlier"][];
             returnsWindow: string | null;
             returnWinners: components["schemas"]["ReturnLeader"][];
             returnLosers: components["schemas"]["ReturnLeader"][];
-            indexConcentration: components["schemas"]["IndexConcentration"];
+            indexConcentration: components["schemas"]["IndexConcentration"] | null;
             /** Format: date-time */
             asOf: string | null;
             dataTrust: string;
@@ -4127,10 +4484,10 @@ export interface components {
             tradeDate: string;
             sessionPhase: string;
             holiday: components["schemas"]["HolidayProximity"];
-            options: components["schemas"]["OptionsDigest"];
-            vix: components["schemas"]["Vix"];
+            options: components["schemas"]["OptionsDigest"] | null;
+            vix: components["schemas"]["Vix"] | null;
             overnightCues: components["schemas"]["GlobalCue"][];
-            indexPriceAction: components["schemas"]["IndexPriceAction"];
+            indexPriceAction: components["schemas"]["IndexPriceAction"] | null;
             ingestTrust: components["schemas"]["IngestTrust"];
             /** Format: date-time */
             asOf: string;
@@ -4326,6 +4683,12 @@ export interface components {
             max: number;
             /** Format: int32 */
             remaining: number;
+        };
+        Entitlement: {
+            covered: boolean;
+            /** Format: int32 */
+            httpStatus: number;
+            detail: string;
         };
         OiBackfillStatus: {
             jobId: string | null;
@@ -4804,9 +5167,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["SubscribeResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5224,9 +5585,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["IvRollupResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5550,9 +5909,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ContinuousBackfillResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5808,9 +6165,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["WorldIndicesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5901,9 +6256,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["MarketSurfaceStatus"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5944,9 +6297,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ScreenerResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -6483,9 +6834,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["PreOpen"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7201,9 +7550,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ChainHistoryResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7448,9 +7795,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["MarketStatusesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7479,9 +7824,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["HolidaysResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7756,9 +8099,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FuturesPreOpen"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7793,9 +8134,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FutOiChart"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7824,9 +8163,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OiBuzzIndicesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7893,9 +8230,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FutAnalysisResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7930,9 +8265,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["FutAnalysisSeriesResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8001,9 +8334,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Screen"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8036,9 +8367,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["EodResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8174,9 +8503,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BankAnalysisResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8210,6 +8537,13 @@ export interface operations {
                     "*/*": components["schemas"]["EquityFundamentals"];
                 };
             };
+            /** @description Fundamentals not found for symbol */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Error envelope (COMMON 8.3) */
             default: {
                 headers: {
@@ -8239,9 +8573,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["ParticipantOi"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8273,9 +8605,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["LongShort"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8307,9 +8637,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["DerivativeStats"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8341,9 +8669,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Cash"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8653,9 +8979,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["AnnouncementsResponse"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -9101,9 +9425,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["Entitlement"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

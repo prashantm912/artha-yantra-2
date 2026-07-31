@@ -65,8 +65,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SystemStatus"
                 }
               }
             }
@@ -94,8 +93,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/SessionState"
                 }
               }
             }
@@ -116,6 +114,99 @@
   },
   "components" : {
     "schemas" : {
+      "KiteStatus" : {
+        "type" : "object",
+        "properties" : {
+          "session" : {
+            "type" : "string"
+          },
+          "raw" : {
+            "type" : [ "string", "null" ]
+          },
+          "ticker" : {
+            "type" : "string"
+          },
+          "lastTickAgeMs" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "rateBudget" : {
+            "type" : [ "number", "null" ],
+            "format" : "double"
+          }
+        },
+        "required" : [ "lastTickAgeMs", "rateBudget", "raw", "session", "ticker" ]
+      },
+      "MarketStatus" : {
+        "type" : "object",
+        "properties" : {
+          "phase" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "phase" ]
+      },
+      "ServiceStatus" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "name", "status" ]
+      },
+      "SystemStatus" : {
+        "type" : "object",
+        "properties" : {
+          "overall" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "services" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ServiceStatus"
+            }
+          },
+          "kite" : {
+            "$ref" : "#/components/schemas/KiteStatus"
+          },
+          "market" : {
+            "$ref" : "#/components/schemas/MarketStatus"
+          },
+          "corporateActions" : {
+            "type" : "string"
+          },
+          "jobs" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          },
+          "asOf" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "asOf", "corporateActions", "jobs", "kite", "market", "overall", "services", "status" ]
+      },
+      "SessionState" : {
+        "type" : "object",
+        "properties" : {
+          "authenticated" : {
+            "type" : "boolean"
+          },
+          "loginTime" : {
+            "type" : [ "string", "null" ]
+          },
+          "profile" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "authenticated", "loginTime", "profile" ]
+      },
       "ErrorResponse" : {
         "type" : "object",
         "properties" : {

@@ -69,6 +69,7 @@ public class ManasFunnelService {
   @Schema(name = "ManasFunnel")
   public record Funnel(
       @Schema(types = {"string", "null"}) LocalDate screenDate,
+      // NOT nullable: regime() returns neutral() or a value, never null (single call site below).
       RegimeService.Regime regime,
       List<FunnelRow> immediatelyBuyable,
       List<FunnelRow> onDeck,

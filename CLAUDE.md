@@ -233,8 +233,9 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   -UseBasicParsing` (PS5.1's IE engine prompts otherwise); POST `/api/v1/auth/login`
   `{"password":...}` (it answers **204**, not 200 — check `-notin 200,204`), then a GET to seed the
   `XSRF-TOKEN` cookie, echoed as the `X-XSRF-TOKEN` header on mutating calls. **A bodyless
-  `-Method Post` defaults to `application/x-www-form-urlencoded` and the endpoint answers 500** (the
-  unmapped `HttpMediaTypeNotSupportedException` should be a 415 — chip task_9ffe390d): always pass
+  `-Method Post` defaults to `application/x-www-form-urlencoded` and the endpoint answers 415**
+  (`HttpMediaTypeNotSupportedException` mapped in #1021; edge-gateway-local endpoints unaffected —
+  gateway uses common-web-core, not the servlet handler): always pass
   `-ContentType 'application/json' -Body '{}'`. In-container SQL: DB is `artha`/`artha_mock`
   (not `arthayantra`).
 - **optimizer-service is Python (FastAPI), not Java** — `/api/v1/optimizations/*` lives there
@@ -368,6 +369,17 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `npm run test:ci` + `npm run build`. After a rebuild HARD-reload (Ctrl+Shift+R) — a stale cached
   chunk renders the old UI. **Deploy gotcha:** the Dockerfile COPYs the HOST-built `dist/`, so
   `npm run build` on the main checkout FIRST, then `docker compose build frontend-react`.
+- **Full-suite vitest timeouts in UNTOUCHED specs are usually suite-growth, not your bug** (#1061,
+  2026-07-28): the heaviest render specs sit at 96–99% of the default 5s budget and tip over when
+  ANY new spec file shifts worker scheduling — green in isolation, red in the full run, and a fresh
+  worktree's cold caches make it worse (a worktree full-suite red proves nothing by itself). Debug
+  ladder: name the failures → run them in ISOLATION → full suite on MAIN's warm checkout (baseline)
+  → full suite at the branch on that same checkout (the only decisive gate). A borderline spec gets
+  an explicit `}, 15_000);` budget + dated comment, not a global testTimeout bump. Also: fake-timer
+  specs — `findBy*`/`vi.waitFor` poll with the FAKED setTimeout and stall; flush with
+  `act(async () => { …; await vi.advanceTimersByTimeAsync(0); })` then plain `getBy*`; and a
+  force-close that UNMOUNTS a Radix dialog never fires `onCloseAutoFocus` (focus repair needs a
+  post-unmount effect, and `.focus()` on a disabled trigger is a silent no-op).
 
 ## Database / migrations
 - **Applied Flyway migrations are checksum-locked** in the dev stack and CI — editing
@@ -445,9 +457,22 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   and the local leftovers are what actually bite (see the next bullet). After any merge run
   **`bash tools/git-prune-merged.sh`** (add `--dry` to preview): it removes worktrees + local
   branches whose upstream is GONE and whose tree is CLEAN, and refuses to touch `main`, a
-  never-pushed local WIP branch, a dirty worktree, or a branch still holding commits main lacks —
-  so the parked `worktree-agent-abb02bf43adbb895d` swing catch-up (1 genuinely unmerged commit)
-  survives it.
+  never-pushed local WIP branch, a dirty worktree, or a branch **whose own changes are not yet in
+  main** — so the parked `worktree-agent-abb02bf43adbb895d` swing catch-up (1 genuinely unmerged
+  commit) survives it. ⚠️ **That last clause used to read "still holding commits main lacks", and as
+  written the script was INERT — it never deleted anything** (fixed 2026-07-30). Under SQUASH-merge
+  the squash is a brand-new commit, so a merged branch's own commits are never ancestors of main and
+  `git rev-list --count origin/main..<branch>` is ALWAYS > 0; since squash is this repo's only merge
+  mode, the check vetoed 100% of candidates. It now compares **only the paths the branch touched**:
+  a squash puts identical content on main, so that diff is empty however many commits it collapsed
+  and however far main has moved on other files, while genuinely-unmerged work still differs on its
+  own paths. Two plausible-looking alternatives are wrong and were measured: a two-dot
+  `git diff origin/main..<branch>` conflates "behind main" with "has unmerged content", and
+  `git cherry`/patch-id can't match because the squash collapsed N commits into one. If a LATER
+  commit on main touched one of those paths the test is inconclusive, and it asks `gh` (authoritative)
+  before keeping — the failure direction is deliberately a false KEEP, never a false delete.
+  `tools/git-prune-merged-test.sh` pins all of it, including that the old check fails ONLY the
+  squash case.
 - **`gh pr merge --delete-branch` can fail its LOCAL step while the merge SUCCEEDS** — with a
   concurrent session holding `main` in a worktree it aborts with `fatal: 'main' is already used by
   worktree at …` and no other output. **Same failure when a worktree holds the BRANCH BEING MERGED**
@@ -462,6 +487,16 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - The **`guard-paths.py` PreToolUse hook resolves its path relative to the Bash cwd** —
   a persisted `cd <subdir>` makes every later Edit/Write fail (`can't open
   .../<subdir>/tools/claude/guard-paths.py`). Keep the Bash cwd at repo root, or subshell.
+- ⚠️ **Same persisted cwd silently builds the WRONG CHECKOUT when a worktree is in play**
+  (2026-07-26, #1044). A bare `./mvnw.cmd -pl <svc> -am verify` inherits whatever cwd the last
+  command left, so one polling command that starts `cd <repo-root>` sends the NEXT build to the
+  main checkout instead of the worktree — and it reports **BUILD SUCCESS for code you did not
+  write**, which is worse than a failure because it reads as a passing gate. Always
+  `(cd <worktree> && ./mvnw.cmd …)` in a subshell. Two tells if you suspect it: the compiler/
+  checkstyle paths lack the worktree segment, and the run executes classes your branch deletes or
+  renames. Related: `target/surefire-reports/` is NEVER pruned, so a renamed or deleted test class
+  leaves its old report behind and any `cat *.txt | awk` tally **double-counts** — match each
+  report to its full package path under `src/test/java`, or just read Maven's own reactor summary.
 - CI runs on a **fresh compose stack + 2-core runner** — code green locally can still
   fail several CI iterations (cold start, constrained cores). Gate e2e readiness on
   container healthchecks, not gateway HTTP (a 401 is the gateway auth filter, not
@@ -482,6 +517,14 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   field-by-field and **diff before/after** to prove only the intended key moved. Also check
   `GET /repos/{o}/{r}/rulesets` — rulesets are a SECOND, independent mechanism that can block a
   merge with classic protection looking clean (ours is `[]`).
+- **Every non-`hotfix/*` PR body needs the anchored `Cross-vendor review:` verdict line** — the
+  required `verdict` check (`ci-review-verdict.yml`, reads the body LIVE so an edit + rerun fixes it)
+  accepts `APPROVED`/`REQUEST_CHANGES (resolved)`/`NEEDS_REWORK (resolved)` each with
+  `— <routed model> (<Vendor>)` model↔vendor PAIRED, or `SKIPPED (<reason>)`. Open builder PRs with
+  `PENDING (...)` — red verdict until the review resolves is the DESIGN, not a failure. And with
+  `strict: true` on main, a green PR goes `BEHIND` whenever main moves — fix with
+  `gh api -X PUT repos/{o}/{r}/pulls/<n>/update-branch` (server-side, no local checkout needed),
+  then let CI re-run; hit twice per evening on busy nights.
 - **The `e2e` job's two former 2-core flakes are FIXED (#903, 2026-07-18)** — `tests/signals.spec.ts` +
   `tests/ws-reconnect.spec.ts` intermittently timed out on the cold-stack `/signals` table-settle for two
   reasons: while `GET /api/v1/signals` was pending the page showed a `qs-loading` skeleton the locator

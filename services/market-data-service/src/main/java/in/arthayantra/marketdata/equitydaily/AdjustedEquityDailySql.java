@@ -1,4 +1,4 @@
-package in.arthayantra.marketdata.screener;
+package in.arthayantra.marketdata.equitydaily;
 
 /**
  * The ONE corporate-action-adjusted equity daily price plane the Minervini/Manas screeners and the
@@ -34,8 +34,13 @@ public final class AdjustedEquityDailySql {
    * The CA-adjustment factor for one bar: the cumulative product of every action ratio with an
    * {@code ex_date} strictly after the bar's date, or 1 when there is none. {@code barAlias}/{@code
    * dateCol} name the outer bar the lateral correlates to.
+   *
+   * <p><b>PUBLIC so this is the SINGLE definition of the rule</b> (ledger §9-02). {@code
+   * EquityReturnsService} used to inline a byte-identical copy of this lateral under a comment
+   * promising it applied "the SAME multiplicative rule" — a promise nothing enforced, and exactly the
+   * shape that drifts. Any new reader needing CA-adjusted prices must call this rather than paste it.
    */
-  private static String factorLateral(String barAlias, String dateCol) {
+  public static String factorLateral(String barAlias, String dateCol) {
     return """
         LEFT JOIN LATERAL (
           SELECT COALESCE(exp(sum(ln(ca.ratio))), 1) AS factor

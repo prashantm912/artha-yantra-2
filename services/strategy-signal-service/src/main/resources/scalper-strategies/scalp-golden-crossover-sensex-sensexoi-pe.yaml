@@ -60,7 +60,7 @@ exit_rules:
   - { type: time_stop,   params: { max_bars: 12 } }
 
 risk:
-  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000, max_lots: 5 } }
   max_positions: 1
   max_positions_per_underlying: 1
   max_daily_loss_pct: 2.0

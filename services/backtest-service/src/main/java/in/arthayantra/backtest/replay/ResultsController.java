@@ -4,7 +4,6 @@ import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.NotFoundException;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,7 +31,7 @@ public class ResultsController {
 
   /** Metrics + curves + reproducibility triple for one run. */
   @GetMapping("/{backtestId}/results")
-  public Map<String, Object> results(@PathVariable UUID backtestId) {
+  public RunResult results(@PathVariable UUID backtestId) {
     return runs
         .findResult(backtestId)
         .orElseThrow(
@@ -47,7 +46,7 @@ public class ResultsController {
    * {@code to} (ISO-8601) bound the entry timestamp to the half-open window {@code [from, to)}.
    */
   @GetMapping("/{backtestId}/trades")
-  public Map<String, Object> trades(
+  public BacktestViews.BacktestTradePage trades(
       @PathVariable UUID backtestId,
       @RequestParam(defaultValue = "100") int limit,
       @RequestParam(defaultValue = "0") int offset,
@@ -58,9 +57,9 @@ public class ResultsController {
           OffsetDateTime to) {
     int boundedLimit = Math.min(Math.max(limit, 1), 1000);
     int boundedOffset = Math.max(offset, 0);
-    List<Map<String, Object>> items =
-        trades.findByRun(backtestId, boundedLimit, boundedOffset, symbol, from, to);
-    return Map.of("items", items, "limit", boundedLimit, "offset", boundedOffset);
+    List<BacktestViews.BacktestTradeItem> items =
+        trades.findByRunItems(backtestId, boundedLimit, boundedOffset, symbol, from, to);
+    return new BacktestViews.BacktestTradePage(items, boundedLimit, boundedOffset);
   }
 
   /** Per-session rejected-entry rollups for an opt-in traced run. */
@@ -100,8 +99,9 @@ public class ResultsController {
    * run versions are simply absent. Empty / absent query ⇒ empty list.
    */
   @GetMapping("/summary")
-  public Map<String, Object> summary(
+  public BacktestViews.BacktestSummaryPage summary(
       @RequestParam(required = false) List<UUID> strategyVersionIds) {
-    return Map.of("items", runs.findLatestSummaries(strategyVersionIds));
+    return new BacktestViews.BacktestSummaryPage(
+        runs.findLatestSummaryItems(strategyVersionIds));
   }
 }

@@ -26,6 +26,102 @@ subset is CI-enforced).
 > shipped + deployed as #990 (T21 premium bands) / #991 (T22+T6 dot calibration) / #992 (T10) / #993
 > (PE-side stop direction) / #1016 (S1–S3 scheduler isolation). Open work stays in the ledger §0; the only
 > owner action outstanding is the B8 host-clock resync.
+>
+> **CURRENCY UPDATE 2026-07-27:** the residual G-group is now CLOSED and deployed — **G3** F-OPT
+> `OptionAtmPinner` (#1039, live: 44 option pins, 2.3% of the subscription cap, 0 evictions),
+> **G4** F-SYNC (#1023, the `kite-dump` permit was spent by a breaker-rejected call — resilience4j
+> decoration order), **G5**/T12 futures-OI cadence (#1031, the cause was scheduler starvation, not
+> the limiter), **G2**/T9 strategy-coverage watchdog (#1035, deployed **DISABLED** — arming is an
+> owner decision), plus task_1b85c64f (#1033, HOLD) and task_bd871971 (#1034).
+>
+> The **swing catch-up branch was SPLIT** rather than shipped or dropped (owner-approved): the
+> *detect* half is live and armed (#1044 + orphan cleanup #1046), the *auto-replay* half stays a
+> parked draft (#1036) because all seven Criticals live in it. **Its behaviour is not yet verified** —
+> the intent ledger was empty at deploy, so the first meaningful sweep is the morning after the
+> first weekday evening; a recurring 08:40 IST weekday check is scheduled.
+>
+> Two OWNER items outstanding: the B8 host-clock resync (carried), and **arming the T9 watchdog**
+> (needs an alert channel, a `NOT_LIVE_RESOLVABLE` re-page cadence, and an OBSERVE_ONLY duration).
+> **INT I4 is PARKED to ~2026-08-09** — 7 Majors, and its headline delivery-rate number was wrong
+> (see ledger C8).
+>
+> **CURRENCY UPDATE 2026-07-28 (supersedes the 07-27 swing paragraph above):** the swing story is
+> now THREE armed layers, all live-verified. The **detect** half's intent machinery proved itself on
+> first contact (intent rows at exactly 19:59:59/20:04:59 IST, both batches marked). The
+> **auto-replay** half was FINISHED the same day the owner funded it and — on the owner's
+> "merge and arm both" — **#1036 is MERGED + DEPLOYED + ARMED** (`2e4ea6f0`; V049–V051 probed,
+> `swing-catchup-sched-1` thread live; a 7th Critical, an exit-vs-open TOCTOU, was found in round 4
+> and closed with per-anchor advisory-lock serialization). The **#640 dead-man's-switch turned out
+> ALREADY armed** (URL set, ping verified) — the "dormant" note was stale. Also shipped same night:
+> **V048 `signals.exit_reason`** (#1057, deployed + DB-probed — scalper exits are now durably
+> explainable) and the **guarded swing Run-batch-now buttons** (#1061, deployed, bundle-probed) as
+> the escalation surface for ABANDONED/refused sessions. First armed 08:35 catch-up sweep verifies
+> via a one-time 08:50 task on 07-28 (expected: clean no-op). Owner items unchanged: B8 clock, T9
+> arming, I4 ~2026-08-09.
+
+> **CURRENCY UPDATE 2026-07-29 (supersedes the 07-28 block above for the SCALPER story):** the
+> scalper→paper path went from dead to bounded in two days, in four shipped pieces. **#1067** revived
+> it (sizing was computed against the INDEX future, so `premium_budget` floored to 0 lots on every
+> entry for three weeks, silently); **#1071** resolved the option's exchange from the instrument
+> master rather than its name (the same field feeds the UNARMED real-money path, so a SENSEX option
+> stamped NSE was a latent landmine); **#1084** added `max_lots` + `min_premium_inr` and made the LIVE
+> path honour both, closing a three-layer disagreement where *replay honoured a param, live ignored
+> it, and the schema forbade it*; **#1086** bound the capital governors at the writer — the deployment
+> cap now refuses the order that CROSSES it, a per-book advisory lock serializes check-plus-write,
+> straddle legs open atomically, and sub-account routing reads deployed capital under that same lock.
+> All four are DEPLOYED and fingerprint-verified.
+>
+> **CURRENCY UPDATE 2026-07-30 (the entry-gate track has a verdict; the frontier moves to the EXIT):**
+> the 07-29/30 run closed the pickup-sheet G-rows (#1111–#1119, live at `f6ba4dab`) and produced one
+> finding that reorders the board: **every measured loosening of the scalper ENTRY gate has lost
+> money — T1 (multiplier, 2W/9L), T7 (threshold, worst book), G13 (IV bloc, undecidable at 6 legs),
+> G10 (time-of-day volume profile, 265 legs, +324.87 gross but −590.95 after 1% cost).** Four tests,
+> three knobs, one direction. G10's profile IS built and reviewed but stays **default-OFF** —
+> recommendation is not to arm. ⚠️ **All four are conditional on the 30-minute `time_stop`, which G11
+> says is itself the dominant term in scalper P&L — so G11 (exit doctrine) is now the highest-leverage
+> open row, and if its exit changes every one of the four must be re-run.** G11 is data-gated on a
+> chop-day observation; **G15 shipped the detector that will announce one** (regime label on each
+> `rollup.md` session row, base rate ~29% ⇒ ~3–4 sessions), which converts an indefinite wait into a
+> short clock. Also closed: **G12** (frozen-operand probe; the `atmIv` freeze turned out to be
+> CORRECT-by-construction — a daily EOD scalar — so the defect belongs to the dot, not the feed) and
+> **G14** (convergence measured: 5–7 strategies on one option key on 6 of 7 sessions, not binding at
+> today's fire rate but directly in the path of any rise). Infrastructure: a required check had been
+> **masking a live Modulith cycle on main** since #1094 by filing a deterministic failure as a flake
+> (#1115 pins structural tests to zero retries; #1116 broke the cycle). D3 burn-down 47 → **37**.
+>
+> **OWNER DECISION 2026-07-29: `budget_inr` HOLDS at ₹15,000 for two weeks; the ₹20,000 raise
+> ([#1075](https://github.com/prashantm912/artha-yantra-2/pull/1075)) stays open and is revisited on
+> LIVE data on 2026-08-12** (scheduled task `revisit-scalper-budget-inr-2026-08-12`). The decision
+> turns on one arithmetic fact: the sub-account allocation is ₹30,000 and the ceiling refuses when
+> projected > allocation, so at ₹15,000 each account holds exactly 2 and the book's 80% cap binds
+> first at 8 — while ANY budget above ₹15,000 drops each account to 1 and concurrency to 5. The cliff
+> is exactly at ₹15,000, and the two numbers that should decide it (real `ZERO_SIZE` rate, real peak
+> concurrency) did not exist yet because the path had been dead.
+>
+> Also live from the same wave: **#1064** (no more phantom zero-volume 1m bars on non-trading days),
+> **#1073** (S24 expiry-day exemption covers the spurt dot), **#1076** (a close this pass did not
+> perform is no longer reported as one), **#1077** (edge-gateway Map-returning handlers typed — D3
+> slice 1), **#1082** (T24: the volume dot tests the floor the RAIL tested; verify task 07-29 16:20),
+> **#1065** (exit-equivalence fixture widened — all copies AGREE). Owner items unchanged: B8 clock,
+> T9 arming, I4 ~2026-08-09, and now budget_inr ~2026-08-12.
+>
+> **LATE 2026-07-29 — architecture-deepening sweep + D3 slice 1 (main `195bfd1b`).** The four §9
+> candidates are resolved: **§9-02 CLOSED** ([#1094](https://github.com/prashantm912/artha-yantra-2/pull/1094),
+> one definition of the CA-adjustment factor), **§9-05** done earlier, **§9-06 DECLINED** (the two
+> 1m→N rollup anchors are mutually exclusive — IST-midnight for `time_bucket` parity vs 09:15
+> SESSION_OPEN for the grid join; 555 minutes makes them identical for 1/3/5/15m and divergent for
+> 10/30/60m, so one definition provably cannot serve both), and **§9-04 BUILT but HELD OPEN**
+> ([#1095](https://github.com/prashantm912/artha-yantra-2/pull/1095) — `PremiumLevels` gives the
+> `premium_pct` formula one home; the ledger gate reads "widen the fixture **+ owner go**", the
+> widening is met via #1065 and the go is not, so it awaits the owner and has had no review round).
+>
+> **D3 slice 1 (Map-return burn-down) moved 68 → 47 handlers**:
+> [#1097](https://github.com/prashantm912/artha-yantra-2/pull/1097) typed the whole signals family
+> (25→18) and [#1098](https://github.com/prashantm912/artha-yantra-2/pull/1098) the paper read
+> envelopes + journal list (18→14). Remaining: market-data 26, strategy-signal 14, backtest 7.
+> These are contract-visibility changes only — no engine, money, parity or migration surface — and
+> **need no deploy**: they alter the published OpenAPI shape and the generated TS client, not
+> runtime behaviour. New chip task_7f57c0d5 (`OpeningSignal`'s three nullable `JsonNode` fields).
 
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the

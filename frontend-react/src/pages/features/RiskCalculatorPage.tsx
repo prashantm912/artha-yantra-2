@@ -7,7 +7,6 @@ import { cn } from '../../lib/cn.ts';
 import { nearestStrike } from '../../lib/strikes.ts';
 import { useChainTable } from '../../api/oiAnalytics.ts';
 import { useMarginQuote, type MarginResponse } from '../../api/margin.ts';
-import { useSymbolContext } from '../../stores/symbolContext.store.ts';
 import { computeRisk, type RiskInput } from '../../core/riskCalculator.ts';
 
 // Risk Calculator (§features/risk-calculator — oipulse "Risk Calculator"). A pure, client-side
@@ -114,9 +113,11 @@ export function RiskCalculatorPage() {
   const pickedLtp = pickedLeg?.ltp ?? null;
 
   // F9 SPAN margin tie-in (audit §2.8): price the sized option position against Upstox's real SPAN so
-  // deployment reflects margin, not notional. Exchange is NFO for NIFTY-family, BFO for SENSEX/BANKEX.
-  const { name } = useSymbolContext();
-  const marginExchange = /SENSEX|BANKEX/i.test(name) ? 'BFO' : 'NFO';
+  // deployment reflects margin, not notional. The exchange is the PICKED LEG's — the instrument
+  // master's, published beside the tradingsymbol as the canonical pair — not a guess off the
+  // underlying's name, which would silently mis-key any newly listed BSE root and price the wrong
+  // contract. Null leaves the margin check disabled rather than sending a half-formed key.
+  const marginExchange = pickedLeg?.exchange ?? null;
   const margin = useMarginQuote();
 
   const input: RiskInput = {
@@ -173,9 +174,10 @@ export function RiskCalculatorPage() {
         {pickedLeg && <span className="text-xs text-ay-muted">{pickedLeg.tradingsymbol}</span>}
         <button
           type="button"
-          disabled={!pickedLeg || !r.valid || margin.isPending}
+          disabled={!pickedLeg || !marginExchange || !r.valid || margin.isPending}
           onClick={() =>
             pickedLeg &&
+            marginExchange &&
             margin.mutate([
               {
                 exchange: marginExchange,
@@ -185,7 +187,11 @@ export function RiskCalculatorPage() {
               },
             ])
           }
-          title="Ask Upstox for the real SPAN + exposure margin on the sized option position (F9)."
+          title={
+            pickedLeg && !marginExchange
+              ? 'Unavailable — the instrument master has no exchange for this contract, so it cannot be priced.'
+              : 'Ask Upstox for the real SPAN + exposure margin on the sized option position (F9).'
+          }
           className="h-9 rounded-md border border-ay-border px-3 text-sm text-ay-text hover:border-accent disabled:opacity-50"
         >
           {margin.isPending ? 'Checking…' : 'Check SPAN margin'}

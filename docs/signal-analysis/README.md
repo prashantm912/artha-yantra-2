@@ -25,7 +25,9 @@ and as new sections in the findings template, so later sessions measure them too
 | when | what |
 |---|---|
 | **During market hours (optional, live)** | Data-health spot-checks + live counterfactual watch (§4). Read-only — never restart services / never write to live tables during a session. |
-| **After every session (EOD)** | Run the §3 standard pass → write `YYYY-MM-DD-session-findings.md` from the template (§5). ~30 min. |
+| **After every session (EOD)** | FIRST run the two mechanical pre-checks (below), then the §3 standard pass → write `YYYY-MM-DD-session-findings.md` from the template (§5). ~30 min. |
+| **EOD pre-check 1** | `python tools/ledger-consistency-check.py` — cross-greps the ledger, newest pickup sheet and recent findings docs for contradictions (an item claimed startable that already shipped, a chip OPEN here and DONE there, a promotion that never landed). Copy any REVIEW lines into findings §6 and resolve or explain them. Exists because a false STARTABLE sat in the ledger for 19 days (§9-03/B17) and cost a work lane before being caught by hand. |
+| **EOD pre-check 2** | `python tools/published-config-drift.py` — every published strategy's tags + exit_rules vs the repo YAML, plus latest-row≠published (the #1016 signal). Findings go to §7 as republish PROPOSALS with the GAINS/LOSES diff — the routine never publishes. Exists because task_76d8f2a4 ran a months-stale config silently. |
 | **Every ~5 sessions (or on owner ask)** | Multi-session rollup: stack the per-session tables, look for rails/dots that are dead or binding across ALL sessions (structural) vs day-dependent (regime). Structural → tune now; regime → collect more. |
 | **Periodic tuning pass (owner-gated)** | Apply the tunes (YAML `scalper.params.*` / `artha.scalper.oi.*` props / code where needed) one PR per knob-family, then measure the NEXT sessions against the tuned baseline. Record before/after in the rollup. |
 
@@ -127,7 +129,10 @@ Run in order; each answers one question. Canned SQL in §6.
     **total** function over four states with no dead zone (`OiInterpretation.java:16-23`), so NEUTRAL is
     NEVER a market outcome — the strategy-side mirror documents it as "data missing"
     (`OiQuadrant.java:10-25`) and it is the declared fallback on every read failure. **A high
-    NEUTRAL share is a defect signal, never a flat-market artifact.** On 2026-07-20 it was 748/748,
+    NEUTRAL share is a defect signal, never a flat-market artifact.** ⚠️ **AMENDED 2026-07-28 — there
+    is exactly ONE non-defect cause: a MONTHLY index-expiry day, where `MarketOiClient.oi()` skips the
+    whole OI block by design (S24). Apply §3.19's two discriminators before calling NEUTRAL a defect.**
+    On 2026-07-20 it was 748/748,
     killing `futures_oi` (w 1.5), `underlying_oi` (1.0) and `oi_spurt` (1.0) and dropping the composite
     cap 0.816 → 0.7181. Worse than a dead IV dot: NEUTRAL dots are added with `absent=false`
     (`ConnectTheDotsScorer.java:207-214`) so they stay in the denominator and score zero, actively
@@ -174,8 +179,19 @@ Run in order; each answers one question. Canned SQL in §6.
     `EXTRACT(second FROM bucket) = 0`, and the misaligned count is itself a per-session
     data-integrity probe.
 16. **Check whether the slug actually configures a premium exit BEFORE resolving any counterfactual**
-    (added 2026-07-23) — §4.2 step 4 below says "+35% premium take-profit (E9 default)". **That default
-    does not exist for most live scalpers.** Only **21 of the 63** YAMLs under
+    (added 2026-07-23) — ⚠️ **AMENDED 2026-07-29: the 21-of-63 statement below is HISTORICAL and no longer
+    describes the fleet.** T21 (owner-approved 2026-07-25, #990) added the block to every scalper YAML;
+    verified 2026-07-29 by direct count, **63 of 63**. The shipped shape is `take_profit premium_pct 35` +
+    `stop_loss premium_pct 25` + `signal_exit (close < vwap)` + `trailing_stop (supertrend_line)` +
+    `time_stop max_bars 10`, so the correct §4.2 model **from 2026-07-25 forward** is a UNIFORM
+    **+35% TP / −25% SL / 10-bar (30-minute) time stop / 15:12 square-off** — the time stop matters most
+    (on 2026-07-29 not one of 41 counterfactual legs touched either bracket; every one resolved at the
+    time stop). ⚠️ The shadow book replicates brackets + structural + square-off but **NOT** the time stop
+    or `signal_exit`, so shadow P&L and a §4.2 counterfactual on the same legs legitimately disagree — on
+    2026-07-29 they disagreed **in sign** (+₹15,260.87 vs −538.50 pts). Say which model produced which
+    number. Findings files written **between 07-23 and 07-25** carry the downward-scope bias the original
+    text describes; files before 07-23 carry the upward bias. Original text follows, for those files.
+    Only **21 of the 63** YAMLs under
     `services/strategy-signal-service/src/main/resources/scalper-strategies/` carry a `premium_pct`
     block — the `gap-theory`, `market-movers`, `hero-zero`, `btst-stbt` and `straddle` families. The
     `golden-crossover`, `connect-the-dots`, `two-candle`, `trending-oi`, `trend-change` and
@@ -220,7 +236,329 @@ Run in order; each answers one question. Canned SQL in §6.
     (650 absolute AND ≤10% of the expected sum — a thin frozen bar still fires), so a surviving WARN
     means either the frozen-partial regression (persistent one-directional ~⅔ shortfall) or a new
     attribution defect. Investigate, don't tolerate-away.
-18. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
+    2026-07-27) — the live scalper signal series is the **dated front future**, and
+    `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27
+    every rejection evaluated `NFO:NIFTY26AUGFUT@3m` while every prior file in this folder measured
+    `NIFTY26JULFUT`. **Nothing in `signal_rejections` names the contract** — `diagnostic.context.chart`
+    has no `signalSymbol` field — so the roll is silent, and a §3.8/§3.15 ground-truth query run against
+    last session's contract silently mis-places every threshold. The two series differ materially: on
+    2026-07-27 AUGFUT ran p90 47,320 / max 117,000 against JULFUT's p90 57,785 / max 222,560 over the
+    same session. Derive it, don't assume it: take any context-bearing row's
+    `context.chart.close` and match it against the candidate contracts' 1m ranges for the day (SQL in
+    §6). State the contract in the findings file, and **never compare volume percentiles or floor
+    thresholds across a roll** without saying so. Rolls are monthly (last Tuesday); the `docker logs`
+    line `scalper confluence blocked entry: <slug> NFO:<contract> rail=…` also names it directly and is
+    the cheapest confirmation while the container is still up.
+19. **On a MONTHLY index-expiry day, expect EVERY OI-derived dot to be inert — and prove it is the
+    by-design suppression, not an outage** (added 2026-07-28) — `MarketOiClient.oi()`
+    (`MarketOiClient.java:287-295`) tests
+    `ScalperCalendars.forUnderlying(underlying).isMonthlyIndexExpiryDay(tradeDate)` and on a hit
+    **skips the entire OI block** (S24 — the expiring series' writers are unwinding, so chain OI is
+    corrupted), returning an inert `Oi`: both quadrants `NEUTRAL`, sentiment / trending / spurt all
+    null, **`futuresBasis` kept**. Measured 2026-07-28: `spurtPricePct` and `spurtOiPct` NULL on
+    **26/26** rows (0 nulls on 07-27's 909 and 07-24's 1,100), both quadrants NEUTRAL 16/16, and all
+    seven OI-derived dots (`futures_oi`, `underlying_oi`, `oi_spurt`, `drastic_oi`, `sentiment`,
+    `sentiment_slope`, `trending_cross`) at **0/16** supports.
+    **The two discriminators vs a real outage:** (a) `futuresBasis` stays LIVE while the quadrants go
+    NEUTRAL — S24 deliberately keeps the price-derived basis, an outage would not; (b)
+    `marketdata.futures_oi_snapshots` keeps full ~1/minute cadence (2,760 snaps / 40 distinct minutes
+    by 09:55 on 07-28) — capture is healthy, the gate is choosing not to read it.
+    **Suppression is PER OI ROOT, not per day:** NSE monthly (last Tuesday) for a NIFTY-rooted read,
+    BSE Thursday monthly for a SENSEX-rooted one. They rarely coincide, so on most expiry days ONE
+    root is suppressed and the other is LIVE — a dead OI dot on the non-expiring root is a REAL
+    outage. Read the root from `diagnostic->'context'->>'underlying'`, never from the slug name: the
+    `sensex-niftyoi` variants read **NIFTY** OI by design (1,069/1,069 rows were `NIFTY 50` across
+    07-25…07-28). `DotHealthCanary` labels the affected probes `inert by design` and drops their
+    `required` flag, per root (#1073 — before it, the label was missing for `oi_spurt_price` and the
+    keying was a blanket NSE-OR-BSE calendar test that could silence a genuine outage on the
+    non-expiring root).
+    **⚠️ Tuning consequence: NEVER draw an entry-gate calibration conclusion from an expiry session.**
+    NEUTRAL dots stay in the denominator with `absent=false` (§3.12), so the composite is
+    structurally starved — max **0.3457** against a 0.600 threshold on 2026-07-28. Zero fires is the
+    mechanical outcome, not evidence. Mark such a session REGIME in the rollup, never STRUCTURAL.
+20. **A dot and its namesake RAIL may not share a threshold — read the scorer's call site before
+    attributing a dead dot to data, regime, or the rail's own tuning** (added 2026-07-28) — the
+    `volume` dot sat at 0% support for nine consecutive sessions under the standing explanation
+    "mechanically dead behind the 125,000 floor". That explanation survived the floor being fixed
+    (T16/#980 armed the relative floor on 38/38 scalpers on 07-25) and the dot **still** read 0/909 on
+    07-27, which falsified it. The cause is a **call-site divergence**, visible only in code:
+    `ConnectTheDotsScorer.java:141` calls the **two-argument** `ScalperGates.volume(underlying, volume)`
+    overload, which delegates to `volume(underlying, volume, null)` and resolves the floor via
+    `volumeFloorFor(underlying, null)` → the **static per-index default** (`VOL_FLOOR`: NIFTY
+    **125,000** / other indices 50,000, `ScalperGates.java:173-175`). The `relative-volume-floor` tag
+    substitutes the banded floor **only at the rail's call site** (`ScalperConfluenceGate.java:422`,
+    `cfg.has(...)`-gated), which passes an explicit override. **The dot never sees it**, on any
+    strategy, armed or not. The arithmetic is the confirmation: on 2026-07-28 (a thick expiry tape) 6 of
+    125 3m bars cleared 125,000 (4.8%) and the dot supported 38/1,068 rows (3.6%) — its first non-zero
+    reading ever; on 07-27 the same series' max was 117,000, so **zero** bars could clear it and the dot
+    read 0/909. Net effect: 1.0 of composite weight permanently gated at roughly the **p95** of its own
+    operand. **Standing check when a dot reads 0% (or 100%) across sessions:** find its `add(dots, …)`
+    line in `ConnectTheDotsScorer`, follow the gate call it makes, and confirm which threshold that
+    overload actually resolves — the rejection row records the dot's *verdict*, only the code records
+    which threshold produced it. The same trap is available to any dot/rail pair sharing a name
+    (`volume`, `rsi`, `vwap`, `oi_spurt`).
+21. **A dot at 0% (or 100%) in a PARTIAL-session read is not a finding — §3.6 support rates are only
+    interpretable over a COMPLETE session** (added 2026-07-29) — the 07-29 midday live run recorded
+    `trending_cross` at **0/722** on a fully-live-OI day and escalated it to the EOD run as
+    "threshold or data?". It was neither: over the full session it is **57/983 (5.8%)**. The CE-over-PE
+    dOI cross simply had not occurred yet in the sampled window. The same trap runs the other way — a dot
+    at 100% mid-session can fall back over the afternoon. **In a `live` run, write "0 so far" and give the
+    denominator + the wall-clock; never write "dead".** Only a session-complete rate belongs in a §3.6
+    table or a tuning row.
+22. **A "dead" or "free" dot may have a FROZEN operand, and no alive/dead canary probe can see it —
+    count DISTINCT operand values across the session, not just the null rate** (added 2026-07-29) —
+    `iv_abs_band` (w 0.8) read **0/180 on 07-28** and **133/133 = 100% on 07-29**, which looks like a
+    revival. It is not: `diagnostic.context.macro.atmIv` carries **exactly ONE distinct value per
+    session** — 0.130859 (07-24) / 0.135577 (07-27) / 0.121736 (07-28) / **0.118781 (07-29)** — so the
+    10–12 band test (`ConnectTheDotsScorer.java:210-213`, 0.10–0.12 on the 0..1 fraction scale) is a
+    **per-day step function**: 07-28's stamp landed just OUTSIDE 0.12, today's just inside. The dot is a
+    coin flip on one stamped number, all session, every session.
+    **Why the canary is blind to it:** `DotHealthCanary` tests whether the input is null/non-null, and a
+    frozen value is emphatically non-null — it reports `alive`. A frozen operand is a *third* state
+    alongside live and dead, and only a `count(DISTINCT …)` finds it. **Standing check whenever a dot sits
+    at 0% or ~100% for a whole session:** run the DISTINCT-count over its operand for the session (SQL in
+    §6) *before* reaching for a threshold explanation. Scope it — on 2026-07-29 the neighbouring
+    `ceIvAvg6` (41 distinct), `peIvAvg6` (44), `ceIvSlope` (100), `vixLevel` (27) and `premiumSkewPct`
+    (100) were all moving normally, so the freeze was ONE field, not the IV feed.
+23. **Check what is DEPLOYED before explaining live behaviour from source — fingerprint the jar, do not
+    read the branch** (added 2026-07-29) — the 07-29 post run explained the `volume` dot's 23.1% support
+    rate by reasoning forward from the code path the 07-28 file had root-caused, and filed an "open
+    sub-question" about arithmetic that would not reconcile. The arithmetic did not reconcile because
+    **the fix had already shipped**: [#1082](https://github.com/prashantm912/artha-yantra-2/pull/1082)
+    merged and deployed 2026-07-28, and 07-29 was its first live session. A session file's own tuning
+    ledger is written against the code as it stood THAT day; a later session that re-reads the same source
+    on a branch — or worse, re-reads the prior file's narrative — will re-derive a stale explanation.
+    **Standing check before attributing any live behaviour to a code path:**
+    ```bash
+    docker exec ay-strategy-signal-service sh -c \
+      'unzip -p /app/*.jar BOOT-INF/classes/<pkg>/<Class>.class' | strings | grep -c <newSymbol>
+    docker inspect ay-strategy-signal-service --format '{{.State.StartedAt}} {{.RestartCount}}'
+    ```
+    and confirm the boot time PRECEDES the session but FOLLOWS the deploy. **Then discriminate on data,
+    not on the fingerprint alone** — split the session's rows by the dot's verdict and read the operand
+    behind each group: on 07-29, 222 of the 227 supporting rows carried a bar volume BELOW the old static
+    125,000 floor, which is impossible under the pre-fix code and is therefore positive proof the new
+    path ran. Cross-check the forward ledger (`2026-07-02-remaining-items.md` §0) for the row before
+    filing a new one — G6 already carried this as DONE.
+24. **DEDUPE the shadow book by `(bar_time, tradingsymbol)` before quoting any count, W/L or per-close
+    figure — slug fan-out inflates every raw total** (added 2026-07-29) — every live scalper evaluates the
+    **same 3m signal series** and resolves its leg through the **same `StrikeLegPicker`**, so one
+    qualifying bar opens the *same option leg at the same entry LTP* across every slug whose rails agreed.
+    On 2026-07-29 the champion book's **24 closes collapse to 6 bar times / 12 distinct
+    `(bar, leg, entry_ltp)` events**, and the **09:48 cluster alone carried +₹15,444.70 of the +₹19,547.61
+    square-off gain (79%) and +₹14,625.93 of the +₹15,260.87 session net (95.8%)**. Reported raw, that
+    session reads as "24 closes, 14W/10L, the book's best ever"; deduped it is **one bar** carrying the
+    session, on an effective independent sample of ~6. **A raw shadow total is a fan-out count, not an
+    observation count.**
+    ```sql
+    SELECT to_char(bar_time AT TIME ZONE 'Asia/Kolkata','HH24:MI') bar, tradingsymbol, entry_ltp,
+           count(*) rows, count(DISTINCT close_reason) exits,
+           string_agg(DISTINCT close_reason,' / ') reasons, round(sum(pnl_net),2) net
+    FROM strategy.shadow_positions
+    WHERE variant='champion' AND opened_at >= :d0915 GROUP BY 1,2,3 ORDER BY 1,2;
+    ```
+    ✅ **The same fan-out is an ASSET for exit analysis, and this is the reusable half.** A cluster where
+    `count(DISTINCT close_reason) > 1` on ONE `(bar, leg, entry_ltp)` is a **controlled exit experiment**:
+    entry is held constant to the paisa and the slugs' exit configs are the only variable. 2026-07-29's
+    09:48 cluster had `scalp-market-movers-*` stopping out at 09:52 while five other slugs held to the
+    15:12 square-off — `NIFTY2680423950CE` @318.60 → **−3.80 vs +16.85 ×5**, `SENSEX26JUL77000CE` @613.90
+    → **−20.85 vs +107.70 ×5**. That is stronger evidence than a shadow-vs-paper comparison, which is
+    always confounded by the two books trading different entries (§2). **Query the multi-exit clusters
+    first whenever an exit question is open** — they cost nothing and they are already in the table.
+
+25. **Session REGIME classification** (added 2026-07-30, G15) — stamp every session with a regime so a
+    data-gated ledger row (G11 needs a chop day) can ever be told its observation arrived. Metric:
+    **intraday directional efficiency** `|close−open| / (high−low)` on the `NIFTY 50` **daily** bar.
+    ⚠️ **Intraday, NOT close-over-prior-close** — a 30-minute `time_stop` cannot capture an overnight
+    gap, and the two disagree exactly where it matters (2026-07-29 reads +1.10% close-over-close but
+    only +0.30% intraday, which is how it was mis-filed as a trend day). ⚠️ **Efficiency, NOT
+    close-position-in-range** — the latter saturates (14 of 21 days ≥0.65) and rates a −0.03%-on-0.87%
+    chop day at 0.676. Cuts are DERIVED from the largest gaps in the sorted distribution, not picked:
+    chop <0.29, mixed 0.29–0.61, trend ≥0.61. Table + method live in `rollup.md` §Session regime; SQL
+    in §6.
+26. **The entry-knob counterfactual PIPELINE** (added 2026-07-30 — the method that settled T1, G13 and
+    G10) — **a pass-rate delta is NOT a result.** Four steps, and skipping any one has produced a wrong
+    answer:
+    1. **rows newly passing** the knob under test;
+    2. **keep only rows where that rail was the SOLE blocker** — G13's +21.7% headline collapsed to 6
+       legs here, because `volume-floor` binds 88% of blocks and `confluence-composite` binds 0.9%;
+    3. **dedupe by `(bar_time, tradingsymbol)`** (§3.24) — slug fan-out inflates raw counts;
+    4. **price** each leg and **test the sign's robustness + subtract costs** — G10 was +324.87 gross
+       and −305.88 excluding its top 5 legs of 265, break-even at ~0.35% round-trip.
+    Everything needed to price a counterfactual is ALREADY on the rejection row (operand, the floor
+    actually applied, every dot's weight+supports, `wouldBeLeg.entryLtp`) — the live side never needs
+    modelling. ⚠️ **Standing result: all four measured loosenings of the scalper entry gate LOST money**
+    (T1, T7, G13, G10). Treat that as the prior. All four are conditional on the 30-minute `time_stop`,
+    so if G11 changes the exit they must be re-run.
+27. **On an expiry day the suppression lands on whichever instrument ROLE touches the expiring chain —
+    §3.19's OI-root query answers ONLY the OI question** (added 2026-07-30) — a scalper carries up to
+    three independent instrument roles (ADR-0003: `signal_underlying` / `strike_reference` /
+    `underlying`), so "which root is expiring" has a different answer per role. On the **BSE monthly
+    expiry of 2026-07-30** every §3.19 discriminator read *no suppression*, correctly: `context.underlying`
+    was `NIFTY 50` on **814/814** rows (the 16 `sensex-niftyoi` slugs read NIFTY OI by design), quadrants
+    NEUTRAL **0/814**, `spurtPricePct` NULL **0/814**, `futuresBasis` LIVE **814/814** — NSE was not
+    expiring, so no NIFTY-rooted OI read could be suppressed. **The expiry hit the EXECUTION root
+    instead, through `strike-pick`:** 405 fails, reason `no strike met the delta/premium band`, on **16 of
+    16** sensex-rooted slugs and **ZERO** NIFTY-rooted ones. The three-session control is clean —
+    07-28 (NSE monthly) **534 fails, all NIFTY-rooted**; 07-29 (non-expiry) **ZERO**; 07-30 (BSE monthly)
+    **405, all SENSEX-rooted**. **So on an expiry day, check `strike-pick` and the `wouldBeLeg` symbols,
+    not only the quadrants** — and mark the expiring root's family REGIME for that session even when the
+    OI bloc is fully live. ⚠️ The rule is *an expiry saturates the expiring root's `strike-pick`*, **not**
+    *only an expiry can*: 2026-07-24 was a Friday with no expiry on either exchange and 550 sensex-rooted
+    fails (a thin or freshly-rolled chain is the unexcluded alternative).
+    ```sql
+    SELECT (r.generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
+           CASE WHEN r.strategy_slug LIKE '%sensex%' THEN 'sensex-rooted' ELSE 'nifty-rooted' END fam,
+           count(*) strike_pick_fails, count(DISTINCT r.strategy_slug) slugs
+    FROM strategy.signal_rejections r, jsonb_array_elements(r.diagnostic->'checks') c
+    WHERE r.generated_at >= :d0 AND c->>'rail'='strike-pick' AND (c->>'pass')::boolean=false
+    GROUP BY 1,2 ORDER BY 1,2;
+    ```
+28. **A dot at 0% (or 100%) on a LIVE, MOVING operand is a FOURTH state — "never crosses" — that neither
+    the alive/dead nor the frozen probe can see; check the operand's own min/max against the dot's
+    threshold before classifying** (added 2026-07-30) — `breadth` (w **1.0**, the canary's only required
+    non-OI probe) read **0/814** on 2026-07-30 with the input emphatically healthy: 0 nulls, 0 zero-pairs,
+    **10 distinct values**, range **23–32**. Its own reason string is the rule — `advances/declines > 32` —
+    and the session maximum was **exactly 32** against a strictly-greater test, the **second** such session
+    (07-28's max was also exactly 32; 07-21's was 31). **The cross-session shape is the finding:** over
+    2026-07-21…07-30 the dot is **0% on five sessions, ~100% on two, 0.2% on one — never in between**,
+    because `advances` is a market-wide scalar shared by every row of a session and moves slowly. A fixed
+    threshold on such an operand is therefore **not a per-bar discriminator but a per-session bias** —
+    here ±**1.0/18.80 = 5.3 pp** on every composite in the session. `DotHealthCanary` reports
+    `alive=true, frozen=false, required=true`, which is correct on both axes and still misses it (§3.22's
+    frozen probe needs ONE distinct value; this operand has ten). **Standing check when a dot sits at 0%
+    or ~100% over a COMPLETE session (§3.21) and §3.22's DISTINCT-count comes back >1:** pull the operand's
+    session min/max and place the dot's own threshold on it, then repeat across sessions — an operand that
+    sits wholly on one side of the threshold every session is a step function, not a signal.
+    ```sql
+    -- the dot's rule is in its own reason string; read it, then bracket the operand
+    SELECT (r.generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
+           min((r.diagnostic->'context'->'macro'->>:field)::numeric) mn,
+           max((r.diagnostic->'context'->'macro'->>:field)::numeric) mx,
+           count(*) FILTER (WHERE (r.diagnostic->'context'->'macro'->>:field)::numeric > :threshold) crossing,
+           count(*) rows
+    FROM strategy.signal_rejections r
+    WHERE r.generated_at >= :d0 AND r.diagnostic->'context'->'macro'->>:field IS NOT NULL
+    GROUP BY 1 ORDER BY 1;
+    ```
+29. **UNEXERCISED-PATH audit** (added 2026-07-31) — which ARMED exit rules and gates have NEVER
+    fired? An armed-but-never-fired path is unverified code sitting on the money path: T24's exit
+    radius was armed for weeks with zero `CONFLUENCE_FLIP` closes platform-wide, and on 2026-07-30
+    `take_profit` was armed on **36** published strategies with **ZERO** TP closes since 07-01 (the
+    T21 +35% bracket never once paid in a month — that is a strategy-data finding, not a bug).
+    Compare armed exit types (published configs) against the fired vocabulary:
+
+    ```sql
+    -- fired vocabulary over the window
+    SELECT close_reason, count(*) FROM strategy.paper_positions
+    WHERE closed_at >= :d0 GROUP BY 1 ORDER BY 2 DESC;
+    -- armed exit PATHS across ENABLED published configs: (type, basis), DISTINCT strategies.
+    -- Per (type,basis), not bare type — one fired STOP_LOSS must not mask an unexercised
+    -- premium/index/structural stop path (review finding, 2026-07-31).
+    SELECT r->>'type' AS armed_type, r->'params'->>'basis' AS basis,
+           count(DISTINCT s.id) AS strategies
+    FROM strategy.strategies s
+    JOIN strategy.strategy_versions v ON v.id = s.published_version_id,
+         jsonb_array_elements((v.config->'exit_rules')::jsonb) r
+    WHERE s.enabled GROUP BY 1, 2 ORDER BY 3 DESC;
+    -- TAG-armed exits are NOT in exit_rules and the exit_rules query CANNOT see them —
+    -- oi-confluence-exit (fires as CONFLUENCE_FLIP) is a TAG:
+    SELECT count(DISTINCT s.id) AS confluence_exit_armed
+    FROM strategy.strategies s
+    JOIN strategy.strategy_versions v ON v.id = s.published_version_id
+    WHERE s.enabled AND (v.config->'tags')::jsonb ? 'oi-confluence-exit';
+    ```
+
+    Report the SET DIFFERENCE (armed path with zero fires) every post-market run, with the day's
+    delta. Known type→`close_reason` map (VERIFY the fired vocabulary each run — do not assume;
+    the engine uppercases the exit TYPE at `SignalEngine:1466`, so every armed type maps):
+    `stop_loss`→`STOP_LOSS`/`STRUCTURAL_STOP` (by basis), `trailing_stop`→`TRAILING_STOP`,
+    `time_stop`→`TIME_STOP`, `take_profit`→`TAKE_PROFIT`, `signal_exit`→`SIGNAL_EXIT`,
+    `square_off`→`SQUARE_OFF`, tag `oi-confluence-exit`→`CONFLUENCE_FLIP`; `MANUAL` maps to no
+    armed path. ⚠️ An incomplete map here labels a HEALTHY armed path "never fired" — the first
+    draft omitted `signal_exit` (armed on 38) and `square_off` (armed on 2), which the review
+    caught; a wrong never-fired verdict is exactly the false alarm this dimension must not raise. A path that has never fired is either
+    (a) genuinely unreachable this regime (say so, with the nearest-miss distance), (b) mis-wired
+    (the T24 class), or (c) shadowed by an earlier rule that always wins (`time_stop` at 30 min ate
+    every exit in the G11 analysis) — distinguish, never just count.
+
+    ⚠️ **The armed granularity is FINER than the fired vocabulary — do not report a (type, basis)
+    row as exercised or as never-fired when it is neither** (added 2026-07-31 after the E2E audit
+    caught the 07-31 run reporting 8 armed rows where its own query returns 10). The query groups by
+    `(type, basis)`; `strategy.paper_positions` carries **no column naming the rule that fired** —
+    `close_reason` is the entire exit vocabulary (verified: the table has no rule/basis column). So
+    several armed bases collapse onto one `close_reason` and become mutually indistinguishable:
+
+    | armed type | bases armed (live, 2026-07-31) | close_reasons available |
+    |---|---|---|
+    | `stop_loss` | `premium_pct` 30 · `index_points` 8 · `percent` 4 · `atr_multiple` 2 | `STOP_LOSS` + `STRUCTURAL_STOP` — 4 bases onto 2 reasons |
+    | `trailing_stop` | `indicator` 42 · `atr_multiple` 2 | `TRAILING_STOP` — 2 bases onto 1 reason |
+
+    Classification rule: a `(type, basis)` row is **exercised** only when its type fired AND no
+    sibling basis could have produced that fire; **never-fired** only when the TYPE itself has zero
+    fires; otherwise **INDETERMINATE — not attributable from `close_reason`**. The two
+    `atr_multiple` rows (2 strategies each) are the standing INDETERMINATE pair: their types fire
+    constantly via other bases, so neither "exercised" nor "never fired" is defensible. Report them
+    as INDETERMINATE every run rather than dropping them — silently omitting a row is how the 8-vs-10
+    discrepancy happened, and a dropped row reads as "covered everything" when it was not.
+
+30. **Sub-account FREEZE telemetry** (added 2026-07-31) — the #1086 capital governors freeze a
+    sub-account for the rest of the session after a loss threshold; on their FIRST live day 3 of 5
+    froze by 13:40 and a 6th entry would have found 4/5 frozen. Whether that is protection or
+    capacity starvation is a data question, and it needs a daily row, not an anecdote:
+
+    ```sql
+    -- ENTRIES come from paper_events, not positions (review finding, 2026-07-31): pyramiding
+    -- AVERAGES INTO the open row — qty and avg price move, opened_at does NOT — while
+    -- paper_events records one OPENED per open-or-average-in (V038). Position-row counting
+    -- under-counts entries and mis-times the freeze.
+    SELECT p.subaccount_idx,
+           count(e.id) AS entries,
+           to_char(max(e.created_at) AT TIME ZONE 'Asia/Kolkata','HH24:MI') AS last_entry_ist
+    FROM strategy.paper_events e
+    JOIN strategy.paper_positions p ON p.id = e.position_id
+    WHERE e.kind = 'OPENED' AND e.created_at >= :d0 AND p.subaccount_idx IS NOT NULL
+    GROUP BY 1 ORDER BY 1;
+    -- day PnL SEPARATELY (a position joined through its events would count once per event)
+    SELECT subaccount_idx, round(sum(realized_pnl), 2) AS day_pnl
+    FROM strategy.paper_positions
+    WHERE closed_at >= :d0 AND subaccount_idx IS NOT NULL
+    GROUP BY 1 ORDER BY 1;
+    ```
+
+    Track `frozen-by` time per idx across sessions. If the median freeze lands before 13:00 for a
+    week, the governors are the binding entry constraint — that goes to the owner as a
+    capacity-vs-protection decision with the counterfactual P&L of the entries they blocked
+    (§3.26 pipeline), not as a tuning proposal.
+
+31. **A sub-account discipline freeze TRUNCATES the rejection stream — discriminate it from a stall
+    via the eval-outcome buckets, and treat every post-freeze table as partial-session** (added
+    2026-07-31) — the §12.7 five-account discipline (`ScalperAccountModel.scalperEntryAllowed`:
+    an account freezes for the day on its FIRST losing close OR on banking ~1% of its ₹30,000
+    allocation; all 5 frozen ⇒ no fresh scalper entry) is consulted in `SignalEngine.scalperEntry`
+    **BEFORE the confluence gate**, returning `DISCIPLINE_PAUSED` — so a fully-frozen fleet writes
+    **zero rejection rows** for the rest of the session while the engine is completely alive. First
+    live observation 2026-07-31: all 5 subs frozen by 13:34 (2 profit-locks + 3 first-losses),
+    `discipline-paused` counter 224 (first non-zero ever), rejections end 13:34 sharp, gauges fresh
+    to the close. **The discriminator vs a stall:**
+
+    ```sql
+    SELECT to_char(bucket_time AT TIME ZONE 'Asia/Kolkata','HH24:MI') ist,
+           sum(eval_count) FILTER (WHERE outcome='discipline-paused')  paused,
+           sum(eval_count) FILTER (WHERE outcome='confluence-blocked') confl,
+           sum(eval_count) FILTER (WHERE outcome='chart-gate-failed')  chart
+    FROM strategy.signal_eval_outcomes
+    WHERE bucket_time >= :d0 GROUP BY 1 ORDER BY 1;
+    ```
+
+    `paused > 0` while `chart` keeps advancing = freeze (healthy); everything at 0 with stale
+    gauges = stall. ⚠️ Consequences for analysis: (a) every §3.3/§3.6 table on a freeze day is a
+    **partial session** (§3.21 class) — say so; (b) §3.10 coverage counts shrink mechanically;
+    (c) the freeze is ALSO §3.30's telemetry subject — log frozen-by times per sub and which rail
+    (profit-lock vs first-loss) froze each. A profit-lock freeze banking a green day is the design
+    working, not starvation.
+32. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -234,7 +572,85 @@ restart services, or write during market hours.
   text here said it was): `recordRejection` runs only PAST the chart gate, so an ordinary
   SuperTrend-DOWN leg silences every scalper at once. Confirm liveness POSITIVELY via a fresh
   `strategy.signal_eval_outcomes` row (§4.3 step 4) before calling anything a problem.
+- ⚠️ **Before ~09:45 IST only a handful of strategies are in-window, so a FLAT Σ
+  `ay_signal_eval_outcome_total` there is the trade WINDOW, not a stall** (added 2026-07-27). Most
+  scalper YAMLs open after 09:45 (the cross-strategy "after 09:45" rule); the `morning-trade` family
+  is the deliberate exception (`window: { from: "09:16", to: "15:00" }`, owner-confirmed in its YAML
+  header). Measured 2026-07-27: Σ sat at **36 across two reads spanning 09:43:45–09:45:33** with
+  **2** slugs emitting, then jumped to **72 with 16 slugs by 09:46:54** as the 09:45 bar brought the
+  rest in-window — a +36 step in ~1.4 min, after ~2 min of apparent flatness. Both
+  `ay_signal_bar_*_age_seconds` gauges read fresh throughout, which is what actually settled it.
+  Practical rule: read the gauges for liveness, and if you want a counter DELTA that means anything,
+  space the two reads across a bar boundary **after 09:45**. Σ is an attribution primitive (§4.3
+  step 4), never a liveness one — flatness inside the opening half-hour is the single easiest way to
+  re-manufacture the 07-17 false escalation.
 - Context nulls (dimension §3.7) on TODAY's rows — catches a dead feed the same day it dies, not at EOD.
+  ⚠️ **`iv_rank` / `dow` / `fii` dead in a MORNING dot-health read is the standing state, not "too
+  early to populate"** (added 2026-07-27, correcting the reading carried in `2026-07-27-open-gate.md`
+  §6): the 07-24 ledger already has `ivRank` NULL 100%, `fiiLongPct` NULL 100% (both dead-data, carried
+  since 07-02) and `dowUp` NULL by design (un-armed). All three are `required: false`. Only a CHANGE
+  in that set — one of them alive, or a fourth dot joining them — is news.
+- ⚠️ **Dot support rates read mid-session are PROVISIONAL — write "0 so far (n=…, as of HH:MM)", never
+  "dead"** (added 2026-07-29, §3.21). The 07-29 midday run reported `trending_cross` **0/722** on a
+  fully-live-OI day; the full session was **57/983 (5.8%)**. Escalating a partial-read 0% costs the EOD
+  run a carry item and can manufacture a phantom tuning row.
+- ⚠️ **The G12 `frozen` flag is likewise UNINTERPRETABLE in a morning read — `frozen:false` before
+  ~8 distinct bars is an un-evidenced default, not a refutation of a known freeze** (added
+  2026-07-30, the same partial-read trap as §3.21 one field deeper). The frozen-operand probe
+  (#1111, closing §3.22/T28) needs `MIN_FROZEN_BARS = 8` distinct operand-bearing bars — ~24 minutes
+  on the 3m primary — before one distinct value may be called frozen, and **below that it reports
+  `frozen:false` rather than "unknown", deliberately: "the flag is an assertion, and an un-evidenced
+  assertion must read false"** (`DotHealthCanary.java:63-67`). Measured 2026-07-30 09:43 IST: all
+  nine dots `frozen:false` on `rowsInspected=6` — consistent with T28's frozen `atmIv` and with a
+  genuine thaw alike, so it discriminates neither. **In a `live` run, quote `rowsInspected` next to
+  any `frozen` verdict and treat a sub-8 reading as no-data.** Only a session-complete read (or the
+  §6 `count(DISTINCT …)` over the operand) settles a freeze.
+- ⚠️ **Fingerprint the JAR before attributing live behaviour to a code path** (added 2026-07-30,
+  §3.23 — this entry was PROMISED by the 07-29 rollup row and never written; the dangling reference
+  is what surfaced it). A deploy can report SUCCESS, go healthy and pass its own probe while shipping
+  a jar that omits other merged work. `docker exec ay-<svc> sh -c 'unzip -l /app/*.jar | grep -c
+  <NewClass>'` is the cheap generic check. ⚠️ Never probe a `*Test` class (never in the service jar),
+  and remember a nested `BOOT-INF/lib/*.jar` class returns 0 from the OUTER jar and looks like a
+  failed deploy. Also fingerprint a RECENT unrelated fix, to rule out a silent revert.
+- **Session REGIME classification** (added 2026-07-30, §3.25 — G15). Stamp every session row with a
+  regime so a data-gated row (G11 needs a chop day) can ever be told its observation arrived.
+  Metric: **intraday directional efficiency** `|close−open| / (high−low)` on `NIFTY 50` daily.
+  ⚠️ **Intraday, NOT close-over-prior-close** — a 30-minute time stop cannot capture an overnight
+  gap, and the two disagree exactly where it matters (2026-07-29 reads +1.10% close-over-close but
+  only +0.30% intraday, which is why it was mis-filed as a trend day). ⚠️ **Efficiency, NOT
+  close-position-in-range** — the latter saturates (14 of 21 days ≥0.65) and rates a −0.03%-on-0.87%
+  chop day at 0.676. Cuts are DERIVED from the largest gaps in the sorted distribution, not picked.
+  Table + method live in `rollup.md` §Session regime.
+- **The entry-knob counterfactual PIPELINE** (added 2026-07-30, §3.26 — the method that settled T1,
+  G13 and G10). A pass-rate delta is NOT a result. Four steps, and skipping any one has produced a
+  wrong answer:
+  1. **rows newly passing** the knob under test;
+  2. **keep only rows where that rail was the SOLE blocker** — G13's +21.7% headline collapsed to 6
+     legs here, because `volume-floor` binds 88% of blocks and `confluence-composite` binds 0.9%;
+  3. **dedupe by `(bar_time, tradingsymbol)`** — slug fan-out inflates raw counts;
+  4. **price** each leg and **test the sign's robustness + subtract costs** — G10 was +324.87 gross
+     and −305.88 excluding its top 5 legs of 265, break-even at ~0.35% round-trip.
+  ⚠️ **Standing result: all four measured loosenings of the scalper entry gate LOST money** (T1, T7,
+  G13, G10). Treat that as the prior. All four are conditional on the 30-minute `time_stop`, so if
+  G11 changes the exit they must be re-run.
+- ⚠ **On an expiry day the suppression lands on whichever instrument ROLE touches the expiring
+  chain — and §3.19's OI-root query CANNOT see it** (added 2026-07-30, §3.27; this entry was claimed
+  as promoted by the 07-30 findings and was NOT actually written — the second dangling promotion in
+  two sessions, after §3.23). §3.19 answers only the OI question. On 2026-07-30 (BSE monthly) every
+  S24 discriminator read *no suppression* and was CORRECT — `context.underlying` was `NIFTY 50` on
+  814/814, quadrants NEUTRAL 0/814, basis live 814/814 — because the `sensex-niftyoi` slugs read
+  NIFTY OI **by design**. The expiry instead surfaced in `strike-pick`: 405 fails on **16 of 16
+  SENSEX-rooted slugs and ZERO NIFTY-rooted ones**. Matched root-swap control across three sessions:
+  07-28 (NSE monthly) 534 fails, all NIFTY-rooted → 07-29 (non-expiry) ZERO → 07-30 (BSE monthly) 405,
+  all SENSEX-rooted. **Check the EXECUTION root, not just the OI root** — they are different
+  instruments under ADR-0003's three-way decoupling. ⚠ 07-24 (Friday, no expiry, 550 SENSEX fails)
+  does not fit, so the claim is *an expiry saturates the expiring root*, NOT *only an expiry can*.
+- ⚠ **A dot at 0% is THREE explanations deep now, and the third one has no probe** (added 2026-07-30,
+  §3.28): a dead input (null — the canary sees it), a **frozen** input (one distinct value — #1111's
+  probe sees it), or a **live, moving operand that never crosses its threshold** (nothing sees it).
+  `breadth` on 2026-07-30 was the third: 0/814 with 10 distinct values over 23–32, against a `> 32`
+  rule whose session max was exactly 32. In a `live` run do not classify at all (§3.21); at EOD place
+  the dot's own threshold on the operand's session min/max **before** reaching for a data explanation.
 - Capture liveness: `max(bucket)` on 1m candles + snapshot counts vs wall clock.
 
 ### 4.2 Live counterfactual — "would loosening knob X have made money TODAY?"
@@ -548,6 +964,109 @@ FROM marketdata.candles WHERE exchange='NFO' AND interval='1m' AND tradingsymbol
   AND EXTRACT(second FROM bucket)=0 AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1 ORDER BY 1;
 -- compare the flagged bucket's value against the canary's logged "3m bar volume" (they matched on
 -- 2026-07-24 — it was the in-memory 1m sum that diverged).
+
+-- §3.18 which contract did the engine actually signal off? (the roll is SILENT in the row)
+-- take a context-bearing close, then see which candidate contract's day range contains it.
+SELECT DISTINCT (diagnostic->'context'->'chart'->>'close')::numeric close_seen
+FROM strategy.signal_rejections
+WHERE generated_at >= :d0915 AND diagnostic->'context'->'chart'->>'close' IS NOT NULL LIMIT 5;
+SELECT tradingsymbol, (array_agg(open ORDER BY bucket))[1] o, max(high) h, min(low) l,
+       (array_agg(close ORDER BY bucket DESC))[1] c
+FROM marketdata.candles WHERE interval='1m' AND EXTRACT(second FROM bucket)=0
+  AND tradingsymbol IN ('NIFTY26JULFUT','NIFTY26AUGFUT')   -- adjust to the live pair
+  AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1;
+-- cheapest confirmation while the container is up (the rail log names the contract):
+--   docker logs ay-strategy-signal-service --since <T> 2>&1 | grep -oE "NFO:[A-Z0-9]+" | sort -u
+
+-- §3.19 monthly-expiry OI suppression: is the dead OI bloc BY DESIGN or a real outage?
+-- (a) the fingerprint — quadrants NEUTRAL + spurt NULL while futuresBasis stays LIVE:
+SELECT count(*) ctx,
+       count(*) FILTER (WHERE diagnostic->'context'->'oi'->>'futuresQuadrant'='NEUTRAL') fq_neutral,
+       count(*) FILTER (WHERE diagnostic->'context'->'oi'->>'spurtPricePct' IS NULL) spurt_null,
+       count(*) FILTER (WHERE diagnostic->'context'->'oi'->>'futuresBasis' IS NOT NULL) basis_live
+FROM strategy.signal_rejections
+WHERE generated_at >= :d0915 AND diagnostic->'context'->'oi' IS NOT NULL;
+-- basis_live = ctx while the other two are saturated ⇒ S24 suppression, NOT an outage.
+-- (b) which ROOT is suppressed? (never infer it from the slug — sensex-niftyoi reads NIFTY OI)
+SELECT diagnostic->'context'->>'underlying' oi_root, count(*)
+FROM strategy.signal_rejections WHERE generated_at >= :d0915 GROUP BY 1;
+-- (c) capture must still be healthy underneath the suppression:
+SELECT count(*) snaps, count(DISTINCT date_trunc('minute',ts)) minutes, max(ts AT TIME ZONE 'Asia/Kolkata') last_ist
+FROM marketdata.futures_oi_snapshots WHERE ts >= :d0915;
+
+-- §3.20 dot-vs-rail threshold divergence: does a dot's support rate track its namesake RAIL?
+-- If the rail blocks on a BANDED threshold while the dot is pinned at 0% (or 100%), the two are not
+-- reading the same floor — go read the scorer's call site (the SQL only shows you WHERE to look).
+SELECT d->>'dot' dot, d->>'reason' reason,
+       round(100.0*count(*) FILTER (WHERE (d->>'supports')::boolean)/count(*),1) dot_support_pct,
+       min(r.blocking_threshold) rail_min_thr, max(r.blocking_threshold) rail_max_thr
+FROM strategy.signal_rejections r, jsonb_array_elements(r.diagnostic->'confluence'->'dots') d
+WHERE r.generated_at >= :d0915 AND d->>'dot' = :dot AND r.blocking_rail = :namesake_rail
+GROUP BY 1,2;
+-- then place the SUSPECTED static default on the operand's own distribution (§3.8/§3.15 form):
+WITH b AS (SELECT time_bucket('3 minutes', bucket) b3, sum(volume) vol FROM marketdata.candles
+  WHERE tradingsymbol=:front_fut AND exchange='NFO' AND interval='1m' AND EXTRACT(second FROM bucket)=0
+    AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1)
+SELECT count(*) bars, count(*) FILTER (WHERE vol >= :suspected_static_floor) clearing,
+       round(100.0*count(*) FILTER (WHERE vol >= :suspected_static_floor)/count(*),1) pct FROM b;
+-- `clearing` matching the dot's distinct supporting BUCKET count is the fingerprint.
+-- code side (the actual proof): ConnectTheDotsScorer's add(dots,"<dot>",…) line -> the ScalperGates
+-- overload it calls -> whether that overload takes a floor override at all.
+
+-- §3.22 FROZEN-operand probe: a dot stuck at 0% or ~100% may have a constant input, which every
+-- null/non-null canary reports as `alive`. Run this BEFORE reaching for a threshold explanation.
+SELECT count(DISTINCT diagnostic->'context'->'macro'->>'atmIv')          atmiv_vals,
+       count(DISTINCT diagnostic->'context'->'macro'->>'ceIvAvg6')      ce_vals,
+       count(DISTINCT diagnostic->'context'->'macro'->>'peIvAvg6')      pe_vals,
+       count(DISTINCT diagnostic->'context'->'macro'->>'vixLevel')      vix_vals,
+       count(DISTINCT diagnostic->'context'->'macro'->>'premiumSkewPct') skew_vals,
+       count(DISTINCT diagnostic->'context'->'oi'->>'futuresBasis')     basis_vals
+FROM strategy.signal_rejections WHERE generated_at >= :d0915;
+-- `1` on a field while its neighbours show tens = a FROZEN operand (2026-07-29: atmIv = 1, four
+-- sessions running, while ceIvAvg6/peIvAvg6/vixLevel/premiumSkewPct all moved).
+-- AUTOMATED 2026-07-29 (G12): DotHealthCanary now runs this per dot and reports `DotState.frozen`
+-- on GET /api/v1/signal-rejections/dot-health, so the hand-run below is now a cross-check, not the
+-- only way to see it. TWO DIFFERENCES from the canary, both deliberate:
+--   (a) this SQL counts DISTINCT ROWS; the canary counts DISTINCT BARS. One 3m bar fans out across
+--       many scalpers, so over a NARROW window row-counting can read `1` off a single bar and call
+--       a live input frozen. Safe here only because it runs over a whole session (:d0915).
+--   (b) atmIv's freeze is CORRECT — it resolves to the latest `iv_daily_summary` row (`iv_30d`
+--       PREFERRED, `atm_iv` only as a fallback — atm_iv is NULL on 2026-07-28 and 07-21 while both
+--       sessions still read a value), written once a day at 16:00 IST, so intraday it is the
+--       previous session's scalar. See docs/signal-analysis/2026-07-29-g12-frozen-operand.md.
+--       Do not "fix" the feed.
+--   (c) `iv_rank` and `fii` are the same EOD shape and are classified DAILY in the canary too;
+--       only CONTINUOUS operands (breadth/vix/oi_spurt_price) page on a freeze.
+-- Cross-session form:
+SELECT (generated_at AT TIME ZONE 'Asia/Kolkata')::date d,
+       count(DISTINCT diagnostic->'context'->'macro'->>'atmIv') vals,
+       min((diagnostic->'context'->'macro'->>'atmIv')::numeric) mn,
+       max((diagnostic->'context'->'macro'->>'atmIv')::numeric) mx
+FROM strategy.signal_rejections WHERE generated_at >= :d0 GROUP BY 1 ORDER BY 1;
+
+-- §3.25 session REGIME (G15): intraday directional efficiency on the `NIFTY 50` DAILY bar.
+-- (NOT the front future -- the regime stamp is an index-level read; an earlier revision of this
+--  block carried a futures-volume CTE that the SELECT never referenced. Removed 2026-07-30.)
+-- Cuts derived from the sorted distribution's largest gaps: chop <0.29, mixed 0.29-0.61, trend >=0.61.
+SELECT to_char(bucket AT TIME ZONE 'Asia/Kolkata','YYYY-MM-DD') d,
+       round(((close-open)/open*100)::numeric,2)            net_pct,
+       round(((high-low)/open*100)::numeric,2)              range_pct,
+       round((abs(close-open)/NULLIF(high-low,0))::numeric,3) efficiency
+FROM marketdata.candles
+WHERE tradingsymbol='NIFTY 50' AND interval='1d' AND bucket >= :d0 ORDER BY bucket;
+-- ⚠️ close-over-PRIOR-close is the WRONG operand here (a 30-min stop cannot capture a gap).
+
+-- §3.26 the counterfactual PIPELINE. Step 2 is the one people skip -- which rail actually BINDS:
+SELECT blocking_rail, count(*) FROM strategy.signal_rejections
+WHERE generated_at >= :d0 AND diagnostic ? 'confluence' GROUP BY 1 ORDER BY 2 DESC;
+-- Everything needed to price a counterfactual is ALREADY on the row -- no modelling of the live side:
+--   diagnostic->>'operand'    the bar's operand as the engine saw it
+--   diagnostic->>'threshold'  the floor the engine ACTUALLY applied
+--   diagnostic->'confluence'->'dots'  every dot's weight + supports (composite is recomputable;
+--                             ⚠️ ABSENT dots are IN this array and must be excluded by hand --
+--                             validated 983/983 against the stored composite_score)
+--   diagnostic->'wouldBeLeg'  tradingsymbol / strike / expiry / optionType / entryLtp
+-- Then dedupe by (bar_time, tradingsymbol) and price via §4.2 below.
 
 -- §4.2 counterfactual premium path for one would-have-fired row
 SELECT captured_at AT TIME ZONE 'Asia/Kolkata', last_price

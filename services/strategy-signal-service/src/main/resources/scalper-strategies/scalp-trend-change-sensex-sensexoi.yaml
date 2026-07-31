@@ -24,13 +24,21 @@
 #
 # Evaluates on the NIFTY front future (Model A); the confluence seam buys the nearest-weekly
 # ATM-band CE.
+#
+# NO `fii-bias` tag on the CE side (owner decision 2026-07-27). That gate passes CE only when the
+# FII index-future LONG share is >=50%, but measured across 11 recent sessions that share ran
+# 8.1-15.7% - FII net-short in index futures is the structural norm, not a bearish signal. So on a
+# CE strategy the gate is not a directional filter, it is an unconditional off switch. The PE mirror
+# KEEPS the tag: `<=50` passes today, and it still bites if FII ever flips genuinely net-long.
+# The gate had never actually run - `Macro.fiiLongPct` was null on every bar because the EOD read
+# asked for the live bar's own date (fixed in the same PR), so nothing was lost by it until now.
 schema: strategy-schema/v1
 id: scalp-trend-change-sensex-sensexoi
 name: "Scalper · Trend Change · SENSEX CE (SENSEX-OI)"
 version: 1.0.0
 description: "Trend-change / reversal-capture scalp (Siva #12) on the NIFTY 3-min front future: a price swing-structure break + a >=50% Trending-OI momentum shift + the §3.1 2-candle 3rd-candle confirm, capped to the 09:45-14:30 window (no fresh down-reversal after ~14:30); broken-swing-pivot SL; long-premium CE only."
 author: owner
-tags: [scalper, options, intraday, sensex, trend-change, fii-bias, constituent-gate, rsi-s24-bands, delta-s24-floor, premium-s24-band, divergence-vol-gate, psar-durability, s24-trade-window, oi-confluence-exit, directional-vix-gate, rsi-cooloff, rsi-recovery, relative-volume-floor]
+tags: [scalper, options, intraday, sensex, trend-change, constituent-gate, rsi-s24-bands, delta-s24-floor, premium-s24-band, divergence-vol-gate, psar-durability, s24-trade-window, oi-confluence-exit, directional-vix-gate, rsi-cooloff, rsi-recovery, relative-volume-floor]
 
 universe:
   mode: options_of_underlying
@@ -72,7 +80,7 @@ exit_rules:
   - { type: time_stop,   params: { max_bars: 30 } }
 
 risk:
-  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000, max_lots: 5 } }
   max_positions: 1
   max_positions_per_underlying: 1
   max_daily_loss_pct: 2.0

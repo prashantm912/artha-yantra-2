@@ -638,6 +638,76 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.items.length()").value(0));
   }
 
+  /**
+   * A negative {@code window} (task_c736e3ca) reached {@link OpenHighStatsService}'s {@code
+   * Stream.limit(2*window+1)} unvalidated, so the limit itself went negative and threw an
+   * uncaught {@code IllegalArgumentException} -> the catch-all 500. A hand-rolled guard (matching
+   * the sibling {@code buckets} check on {@code /trending}) rejects it before the reader/grading
+   * path runs.
+   */
+  @Test
+  void strikeSessionStatsNegativeWindowIs400NotServerError() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSNEGWIN")
+                .param("expiry", "2026-06-25")
+                .param("window", "-1"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  /**
+   * {@code window=0} is a genuinely different case from negative — {@code Stream.limit(0)} is
+   * legal and yields just the single nearest (ATM) strike, not an error — so it must NOT be
+   * rejected by the negative-window guard above.
+   */
+  @Test
+  void strikeSessionStatsZeroWindowKeepsOnlyAtmStrike() throws Exception {
+    String u = "SESSZEROWIN";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime s0 = OffsetDateTime.of(2026, 6, 19, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    // spot is hardcoded 22480.00 in insertRow -> ATM nearest = 22500.
+    OptionsSnapshotReaderIntegrationTest.insertRow(
+        jdbc, s0, u, exp, "22500", "CE", "100.00", 1000L, 0L, 2000L);
+    // decoy strike, OUT of window=0 (must be sliced away).
+    OptionsSnapshotReaderIntegrationTest.insertRow(
+        jdbc, s0, u, exp, "22550", "CE", "50.00", 800L, 0L, 1000L);
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", u)
+                .param("expiry", "2026-06-25")
+                .param("session", "2026-06-19")
+                .param("window", "0")
+                .param("interval", "5"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.atmStrike").value(org.hamcrest.Matchers.startsWith("22500")))
+        .andExpect(jsonPath("$.items.length()").value(1))
+        .andExpect(jsonPath("$.items[0].strike").value(org.hamcrest.Matchers.startsWith("22500")));
+  }
+
+  /**
+   * Recon (task_c736e3ca): unlike {@code window}, a negative {@code interval} needs no new guard.
+   * {@code reader.sessionStats(...)} calls {@code OiInterval.parse(intervalMinutes + "m")} as ITS
+   * OWN first statement (both the live-snapshot {@code OptionsSnapshotReader} and the
+   * candle-derived {@code CandleDerivedChainReader} paths) — before the controller's own later
+   * {@code OiInterval.parse} call even runs — so the interval gate already fires first, same 400
+   * as {@code /oi-stats}'s {@code unsupportedIntervalIs400WithCode}.
+   */
+  @Test
+  void strikeSessionStatsNegativeIntervalIs400NotServerError() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSNEGIV")
+                .param("expiry", "2026-06-25")
+                .param("interval", "-1"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_INTERVAL_UNSUPPORTED"));
+  }
+
   @Test
   void premiumSeriesTracksAtmStraddlePerBucket() throws Exception {
     String u = "PREMSERIES";

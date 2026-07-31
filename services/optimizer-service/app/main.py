@@ -8,6 +8,7 @@ import logging
 import psycopg
 import redis
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app import (
@@ -28,6 +29,7 @@ from app.errors import (
     api_error_handler,
     invalid_path_handler,
     unhandled_error_handler,
+    validation_error_handler,
 )
 from app.notify import NtfyClient
 from app.path_grammar import InvalidParameterPath
@@ -48,6 +50,8 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(InvalidParameterPath, invalid_path_handler)
+    # Overrides FastAPI's stock {"detail": [...]} 422 body with the shared envelope.
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
     # Catch-all: without it ANY unmapped exception left a bare 500 with no error envelope.
     app.add_exception_handler(Exception, unhandled_error_handler)
 

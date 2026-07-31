@@ -182,7 +182,15 @@ public class OptionsAnalyticsController {
   /** One faithful-chain row: CE | strike | PE, each leg enriched with deltas. */
   public record ChainTableRow(BigDecimal strike, ChainTableLeg ce, ChainTableLeg pe) {}
 
-  /** The faithful Options Chain feed: the live chain header + enriched rows + the delta interval. */
+  /**
+   * The faithful Options Chain feed: the live chain header + enriched rows + the delta interval.
+   *
+   * <p>{@code lastCaptured} mirrors {@link OptionsChainService.Chain}: true ⇒ LIVE mode had no spot
+   * quote and the rows are the most recent CAPTURED chain, with {@code asOf} = the capture time —
+   * render it as an explicit staleness badge. It is orthogonal to {@code stale} (market not open),
+   * and always false in HISTORY mode, which is an explicit request for a past session rather than a
+   * degraded live read.
+   */
   public record ChainTable(
       String underlying,
       LocalDate expiry,
@@ -192,6 +200,7 @@ public class OptionsAnalyticsController {
       BigDecimal riskFreeRate,
       @Schema(types = {"number", "null"}) BigDecimal pcr,
       boolean stale,
+      boolean lastCaptured,
       OffsetDateTime asOf,
       String interval,
       List<ChainTableRow> rows,
@@ -477,7 +486,7 @@ public class OptionsAnalyticsController {
     if (!q.live() && q.date() != null) {
       return historicalChainTable(q, exp, deltas);
     }
-    OptionsChainService.Chain chain = chainService.chain(q.name(), exp);
+    OptionsChainService.Chain chain = chainService.chainOrLastCaptured(q.name(), exp);
     List<ChainTableRow> rows = new ArrayList<>(chain.rows().size());
     for (OptionsChainService.StrikeRow r : chain.rows()) {
       rows.add(
@@ -495,12 +504,19 @@ public class OptionsAnalyticsController {
         chain.riskFreeRate(),
         chain.pcr(),
         chain.stale(),
+        chain.lastCaptured(),
         chain.asOf(),
         q.interval().token(),
         rows,
-        // Live black76 chain — complete unless the underlying quote is stale (off-hours / feed gap).
+        // Live black76 chain — complete unless the market is closed OR the chain degraded to the
+        // last captured book (no live spot); asOf is then the capture time, so staleSeconds is real.
         DataFreshness.of(
-            chain.asOf(), DataFreshness.LIVE, "capture", null, !chain.stale(), clock));
+            chain.asOf(),
+            DataFreshness.LIVE,
+            "capture",
+            null,
+            !chain.stale() && !chain.lastCaptured(),
+            clock));
   }
 
   /**
@@ -1233,7 +1249,7 @@ public class OptionsAnalyticsController {
             ? null
             : BigDecimal.valueOf(peOi).divide(BigDecimal.valueOf(ceOi), 4, RoundingMode.HALF_UP);
     return new ChainTable(
-        q.name(), exp, spot, null, null, null, pcr, false, asOf, q.interval().token(), rows,
+        q.name(), exp, spot, null, null, null, pcr, false, false, asOf, q.interval().token(), rows,
         oiFreshness(q, asOf, latest, true));
   }
 

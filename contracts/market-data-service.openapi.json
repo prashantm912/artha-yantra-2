@@ -9887,6 +9887,9 @@
           "stale" : {
             "type" : "boolean"
           },
+          "lastCaptured" : {
+            "type" : "boolean"
+          },
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
@@ -9898,7 +9901,7 @@
             }
           }
         },
-        "required" : [ "asOf", "expiry", "forward", "forwardSource", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
+        "required" : [ "asOf", "expiry", "forward", "forwardSource", "lastCaptured", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
       },
       "Leg" : {
         "type" : "object",
@@ -10121,6 +10124,9 @@
           "stale" : {
             "type" : "boolean"
           },
+          "lastCaptured" : {
+            "type" : "boolean"
+          },
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
@@ -10138,7 +10144,7 @@
             "$ref" : "#/components/schemas/DataFreshness"
           }
         },
-        "required" : [ "asOf", "expiry", "forward", "forwardSource", "interval", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
+        "required" : [ "asOf", "expiry", "forward", "forwardSource", "interval", "lastCaptured", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
       },
       "ChainTableLeg" : {
         "type" : "object",

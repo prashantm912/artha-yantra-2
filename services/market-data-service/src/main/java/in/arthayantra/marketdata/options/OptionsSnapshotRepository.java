@@ -201,6 +201,30 @@ public class OptionsSnapshotRepository {
     return ts.isEmpty() ? Optional.empty() : Optional.of(ts.get(0));
   }
 
+  /**
+   * The NEWEST captured snapshot timestamp for (underlying, expiry) — the anchor for serving the
+   * last captured chain when no live spot quote exists (off-hours / feed gap).
+   *
+   * <p>Deliberately a bare {@code max(ts)} aggregate rather than an {@code ORDER BY … LIMIT 1}:
+   * over a hypertable with compressed chunks TimescaleDB 2.18.2 aborts query PLANNING for a
+   * top-level sort key that is a computed expression under a {@code LIMIT} ("non-Var pathkey not
+   * expected for compressed batch sorted merge" — see {@code OptionsSnapshotReader.latestPair}).
+   * An aggregate carries no pathkey at all, so the sorted-merge path is never considered.
+   *
+   * <p>Unfiltered by {@code quarantined}/{@code source} on purpose, matching {@link #rowsAt} which
+   * this pairs with — the anchor and the rows it selects must describe the same capture pass.
+   */
+  public Optional<OffsetDateTime> latestSnapshotTs(String underlying, LocalDate expiry) {
+    List<OffsetDateTime> ts =
+        jdbc.query(
+            "SELECT max(ts) AS ts FROM options_chain_snapshots WHERE underlying = ? AND expiry = ?",
+            (rs, n) -> rs.getObject("ts", OffsetDateTime.class),
+            underlying,
+            java.sql.Date.valueOf(expiry));
+    // max() over an empty set still returns one row, holding NULL
+    return ts.isEmpty() ? Optional.empty() : Optional.ofNullable(ts.get(0));
+  }
+
   /** Every row of one stored snapshot. */
   public List<SnapshotRow> rowsAt(String underlying, LocalDate expiry, OffsetDateTime ts) {
     return jdbc.query(

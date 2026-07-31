@@ -130,7 +130,8 @@ class OptionsSnapshotSourceSeamTest {
             CLOCK,
             new BigDecimal("0.065"),
             true,
-            Optional.of(upstox));
+            Optional.of(upstox),
+            null); // a live spot is present, so the captured-chain fallback is never consulted
     CapturingRepo repo = new CapturingRepo();
 
     snapshotService(chainService, repo).snapshotNow("NIFTY 50", EXPIRY);
@@ -185,7 +186,8 @@ class OptionsSnapshotSourceSeamTest {
             CLOCK,
             new BigDecimal("0.065"),
             true,
-            Optional.empty()); // DEFAULT: no Upstox source
+            Optional.empty(), // DEFAULT: no Upstox source
+            null); // a live spot is present, so the captured-chain fallback is never consulted
     CapturingRepo repo = new CapturingRepo();
 
     snapshotService(chainService, repo).snapshotNow("NIFTY 50", EXPIRY);

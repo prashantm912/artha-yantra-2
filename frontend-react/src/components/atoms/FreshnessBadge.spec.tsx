@@ -53,6 +53,28 @@ describe('FreshnessBadge', () => {
     expect(screen.getByText('Stale')).toBeInTheDocument();
   });
 
+  it('keeps a briefly-stale LIVE read on HH:MM alone (no date noise under a day)', () => {
+    render(
+      <FreshnessBadge freshness={fresh({ asOf: '2026-07-11T14:55:00+05:30' })} now={NOW} />,
+    );
+    expect(screen.getByText('as of 14:55')).toBeInTheDocument();
+  });
+
+  it('adds the DATE once a LIVE read is a day or more old, so a served-from-capture chain cannot read like a fresh one', () => {
+    // The chain-table degrades to the last CAPTURED book after close rather than 503-ing, so a
+    // days-old chain renders in the same table as a live one; HH:MM alone would make "yesterday's
+    // close" and "three weeks ago" the same chip.
+    render(
+      <FreshnessBadge
+        freshness={fresh({ asOf: '2026-06-20T15:30:00+05:30', complete: false })}
+        now={NOW}
+      />,
+    );
+    expect(screen.getByText('Stale')).toBeInTheDocument();
+    expect(screen.getByText('as of 2026-06-20 15:30')).toBeInTheDocument();
+    expect(screen.queryByText('as of 15:30')).not.toBeInTheDocument();
+  });
+
   it('renders an EOD read as the date, muted, never coloured alone', () => {
     render(
       <FreshnessBadge

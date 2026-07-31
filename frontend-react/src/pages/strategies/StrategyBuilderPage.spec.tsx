@@ -12,6 +12,7 @@ const chain: ChainTable = {
   riskFreeRate: null,
   pcr: null,
   stale: false,
+  lastCaptured: false,
   asOf: '2026-06-22T15:24:00+05:30',
   interval: '5m',
   rows: [

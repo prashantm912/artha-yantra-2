@@ -10,7 +10,10 @@ import in.arthayantra.marketdata.instruments.Instrument;
 import in.arthayantra.marketdata.instruments.InstrumentRepository;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -283,5 +286,48 @@ class OptionsChainLastCapturedTest {
     assertThat(chain.stale()).as("the market IS open").isFalse();
     assertThat(chain.lastCaptured()).as("the data is not").isTrue();
     assertThat(chain.asOf()).isEqualTo(CAPTURED_AT);
+  }
+
+  // ── call-site pins ────────────────────────────────────────────────────────────────────────────
+  // The two entry points are one identifier apart, so a one-line edit either silently undoes the
+  // whole feature (read path back on strict chain() ⇒ 503 every evening again) or silently breaks
+  // capture (write path on the degrading entry ⇒ the 2-min pass re-persists the stale book as a
+  // fresh row and freezes OI). Neither is reachable from a service-level unit test — both sides
+  // behave correctly in isolation — so the wiring itself is pinned here, the same pure-file way
+  // MapReturnRatchetTest pins the contract surface. No containers, no Spring context.
+
+  private static final Path READ_PATH_CONTROLLERS_ROOT =
+      Path.of("src/main/java/in/arthayantra/marketdata/options");
+
+  @Test
+  void everyReadEndpointUsesTheDegradingEntryPoint() throws IOException {
+    for (String controller :
+        List.of("OptionsChainController.java", "analytics/OptionsAnalyticsController.java")) {
+      String source = Files.readString(READ_PATH_CONTROLLERS_ROOT.resolve(controller));
+      assertThat(source)
+          .as("%s must serve reads through chainOrLastCaptured", controller)
+          .contains("chainService.chainOrLastCaptured(");
+      assertThat(source)
+          .as(
+              "%s calls the strict chainService.chain(...) — that is the WRITE-path entry and it"
+                  + " 503s whenever there is no live spot, which blanks the panel every evening."
+                  + " Read paths must call chainOrLastCaptured(...).",
+              controller)
+          .doesNotContain("chainService.chain(");
+    }
+  }
+
+  @Test
+  void theCaptureAndBroadcastPassStayOnTheStrictEntryPoint() throws IOException {
+    String source = Files.readString(READ_PATH_CONTROLLERS_ROOT.resolve("OptionsSnapshotService.java"));
+    assertThat(source)
+        .as("the capture/broadcast pass must keep refusing when there is no live spot")
+        .contains("chainService.chain(");
+    assertThat(source)
+        .as(
+            "OptionsSnapshotService must NEVER degrade to the captured chain — snapshotNow persists"
+                + " what chain() returns, so it would re-insert the last captured book as a fresh"
+                + " row and freeze OI for the rest of the day.")
+        .doesNotContain("chainOrLastCaptured");
   }
 }

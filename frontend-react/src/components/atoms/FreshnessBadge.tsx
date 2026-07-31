@@ -67,7 +67,14 @@ export function FreshnessBadge({
     tone = stale ? 'text-warn ring-warn/40' : 'text-bull ring-bull/40';
     label = stale ? 'Stale' : 'Live';
     icon = stale ? 'warn' : 'live';
-    detail = timeLabel;
+    // A live read stale by DAYS must not read the same as one stale by minutes: HH:MM alone makes
+    // "yesterday's close" and "a chain from three weeks ago" identical chips. Past a day the date
+    // joins the time so the age is legible at a glance, not only on the hover title. Under a day
+    // the chip is unchanged, so every fresh/briefly-stale surface renders exactly as before.
+    detail =
+      stale && ageSec != null && ageSec >= 86_400 && dateLabel != null
+        ? `${dateLabel} ${timeLabel}`
+        : timeLabel;
   } else if (provenance === 'eod') {
     tone = 'text-ay-muted ring-ay-border';
     label = 'EOD';

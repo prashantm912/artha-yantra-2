@@ -204,6 +204,10 @@ describe('JobsPage', () => {
     );
   });
 
+  // Explicit budget (2026-08-01, #1061 suite-growth rule): this heavy renderPage + Radix-popover
+  // test sits close to the default 5s and tips over whenever added specs elsewhere reshuffle worker
+  // scheduling — it passes 9/9 in isolation. Per house rule this gets a per-test budget rather than
+  // a global testTimeout bump.
   it('applies a saved view back onto the page filters', () => {
     savedViews = [
       { id: 'v1', kind: 'backtest_jobs', name: 'Running only', filter: { status: 'running', strategyId: null, jobTag: null, latestOnly: false, sort: null } },
@@ -213,5 +217,5 @@ describe('JobsPage', () => {
     fireEvent.click(screen.getByText('Running only'));
     // Applying restores status='running' → the next render re-queries useJobs with it (arg 0).
     expect(lastJobsArgs[0]).toBe('running');
-  });
+  }, 15_000);
 });

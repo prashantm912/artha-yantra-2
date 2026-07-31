@@ -572,6 +572,23 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.atmStrike").value(org.hamcrest.Matchers.nullValue()));
   }
 
+  /**
+   * The {@code expiry} param (task_e2e01m(b)) used to be parsed by hand ({@code LocalDate.parse}),
+   * so a malformed value threw an uncaught {@code DateTimeParseException} -> the catch-all 500.
+   * Typing the {@code @RequestParam} as {@code LocalDate} (matching {@code ExportController}'s
+   * "expiry" param convention) makes Spring's own conversion failure map to 400 VALIDATION_FAILED.
+   */
+  @Test
+  void strikeSessionStatsBadExpiryIs400NotNpe() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSBADEXP")
+                .param("expiry", "test"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
   @Test
   void premiumSeriesTracksAtmStraddlePerBucket() throws Exception {
     String u = "PREMSERIES";

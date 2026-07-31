@@ -4,10 +4,13 @@ Java services (DATA_GAP, INVALID_PARAMETER_PATH, VALIDATION_FAILED, NOT_FOUND_*)
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+
+log = logging.getLogger("optimizer")
 
 
 class ApiError(Exception):
@@ -36,3 +39,11 @@ async def invalid_path_handler(request: Request, exc: Exception) -> JSONResponse
     return await api_error_handler(
         request, ApiError(400, "INVALID_PARAMETER_PATH", str(exc))
     )
+
+
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Last resort, mirroring the Java services' GlobalExceptionHandler (A.4): an unmapped
+    exception stays a 500 — it IS unexpected — but renders the shared envelope instead of a bare,
+    bodyless one, and is logged server-side WITH the traceback (never returned to the client)."""
+    log.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return await api_error_handler(request, ApiError(500, "INTERNAL_ERROR", "Internal error"))

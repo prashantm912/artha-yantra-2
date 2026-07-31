@@ -23,7 +23,12 @@ from app import (
     suggesters,
 )
 from app.backtest_client import BacktestClient
-from app.errors import ApiError, api_error_handler, invalid_path_handler
+from app.errors import (
+    ApiError,
+    api_error_handler,
+    invalid_path_handler,
+    unhandled_error_handler,
+)
 from app.notify import NtfyClient
 from app.path_grammar import InvalidParameterPath
 from app.repos import EvoRepo, JobsRepo, LiveEvidenceRepo, ReconciliationRepo, TrialsRepo
@@ -43,6 +48,8 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(InvalidParameterPath, invalid_path_handler)
+    # Catch-all: without it ANY unmapped exception left a bare 500 with no error envelope.
+    app.add_exception_handler(Exception, unhandled_error_handler)
 
     redis_client = redis.Redis.from_url(settings.redis_url)
     dispatcher = TrialDispatcher(redis_client)

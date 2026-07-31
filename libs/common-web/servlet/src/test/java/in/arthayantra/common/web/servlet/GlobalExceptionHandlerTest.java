@@ -136,11 +136,15 @@ class GlobalExceptionHandlerTest {
   }
 
   /**
-   * The ordering pin. {@code NoResourceFoundException} does NOT extend {@code ResponseStatusException}
-   * at Spring 6.2.x (it extends {@code ServletException} and implements {@code ErrorResponse}), so the
-   * new mapping cannot claim it — but that is a framework fact, not a guarantee, and a future Spring
-   * that re-parents it would silently swap this envelope for the generic one. This pins the exact
-   * envelope through a real dispatch; it fails the moment anything else wins the resolution.
+   * The resolution pin. {@code NoResourceFoundException} does NOT extend
+   * {@code ResponseStatusException} at Spring 6.2.x (it extends {@code ServletException} and
+   * implements {@code ErrorResponse}), so the two mappings sit in separate hierarchies and neither
+   * declaration order nor re-parenting could hand this exception to the broader handler — Spring
+   * always prefers the most specific mapping. What this test actually guards is the envelope itself
+   * against a resolver or configuration change: it drives a real dispatch and fails the moment
+   * anything other than the dedicated mapping wins. (Wording corrected after the cross-vendor review
+   * pointed out the original "a future Spring that re-parents it would swap the envelope" reasoning
+   * was wrong about how Spring selects handlers.)
    */
   @Test
   void noResourceFoundKeepsItsOwnEnvelopeAfterTheResponseStatusMapping() throws Exception {

@@ -91,7 +91,7 @@ Adjudicated non-drift: the ledger-consistency-check REVIEW[C] (T18/T30 promotion
 - **Session-level external heartbeat (`ARTHA_HEARTBEAT_SESSION_URL`) still dormant** — today's live session had no off-box liveness monitor; machine demonstrably boots minutes before open. Owner arming decision.
 - Kite REST circuit opened 3× (12:07–12:10, 12:53, 15:47 IST) — all paths fail-soft/cached; a few minutes of chain snapshots missing; SENSEX 07-30 expired-backfill had 8 leg-fetch cancels but kept retrying past 16:17.
 - Two forever-RUNNING BHAVCOPY ledger rows (07-16, 07-20) — pre-#1141 deadlock artifacts, no operational impact; optional owner-gated cleanup.
-- 88 legacy weekend TICK_AGG option bars from Sunday 07-26 persist in `candles` (forward writes blocked by #1064; the finder's "no session guard" claim was REFUTED). Owner-gated one-time delete; blast radius negligible (zero-volume, outside any session window).
+- ~~88 legacy weekend TICK_AGG option bars from Sunday 07-26 persist in `candles`~~ — **the count was wrong by 45×; corrected and partially executed 2026-07-31 late, see the §10 addendum.** Forward writes blocked by #1064 (the finder's "no session guard" claim was REFUTED, and #1064 merged 2026-07-28 — *after* that weekend, so the residue is genuinely pre-guard legacy).
 
 ## 5 Deploy-state truth (verified commit-by-commit)
 
@@ -289,3 +289,75 @@ Lesson pinned: **never edit `.env` with a rewrite-and-rename tool; edit in place
 surfaces, paper manual, data-ops) works end-to-end on mock with correct 4xx surfacing; the full-spec API sweep
 found **zero missing required keys** and no contract lies — the defect harvest is 4 robustness-tier
 invalid-input/unknown-id handlers, none on a money or engine path. E2E-01 is now fully DONE.
+
+---
+
+## 10 Addendum — task_e2e01i executed, and the row count in §4.4 was wrong by 45×
+
+**Date:** 2026-07-31 late (main loop, live DB, owner-approved cleanup).
+
+### 10.1 What the count actually is
+
+§4.4 reported "88 legacy weekend TICK_AGG option bars from Sunday 07-26". Re-measured directly against
+the live `artha` DB before touching anything, the real phantom set is **4,201 rows across 12
+non-session days**, not 88 from one day:
+
+| scope | rows | note |
+|---|---|---|
+| weekend (Sat/Sun) TICK_AGG, 2026-06-20 … 2026-07-26 | **3,983** across 11 weekend days | all `volume = 0` |
+| weekday out-of-session TICK_AGG (Fri 2026-06-26, 01:00–17:01 IST) | **218** | a trading day, so **#1064 does not block this shape** |
+| **total** | **4,201** | |
+
+Two corrections to the original finding beyond the count: it is **not** options-only (NSE and BSE index
+rows are in the set too), and it is **not** confined to 07-26 — every weekend back to 2026-06-20
+carries the same residue.
+
+### 10.2 Why only part of it was deleted
+
+`marketdata.candles` chunks over that range are **compressed in 5 of 6 cases**:
+
+| chunk range (IST) | compressed |
+|---|---|
+| 2026-06-18 → 06-25 · 06-25 → 07-02 · 07-02 → 07-09 · 07-09 → 07-16 · 07-16 → 07-23 | **yes** |
+| 2026-07-23 → 07-30 | no |
+
+A `DELETE` against a compressed chunk decompresses it. Doing that across five weekly chunks of the full
+candles hypertable, on a 4 GB live TimescaleDB that has OOM-crash-looped three times on exactly this
+class of operation (2026-07-10) — and on the same day a decompression limit broke the corporate-action
+cagg rebuild (§1.1) — is not a cleanup, it is an incident waiting to happen. So the work was split at
+the compression boundary.
+
+**Executed** (zero decompression, entirely inside the uncompressed chunk): the 2026-07-25 + 2026-07-26
+weekend, **455 rows** — a superset of the owner-approved Sunday-07-26 scope. Backed up to CSV first,
+then `DELETE ... WHERE source='TICK_AGG' AND volume=0 AND bucket ∈ [07-25, 07-27) IST` → `DELETE 455`,
+verified `0` remaining. The `volume = 0` conjunct is deliberate and load-bearing, not belt-and-braces:
+it mirrors #1064's own doctrine, because `isTradingDay` returns false for ANY Saturday/Sunday while
+real weekend sessions exist (the 2026-11-08 Diwali Muhurat session falls on a Sunday, and a
+Union-Budget Saturday runs a full session) — a date-only predicate would eventually delete real bars.
+
+**Also executed:** the two forever-`RUNNING` BHAVCOPY ledger rows (ids 14945 @ 2026-07-16, 24836 @
+2026-07-20) closed to `FAILURE` with an explanatory `error`. Worth recording that these were **never
+blocking anything** — `IngestHealthBoard` already treats an aged `RUNNING` row as crashed via the
+shared `artha.ingest-canary.running-stale-minutes` threshold, and its `DISTINCT ON (source)` last-run
+query never even selected them, since BHAVCOPY has succeeded many times since. Pure hygiene.
+
+**Deferred to an owner call: 3,746 rows** in the five compressed chunks. Recommendation — leave them.
+They are zero-volume, outside every session window, and #1064 blocks new ones; the only cost of keeping
+them is that a weekend-day `candles` read returns rows it should not, which nothing currently does. If
+they are ever removed it should be one chunk at a time with the decompression limit handled the way
+§1.1's fix handles it, not as a single statement.
+
+### 10.3 The residual gap this uncovered
+
+The Friday 2026-06-26 rows (218, at 01:00–17:01 IST on a **trading day**) are outside #1064's guard by
+construction: that guard rejects bars that are BOTH on a non-trading date AND zero-volume, so an
+out-of-session bar on a trading date passes it. No recent session shows the shape — 2026-06-26 is the
+only weekday instance in the whole history sweep — so this is recorded as an observation, not a chip.
+If out-of-hours weekday bars reappear, the guard needs a session-window conjunct, not just a date one.
+
+### 10.4 Verification owed
+
+#1064's weekend guard has **never actually been exercised on a weekend**: it merged 2026-07-28, and
+2026-07-25/26 was the last weekend before that. The first real test is the 2026-08-01/02 weekend. Since
+the 455 rows are now deleted, that window is a clean-room: **any TICK_AGG row appearing on 08-01 or
+08-02 means the guard does not work.** Worth a check on the following Monday.

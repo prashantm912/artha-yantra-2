@@ -33,6 +33,8 @@
 
 `docker logs ay-market-data-service` 2026-07-30 11:30:47Z / 11:52:37Z: ERROR "corporate-action rebuild failed for CHEVIOT" (and ULTRACEMCO) — `CALL public.refresh_continuous_aggregate('candles_5m', '2015-01-04'..'2015-04-14')` aborts with `ERROR: tuple decompression limit exceeded by operation`. This is a **new** Timescale failure shape (not the known 2.18.2 sorted-merge planner bug): the full-history cagg refresh over compressed 2015 chunks trips the decompression-limit GUC. Risk: base `candles` rows may be CA-adjusted while the 5m/15m/1h/1d/1w caggs were NOT refreshed — split-brain between base and aggregates for both symbols (both swing-universe equities). Chip filed (fix = chunked refresh windows or `SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0` around the rebuild, then re-run for both symbols and verify base-vs-cagg agreement).
 
+⚠️ **UPGRADED 2026-07-31 late — this section UNDERSTATES the finding on three counts. See the §13 addendum.** The "risk" is a confirmed, measured data loss; it is **13 symbols, not 2**; the trigger is a dated regression (V049/#940 compressed the caggs on 2026-07-19); and **it is still occurring** — a fresh symbol failed today. Fix in [#1151](https://github.com/prashantm912/artha-yantra-2/pull/1151).
+
 ### 1.2 `/multiframe-chart` 4th pane permanently broken for index symbols — hardcoded `30m` interval the candles API rejects
 
 Default load (NSE:NIFTY 50): pane 4 issues `GET /api/v1/market/candles?...&interval=30m` → **400** (twice, console errors), renders "No candles.", and the interval select mis-displays `1m` (30m is not among its options). Source: `MultiframeChartPage.tsx:17` `INDEX_DEFAULT_INTERVALS = ['15m','5m','3m','30m']` vs `api/charts.ts:14` `CHART_INTERVALS` which has no 30m. Bonus: the "indices have no 1m candles" premise behind the 30m default is stale — the same page's 1m fetch returned 200 WITH data this session. Chip filed (fix the default; consider taking audit FG-03 single-symbol parity in the same touch — same file, see §2).
@@ -40,7 +42,7 @@ Default load (NSE:NIFTY 50): pane 4 issues `GET /api/v1/market/candles?...&inter
 ## 2 Feature gaps (CONFIRMED)
 
 1. **Morning canaries never ran today; no boot catch-up exists.** Stack was down 02:29–08:56 IST; the 08:30 notifier-health + 08:45 ingest-coverage crons ticked while down and missed crons never replay (`IngestCoverageCanary.java:55` documents it). The owner's machine routinely boots ~08:56 — this recurs on every late boot. Chip: boot-time run-once-if-missed-today catch-up, mirroring the #1036 pattern.
-2. **NFO+BFO option 1m capture breadth collapsed to 22 ATM contracts (7× worse cycle-over-cycle).** Post-weekly-expiry NFO contract counts: 07-15=312 → 07-22=181 → 07-29=26 → 07-31: NFO 22 and BFO 22 (BFO was 279 contracts on 07-30). The 22 survivors are exactly the 08-04 weekly ATM ±5-strike band, each with full 375 bars — breadth loss, not sparsity. `options_chain_snapshots` stayed dense (1.2M+ rows/day); only the WS tick-agg candle path narrowed. Owner decision: is ATM-band-only the intended post-roll subscription set, or widen? Chip filed.
+2. ~~**NFO+BFO option 1m capture breadth collapsed to 22 ATM contracts (7× worse cycle-over-cycle).**~~ **REFUTED 2026-07-31 late — see the §11 addendum. There was no collapse; live option capture roughly DOUBLED on 07-27.** The finding compared `BACKFILL`-source rows against `TICK_AGG`-source rows and read the difference as a regression. Chip task_e2e01d closed as not-a-defect.
 3. **Cockpit Option-chain panel hard-errors every evening.** `chain-table?mode=live` 503s DATA_STALE post-market (`OptionsChainService.java:195` throws when no spot quote) instead of degrading to the last session's chain; header tiles all "—", straddle panel empty. Design call: cockpit falls back to `mode=history` when closed, or live mode serves last captured chain with a stale marker. Chip filed.
 4. **Multi Leg Price page (oipulse `/app/strategies/multi-leg-price`) still has no route** — audit FG-05, the last true missing oipulse page. Verdict **DEFER** (P2 unchanged; straddle/strangle + strategy-builder cover most of its value; generalize `StraddleChartService` to N legs if pulled).
 5. **Options Chain §20.7.6 fidelity tail never shipped** (2h/4h/custom intervals, IV-Chng + O=H/O=L optional columns, grouped name select, strike-click sub-view) while §20.7.6 claims "nothing dropped". Verdict **DEFER** — display-only tail, zero gate/money impact; the claim itself is corrected via the master-plan chip (§3).
@@ -91,7 +93,7 @@ Adjudicated non-drift: the ledger-consistency-check REVIEW[C] (T18/T30 promotion
 - **Session-level external heartbeat (`ARTHA_HEARTBEAT_SESSION_URL`) still dormant** — today's live session had no off-box liveness monitor; machine demonstrably boots minutes before open. Owner arming decision.
 - Kite REST circuit opened 3× (12:07–12:10, 12:53, 15:47 IST) — all paths fail-soft/cached; a few minutes of chain snapshots missing; SENSEX 07-30 expired-backfill had 8 leg-fetch cancels but kept retrying past 16:17.
 - Two forever-RUNNING BHAVCOPY ledger rows (07-16, 07-20) — pre-#1141 deadlock artifacts, no operational impact; optional owner-gated cleanup.
-- 88 legacy weekend TICK_AGG option bars from Sunday 07-26 persist in `candles` (forward writes blocked by #1064; the finder's "no session guard" claim was REFUTED). Owner-gated one-time delete; blast radius negligible (zero-volume, outside any session window).
+- ~~88 legacy weekend TICK_AGG option bars from Sunday 07-26 persist in `candles`~~ — **the count was wrong by 45×; corrected and partially executed 2026-07-31 late, see the §10 addendum.** Forward writes blocked by #1064 (the finder's "no session guard" claim was REFUTED, and #1064 merged 2026-07-28 — *after* that weekend, so the residue is genuinely pre-guard legacy).
 
 ## 5 Deploy-state truth (verified commit-by-commit)
 
@@ -289,3 +291,299 @@ Lesson pinned: **never edit `.env` with a rewrite-and-rename tool; edit in place
 surfaces, paper manual, data-ops) works end-to-end on mock with correct 4xx surfacing; the full-spec API sweep
 found **zero missing required keys** and no contract lies — the defect harvest is 4 robustness-tier
 invalid-input/unknown-id handlers, none on a money or engine path. E2E-01 is now fully DONE.
+
+---
+
+## 10 Addendum — task_e2e01i executed, and the row count in §4.4 was wrong by 45×
+
+**Date:** 2026-07-31 late (main loop, live DB, owner-approved cleanup).
+
+### 10.1 What the count actually is
+
+§4.4 reported "88 legacy weekend TICK_AGG option bars from Sunday 07-26". Re-measured directly against
+the live `artha` DB before touching anything, the real phantom set is **4,201 rows across 12
+non-session days**, not 88 from one day:
+
+| scope | rows | note |
+|---|---|---|
+| weekend (Sat/Sun) TICK_AGG, 2026-06-20 … 2026-07-26 | **3,983** across 11 weekend days | all `volume = 0` |
+| weekday out-of-session TICK_AGG (Fri 2026-06-26, 01:00–17:01 IST) | **218** | a trading day, so **#1064 does not block this shape** |
+| **total** | **4,201** | |
+
+Two corrections to the original finding beyond the count: it is **not** options-only (NSE and BSE index
+rows are in the set too), and it is **not** confined to 07-26 — every weekend back to 2026-06-20
+carries the same residue.
+
+### 10.2 Why only part of it was deleted
+
+`marketdata.candles` chunks over that range are **compressed in 5 of 6 cases**:
+
+| chunk range (IST) | compressed |
+|---|---|
+| 2026-06-18 → 06-25 · 06-25 → 07-02 · 07-02 → 07-09 · 07-09 → 07-16 · 07-16 → 07-23 | **yes** |
+| 2026-07-23 → 07-30 | no |
+
+A `DELETE` against a compressed chunk decompresses it. Doing that across five weekly chunks of the full
+candles hypertable, on a 4 GB live TimescaleDB that has OOM-crash-looped three times on exactly this
+class of operation (2026-07-10) — and on the same day a decompression limit broke the corporate-action
+cagg rebuild (§1.1) — is not a cleanup, it is an incident waiting to happen. So the work was split at
+the compression boundary.
+
+**Executed** (zero decompression, entirely inside the uncompressed chunk): the 2026-07-25 + 2026-07-26
+weekend, **455 rows** — a superset of the owner-approved Sunday-07-26 scope. Backed up to CSV first,
+then `DELETE ... WHERE source='TICK_AGG' AND volume=0 AND bucket ∈ [07-25, 07-27) IST` → `DELETE 455`,
+verified `0` remaining. The `volume = 0` conjunct is deliberate and load-bearing, not belt-and-braces:
+it mirrors #1064's own doctrine, because `isTradingDay` returns false for ANY Saturday/Sunday while
+real weekend sessions exist (the 2026-11-08 Diwali Muhurat session falls on a Sunday, and a
+Union-Budget Saturday runs a full session) — a date-only predicate would eventually delete real bars.
+
+**Also executed:** the two forever-`RUNNING` BHAVCOPY ledger rows (ids 14945 @ 2026-07-16, 24836 @
+2026-07-20) closed to `FAILURE` with an explanatory `error`. Worth recording that these were **never
+blocking anything** — `IngestHealthBoard` already treats an aged `RUNNING` row as crashed via the
+shared `artha.ingest-canary.running-stale-minutes` threshold, and its `DISTINCT ON (source)` last-run
+query never even selected them, since BHAVCOPY has succeeded many times since. Pure hygiene.
+
+**Deferred to an owner call: 3,746 rows** in the five compressed chunks. Recommendation — leave them.
+They are zero-volume, outside every session window, and #1064 blocks new ones; the only cost of keeping
+them is that a weekend-day `candles` read returns rows it should not, which nothing currently does. If
+they are ever removed it should be one chunk at a time with the decompression limit handled the way
+§1.1's fix handles it, not as a single statement.
+
+### 10.3 The residual gap this uncovered
+
+The Friday 2026-06-26 rows (218, at 01:00–17:01 IST on a **trading day**) are outside #1064's guard by
+construction: that guard rejects bars that are BOTH on a non-trading date AND zero-volume, so an
+out-of-session bar on a trading date passes it. No recent session shows the shape — 2026-06-26 is the
+only weekday instance in the whole history sweep — so this is recorded as an observation, not a chip.
+If out-of-hours weekday bars reappear, the guard needs a session-window conjunct, not just a date one.
+
+### 10.4 Verification owed
+
+#1064's weekend guard has **never actually been exercised on a weekend**: it merged 2026-07-28, and
+2026-07-25/26 was the last weekend before that. The first real test is the 2026-08-01/02 weekend. Since
+the 455 rows are now deleted, that window is a clean-room: **any TICK_AGG row appearing on 08-01 or
+08-02 means the guard does not work.** Worth a check on the following Monday.
+
+---
+
+## 11 Addendum — task_e2e01d REFUTED: live option capture doubled, it did not collapse
+
+**Date:** 2026-07-31 late (main loop, read-only against the live `artha` DB + the running container).
+
+§2.2 reported a 7× collapse in NFO/BFO option 1m capture, down to a 22-contract ATM band. Investigated
+before changing any subscription config (the owner's instruction was "investigate, then widen only if
+unintended"). **The finding is refuted in the strongest direction: capture breadth roughly doubled on
+2026-07-27 and has held.**
+
+### 11.1 The measurement error
+
+The reported series — NFO 07-15=312 → 07-22=181 → 07-29=26 → 07-31=22, BFO 07-30=279 — does not
+describe live capture. Those are **`source='BACKFILL'`** contract counts, i.e. the post-expiry
+historical fetch of *expired* contracts. Re-measured per source:
+
+| day (IST) | NFO `BACKFILL` | BFO `BACKFILL` | NFO `TICK_AGG` | BFO `TICK_AGG` |
+|---|---|---|---|---|
+| 2026-07-15 | 313 | 489 | 16 | 8 |
+| 2026-07-22 | 182 | 399 | 16 | 8 |
+| 2026-07-27 | 181 | 242 | **38** | **30** |
+| 2026-07-29 | — | 254 | **42** | **40** |
+| 2026-07-31 | — | — | **40** | **30** |
+
+The `BACKFILL` column going empty for the most recent days is **correct by construction**: those
+contracts have not expired yet, so the expired-contract backfill has nothing to fetch. Reading a
+not-yet-expired series as a "collapse" is the artifact. The live capture column — the one that
+actually measures whether ticks are being aggregated into candles — moves the other way.
+
+### 11.2 What actually changed on 07-27, and why 22 is the designed number
+
+`OptionAtmPinner` shipped in **[#1039](https://github.com/prashantm912/artha-yantra-2/pull/1039) on
+2026-07-26** (ledger row G3, status `DONE + LIVE` — the row was not stale). The step in the TICK_AGG
+columns on the next trading day is that pinner going live. Verified running right now:
+
+- gauge `ay_options_atm_pinned_contracts` = **44.0**
+- last pass: `option ATM pin pass: underlyings resolved=2/2, desired=44, pinned=44`
+
+44 is exactly the configured intent: **2 underlyings** (`artha.options.atm-pinner.underlyings` =
+`NIFTY 50, SENSEX`) × **11 strikes** (`strike-width: 5` ⇒ ATM ±5) × **2 sides** (CE/PE) = 44. The "22
+survivors" §2.2 flagged are one underlying's half of that — the designed band, not a remnant.
+
+### 11.3 Disposition
+
+**No change made**, per the owner's stated rule for the intended case. Recording the knobs for
+whenever more research breadth is actually wanted, since both are configuration rather than code:
+
+| knob | default | effect of widening |
+|---|---|---|
+| `artha.options.atm-pinner.strike-width` | `5` (ATM ±5 ⇒ 11 strikes) | linear in pinned contracts: ±10 would take 44 → 84 |
+| `artha.options.atm-pinner.expiry-horizon-days` | `7` | pulls in additional expiries inside the horizon |
+
+The cost of widening is WS subscription budget, not correctness — pins register as `SPECULATIVE`
+(hardened in #1039's own audit) so under cap pressure they yield to the live engine rather than evict
+a strategy hold. Current headroom is large (69 active subscriptions ≈ 2.3% of the 3000 cap at the
+#1039 live-verify), so a widening is cheap if the research case appears.
+
+### 11.4 The lesson worth keeping
+
+Both this and §10's 45× row-count error are the same failure: **a count taken without pinning the
+`source` column.** `marketdata.candles` multiplexes `TICK_AGG`, `BACKFILL`, `BHAVCOPY` and fetched
+history into one table, and the provenance column is the only thing separating "what we captured live"
+from "what we fetched afterwards". Any future breadth or coverage claim about candles must state its
+`source` filter, or it is not a claim about capture.
+
+---
+
+## 12 Addendum — session heartbeat: nothing to build, one owner step remains
+
+**Date:** 2026-07-31 late (main loop, read-only).
+
+§4.4 flagged that the session-level external heartbeat is dormant, and the owner approved "wire it
+through and document the arming step". On inspection **the wiring is already complete** — this is an
+arming decision, not a build:
+
+| layer | state |
+|---|---|
+| the bean | `SessionLivenessHeartbeat` (strategy-signal), built and tested (`SessionLivenessHeartbeatTest`) |
+| load gate | `@ConditionalOnProperty("artha.heartbeat.session-url")` + shares `SignalEngine`'s lifecycle |
+| schedule | `artha.heartbeat.session-cron`, default `0 */10 9-15 * * MON-FRI` (Asia/Kolkata) |
+| compose passthrough | `ARTHA_HEARTBEAT_SESSION_URL` at `deploy/docker-compose.yml:601` — name verified to match the property under relaxed binding |
+| `.env` | **the only gap** — carries `ARTHA_HEARTBEAT_URL` (the 20:15 swing ping, already armed) but no `ARTHA_HEARTBEAT_SESSION_URL` |
+
+### 12.1 The one step (owner-only — deliberately not done here)
+
+Add `ARTHA_HEARTBEAT_SESSION_URL=<your ping URL>` to `.env` and restart strategy-signal. A ping URL is
+a credential-equivalent (anyone holding it can forge liveness), so it is not handled here.
+
+⚠️ **Edit `.env` IN PLACE.** Do not use `sed -i`, or any write-temp-then-rename editor: that recreates
+the file, which drops its hardened ACL and lets inherited broad-principal write grants back in. SEC-01
+then fail-closed refuses to start the live stack. This is not hypothetical — it happened during
+tonight's own T1b profile flip (§T1b.6), and recovery needed `icacls /inheritance:r` re-tightening
+before `ay up` would run. If the ACL is disturbed, re-tighten to owner + SYSTEM + Administrators only,
+mirroring `deploy\secrets`.
+
+### 12.2 What arming buys, precisely
+
+The already-armed `SwingBatchHeartbeat` pings once at 20:15 IST and proves only that the evening swing
+batch ran. **A stack dead across the entire 09:15–15:30 live session but recovered by 20:15 pings that
+monitor happily** — which is exactly the failure mode observed today: the stack was down 02:29–08:56
+IST, and the machine demonstrably boots minutes before the open. The session heartbeat closes that
+window by pinging a *separate* monitor every ~10 min, but only while candles are actually arriving.
+
+Note the design and do not "improve" it: **absence is the alarm.** It pings only when healthy and stays
+silent otherwise, so the withheld ping is the signal — never a status payload. Health is gated solely
+on candle-receipt liveness, never on rejections or signal counts, which are direction- and
+window-confounded and would false-alarm on a healthy-but-quiet leg (the same reasoning that retired an
+earlier gate-output-keyed heartbeat).
+
+### 12.3 One inaccuracy found while verifying, not worth a code change
+
+`beat()` carries a blank-URL early return commented "belt-and-braces; the conditional already gates
+loading". Under compose the conditional does **not** gate loading: `ARTHA_HEARTBEAT_SESSION_URL:
+"${ARTHA_HEARTBEAT_SESSION_URL:-}"` makes the property *present but empty* when unset, and
+`@ConditionalOnProperty` with no `havingValue` matches any present value that is not `false`. So the
+bean does load today and the early return is what actually keeps it inert. Behaviour is correct and the
+cost is one no-op call per 10 minutes; only the comment's reasoning is off. Recorded rather than
+patched — a docs-only touch on a live money-path service is not worth a deploy.
+
+---
+
+## 13 Addendum — §1.1 upgraded: confirmed data loss, 13 symbols, caused by V049, still occurring
+
+**Date:** 2026-07-31 late (main loop, read-only against the live `artha` DB). Fix: [#1151](https://github.com/prashantm912/artha-yantra-2/pull/1151).
+
+§1.1 recorded a *risk* of base-vs-cagg split-brain for two symbols. Measured, it is a confirmed loss
+across thirteen, with a dated cause and an open wound.
+
+### 13.1 It is real, and it is total
+
+Comparing base 1m rolled to 5m against `candles_5m` for ULTRACEMCO over §1.1's own failing window:
+**3,596 buckets compared, 3,071 missing from the cagg, 0 value mismatches.** A coverage hole, not
+corruption — which is the good news, because a re-run fully repairs it.
+
+Whole-history damage against a control symbol:
+
+| cagg | ULTRACEMCO | CHEVIOT | INFY (control) | GAIL (control) |
+|---|---|---|---|---|
+| `candles_5m` | 2,850 | 2,223 | 211,783 | 210,672 |
+| `candles_15m` | 775 | 770 | 70,602 | 70,231 |
+| `candles_1h` | 214 | 214 | 19,782 | 19,678 |
+| `candles_1d` | 32 | 32 | 2,837 | 2,821 |
+| `candles_1w` | 6 | 6 | 59 | 55 |
+
+Roughly **1%** of a healthy symbol. The residue is only what the ongoing refresh policy has
+re-materialised in its recent window (32 daily buckets ≈ 6 weeks), which matches the 6 weekly buckets
+exactly. Everything older is gone from the aggregates while base retains it.
+
+### 13.2 Thirteen symbols, and the correlation is perfect
+
+| population | wiped 5m cagg |
+|---|---|
+| symbols with a FAILED corporate-action event, having base data (107) | **13** |
+| symbols with **no** failed CA event (27 control) | **0** |
+
+Zero false positives in the control. The wiped set: EXPLEOSOL, ULTRACEMCO, ZENSARTECH, ABBOTINDIA,
+DBCORP, ICRA, SARVESHWAR, CHEVIOT, ABSLAMC, INDOBORAX, POCL, JLHL (+1). Note EXPLEOSOL sits at **0.0%**
+of expected — the worst of the set, and it is not one of the two the audit named.
+
+### 13.3 The cause is dated, and it is a regression
+
+**Every one of the wiped symbols has its FAILED event dated on or after 2026-07-21.** V049 (#940) made
+all five caggs compressed hypertables on **2026-07-19**. A cagg refresh is DELETE-then-reinsert — DML
+on compressed chunks — which is exactly what `timescaledb.max_tuples_decompressed_per_dml_transaction`
+caps at 100,000. Before V049 the same refresh was free.
+
+This is why the 92-day chunking already in `CandleRepository` did not prevent it: that windowing bounds
+*materialization* work (the 2026-07-10 SIGKILLs), a different mechanism entirely from DML
+decompression. The chunking is correct and was left untouched.
+
+The rebuild **purges before it refreshes**, which is what converts an abort into data loss rather than
+mere staleness.
+
+### 13.4 It is not historical
+
+175 FAILED corporate-action events span 2026-06-23 → 2026-07-31 across 166 distinct symbols, and
+**EXPLEOSOL failed today**. Not every failure wipes caggs — 94 of the 107 are healthy, consistent with
+the wipe requiring the post-V049 decompression abort specifically — but the failing path is live and
+will keep claiming symbols until #1151 deploys.
+
+### 13.5 Post-merge action owed (main loop) — and the trap in the obvious version of it
+
+Until repaired, any 5m/15m/1h/1d/1w read for these symbols older than ~6 weeks silently returns
+nothing. Several are swing-universe equities, so a backtest over them is quietly running on missing
+data.
+
+⚠️ **"Deploy #1151 and re-run the rebuild" does not work, and it is worth knowing why before anyone
+tries it.** The 13 symbols are **permanently stranded** by the job's own control flow:
+
+- The sweep's **resume checkpoint fires only when the latest event status is `BASE_REBUILT`** — the
+  "crashed after the base was committed but before the cagg refresh finished" case. Our 13 are
+  `FAILED`, so the checkpoint skips them.
+- **Fresh detection will never re-fire either**, and `CorporateActionJob`'s own javadoc says so: the
+  base *was* rebuilt before the refresh aborted, so the cache now equals Kite, there is no divergence,
+  and therefore no new `DETECTED` row. The comment calls the checkpoint scan "the SOLE resume trigger"
+  — which is exactly the problem when a symbol never reaches the state that trigger looks for.
+- Scoping the sweep with `artha.corporate-actions.symbols` does **not** help: it narrows *which*
+  symbols are examined, not *what* the examination concludes. Those symbols would still show no
+  divergence and still be skipped.
+
+So the repair is: deploy #1151 first (otherwise the resume hits the same decompression limit and
+re-fails), then **flip each stranded symbol's latest event from `FAILED` to `BASE_REBUILT`** so the
+next sweep's checkpoint picks it up and runs `submitRefreshOnly` — which is precisely the right
+operation, since it skips the purge and re-prefetch and does only the chunked cagg refresh. That uses
+the system's own resume mechanism rather than hand-running SQL refreshes against a live compressed
+hypertable, which is the safer of the two by a wide margin.
+
+Acceptance is concrete: each symbol's cagg counts should approach the control's
+~211k / 70k / 19.7k / 2.8k / 59.
+
+**Design gap worth a chip, separate from #1151:** a `FAILED` corporate-action event is unresumable by
+construction. The job can recover from a crash (`BASE_REBUILT`) but not from an error, even though the
+error leaves the symbol in a strictly worse state than the crash does — caggs purged and not rebuilt,
+with nothing that will ever retry. A `FAILED` row whose base is already rebuilt should be resumable on
+the same path.
+
+### 13.6 Method note
+
+The control group is what makes this a finding rather than an anecdote. "13 symbols have sparse caggs"
+alone proves nothing — caggs are legitimately sparse for backfilled history until refreshed. It only
+became evidence once the same measurement over symbols with **no** failed CA event returned **zero**.
+Any future coverage claim of this shape should carry its control the same way.

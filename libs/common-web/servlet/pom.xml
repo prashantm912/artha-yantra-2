@@ -29,6 +29,14 @@
       <artifactId>spring-boot-starter-web</artifactId>
       <scope>provided</scope>
     </dependency>
+    <!-- provided, same reasoning: the @Validated method-validation mapping names
+         ConstraintViolationException, and all three consumers already carry the API at
+         compile scope (springdoc-openapi-starter-common → spring-boot-starter-validation) -->
+    <dependency>
+      <groupId>jakarta.validation</groupId>
+      <artifactId>jakarta.validation-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>

@@ -49,6 +49,11 @@ class OptionsChainLastCapturedTest {
   private static final BigDecimal SNAPSHOT_STRIKE = new BigDecimal("23800.00");
   private static final OffsetDateTime CAPTURED_AT =
       OffsetDateTime.parse("2026-06-15T15:30:00+05:30");
+  // The rate the capture SOLVED its greeks with, deliberately UNLIKE the configured one below: with
+  // both at 0.065 the served rate is indistinguishable whichever source it came from, so the whole
+  // assertion would be vacuous.
+  private static final BigDecimal CAPTURED_RATE = new BigDecimal("0.042500");
+  private static final BigDecimal CONFIGURED_RATE = new BigDecimal("0.065000");
   private static final MarketCalendar CAL =
       MarketCalendar.of(List.of(LocalDate.parse("2026-01-26")));
 
@@ -108,12 +113,12 @@ class OptionsChainLastCapturedTest {
   private static OptionsSnapshotRepository capturedStub() {
     return new OptionsSnapshotRepository(null) {
       @Override
-      public Optional<OffsetDateTime> latestSnapshotTs(String underlying, LocalDate expiry) {
+      public Optional<OffsetDateTime> latestCapturedSnapshotTs(String underlying, LocalDate expiry) {
         return Optional.of(CAPTURED_AT);
       }
 
       @Override
-      public List<SnapshotRow> rowsAt(String underlying, LocalDate expiry, OffsetDateTime ts) {
+      public List<SnapshotRow> capturedRowsAt(String underlying, LocalDate expiry, OffsetDateTime ts) {
         return List.of(
             capturedRow("CE", "NIFTY26JUN23800CE", "133.45", 1_820_075L, "0.181500"),
             capturedRow("PE", "NIFTY26JUN23800PE", "255.75", 2_105_500L, "0.194200"));
@@ -146,20 +151,20 @@ class OptionsChainLastCapturedTest {
         "SOLVED",
         "MID",
         new BigDecimal("23917.44"),
-        new BigDecimal("0.065000"));
+        CAPTURED_RATE);
   }
 
   /** Nothing was ever captured for this (underlying, expiry). */
   private static OptionsSnapshotRepository noCaptureStub() {
     return new OptionsSnapshotRepository(null) {
       @Override
-      public Optional<OffsetDateTime> latestSnapshotTs(String underlying, LocalDate expiry) {
+      public Optional<OffsetDateTime> latestCapturedSnapshotTs(String underlying, LocalDate expiry) {
         return Optional.empty();
       }
 
       @Override
-      public List<SnapshotRow> rowsAt(String underlying, LocalDate expiry, OffsetDateTime ts) {
-        throw new AssertionError("rowsAt must not be reached with no capture anchor");
+      public List<SnapshotRow> capturedRowsAt(String underlying, LocalDate expiry, OffsetDateTime ts) {
+        throw new AssertionError("capturedRowsAt must not be reached with no capture anchor");
       }
     };
   }
@@ -168,12 +173,12 @@ class OptionsChainLastCapturedTest {
   private static OptionsSnapshotRepository forbiddenStub() {
     return new OptionsSnapshotRepository(null) {
       @Override
-      public Optional<OffsetDateTime> latestSnapshotTs(String underlying, LocalDate expiry) {
+      public Optional<OffsetDateTime> latestCapturedSnapshotTs(String underlying, LocalDate expiry) {
         throw new AssertionError("the live path must never consult the capture store");
       }
 
       @Override
-      public List<SnapshotRow> rowsAt(String underlying, LocalDate expiry, OffsetDateTime ts) {
+      public List<SnapshotRow> capturedRowsAt(String underlying, LocalDate expiry, OffsetDateTime ts) {
         throw new AssertionError("the live path must never consult the capture store");
       }
     };
@@ -186,7 +191,7 @@ class OptionsChainLastCapturedTest {
         gateway,
         CAL,
         clock,
-        new BigDecimal("0.065"),
+        CONFIGURED_RATE,
         true,
         Optional.empty(),
         snapshots);
@@ -207,6 +212,12 @@ class OptionsChainLastCapturedTest {
     assertThat(chain.forwardSource())
         .as("the forward's precedence rule is not persisted, so it is not claimed")
         .isEqualTo("CAPTURED");
+    // The greeks below were solved at the CAPTURED rate; publishing today's configured rate beside
+    // them would advertise an input they were never computed from.
+    assertThat(chain.riskFreeRate())
+        .as("the rate the capture solved with, not the rate configured today")
+        .isEqualByComparingTo(CAPTURED_RATE);
+    assertThat(chain.riskFreeRate()).isNotEqualByComparingTo(CONFIGURED_RATE);
     // ΣPE OI / ΣCE OI over the captured book
     assertThat(chain.pcr()).isEqualByComparingTo("1.1568");
 

@@ -296,13 +296,21 @@ public class OptionsChainService {
    * the CAPTURE timestamp, never {@code now}. Empty when nothing was ever captured, or when nothing
    * captured still matches the live instrument master (the caller then keeps its 503).
    *
-   * <p>Reuses the capture's own storage ({@link OptionsSnapshotRepository#latestSnapshotTs} +
-   * {@link OptionsSnapshotRepository#rowsAt}) rather than a second reader, so the served legs carry
-   * the full captured book — bid/ask/volume/OI, the solved IV and its first-order greeks, and the
-   * {@code ivReason}/{@code priceSource} provenance the capture wrote. Fields the snapshot table
-   * does not hold are null, never fabricated: {@code prevOi} (an Upstox-source-only live field) and
-   * the second/third-order greeks (live-only per {@link Leg}). {@code forwardSource} reads
-   * {@code CAPTURED} because the forward's precedence rule is not persisted — only its value is.
+   * <p>Reuses the capture's own storage ({@link OptionsSnapshotRepository#latestCapturedSnapshotTs}
+   * + {@link OptionsSnapshotRepository#capturedRowsAt}) rather than a second reader, so the served
+   * legs carry the full captured book — bid/ask/volume/OI, the solved IV and its first-order greeks,
+   * and the {@code ivReason}/{@code priceSource} provenance the capture wrote. Both reads apply the
+   * SAME live-capture + not-quarantined predicate: a BACKFILL or UPSTOX_1M row must never be
+   * relabelled {@code CAPTURED}, and a row quarantined as an implausible OI print must not re-enter
+   * through this path. Fields the snapshot table does not hold are null, never fabricated:
+   * {@code prevOi} (an Upstox-source-only live field) and the second/third-order greeks (live-only
+   * per {@link Leg}). {@code forwardSource} reads {@code CAPTURED} because the forward's precedence
+   * rule is not persisted — only its value is.
+   *
+   * <p>{@code riskFreeRate} is the rate the capture STORED, not today's configured one: every
+   * snapshot persists the {@code r} its IV/greeks were solved with, so serving the current config
+   * beside older greeks would advertise an input those numbers were not computed from. The
+   * configured rate is used only when the stored one is null (pre-provenance rows).
    *
    * <p>Rows come from the live instrument master, so the chain's strike ladder, CE/PE pairing and
    * {@code (exchange, tradingsymbol)} identity are the same ones a live chain publishes; a strike
@@ -310,19 +318,20 @@ public class OptionsChainService {
    */
   private Optional<Chain> lastCapturedChain(
       String underlying, LocalDate expiry, List<Instrument> chainInstruments, boolean open) {
-    OffsetDateTime capturedAt = snapshots.latestSnapshotTs(underlying, expiry).orElse(null);
+    OffsetDateTime capturedAt = snapshots.latestCapturedSnapshotTs(underlying, expiry).orElse(null);
     if (capturedAt == null) {
       return Optional.empty();
     }
     Map<String, OptionsSnapshotRepository.SnapshotRow> captured = new java.util.HashMap<>();
     for (OptionsSnapshotRepository.SnapshotRow row :
-        snapshots.rowsAt(underlying, expiry, capturedAt)) {
+        snapshots.capturedRowsAt(underlying, expiry, capturedAt)) {
       captured.put(strikeTypeKey(row.strike(), row.optionType()), row);
     }
 
     Map<BigDecimal, Leg[]> byStrike = new LinkedHashMap<>();
     BigDecimal spot = null;
     BigDecimal forward = null;
+    BigDecimal capturedRate = null;
     int matched = 0;
     long ceOi = 0;
     long peOi = 0;
@@ -342,6 +351,7 @@ public class OptionsChainService {
         matched++;
         spot = spot == null ? row.spotPrice() : spot;
         forward = forward == null ? row.forwardPrice() : forward;
+        capturedRate = capturedRate == null ? row.riskFreeRate() : capturedRate;
       }
     }
     if (matched == 0) {
@@ -357,7 +367,7 @@ public class OptionsChainService {
             spot,
             forward,
             "CAPTURED",
-            riskFreeRate,
+            capturedRate == null ? riskFreeRate : capturedRate,
             putCallRatio(ceOi, peOi),
             !open,
             true,

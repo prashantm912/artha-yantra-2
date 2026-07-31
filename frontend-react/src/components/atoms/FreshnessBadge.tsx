@@ -30,6 +30,23 @@ function formatAge(seconds: number): string {
   return `${Math.floor(seconds / 86_400)}d`;
 }
 
+// `asOf` must be RENDERED in IST regardless of the offset the server serialised it with. Slicing the
+// ISO string (the old approach) only works when the wire carries `+05:30`; market-data runs on
+// Clock.systemUTC(), so a 15:30 IST capture arrives as ...T10:00:00Z and character-slicing rendered
+// it as "10:00" — a wrong wall-clock on the one field the badge exists to communicate.
+const IST_DATE = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+const IST_TIME = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Kolkata',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
 export function FreshnessBadge({
   freshness,
   staleAfterSeconds = 180,
@@ -42,13 +59,15 @@ export function FreshnessBadge({
   // Client-side age (so an idle LIVE page's chip visibly ages past the server-computed staleSeconds on
   // the next render), falling back to the server value when asOf is absent. The `+05:30` offset in the
   // ISO string makes Date.parse resolve the correct instant.
-  const ageSec =
-    asOf != null
-      ? Math.max(0, Math.round(((now ?? Date.now()) - Date.parse(asOf)) / 1000))
-      : (staleSeconds ?? null);
+  const asOfMs = asOf != null ? Date.parse(asOf) : Number.NaN;
+  const asOfValid = !Number.isNaN(asOfMs);
+  const nowMs = now ?? Date.now();
+  const ageSec = asOfValid
+    ? Math.max(0, Math.round((nowMs - asOfMs) / 1000))
+    : (staleSeconds ?? null);
 
-  const timeLabel = asOf != null ? asOf.slice(11, 16) : null; // HH:MM IST
-  const dateLabel = asOf != null ? asOf.slice(0, 10) : null; // YYYY-MM-DD
+  const timeLabel = asOfValid ? IST_TIME.format(asOfMs) : null; // HH:MM IST
+  const dateLabel = asOfValid ? IST_DATE.format(asOfMs) : null; // YYYY-MM-DD IST
 
   // Build the hover detail: source + captured-age + completeness.
   const titleParts: string[] = [];
@@ -67,12 +86,14 @@ export function FreshnessBadge({
     tone = stale ? 'text-warn ring-warn/40' : 'text-bull ring-bull/40';
     label = stale ? 'Stale' : 'Live';
     icon = stale ? 'warn' : 'live';
-    // A live read stale by DAYS must not read the same as one stale by minutes: HH:MM alone makes
-    // "yesterday's close" and "a chain from three weeks ago" identical chips. Past a day the date
-    // joins the time so the age is legible at a glance, not only on the hover title. Under a day
-    // the chip is unchanged, so every fresh/briefly-stale surface renders exactly as before.
+    // A stale live read from a PREVIOUS IST session must not read like one from minutes ago: HH:MM
+    // alone makes "yesterday's close" and "a chain from three weeks ago" identical chips. The test
+    // is the IST CALENDAR DATE, not elapsed hours — an elapsed-hours threshold gets the commonest
+    // case wrong, since a 15:30 capture read at 09:15 next morning is only ~17.5 h old yet is a
+    // different session, and that overnight view is how this badge is usually seen. Same-day stale
+    // chips are unchanged, so every intraday surface renders exactly as before.
     detail =
-      stale && ageSec != null && ageSec >= 86_400 && dateLabel != null
+      stale && dateLabel != null && dateLabel !== IST_DATE.format(nowMs)
         ? `${dateLabel} ${timeLabel}`
         : timeLabel;
   } else if (provenance === 'eod') {

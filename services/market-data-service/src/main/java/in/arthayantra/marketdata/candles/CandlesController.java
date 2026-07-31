@@ -1,5 +1,8 @@
 package in.arthayantra.marketdata.candles;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -22,9 +25,13 @@ public class CandlesController {
   public record CandlesResponse(
       List<Candle> items, boolean stale, OffsetDateTime asOf, int limit, int offset, int total) {}
 
-  /** Refresh request body. */
+  /** Refresh request body — all fields required (B-1); a missing one 400s instead of NPE-ing. */
   public record RefreshRequest(
-      String exchange, String tradingsymbol, String interval, OffsetDateTime from, OffsetDateTime to) {}
+      @NotBlank String exchange,
+      @NotBlank String tradingsymbol,
+      @NotBlank String interval,
+      @NotNull OffsetDateTime from,
+      @NotNull OffsetDateTime to) {}
 
   private final CandleQueryService queryService;
   private final ContBackAdjuster backAdjuster;
@@ -88,7 +95,7 @@ public class CandlesController {
 
   /** Forced re-fetch — 202 + jobId, async on the service executor (rate-limit bound). */
   @PostMapping("/refresh")
-  public ResponseEntity<Map<String, String>> refresh(@RequestBody RefreshRequest request) {
+  public ResponseEntity<Map<String, String>> refresh(@Valid @RequestBody RefreshRequest request) {
     Map<String, String> job =
         queryService.refreshAsync(
             request.exchange(), request.tradingsymbol(), request.interval(),

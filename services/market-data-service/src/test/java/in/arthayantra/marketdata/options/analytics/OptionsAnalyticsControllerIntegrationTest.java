@@ -572,6 +572,72 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.atmStrike").value(org.hamcrest.Matchers.nullValue()));
   }
 
+  /**
+   * The {@code expiry} param (task_e2e01m(b)) used to be parsed by hand ({@code LocalDate.parse}),
+   * so a malformed value threw an uncaught {@code DateTimeParseException} -> the catch-all 500.
+   * Typing the {@code @RequestParam} as {@code LocalDate} (matching {@code ExportController}'s
+   * "expiry" param convention) makes Spring's own conversion failure map to 400 VALIDATION_FAILED.
+   */
+  @Test
+  void strikeSessionStatsBadExpiryIs400NotNpe() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSBADEXP")
+                .param("expiry", "test"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  /**
+   * The {@code session} param (task_7cc34a70) used to be hand-parsed ({@code
+   * LocalDate.parse(session)}), so a malformed value threw an uncaught {@code
+   * DateTimeParseException} -> the catch-all 500. Retyped to {@code LocalDate} (same {@code expiry}
+   * convention above) so Spring's own conversion failure maps to 400 VALIDATION_FAILED.
+   */
+  @Test
+  void strikeSessionStatsMalformedSessionIs400NotServerError() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSBADSESS")
+                .param("expiry", "2026-06-25")
+                .param("session", "not-a-date"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  /** Absent {@code session} defaults to today IST — unchanged by the retype (no data -> empty items). */
+  @Test
+  void strikeSessionStatsAbsentSessionDefaultsToTodayNot400Or500() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSABSENTSESS")
+                .param("expiry", "2026-06-25"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(0));
+  }
+
+  /**
+   * A present-but-empty {@code session=} used to hit the SAME hand-rolled {@code LocalDate.parse("")}
+   * as a malformed value (both throw {@code DateTimeParseException} -> 500) — unlike {@code farExpiry},
+   * {@code session} had no explicit blank guard. Spring's {@code @DateTimeFormat} conversion treats a
+   * blank query value as absent (no conversion attempted), so post-fix it now defaults to today exactly
+   * like the absent case above, rather than error at all.
+   */
+  @Test
+  void strikeSessionStatsEmptySessionBehavesLikeAbsentNot500() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/strike-session-stats")
+                .param("underlying", "SESSEMPTYSESS")
+                .param("expiry", "2026-06-25")
+                .param("session", ""))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.items.length()").value(0));
+  }
+
   @Test
   void premiumSeriesTracksAtmStraddlePerBucket() throws Exception {
     String u = "PREMSERIES";
@@ -720,5 +786,89 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
                 .param("interval", "5m"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.items.length()").value(0));
+  }
+
+  // ── /calendar-spread: farExpiry (task_7cc34a70) ─────────────────────────────────────────────────
+
+  /**
+   * {@code farExpiry} used to be hand-parsed ({@code java.time.LocalDate.parse(farExpiry)}), so a
+   * malformed value threw an uncaught {@code DateTimeParseException} -> the catch-all 500. Retyped to
+   * {@code LocalDate} (same convention as {@code strike-session-stats}'s {@code session}/{@code expiry})
+   * so Spring's own conversion failure maps to 400 VALIDATION_FAILED. No option-chain fixture needed —
+   * the malformed value fails at argument binding, before the handler body (and its chain lookups) ever runs.
+   */
+  @Test
+  void calendarSpreadMalformedFarExpiryIs400NotServerError() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/calendar-spread")
+                .param("name", "CALSPREADBAD")
+                .param("strike", "100")
+                .param("nearExpiry", "2026-06-16")
+                .param("farExpiry", "not-a-date"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
+
+  /**
+   * Absent {@code farExpiry} -> null -> the service defaults it to "the next listed expiry after near"
+   * ({@code CalendarSpreadChartService.nextExpiryAfter}); for an underlying with NO listed expiries at
+   * all that resolves to null, which the service's own 400 catches ("farExpiry must be after
+   * nearExpiry") — a business-rule 400, not a param-binding one. This is the BASELINE the empty-string
+   * case below is compared against.
+   */
+  @Test
+  void calendarSpreadAbsentFarExpiryHitsBusinessValidationNot500() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/calendar-spread")
+                .param("name", "CALSPREADABSENT")
+                .param("strike", "100")
+                .param("nearExpiry", "2026-06-16"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+        .andExpect(jsonPath("$.message").value("farExpiry must be after nearExpiry (2026-06-16)"));
+  }
+
+  /**
+   * The behaviour nuance this task exists to guard: {@code farExpiry=} (present but empty) used to be
+   * explicitly blank-tolerant ({@code farExpiry.isBlank() ? null : ...}) and reach the SAME business
+   * validation as the absent case above (same 400 message). Retyping to {@code LocalDate} must not turn
+   * this into a raw Spring type-mismatch 400 ("Invalid parameter value") instead — that would be a wire
+   * regression (right status, wrong reason) hiding behind an unchanged status code. Asserting the exact
+   * {@code $.message} (not just the status) is what catches that: a MethodArgumentTypeMismatchException
+   * would produce a DIFFERENT message ("Invalid parameter value") from the business-rule one pinned here.
+   */
+  @Test
+  void calendarSpreadEmptyFarExpiryBehavesExactlyLikeAbsent() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/calendar-spread")
+                .param("name", "CALSPREADEMPTY")
+                .param("strike", "100")
+                .param("nearExpiry", "2026-06-16")
+                .param("farExpiry", ""))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+        .andExpect(jsonPath("$.message").value("farExpiry must be after nearExpiry (2026-06-16)"));
+  }
+
+  /**
+   * A syntactically valid, after-near {@code farExpiry} must still parse and pass the near/far
+   * validation (unchanged by the retype) — it proceeds to the per-leg instrument lookup, which 422s for
+   * this unlisted (underlying, strike) pair. That 422 (DATA_GAP), not a 400, is the tell that farExpiry
+   * parsed correctly and cleared the {@code far.isAfter(near)} gate.
+   */
+  @Test
+  void calendarSpreadValidFarExpiryClearsValidationReaches422OnUnlistedStrike() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/calendar-spread")
+                .param("name", "CALSPREADVALID")
+                .param("strike", "100")
+                .param("nearExpiry", "2026-06-16")
+                .param("farExpiry", "2026-06-23"))
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.code").value("DATA_GAP"));
   }
 }

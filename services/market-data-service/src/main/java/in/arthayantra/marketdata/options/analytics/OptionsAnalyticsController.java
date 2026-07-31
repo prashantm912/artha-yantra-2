@@ -807,13 +807,11 @@ public class OptionsAnalyticsController {
       @RequestParam BigDecimal strike,
       @RequestParam(required = false, defaultValue = "CE") String optionType,
       @RequestParam(required = false) String nearExpiry,
-      @RequestParam(required = false) String farExpiry,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate farExpiry,
       @RequestParam(required = false, defaultValue = "3") int interval) {
     OiQuery q = OiQuery.of(mode, name, date, null, nearExpiry);
-    java.time.LocalDate far =
-        farExpiry == null || farExpiry.isBlank() ? null : java.time.LocalDate.parse(farExpiry);
     return calendarSpreadChartService.chart(
-        q.name(), strike, optionType, q.expiry(), far, interval, q.date());
+        q.name(), strike, optionType, q.expiry(), farExpiry, interval, q.date());
   }
 
   /**
@@ -929,8 +927,11 @@ public class OptionsAnalyticsController {
 
   /**
    * /strike-session-stats: per-strike session OH/OL grading (Siva #2) for the {@code 2*window+1}
-   * strikes nearest the ATM. {@code window} default 3; {@code interval} (minutes) default = the
-   * snapshot capture cadence; {@code session} default = today IST. Empty items -> 200 (no error).
+   * strikes nearest the ATM. {@code window} default 3, must be {@code >= 0} (a negative value
+   * would make {@code Stream.limit} reject it, so it 400s here instead); {@code window=0} is a
+   * valid, distinct case — just the single nearest (ATM) strike. {@code interval} (minutes)
+   * default = the snapshot capture cadence; {@code session} default = today IST. Empty items ->
+   * 200 (no error).
    */
   @GetMapping("/strike-session-stats")
   public OpenHighStatsService.StrikeSessionStats strikeSessionStats(
@@ -938,11 +939,14 @@ public class OptionsAnalyticsController {
       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate expiry,
       @RequestParam(required = false) Integer window,
       @RequestParam(required = false) Integer interval,
-      @RequestParam(required = false) String session) {
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate session) {
+    if (window != null && window < 0) {
+      throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "window must be >= 0");
+    }
     LocalDate exp = expiry;
     int win = window == null ? 3 : window;
     int intervalMinutes = interval == null ? defaultSessionIntervalMinutes : interval;
-    LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : LocalDate.parse(session);
+    LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : session;
 
     List<OptionsSnapshotReader.PerStrikeSessionStat> stats =
         reader.sessionStats(underlying, exp, sess, intervalMinutes);

@@ -2694,13 +2694,13 @@ export interface components {
             bse: components["schemas"]["BhavcopyExchangeResult"];
         };
         RefreshRequest: {
-            exchange?: string;
-            tradingsymbol?: string;
-            interval?: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
             /** Format: date-time */
-            from?: string;
+            from: string;
             /** Format: date-time */
-            to?: string;
+            to: string;
         };
         QueryRequest: {
             sql?: string;

@@ -181,7 +181,7 @@ class CorporateActionResumeTest {
     when(events.statusOf(id)).thenReturn(Optional.of("BASE_REBUILT"));
     doThrow(new RuntimeException("max_tuples_decompressed_per_dml_transaction"))
         .when(candles)
-        .refreshDerivedAggregates(any(), any());
+        .refreshDerivedAggregatesForRebuild(any(), any());
 
     job.sweepNow();
 
@@ -202,7 +202,7 @@ class CorporateActionResumeTest {
     await()
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(() -> verify(events).updateStatusIf(id, "REFRESH_FAILED", "RESOLVED"));
-    verify(candles).refreshDerivedAggregates(any(), any());
+    verify(candles).refreshDerivedAggregatesForRebuild(any(), any());
     // refresh-ONLY: the ~12-year purge + re-backfill are exactly what a resume must not redo
     verify(candles, never()).purgeSymbol(anyString(), anyString());
     verify(queryService, never()).prefetch(anyString(), anyString(), anyString(), any(), any());
@@ -226,7 +226,7 @@ class CorporateActionResumeTest {
               return null;
             })
         .when(candles)
-        .refreshDerivedAggregates(any(), any());
+        .refreshDerivedAggregatesForRebuild(any(), any());
 
     job.sweepNow();
     assertThat(running.await(20, TimeUnit.SECONDS)).as("attempt started").isTrue();
@@ -241,7 +241,7 @@ class CorporateActionResumeTest {
         .atMost(Duration.ofSeconds(20))
         .untilAsserted(() -> verify(events).updateStatusIf(id, "REFRESH_FAILED", "RESOLVED"));
     // exactly one attempt ran and one was counted — the crossing sweep queued nothing
-    verify(candles, times(1)).refreshDerivedAggregates(any(), any());
+    verify(candles, times(1)).refreshDerivedAggregatesForRebuild(any(), any());
     verify(events, times(1)).incrementRefreshAttempts(id);
   }
 
@@ -269,7 +269,7 @@ class CorporateActionResumeTest {
     when(events.statusOf(id)).thenReturn(Optional.of("REFRESH_ABANDONED"));
     doThrow(new RuntimeException("max_tuples_decompressed_per_dml_transaction"))
         .when(candles)
-        .refreshDerivedAggregates(any(), any());
+        .refreshDerivedAggregatesForRebuild(any(), any());
 
     job.sweepNow();
 
@@ -301,7 +301,7 @@ class CorporateActionResumeTest {
     // materialise aggregates over a purged-but-not-refilled base
     when(events.latestEvent("NSE", "TCS")).thenReturn(Optional.of(row(id, "FAILED", 0)));
     job.sweepNow();
-    verify(candles, never()).refreshDerivedAggregates(any(), any());
+    verify(candles, never()).refreshDerivedAggregatesForRebuild(any(), any());
     verify(events, never()).updateStatusIf(eq(id), anyString(), eq("RESOLVED"));
   }
 
@@ -314,7 +314,7 @@ class CorporateActionResumeTest {
     job.sweepNow();
 
     verify(events).updateStatusIf(id, "REFRESH_FAILED", "REFRESH_ABANDONED");
-    verify(candles, never()).refreshDerivedAggregates(any(), any());
+    verify(candles, never()).refreshDerivedAggregatesForRebuild(any(), any());
     // the terminal state is the one an operator must act on, so it DOES page
     verify(ntfy).send(contains("ABANDONED"), eq("urgent"), anyString());
 
@@ -337,7 +337,7 @@ class CorporateActionResumeTest {
         .thenReturn(Optional.of("BASE_REBUILT"), Optional.of("REFRESH_FAILED"));
     doThrow(new RuntimeException("max_tuples_decompressed_per_dml_transaction"))
         .when(candles)
-        .refreshDerivedAggregates(any(), any());
+        .refreshDerivedAggregatesForRebuild(any(), any());
 
     // the in-flight fence makes a sweep a no-op while the prior attempt is still unwinding, so poll
     // the sweep itself rather than racing the claim release; extra no-op sweeps cost nothing and

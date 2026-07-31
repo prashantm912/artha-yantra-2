@@ -374,6 +374,7 @@
     "requestBody": true,
     "responses": [
       "202",
+      "400",
       "422"
     ]
   },

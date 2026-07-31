@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/v1/optimizations")
+
+
+class PromoteRequest(BaseModel):
+    """Which COMPLETE trial to materialize as a new draft, plus the optional human note."""
+
+    trialId: int
+    notes: str | None = None
 
 
 class ProbeRequest(BaseModel):
@@ -36,9 +44,17 @@ def _service(request: Request) -> Any:
     return request.app.state.sweeps
 
 
-@router.post("/run", status_code=202)
+@router.post(
+    "/run",
+    status_code=202,
+    # §D STAGE_D line 179 documents 400 for this route and test_missing_field_is_400 pins it, but
+    # the hand-rolled body validation lives in the service so springdoc-style inference can't see
+    # it — declare it so the published surface matches the shipped behaviour.
+    responses={400: {"description": "VALIDATION_FAILED / INVALID_PARAMETER_PATH"}},
+)
 def run(body: dict[str, Any], request: Request) -> dict[str, Any]:
-    """Submit a sweep → 202 {jobId, status:"queued"}."""
+    """Submit a sweep → 202 {jobId, status:"queued"}; 400 on a bad/missing field or a
+    closed-grammar parameter path."""
     job_id = _service(request).submit(body)
     return {"jobId": job_id, "status": "queued"}
 
@@ -52,9 +68,11 @@ def jobs(request: Request, limit: int = 50, offset: int = 0) -> dict[str, Any]:
 
 
 @router.get("/jobs/{job_id}")
-def job(job_id: str, request: Request) -> dict[str, Any]:
-    """Sweep status / progress / trials completed."""
-    return _service(request).job_status(job_id)
+def job(job_id: UUID, request: Request) -> dict[str, Any]:
+    """Sweep status / progress / trials completed. UUID-typed so a malformed id is refused at the
+    boundary (422) instead of reaching the UUID-typed ``jobs.id`` column as an uncaught Postgres
+    parse error; a well-formed but unknown id still 404s."""
+    return _service(request).job_status(str(job_id))
 
 
 @router.delete("/jobs/{job_id}", status_code=202)
@@ -95,9 +113,11 @@ def trial_folds(sweep_id: str, trial_id: int, request: Request) -> Any:
 
 
 @router.post("/{sweep_id}/promote", status_code=201)
-def promote(sweep_id: str, body: dict[str, Any], request: Request) -> dict[str, Any]:
-    """Promote a COMPLETE trial's params to a new draft version (§D.9); 409 if not promotable."""
-    return _service(request).promote(sweep_id, int(body["trialId"]), body.get("notes"))
+def promote(sweep_id: str, body: PromoteRequest, request: Request) -> dict[str, Any]:
+    """Promote a COMPLETE trial's params to a new draft version (§D.9); 409 if not promotable.
+    Modelled like ``/probes`` below, so a body missing ``trialId`` is a 422 rather than a KeyError
+    escaping as a bare 500."""
+    return _service(request).promote(sweep_id, body.trialId, body.notes)
 
 
 @router.post("/{sweep_id}/probes", response_model=ProbeReceipt)

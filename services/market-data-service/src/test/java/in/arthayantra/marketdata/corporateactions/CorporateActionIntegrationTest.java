@@ -269,8 +269,10 @@ class CorporateActionIntegrationTest extends MarketDataIntegrationTestBase {
             () -> assertThat(events.eventsFor("NSE", "TCS").get(0).status()).isEqualTo("RESOLVED"));
 
     CorporateActionRepository.EventRow resumed = events.eventsFor("NSE", "TCS").get(0);
-    // identity, NOT a row count: this DB persists across methods AND across surefire reruns, so
-    // "there is exactly one TCS event" is unsafe by construction — assert THIS event was reused
+    // Identity, not a row count — because identity is what this test actually means: the resume
+    // must reuse THE SAME event, not merely leave one behind. (A count would also be the wrong
+    // instrument for a DB that persists across methods and surefire reruns, but note this class
+    // does clear the table at @BeforeEach, so that is a robustness argument here, not a live bug.)
     assertThat(resumed.id()).isEqualTo(id);
     assertThat(resumed.refreshAttempts()).isEqualTo(2); // the resume counted its own attempt
     assertThat(candles.range("NSE", "TCS", "1d", from, to)).hasSize(barsBefore); // purge skipped
@@ -293,7 +295,7 @@ class CorporateActionIntegrationTest extends MarketDataIntegrationTestBase {
     job.sweepNow();
 
     CorporateActionRepository.EventRow abandoned = events.eventsFor("NSE", "TCS").get(0);
-    assertThat(abandoned.id()).isEqualTo(id); // identity, never a row count (persistent DB)
+    assertThat(abandoned.id()).isEqualTo(id); // identity: THIS event was abandoned, not merely some event
     assertThat(abandoned.status()).isEqualTo("REFRESH_ABANDONED");
     assertThat(abandoned.refreshAttempts()).isEqualTo(3); // no fourth attempt was started
     assertThat(abandoned.resolvedAt()).as("terminal states stamp resolved_at").isNotNull();

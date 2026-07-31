@@ -299,4 +299,21 @@ class CandleQueryIntegrationTest extends MarketDataIntegrationTestBase {
         .untilAsserted(
             () -> assertThat(repository.range("NSE", "CQREF", "1m", FROM, TO)).hasSize(60));
   }
+
+  /**
+   * An empty body (task_e2e01m(a)) used to reach {@code CandleQueryService.refreshAsync} with
+   * {@code interval == null} and NPE on {@code interval.equals("1w")} — the catch-all 500. Bean
+   * validation on {@link CandlesController.RefreshRequest} now rejects the missing fields before
+   * the service is ever called.
+   */
+  @Test
+  void refreshWithEmptyBodyIs400ValidationFailedNotNpe() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/market/candles/refresh")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+  }
 }

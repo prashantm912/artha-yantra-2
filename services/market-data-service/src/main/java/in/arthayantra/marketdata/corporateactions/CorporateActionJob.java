@@ -478,13 +478,18 @@ public class CorporateActionJob {
   }
 
   /**
-   * The chunked cagg refresh over the rebuilt 1m window (CandleRepository slices it ≤92-day). The
-   * attempt is RECORDED before it runs, not after it fails, so the retry bound holds even when a run
-   * dies without unwinding (the OOM kill this whole checkpoint exists for).
+   * The chunked cagg refresh over the rebuilt 1m window (CandleRepository slices it ≤92-day).
+   *
+   * <p>Two independent properties meet here, from #1151 and task_6903cd5e. It calls the REBUILD
+   * variant because this span reaches back years into COMPRESSED cagg chunks and so needs the raised
+   * per-DML decompression cap that every other refresh caller deliberately does without. And the
+   * attempt is RECORDED BEFORE it runs, not after it fails, so the retry bound still holds when a run
+   * dies without unwinding — the OOM kill this checkpoint exists for never reaches a catch block,
+   * which is exactly why counting failures instead of attempts would leave crash loops unbounded.
    */
   private void refreshRebuiltAggregates(UUID id, LocalDate today, OffsetDateTime now) {
     events.incrementRefreshAttempts(id);
-    candles.refreshDerivedAggregates(
+    candles.refreshDerivedAggregatesForRebuild(
         today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now);
   }
 

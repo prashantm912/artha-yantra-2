@@ -242,6 +242,65 @@ class CorporateActionIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
+  void refreshFailedEventIsResumedRefreshOnlyAgainstTheRealSchema() {
+    // task_6903cd5e: the same checkpoint, for the class that ERRORED rather than crashed. Against
+    // the real Flyway lineage this also proves V051 applied — the widened CHECK has to admit
+    // REFRESH_FAILED or updateStatus would throw.
+    OffsetDateTime from = OffsetDateTime.parse("2025-06-01T00:00:00+05:30");
+    OffsetDateTime to = OffsetDateTime.parse("2026-06-15T00:00:00+05:30");
+    int barsBefore = candles.range("NSE", "TCS", "1d", from, to).size();
+    assertThat(barsBefore).isGreaterThan(0);
+
+    UUID id =
+        events.insertDetected(
+            "NSE", "TCS", java.time.LocalDate.parse("2026-06-01"),
+            new BigDecimal("2.0"), 4, 3, "[]");
+    events.updateStatus(id, "BASE_REBUILT");
+    events.incrementRefreshAttempts(id);
+    events.updateStatus(id, "REFRESH_FAILED"); // V051 admits the new resumable state
+
+    mockGateway().setCorporateActionActive(false); // no fresh divergence — resume is the ONLY path
+
+    job.sweepNow();
+
+    await()
+        .atMost(Duration.ofSeconds(60))
+        .untilAsserted(
+            () -> assertThat(events.eventsFor("NSE", "TCS").get(0).status()).isEqualTo("RESOLVED"));
+
+    CorporateActionRepository.EventRow resumed = events.eventsFor("NSE", "TCS").get(0);
+    // identity, NOT a row count: this DB persists across methods AND across surefire reruns, so
+    // "there is exactly one TCS event" is unsafe by construction — assert THIS event was reused
+    assertThat(resumed.id()).isEqualTo(id);
+    assertThat(resumed.refreshAttempts()).isEqualTo(2); // the resume counted its own attempt
+    assertThat(candles.range("NSE", "TCS", "1d", from, to)).hasSize(barsBefore); // purge skipped
+  }
+
+  @Test
+  void spentRetryBoundAbandonsTheEventInsteadOfRetryingForever() {
+    UUID id =
+        events.insertDetected(
+            "NSE", "TCS", java.time.LocalDate.parse("2026-06-01"),
+            new BigDecimal("2.0"), 4, 3, "[]");
+    events.updateStatus(id, "REFRESH_FAILED");
+    // three recorded attempts = the default artha.corporate-actions.max-refresh-attempts
+    events.incrementRefreshAttempts(id);
+    events.incrementRefreshAttempts(id);
+    events.incrementRefreshAttempts(id);
+
+    mockGateway().setCorporateActionActive(false);
+
+    job.sweepNow();
+
+    CorporateActionRepository.EventRow abandoned = events.eventsFor("NSE", "TCS").get(0);
+    assertThat(abandoned.id()).isEqualTo(id); // identity, never a row count (persistent DB)
+    assertThat(abandoned.status()).isEqualTo("REFRESH_ABANDONED");
+    assertThat(abandoned.refreshAttempts()).isEqualTo(3); // no fourth attempt was started
+    assertThat(abandoned.resolvedAt()).as("terminal states stamp resolved_at").isNotNull();
+    NTFY.verify(1, postRequestedFor(urlPathEqualTo("/ay-ca-test")));
+  }
+
+  @Test
   void backtestRoleCanSelectEventsButNeverInsert() throws Exception {
     try (Connection connection = DriverManager.getConnection(jdbcUrl(), dbUser(), dbPassword());
         Statement statement = connection.createStatement()) {

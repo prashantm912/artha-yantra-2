@@ -40,7 +40,7 @@ Default load (NSE:NIFTY 50): pane 4 issues `GET /api/v1/market/candles?...&inter
 ## 2 Feature gaps (CONFIRMED)
 
 1. **Morning canaries never ran today; no boot catch-up exists.** Stack was down 02:29–08:56 IST; the 08:30 notifier-health + 08:45 ingest-coverage crons ticked while down and missed crons never replay (`IngestCoverageCanary.java:55` documents it). The owner's machine routinely boots ~08:56 — this recurs on every late boot. Chip: boot-time run-once-if-missed-today catch-up, mirroring the #1036 pattern.
-2. **NFO+BFO option 1m capture breadth collapsed to 22 ATM contracts (7× worse cycle-over-cycle).** Post-weekly-expiry NFO contract counts: 07-15=312 → 07-22=181 → 07-29=26 → 07-31: NFO 22 and BFO 22 (BFO was 279 contracts on 07-30). The 22 survivors are exactly the 08-04 weekly ATM ±5-strike band, each with full 375 bars — breadth loss, not sparsity. `options_chain_snapshots` stayed dense (1.2M+ rows/day); only the WS tick-agg candle path narrowed. Owner decision: is ATM-band-only the intended post-roll subscription set, or widen? Chip filed.
+2. ~~**NFO+BFO option 1m capture breadth collapsed to 22 ATM contracts (7× worse cycle-over-cycle).**~~ **REFUTED 2026-07-31 late — see the §11 addendum. There was no collapse; live option capture roughly DOUBLED on 07-27.** The finding compared `BACKFILL`-source rows against `TICK_AGG`-source rows and read the difference as a regression. Chip task_e2e01d closed as not-a-defect.
 3. **Cockpit Option-chain panel hard-errors every evening.** `chain-table?mode=live` 503s DATA_STALE post-market (`OptionsChainService.java:195` throws when no spot quote) instead of degrading to the last session's chain; header tiles all "—", straddle panel empty. Design call: cockpit falls back to `mode=history` when closed, or live mode serves last captured chain with a stale marker. Chip filed.
 4. **Multi Leg Price page (oipulse `/app/strategies/multi-leg-price`) still has no route** — audit FG-05, the last true missing oipulse page. Verdict **DEFER** (P2 unchanged; straddle/strangle + strategy-builder cover most of its value; generalize `StraddleChartService` to N legs if pulled).
 5. **Options Chain §20.7.6 fidelity tail never shipped** (2h/4h/custom intervals, IV-Chng + O=H/O=L optional columns, grouped name select, strike-click sub-view) while §20.7.6 claims "nothing dropped". Verdict **DEFER** — display-only tail, zero gate/money impact; the claim itself is corrected via the master-plan chip (§3).
@@ -361,3 +361,69 @@ If out-of-hours weekday bars reappear, the guard needs a session-window conjunct
 2026-07-25/26 was the last weekend before that. The first real test is the 2026-08-01/02 weekend. Since
 the 455 rows are now deleted, that window is a clean-room: **any TICK_AGG row appearing on 08-01 or
 08-02 means the guard does not work.** Worth a check on the following Monday.
+
+---
+
+## 11 Addendum — task_e2e01d REFUTED: live option capture doubled, it did not collapse
+
+**Date:** 2026-07-31 late (main loop, read-only against the live `artha` DB + the running container).
+
+§2.2 reported a 7× collapse in NFO/BFO option 1m capture, down to a 22-contract ATM band. Investigated
+before changing any subscription config (the owner's instruction was "investigate, then widen only if
+unintended"). **The finding is refuted in the strongest direction: capture breadth roughly doubled on
+2026-07-27 and has held.**
+
+### 11.1 The measurement error
+
+The reported series — NFO 07-15=312 → 07-22=181 → 07-29=26 → 07-31=22, BFO 07-30=279 — does not
+describe live capture. Those are **`source='BACKFILL'`** contract counts, i.e. the post-expiry
+historical fetch of *expired* contracts. Re-measured per source:
+
+| day (IST) | NFO `BACKFILL` | BFO `BACKFILL` | NFO `TICK_AGG` | BFO `TICK_AGG` |
+|---|---|---|---|---|
+| 2026-07-15 | 313 | 489 | 16 | 8 |
+| 2026-07-22 | 182 | 399 | 16 | 8 |
+| 2026-07-27 | 181 | 242 | **38** | **30** |
+| 2026-07-29 | — | 254 | **42** | **40** |
+| 2026-07-31 | — | — | **40** | **30** |
+
+The `BACKFILL` column going empty for the most recent days is **correct by construction**: those
+contracts have not expired yet, so the expired-contract backfill has nothing to fetch. Reading a
+not-yet-expired series as a "collapse" is the artifact. The live capture column — the one that
+actually measures whether ticks are being aggregated into candles — moves the other way.
+
+### 11.2 What actually changed on 07-27, and why 22 is the designed number
+
+`OptionAtmPinner` shipped in **[#1039](https://github.com/prashantm912/artha-yantra-2/pull/1039) on
+2026-07-26** (ledger row G3, status `DONE + LIVE` — the row was not stale). The step in the TICK_AGG
+columns on the next trading day is that pinner going live. Verified running right now:
+
+- gauge `ay_options_atm_pinned_contracts` = **44.0**
+- last pass: `option ATM pin pass: underlyings resolved=2/2, desired=44, pinned=44`
+
+44 is exactly the configured intent: **2 underlyings** (`artha.options.atm-pinner.underlyings` =
+`NIFTY 50, SENSEX`) × **11 strikes** (`strike-width: 5` ⇒ ATM ±5) × **2 sides** (CE/PE) = 44. The "22
+survivors" §2.2 flagged are one underlying's half of that — the designed band, not a remnant.
+
+### 11.3 Disposition
+
+**No change made**, per the owner's stated rule for the intended case. Recording the knobs for
+whenever more research breadth is actually wanted, since both are configuration rather than code:
+
+| knob | default | effect of widening |
+|---|---|---|
+| `artha.options.atm-pinner.strike-width` | `5` (ATM ±5 ⇒ 11 strikes) | linear in pinned contracts: ±10 would take 44 → 84 |
+| `artha.options.atm-pinner.expiry-horizon-days` | `7` | pulls in additional expiries inside the horizon |
+
+The cost of widening is WS subscription budget, not correctness — pins register as `SPECULATIVE`
+(hardened in #1039's own audit) so under cap pressure they yield to the live engine rather than evict
+a strategy hold. Current headroom is large (69 active subscriptions ≈ 2.3% of the 3000 cap at the
+#1039 live-verify), so a widening is cheap if the research case appears.
+
+### 11.4 The lesson worth keeping
+
+Both this and §10's 45× row-count error are the same failure: **a count taken without pinning the
+`source` column.** `marketdata.candles` multiplexes `TICK_AGG`, `BACKFILL`, `BHAVCOPY` and fetched
+history into one table, and the provenance column is the only thing separating "what we captured live"
+from "what we fetched afterwards". Any future breadth or coverage claim about candles must state its
+`source` filter, or it is not a claim about capture.

@@ -658,9 +658,12 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
   }
 
   /**
-   * {@code window=0} is a genuinely different case from negative — {@code Stream.limit(0)} is
-   * legal and yields just the single nearest (ATM) strike, not an error — so it must NOT be
-   * rejected by the negative-window guard above.
+   * {@code window=0} is a genuinely different case from negative. The service computes a radius,
+   * {@code 2 * window + 1}, so window=0 reaches {@code Stream.limit(1)} — legal, and it yields just
+   * the single nearest (ATM) strike rather than an error. It must NOT be rejected by the
+   * negative-window guard above. (An earlier version of this comment said {@code limit(0)}, which
+   * would have yielded an EMPTY result and made the assertion below look wrong — cross-vendor review
+   * caught the arithmetic.)
    */
   @Test
   void strikeSessionStatsZeroWindowKeepsOnlyAtmStrike() throws Exception {

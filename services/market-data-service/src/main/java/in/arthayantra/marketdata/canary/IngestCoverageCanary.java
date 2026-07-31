@@ -62,7 +62,7 @@ import org.springframework.stereotype.Component;
  * late boot the morning canary that exists to catch a broken overnight batch was exactly the thing
  * that did not run (E2E audit 2026-07-31 §2.1: stack down 02:29–08:56). {@link #catchUpIfMissed()}
  * is the boot-time replay: if today's cron fire has already passed and no run is recorded for today,
- * it sweeps once. "Already ran" is grounded in the durable {@code canary_runs} row (V050), never an
+ * it sweeps once. "Already ran" is grounded in the durable {@code canary_runs} row (V052 — renumbered from V050 after marketdata V051 merged first via #1156), never an
  * in-memory flag — an in-memory flag is defeated by exactly the restart this exists for. The
  * dead-man heartbeat still covers a full outage; this covers the late-boot morning.
  *
@@ -128,7 +128,7 @@ public class IngestCoverageCanary {
   static final String YELLOW = "YELLOW";
   static final String RED = "RED";
 
-  /** {@code canary_runs.canary} key for this canary's per-IST-day run marker (V050). */
+  /** {@code canary_runs.canary} key for this canary's per-IST-day run marker (V052 — renumbered from V050 after marketdata V051 merged first via #1156). */
   public static final String CANARY_KEY = "INGEST_COVERAGE";
 
   /**

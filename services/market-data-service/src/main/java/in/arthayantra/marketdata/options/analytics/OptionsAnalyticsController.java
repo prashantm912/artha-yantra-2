@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -934,11 +935,11 @@ public class OptionsAnalyticsController {
   @GetMapping("/strike-session-stats")
   public OpenHighStatsService.StrikeSessionStats strikeSessionStats(
       @RequestParam String underlying,
-      @RequestParam String expiry,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate expiry,
       @RequestParam(required = false) Integer window,
       @RequestParam(required = false) Integer interval,
       @RequestParam(required = false) String session) {
-    LocalDate exp = LocalDate.parse(expiry);
+    LocalDate exp = expiry;
     int win = window == null ? 3 : window;
     int intervalMinutes = interval == null ? defaultSessionIntervalMinutes : interval;
     LocalDate sess = session == null ? LocalDate.now(Ist.ZONE) : LocalDate.parse(session);

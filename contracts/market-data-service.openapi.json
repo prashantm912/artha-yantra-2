@@ -2666,7 +2666,8 @@
           "in" : "query",
           "required" : true,
           "schema" : {
-            "type" : "string"
+            "type" : "string",
+            "format" : "date"
           }
         }, {
           "name" : "window",
@@ -8075,13 +8076,16 @@
         "type" : "object",
         "properties" : {
           "exchange" : {
-            "type" : "string"
+            "type" : "string",
+            "minLength" : 1
           },
           "tradingsymbol" : {
-            "type" : "string"
+            "type" : "string",
+            "minLength" : 1
           },
           "interval" : {
-            "type" : "string"
+            "type" : "string",
+            "minLength" : 1
           },
           "from" : {
             "type" : "string",
@@ -8091,7 +8095,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "exchange", "from", "interval", "to", "tradingsymbol" ]
       },
       "QueryRequest" : {
         "type" : "object",

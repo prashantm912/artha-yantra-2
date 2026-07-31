@@ -204,6 +204,11 @@ public class EquityIndexContributionService {
    * date-compare in the codebase.
    */
   private BigDecimal indexClose(String index, LocalDate asOf) {
+    if (asOf == null) {
+      // no bhavcopy at all (empty table): java.sql.Date.valueOf(null) would NPE — fall through to
+      // the empty latestChange()/fold() below, which already throws the 422 DATA_GAP.
+      return null;
+    }
     return jdbc.query(
         "SELECT close FROM candles WHERE interval = '1d' AND tradingsymbol = ? "
             + "AND (bucket AT TIME ZONE 'Asia/Kolkata')::date <= ? ORDER BY bucket DESC LIMIT 1",

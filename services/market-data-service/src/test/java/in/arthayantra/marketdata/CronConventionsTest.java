@@ -25,7 +25,12 @@ class CronConventionsTest {
           in.arthayantra.marketdata.futures.FuturesOiSnapshotService.class,
           in.arthayantra.marketdata.kite.session.SessionHealthProbe.class,
           in.arthayantra.marketdata.nse.preopen.PreOpenEquityScanService.class,
-          in.arthayantra.marketdata.candles.CandlesConfig.CandleHousekeeping.class);
+          in.arthayantra.marketdata.candles.CandlesConfig.CandleHousekeeping.class,
+          // task_e2e01c: this one is not merely conventional any more — IngestCoverageCanary now
+          // PARSES its own cron (CronExpression.parse) to decide whether the boot catch-up fires, so
+          // a malformed or zone-less expression silently disables the catch-up as well as drifting
+          // the schedule.
+          in.arthayantra.marketdata.canary.IngestCoverageCanary.class);
 
   @Test
   void everyCronScheduleIsSixFieldWithIstZone() {

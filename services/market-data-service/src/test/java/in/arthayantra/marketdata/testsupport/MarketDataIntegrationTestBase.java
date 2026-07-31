@@ -114,6 +114,15 @@ public abstract class MarketDataIntegrationTestBase {
     // prime CI hours — so a run crossing it re-creates the identical cached-context-writer race
     // the line above closes. Spring cron "-" = disabled.
     registry.add("artha.bhavcopy.eod-cron", () -> "-");
+    // ⚠️ Same rule for the morning-canary BOOT catch-up (task_e2e01c): MorningCanaryCatchUp fires
+    // on ApplicationReadyEvent and dispatches onto monitorTaskScheduler, so a CACHED context can
+    // sweep ingest_runs and INSERT into canary_runs at an arbitrary later moment — inside whichever
+    // unrelated test happens to be running. That is the identical cached-context-writer hazard the
+    // two lines above exist for, so the default lives here too, on the substrate all IT contexts
+    // extend. IngestCoverageCanaryIntegrationTest calls catchUpIfMissed() DIRECTLY on a
+    // hand-constructed canary with a fixed clock — that is how the path stays covered without any
+    // context firing it on its own.
+    registry.add("artha.ingest-canary.startup-catchup", () -> "false");
   }
 
   /** Connection details for raw-JDBC assertions (grant tests connect as other roles). */

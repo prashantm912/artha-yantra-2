@@ -2694,13 +2694,13 @@ export interface components {
             bse: components["schemas"]["BhavcopyExchangeResult"];
         };
         RefreshRequest: {
-            exchange?: string;
-            tradingsymbol?: string;
-            interval?: string;
+            exchange: string;
+            tradingsymbol: string;
+            interval: string;
             /** Format: date-time */
-            from?: string;
+            from: string;
             /** Format: date-time */
-            to?: string;
+            to: string;
         };
         QueryRequest: {
             sql?: string;
@@ -3332,6 +3332,7 @@ export interface components {
             riskFreeRate: number;
             pcr: number | null;
             stale: boolean;
+            lastCaptured: boolean;
             /** Format: date-time */
             asOf: string;
             rows: components["schemas"]["StrikeRow"][];
@@ -3416,6 +3417,7 @@ export interface components {
             riskFreeRate: number;
             pcr: number | null;
             stale: boolean;
+            lastCaptured: boolean;
             /** Format: date-time */
             asOf: string;
             interval: string;

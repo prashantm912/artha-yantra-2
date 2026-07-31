@@ -11,12 +11,20 @@ import json
 import os
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 from app.main import app
 
 _HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 
 # contracts/ is at the repo root: services/optimizer-service/tests/<this> -> parents[3] = root.
-CONTRACT = Path(__file__).resolve().parents[3] / "contracts" / "optimizer-service.api-surface.json"
+CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
+CONTRACT = CONTRACTS / "optimizer-service.api-surface.json"
+# The FastAPI-native full dump (STAGE_D deliverable). Deliberately NOT asserted — its bytes churn
+# across Python / fastapi / pydantic versions, which is the whole reason the coarse surface above
+# exists — but it IS refreshed by the same CONTRACTS_CAPTURE run, so re-capturing can no longer
+# update one artifact and silently leave the other stale.
+FULL_SPEC = CONTRACTS / "optimizer-service.openapi.json"
 
 
 def _surface() -> str:
@@ -39,6 +47,11 @@ def test_openapi_surface_matches_committed_contract():
         # newline="\n": *.json is pinned eol=lf (.gitattributes) — write LF verbatim, not Windows
         # CRLF (which would churn the diff + break the cross-platform compare).
         CONTRACT.write_text(_surface(), encoding="utf-8", newline="\n")
+        # indent=2, insertion order, ensure_ascii — matches how the committed dump was written, so
+        # a re-capture diffs only what actually changed.
+        FULL_SPEC.write_text(
+            json.dumps(app.openapi(), indent=2) + "\n", encoding="utf-8", newline="\n"
+        )
         return
     assert CONTRACT.exists(), f"missing contract snapshot: {CONTRACT}"
     assert _surface() == CONTRACT.read_text(encoding="utf-8"), (
@@ -46,3 +59,43 @@ def test_openapi_surface_matches_committed_contract():
         "committed contract. If intended, re-capture with:  CONTRACTS_CAPTURE=1 python -m pytest "
         "tests/test_openapi_contract.py  and commit contracts/optimizer-service.api-surface.json"
     )
+
+
+def _documented_422_refs() -> set[str | None]:
+    """Every 422 response schema `$ref` the published spec advertises, service-wide."""
+    spec = app.openapi()
+    refs: set[str | None] = set()
+    for item in spec.get("paths", {}).values():
+        for method, operation in item.items():
+            if method.lower() not in _HTTP_METHODS:
+                continue
+            response = (operation.get("responses") or {}).get("422")
+            if response is not None:
+                refs.add(response["content"]["application/json"]["schema"].get("$ref"))
+    return refs
+
+
+def test_every_documented_422_is_the_shared_error_envelope():
+    """The 422 body is enveloped at runtime, so the SPEC must say so — FastAPI's stock
+    ``HTTPValidationError`` (``{"detail": [...]}``) would be a documented-but-FALSE response shape,
+    the 'contract lie' class the 2026-07-31 E2E sweep hunted and found zero of across 262 paths.
+    The coarse surface snapshot above cannot see this: it records response-code KEYS, never their
+    schemas. Asserted service-wide so a route added later cannot quietly reintroduce the stock
+    shape, and the orphaned components are asserted GONE — leaving them would keep advertising a
+    body nothing returns."""
+    assert _documented_422_refs() == {"#/components/schemas/ErrorEnvelope"}
+    schemas = app.openapi()["components"]["schemas"]
+    assert "HTTPValidationError" not in schemas
+    assert "ValidationError" not in schemas
+
+
+def test_documented_422_schema_matches_the_runtime_body():
+    """Spec vs RUNTIME, not spec vs itself: drive a REAL validation failure and assert the body
+    returned is exactly what the published schema promises. Without this half, the spec and the
+    handler can drift apart again the next time either one changes."""
+    schema = app.openapi()["components"]["schemas"]["ErrorEnvelope"]
+    body = TestClient(app).get("/api/v1/optimizations/jobs/not-a-uuid").json()
+    assert set(body) == set(schema["properties"])
+    assert set(schema["required"]) == set(body)  # every documented key is ALWAYS written
+    assert schema["properties"]["details"]["type"] == "object"
+    assert isinstance(body["details"], dict)

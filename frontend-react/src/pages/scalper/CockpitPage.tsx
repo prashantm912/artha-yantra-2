@@ -12,6 +12,7 @@ import { FilterBar } from '../../components/FilterBar.tsx';
 import { GoButton } from '../../components/atoms/GoButton.tsx';
 import { Metric } from '../../components/atoms/Metric.tsx';
 import { SentimentBadge, type SentimentTone } from '../../components/atoms/SentimentBadge.tsx';
+import { FreshnessBadge } from '../../components/atoms/FreshnessBadge.tsx';
 import { OptionsChainTable } from '../../components/OptionsChainTable.tsx';
 import { ConnectingDotsTable } from '../../components/ConnectingDotsTable.tsx';
 import { StraddleChart } from '../../components/StraddleChart.tsx';
@@ -40,22 +41,28 @@ function Panel({
   title,
   to,
   linkLabel,
+  right,
   children,
 }: {
   title: string;
   to?: string;
   linkLabel?: string;
+  /** Optional status slot beside the heading — the PageHeader `right` idiom (freshness chip). */
+  right?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="min-w-0 rounded-lg border border-ay-border bg-surface-1 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="text-h3 text-ay-text">{title}</h2>
-        {to && (
-          <Link to={to} className="whitespace-nowrap text-xs text-accent hover:underline">
-            {linkLabel ?? 'Open'} →
-          </Link>
-        )}
+        <div className="flex min-w-0 items-center gap-2">
+          {right}
+          {to && (
+            <Link to={to} className="whitespace-nowrap text-xs text-accent hover:underline">
+              {linkLabel ?? 'Open'} →
+            </Link>
+          )}
+        </div>
       </div>
       {children}
     </section>
@@ -165,8 +172,16 @@ export function CockpitPage() {
 
       {/* Adaptive grid: single scrollable column on narrow viewports, two columns from xl. */}
       <BeatBlock className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        {/* (a) Option chain (compact) */}
-        <Panel title="Option chain" to="/options/options-chain" linkLabel="Full chain">
+        {/* (a) Option chain (compact). The freshness chip is load-bearing here, not decoration: after
+            market close the server degrades to the last CAPTURED chain rather than 503-ing, so these
+            rows can be yesterday's book rendered in the same table as a live one. The chip is the only
+            thing distinguishing them, and past a day it carries the capture DATE, not just HH:MM. */}
+        <Panel
+          title="Option chain"
+          to="/options/options-chain"
+          linkLabel="Full chain"
+          right={<FreshnessBadge freshness={chain?.freshness} />}
+        >
           {chainQ.isError ? (
             <PanelError onRetry={() => void chainQ.refetch()} />
           ) : chain == null && !chainQ.isLoading ? (

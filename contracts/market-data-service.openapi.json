@@ -2666,7 +2666,8 @@
           "in" : "query",
           "required" : true,
           "schema" : {
-            "type" : "string"
+            "type" : "string",
+            "format" : "date"
           }
         }, {
           "name" : "window",
@@ -2689,7 +2690,8 @@
           "in" : "query",
           "required" : false,
           "schema" : {
-            "type" : "string"
+            "type" : "string",
+            "format" : "date"
           }
         } ],
         "responses" : {
@@ -4004,7 +4006,8 @@
           "in" : "query",
           "required" : false,
           "schema" : {
-            "type" : "string"
+            "type" : "string",
+            "format" : "date"
           }
         }, {
           "name" : "interval",
@@ -8075,13 +8078,16 @@
         "type" : "object",
         "properties" : {
           "exchange" : {
-            "type" : "string"
+            "type" : "string",
+            "minLength" : 1
           },
           "tradingsymbol" : {
-            "type" : "string"
+            "type" : "string",
+            "minLength" : 1
           },
           "interval" : {
-            "type" : "string"
+            "type" : "string",
+            "minLength" : 1
           },
           "from" : {
             "type" : "string",
@@ -8091,7 +8097,8 @@
             "type" : "string",
             "format" : "date-time"
           }
-        }
+        },
+        "required" : [ "exchange", "from", "interval", "to", "tradingsymbol" ]
       },
       "QueryRequest" : {
         "type" : "object",
@@ -9887,6 +9894,9 @@
           "stale" : {
             "type" : "boolean"
           },
+          "lastCaptured" : {
+            "type" : "boolean"
+          },
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
@@ -9898,7 +9908,7 @@
             }
           }
         },
-        "required" : [ "asOf", "expiry", "forward", "forwardSource", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
+        "required" : [ "asOf", "expiry", "forward", "forwardSource", "lastCaptured", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
       },
       "Leg" : {
         "type" : "object",
@@ -10121,6 +10131,9 @@
           "stale" : {
             "type" : "boolean"
           },
+          "lastCaptured" : {
+            "type" : "boolean"
+          },
           "asOf" : {
             "type" : "string",
             "format" : "date-time"
@@ -10138,7 +10151,7 @@
             "$ref" : "#/components/schemas/DataFreshness"
           }
         },
-        "required" : [ "asOf", "expiry", "forward", "forwardSource", "interval", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
+        "required" : [ "asOf", "expiry", "forward", "forwardSource", "interval", "lastCaptured", "pcr", "riskFreeRate", "rows", "spot", "stale", "underlying" ]
       },
       "ChainTableLeg" : {
         "type" : "object",

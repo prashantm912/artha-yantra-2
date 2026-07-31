@@ -233,8 +233,9 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   -UseBasicParsing` (PS5.1's IE engine prompts otherwise); POST `/api/v1/auth/login`
   `{"password":...}` (it answers **204**, not 200 — check `-notin 200,204`), then a GET to seed the
   `XSRF-TOKEN` cookie, echoed as the `X-XSRF-TOKEN` header on mutating calls. **A bodyless
-  `-Method Post` defaults to `application/x-www-form-urlencoded` and the endpoint answers 500** (the
-  unmapped `HttpMediaTypeNotSupportedException` should be a 415 — chip task_9ffe390d): always pass
+  `-Method Post` defaults to `application/x-www-form-urlencoded` and the endpoint answers 415**
+  (`HttpMediaTypeNotSupportedException` mapped in #1021; edge-gateway-local endpoints unaffected —
+  gateway uses common-web-core, not the servlet handler): always pass
   `-ContentType 'application/json' -Body '{}'`. In-container SQL: DB is `artha`/`artha_mock`
   (not `arthayantra`).
 - **optimizer-service is Python (FastAPI), not Java** — `/api/v1/optimizations/*` lives there

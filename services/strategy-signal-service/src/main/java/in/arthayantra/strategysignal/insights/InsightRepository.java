@@ -31,10 +31,20 @@ public class InsightRepository {
   }
 
   /**
-   * UPSERTs an insight on its OPEN {@code dedupe_key} (§2.5.1). A regenerated insight refreshes the
-   * existing OPEN row's payload in place; a first sighting inserts.
+   * The upsert outcome: the persisted row plus whether the INSERT branch ran (a new occurrence) or
+   * the conflict branch refreshed the existing OPEN row. The engine delivers ONLY on {@code
+   * inserted} — a 15-min resweep of a persistent condition refreshes in place and must never
+   * re-push (pre-arm review M1).
    */
-  public Insight insertOrRefresh(Insight in) {
+  public record Upsert(Insight insight, boolean inserted) {}
+
+  /**
+   * UPSERTs an insight on its OPEN {@code dedupe_key} (§2.5.1). A regenerated insight refreshes the
+   * existing OPEN row's payload in place; a first sighting inserts. Insert-vs-refresh is read from
+   * {@code RETURNING id}: the {@code DO UPDATE} branch never rewrites {@code id}, so getting our own
+   * id back proves the INSERT branch ran.
+   */
+  public Upsert insertOrRefresh(Insight in) {
     String[] reasons =
         in.trustReasons() == null ? new String[0] : in.trustReasons().toArray(new String[0]);
     List<UUID> ids =
@@ -93,45 +103,55 @@ public class InsightRepository {
         (rs, rowNum) -> rs.getObject("id", UUID.class));
     UUID persistedId = ids.stream().findFirst().orElseThrow();
     if (persistedId.equals(in.id())) {
-      return in;
+      return new Upsert(in, true);
     }
-    return new Insight(
-        persistedId,
-        in.generatedAt(),
-        in.type(),
-        in.severity(),
-        in.scope(),
-        in.title(),
-        in.explanation(),
-        in.evidence(),
-        in.priority(),
-        in.priorityDetail(),
-        in.dataTrust(),
-        in.trustReasons(),
-        in.dedupeKey(),
-        in.cooldownUntil(),
-        in.suppressed(),
-        in.status(),
-        in.expiresAt(),
-        in.engineVersion(),
-        in.configHash());
-  }
-
-  /** True when an existing OPEN row for this dedupe key is still inside its cooldown window. */
-  public boolean isCooling(String dedupeKey, OffsetDateTime now) {
-    Boolean cooling =
-        jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM insights WHERE dedupe_key = ? AND status = 'OPEN'"
-                + " AND cooldown_until IS NOT NULL AND cooldown_until > ?)",
-            Boolean.class,
-            dedupeKey,
-            now);
-    return Boolean.TRUE.equals(cooling);
+    return new Upsert(
+        new Insight(
+            persistedId,
+            in.generatedAt(),
+            in.type(),
+            in.severity(),
+            in.scope(),
+            in.title(),
+            in.explanation(),
+            in.evidence(),
+            in.priority(),
+            in.priorityDetail(),
+            in.dataTrust(),
+            in.trustReasons(),
+            in.dedupeKey(),
+            in.cooldownUntil(),
+            in.suppressed(),
+            in.status(),
+            in.expiresAt(),
+            in.engineVersion(),
+            in.configHash()),
+        false);
   }
 
   /**
-   * A persistent owner mute from the existing MUTE_TYPE action seam. A missing scope is a global
-   * type mute; a strategy scope limits the mute to that strategy's insight rows.
+   * True when the LATEST row for this dedupe key — ANY status — is still inside its cooldown
+   * window. Status-blind on purpose (pre-arm review M3): ACK/DISMISS closes the OPEN row and the
+   * next sweep re-inserts, so an OPEN-only check would let acknowledging an alert defeat the
+   * cooldown and re-page inside the original window.
+   */
+  public boolean isCooling(String dedupeKey, OffsetDateTime now) {
+    List<Boolean> latest =
+        jdbc.query(
+            "SELECT cooldown_until IS NOT NULL AND cooldown_until > ? AS cooling FROM insights"
+                + " WHERE dedupe_key = ? ORDER BY generated_at DESC, id DESC LIMIT 1",
+            (rs, n) -> rs.getBoolean("cooling"),
+            now,
+            dedupeKey);
+    return !latest.isEmpty() && Boolean.TRUE.equals(latest.get(0));
+  }
+
+  /**
+   * A persistent owner delivery mute from the MUTE_TYPE action seam. A missing scope is a global
+   * type mute; a strategy scope limits the mute to that strategy's insight rows. Only rows carrying
+   * the explicit {@code target_ref.delivery = true} marker count (pre-arm review M5): legacy
+   * scopeless MUTE_TYPE audit rows predate I4 delivery and must never act as permanent global
+   * mutes — they are ignored, not migrated (this PR deliberately carries no migration).
    */
   public boolean isMuted(String type, String scope) {
     if (latestMuteAction(type, null)) {
@@ -144,6 +164,7 @@ public class InsightRepository {
     String sql =
         "SELECT action FROM insight_actions"
             + " WHERE action IN ('MUTE_TYPE', 'UNMUTE_TYPE') AND target_ref->>'type' = ?"
+            + " AND target_ref->>'delivery' = 'true'"
             + (scope == null ? " AND target_ref->>'scope' IS NULL" : " AND target_ref->>'scope' = ?")
             + " ORDER BY acted_at DESC, id DESC LIMIT 1";
     List<String> actions =

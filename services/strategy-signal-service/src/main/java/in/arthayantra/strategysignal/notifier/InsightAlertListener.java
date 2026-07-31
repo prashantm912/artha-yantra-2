@@ -61,14 +61,17 @@ public class InsightAlertListener {
     for (int attempt = 1; attempt <= retryMax; attempt++) {
       try {
         client.send(channel, title, body);
-        repository.recordInsight(insightId, strategyId, channel, "SENT", attempt, null);
-        return;
       } catch (RuntimeException ex) {
         last = ex;
         backoff(attempt);
+        continue;
       }
+      // Transport succeeded — the audit insert sits OUTSIDE the retry block (pre-arm review M4):
+      // a failed audit write must never re-send the phone notification.
+      recordOutcome(insightId, strategyId, channel, "SENT", attempt, null);
+      return;
     }
-    repository.recordInsight(
+    recordOutcome(
         insightId,
         strategyId,
         channel,
@@ -76,6 +79,17 @@ public class InsightAlertListener {
         retryMax,
         last == null ? null : last.getMessage());
     log.warn("insight notifier giving up on {} after {} attempts", insightId, retryMax);
+  }
+
+  /** Best-effort audit append — an audit failure logs and is swallowed, never retried as a send. */
+  private void recordOutcome(
+      UUID insightId, UUID strategyId, String channel, String status, int attempts, String detail) {
+    try {
+      repository.recordInsight(insightId, strategyId, channel, status, attempts, detail);
+    } catch (RuntimeException ex) {
+      log.warn(
+          "insight delivery audit row not recorded for {} ({}): {}", insightId, status, ex.toString());
+    }
   }
 
   private void backoff(int attempt) {

@@ -2,8 +2,10 @@ package in.arthayantra.strategysignal.insights;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -122,7 +124,8 @@ class InsightDeliveryTest {
     InsightRepository repository = mock(InsightRepository.class);
     when(repository.isCooling(eq(candidate.dedupeKey()), any())).thenReturn(true);
     when(repository.insertOrRefresh(any(Insight.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
+        .thenAnswer(
+            invocation -> new InsightRepository.Upsert(invocation.getArgument(0), true));
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     InsightPublisher publisher = publisher(new InsightProperties.Delivery(false, true, false, Severity.NOTICE), events, repository);
     TrustService trustService = mock(TrustService.class);
@@ -171,6 +174,26 @@ class InsightDeliveryTest {
     listener.onInsightDelivery(
         new InsightDeliveryAlert(UUID.randomUUID(), "title", "body", "market", "TELEGRAM"));
     verify(client, never()).send(eq("TELEGRAM"), anyString(), anyString());
+  }
+
+  @Test
+  void auditFailureAfterSuccessfulSendNeverResends() {
+    // Pre-arm review M4: transport succeeded, ONLY the audit insert fails — the retry loop must not
+    // re-send the phone notification (before the fix, send + audit shared one retry block and the
+    // owner got the same push up to retry-max times).
+    NotificationRepository repository = mock(NotificationRepository.class);
+    doThrow(new RuntimeException("audit insert failed"))
+        .when(repository)
+        .recordInsight(any(), any(), anyString(), anyString(), anyInt(), any());
+    NotifierClient client = mock(NotifierClient.class);
+    when(client.configured("NTFY")).thenReturn(true);
+    InsightAlertListener listener = new InsightAlertListener(repository, client, 3);
+
+    listener.onInsightDelivery(
+        new InsightDeliveryAlert(UUID.randomUUID(), "title", "body", "market", "NTFY"));
+
+    verify(client, times(1)).send("NTFY", "ArthaYantra title", "body\nScope: market");
+    verify(repository, times(1)).recordInsight(any(), any(), anyString(), anyString(), anyInt(), any());
   }
 
   private static InsightPublisher publisher(

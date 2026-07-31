@@ -219,14 +219,18 @@ public class InsightEngine {
               c.expiresAt(),
               stamp.engineVersion(),
               stamp.configHash());
-      Insight persisted = repository.insertOrRefresh(row);
+      InsightRepository.Upsert upsert = repository.insertOrRefresh(row);
       meters.counter("ay_insights_generated_total", "type", c.type().name()).increment();
       if (suppressed) {
         meters.counter("ay_insights_suppressed_total").increment();
       }
       // Stage-1 WS delivery (§9.3): the publisher no-ops in shadow mode (flag default OFF), so nothing
       // pushes until the owner arms it — the durable row above is always the record of truth.
-      publisher.publish(persisted);
+      // Delivery fires ONLY on a newly INSERTED occurrence (pre-arm review M1): a refresh of the
+      // existing OPEN row — the 15-min resweep of a persistent condition — must never re-push.
+      if (upsert.inserted()) {
+        publisher.publish(upsert.insight());
+      }
     } catch (RuntimeException e) {
       log.warn("insight persist failed ({}): {}", c.dedupeKey(), e.toString());
     }

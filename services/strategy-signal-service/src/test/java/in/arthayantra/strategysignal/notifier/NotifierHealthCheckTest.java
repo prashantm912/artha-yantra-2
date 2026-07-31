@@ -16,6 +16,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
+import org.springframework.scheduling.TaskScheduler;
 
 /**
  * V15 notifier-health check (audit §8 V15): a daily failure-rate check over {@code
@@ -29,9 +30,15 @@ class NotifierHealthCheckTest {
   private final NotificationRepository repo = mock(NotificationRepository.class);
   private final NotifierClient client = mock(NotifierClient.class);
   private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+  private final TaskScheduler retryScheduler = mock(TaskScheduler.class);
 
   private NotifierHealthCheck check(double threshold, long minAttempts) {
-    return new NotifierHealthCheck(repo, client, CLOCK, meters, 24, minAttempts, threshold);
+    // check() publishes only after WINNING the once-per-IST-day claim (task_7e754e11), and a bare
+    // Mockito boolean defaults to false — i.e. "today already ran", which would silence every case
+    // below for the wrong reason. These tests are about the verdict, so the claim is granted.
+    when(repo.claimCanaryRun(anyString(), any(), anyString(), any(), any())).thenReturn(true);
+    return new NotifierHealthCheck(
+        repo, client, CLOCK, meters, 24, minAttempts, threshold, "0 30 8 * * *", retryScheduler);
   }
 
   @Test

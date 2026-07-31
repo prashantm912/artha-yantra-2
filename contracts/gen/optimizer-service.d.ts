@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Health */
+        get: operations["health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/optimizations/run": {
         parameters: {
             query?: never;
@@ -15,9 +32,31 @@ export interface paths {
         put?: never;
         /**
          * Run
-         * @description Submit a sweep → 202 {jobId, status:"queued"}.
+         * @description Submit a sweep → 202 {jobId, status:"queued"}; 400 on a bad/missing field or a
+         *     closed-grammar parameter path.
          */
         post: operations["run_api_v1_optimizations_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimizations/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Jobs
+         * @description List optimizer sweeps (OPTIMIZATION jobs), newest first — the sweep-native listing surface
+         *     (previously sweeps were only discoverable via the shared backtest jobs table).
+         */
+        get: operations["jobs_api_v1_optimizations_jobs_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -33,7 +72,9 @@ export interface paths {
         };
         /**
          * Job
-         * @description Sweep status / progress / trials completed.
+         * @description Sweep status / progress / trials completed. UUID-typed so a malformed id is refused at the
+         *     boundary (422) instead of reaching the UUID-typed ``jobs.id`` column as an uncaught Postgres
+         *     parse error; a well-formed but unknown id still 404s.
          */
         get: operations["job_api_v1_optimizations_jobs__job_id__get"];
         put?: never;
@@ -120,6 +161,8 @@ export interface paths {
         /**
          * Promote
          * @description Promote a COMPLETE trial's params to a new draft version (§D.9); 409 if not promotable.
+         *     Modelled like ``/probes`` below, so a body missing ``trialId`` is a 422 rather than a KeyError
+         *     escaping as a bare 500.
          */
         post: operations["promote_api_v1_optimizations__sweep_id__promote_post"];
         delete?: never;
@@ -128,15 +171,629 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/health": {
+    "/api/v1/optimizations/{sweep_id}/probes": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Health */
-        get: operations["health_health_get"];
+        get?: never;
+        put?: never;
+        /**
+         * Probes
+         * @description Submit the plateau top-K's missing ±1-step neighbours as ordinary trials of this COMPLETED
+         *     sweep, so a later ``/best`` read MEASURES ``neighborCount`` (§3.2.3 / §11). Body is optional
+         *     (``topK`` default 5, ``maxProbes`` default 40). 404 unknown or non-sweep job; 409 unless the
+         *     sweep is completed.
+         */
+        post: operations["probes_api_v1_optimizations__sweep_id__probes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Campaigns
+         * @description List evolution campaigns, newest first.
+         */
+        get: operations["campaigns_api_v1_evolution_campaigns_get"];
+        put?: never;
+        /**
+         * Create Campaign
+         * @description Create an evolution campaign (status ACTIVE); 422 on an unknown evidencePolicy.
+         */
+        post: operations["create_campaign_api_v1_evolution_campaigns_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Campaign
+         * @description One campaign with its generations; 404 if unknown.
+         */
+        get: operations["campaign_api_v1_evolution_campaigns__campaign_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Candidates
+         * @description The campaign's candidates (incl. the scorecard JSONB); 404 if the campaign is unknown.
+         */
+        get: operations["candidates_api_v1_evolution_campaigns__campaign_id__candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/retro-score/{sweep_job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retro Score
+         * @description Score an existing sweep's trials as a cohort (§6 gates + RobustScore); 404 if unknown.
+         */
+        get: operations["retro_score_api_v1_evolution_retro_score__sweep_job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record Generation
+         * @description Record a completed sweep as this campaign's next generation, scoring its cohort into
+         *     candidate scorecards. 404 unknown campaign / sweep; 409 if the sweep is already recorded; 422 if
+         *     the campaign's evidence policy forbids sim scoring (SIM_BLOCKED).
+         */
+        post: operations["record_generation_api_v1_evolution_campaigns__campaign_id__generations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/generations/{n}/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select Survivors
+         * @description Run the §8.1 SELECT step over generation ``n``: promote the gate-passing top-K candidates by
+         *     RobustScore to SURVIVOR and RETIRE the rest, recording the rationale on each scorecard. Body
+         *     ``{topK}`` optional (default 15, bounded 1..50). Idempotent — a re-run recomputes the same split
+         *     and writes only rows that changed. 404 unknown campaign / generation. NOTHING self-arms:
+         *     SURVIVOR only makes a candidate ELIGIBLE for a PUBLISH_PAPER proposal; the owner still approves
+         *     and executes it.
+         */
+        post: operations["select_survivors_api_v1_evolution_campaigns__campaign_id__generations__n__select_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/insights/{sweep_job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Insights
+         * @description Parameter-effect analytics over an existing sweep — importance tornado, brittleness map, and
+         *     2-D interaction slices (existing trials only). 404 for an unknown / non-OPTIMIZATION job; 200
+         *     with empty arrays + a ``notes`` entry when there is too little data to analyze.
+         */
+        get: operations["insights_api_v1_evolution_insights__sweep_job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/generations/{generation_id}/stress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stress
+         * @description Re-run a generation's plateau top-K at 2×/4× slippage (design §3.2.5), measuring the
+         *     objective degradation slope that feeds §6.2 ``cost_resilience``. Body optional (``topK`` 5,
+         *     ``multipliers`` default ``[2, 4]``). 404 unknown generation; 422 SIM_BLOCKED / no SCORED
+         *     candidates / no source sweep; 409 if a round is already in flight.
+         */
+        post: operations["stress_api_v1_evolution_generations__generation_id__stress_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/reconciliations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Reconciliations
+         * @description A version's reconciliations, newest-first (design §7.1.4 / §11 endpoint list) — the typed
+         *     ``{items: [...]}`` envelope the FE backtest-vs-paper view renders.
+         */
+        get: operations["list_reconciliations_api_v1_evolution_reconciliations_get"];
+        put?: never;
+        /**
+         * Create Reconciliation
+         * @description Compute a backtest-vs-live reconciliation for a version over a lived window (design §7.1).
+         *     Body ``{versionId, from, to}``. Submits the matched-window re-sim (``purpose: reconcile``) and
+         *     returns a 202 receipt; the gap row lands asynchronously (GET ?versionId=). 400 missing field;
+         *     404 unknown version; 409 if a reconciliation for (version, window) exists or is in flight.
+         */
+        post: operations["create_reconciliation_api_v1_evolution_reconciliations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Proposals
+         * @description Generate/refresh PUBLISH_PAPER proposals for a campaign's eligible candidates (§8.2 bar).
+         *     Idempotent — one OPEN proposal per (candidate, kind); regeneration refreshes. 404 unknown
+         *     campaign. NOTHING self-arms: a proposal is an owner-inbox item, not an armed action.
+         */
+        post: operations["generate_proposals_api_v1_evolution_campaigns__campaign_id__proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Proposals
+         * @description The owner inbox — proposals newest-first, filterable by status / kind / campaign.
+         */
+        get: operations["list_proposals_api_v1_evolution_proposals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/proposals/{proposal_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Proposal
+         * @description Approve a PENDING proposal — marks status APPROVED + actor + decided_at, and returns the
+         *     slice-2 ``nextSteps`` it WOULD trigger (honest that the publish is not yet wired; nothing arms).
+         *     404 unknown proposal; 409 if already decided/expired.
+         */
+        post: operations["approve_proposal_api_v1_evolution_proposals__proposal_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/proposals/{proposal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject Proposal
+         * @description Reject a PENDING proposal — marks status REJECTED + actor + decided_at (§8.3 rejection is
+         *     persisted, never silent). 404 unknown proposal; 409 if already decided/expired.
+         */
+        post: operations["reject_proposal_api_v1_evolution_proposals__proposal_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/proposals/{proposal_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Proposal
+         * @description Execute an APPROVED proposal (§8.2 items 12-13), dispatched by kind: PUBLISH_PAPER →
+         *     create+publish the sibling evo paper-lane clone; PROMOTE → publish the candidate onto the base
+         *     strategy (champion move) + register the demoted-champion counterfactual; ROLLBACK → copy-forward
+         *     roll the base back to the demoted champion. The ONLY registry-mutating path — explicit +
+         *     owner-clicked; approval alone arms nothing; no real-order path exists. 404 unknown proposal /
+         *     candidate / campaign; 409 not-approved / already-executed / per-family cap / registry collision;
+         *     422 unexecutable kind (RETIRE) / unresolved base lineage; 502 registry fault.
+         */
+        post: operations["execute_proposal_api_v1_evolution_proposals__proposal_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/take-eligible": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assess Take Eligible
+         * @description Assess the campaign's PAPER candidates against the §8.2 TAKE_ELIGIBLE bar over each evo
+         *     clone's live paper book (F7 thresholds + §7.2 live-gap gate), advancing the eligible ones to
+         *     TAKE_ELIGIBLE and generating/refreshing an owner-inbox PROMOTE proposal. 404 unknown campaign.
+         *     NOTHING self-arms — the PROMOTE ACTION stays owner-clicked (approve + execute).
+         */
+        post: operations["assess_take_eligible_api_v1_evolution_campaigns__campaign_id__take_eligible_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/rollback-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assess Rollback
+         * @description Assess the campaign's PROMOTED candidates against the §8.2 ROLLBACK trigger rules over their
+         *     live evidence (this slice: DIVERGENT ×2, §7.3), generating/refreshing an owner-inbox ROLLBACK
+         *     proposal for each that triggers. 404 unknown campaign. NOTHING self-arms — the ROLLBACK ACTION
+         *     stays owner-clicked (approve + execute).
+         */
+        post: operations["assess_rollback_api_v1_evolution_campaigns__campaign_id__rollback_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/ablations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Ablations
+         * @description A campaign's ablations (pre-registered + evaluated), newest first; 404 unknown campaign.
+         */
+        get: operations["list_ablations_api_v1_evolution_campaigns__campaign_id__ablations_get"];
+        put?: never;
+        /**
+         * Register Ablation
+         * @description Pre-register a structure-mutation ablation (§5.2). Body ``{mutation, parentCandidateId?,
+         *     createdBy?}``. 400 missing/invalid mutation; 404 unknown campaign / parent; 409 graveyarded or
+         *     already pre-registered.
+         */
+        post: operations["register_ablation_api_v1_evolution_campaigns__campaign_id__ablations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/ablations/{ablation_id}/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Evaluate Ablation Endpoint
+         * @description Evaluate a pre-registered ablation against paired identical-fold evidence (§5.2). Body
+         *     ``{parent, candidate}``. ACCEPT is fail-closed (incomplete trade/regime/DOF evidence →
+         *     REJECTED_INCOMPLETE_EVIDENCE, recorded but not buried); disproof rejections bury the structure
+         *     (never re-proposed) and a REJECTED_IS_ONLY also mints a REVIEW_GATE proposal. 400/422 bad
+         *     evidence; 404 unknown; 409 already evaluated.
+         */
+        post: operations["evaluate_ablation_endpoint_api_v1_evolution_ablations__ablation_id__evaluate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/graveyard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Graveyard
+         * @description A campaign's graveyard — the rejected structures never re-proposed silently (§8.3); 404
+         *     unknown campaign.
+         */
+        get: operations["list_graveyard_api_v1_evolution_campaigns__campaign_id__graveyard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Suggestions
+         * @description Run the §5.1.2 gate-candidate suggesters (rejection-forensics + regime-gate [emit-only] +
+         *     unused-indicator) over supplied forensics evidence, suppress graveyarded structures, and persist
+         *     the survivors as REVIEW_GATE proposals. Body ``{candidates?, railStats?, usedIndicators?,
+         *     libraryIndicators?}``. 404 unknown campaign. NOTHING self-arms — proposals are inbox records the
+         *     owner reviews; the regime gate wires nothing (regimes frozen, §5.1.2).
+         */
+        post: operations["generate_suggestions_api_v1_evolution_campaigns__campaign_id__suggestions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/scheduler/tick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scheduler Tick
+         * @description Run ONE scheduler cycle NOW (owner/ops-triggered supervised advance): expire stale proposals,
+         *     then advance every ENROLLED + ACTIVE campaign by at most one step. This advances RESEARCH only
+         *     (launch a sweep, probe/record/stress/select a completed one, mint proposals) — NOTHING self-arms
+         *     or self-publishes (publish/promote stay owner-clicked via the proposal execute path). Serialized
+         *     against the background driver by the in-process tick lock.
+         */
+        post: operations["scheduler_tick_api_v1_evolution_scheduler_tick_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/proposals/expire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Expire Proposals
+         * @description Sweep the proposal inbox for PENDING proposals past their §8.2 7-day expiry and mark them
+         *     EXPIRED. Idempotent; DB-clock-anchored. (The scheduler tick also runs this; the endpoint is the
+         *     standalone ops surface.)
+         */
+        post: operations["expire_proposals_api_v1_evolution_proposals_expire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/scheduler/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enroll Campaign
+         * @description Enroll this campaign into scheduler autonomy (owner-clicked, per-campaign consent): NULL /
+         *     EXHAUSTED → IDLE. Idempotent for already-enrolled states. 404 unknown campaign. The global
+         *     ARTHA_EVO_SCHEDULER_ENABLED flag arms only the background driver — nothing advances without
+         *     BOTH the flag (or a manual tick) AND this per-campaign enrollment.
+         */
+        post: operations["enroll_campaign_api_v1_evolution_campaigns__campaign_id__scheduler_enroll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/scheduler/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw Campaign
+         * @description Withdraw this campaign from scheduler autonomy: scheduler_state → NULL; a pending sweep is
+         *     abandoned (completes as an ordinary sweep, recordable manually). Idempotent. 404 unknown.
+         */
+        post: operations["withdraw_campaign_api_v1_evolution_campaigns__campaign_id__scheduler_withdraw_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/scheduler/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Scheduler Status
+         * @description The scheduler heartbeat: when the last tick ran (manual or driver). None = no tick since
+         *     boot — with the driver armed, a persistently-None/stale value means the loop is not running.
+         */
+        get: operations["scheduler_status_api_v1_evolution_scheduler_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evolution/campaigns/{campaign_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Campaign Report
+         * @description The per-campaign evolution report: generations, scores, survivors, proposals, budget spend,
+         *     and the §8.3 graveyard. 404 if the campaign is unknown.
+         */
+        get: operations["campaign_report_api_v1_evolution_campaigns__campaign_id__report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics
+         * @description Endpoint that serves Prometheus metrics.
+         */
+        get: operations["metrics_metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -149,23 +806,1129 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
+        /** AblationListResponse */
+        AblationListResponse: {
+            /** Items */
+            items: components["schemas"]["AblationModel"][];
         };
-        /** ValidationError */
-        ValidationError: {
-            /** Location */
-            loc: (string | number)[];
+        /**
+         * AblationModel
+         * @description One ``evo_ablations`` row (V016) — the pre-registered structure-mutation hypothesis + (once
+         *     evaluated) its verdict/evaluation.
+         */
+        AblationModel: {
+            /** Id */
+            id: string;
+            /** Campaignid */
+            campaignId: string;
+            /** Parentcandidateid */
+            parentCandidateId?: string | null;
+            /** Mutation */
+            mutation?: {
+                [key: string]: unknown;
+            } | null;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Status */
+            status: string;
+            /** Verdict */
+            verdict?: string | null;
+            /** Evaluation */
+            evaluation?: {
+                [key: string]: unknown;
+            } | null;
+            /** Createdby */
+            createdBy?: string | null;
+            /** Preregisteredat */
+            preRegisteredAt?: string | null;
+            /** Evaluatedat */
+            evaluatedAt?: string | null;
+        };
+        /**
+         * AssessmentResponse
+         * @description The result of an assessment pass (TAKE_ELIGIBLE over PAPER candidates, or ROLLBACK over
+         *     PROMOTED ones): how many candidates were assessed, how many met the bar / triggered, how many
+         *     proposals were newly minted vs refreshed in place, and the affected proposal rows. NOTHING
+         *     self-arms — an assessment only advances state to TAKE_ELIGIBLE (autonomous, no owner gate up to
+         *     that point) and mints an inbox proposal; the PROMOTE/ROLLBACK action stays owner-clicked.
+         */
+        AssessmentResponse: {
+            /** Campaignid */
+            campaignId: string;
+            /** Assessed */
+            assessed: number;
+            /** Eligible */
+            eligible: number;
+            /** Generated */
+            generated: number;
+            /** Refreshed */
+            refreshed: number;
+            /** Items */
+            items: components["schemas"]["ProposalModel"][];
+        };
+        /**
+         * BrittlenessItem
+         * @description A parameter × stability cell. ``importance`` is the same |rho| reused from the tornado;
+         *     ``localVariance`` is the mean per-neighbor-pair objective variance (None if no neighbor pair
+         *     varies this param); ``brittle`` flags high-importance + high-local-variance.
+         */
+        BrittlenessItem: {
+            /** Param */
+            param: string;
+            /** Importance */
+            importance: number;
+            /** Localvariance */
+            localVariance?: number | null;
+            /** Brittle */
+            brittle: boolean;
+        };
+        /**
+         * BudgetSpend
+         * @description The campaign's budget caps vs. what has been spent, plus the scheduler sub-state (V017).
+         *     ``holdoutTouches`` is the configured cap; ``holdoutTouchesUsed`` is the realized spend (one per
+         *     candidate carrying a consumed ``holdout_run_id`` — the §1.4.2 one-shot budget);
+         *     ``stressTouchesUsed`` is the realized cost-stress touch count summed across generations.
+         */
+        BudgetSpend: {
+            /** Maxgenerations */
+            maxGenerations?: number | null;
+            /** Generationsused */
+            generationsUsed: number;
+            /** Maxtrialspergen */
+            maxTrialsPerGen?: number | null;
+            /** Cadenceseconds */
+            cadenceSeconds?: number | null;
+            /** Holdouttouches */
+            holdoutTouches?: number | null;
+            /** Holdouttouchesused */
+            holdoutTouchesUsed: number;
+            /** Stresstouchesused */
+            stressTouchesUsed: number;
+            /** Candidatesscored */
+            candidatesScored: number;
+            /** Schedulerstate */
+            schedulerState?: string | null;
+            /** Pendingsweepjobid */
+            pendingSweepJobId?: string | null;
+            /** Lastscheduledat */
+            lastScheduledAt?: string | null;
+        };
+        /**
+         * CampaignAdvance
+         * @description One campaign's outcome for a tick. ``action`` is the step taken (or refused); ``reason`` is a
+         *     human-readable trace; ``sweepJobId`` / ``generationN`` populate when the step touched them;
+         *     ``liveWatch`` records the §7.3 take-eligible/rollback assessment pass when it ran.
+         */
+        CampaignAdvance: {
+            /** Campaignid */
+            campaignId: string;
+            /** Action */
+            action: string;
+            /** Reason */
+            reason: string;
+            /** Sweepjobid */
+            sweepJobId?: string | null;
+            /** Generationn */
+            generationN?: number | null;
+            /** Livewatch */
+            liveWatch?: string | null;
+        };
+        /**
+         * CampaignDetail
+         * @description A campaign plus its generations (the ``/campaigns/{id}`` detail shape).
+         */
+        CampaignDetail: {
+            /** Id */
+            id: string;
+            /** Strategyid */
+            strategyId?: string | null;
+            /** Family */
+            family?: string | null;
+            /** Evidencepolicy */
+            evidencePolicy: string;
+            /** Objectivespec */
+            objectiveSpec?: {
+                [key: string]: unknown;
+            } | null;
+            /** Searchspace */
+            searchSpace?: {
+                [key: string]: unknown;
+            } | null;
+            /** Budget */
+            budget?: {
+                [key: string]: unknown;
+            } | null;
+            /** Status */
+            status: string;
+            /** Championversionid */
+            championVersionId?: string | null;
+            /** Createdat */
+            createdAt?: string | null;
+            /** Updatedat */
+            updatedAt?: string | null;
+            /**
+             * Generations
+             * @default []
+             */
+            generations: components["schemas"]["GenerationModel"][];
+        };
+        /** CampaignListResponse */
+        CampaignListResponse: {
+            /** Items */
+            items: components["schemas"]["CampaignModel"][];
+        };
+        /**
+         * CampaignModel
+         * @description A long-lived evolution program for one base strategy (``evo_campaigns``).
+         */
+        CampaignModel: {
+            /** Id */
+            id: string;
+            /** Strategyid */
+            strategyId?: string | null;
+            /** Family */
+            family?: string | null;
+            /** Evidencepolicy */
+            evidencePolicy: string;
+            /** Objectivespec */
+            objectiveSpec?: {
+                [key: string]: unknown;
+            } | null;
+            /** Searchspace */
+            searchSpace?: {
+                [key: string]: unknown;
+            } | null;
+            /** Budget */
+            budget?: {
+                [key: string]: unknown;
+            } | null;
+            /** Status */
+            status: string;
+            /** Championversionid */
+            championVersionId?: string | null;
+            /** Createdat */
+            createdAt?: string | null;
+            /** Updatedat */
+            updatedAt?: string | null;
+        };
+        /**
+         * CampaignReport
+         * @description The full per-campaign report shape (§12 E6 item 16).
+         */
+        CampaignReport: {
+            /** Campaignid */
+            campaignId: string;
+            /** Strategyid */
+            strategyId?: string | null;
+            /** Family */
+            family?: string | null;
+            /** Evidencepolicy */
+            evidencePolicy: string;
+            /** Status */
+            status: string;
+            /** Championversionid */
+            championVersionId?: string | null;
+            budget: components["schemas"]["BudgetSpend"];
+            /** Generations */
+            generations: components["schemas"]["GenerationSummary"][];
+            /** Candidatestates */
+            candidateStates: {
+                [key: string]: number;
+            };
+            /** Survivors */
+            survivors: number;
+            /** Holdoutpendingsurvivors */
+            holdoutPendingSurvivors: number;
+            /** Proposals */
+            proposals: components["schemas"]["ProposalTally"][];
+            /** Graveyard */
+            graveyard: components["schemas"]["GraveyardEntry"][];
+        };
+        /** CandidateListResponse */
+        CandidateListResponse: {
+            /** Items */
+            items: components["schemas"]["CandidateModel"][];
+        };
+        /**
+         * CandidateModel
+         * @description One concrete version under evaluation (``evo_candidates``); ``scorecard`` is the
+         *     §6 gates/RobustScore JSONB passed through verbatim.
+         */
+        CandidateModel: {
+            /** Id */
+            id: string;
+            /** Generationid */
+            generationId: string;
+            /** Versionid */
+            versionId?: string | null;
+            /** Parentcandidateid */
+            parentCandidateId?: string | null;
+            /** Mutationkind */
+            mutationKind?: string | null;
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            } | null;
+            /** Structurediff */
+            structureDiff?: {
+                [key: string]: unknown;
+            } | null;
+            /** Sweepjobid */
+            sweepJobId?: string | null;
+            /** Holdoutrunid */
+            holdoutRunId?: string | null;
+            /** Scorecard */
+            scorecard?: {
+                [key: string]: unknown;
+            } | null;
+            /** State */
+            state?: string | null;
+            /** Updatedat */
+            updatedAt?: string | null;
+        };
+        /**
+         * ComponentScore
+         * @description One §6.2 RobustScore component: its cohort z-score + the raw constituents that fed it.
+         */
+        ComponentScore: {
+            /** Id */
+            id: string;
+            /** Z */
+            z: number;
+            /**
+             * Raw
+             * @default {}
+             */
+            raw: {
+                [key: string]: unknown;
+            };
+            /** Caveat */
+            caveat?: string | null;
+        };
+        /**
+         * EnrollmentResult
+         * @description The outcome of an enroll/withdraw click: the campaign's autonomy sub-state before and after.
+         *     ``schedulerState`` None = NOT ENROLLED (the default for every campaign).
+         */
+        EnrollmentResult: {
+            /** Campaignid */
+            campaignId: string;
+            /** Schedulerstate */
+            schedulerState?: string | null;
+            /** Previousstate */
+            previousState?: string | null;
+            /** Pendingsweepjobid */
+            pendingSweepJobId?: string | null;
+            /** Changed */
+            changed: boolean;
+        };
+        /**
+         * EvaluatedAblation
+         * @description The evaluate response: the now-EVALUATED ablation plus what the verdict triggered — whether
+         *     a NEW grave was written (idempotent), and the REVIEW_GATE proposal id minted for a
+         *     REJECTED_IS_ONLY (the §5.2 institutional-memory trail).
+         */
+        EvaluatedAblation: {
+            /** Id */
+            id: string;
+            /** Campaignid */
+            campaignId: string;
+            /** Parentcandidateid */
+            parentCandidateId?: string | null;
+            /** Mutation */
+            mutation?: {
+                [key: string]: unknown;
+            } | null;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Status */
+            status: string;
+            /** Verdict */
+            verdict?: string | null;
+            /** Evaluation */
+            evaluation?: {
+                [key: string]: unknown;
+            } | null;
+            /** Createdby */
+            createdBy?: string | null;
+            /** Preregisteredat */
+            preRegisteredAt?: string | null;
+            /** Evaluatedat */
+            evaluatedAt?: string | null;
+            /**
+             * Buried
+             * @default false
+             */
+            buried: boolean;
+            /** Reviewgateproposalid */
+            reviewGateProposalId?: string | null;
+            /** Note */
+            note: string;
+        };
+        /**
+         * Evidence
+         * @description The evidence chain behind a scorecard (§6.3). Retro has sim runs only — no holdout/live.
+         */
+        Evidence: {
+            /**
+             * Simruns
+             * @default []
+             */
+            simRuns: string[];
+            /** Holdoutrun */
+            holdoutRun?: string | null;
+            /** Livewindow */
+            liveWindow?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * ExpireResult
+         * @description The outcome of a standalone proposal-expiry sweep (§8.2 7-day expiry).
+         */
+        ExpireResult: {
+            /** Expired */
+            expired: number;
+            /** Proposalids */
+            proposalIds: string[];
+        };
+        /**
+         * GateResult
+         * @description One §6.1 hard gate: PASS / FAIL / SKIPPED / UNKNOWN / NOT_IMPLEMENTED + assessed value.
+         */
+        GateResult: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+            /** Value */
+            value?: unknown | null;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * GenerateProposalsResponse
+         * @description The result of a generation pass over a campaign's candidates: how many proposals were newly
+         *     minted vs refreshed in place (idempotent regeneration), plus the affected rows.
+         */
+        GenerateProposalsResponse: {
+            /** Campaignid */
+            campaignId: string;
+            /** Generated */
+            generated: number;
+            /** Refreshed */
+            refreshed: number;
+            /** Items */
+            items: components["schemas"]["ProposalModel"][];
+        };
+        /**
+         * GenerationModel
+         * @description One propose→evaluate→select iteration within a campaign (``evo_generations``).
+         */
+        GenerationModel: {
+            /** Id */
+            id: string;
+            /** Campaignid */
+            campaignId: string;
+            /** N */
+            n: number;
+            /** Proposal */
+            proposal?: {
+                [key: string]: unknown;
+            } | null;
+            /** Searchspacehash */
+            searchSpaceHash?: string | null;
+            /** Enginesha */
+            engineSha?: string | null;
+            /** Dataepoch */
+            dataEpoch?: {
+                [key: string]: unknown;
+            } | null;
+            /** Stresstouches */
+            stressTouches: number;
+            /** Status */
+            status?: string | null;
+            /** Startedat */
+            startedAt?: string | null;
+            /** Finishedat */
+            finishedAt?: string | null;
+        };
+        /**
+         * GenerationRecorded
+         * @description The recorder's response: the persisted generation (``evo_generations`` shape) plus the count
+         *     of scorecards it wrote — the candidates themselves surface through GET
+         *     /campaigns/{id}/candidates (this PR adds no new read shape).
+         */
+        GenerationRecorded: {
+            /** Id */
+            id: string;
+            /** Campaignid */
+            campaignId: string;
+            /** N */
+            n: number;
+            /** Proposal */
+            proposal?: {
+                [key: string]: unknown;
+            } | null;
+            /** Searchspacehash */
+            searchSpaceHash?: string | null;
+            /** Enginesha */
+            engineSha?: string | null;
+            /** Dataepoch */
+            dataEpoch?: {
+                [key: string]: unknown;
+            } | null;
+            /** Stresstouches */
+            stressTouches: number;
+            /** Status */
+            status?: string | null;
+            /** Startedat */
+            startedAt?: string | null;
+            /** Finishedat */
+            finishedAt?: string | null;
+            /** Candidatesrecorded */
+            candidatesRecorded: number;
+        };
+        /**
+         * GenerationSummary
+         * @description One generation's roll-up: how many candidates it scored, how many survived selection, its
+         *     cost-stress touch count, its best RobustScore (the plateau leader), and the §1.3 comparability
+         *     provenance (engineSha / dataEpoch / searchSpaceHash — rankings must refuse to compare across a
+         *     differing engine SHA or data epoch, so the report surfaces them per generation).
+         */
+        GenerationSummary: {
+            /** N */
+            n: number;
+            /** Status */
+            status?: string | null;
+            /** Candidatecount */
+            candidateCount: number;
+            /** Survivorcount */
+            survivorCount: number;
+            /** Stresstouches */
+            stressTouches: number;
+            /** Bestrobustscore */
+            bestRobustScore?: number | null;
+            /** Enginesha */
+            engineSha?: string | null;
+            /** Dataepoch */
+            dataEpoch?: {
+                [key: string]: unknown;
+            } | null;
+            /** Searchspacehash */
+            searchSpaceHash?: string | null;
+            /** Startedat */
+            startedAt?: string | null;
+            /** Finishedat */
+            finishedAt?: string | null;
+        };
+        /**
+         * GraveyardEntry
+         * @description One RETIRED candidate and WHY it was retired (§8.3) — the recorded selection reason (a
+         *     hard-gate fail / dominated), so the report proves the search is not cherry-picking.
+         */
+        GraveyardEntry: {
+            /** Candidateid */
+            candidateId: string;
+            /** Generationn */
+            generationN?: number | null;
+            /** Robustscore */
+            robustScore?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** GraveyardListResponse */
+        GraveyardListResponse: {
+            /** Items */
+            items: components["schemas"]["GraveyardModel"][];
+        };
+        /**
+         * GraveyardModel
+         * @description One ``evo_graveyard`` row (V016) — a buried structure. Its ``fingerprint`` is what the
+         *     suggesters check to never re-propose it (§8.3).
+         */
+        GraveyardModel: {
+            /** Id */
+            id: string;
+            /** Campaignid */
+            campaignId: string;
+            /** Ablationid */
+            ablationId?: string | null;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Mutation */
+            mutation?: {
+                [key: string]: unknown;
+            } | null;
+            /** Verdict */
+            verdict: string;
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            } | null;
+            /** Buriedat */
+            buriedAt?: string | null;
+        };
+        /**
+         * ImportanceItem
+         * @description One parameter's tornado entry. ``score`` = |Spearman rho| (0..1); ``direction`` is the SIGN
+         *     of the param↔objective relationship on the RAW objective metric — ``positive`` (higher param →
+         *     higher metric), ``negative``, or ``flat`` — independent of the maximize/minimize goal.
+         */
+        ImportanceItem: {
+            /** Param */
+            param: string;
+            /** Score */
+            score: number;
+            /** Direction */
+            direction?: string | null;
+        };
+        /**
+         * InsightsResponse
+         * @description The parameter-effect analytics for one sweep. ``direction`` here is the sweep's OPTIMIZE
+         *     direction (maximize/minimize) — distinct from each importance item's effect ``direction``.
+         *     ``notes`` carries every honest-degradation caveat (too few trials, a non-varying param, a param
+         *     with no local neighbor variation, skipped slices).
+         */
+        InsightsResponse: {
+            /** Sweepjobid */
+            sweepJobId: string;
+            /** Metric */
+            metric: string;
+            /** Direction */
+            direction: string;
+            /** Importance */
+            importance: components["schemas"]["ImportanceItem"][];
+            /** Brittleness */
+            brittleness: components["schemas"]["BrittlenessItem"][];
+            /** Slices */
+            slices: components["schemas"]["InteractionSlice"][];
+            /**
+             * Notes
+             * @default []
+             */
+            notes: string[];
+        };
+        /**
+         * InteractionSlice
+         * @description A 2-D plateau slice over two parameters — a grid of existing trials, no new runs.
+         */
+        InteractionSlice: {
+            /** Paramx */
+            paramX: string;
+            /** Paramy */
+            paramY: string;
+            /** Cells */
+            cells: components["schemas"]["SliceCell"][];
+        };
+        /**
+         * NextSteps
+         * @description What the approved proposal WOULD trigger — named honestly as not-yet-wired substrate.
+         */
+        NextSteps: {
+            /** Action */
+            action: string;
+            /** Status */
+            status: string;
+            /** Note */
+            note: string;
+        };
+        /**
+         * Penalties
+         * @description §6.2 subtractive penalties: ``dof`` = 0.03 per tuned param over 4 + 0.06 per structure gate
+         *     (E2, design §12 item 6); ``caveats`` = 0.05 per unresolved data caveat / sub-80% oiCoverage.
+         */
+        Penalties: {
+            /** Dof */
+            dof: number;
+            /** Caveats */
+            caveats: number;
+        };
+        /**
+         * ProbeReceipt
+         * @description Receipt for a neighbor-probe submission (§3.2.3): probe trials dispatched as ordinary trials
+         *     of the sweep, plus how many candidate cells were skipped (already evaluated or over the cap).
+         */
+        ProbeReceipt: {
+            /** Submitted */
+            submitted: number;
+            /** Skipped */
+            skipped: number;
+            /** Trials */
+            trials: components["schemas"]["ProbeTrial"][];
+        };
+        /**
+         * ProbeRequest
+         * @description Neighbor-probe options: how many plateau leaders to fill around, and the batch ceiling.
+         */
+        ProbeRequest: {
+            /**
+             * Topk
+             * @default 5
+             */
+            topK: number;
+            /**
+             * Maxprobes
+             * @default 40
+             */
+            maxProbes: number;
+        };
+        /** ProbeTrial */
+        ProbeTrial: {
+            /** Trialnumber */
+            trialNumber: number;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Trialjobid */
+            trialJobId: string;
+        };
+        /**
+         * PromoteRequest
+         * @description Which COMPLETE trial to materialize as a new draft, plus the optional human note.
+         */
+        PromoteRequest: {
+            /** Trialid */
+            trialId: number;
+            /** Notes */
+            notes?: string | null;
+        };
+        /**
+         * ProposalDecision
+         * @description The approve/reject response: the decided row + (for approve) the nextSteps.
+         */
+        ProposalDecision: {
+            proposal: components["schemas"]["ProposalModel"];
+            nextSteps?: components["schemas"]["NextSteps"] | null;
+        };
+        /** ProposalListResponse */
+        ProposalListResponse: {
+            /** Items */
+            items: components["schemas"]["ProposalModel"][];
+        };
+        /**
+         * ProposalModel
+         * @description One ``evo_proposals`` row (V011) — the inbox card. ``evidence`` is the §10 proposal-card
+         *     JSONB passed through verbatim.
+         */
+        ProposalModel: {
+            /** Id */
+            id: string;
+            /** Campaignid */
+            campaignId: string;
+            /** Candidateid */
+            candidateId?: string | null;
+            /** Kind */
+            kind: string;
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            } | null;
+            /** Status */
+            status: string;
+            /** Actor */
+            actor?: string | null;
+            /** Decidedat */
+            decidedAt?: string | null;
+            /** Expiresat */
+            expiresAt?: string | null;
+            /** Createdat */
+            createdAt?: string | null;
+        };
+        /**
+         * ProposalTally
+         * @description One (kind, status) proposal bucket and its count (the owner-inbox census).
+         */
+        ProposalTally: {
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+            /** Count */
+            count: number;
+        };
+        /** ReconciliationListResponse */
+        ReconciliationListResponse: {
+            /** Items */
+            items: components["schemas"]["ReconciliationModel"][];
+        };
+        /**
+         * ReconciliationModel
+         * @description One persisted reconciliation (``reconciliations`` row, V012) — the GET ?versionId= shape.
+         */
+        ReconciliationModel: {
+            /** Id */
+            id: string;
+            /** Versionid */
+            versionId?: string | null;
+            /** Strategyid */
+            strategyId?: string | null;
+            /** Windowfrom */
+            windowFrom?: string | null;
+            /** Windowto */
+            windowTo?: string | null;
+            /** Simjobid */
+            simJobId?: string | null;
+            /** Simrunid */
+            simRunId?: string | null;
+            /** Gap */
+            gap?: {
+                [key: string]: unknown;
+            } | null;
+            /** Gapz */
+            gapZ?: number | null;
+            /** Pairedtrades */
+            pairedTrades: number;
+            /** Evidencefloormet */
+            evidenceFloorMet: boolean;
+            /** Verdict */
+            verdict: string;
+            /** Diagnosis */
+            diagnosis?: {
+                [key: string]: unknown;
+            } | null;
+            /** Createdat */
+            createdAt?: string | null;
+        };
+        /**
+         * ReconciliationReceipt
+         * @description The 202 receipt for a dispatched reconciliation (design §7.1): the matched-window re-sim was
+         *     submitted (``simJobId``); the gap row lands on the async drain's completion and is read back via
+         *     GET ?versionId=. ``caveats`` surfaces the honest degradations known at dispatch (the scalper
+         *     §7.2 structural divergence, the funnel single-pick portfolio-effect).
+         */
+        ReconciliationReceipt: {
+            /** Versionid */
+            versionId: string;
+            /** Windowfrom */
+            windowFrom: string;
+            /** Windowto */
+            windowTo: string;
+            /** Simjobid */
+            simJobId?: string | null;
+            /** Mode */
+            mode: string;
+            /** Livetrades */
+            liveTrades: number;
+            /**
+             * Status
+             * @default computing
+             */
+            status: string;
+            /**
+             * Caveats
+             * @default []
+             */
+            caveats: string[];
+        };
+        /**
+         * RetroScoreResponse
+         * @description The scored cohort for one sweep — the ``{items: [...]}`` envelope plus the objective/policy
+         *     context the FE leaderboard needs to render the ranking. ``caveats`` carries response-level
+         *     warnings (e.g. a cohort truncated at the trial cap — its z-scores are over a partial cohort).
+         */
+        RetroScoreResponse: {
+            /** Sweepjobid */
+            sweepJobId: string;
+            /** Metric */
+            metric: string;
+            /** Direction */
+            direction: string;
+            /** Policy */
+            policy: string;
+            /**
+             * Caveats
+             * @default []
+             */
+            caveats: string[];
+            /** Items */
+            items: components["schemas"]["Scorecard"][];
+        };
+        /**
+         * SchedulerStatus
+         * @description The scheduler heartbeat: when the last tick ran (None = no tick since boot). In-memory by
+         *     design — a restart resets it, and the armed driver's next tick re-stamps it within one interval,
+         *     so a stale/None value IS the signal the loop is not running.
+         */
+        SchedulerStatus: {
+            /** Lasttickat */
+            lastTickAt?: string | null;
+        };
+        /**
+         * SchedulerTickResult
+         * @description The outcome of one scheduler tick: when it ran, how many stale proposals it expired, and the
+         *     per-campaign advances. The owner-triggered POST /scheduler/tick returns this; the background
+         *     driver logs a summary of it.
+         */
+        SchedulerTickResult: {
+            /** Ranat */
+            ranAt: string;
+            /** Expiredproposals */
+            expiredProposals: number;
+            /** Campaigns */
+            campaigns: components["schemas"]["CampaignAdvance"][];
+        };
+        /**
+         * Scorecard
+         * @description A §6.3 scorecard for one sweep trial, cohort-normalized. Extends the ``/best`` leaderboard
+         *     identity (trialNumber/runId/params) with the gates + RobustScore + penalties, rather than
+         *     replacing it (audit §13.11).
+         */
+        Scorecard: {
+            /** Trialnumber */
+            trialNumber?: number | null;
+            /** Runid */
+            runId?: string | null;
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            } | null;
+            /** Policy */
+            policy: string;
+            /** Direction */
+            direction: string;
+            /** Robustscore */
+            robustScore: number;
+            /** Rank */
+            rank?: number | null;
+            /** Rankable */
+            rankable: boolean;
+            stageReadiness?: components["schemas"]["StageReadiness"] | null;
+            /** Provenance */
+            provenance?: {
+                [key: string]: unknown;
+            } | null;
+            /** Weights */
+            weights: {
+                [key: string]: number;
+            };
+            /** Gates */
+            gates: components["schemas"]["GateResult"][];
+            /** Components */
+            components: components["schemas"]["ComponentScore"][];
+            penalties: components["schemas"]["Penalties"];
+            /**
+             * Flags
+             * @default []
+             */
+            flags: string[];
+            /**
+             * Caveats
+             * @default []
+             */
+            caveats: string[];
+            evidence: components["schemas"]["Evidence"];
+            /** Livegap */
+            liveGap?: {
+                [key: string]: unknown;
+            } | null;
+            /** Comparator */
+            comparator?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * SelectionResult
+         * @description The outcome of one SELECT pass over a generation: the survivor/retired split, how many rows
+         *     actually changed (idempotent re-run → 0), and the affected candidate rows (updated state +
+         *     the ``selection`` rationale now on each scorecard).
+         */
+        SelectionResult: {
+            /** Campaignid */
+            campaignId: string;
+            /** Generationn */
+            generationN: number;
+            /** Generationid */
+            generationId: string;
+            /** Topk */
+            topK: number;
+            /** Survivors */
+            survivors: number;
+            /** Retired */
+            retired: number;
+            /** Updated */
+            updated: number;
+            /**
+             * Retireacks
+             * @default 0
+             */
+            retireAcks: number;
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["CandidateModel"][];
+        };
+        /**
+         * SliceCell
+         * @description One existing-trials cell of a 2-D interaction slice: the (x, y) param values, the median
+         *     objective of the trials at that combination, and how many there are.
+         */
+        SliceCell: {
+            /** X */
+            x?: unknown;
+            /** Y */
+            y?: unknown;
+            /** Objective */
+            objective?: number | null;
+            /** Count */
+            count: number;
+        };
+        /**
+         * StageReadiness
+         * @description The audit-PF-01 promotion-admission verdict for the SCORED→SURVIVOR stage, PER evidencePolicy
+         *     (design §1.2) — fail-closed, DISTINCT from the descriptive ``rankable``. ``ready`` gates
+         *     SURVIVOR selection; ``blockedBy`` names the required gates that FAILed or were never
+         *     affirmatively evaluated. A typed field (not a loose dict) so the read never strips it (#7).
+         */
+        StageReadiness: {
+            /** Evidencepolicy */
+            evidencePolicy: string;
+            /** Stage */
+            stage: string;
+            /** Ready */
+            ready: boolean;
+            /**
+             * Requiredgates
+             * @default []
+             */
+            requiredGates: string[];
+            /**
+             * Blockedby
+             * @default []
+             */
+            blockedBy: string[];
+            /**
+             * Stalesignature
+             * @default false
+             */
+            staleSignature: boolean;
+        };
+        /** StressCandidateDispatch */
+        StressCandidateDispatch: {
+            /** Candidateid */
+            candidateId: string;
+            /** Trialnumber */
+            trialNumber?: number | null;
+            /** Runs */
+            runs: components["schemas"]["StressRunRef"][];
+        };
+        /**
+         * StressReceipt
+         * @description 202 receipt for a dispatched cost-stress round (§3.2.5): the BACKTEST re-runs submitted per
+         *     top-K candidate, and how many SCORED candidates were not selected (beyond top-K / not rankable /
+         *     no params). The degradation slopes + re-score land asynchronously on the candidate cards.
+         */
+        StressReceipt: {
+            /** Generationid */
+            generationId: string;
+            /** Dispatched */
+            dispatched: number;
+            /** Skipped */
+            skipped: number;
+            /** Multipliers */
+            multipliers: number[];
+            /** Candidates */
+            candidates: components["schemas"]["StressCandidateDispatch"][];
+        };
+        /**
+         * StressRequest
+         * @description Cost-stress options: how many plateau leaders to re-run, at which slippage multipliers.
+         */
+        StressRequest: {
+            /**
+             * Topk
+             * @default 5
+             */
+            topK: number;
+            /**
+             * Multipliers
+             * @default [
+             *       2,
+             *       4
+             *     ]
+             */
+            multipliers: number[];
+        };
+        /** StressRunRef */
+        StressRunRef: {
+            /** Multiplier */
+            multiplier: number;
+            /** Jobid */
+            jobId: string;
+        };
+        /**
+         * SuggestionModel
+         * @description One gate-candidate suggestion (persisted as a REVIEW_GATE proposal). ``wires`` is always
+         *     False — suggesters SUGGEST; nothing self-arms. ``proposalId`` is the persisted evo_proposals
+         *     row it minted/refreshed.
+         */
+        SuggestionModel: {
+            /** Source */
+            source: string;
+            /** Suggestion */
+            suggestion: string;
+            /** Mutation */
+            mutation: {
+                [key: string]: unknown;
+            };
+            /** Fingerprint */
+            fingerprint: string;
+            /**
+             * Kind
+             * @default REVIEW_GATE
+             */
+            kind: string;
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Caveats
+             * @default []
+             */
+            caveats: string[];
+            /**
+             * Wires
+             * @default false
+             */
+            wires: boolean;
+            /** Proposalid */
+            proposalId?: string | null;
+        };
+        /**
+         * SuggestionsResponse
+         * @description A suggester pass over a campaign's forensics evidence: how many REVIEW_GATE proposals were
+         *     newly minted vs refreshed in place (idempotent on fingerprint), how many suggestions were
+         *     SUPPRESSED because their structure is already graveyarded (§8.3), and the surviving suggestions
+         *     (each carrying its persisted proposalId).
+         */
+        SuggestionsResponse: {
+            /** Campaignid */
+            campaignId: string;
+            /** Generated */
+            generated: number;
+            /** Refreshed */
+            refreshed: number;
+            /** Suppressed */
+            suppressed: number;
+            /** Items */
+            items: components["schemas"]["SuggestionModel"][];
+        };
+        /**
+         * ErrorEnvelope
+         * @description The shared error envelope (COMMON §8.3) every optimizer error response carries.
+         */
+        ErrorEnvelope: {
+            /** Code */
+            code: string;
             /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
+            message: string;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
         };
     };
     responses: never;
@@ -176,6 +1939,28 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    health_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+    };
     run_api_v1_optimizations_run_post: {
         parameters: {
             query?: never;
@@ -202,13 +1987,54 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation Error */
+            /** @description VALIDATION_FAILED / INVALID_PARAMETER_PATH */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation failed (shared error envelope) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    jobs_api_v1_optimizations_jobs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -235,13 +2061,13 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation failed (shared error envelope) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -268,13 +2094,13 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation failed (shared error envelope) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -305,13 +2131,13 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation failed (shared error envelope) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -341,13 +2167,13 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation failed (shared error envelope) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -373,13 +2199,13 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation failed (shared error envelope) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
@@ -390,6 +2216,238 @@ export interface operations {
             header?: never;
             path: {
                 sweep_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    probes_api_v1_optimizations__sweep_id__probes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sweep_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ProbeRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeReceipt"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    campaigns_api_v1_evolution_campaigns_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignListResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_campaign_api_v1_evolution_campaigns_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignModel"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    campaign_api_v1_evolution_campaigns__campaign_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignDetail"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    candidates_api_v1_evolution_campaigns__campaign_id__candidates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateListResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    retro_score_api_v1_evolution_retro_score__sweep_job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sweep_job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetroScoreResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    record_generation_api_v1_evolution_campaigns__campaign_id__generations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
             };
             cookie?: never;
         };
@@ -407,23 +2465,764 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["GenerationRecorded"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation failed (shared error envelope) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
         };
     };
-    health_health_get: {
+    select_survivors_api_v1_evolution_campaigns__campaign_id__generations__n__select_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+                n: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectionResult"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    insights_api_v1_evolution_insights__sweep_job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sweep_job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    stress_api_v1_evolution_generations__generation_id__stress_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                generation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StressRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StressReceipt"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_reconciliations_api_v1_evolution_reconciliations_get: {
+        parameters: {
+            query: {
+                versionId: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationListResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    create_reconciliation_api_v1_evolution_reconciliations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationReceipt"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    generate_proposals_api_v1_evolution_campaigns__campaign_id__proposals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateProposalsResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_proposals_api_v1_evolution_proposals_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                kind?: string | null;
+                campaignId?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalListResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    approve_proposal_api_v1_evolution_proposals__proposal_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalDecision"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    reject_proposal_api_v1_evolution_proposals__proposal_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalDecision"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    execute_proposal_api_v1_evolution_proposals__proposal_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                } | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    assess_take_eligible_api_v1_evolution_campaigns__campaign_id__take_eligible_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    assess_rollback_api_v1_evolution_campaigns__campaign_id__rollback_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_ablations_api_v1_evolution_campaigns__campaign_id__ablations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AblationListResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    register_ablation_api_v1_evolution_campaigns__campaign_id__ablations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AblationModel"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    evaluate_ablation_endpoint_api_v1_evolution_ablations__ablation_id__evaluate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ablation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvaluatedAblation"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    list_graveyard_api_v1_evolution_campaigns__campaign_id__graveyard_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraveyardListResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    generate_suggestions_api_v1_evolution_campaigns__campaign_id__suggestions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuggestionsResponse"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    scheduler_tick_api_v1_evolution_scheduler_tick_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulerTickResult"];
+                };
+            };
+        };
+    };
+    expire_proposals_api_v1_evolution_proposals_expire_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpireResult"];
+                };
+            };
+        };
+    };
+    enroll_campaign_api_v1_evolution_campaigns__campaign_id__scheduler_enroll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentResult"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    withdraw_campaign_api_v1_evolution_campaigns__campaign_id__scheduler_withdraw_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentResult"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    scheduler_status_api_v1_evolution_scheduler_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulerStatus"];
+                };
+            };
+        };
+    };
+    campaign_report_api_v1_evolution_campaigns__campaign_id__report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaign_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignReport"];
+                };
+            };
+            /** @description Validation failed (shared error envelope) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    metrics_metrics_get: {
         parameters: {
             query?: never;
             header?: never;

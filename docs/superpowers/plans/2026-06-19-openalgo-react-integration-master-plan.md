@@ -3467,10 +3467,16 @@ in-process `SignalEmitted` event and fires a ntfy/telegram push **only** for sca
 underlying, option side/strike, BUY/SELL, entry/SL/target, confluence, OI-probability), gated
 `artha.notifier.scalp-alerts.enabled` (default OFF, NOT the `artha.scalper.notify-on-signal` name
 this section proposed) + the per-strategy opt-in, deduped per setup (`ScalpAlertDedupe`), bounded
-retry, LIVE-only (replay never publishes `SignalEmitted`, so parity-safe by construction). **Residual
-vs the spec below (minor, buildable-now):** the push does not yet carry `suggested_qty` or a deep
-link to the §18.1 `/orders` pre-fill ticket. Do not re-flag the whole item as pending — only the two
-payload extras remain.
+retry, LIVE-only (replay never publishes `SignalEmitted`, so parity-safe by construction).
+
+**Status 2026-07-31 — §18.4 is FULLY DONE; the residual is closed.** The two payload extras that this
+block carried as outstanding — `suggested_qty` and the deep link to the §18.1 `/orders` pre-fill
+ticket — are both shipped in `ScalpAlertService` (the qty rides the body only when the leg was
+actually sized, and `orderTicketLink` builds a `/orders?sig=…&symbol=…&side=…&qty=…` URL, returning
+null rather than emitting a dead relative link when `artha.notifier.app-base-url` is blank). Corrected
+2026-07-31 (chip task_e2e01f) after the E2E audit found this block still advertising them as pending;
+the stale text had survived because nothing re-reads a status paragraph once its item stops being
+worked. **Nothing in §18.4 remains.**
 
 The notifier (ntfy/telegram, Stage E [[stage-e-progress]]) exists and §1b plans phone access over Tailscale, but §12.5's semi-auto flow assumes the owner is watching the screen to click "Take." For scalping while away, the fresh signal must reach the phone so the owner can act.
 
@@ -3560,10 +3566,17 @@ can note "no manual surface — verified by tests" instead.
 > through the gateway), the scalper cockpit (#105–#110), and oipulse Waves **W1/W2/W3** (depth +
 > breadth + chart pages, through #82–#93/#109). Beyond §20: the **Data Ops Console** (operator UI over
 > the expired/OI backfill) merged as #121 (`docs/superpowers/plans/archive/2026-06-24-data-ops-console-wave.md`).
-> The remaining open Phase-4 work is the **data-foundation value-verify** (§20.8 — render every page
-> in History mode on a real session vs oipulse, gated on the expired/OI backfill now loading), the
-> `/orders` page, and the manual-verification-checklist UI. Pending detail lives in
-> `docs/DEFERRED_BACKLOG.md`; current marker in `PHASE_GATES.md`.
+> ~~The remaining open Phase-4 work is the **data-foundation value-verify** (§20.8), the `/orders`
+> page, and the manual-verification-checklist UI.~~ **Superseded 2026-07-31 (chip task_e2e01f) — all
+> three are closed and this note was stale:** the `/orders` page is routed and live
+> (`frontend-react/src/App.tsx:250`), the checklist shipped as
+> `frontend-react/src/components/ManualVerifyChecklist.tsx` and is mounted in the scalper cockpit, and
+> §20.8's value-verify has been exercised by the oipulse live-QA passes plus the 2026-07-31 T1a route
+> walk (85 static routes + 3 param samples, authenticated, 83 OK / 2 defects). Note the honest limit
+> on that last one: §20.8 as written is a **QA exercise, not a code deliverable**, so it is closed by
+> disposition rather than by a merge — if a page-by-page History-mode diff against oipulse is still
+> wanted, it needs its own ledger row rather than living here as perpetual "remaining work". Pending
+> detail lives in `docs/DEFERRED_BACKLOG.md`; current marker in `PHASE_GATES.md`.
 
 ### 20.0 Headline reframe (what this supersedes)
 - **§18.7 "React = 1:1 current Angular, oipulse deferred" → SUPERSEDED.** oipulse replication is the
@@ -3693,9 +3706,16 @@ Owner chose a SEQUENCE of smaller PRs (65 routes is unreviewable in one).
   name `frontend-ui` / container `ay-frontend-ui` / image tag for e2e + tooling), flip
   `ARTHA_ROUTE_FRONTEND`, delete old `frontend-ui/`, full e2e green.
 
-Full oipulse coverage = 52 pages (`Plans`/billing + the non-route Morning-Trade/3:20 excluded; all
-other optional `+` groups INCLUDED). e2e selectors preserved: `input[name=password]`, "Sign in",
-shell → `data-testid="app-shell"`.
+~~Full oipulse coverage = 52 pages (`Plans`/billing + the non-route Morning-Trade/3:20 excluded; all
+other optional `+` groups INCLUDED).~~ **Corrected 2026-07-31 (chip task_e2e01f) — "all other groups
+INCLUDED" overstates what shipped.** The real dispositions, so a reader does not mistake the plan's
+ambition for delivered coverage: **Dashboard** dropped · **Event Days** skipped · **Update Logs**
+never dispositioned (recommend SKIP — it is a vendor changelog with no analogue here) · **Strangle**
+merged into the straddle page rather than built separately · **Multi Leg Price** still open as audit
+**FG-05** (verdict DEFER: straddle/strangle plus the strategy builder cover most of its value;
+generalizing `StraddleChartService` to N legs is the route if it is ever pulled). Everything else in
+the 52 did ship. e2e selectors preserved: `input[name=password]`, "Sign in", shell →
+`data-testid="app-shell"`.
 
 ### 20.4 Testing & CI (owner-confirmed)
 - **Unit (vitest+jsdom):** port pure-TS specs verbatim (decimal, conflation, `nextReconnectDelay`,
@@ -3817,9 +3837,17 @@ aria-label). The QA checklist + full divergence log live in
   custom-time (an `OiInterval` enum extension + custom-time pickers); **IV Chng** optional col (an
   IV-delta field on `chain-table`); **O=H / O=L** optional cols (a `strike-session-stats` join).
 
-Net: the chain reaches full oipulse fidelity by end of **PR-W3** (+ PR-W4 for the chart click). Nothing
-dropped. This same per-page rhythm — build to the study doc, then a live Claude-in-Chrome QA, then a
-documented fidelity pass — applies to every Wave page (§20.8.2).
+~~Net: the chain reaches full oipulse fidelity by end of **PR-W3** (+ PR-W4 for the chart click).
+Nothing dropped.~~ **Corrected 2026-07-31 (chip task_e2e01f) — "nothing dropped" is not true as of
+today, and the plan should not keep asserting it.** The fidelity tail listed just above never shipped:
+the **2h / 4h / custom-time intervals**, the **IV-Chng** optional column, the **O=H / O=L** optional
+columns, the **grouped Name select**, and the **strike-click chart sub-view** are all still absent.
+Verdict **DEFER** (audit finding, 2026-07-31): every one of them is display-only, none touches a gate,
+a price, or a money path, so the cost of carrying them is zero and the value of building them is
+cosmetic. The honest framing is that the chain reached *functional* parity, not *full* fidelity —
+recorded here so a later reader does not treat the tail as delivered. The per-page rhythm itself —
+build to the study doc, then a live Claude-in-Chrome QA, then a documented fidelity pass — still
+applies to every Wave page (§20.8.2).
 
 ### 20.7.7 Straddle/Strangle Chart — built + live-QA'd (2026-06-21)
 

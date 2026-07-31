@@ -72,8 +72,11 @@ public class CandleRepository {
    * re-materialized (the procedure commits across several transactions), i.e. an empty cagg range:
    * exactly the damage being repaired.
    *
-   * <p>Sized from the densest CALL. Every cagg reads {@code WHERE "interval" = '1m'} (V004), so only
-   * symbols with 1m history count. {@code candles_5m} dominates at 375 trading minutes / 5 = 75
+   * <p>Sized from the densest CALL. Every cagg is ULTIMATELY sourced from 1m candles, so only
+   * symbols with 1m history count — four read {@code candles WHERE "interval" = '1m'} directly,
+   * while {@code candles_1w} reads {@code candles_1d} (V004), which inherits the same restriction
+   * transitively. (Cross-vendor review corrected an earlier "every cagg reads candles directly"
+   * here; the symbol-cardinality conclusion is unchanged, the derivation is just honest now.) {@code candles_5m} dominates at 375 trading minutes / 5 = 75
    * buckets per symbol per session × ~69 sessions in a 100-day window ≈ 5175 rows per symbol, so
    * 5000000 covers ~960 such symbols in one window — comfortably past the deep-history (2015)
    * windows that actually failed, where only CA-remediated equities carry 1m bars at all. At ~100

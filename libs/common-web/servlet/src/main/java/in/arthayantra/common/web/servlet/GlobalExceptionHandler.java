@@ -20,6 +20,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -98,7 +99,43 @@ public class GlobalExceptionHandler {
                 ErrorCodes.MEDIA_TYPE_UNSUPPORTED, "Unsupported request Content-Type", details));
   }
 
-  /** Unknown paths/static resources: 404 envelope, never the container error page. */
+  /**
+   * A controller that raises {@link ResponseStatusException} has already named its status — honour
+   * it instead of dropping to the catch-all 500 (task_e2e01j).
+   *
+   * <p>Without this mapping every {@code ResponseStatusException(NOT_FOUND, …)} answered <b>500
+   * INTERNAL_ERROR</b> with a logged stack trace; the E2E T1b sweep caught it on all five
+   * {@code /api/v1/insights/{id}} endpoints, and every future servlet controller reaching for the
+   * idiom inherited the same bug. The status→code switch mirrors the reactive gateway's
+   * {@code GatewayErrorWebExceptionHandler} exactly so the two D8 handlers cannot disagree; a
+   * {@code null} reason falls back to the status' own phrase.
+   */
+  @ExceptionHandler(ResponseStatusException.class)
+  public ResponseEntity<ErrorResponse> handleResponseStatus(ResponseStatusException ex) {
+    HttpStatus status = HttpStatus.valueOf(ex.getStatusCode().value());
+    String code =
+        switch (status) {
+          case NOT_FOUND -> ErrorCodes.NOT_FOUND_RESOURCE;
+          case SERVICE_UNAVAILABLE -> ErrorCodes.UPSTREAM_UNAVAILABLE;
+          case UNAUTHORIZED -> ErrorCodes.AUTH_REQUIRED;
+          case FORBIDDEN -> ErrorCodes.AUTH_FORBIDDEN;
+          default -> status.is4xxClientError()
+              ? ErrorCodes.VALIDATION_FAILED
+              : ErrorCodes.INTERNAL_ERROR;
+        };
+    return ResponseEntity.status(status)
+        .body(
+            ErrorResponse.of(
+                code, ex.getReason() == null ? status.getReasonPhrase() : ex.getReason()));
+  }
+
+  /**
+   * Unknown paths/static resources: 404 envelope, never the container error page.
+   *
+   * <p>Kept as its own mapping deliberately: {@code NoResourceFoundException} extends
+   * {@code ServletException} (NOT {@link ResponseStatusException}) at Spring 6.2.x, so nothing above
+   * can claim it — see {@code GlobalExceptionHandlerTest} for the dispatch pin.
+   */
   @ExceptionHandler(NoResourceFoundException.class)
   public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex) {
     return ResponseEntity.status(HttpStatus.NOT_FOUND)

@@ -1,6 +1,7 @@
 package in.arthayantra.common.web.servlet;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -8,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.error.ErrorResponse;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -15,15 +17,19 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * A missing required query/form param must map to 400 VALIDATION_FAILED, not fall through to the
  * catch-all 500 INTERNAL_ERROR (the data-foundation value-verify hit the old 500 on `?underlying=` /
  * `?from=` omissions); a body whose Content-Type the endpoint does not consume must map to 415
- * MEDIA_TYPE_UNSUPPORTED for the same reason (task_9ffe390d).
+ * MEDIA_TYPE_UNSUPPORTED for the same reason (task_9ffe390d); and a controller-raised
+ * {@code ResponseStatusException} must answer ITS OWN status, not the catch-all 500 (task_e2e01j).
  */
 class GlobalExceptionHandlerTest {
 
@@ -89,12 +95,93 @@ class GlobalExceptionHandlerTest {
         .andExpect(jsonPath("$.code").value(ErrorCodes.MEDIA_TYPE_UNSUPPORTED));
   }
 
+  /**
+   * The 404 the insights endpoints were always trying to return. Same class of defect as the 415
+   * above: no mapping existed, so the throw was dispatched to the {@code Exception.class} catch-all
+   * and the endpoint answered <b>500</b> with a logged stack trace (E2E T1b-F1). Only a real
+   * dispatch can see that, so this drives MockMvc rather than calling the handler.
+   */
+  @Test
+  void responseStatusExceptionIsDispatchedToItsOwnStatusNotTheCatchAll500() throws Exception {
+    MockMvc mvc = standaloneMvc();
+
+    mvc.perform(get("/not-found"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value(ErrorCodes.NOT_FOUND_RESOURCE))
+        .andExpect(jsonPath("$.message").value("insight not found"));
+  }
+
+  /** A non-404 status must be carried through faithfully, not flattened to 404 or 500. */
+  @Test
+  void nonNotFoundResponseStatusIsCarriedThrough() throws Exception {
+    MockMvc mvc = standaloneMvc();
+
+    mvc.perform(get("/conflicted"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value(ErrorCodes.VALIDATION_FAILED))
+        .andExpect(jsonPath("$.message").value("already acked"));
+  }
+
+  /** A {@code null} reason falls back to the status' own phrase rather than a null message. */
+  @Test
+  void absentReasonFallsBackToTheStatusPhrase() {
+    var ex = new ResponseStatusException(HttpStatus.FORBIDDEN);
+
+    ResponseEntity<ErrorResponse> resp = handler.handleResponseStatus(ex);
+
+    assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    assertThat(resp.getBody()).isNotNull();
+    assertThat(resp.getBody().code()).isEqualTo(ErrorCodes.AUTH_FORBIDDEN);
+    assertThat(resp.getBody().message()).isEqualTo("Forbidden");
+  }
+
+  /**
+   * The ordering pin. {@code NoResourceFoundException} does NOT extend {@code ResponseStatusException}
+   * at Spring 6.2.x (it extends {@code ServletException} and implements {@code ErrorResponse}), so the
+   * new mapping cannot claim it — but that is a framework fact, not a guarantee, and a future Spring
+   * that re-parents it would silently swap this envelope for the generic one. This pins the exact
+   * envelope through a real dispatch; it fails the moment anything else wins the resolution.
+   */
+  @Test
+  void noResourceFoundKeepsItsOwnEnvelopeAfterTheResponseStatusMapping() throws Exception {
+    MockMvc mvc = standaloneMvc();
+
+    mvc.perform(get("/no-resource"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value(ErrorCodes.NOT_FOUND_RESOURCE))
+        .andExpect(jsonPath("$.message").value("No such resource"));
+  }
+
+  private static MockMvc standaloneMvc() {
+    return MockMvcBuilders.standaloneSetup(new JsonOnlyController())
+        .setControllerAdvice(new GlobalExceptionHandler())
+        .build();
+  }
+
   /** Stands in for any JSON-consuming endpoint (the live case was the strategy publish endpoint). */
   @RestController
   static class JsonOnlyController {
     @PostMapping(value = "/echo", consumes = MediaType.APPLICATION_JSON_VALUE)
     String echo(@RequestBody(required = false) String body) {
       return "ok";
+    }
+
+    /** Mirrors InsightController's unknown-id throw. */
+    @GetMapping("/not-found")
+    String notFound() {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "insight not found");
+    }
+
+    /** A non-404 ResponseStatusException, to prove the status is carried and not normalized. */
+    @GetMapping("/conflicted")
+    String conflicted() {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, "already acked");
+    }
+
+    /** The dedicated 404 mapping's own trigger, raised directly (no resource handler in standalone). */
+    @GetMapping("/no-resource")
+    String noResource() throws NoResourceFoundException {
+      throw new NoResourceFoundException(HttpMethod.GET, "/static/missing.css");
     }
   }
 }

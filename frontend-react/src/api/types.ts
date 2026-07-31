@@ -423,7 +423,14 @@ export interface ChainTable {
   forwardSource: string | null;
   riskFreeRate: string | null;
   pcr: string | null;
+  /** The market is not open. Orthogonal to `lastCaptured` — a live chain computed off-hours is live. */
   stale: boolean;
+  /**
+   * LIVE mode had no spot quote, so `rows` are the most recent CAPTURED chain and `asOf` is the
+   * CAPTURE time rather than now (the server degrades instead of 503-ing after close). The server
+   * also folds this into `freshness.complete=false`, which is what drives the staleness badge.
+   */
+  lastCaptured: boolean;
   asOf: string;
   interval: string;
   rows: ChainTableRow[];

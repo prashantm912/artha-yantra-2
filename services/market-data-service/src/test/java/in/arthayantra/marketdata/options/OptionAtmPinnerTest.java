@@ -201,7 +201,7 @@ class OptionAtmPinnerTest {
     }
     return new OptionsChainService.Chain(
         underlying, expiry, BigDecimal.valueOf(center), null, "TEST", BigDecimal.ZERO, null,
-        false, OffsetDateTime.parse("2026-07-20T10:00:00+05:30"), rows);
+        false, false, OffsetDateTime.parse("2026-07-20T10:00:00+05:30"), rows);
   }
 
   private static OptionsChainService.Leg leg(

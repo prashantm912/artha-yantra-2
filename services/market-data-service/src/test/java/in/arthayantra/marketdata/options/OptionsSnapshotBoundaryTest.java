@@ -87,7 +87,9 @@ class OptionsSnapshotBoundaryTest {
     OptionsChainService chainService =
         new OptionsChainService(
             instrumentStub(), null, CAL, clock, new BigDecimal("0.065"), true,
-            Optional.of(quoteSource()));
+            Optional.of(quoteSource()),
+            // a live spot is present, so the captured-chain fallback is never consulted
+            null);
     return new OptionsSnapshotService(
         chainService,
         repo,

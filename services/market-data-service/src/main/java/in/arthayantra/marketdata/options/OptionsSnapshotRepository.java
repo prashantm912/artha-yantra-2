@@ -201,6 +201,87 @@ public class OptionsSnapshotRepository {
     return ts.isEmpty() ? Optional.empty() : Optional.of(ts.get(0));
   }
 
+  /**
+   * The trust predicate for serving a stored chain back as if it were the live one: LIVE-captured
+   * rows only, outliers excluded.
+   *
+   * <p>{@code source} is NULL on pre-V023 rows ("read as live by convention", V023's own wording)
+   * and {@code 'LIVE'} on every capture since; {@code 'BACKFILL'} (the OI importer) and
+   * {@code 'UPSTOX_1M'} (the candle-derived stock-chain warm) are NOT live captures and must never
+   * be relabelled {@code CAPTURED} and served as the last chain. {@code quarantined IS NOT TRUE}
+   * mirrors the V045 reader convention — a row the capture path flagged as an implausible OI print
+   * is skipped by every OI fold, and this path must not be the one place it leaks back out.
+   */
+  private static final String CAPTURED_ONLY =
+      " AND (source IS NULL OR source = 'LIVE') AND (quarantined IS NOT TRUE)";
+
+  /** Maps one {@code options_chain_snapshots} row; shared by the raw and captured-only reads. */
+  private static final org.springframework.jdbc.core.RowMapper<SnapshotRow> SNAPSHOT_ROW_MAPPER =
+      (rs, n) ->
+          new SnapshotRow(
+              rs.getObject("ts", OffsetDateTime.class),
+              rs.getString("underlying"),
+              rs.getDate("expiry").toLocalDate(),
+              rs.getBigDecimal("strike"),
+              rs.getString("option_type"),
+              rs.getString("tradingsymbol"),
+              rs.getBigDecimal("ltp"),
+              rs.getBigDecimal("bid"),
+              rs.getBigDecimal("ask"),
+              rs.getObject("volume", Long.class),
+              rs.getObject("oi", Long.class),
+              rs.getObject("oi_change", Long.class),
+              rs.getBigDecimal("spot_price"),
+              rs.getBigDecimal("iv"),
+              rs.getBigDecimal("delta"),
+              rs.getBigDecimal("gamma"),
+              rs.getBigDecimal("theta"),
+              rs.getBigDecimal("vega"),
+              rs.getBigDecimal("rho"),
+              rs.getString("iv_reason"),
+              rs.getString("price_source"),
+              rs.getBigDecimal("forward_price"),
+              rs.getBigDecimal("risk_free_rate"));
+
+  /**
+   * The NEWEST LIVE-CAPTURED snapshot timestamp for (underlying, expiry) — the anchor for serving
+   * the last captured chain when no live spot quote exists (off-hours / feed gap). Scoped by
+   * {@link #CAPTURED_ONLY}, and paired with {@link #capturedRowsAt}, which applies the SAME
+   * predicate so the anchor and its rows always describe one real capture pass.
+   *
+   * <p>Deliberately a bare {@code max(ts)} aggregate rather than an {@code ORDER BY … LIMIT 1}:
+   * over a hypertable with compressed chunks TimescaleDB 2.18.2 aborts query PLANNING for a
+   * top-level sort key that is a computed expression under a {@code LIMIT} ("non-Var pathkey not
+   * expected for compressed batch sorted merge" — see {@code OptionsSnapshotReader.latestPair}).
+   * An aggregate carries no pathkey at all, so the sorted-merge path is never considered; the
+   * added equality/IS-NULL predicates introduce no pathkey either.
+   */
+  public Optional<OffsetDateTime> latestCapturedSnapshotTs(String underlying, LocalDate expiry) {
+    List<OffsetDateTime> ts =
+        jdbc.query(
+            "SELECT max(ts) AS ts FROM options_chain_snapshots"
+                + " WHERE underlying = ? AND expiry = ?"
+                + CAPTURED_ONLY,
+            (rs, n) -> rs.getObject("ts", OffsetDateTime.class),
+            underlying,
+            java.sql.Date.valueOf(expiry));
+    // max() over an empty set still returns one row, holding NULL
+    return ts.isEmpty() ? Optional.empty() : Optional.ofNullable(ts.get(0));
+  }
+
+  /** Every LIVE-CAPTURED, non-quarantined row of one stored snapshot (see {@link #CAPTURED_ONLY}). */
+  public List<SnapshotRow> capturedRowsAt(String underlying, LocalDate expiry, OffsetDateTime ts) {
+    return jdbc.query(
+        "SELECT * FROM options_chain_snapshots"
+            + " WHERE underlying = ? AND expiry = ? AND ts = ?"
+            + CAPTURED_ONLY
+            + " ORDER BY strike, option_type",
+        SNAPSHOT_ROW_MAPPER,
+        underlying,
+        java.sql.Date.valueOf(expiry),
+        Timestamp.from(ts.toInstant()));
+  }
+
   /** Every row of one stored snapshot. */
   public List<SnapshotRow> rowsAt(String underlying, LocalDate expiry, OffsetDateTime ts) {
     return jdbc.query(
@@ -209,31 +290,7 @@ public class OptionsSnapshotRepository {
         WHERE underlying = ? AND expiry = ? AND ts = ?
         ORDER BY strike, option_type
         """,
-        (rs, n) ->
-            new SnapshotRow(
-                rs.getObject("ts", OffsetDateTime.class),
-                rs.getString("underlying"),
-                rs.getDate("expiry").toLocalDate(),
-                rs.getBigDecimal("strike"),
-                rs.getString("option_type"),
-                rs.getString("tradingsymbol"),
-                rs.getBigDecimal("ltp"),
-                rs.getBigDecimal("bid"),
-                rs.getBigDecimal("ask"),
-                rs.getObject("volume", Long.class),
-                rs.getObject("oi", Long.class),
-                rs.getObject("oi_change", Long.class),
-                rs.getBigDecimal("spot_price"),
-                rs.getBigDecimal("iv"),
-                rs.getBigDecimal("delta"),
-                rs.getBigDecimal("gamma"),
-                rs.getBigDecimal("theta"),
-                rs.getBigDecimal("vega"),
-                rs.getBigDecimal("rho"),
-                rs.getString("iv_reason"),
-                rs.getString("price_source"),
-                rs.getBigDecimal("forward_price"),
-                rs.getBigDecimal("risk_free_rate")),
+        SNAPSHOT_ROW_MAPPER,
         underlying,
         java.sql.Date.valueOf(expiry),
         Timestamp.from(ts.toInstant()));

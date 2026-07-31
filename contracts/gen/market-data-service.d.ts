@@ -3332,6 +3332,7 @@ export interface components {
             riskFreeRate: number;
             pcr: number | null;
             stale: boolean;
+            lastCaptured: boolean;
             /** Format: date-time */
             asOf: string;
             rows: components["schemas"]["StrikeRow"][];
@@ -3416,6 +3417,7 @@ export interface components {
             riskFreeRate: number;
             pcr: number | null;
             stale: boolean;
+            lastCaptured: boolean;
             /** Format: date-time */
             asOf: string;
             interval: string;

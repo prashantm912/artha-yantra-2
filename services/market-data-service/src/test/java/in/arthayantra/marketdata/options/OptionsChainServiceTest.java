@@ -27,7 +27,14 @@ class OptionsChainServiceTest {
           }
         };
     return new OptionsChainService(
-        stub, null, null, IST_CLOCK, new BigDecimal("0.065"), true, java.util.Optional.empty());
+        stub,
+        null,
+        null,
+        IST_CLOCK,
+        new BigDecimal("0.065"),
+        true,
+        java.util.Optional.empty(),
+        null); // expiry selection never touches the captured-chain fallback
   }
 
   @Test

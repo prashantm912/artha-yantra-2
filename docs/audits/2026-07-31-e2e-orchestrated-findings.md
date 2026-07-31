@@ -161,3 +161,131 @@ Close-reason attribution: **scalper TIME_STOP is the only positive bucket platfo
 - The finder→verifier shape paid for itself: 3 refutations, including one the orchestrator itself had pre-filed (deploy-lag).
 - Allowlist corrections: backtest list = `/api/v1/backtests/jobs`; `/actuator/health` has no OpenAPI schema (sample, don't diff).
 - T1b (mock interactive flows + full API-surface probe over all 4 specs) remains the biggest untested surface — weekend run per the plan.
+
+---
+
+## T1b (mock interactive) — 2026-07-31 late (21:45–23:00 IST)
+
+**Run:** scheduled autonomous run (owner approved "option 1" ~17:45 IST: tonight 21:45, after the paper
+reconcilers), main @ `6bc83f7a`. Orchestration: scripted probes + 3 adversarial refute-verifier agents
+(finder→verifier per the plan; 4 sub-findings CONFIRMED, 1 REFUTED, 5 probe-artifact classes self-refuted).
+
+**Sequence integrity:** 21:15 reconcilers confirmed clean BEFORE the switch (`paper reconciliation done:
+7 positions + 2 taken signals checked, 0 discrepancies` @ 21:14:59 IST). Profile switched live→mock via
+`ay up`. **Fail-closed preflight PASS** (`docker inspect`: edge-gateway `SPRING_PROFILES_ACTIVE=mock` +
+`SPRING_DATA_REDIS_DATABASE=1`; strategy-signal datasource `/artha_mock?`) — mutations authorized.
+**Restored to LIVE and verified at 22:43 IST** (see §T1b.6).
+
+### T1b.1 Baseline (step 1)
+
+Playwright suite vs the mock stack: **17/17 passed, 45.6 s**. Green before any exploratory work — no
+fix-or-file needed. (The suite also supplies the UI-surfaced-error evidence for two flows: wrong-password
+inline error on /login, and the strategy editor's invalid-YAML badge; further browser-level probing was
+skipped deliberately — concurrent logins would thrash the auth rate-limiter the API probes were already
+exercising.)
+
+### T1b.2 Form/flow probes (step 3) — all 6 flows PASS; 1 real defect
+
+| flow | happy path | invalid path | verdict |
+|---|---|---|---|
+| Strategy create→publish→disable→enable→archive | 201 → publish 200 → `publishedVersionId` set → 200/200/200 | duplicate name **409**; garbage YAML → `valid:false` with schema errors | PASS |
+| Backtest submit→job→results→export | 202 → `completed` → results 200, trades 200, export/trades+folds+equity 200 (CSV) | unknown strategyId **404** | PASS |
+| Watchlist CRUD | create 201, add item 200, rename 200, remove item 204, delete 204 | unknown-instrument item **404** | PASS |
+| Journal CRUD | create 201, update 200, delete 204 | `disciplineRating: 99` → **422** | PASS |
+| Paper manual open/close | open 201 (mock tick fresh at 22:15 IST), close 200 | `qty: -5` → **400** | PASS |
+| Data-ops actions | eod refetch 200 (graceful 0-row on mock), candles refresh 202 + jobId | refresh with `{}` → **500** ⇒ finding T1b-F4 | PASS except F4 |
+
+### T1b.3 API-surface probe (step 4) — the full sweep T1a sampled
+
+**Coverage: 256 of 262 unique spec paths exercised** (285 operations; 266 swept — the 19 skips are
+PUT/PATCH/DELETE ops needing pre-staged targets, of which the watchlist/journal/strategy DELETEs were
+exercised separately in the flows above). Distribution: 137×2xx · 108×4xx · 17×5xx. **Status-in-spec
+98.9%** — every miss investigated below or refuted as a probe artifact. `missing_required` on 200-responses:
+**0** across all record-backed schemas (Map-return stops exempt per plan). The T1a 13/200 sampler debt is paid.
+
+### T1b.4 Findings (all adversarially refute-verified)
+
+**T1b-F1 (CONFIRMED) — all 5 `/api/v1/insights/{id}` endpoints answer 500 instead of 404 for an unknown id.**
+`InsightController` (lines 158/209/215/222/262) throws `ResponseStatusException(404 "insight not found")`, but
+common-web's servlet `GlobalExceptionHandler` is a plain `@RestControllerAdvice` with no
+`ResponseStatusException` mapping — it falls to the `handleUnexpected` catch-all → 500 INTERNAL_ERROR + logged
+stack trace. Same repeat-bug class this handler already had once (task_9ffe390d, MediaType). Blast radius today:
+insights only (gateway's reactive handler maps it correctly); but any future servlet controller using
+`ResponseStatusException` inherits the bug. Reachability: stale deep-link / manual call (insights are never
+hard-deleted). Severity: robustness/contract (wrong status + log noise). Chip task_e2e01j.
+
+**T1b-F2 (CONFIRMED ×2, REFUTED ×1) — optimizer-service unvalidated inputs crash to bare 500s.**
+(a) `POST /{sweep_id}/promote` with `{}` → `KeyError: 'trialId'` at `api.py:100` (raw-dict body, no Pydantic —
+contrast the sibling `/probes` which does it right) → bare 500, no error envelope; untested at the HTTP boundary
+(`test_promote.py` calls the service directly, never the route). (b) `GET /jobs/{job_id}` with a non-UUID-shaped
+id → uncaught Postgres UUID-parse error → bare 500 (the passing `test_unknown_job_is_404` runs against the
+in-memory fake repo — a plain dict `.get()` — so the real UUID-typed column is never exercised). Common root
+cause: `main.py` registers handlers only for `ApiError`/`InvalidParameterPath`, no catch-all. (c) REFUTED:
+"`POST /run` with `{}` → 400 undocumented" — the design authority (STAGE_D doc, backtest/optimizer §, line 179)
+documents 400 and `test_missing_field_is_400` pins it; the OpenAPI spec omitting 400 is a spec-omission nit,
+not a defect. Chip task_e2e01k.
+
+**T1b-F3 (CONFIRMED) — `GET /api/v1/market/breadth/live` 500s (NPE) whenever `nse_eod_bhavcopy` has no EQ rows.**
+`EquityIndexContributionService.indexClose:212` calls `java.sql.Date.valueOf(asOf)` unguarded; `asOf()` =
+`max(trade_date)` is null on an empty table. Mock-deterministic (mock: 0 EQ rows; live: 635k rows, so
+live-reachable only in a post-`reset-db` + all-50-constituent-quote-failure compound window). No frontend caller
+today; the one real consumer (`MarketOiClient.macro()`) already catches and degrades to `{0,0}` — live engine
+safe. Violates the file's own 422 DATA_GAP convention (same class thrown at line 167 and in 4 sibling services).
+Fix is a one-line null-guard. Chip task_e2e01l.
+
+**T1b-F4 (CONFIRMED) — market-data invalid-input paths 500 instead of 400.** Two log-verified instances from
+this run: `POST /api/v1/market/candles/refresh` with `{}` → NPE `"interval" is null`; `GET
+/api/v1/market/options/strike-session-stats?expiry=test` → unhandled `DateTimeParseException`. Both are missing
+request validation ahead of use — the generic handler correctly 500s a genuine NPE, but these inputs should 400.
+Chip task_e2e01m.
+
+### T1b.5 Refuted candidates + probe artifacts (the honesty ledger)
+
+1. **"Optimizer + 222 other endpoints 401" (run 1)** — REFUTED as self-inflicted: the sweep called the
+   edge-gateway spec's `POST /api/v1/auth/logout` mid-run and killed its own session; every later call 401'd
+   (in-spec for most services, which hid it). Fixed with per-service re-login + logout skip.
+2. **Watchlist/journal DELETE 403s (flow round 1)** — probe artifact: bodyless DELETEs went out without the
+   `X-XSRF-TOKEN` header. With the header: 204s. Positive control: **CSRF protection provably enforced on
+   bodyless mutations.**
+3. **"Backtest export 404"** — probe artifact: the endpoint family is `/export/trades|folds|equity` (all 200,
+   correct CSV headers), not `/export`.
+4. **4 connection errors** — probe artifact: unencoded space in `NIFTY 50` path segments.
+5. **6 parse-fails** — exempt by design: 5 CSV export endpoints + optimizer `/health` (service-local path, not
+   gateway-routed, answers the SPA shell).
+6. **Optimizer `POST /run` 400** — refuted, see T1b-F2(c).
+7. 503s under `/api/v1/auth/kite/*`, admin backfills, stock-chain warm: mock-expected (no Kite/Upstox); 409 on
+   double eod-refetch = correct idempotency behavior.
+
+### T1b.6 Restore-to-live + the SEC-01 incident
+
+Restore hit a real trap worth recording: the profile flip was done with `sed -i` on `.env`, which **recreates
+the file** — the tightened ACL (inheritance disabled) was replaced by inherited broad-principal write grants,
+and `ay up` on the live profile **refused to start** (SEC-01 fail-closed, exactly as designed — the same
+condition had only warned on mock). Fixed by re-tightening (`icacls /inheritance:r`, owner+SYSTEM+Administrators
+only, mirroring `deploy\secrets`), then `ay up` → **live verified 22:43 IST**: `SPRING_PROFILES_ACTIVE=live`,
+redis db 0, datasource `/artha?`, 11/11 containers healthy, in-container
+`GET /api/v1/market/health/data` → `{"status":"GREEN","marketOpen":false,"tickedTokens":69,"problems":[]}`.
+Lesson pinned: **never edit `.env` with a rewrite-and-rename tool; edit in place or re-apply the ACL after.**
+
+### T1b.7 Observations (info tier)
+
+- Auth rate-limiter works (429 `AUTH_RATE_LIMITED` after the probes' login burst, ~12.5 min cooldown) but sends
+  no `Retry-After` header — only body `details.retryAfterMs`. Cosmetic.
+- `GET /api/v1/backtests/jobs` (list) returns `resultRef: null` even for completed jobs; the job DETAIL carries
+  it. The SPA uses the detail, so no user impact — worth a look next time someone is in that controller.
+- Mock paper fills at 22:15 IST were tick-fresh (no DATA_STALE) — the mock feed keeps synthetic ticks flowing
+  post-market; fine for mock, and the #694 doctrine path was still exercised via the 4xx checks.
+
+### T1b.8 Chips filed from T1b
+
+| chip | what | severity |
+|---|---|---|
+| task_e2e01j | common-web servlet `GlobalExceptionHandler`: map `ResponseStatusException` (insights 500→404) | robustness |
+| task_e2e01k | optimizer: Pydantic model for promote body + UUID param typing / catch-all handler; spec-add 400 on /run | robustness |
+| task_e2e01l | breadth/live: null-guard `indexClose` → existing 422 DATA_GAP path | robustness (mock-det.) |
+| task_e2e01m | market-data: validate `candles/refresh` body + `strike-session-stats` expiry parse → 400 | robustness |
+
+**T1b verdict: the platform passed.** Every owner-facing flow (strategy lifecycle, backtest pipeline, CRUD
+surfaces, paper manual, data-ops) works end-to-end on mock with correct 4xx surfacing; the full-spec API sweep
+found **zero missing required keys** and no contract lies — the defect harvest is 4 robustness-tier
+invalid-input/unknown-id handlers, none on a money or engine path. E2E-01 is now fully DONE.

@@ -483,6 +483,26 @@ Run in order; each answers one question. Canned SQL in §6.
     (the T24 class), or (c) shadowed by an earlier rule that always wins (`time_stop` at 30 min ate
     every exit in the G11 analysis) — distinguish, never just count.
 
+    ⚠️ **The armed granularity is FINER than the fired vocabulary — do not report a (type, basis)
+    row as exercised or as never-fired when it is neither** (added 2026-07-31 after the E2E audit
+    caught the 07-31 run reporting 8 armed rows where its own query returns 10). The query groups by
+    `(type, basis)`; `strategy.paper_positions` carries **no column naming the rule that fired** —
+    `close_reason` is the entire exit vocabulary (verified: the table has no rule/basis column). So
+    several armed bases collapse onto one `close_reason` and become mutually indistinguishable:
+
+    | armed type | bases armed (live, 2026-07-31) | close_reasons available |
+    |---|---|---|
+    | `stop_loss` | `premium_pct` 30 · `index_points` 8 · `percent` 4 · `atr_multiple` 2 | `STOP_LOSS` + `STRUCTURAL_STOP` — 4 bases onto 2 reasons |
+    | `trailing_stop` | `indicator` 42 · `atr_multiple` 2 | `TRAILING_STOP` — 2 bases onto 1 reason |
+
+    Classification rule: a `(type, basis)` row is **exercised** only when its type fired AND no
+    sibling basis could have produced that fire; **never-fired** only when the TYPE itself has zero
+    fires; otherwise **INDETERMINATE — not attributable from `close_reason`**. The two
+    `atr_multiple` rows (2 strategies each) are the standing INDETERMINATE pair: their types fire
+    constantly via other bases, so neither "exercised" nor "never fired" is defensible. Report them
+    as INDETERMINATE every run rather than dropping them — silently omitting a row is how the 8-vs-10
+    discrepancy happened, and a dropped row reads as "covered everything" when it was not.
+
 30. **Sub-account FREEZE telemetry** (added 2026-07-31) — the #1086 capital governors freeze a
     sub-account for the rest of the session after a loss threshold; on their FIRST live day 3 of 5
     froze by 13:40 and a 6th entry would have found 4/5 frozen. Whether that is protection or

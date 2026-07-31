@@ -351,6 +351,180 @@ class OptionsChainIntegrationTest extends MarketDataIntegrationTestBase {
         "23000.00");
   }
 
+  /**
+   * The load-bearing seam (task_e2e01e): a GENUINELY degraded live chain must publish
+   * {@code lastCaptured}, the CAPTURE {@code asOf} AND {@code freshness.complete=false} together.
+   * Nothing else asserts the three as one fact — the service test pins the flag and the cockpit spec
+   * fabricates the envelope, so a change to the controller's {@code complete} expression would
+   * silently un-badge the panel with every other test green.
+   *
+   * <p>The degrade is real, not stubbed: the chain's underlying has NO row in {@code instruments},
+   * so {@code MockQuoteGateway.spotQuote} finds no instrument, no last tick and no base price and
+   * returns the key UNMAPPED — exactly the post-close "no spot quote" condition, reached through
+   * the real controller, service and repository.
+   */
+  @Test
+  void liveChainTableDegradesToTheCapturedBookAndSaysSoOnEveryChannel() throws Exception {
+    String underlying = "E2E01E DEGRADE IDX";
+    LocalDate exp = LocalDate.parse("2026-06-16");
+    seedOrphanOptionChain(underlying, exp, "23000");
+    // one captured pass at 15:30 IST — the book the degrade must serve back
+    OffsetDateTime capturedAt = OffsetDateTime.parse("2026-06-15T15:30:00+05:30");
+    insertCapturedLeg(capturedAt, underlying, exp, "23000", "CE", "133.45", 1_820_075L, "LIVE");
+    insertCapturedLeg(capturedAt, underlying, exp, "23000", "PE", "255.75", 2_105_500L, "LIVE");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/chain-table")
+                .param("name", underlying)
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.lastCaptured").value(true))
+        .andExpect(jsonPath("$.asOf").value(org.hamcrest.Matchers.startsWith("2026-06-15T15:30")))
+        // the SAME degrade must drive the freshness envelope the UI badges off
+        .andExpect(jsonPath("$.freshness.complete").value(false))
+        .andExpect(jsonPath("$.freshness.provenance").value("live"))
+        // and the served book is the captured one, not an empty shell
+        .andExpect(jsonPath("$.rows[*].ce.leg.oi").value(org.hamcrest.Matchers.hasItem(1820075)))
+        .andExpect(jsonPath("$.forwardSource").value("CAPTURED"));
+  }
+
+  /** With no live spot AND nothing captured, the read path still refuses — degrading, not lying. */
+  @Test
+  void liveChainTableStillRefusesWhenNothingWasEverCaptured() throws Exception {
+    String underlying = "E2E01E EMPTY IDX";
+    seedOrphanOptionChain(underlying, LocalDate.parse("2026-06-16"), "23000");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/chain-table")
+                .param("name", underlying)
+                .param("interval", "5m"))
+        .andExpect(status().isServiceUnavailable());
+  }
+
+  /**
+   * A BACKFILL/UPSTOX_1M row must never be relabelled CAPTURED and served as the last live chain,
+   * and a quarantined row must not re-enter through the fallback. Both are stamped NEWER than the
+   * live pass, so an unfiltered {@code max(ts)} anchor would pick them and the assertions below
+   * would read their OI and timestamp instead of the live capture's.
+   */
+  @Test
+  void theDegradeIgnoresBackfillUpstoxAndQuarantinedRows() throws Exception {
+    String underlying = "E2E01E TRUST IDX";
+    LocalDate exp = LocalDate.parse("2026-06-16");
+    seedOrphanOptionChain(underlying, exp, "23000");
+    OffsetDateTime live = OffsetDateTime.parse("2026-06-15T15:30:00+05:30");
+    insertCapturedLeg(live, underlying, exp, "23000", "CE", "133.45", 1_820_075L, "LIVE");
+    insertCapturedLeg(live, underlying, exp, "23000", "PE", "255.75", 2_105_500L, "LIVE");
+    // newer, but NOT live capture
+    insertCapturedLeg(live.plusMinutes(5), underlying, exp, "23000", "CE", "1.11", 11L, "BACKFILL");
+    insertCapturedLeg(live.plusMinutes(6), underlying, exp, "23000", "CE", "2.22", 22L, "UPSTOX_1M");
+    // newest of all, and quarantined as an implausible OI print
+    insertCapturedLeg(live.plusMinutes(7), underlying, exp, "23000", "CE", "3.33", 33L, "LIVE");
+    jdbc.update(
+        "UPDATE options_chain_snapshots SET quarantined = TRUE WHERE underlying = ? AND ts = ?",
+        underlying,
+        java.sql.Timestamp.from(live.plusMinutes(7).toInstant()));
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/chain-table")
+                .param("name", underlying)
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.asOf").value(org.hamcrest.Matchers.startsWith("2026-06-15T15:30")))
+        .andExpect(jsonPath("$.rows[*].ce.leg.oi").value(org.hamcrest.Matchers.hasItem(1820075)));
+  }
+
+  /** The captured chain advertises the rate its greeks were SOLVED with, not today's config. */
+  @Test
+  void theDegradedChainCarriesTheCapturedRiskFreeRateNotTheConfiguredOne() throws Exception {
+    String underlying = "E2E01E RATE IDX";
+    LocalDate exp = LocalDate.parse("2026-06-16");
+    seedOrphanOptionChain(underlying, exp, "23000");
+    OffsetDateTime capturedAt = OffsetDateTime.parse("2026-06-15T15:30:00+05:30");
+    insertCapturedLeg(capturedAt, underlying, exp, "23000", "CE", "133.45", 1_820_075L, "LIVE");
+    // the capture solved its greeks at 4.25%, deliberately unlike the configured 6.5%
+    jdbc.update(
+        "UPDATE options_chain_snapshots SET risk_free_rate = 0.042500 "
+            + "WHERE underlying = ? AND ts = ?",
+        underlying,
+        java.sql.Timestamp.from(capturedAt.toInstant()));
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/chain-table")
+                .param("name", underlying)
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.riskFreeRate").value(org.hamcrest.Matchers.startsWith("0.0425")));
+  }
+
+  /**
+   * Seeds a CE+PE pair whose underlying has NO {@code instruments} row of its own, so the mock
+   * quote gateway cannot resolve a spot for it — the live chain then has no spot and must degrade.
+   * Upserts {@code is_active} so a rerun against the shared singleton DB is idempotent.
+   */
+  private void seedOrphanOptionChain(String underlying, LocalDate exp, String strike) {
+    for (String type : List.of("CE", "PE")) {
+      jdbc.update(
+          "INSERT INTO instruments (exchange, tradingsymbol, instrument_token, name, segment,"
+              + " instrument_type, underlying_exchange, underlying_tradingsymbol, expiry, strike,"
+              + " tick_size, lot_size, is_active)"
+              + " VALUES (?,?,?,?,?,?,?,?,?,?::numeric,0.05,75,TRUE)"
+              + " ON CONFLICT (exchange, tradingsymbol) DO UPDATE SET is_active = TRUE",
+          "NFO",
+          underlying.replace(" ", "") + strike + type,
+          Math.abs((underlying + strike + type).hashCode()),
+          underlying,
+          "NFO-OPT",
+          type,
+          "NSE",
+          underlying,
+          java.sql.Date.valueOf(exp),
+          strike);
+    }
+  }
+
+  /** One provenance-complete captured leg with an explicit {@code source}. */
+  private void insertCapturedLeg(
+      OffsetDateTime ts,
+      String underlying,
+      LocalDate exp,
+      String strike,
+      String type,
+      String ltp,
+      Long oi,
+      String snapshotSource) {
+    jdbc.update(
+        "INSERT INTO options_chain_snapshots (ts, underlying, expiry, strike, option_type,"
+            + " tradingsymbol, ltp, bid, ask, volume, oi, oi_change, spot_price, iv, delta,"
+            + " iv_reason, price_source, forward_price, risk_free_rate, source)"
+            + " VALUES (?,?,?,?::numeric,?,?,?::numeric,?::numeric,?::numeric,?,?,?,?::numeric,"
+            + " ?::numeric,?::numeric,?,?,?::numeric,?::numeric,?) ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(ts.toInstant()),
+        underlying,
+        java.sql.Date.valueOf(exp),
+        strike,
+        type,
+        underlying.replace(" ", "") + strike + type,
+        ltp,
+        "133.00",
+        "133.90",
+        345_600L,
+        oi,
+        0L,
+        "23901.20",
+        "0.181500",
+        "0.512300",
+        "SOLVED",
+        "MID",
+        "23917.44",
+        "0.065000",
+        snapshotSource);
+  }
+
   @Test
   void nearestExpiryResolution() {
     assertThat(chainService.resolveExpiry("NIFTY 50", null)).isEqualTo(LocalDate.parse("2026-06-16"));

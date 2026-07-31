@@ -15,9 +15,10 @@ enumeration is the six-location recipe at the top of §0 of
 three knobs.** Details in `2026-07-30-session-learnings.md`. Treat it as the prior before proposing
 any entry-knob change.
 
-⚠️ **All four are conditional on the 30-minute `time_stop`**, which G11 says is the dominant term in
-scalper P&L. **If G11's exit changes, re-run all four.** That makes G11 the highest-leverage row on
-the board, not the entry track.
+⚠️ ~~**All four are conditional on the 30-minute `time_stop`**~~ — **resolved 2026-07-31: the owner
+decided KEEP, so the condition these four hung on has settled in the direction that preserves them.
+All four are now FINAL, not conditional.** The re-run trigger survives but is now hypothetical: if the
+exit doctrine is ever changed, re-run all four.
 
 ---
 
@@ -35,9 +36,11 @@ the board, not the entry track.
 
 ## Data-gated, waiting on the market
 
-- **G11 (exit doctrine)** — needs ONE post-07-27 chop day. G15's detector now stamps a regime label
-  on each `rollup.md` session row, so the 15:47 agent will announce it. Base rate ~29% ⇒ expect one
-  within ~3–4 sessions. **Re-read G11 the moment a `chop` row lands.**
+- ~~**G11 (exit doctrine)** — needs ONE post-07-27 chop day.~~ **CLOSED 2026-07-31.** The chop day
+  landed the same session G15's detector went in (regime `chop`, efficiency 0.171, expiry-free), and
+  the owner DECIDED: **KEEP the 30-minute `time_stop` as armed** — no code, no deploy, the stop was
+  already armed fleet-wide. Consequence: T1 / T7 / G13 / G10 are no longer stop-conditional, they are
+  **final**. Nothing here is data-gated any more; see the G11 ledger row.
 - **G8 / G9** — open but re-characterised; see their rows.
 
 ## Owner decisions — present, do not start

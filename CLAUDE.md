@@ -76,6 +76,17 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `-Dspotless.check.skip=true`, which is INERT — no spotless plugin exists in this repo; it rode
   along in ~8 builder briefs on 2026-07-31 before two builders independently caught it. Checkstyle
   is the formatting gate.)
+- ⚠️ **Two ways a Maven run reports GREEN without having run** (both hit builders on 2026-08-01):
+  **(1) `mvnw … | Out-File` (or any pipe) reports the PIPELINE's exit code, not Maven's** — a run
+  truncated mid-`testCompile`, with no `BUILD` line at all, was reported as "completed, exit 0" and
+  reads exactly like a passing gate. Redirect instead and read Maven's own code:
+  `./mvnw.cmd … > run.log 2>&1; echo "MAVEN_EXIT=$?"`, then confirm the log actually contains a
+  `BUILD SUCCESS`/`BUILD FAILURE` line (a frozen mtime with no BUILD line = truncated, not passed).
+  **(2) `mvnw surefire:test` as a bare GOAL does NOT recompile** — it runs whatever is already in
+  `target/classes`, so a red-proof done that way exercises stale bytecode: you break the production
+  code on purpose, see BUILD SUCCESS, and wrongly conclude your test cannot detect the break. Always
+  red-proof through a lifecycle PHASE (`test` / `verify`). Both fail in the safe-looking direction,
+  which is what makes them worse than a crash.
 - **CI `build-test` is sharded per-service** (`.github/workflows/ci-java.yml`): a 3-leg
   matrix (`market-data` / `backtest` / `strategy-gateway` = strategy-signal + edge-gateway),
   each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the

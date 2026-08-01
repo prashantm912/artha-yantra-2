@@ -16,6 +16,7 @@ import in.arthayantra.strategysignal.registry.StrategyRepository;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -334,11 +335,39 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     try {
       strategyId =
                         registryService.create("Engine IT Momentum", null, null, STRATEGY_YAML).id();
-      registryService.publish(strategyId, null, null);
+      UUID publishedVersionId = registryService.publish(strategyId, null, null).versionId();
 
       await()
           .atMost(Duration.ofSeconds(20))
           .until(() -> engine.loadedSlugs().contains("engine-it-momentum"));
+
+      // ORDER/STATE INDEPENDENCE. Every meter this method asserts on lives on the CONTEXT-WIDE
+      // MeterRegistry, so each is measured as a DELTA from here, and the one precondition those
+      // deltas depend on is asserted rather than assumed:
+      //
+      //   * `ay_signal_eval_outcome_total{outcome=fired}` increments ONLY inside the
+      //     `activeEntry.isEmpty()` branch (SignalEngine:1469-1476). With an ACTIVE/TAKEN ENTRY
+      //     already anchoring this (version, exchange, tradingsymbol), every bar below would take
+      //     the EXIT branch instead — which still calls stampEmissionLatency, so the bar-to-emit
+      //     timer still moves and every earlier assertion still passes, but NO outcome is counted.
+      //     `fired` then reads 0 permanently and no await can rescue it; that is the one failure
+      //     mode the #1179 await is structurally unable to cover, so it is asserted, not awaited.
+      //   * an absolute `>= 1` / `== 1` also answers for emits made by anything else sharing this
+      //     registry, which is what makes the assertion order-sensitive in the first place.
+      assertThat(signals.activeEntry(publishedVersionId, "NSE", "SIGTEST"))
+          .as("no ENTRY may already anchor this (version, instrument) — see above")
+          .isEmpty();
+      Counter fired =
+          meterRegistry.find("ay_signal_eval_outcome_total").tag("outcome", "fired").counter();
+      assertThat(fired).as("the fired outcome tag is pre-registered at boot").isNotNull();
+      double firedBefore = fired.count();
+      Timer barToEmit = meterRegistry.find("ay_signal_bar_to_emit_seconds").timer();
+      assertThat(barToEmit).as("the bar-to-emit timer is pre-registered at boot").isNotNull();
+      long emitsBefore = barToEmit.count();
+      // read only by the failure message below; resolved HERE so a null lookup can never surface as
+      // an NPE from inside an untilAsserted block (Awaitility retries AssertionError, not NPE).
+      Counter evalFailures = meterRegistry.find("ay_signal_eval_failures_total").counter();
+      assertThat(evalFailures).as("the eval-failure counter is pre-registered at boot").isNotNull();
 
       // rising live bars after the declining warm-up: RSI climbs, the gate is trivially true
       OffsetDateTime liveBase = WARM_BASE.plusMinutes(30);
@@ -348,17 +377,25 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
         publishBar("SIGTEST", liveBase.plusMinutes(i), price);
       }
 
-      // scope to THIS test's instrument — the IT DB is shared with no per-method cleanup, so other
-      // methods/classes may leave their own active signals newer than ours (CLAUDE.md IT contract).
+      // scope to THIS test's published VERSION, not merely its instrument — the IT DB is shared with
+      // no per-method cleanup (CLAUDE.md IT contract) and `signals.active()` is unscoped across every
+      // strategy in it (SignalRepository:165-170), while SIGTEST is the instrument of a dozen further
+      // fixtures in this class. An instrument-only filter can therefore hand this method a FOREIGN
+      // row — one whose emit never touched the counters asserted below, which is exactly how the
+      // counter assertion reads 0 with everything before it green.
       await()
           .atMost(Duration.ofSeconds(20))
-          .until(() -> signals.active().stream().anyMatch(s -> "SIGTEST".equals(s.tradingsymbol())));
+          .until(
+              () ->
+                  signals.active().stream()
+                      .anyMatch(s -> publishedVersionId.equals(s.strategyVersionId())));
 
       SignalRepository.SignalRow row =
           signals.active().stream()
-              .filter(s -> "SIGTEST".equals(s.tradingsymbol()))
+              .filter(s -> publishedVersionId.equals(s.strategyVersionId()))
               .findFirst()
               .orElseThrow();
+      assertThat(row.tradingsymbol()).isEqualTo("SIGTEST");
       firstSignalId = row.id();
       assertThat(row.signalType()).isEqualTo("ENTRY");
       assertThat(row.side()).isEqualTo("BUY");
@@ -394,10 +431,9 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
                 assertThat(((java.sql.Timestamp) latencyStamp.get("emitted_at")).toInstant())
                     .isEqualTo(LIVE_NOW.toInstant());
                 assertThat(latencyStamp.get("emit_latency_ms")).isEqualTo(0L);
-                assertThat(meterRegistry.find("ay_signal_bar_to_emit_seconds").timer())
-                    .isNotNull()
-                    .extracting(timer -> timer.count())
-                    .isEqualTo(1L);
+                assertThat(barToEmit.count())
+                    .as("this method's ENTRY recorded exactly one bar-to-emit sample")
+                    .isEqualTo(emitsBefore + 1);
               });
 
       // chip task_37ee83e0: the per-outcome counters are wired on the LIVE eval path (not just the
@@ -407,9 +443,6 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       assertThat(meterRegistry.find("ay_signal_eval_outcome_total").counters())
           .as("every outcome tag exists from boot, even at zero")
           .hasSize(SignalEngine.Outcome.values().length);
-      Counter fired =
-          meterRegistry.find("ay_signal_eval_outcome_total").tag("outcome", "fired").counter();
-      assertThat(fired).isNotNull();
       // AWAITED, not asserted outright: the emit (which persists the row this test already awaited
       // above) happens INSIDE decideEntry, while the outcome counter increments at its CALL SITE —
       // SignalEngine "THE ONLY increment site", strictly after decideEntry returns. The await on the
@@ -429,13 +462,31 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       // decideEntry, and a throw in between is caught at SignalEngine:1394-1401, which bumps
       // ay_signal_eval_failures_total AND logs ERROR. 10s matches this class's untilAsserted
       // convention (:1373); its GATING awaits use 20s, the consistent bump if CI ever flakes here.
+      //
+      // The await stays, and it is asserted as a DELTA off `firedBefore` rather than as an absolute
+      // `>= 1`: the two are orthogonal fixes for two different ways this line reads a number it did
+      // not cause. The await covers the RACE (the increment has not landed YET); the delta covers
+      // the shared-registry read (some other emit in this context already put it above 1, so an
+      // absolute floor would pass without this method's bar ever being counted). Neither weakens
+      // the other — a counter that never increments still fails, now after 10s instead of at once.
+      // The failure message carries the whole outcome map plus ay_signal_eval_failures_total,
+      // because a `fired` that never moves is only ever one of three things: the entry branch was
+      // never taken (some other outcome tag moved instead), the evaluation threw between the emit
+      // and the increment (SignalEngine:1394-1401 counts that as an eval failure), or the engine
+      // never evaluated this bar at all (nothing moved anywhere). Printing all three tells them
+      // apart from the surefire report alone.
       await()
           .atMost(Duration.ofSeconds(10))
           .untilAsserted(
               () ->
                   assertThat(fired.count())
-                      .as("the bar that emitted the signal above counted as an outcome")
-                      .isGreaterThanOrEqualTo(1.0));
+                      .as(
+                          "the bar that emitted the signal above counted as an outcome"
+                              + " (before=%s, outcomes=%s, evalFailures=%s)",
+                          firedBefore,
+                          engine.outcomeSnapshot().counts(),
+                          evalFailures.count())
+                      .isGreaterThanOrEqualTo(firedBefore + 1.0));
 
       // renderer invariant on the persisted breakdown
       BigDecimal contributions = BigDecimal.ZERO;

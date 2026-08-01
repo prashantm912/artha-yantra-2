@@ -7,6 +7,7 @@ import in.arthayantra.marketdata.alerts.NtfyClient;
 import in.arthayantra.marketdata.feeds.FiiDerivativeFetcher;
 import in.arthayantra.marketdata.feeds.FiiDiiFetcher;
 import in.arthayantra.marketdata.feeds.NewsSource;
+import in.arthayantra.marketdata.kite.GlobalQuoteSource;
 import in.arthayantra.marketdata.nse.LiveFiiDiiFetcher;
 import in.arthayantra.marketdata.upstox.canary.UpstoxContractCanary;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -168,6 +169,34 @@ public class UpstoxAnalyticsConfig {
       UpstoxRateLimiter upstoxRateLimiter) {
     return new UpstoxGlobalInstrumentsClient(
         restClientBuilder, objectMapper, properties, upstoxRateLimiter);
+  }
+
+  /**
+   * Upstox-backed {@link GlobalQuoteSource} — the Connecting-Dots <b>Dow</b> factor and {@code GET
+   * /api/v1/market/global/dow}. HOLD-tier and default-OFF: making the Dow dot real changes which
+   * signals fire (today it contributes Neutral to every composite), so arming {@code
+   * artha.upstox.global-quotes-enabled=true} is a deliberate owner decision after forward measurement.
+   *
+   * <p>It reuses the ALREADY-LIVE world-indices client (shared analytics token + shared rate budget)
+   * rather than opening a second Upstox coupling, hence the hard requirement on {@code
+   * artha.upstox.analytics.enabled=true}: without it {@link UpstoxGlobalInstrumentsClient} is absent
+   * and this bean refuses LOUDLY at startup instead of dying silently (the #653 passthrough class).
+   *
+   * <p>Mutually exclusive with {@code artha.openalgo.global-quotes-enabled} — both on fails the
+   * context at {@code GlobalQuoteSourceExclusivityGuard}, since two candidates would break the
+   * consumers' {@code ObjectProvider.getIfAvailable()}.
+   */
+  @Bean
+  @ConditionalOnProperty(name = "artha.upstox.global-quotes-enabled", havingValue = "true")
+  public GlobalQuoteSource upstoxGlobalQuoteSource(
+      ObjectProvider<UpstoxGlobalInstrumentsClient> globalInstruments, MeterRegistry meterRegistry) {
+    UpstoxGlobalInstrumentsClient client = globalInstruments.getIfAvailable();
+    if (client == null) {
+      throw new IllegalStateException(
+          "artha.upstox.global-quotes-enabled=true requires artha.upstox.analytics.enabled=true — "
+              + "the global (Dow) quote rides the analytics-token world-indices client");
+    }
+    return new UpstoxGlobalQuoteClient(client, meterRegistry);
   }
 
   /**

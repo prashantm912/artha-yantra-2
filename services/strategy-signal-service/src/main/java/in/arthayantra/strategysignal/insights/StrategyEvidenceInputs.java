@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.insights;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -35,7 +36,15 @@ public record StrategyEvidenceInputs(
       BigDecimal maxDrawdownPct,
       List<Criterion> criteria) {}
 
-  /** One scored graduation criterion (name / human bound / actual / pass) — mirrors the board's. */
+  /**
+   * One scored graduation criterion (name / human bound / actual / pass) — mirrors the board's.
+   *
+   * <p>{@code @Schema(name)} is load-bearing: {@code GraduationController.Criterion} shares this
+   * simple name, and springdoc would collapse both into ONE spec component (task_1c04803f); the
+   * ContractCaptureTest collision assertion fails without the distinct name. The graduation
+   * board's twin keeps the plain {@code Criterion} name.
+   */
+  @Schema(name = "EvidenceCriterion")
   public record Criterion(String name, String required, String actual, boolean pass) {}
 
   /**

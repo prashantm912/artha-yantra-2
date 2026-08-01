@@ -21,6 +21,12 @@ public class ArthaOpenApiAutoConfiguration {
     return new RecordRequiredModelConverter();
   }
 
+  /** Observes schema-name collisions (task_1c04803f); asserted empty by every ContractCaptureTest. */
+  @Bean
+  public SchemaNameCollisionDetector schemaNameCollisionDetector() {
+    return new SchemaNameCollisionDetector();
+  }
+
   /** Rewrites nullable record references into an honest OpenAPI 3.1 {@code anyOf}. */
   @Bean
   public NullableRefCustomizer nullableRefCustomizer() {

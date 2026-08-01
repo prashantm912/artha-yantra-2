@@ -33,6 +33,9 @@ class ContractCaptureTest extends MarketDataIntegrationTestBase {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
 
+  @Autowired
+  private in.arthayantra.common.web.openapi.SchemaNameCollisionDetector collisionDetector;
+
   @Test
   void specCapturesCleanAndHonorsTheD8Conventions() throws Exception {
     String body =
@@ -44,6 +47,12 @@ class ContractCaptureTest extends MarketDataIntegrationTestBase {
             .getContentAsString(StandardCharsets.UTF_8);
     JsonNode spec = objectMapper.readTree(body);
     ((ObjectNode) spec).remove("servers"); // random test port — never part of the contract
+
+    // task_1c04803f: two distinct Java types must never collapse into one schema component —
+    // springdoc keys components by simple name and the loser's fields silently vanish.
+    assertThat(collisionDetector.collisions())
+        .as("schema-name collisions (disambiguate with @Schema(name = ...))")
+        .isEmpty();
 
     // D8 lint: every path under /api/v1; envelope schema present; default error everywhere
     spec.path("paths")

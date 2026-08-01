@@ -46,6 +46,10 @@ Separating them is the whole point of this runbook.
   routing, wired only when `oi-backfill-enabled=true`.
 - **Dow global feed** — `GlobalQuoteSource` + `OpenAlgoGlobalQuoteClient` (`DOWJONES@GLOBAL_INDEX` LTP),
   wired only when `global-quotes-enabled=true`; otherwise Connecting-Dots Dow factor returns **Neutral**.
+  ⚠️ The OpenAlgo route needs an **Upstox-backed** appliance and the deployed one is Zerodha-backed, so it has
+  never resolved — the Dow dot read Neutral on every row for months. A second implementation
+  (`UpstoxGlobalQuoteClient`, flag `ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED`) rides the already-live Upstox
+  world-indices feed instead; the two are **mutually exclusive** (both on ⇒ market-data refuses to start).
 - **optionchain→OpenAlgo routing + contract canary** — `source.optionchain=openalgo` swaps live per-strike OI
   capture to OpenAlgo `/optionchain`; gated behind the daily `OpenAlgoContractCanary` (§17.11 entry gate).
 
@@ -54,7 +58,8 @@ Separating them is the whole point of this runbook.
 | `.env` var | property | default | gate to flip |
 |---|---|---|---|
 | `ARTHA_OPENALGO_OI_BACKFILL_ENABLED` | `artha.openalgo.oi-backfill-enabled` | `false` | OpenAlgo appliance connected + API key staged |
-| `ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED` | `artha.openalgo.global-quotes-enabled` | `false` | **Upstox** appliance (global indices) |
+| `ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED` | `artha.openalgo.global-quotes-enabled` | `false` | **Upstox** appliance (global indices) — blocked, ours is Zerodha-backed |
+| `ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED` | `artha.upstox.global-quotes-enabled` | `false` | analytics token on; **HOLD** — arming makes the Dow dot real, which changes which signals fire |
 | `ARTHA_OPENALGO_CANARY_ENABLED` | `artha.openalgo.contract-canary-enabled` | `false` | appliance live; precedes any `source.*` flip |
 | `ARTHA_MD_SOURCE_OPTIONCHAIN` | `artha.marketdata.source.optionchain` | `kite` | canary green ≥1 day (§17.11) |
 | `ARTHA_MD_SOURCE_QUOTES` / `_CANDLES` | `artha.marketdata.source.*` | `kite` | appliance live (no OI gate) |
@@ -198,8 +203,12 @@ are Track B.
 
 Track B is **not a flag flip** — most of it is unbuilt. It unlocks:
 
-1. **Dow global factor** (Connecting Dots) — flip `ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED=true` once the appliance
-   is **Upstox-backed** (Kite has no global indices). This piece *is* built; it only needs the Upstox broker session.
+1. ~~**Dow global factor** (Connecting Dots) — flip `ARTHA_OPENALGO_GLOBAL_QUOTES_ENABLED=true` once the appliance
+   is **Upstox-backed** (Kite has no global indices).~~ **Superseded 2026-08-01:** the appliance stayed
+   Zerodha-backed, so this never resolved and the Dow dot read Neutral on every row. The Dow now has a second,
+   appliance-free route — `ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED=true` over the already-live Upstox world-indices
+   feed (`GLOBAL_INDEX|^DJI`), needing only `ARTHA_UPSTOX_ANALYTICS_ENABLED=true` (already on). Arming is
+   **owner-gated**: a real Dow dot changes which signals fire.
 2. **Deep / expired-contract OI** (ADR-0001B) — direct `upstox-java-sdk` behind `HistoricalCandleGateway`,
    scoped by a 2nd Upstox token. **Unbuilt** — backtesting-milestone work.
 3. **ADR-0002 analytics** — `upstox/wire/` DTOs + `FiiDiiSource` (Upstox primary, NSE fallback) + `MaxPainService`

@@ -364,6 +364,10 @@ services:
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
       ARTHA_UPSTOX_CANARY_ENABLED: ${ARTHA_UPSTOX_CANARY_ENABLED:-false}
+      # Connecting-Dots Dow factor off the live Upstox world-indices feed. Name MUST byte-match
+      # application.yml's artha.upstox.global-quotes-enabled placeholder (#653). Default false —
+      # arming changes which signals fire, so it is an owner decision, not a deploy detail.
+      ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED: ${ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED:-false}
       # IV rank/percentile trailing-window floor (days). 60 = pinned honest-null default; the
       # iv_rank dot stays dead until capture history (started 2026-06-15) crosses it. Lower ONLY
       # on rollup evidence (signal-analysis findings item #5) — never below ~15 (rank over a

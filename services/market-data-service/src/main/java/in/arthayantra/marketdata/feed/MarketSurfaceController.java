@@ -61,8 +61,10 @@ public class MarketSurfaceController {
 
   /**
    * GET /global/dow: the Dow Jones global cue (LTP-direction vs prev close). 422 DATA_GAP when the
-   * global-quote feed is unconfigured (absent unless {@code artha.openalgo.global-quotes-enabled}) or
-   * the quote is unavailable (off-hours / mock) — the scalper Dow read then degrades to neutral.
+   * global-quote feed is unconfigured (absent unless one of {@code artha.openalgo.global-quotes-enabled}
+   * / {@code artha.upstox.global-quotes-enabled} is on) or the quote is unavailable (off-hours / mock)
+   * — the scalper Dow read then degrades to neutral. A degradation is counted as
+   * {@code ay_global_quote_degraded_total}, so a permanently-422 Dow is diagnosable from metrics alone.
    */
   @GetMapping("/global/dow")
   public DowQuote dow() {

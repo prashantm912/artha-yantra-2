@@ -280,6 +280,12 @@ class SpecOpenObjectRatchetTest {
    */
   private static final Map<String, String> OUT_OF_SCOPE =
       Map.of(
+          "margin-service",
+          "Ratcheted in its OWN suite — services/margin-service/tests/test_open_object_ratchet.py,"
+              + " same predicate and grammar, against a live app.openapi(). Python/FastAPI, so the"
+              + " source regex cannot read it either. It appeared here the moment #1199 committed"
+              + " its spec, which is this assertion doing its job: a new service cannot arrive"
+              + " unchecked, it can only arrive as a decision somebody writes down.",
           "optimizer-service",
           "Ratcheted in its OWN suite instead — services/optimizer-service/tests/"
               + "test_open_object_ratchet.py, same rules, against a live app.openapi(). NOT"

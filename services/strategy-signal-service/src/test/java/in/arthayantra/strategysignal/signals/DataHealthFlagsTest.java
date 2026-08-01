@@ -22,6 +22,28 @@ import org.junit.jupiter.api.Test;
  * <p>The load-bearing case is {@link #s24SuppressionIsKeyedPerOiRootNotPerDate()}: S24's OI skip
  * fires on the ROOT's own monthly expiry (NSE last Tuesday / BSE last Thursday), so a date-keyed
  * exemption would mark a whole normal SENSEX session as by-design-inert and hide a real outage.
+ *
+ * <p><b>Two kinds of fixture live here, and the difference matters — conflating them shipped two
+ * separate defects already.</b>
+ *
+ * <ul>
+ *   <li><b>Production-faithful fixtures</b> back any test asserting that a state is ORDINARY (not
+ *       degraded): {@link #flatChainOi()}, the quiet bar, {@link #inertOi()}. These must be shapes
+ *       {@code MarketOiClient} can actually emit, because the claim is about real market states. A
+ *       fixture that cannot occur makes such a test vacuous while it sits green — which is exactly
+ *       what happened twice: the quiet bar once used {@code NEUTRAL} to mean "flat market" (it means
+ *       snapshot-unavailable), and the flat-chain regression test once nulled the imbalance beside
+ *       NONZERO deltas, a state the producer cannot emit since imbalance is derived from them.
+ *   <li><b>Synthetic isolation probes</b> back the coverage sweeps: {@link #macroWithout} and
+ *       {@link #oiWithout} remove ONE input to prove it is independently detected. Production often
+ *       loses such inputs in groups (a failed trending read nulls both deltas and the imbalance
+ *       together), so these deliberately construct narrower states than any single upstream failure
+ *       produces. That is the point — they pin per-field detection, not market realism. Do NOT
+ *       "correct" them into group failures; that would silently stop proving per-field coverage.
+ * </ul>
+ *
+ * <p>{@link #oiWithout} REFUSES the one field where the distinction collapses (the imbalance is a
+ * pure function of the deltas), so the impossible shape cannot be rebuilt by accident.
  */
 class DataHealthFlagsTest {
 
@@ -96,7 +118,10 @@ class DataHealthFlagsTest {
     BigDecimal futuresBasis = new BigDecimal("31.5");
     BigDecimal ceOiDelta = new BigDecimal("120000");
     BigDecimal peOiDelta = new BigDecimal("240000");
-    BigDecimal callPutDeltaImbalancePct = new BigDecimal("12.0");
+    // DERIVED, not invented: imbalance is a pure function of the deltas —
+    // |pe−ce| / max(|ce|,|pe|) × 100 at scale 4 (MarketOiClient:735-741), so 120000/240000 gives
+    // exactly 50.0000. A hand-picked value here would be a shape production cannot emit.
+    BigDecimal callPutDeltaImbalancePct = new BigDecimal("50.0000");
     BigDecimal sentimentSlope = new BigDecimal("0.8");
     BigDecimal spurtOiPct = new BigDecimal("9.0");
     BigDecimal spurtPricePct = new BigDecimal("1.4");
@@ -110,7 +135,13 @@ class DataHealthFlagsTest {
         case "futuresBasis" -> futuresBasis = null;
         case "ceOiDelta" -> ceOiDelta = null;
         case "peOiDelta" -> peOiDelta = null;
-        case "callPutDeltaImbalancePct" -> callPutDeltaImbalancePct = null;
+        // Deliberately UNREACHABLE here. imbalance is a pure function of the deltas, so "null
+        // imbalance with nonzero deltas" is a state production cannot emit — the real flat chain is
+        // {ceDelta=0, peDelta=0, imbalance=null}. Use flatChainOi() for that.
+        case "callPutDeltaImbalancePct" ->
+            throw new IllegalArgumentException(
+                "imbalance cannot be absent on its own — it is derived from the deltas; use"
+                    + " flatChainOi() for the flat-chain shape");
         case "sentimentSlope" -> sentimentSlope = null;
         case "spurtOiPct" -> spurtOiPct = null;
         case "spurtPricePct" -> spurtPricePct = null;
@@ -127,6 +158,24 @@ class DataHealthFlagsTest {
   /** A live OI read on an ordinary bar: quadrants resolved, magnitudes present. */
   private static ScalperGateContext.Oi liveOi() {
     return oiWithout(null);
+  }
+
+  /**
+   * THE REAL FLAT CHAIN, as production emits it: OI unchanged across the window, so both deltas are
+   * present and exactly ZERO and {@code imbalancePct} therefore returns null (its denominator
+   * {@code max(|ce|,|pe|)} is 0 — MarketOiClient:735-741). Everything else is live.
+   *
+   * <p>⚠️ Built explicitly rather than via {@link #oiWithout} because the two fields are COUPLED: a
+   * null imbalance beside nonzero deltas is a state the producer cannot emit, and a test asserting
+   * "this is an ordinary market state" must assert it about a state that actually occurs.
+   */
+  private static ScalperGateContext.Oi flatChainOi() {
+    return new ScalperGateContext.Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.SHORT_COVERING, new BigDecimal("58.0"),
+        new BigDecimal("4.2"), new BigDecimal("31.5"),
+        BigDecimal.ZERO, BigDecimal.ZERO, null, // ce/pe deltas flat -> imbalance null
+        false, false, new BigDecimal("0.8"), new BigDecimal("9.0"), new BigDecimal("1.4"),
+        new BigDecimal("22.0"));
   }
 
   /**
@@ -228,19 +277,20 @@ class DataHealthFlagsTest {
 
   @Test
   void aQuietButLiveOiBarIsNotInert() {
-    // The trap a naive port of the canary's window probes falls into: per row, a zero spurt and a
-    // NEUTRAL quadrant are ordinary. Measured live 2026-07-20..31, spurtPricePct = 0 on ~43% of
-    // context-bearing rows on NON-expiry sessions. Only a WHOLLY empty OI block is inert.
-    // ⚠️ The quadrants here are REAL states, not NEUTRAL. This fixture used to pass NEUTRAL to mean
-    // "flat market", which review round 2 showed is wrong: OiQuadrant.NEUTRAL's javadoc is explicit
-    // that it is the "snapshot unavailable" sentinel, NOT one of the four source states. A genuinely
-    // quiet-but-live bar resolves its quadrants and merely reports zero magnitudes.
+    // The trap a naive port of the canary's window probes falls into: per row, a ZERO SPURT is
+    // ordinary. Measured live 2026-07-20..31, spurtPricePct = 0 on ~43% of context-bearing rows on
+    // NON-expiry sessions. Only a WHOLLY empty OI block is inert.
+    // ⚠️ The quadrants here are REAL states, not NEUTRAL: NEUTRAL is the "snapshot unavailable"
+    // sentinel, not one of the four source states. And the deltas are NONZERO with an imbalance
+    // DERIVED from them (50.0000), because a zero-delta bar would force imbalance null — that is
+    // the separate flat-chain shape, covered by flatChainOi(). A quiet-but-live bar is one whose
+    // SPURT magnitudes are zero, not one whose chain never moved.
     ScalperGateContext.Oi quiet =
         new ScalperGateContext.Oi(
             OiQuadrant.LONG_BUILDUP, OiQuadrant.SHORT_COVERING, new BigDecimal("50.0"),
-            BigDecimal.ZERO, new BigDecimal("31.5"), BigDecimal.ZERO, BigDecimal.ZERO,
-            BigDecimal.ZERO, false, false, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
-            BigDecimal.ZERO);
+            BigDecimal.ZERO, new BigDecimal("31.5"), new BigDecimal("120000"),
+            new BigDecimal("240000"), new BigDecimal("50.0000"), false, false, BigDecimal.ZERO,
+            BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
 
     DataHealthFlags health =
         DataHealthFlags.of(context("NIFTY 50", quiet, healthyMacro()), ORDINARY_DAY);
@@ -541,16 +591,14 @@ class DataHealthFlagsTest {
         });
   }
 
-  /** A null imbalance with both deltas PRESENT is the flat-chain sentinel — a value, not absence. */
+  /** A null imbalance beside PRESENT, ZERO deltas is the flat-chain sentinel — a value, not absence. */
   @Test
   void aFlatChainImbalanceSentinelIsNotAnAbsence() {
     DataHealthFlags health =
-        DataHealthFlags.of(
-            context("NIFTY 50", oiWithout("callPutDeltaImbalancePct"), healthyMacro()),
-            ORDINARY_DAY);
+        DataHealthFlags.of(context("NIFTY 50", flatChainOi(), healthyMacro()), ORDINARY_DAY);
 
     assertThat(health.flags())
-        .as("a flat chain (both deltas present, imbalance null) is an ordinary market state")
+        .as("a flat chain (deltas present and zero, imbalance null) is an ordinary market state")
         .isEmpty();
     assertThat(health.degraded()).isFalse();
   }

@@ -2521,6 +2521,76 @@ export interface components {
             meanExcessReturnPct: number | null;
             medianReturnPct: number | null;
         };
+        ManasPortfolioStat: {
+            /** Format: int32 */
+            slots: number;
+            totalReturnPct: number;
+            cagrPct: number;
+            maxDrawdownPct: number;
+            sharpe: number;
+            /** Format: int32 */
+            tradesTaken: number;
+            /** Format: int32 */
+            tradesSkipped: number;
+            avgExposurePct: number;
+            /** Format: int32 */
+            months: number;
+            positiveMonthsPct: number;
+            bestMonthPct: number;
+            worstMonthPct: number;
+            avgMonthPct: number;
+            annual: components["schemas"]["ManasYearReturn"][];
+        };
+        ManasReport: {
+            status: string;
+            variant: string | null;
+            /** Format: date */
+            fromDate: string | null;
+            runAt: string | null;
+            /** Format: int32 */
+            symbolsScanned: number;
+            /** Format: int32 */
+            totalTrades: number;
+            setups: components["schemas"]["ManasSetupStat"][];
+            portfolio: components["schemas"]["ManasPortfolioStat"] | null;
+            portfolioRsPriority: components["schemas"]["ManasPortfolioStat"] | null;
+            portfolioRsPriorityNet: components["schemas"]["ManasPortfolioStat"] | null;
+            note: string | null;
+        };
+        ManasSetupStat: {
+            setup: string;
+            /** Format: int32 */
+            trades: number;
+            /** Format: int32 */
+            wins: number;
+            /** Format: int32 */
+            losses: number;
+            winRatePct: number;
+            avgWinPct: number;
+            avgLossPct: number;
+            payoffRatio: number;
+            expectancyPct: number;
+            profitFactor: number;
+            avgBarsHeld: number;
+            bestTradePct: number;
+            worstTradePct: number;
+            /** Format: int32 */
+            longestHoldBars: number;
+            /** Format: int32 */
+            shortestHoldBars: number;
+            /** Format: int32 */
+            maxWinStreak: number;
+            /** Format: int32 */
+            maxLossStreak: number;
+            stopOutPct: number;
+        };
+        ManasYearReturn: {
+            /** Format: int32 */
+            year: number;
+            returnPct: number;
+            /** Format: int32 */
+            trades: number;
+        };
         ManasRow: {
             symbol: string;
             exchange: string;
@@ -3024,9 +3094,21 @@ export interface components {
             /** Format: date */
             fromDate: string | null;
             runAt: string | null;
-            variants: components["schemas"]["Report"][];
-            slotSweep: components["schemas"]["SlotCell"][];
+            variants: components["schemas"]["ManasReport"][];
+            slotSweep: components["schemas"]["ManasSlotCell"][];
             note: string;
+        };
+        ManasSlotCell: {
+            /** Format: int32 */
+            slots: number;
+            /** Format: int32 */
+            tradesTaken: number;
+            /** Format: int32 */
+            tradesSkipped: number;
+            grossCagrPct: number;
+            netCagrPct: number;
+            netDrawdownPct: number;
+            netSharpe: number;
         };
         ManasFunnel: {
             /** Format: date */
@@ -3274,12 +3356,12 @@ export interface components {
             value: number | null;
         };
         Heatmap: {
-            buckets?: string[];
-            strikes?: string[];
-            ce?: components["schemas"]["Cell"][];
-            pe?: components["schemas"]["Cell"][];
+            buckets: string[];
+            strikes: string[];
+            ce: components["schemas"]["Cell"][];
+            pe: components["schemas"]["Cell"][];
             /** Format: int64 */
-            maxAbs?: number | null;
+            maxAbs: number | null;
             /** Format: date-time */
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
@@ -3763,6 +3845,30 @@ export interface components {
         OiBuzzIndicesResponse: {
             items: string[];
         };
+        OiBuzzHeatmap: {
+            index: string;
+            /** Format: int32 */
+            advance: number;
+            /** Format: int32 */
+            decline: number;
+            tiles: components["schemas"]["Tile"][];
+            /** Format: date-time */
+            asOf: string | null;
+        };
+        Tile: {
+            symbol: string;
+            changePct: number;
+            ltp: number;
+            open: number;
+            high: number;
+            low: number;
+            /** Format: int64 */
+            oi: number;
+            /** Format: int64 */
+            oiChange: number;
+            /** @enum {string} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
+        };
         FutAnalysisResponse: {
             items: components["schemas"]["FutPoint"][];
         };
@@ -4224,8 +4330,8 @@ export interface components {
             expiry: string;
             pcr: components["schemas"]["Pcr"] | null;
             maxPain: components["schemas"]["MaxPain"] | null;
-            oiGainers: components["schemas"]["StrikeMove"][];
-            oiLosers: components["schemas"]["StrikeMove"][];
+            oiGainers: components["schemas"]["OptionsDigestStrikeMove"][];
+            oiLosers: components["schemas"]["OptionsDigestStrikeMove"][];
             activeStrikes: components["schemas"]["ActiveStrikeMigration"] | null;
             atmStraddle: components["schemas"]["Straddle"] | null;
             atmIv: components["schemas"]["AtmIv"] | null;
@@ -4234,6 +4340,13 @@ export interface components {
             asOf: string | null;
             dataTrust: string;
             trustReasons: string[];
+        };
+        OptionsDigestStrikeMove: {
+            strike: string;
+            /** Format: int64 */
+            oiChange: number;
+            /** @enum {string} */
+            interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         Pcr: {
             now: number | null;
@@ -5354,7 +5467,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Report"];
+                    "*/*": components["schemas"]["ManasReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5385,7 +5498,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Report"];
+                    "*/*": components["schemas"]["ManasReport"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -8195,7 +8308,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["Heatmap"];
+                    "*/*": components["schemas"]["OiBuzzHeatmap"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

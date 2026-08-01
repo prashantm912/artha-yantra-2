@@ -42,9 +42,18 @@ public final class ConnectTheDotsScorer {
   /**
    * One confluence dot's contribution. {@code absent} (signal-analysis rollup §Proposals P3) marks a
    * dot whose INPUT data is MISSING: it is WITHHELD from BOTH the numerator and the denominator (it
-   * neither supports nor opposes), so a data gap is never scored as evidence against the side. The
-   * recorded side-channel keeps serializing {@code dot}/{@code weight}/{@code supports} only, so the
-   * JSON shape is unchanged — the exclusion shows up only in the (correspondingly higher) aggregate.
+   * neither supports nor opposes), so a data gap is never scored as evidence against the side.
+   *
+   * <p><b>{@code absent} IS serialized (F5 U4a / dead-dot A6).</b> It originally rode as a
+   * scoring-only field — the three live-only side-channels wrote {@code dot}/{@code weight}/{@code
+   * supports} (+{@code reason} on the two diagnostics) and the exclusion showed up ONLY as a
+   * correspondingly higher aggregate. Since a withheld dot ALSO reads {@code supports=false}, that
+   * made "no data" and "data said no" byte-identical in the persisted forensics, and the G13 iv-bloc
+   * counterfactual had to reverse-engineer absentness from the effective weight sum being 18.80
+   * rather than 19.60. All three serializers now emit the flag, so the fact is recorded, not
+   * inferred. This is a diagnostic key only: the aggregate arithmetic here is untouched, and none of
+   * the three columns is on the golden/parity path ({@code GoldenSignalsJson.write} lives in
+   * {@code libs/strategy-engine}, which never sees this class).
    */
   public record DotScore(String dot, double weight, boolean supports, String reason, boolean absent) {
 

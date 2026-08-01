@@ -30,13 +30,13 @@ public final class FuturesPreOpenScan {
   /** One scanned symbol — the shape both the stock and index tables render. */
   public record PreOpenRow(
       String symbol,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal preOpenPrice,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal prevClose,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal change,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal changePct,
       @Schema(types = {"string", "null"})
       String prevDayBreak) {}

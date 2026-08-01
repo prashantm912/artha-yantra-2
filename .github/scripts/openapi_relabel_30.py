@@ -24,10 +24,15 @@ Pydantic's FastAPI specs (optimizer-service, margin-service) spell the SAME fact
 `$ref` branch converts to a bare `$ref` (task_ade97df8's original case; nullability and any sibling
 `title` are legitimately dropped, since openapi-diff is blind to nullability either way and the
 alternative — leaving `title` beside a hoisted `$ref` — is exactly the "$ref with sibling keys"
-shape `scan()` refuses below), and a non-`$ref` (primitive, object, or a genuine multi-branch union)
-branch converts to that branch's own keys plus `nullable: true`, or to a trimmed `anyOf` plus
-`nullable: true` when more than one non-null branch remains — both confirmed valid OpenAPI 3.0 by
-the validator backstop, never assumed.
+shape `scan()` refuses below), and a non-`$ref` branch converts to that branch's own keys plus
+`nullable: true` on that SAME node. When more than one non-null branch remains (a genuine union
+alongside nullability), `nullable: true` goes on ONE RETAINED BRANCH that itself carries `type` —
+never on the parent, which carries only `anyOf` and no `type` of its own, so OAS 3.0's own rule
+("nullable adds null … only if type is explicitly defined within the same Schema Object") makes a
+parent-level `nullable` a syntactically-valid but semantically-INERT no-op that silently drops the
+null case. `openapi-spec-validator` cannot catch that mistake — it checks document SYNTAX, not
+instance semantics — which is exactly why this file's own `downgrade_nullable_primitive_anyof`
+docstring below states the correct spelling explicitly rather than relying on the validator alone.
 
 The relabel is lossless ONLY while the specs use no OTHER 3.1-only construct, and this GUARANTEES
 that rather than assuming it — with an ALLOW-LIST, not a deny-list. After relabeling, it VALIDATES the
@@ -155,15 +160,29 @@ def downgrade_nullable_primitive_anyof(node):
     ``Optional[Any]``), or — when MORE than one non-null branch survives (margin-service's
     ``SizeRequest.stop: number | string-pattern | None``) — a genuine union alongside nullability.
 
-    All four are sound, lossless 3.0 spellings, confirmed by the validator backstop, never assumed:
+    ⚠️ **`nullable` on the PARENT is a NO-OP unless the parent also carries `type` in the SAME
+    schema object** (OAS 3.0.3: "[nullable] adds null to the allowed type specified by the type
+    keyword, only if type is explicitly defined within the same Schema Object"). A schema whose
+    only content is `anyOf` (no sibling `type`) with `nullable: true` bolted on is syntactically
+    valid 3.0 — `openapi-spec-validator` passes it — but semantically states nothing: instance
+    validators (and any spec reader following the OAS 3.0 rule literally) still reject `null`,
+    because the keyword that would grant it has nothing to attach to. An earlier version of this
+    function did exactly that for the >1-remaining-branch case and shipped a WRONG diff-copy
+    representation (caught in review before merge, never on a committed spec) — this is why the
+    two cases below are handled differently, not uniformly:
       * exactly one non-null branch remains -> hoist that branch's own keys onto this node (its
-        `type`, and anything else it carries, e.g. `additionalProperties`) and set `nullable: true`,
-        the identical idiom `downgrade_nullable_type_arrays` above uses for the type-array spelling
-        of the same fact.
-      * more than one non-null branch remains -> keep `anyOf` holding just the non-null branches and
-        set `nullable: true` beside it. `anyOf` and `nullable` coexisting is valid OAS 3.0 (`nullable`
-        is an orthogonal schema-level flag, not exclusive with `anyOf`) — confirmed against
-        openapi-spec-validator, not assumed from the spec text.
+        `type`, and anything else it carries, e.g. `additionalProperties`) and set `nullable: true`
+        on this SAME node — sound, because `type` and `nullable` now sit together, the identical
+        idiom `downgrade_nullable_type_arrays` above uses for the type-array spelling of the same
+        fact.
+      * more than one non-null branch remains -> `nullable: true` goes on ONE RETAINED BRANCH that
+        itself carries `type` (the first one found), never on the parent. A value validates against
+        an `anyOf` if it matches ANY branch; `null` now matches that one nullable-and-typed branch,
+        so the union as a whole permits it — sound and lossless, and `type`+`nullable` sit together
+        exactly as in the single-branch case. If NO retained branch carries `type` (not observed in
+        any real spec today), there is nowhere sound to attach `nullable` — refuse this node instead
+        of guessing: it is left completely untouched and falls through to the validator/scan()
+        backstop, which will reject the leftover `type: "null"` sibling and fail the gate closed.
 
     Never matches a branch that IS or CONTAINS a `$ref`, `anyOf`, `oneOf`, or `allOf` — those are
     `downgrade_nullable_ref_anyof`'s narrower job (a `$ref` needs the sibling-keys care described
@@ -177,20 +196,26 @@ def downgrade_nullable_primitive_anyof(node):
         if isinstance(any_of, list) and len(any_of) >= 2:
             null_branches = [b for b in any_of if isinstance(b, dict) and b == {"type": "null"}]
             rest = [b for b in any_of if b not in null_branches]
-            if (
+            convertible = (
                 len(null_branches) == 1
                 and len(rest) >= 1
                 and all(
                     isinstance(b, dict) and not (COMPOSITION_KEYS | {"$ref"}) & set(b)
                     for b in rest
                 )
-            ):
+            )
+            if convertible and len(rest) == 1:
                 del node["anyOf"]
-                if len(rest) == 1:
-                    node.update(rest[0])
-                else:
-                    node["anyOf"] = rest
+                node.update(rest[0])
                 node["nullable"] = True
+            elif convertible and len(rest) > 1:
+                typed_branch = next((b for b in rest if "type" in b), None)
+                if typed_branch is not None:
+                    del node["anyOf"]
+                    typed_branch["nullable"] = True
+                    node["anyOf"] = rest
+                # else: no retained branch can carry `nullable` meaningfully - leave untouched;
+                # see the docstring's "refuse this node instead of guessing".
         for key, value in node.items():
             if key in COMPOSITION_KEYS:
                 continue  # see the docstring: descending here can silently mangle a nested union

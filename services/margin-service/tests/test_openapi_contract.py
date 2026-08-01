@@ -10,14 +10,18 @@ response-code set. Runs in the pytest CI (no new workflow).
 
 margin-service now ALSO commits the full OpenAPI document (mirrors optimizer-service,
 task_e2d15c21's pattern): this file captures both artifacts together so they can never drift
-apart from each other. Coverage is PARTIAL, the same shape as optimizer-service's (see
-contract_service_inventory.sh's NON_JAVA_SERVICES comment): the openapi-diff breaking-change gate
-NEVER runs on margin-service — it loops over the JAVA service list only, categorically, regardless
-of spec content. Only ci-contracts.yml's removed-component-name gate diffs this document across
-the merge base, and only the COMPONENT KEY SET (e.g. whether "SizeResponse" exists at all) — never
-a property or type inside it. Concretely: renaming SizeResponse.target to targetPrice changes
-neither the route surface below nor any component key, so it passes every margin-service gate
-silently — measured, not assumed, and permanent (not a gap a later PR closes on its own).
+apart from each other. margin-service's breaking-change gate NOW RUNS (openapi_relabel_30.py
+gained a converter for pydantic's nullable-anyOf idiom, and the breaking-gate loop now iterates
+non-Java services too - see contract_service_inventory.sh's NON_JAVA_SERVICES comment), comparing
+the merge base's committed spec against THIS branch's own committed spec (no Maven-style fresh
+capture exists for Python). That comparison is only honest if the committed spec actually reflects
+the current code - which is exactly what `test_component_property_names_match_committed_spec`
+below exists to force: it fails LOUD if code renamed/added/removed a component property without
+a `CONTRACTS_CAPTURE=1` re-run, so a forgotten re-dump can never let the breaking gate silently
+compare two identical stale documents. Renaming SizeResponse.target to targetPrice is caught by
+NEITHER the route surface below NOR ci-contracts.yml's removed-component-name gate (component KEY
+set only, never a property inside it) - it is `test_component_property_names_match_committed_spec`
+plus the breaking gate together that closes this, not either alone.
 contracts/gen/margin-service.d.ts + tsc --strict are generated from this document too."""
 
 import json
@@ -72,4 +76,34 @@ def test_openapi_surface_matches_committed_contract():
         "tests/test_openapi_contract.py  and commit BOTH contracts/margin-service.api-surface.json "
         "and contracts/margin-service.openapi.json (then regen contracts/gen/margin-service.d.ts "
         "via npx openapi-typescript@7)"
+    )
+
+
+def _component_property_keys(spec: dict) -> dict:
+    """Property-NAME projection per schema component - deliberately narrower than a raw-spec pin
+    (see the module docstring on why that churns across Python/fastapi/pydantic versions), but a
+    property's NAME is stable across all of them; only the JSON-Schema keyword spelling of its
+    TYPE varies (e.g. anyOf branch shape/ordering/title casing). This catches precisely the class
+    of break the route surface above and ci-contracts' removed-component-name gate cannot: a
+    response-field RENAME that changes no route and no component KEY (margin-service's
+    SizeResponse.target -> targetPrice, e.g.) - measured to pass every other margin-service gate
+    silently before this test existed."""
+    schemas = spec.get("components", {}).get("schemas", {})
+    return {name: sorted(schema.get("properties", {}).keys()) for name, schema in schemas.items()}
+
+
+def test_component_property_names_match_committed_spec():
+    """LIVE app vs the COMMITTED contracts/margin-service.openapi.json - the artifact
+    ci-contracts.yml's breaking gate uses as this service's branch-side comparison input (it has no
+    Maven-style fresh-capture artifact of its own). If code renames a field and this test is not
+    re-run with CONTRACTS_CAPTURE=1, the committed spec goes stale and the breaking gate would
+    silently compare two identical (stale) documents across the merge base - this test is what
+    forces the re-capture BEFORE that can happen."""
+    assert FULL_SPEC.exists(), f"missing committed spec: {FULL_SPEC}"
+    committed = json.loads(FULL_SPEC.read_text(encoding="utf-8"))
+    assert _component_property_keys(app.openapi()) == _component_property_keys(committed), (
+        "margin-service's LIVE component property names differ from the committed "
+        f"{FULL_SPEC.name} - a field was added, removed, or renamed in code without "
+        "re-capturing the spec. Re-capture with:  CONTRACTS_CAPTURE=1 python -m pytest "
+        "tests/test_openapi_contract.py  and commit the result."
     )

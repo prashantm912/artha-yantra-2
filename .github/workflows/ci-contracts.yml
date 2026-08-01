@@ -80,20 +80,32 @@
 #   services (optimizer-service, margin-service) have no such artifact (both Python), so their
 #   branch side is each one's own COMMITTED contracts/<svc>.openapi.json - same merge base vs
 #   branch shape, two different commits, never branch-vs-itself, but it only sees a rename once
-#   the author re-dumps (the SEPARATE optimizer_spec_staleness.py / margin_spec_staleness.py gates
-#   keep the committed dump honest against code between re-dumps; see ci-margin.yml /
-#   ci-optimizer.yml). BOTH non-Java services NOW RIDE THE SAME BREAKING LOOP AS THE FOUR JAVA
-#   SERVICES (previously they did not - the loop iterated AY_CONTRACT_SERVICES_JAVA only, and
-#   openapi_relabel_30.py separately refused both specs outright, so a response-field rename
-#   inside either service, e.g. margin-service's SizeResponse.target, was caught by NO gate at
-#   all, permanently, not merely delayed until a re-dump). Fixed by two independent changes: the
-#   loop below now iterates AY_CONTRACT_SERVICES_ALL (branching on AY_CONTRACT_SERVICES_NON_JAVA
-#   only to pick the branch-side artifact path, exactly as the removed-component-name gate already
-#   did), and openapi_relabel_30.py gained downgrade_nullable_primitive_anyof - pydantic spells
-#   `Optional[X]` as `anyOf: [<schema>, {"type":"null"}]`, bare or with a `title` sibling, which
-#   neither existing converter matched (one wants a bare node, the other wants a `$ref` branch).
-#   The four Java specs relabel BYTE-IDENTICAL to before (none of them uses this shape - verified,
-#   not assumed); see .github/scripts/test_openapi_relabel_30.py for the fixture-pinned shapes.
+#   the author re-dumps. ⚠️ The SEPARATE optimizer_spec_staleness.py / margin_spec_staleness.py
+#   gates do NOT keep that dump honest at the property level - they diff two COMMITTED artifacts
+#   against each other (api-surface.json vs openapi.json), never against the live app, and their
+#   OWN live-app comparison (test_openapi_contract.py's route/param/response-code surface) also
+#   projects OPERATIONS only. A rename inside a component (e.g. margin-service's SizeResponse.target)
+#   changes neither, so nothing forced a re-dump - measured: reproduced both services' red-proof
+#   renames in CODE ONLY (committed spec untouched) and confirmed every existing gate stayed green.
+#   Closed by `test_component_property_names_match_committed_spec` in each service's
+#   test_openapi_contract.py: LIVE app vs the COMMITTED full spec, projected to property NAMES per
+#   component (version-stable across Python/fastapi/pydantic, unlike the full serialized schema -
+#   see that file's module docstring) - it fails LOUD the moment code and committed spec disagree,
+#   which is what makes relying on the committed spec as this branch's "code state" sound.
+#   BOTH non-Java services NOW RIDE THE SAME BREAKING LOOP AS THE FOUR JAVA SERVICES (previously
+#   they did not - the loop iterated AY_CONTRACT_SERVICES_JAVA only, and openapi_relabel_30.py
+#   separately refused both specs outright, so a response-field rename inside either service was
+#   caught by NO gate at all, permanently, not merely delayed until a re-dump). Fixed by THREE
+#   independent changes: the loop below now iterates AY_CONTRACT_SERVICES_ALL (branching on
+#   AY_CONTRACT_SERVICES_NON_JAVA only to pick the branch-side artifact path, exactly as the
+#   removed-component-name gate already did); openapi_relabel_30.py gained
+#   downgrade_nullable_primitive_anyof - pydantic spells `Optional[X]` as `anyOf: [<schema>,
+#   {"type":"null"}]`, bare or with a `title` sibling, which neither existing converter matched
+#   (one wants a bare node, the other wants a `$ref` branch) - the four Java specs relabel
+#   BYTE-IDENTICAL to before (none of them uses this shape - verified, not assumed; see
+#   .github/scripts/test_openapi_relabel_30.py for the fixture-pinned shapes); and the new
+#   property-name staleness test above, without which the first two changes would compare two
+#   identical stale documents whenever an author forgot to re-dump.
 #   STILL NOT CAUGHT by either gate: a component RETYPE or field-level change that openapi-diff
 #   judges compatible, plus everything already listed above.
 #

@@ -45,6 +45,36 @@ def _is_valid_30(components):
     validate(doc)  # raises on invalid; a bare call is the pass condition
 
 
+def _permits_null(schema):
+    """SEMANTIC check, deliberately separate from `_is_valid_30`: does this schema fragment, as it
+    will appear in the throwaway 3.0 diff copy, actually allow a null value? `_is_valid_30` only
+    proves the document is syntactically well-formed 3.0 - it says nothing about whether a
+    converted node still means what the original 3.1 node meant, which is exactly the gap a real
+    review round caught (a parent-level `nullable: true` beside `anyOf` with no sibling `type` is
+    valid 3.0 syntax that OAS 3.0's own rule says does NOTHING - "nullable adds null to the allowed
+    type ... only if type is explicitly defined within the SAME Schema Object"). Encodes that one
+    rule plus plain `anyOf` semantics (valid if it matches ANY branch) - not a general JSON-Schema
+    validator, just the one property every downgrade in this file must preserve."""
+    if not isinstance(schema, dict):
+        return False
+    if "anyOf" in schema:
+        return any(_permits_null(b) for b in schema["anyOf"])
+    if "type" not in schema:
+        return True  # unconstrained (pydantic's Optional[Any] -> {}) - null already fits, no flag needed
+    return isinstance(schema["type"], str) and schema.get("nullable") is True
+
+
+def test_permits_null_catches_the_parent_level_nullable_mistake():
+    """Regression pin for the exact defect a review round caught before merge: `nullable: true`
+    sitting beside `anyOf` with NO sibling `type` is syntactically valid 3.0 (passes
+    `_is_valid_30`) but semantically permits nothing extra. If this test ever goes green for the
+    wrong reason, `_permits_null` itself is broken."""
+    wrong = {"anyOf": [{"type": "number"}, {"type": "string"}], "nullable": True}
+    assert not _permits_null(wrong)
+    right = {"anyOf": [{"type": "number", "nullable": True}, {"type": "string"}]}
+    assert _permits_null(right)
+
+
 # ---- downgrade_nullable_type_arrays (pre-existing; pinned so a future edit cannot regress it) --
 
 
@@ -53,6 +83,7 @@ def test_type_array_nullable_converts():
     relabel.downgrade_nullable_type_arrays(node)
     assert node == {"type": "number", "nullable": True, "title": "StopLoss"}
     _is_valid_30({"schemas": {"X": {"properties": {"f": node}, "type": "object"}}})
+    assert _permits_null(node)
 
 
 def test_type_array_genuine_union_left_alone():
@@ -112,6 +143,7 @@ def test_primitive_anyof_bare_converts():
     _is_valid_30(
         {"schemas": {"X": {"type": "object", "additionalProperties": node, "title": "Response"}}}
     )
+    assert _permits_null(node)
 
 
 def test_primitive_anyof_titled_converts():
@@ -121,6 +153,7 @@ def test_primitive_anyof_titled_converts():
     relabel.downgrade_nullable_primitive_anyof(node)
     assert node == {"title": "Strike", "type": "number", "nullable": True}
     _is_valid_30({"schemas": {"X": {"properties": {"f": node}, "type": "object"}}})
+    assert _permits_null(node)
 
 
 def test_object_additionalproperties_anyof_converts():
@@ -142,6 +175,7 @@ def test_object_additionalproperties_anyof_converts():
         "nullable": True,
     }
     _is_valid_30({"schemas": {"X": {"properties": {"f": node}, "type": "object"}}})
+    assert _permits_null(node)
 
 
 def test_empty_schema_anyof_converts():
@@ -152,13 +186,19 @@ def test_empty_schema_anyof_converts():
     relabel.downgrade_nullable_primitive_anyof(node)
     assert node == {"title": "Value", "nullable": True}
     _is_valid_30({"schemas": {"X": {"properties": {"f": node}, "type": "object"}}})
+    assert _permits_null(node)
 
 
 def test_multi_branch_union_alongside_null_converts():
     """margin-service's SizeRequest.stop: number | pattern-string | None - a GENUINE union that
-    ALSO carries nullability. 3.0 has no single-type spelling for this, but `anyOf` (holding just
-    the non-null branches) plus a sibling `nullable: true` is valid OAS 3.0 syntax and states the
-    identical fact; confirmed against the real validator, not assumed from the spec text."""
+    ALSO carries nullability. 3.0 has no single-type spelling for this, and a parent-level
+    `nullable: true` beside `anyOf` (no sibling `type`) is a NO-OP under OAS 3.0's own rule
+    (nullable only takes effect beside an explicit `type` in the SAME schema object) - caught in
+    review before this ever reached a committed spec; `_is_valid_30` alone cannot catch it since
+    it only checks document SYNTAX. The correct, lossless spelling puts `nullable: true` on ONE
+    RETAINED TYPED BRANCH: a null instance then matches that branch (type + nullable == "type or
+    null"), so it matches the anyOf as a whole. Confirmed both syntactically (real validator) and
+    SEMANTICALLY (`_permits_null`, which encodes the exact OAS 3.0 rule above)."""
     node = {
         "anyOf": [
             {"type": "number"},
@@ -170,10 +210,25 @@ def test_multi_branch_union_alongside_null_converts():
     relabel.downgrade_nullable_primitive_anyof(node)
     assert node == {
         "title": "Stop",
-        "anyOf": [{"type": "number"}, {"type": "string", "pattern": r"^\d+$"}],
-        "nullable": True,
+        "anyOf": [
+            {"type": "number", "nullable": True},
+            {"type": "string", "pattern": r"^\d+$"},
+        ],
     }
     _is_valid_30({"schemas": {"X": {"properties": {"f": node}, "type": "object"}}})
+    assert _permits_null(node)
+
+
+def test_multi_branch_with_no_typed_retained_branch_refuses():
+    """If NO retained branch carries `type`, there is nowhere sound to hang `nullable` - this must
+    be left COMPLETELY untouched (not guessed at) so the leftover `type: "null"` sibling falls
+    through to the validator/scan() backstop and the gate fails closed rather than silently
+    mangling. Synthetic (not observed in any real spec today); pins the refusal path so a future
+    edit cannot quietly start guessing here."""
+    node = {"anyOf": [{}, {"pattern": r"^x$"}, {"type": "null"}], "title": "Odd"}
+    before = copy.deepcopy(node)
+    relabel.downgrade_nullable_primitive_anyof(node)
+    assert node == before
 
 
 def test_non_nullable_union_left_alone():
@@ -188,6 +243,7 @@ def test_non_nullable_union_left_alone():
     relabel.downgrade_nullable_primitive_anyof(node)
     assert node == before
     _is_valid_30({"schemas": {"X": {"properties": {"f": node}, "type": "object"}}})
+    assert not _permits_null(node)  # correctly so - the ORIGINAL never permitted null either
 
 
 def test_primitive_anyof_never_touches_ref_branch():

@@ -61,6 +61,36 @@ def test_openapi_surface_matches_committed_contract():
     )
 
 
+def _component_property_keys(spec: dict) -> dict:
+    """Property-NAME projection per schema component - deliberately narrower than a raw-spec pin
+    (see the module docstring on why that churns across Python/fastapi/pydantic versions), but a
+    property's NAME is stable across all of them; only the JSON-Schema keyword spelling of its
+    TYPE varies (e.g. anyOf branch shape/ordering/title casing). This catches precisely the class
+    of break the route surface above and ci-contracts' removed-component-name gate cannot: a
+    response-field RENAME that changes no route and no component KEY (e.g. ExpireResult.expired ->
+    expiredCount) - measured to pass every other optimizer-service gate silently before this test
+    existed."""
+    schemas = spec.get("components", {}).get("schemas", {})
+    return {name: sorted(schema.get("properties", {}).keys()) for name, schema in schemas.items()}
+
+
+def test_component_property_names_match_committed_spec():
+    """LIVE app vs the COMMITTED contracts/optimizer-service.openapi.json - the artifact
+    ci-contracts.yml's breaking gate uses as this service's branch-side comparison input (it has no
+    Maven-style fresh-capture artifact of its own). If code renames a field and this test is not
+    re-run with CONTRACTS_CAPTURE=1, the committed spec goes stale and the breaking gate would
+    silently compare two identical (stale) documents across the merge base - this test is what
+    forces the re-capture BEFORE that can happen."""
+    assert FULL_SPEC.exists(), f"missing committed spec: {FULL_SPEC}"
+    committed = json.loads(FULL_SPEC.read_text(encoding="utf-8"))
+    assert _component_property_keys(app.openapi()) == _component_property_keys(committed), (
+        "optimizer-service's LIVE component property names differ from the committed "
+        f"{FULL_SPEC.name} - a field was added, removed, or renamed in code without "
+        "re-capturing the spec. Re-capture with:  CONTRACTS_CAPTURE=1 python -m pytest "
+        "tests/test_openapi_contract.py  and commit the result."
+    )
+
+
 def _documented_422_refs() -> set[str | None]:
     """Every 422 response schema `$ref` the published spec advertises, service-wide."""
     spec = app.openapi()

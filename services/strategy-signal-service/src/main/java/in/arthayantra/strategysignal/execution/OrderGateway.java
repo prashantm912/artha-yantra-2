@@ -51,34 +51,43 @@ public interface OrderGateway {
       String symbol,
       String exchange,
       String action,
-      BigDecimal qty,
-      BigDecimal price,
-      BigDecimal triggerPrice,
+      @Schema(type = "string") BigDecimal qty,
+      @Schema(type = "string") BigDecimal price,
+      @Schema(type = "string") BigDecimal triggerPrice,
       String pricetype,
       String product,
       String orderId,
       String status,
       String timestamp) {}
 
-  /** One net-position row. {@code qty} is signed (negative = short); {@code side} is its derived BUY/SELL. */
+  /**
+   * One net-position row. {@code qty} is signed (negative = short); {@code side} is its derived
+   * BUY/SELL. {@code ltp}/{@code mtmPnl} are nullable: OpenAlgo's positionbook doc sample omits them
+   * (they ride the broker-mapped/normalized shape, not the bare documented fields — see {@code
+   * OpenAlgoPosition}'s javadoc), and an omitted JSON key deserializes to a null record component.
+   * {@code qty} is ALSO spelled nullable: the mapper ({@code
+   * RestOpenAlgoOrderReadGateway#toPositionEntry}) explicitly null-checks {@code p.quantity()}
+   * before deriving {@code side}, so the construction site itself treats it as possibly absent even
+   * though no fixture currently exercises that branch.
+   */
   record PositionEntry(
       String symbol,
       String exchange,
       String side,
-      BigDecimal qty,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal qty,
       String product,
-      BigDecimal avgPrice,
-      BigDecimal ltp,
-      BigDecimal mtmPnl) {}
+      @Schema(type = "string") BigDecimal avgPrice,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal mtmPnl) {}
 
   /** One tradebook (fill) row. */
   record TradebookEntry(
       String symbol,
       String exchange,
       String action,
-      BigDecimal qty,
-      BigDecimal price,
-      BigDecimal tradeValue,
+      @Schema(type = "string") BigDecimal qty,
+      @Schema(type = "string") BigDecimal price,
+      @Schema(type = "string") BigDecimal tradeValue,
       String product,
       String orderId,
       String tradeTime) {}
@@ -86,11 +95,11 @@ public interface OrderGateway {
   /** The funds/margin snapshot. {@code status} is {@code OK} or {@code NOT_CONFIGURED} (sentinel). */
   record Funds(
       String status,
-      @Schema(types = {"number", "null"}) BigDecimal availableCash,
-      @Schema(types = {"number", "null"}) BigDecimal collateral,
-      @Schema(types = {"number", "null"}) BigDecimal m2mRealized,
-      @Schema(types = {"number", "null"}) BigDecimal m2mUnrealized,
-      @Schema(types = {"number", "null"}) BigDecimal utilisedDebits) {
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal availableCash,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal collateral,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal m2mRealized,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal m2mUnrealized,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal utilisedDebits) {
 
     /** The fail-safe row a disabled gateway returns — all-null amounts, {@code NOT_CONFIGURED}. */
     public static Funds notConfigured() {

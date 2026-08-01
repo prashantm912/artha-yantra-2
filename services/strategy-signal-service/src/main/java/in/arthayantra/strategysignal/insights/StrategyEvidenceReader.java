@@ -282,6 +282,6 @@ public class StrategyEvidenceReader {
   /** One open sell-decision row in the dossier. */
   public record OpenSell(
       long sellDecisionId, LocalDate runDate, String symbol, String verdict,
-      @Schema(types = {"number", "null"}) BigDecimal unrealizedPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal unrealizedPct,
       boolean acknowledged) {}
 }

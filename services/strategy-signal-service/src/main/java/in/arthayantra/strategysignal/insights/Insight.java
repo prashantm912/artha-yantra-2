@@ -23,7 +23,7 @@ public record Insight(
     String title,
     String explanation,
     JsonNode evidence,
-    @Schema(types = {"number", "null"}) BigDecimal priority,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal priority,
     // InsightEngine:211 builds this as `c.priorityDetail() == null ? null : valueToTree(...)`, so it
     // is explicitly nullable at its ONLY construction site. `evidence` above is NOT: toJson()
     // normalises a null list to List.of(), so it is genuinely always present.

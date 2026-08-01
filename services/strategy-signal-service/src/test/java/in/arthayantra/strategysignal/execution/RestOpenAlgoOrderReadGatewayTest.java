@@ -90,7 +90,14 @@ class RestOpenAlgoOrderReadGatewayTest {
     assertThat(positions.get(0).ltp()).isEqualByComparingTo("110.00");
     assertThat(positions.get(0).mtmPnl()).isEqualByComparingTo("10.00");
     assertThat(positions.get(1).side()).isEqualTo("SELL"); // qty -1
+    // rows 1 and 2 omit ltp/pnl entirely (the broker-mapped/normalized fields, not the bare
+    // documented positionbook sample) — this is the real-world null case OrderGateway.PositionEntry
+    // must advertise as nullable, not merely undocumented.
+    assertThat(positions.get(1).ltp()).isNull();
+    assertThat(positions.get(1).mtmPnl()).isNull();
     assertThat(positions.get(2).side()).isEqualTo("FLAT"); // qty 0
+    assertThat(positions.get(2).ltp()).isNull();
+    assertThat(positions.get(2).mtmPnl()).isNull();
     server.verify();
   }
 

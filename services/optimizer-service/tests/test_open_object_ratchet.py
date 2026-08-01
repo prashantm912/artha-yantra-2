@@ -201,7 +201,7 @@ def _nonempty(value):
     return bool(value) if isinstance(value, (dict, list)) else value is not None
 
 
-def _discloses_key_information(node, schemas: dict) -> bool:
+def _discloses_key_information(node, root: dict) -> bool:
     """Does this node put ANY information about the object's KEYS into the published document?
 
     This asks DISCLOSURE, not validation, and the distinction is the whole design. Four consecutive
@@ -237,7 +237,7 @@ def _discloses_key_information(node, schemas: dict) -> bool:
     if "const" in node:
         return True
     for keyword in ("additionalProperties", "unevaluatedProperties"):
-        if keyword in node and _value_schema_says_something(node[keyword], schemas):
+        if keyword in node and _value_schema_says_something(node[keyword], root):
             return True
     if "propertyNames" in node and _narrows_names(node["propertyNames"]):
         return True
@@ -245,15 +245,15 @@ def _discloses_key_information(node, schemas: dict) -> bool:
     # `not: {"type":"string"}` and `if`/`then` over scalar facets restrict the instance but publish
     # no key names, so a client is still untyped and the diff gate still blind. Ask the SUBSCHEMA
     # the same disclosure question, defaulting to non-disclosing when it answers no.
-    if "not" in node and _discloses_key_information(node["not"], schemas):
+    if "not" in node and _discloses_key_information(node["not"], root):
         return True
     if "if" in node and ("then" in node or "else" in node):      # a lone `if` has no effect
-        return (_discloses_key_information(node.get("then"), schemas)
-                or _discloses_key_information(node.get("else"), schemas))
+        return (_discloses_key_information(node.get("then"), root)
+                or _discloses_key_information(node.get("else"), root))
     return False
 
 
-def _value_schema_says_something(schema, schemas: dict, seen=()) -> bool:
+def _value_schema_says_something(schema, root: dict, seen=()) -> bool:
     """Does an additionalProperties / unevaluatedProperties subschema pin the VALUE shape?
 
     ``true`` and ``{}`` say nothing; ``false`` says "no further keys", which is a closed object and
@@ -272,13 +272,11 @@ def _value_schema_says_something(schema, schemas: dict, seen=()) -> bool:
         return False
     ref = schema.get("$ref")
     if ref is not None:
-        if not ref.startswith(COMPONENT_PREFIX):
-            return False
-        name = ref[len(COMPONENT_PREFIX):]
-        if name in seen or name not in schemas:
-            return False                                # unresolvable, or a reference cycle
-        return _value_schema_says_something(schemas[name], schemas, seen + (name,))
-    return "type" in schema or _discloses_key_information(schema, schemas)
+        target = _resolve_local_schema(root, ref)
+        if target is None or ref in seen:
+            return False                    # unresolvable, external, or a reference cycle
+        return _value_schema_says_something(target, root, seen + (ref,))
+    return "type" in schema or _discloses_key_information(schema, root)
 
 
 def _narrows_names(schema) -> bool:
@@ -307,7 +305,7 @@ def _narrows_names(schema) -> bool:
         return True
     return any(_narrows_names(b) for b in (schema.get("allOf") or []))
 
-def _is_open(node, schemas: dict = {}) -> bool:
+def _is_open(node, root: dict = {}) -> bool:
     """True when the schema publishes nothing about the keys of the object it describes.
 
     The empty schema ``{}``, the boolean ``true`` schema, annotation-only such as ``{"title":
@@ -321,7 +319,7 @@ def _is_open(node, schemas: dict = {}) -> bool:
     types = declared if isinstance(declared, list) else ([declared] if declared else [])
     if types and "object" not in types:
         return False
-    return not _discloses_key_information(node, schemas)
+    return not _discloses_key_information(node, root)
 
 
 
@@ -338,6 +336,21 @@ def _resolve_pointer(root, pointer: str):
     return current
 
 
+
+def _resolve_local_schema(root, reference: str):
+    """THE ONE RESOLVER. Every local reference in this file resolves here.
+
+    There used to be TWO. ``_value_schema_says_something`` carried its own, which accepted only
+    ``#/components/schemas/...``, so a map value pointing at ``#/$defs/X`` read as "says nothing",
+    the parent was reported open, and the walker returned before descending -- and once that wrong
+    parent location was frozen, adding an open child inside the target produced no new location.
+    Reference-site absorption, through a fourth door. Making the second resolver smarter would have
+    left the divergence alive; there is now only one, and ``#/components/schemas/X`` is simply a
+    ``#/`` pointer like any other.
+    """
+    return _resolve_pointer(root, reference[1:]) if reference.startswith("#/") else None
+
+
 def _walk(root: dict, schemas: dict, node: Any, where: str, pointer: str,
           found: set, refs: set) -> None:
     if node is None:
@@ -346,7 +359,7 @@ def _walk(root: dict, schemas: dict, node: Any, where: str, pointer: str,
         # PREDICATE-CORRECT IS NOT WALKER-CORRECT. _is_open already judged the boolean `true`
         # schema correctly and its unit case passed, while this branch dropped it before
         # publication ever saw it. Evaluate here rather than bailing on "not a dict".
-        if _is_open(node, schemas):
+        if _is_open(node, root):
             found.add(where + pointer)
         return
     reference_keyword = next((k for k in FOLLOWED_REFERENCE_FORMS if k in node), None)
@@ -364,18 +377,18 @@ def _walk(root: dict, schemas: dict, node: Any, where: str, pointer: str,
             found.add(f"{where}{pointer} -> UNRESOLVABLE {reference_keyword} {ref}")
         elif ref.startswith(COMPONENT_PREFIX):
             name = ref[len(COMPONENT_PREFIX) :]
-            component = schemas.get(name)
+            component = _resolve_local_schema(root, ref)
             if component is None:
                 # A DANGLING reference publishes a shape nothing can verify: report it.
                 found.add(f"{where}{pointer} -> {ref}")
-            elif _is_open(component, schemas):
+            elif _is_open(component, root):
                 found.add(f"{where}{pointer} -> {name}")
             else:
                 refs.add(name)
         elif ref.startswith("#/"):
             # Any other LOCAL pointer (#/$defs/X and the rest) is resolved rather than ignored.
-            resolved = _resolve_pointer(root, ref[1:])
-            if resolved is None or _is_open(resolved, schemas):
+            resolved = _resolve_local_schema(root, ref)
+            if resolved is None or _is_open(resolved, root):
                 found.add(f"{where}{pointer} -> {ref}")
             else:
                 # RESOLVE THEN KEEP WALKING. Classifying the target's ROOT and stopping meant a
@@ -392,7 +405,7 @@ def _walk(root: dict, schemas: dict, node: Any, where: str, pointer: str,
         # replacement for them (that was draft-07). Returning here meant a frozen reference site
         # absorbed any opaque sibling for free -- the reference-site allowance hole this test
         # closed once already, re-entering through a different door.
-    elif _is_open(node, schemas):
+    elif _is_open(node, root):
         found.add(where + pointer)
         return
     # DESCENT IS DATA, NOT CODE -- iterate the table rather than restating it, so a keyword
@@ -447,7 +460,7 @@ def _scan(spec: dict) -> set:
         # A closure entry is either a component NAME (walked as `#Name`, the frozen location form)
         # or a raw local POINTER such as `#/$defs/X`, which is its own location.
         is_pointer = name.startswith("#/")
-        target = _resolve_pointer(spec, name[1:]) if is_pointer else schemas.get(name)
+        target = _resolve_local_schema(spec, name) if is_pointer else schemas.get(name)
         _walk(spec, schemas, target, name if is_pointer else f"#{name}", "", found, refs)
         queue.extend(refs - seen)
     return found
@@ -732,6 +745,12 @@ def test_a_reference_does_not_absorb_its_opaque_siblings():
                 "$ref": "#/$defs/Open"}}}}}}},
             "/defs-typed": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
                 "$ref": "#/$defs/TypedWithOpenChild"}}}}}}},
+            "/ap-defs": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "type": "object",
+                "additionalProperties": {"$ref": "#/$defs/TypedWithOpenChild"}}}}}}}},
+            "/unev-defs": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "type": "object",
+                "unevaluatedProperties": {"$ref": "#/$defs/TypedWithOpenChild"}}}}}}}},
             "/external": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
                 "$ref": "https://example.test/x.json#/Foo"}}}}}}},
             "/dangling": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
@@ -751,7 +770,10 @@ def test_a_reference_does_not_absorb_its_opaque_siblings():
         "GET /open-target 200 -> Open",         # an OPEN target reports the site AND the sibling
         "GET /open-target 200.payload",
         "GET /defs-ref 200 -> #/$defs/Open",    # a local pointer outside components is resolved
-        # and a TYPED $defs target is TRAVERSED, not just classified at its root
+        # and a TYPED $defs target is TRAVERSED, not just classified at its root.
+        # BOTH map-value forms must reach it -- additionalProperties and unevaluatedProperties each
+        # used to consult a second, component-only resolver that answered "says nothing" for a
+        # $defs pointer, so the parent was reported open and the walker returned before descending.
         "#/$defs/TypedWithOpenChild.payload",
         "GET /external 200 -> UNRESOLVABLE https://example.test/x.json#/Foo",
         "GET /dangling 200 -> #/components/schemas/Missing",

@@ -789,7 +789,23 @@ class SpecOpenObjectRatchetTest {
   }
 
 
-  /** Resolves a local JSON pointer ({@code /components/schemas/X}, {@code /$defs/X}) or null. */
+  /**
+   * ⚠️ THE ONE RESOLVER. Every local reference in this file resolves here — the walker's {@code
+   * $ref} branch, the closure, and {@link #valueSchemaSaysSomething}.
+   *
+   * <p>There used to be TWO. {@code valueSchemaSaysSomething} carried its own, which accepted only
+   * {@code #/components/schemas/…}, so a map value pointing at {@code #/$defs/X} read as "says
+   * nothing", the parent was reported open, and the walker returned before descending — and once
+   * that wrong parent location was frozen, adding an open child inside the target produced no new
+   * location. Reference-site absorption, through a fourth door. Making the second resolver smarter
+   * would have left the divergence alive; there is now only one, and {@code #/components/schemas/X}
+   * is simply a {@code #/} pointer like any other.
+   */
+  private static JsonNode resolveLocalSchema(JsonNode root, String reference) {
+    return reference.startsWith("#/") ? resolvePointer(root, reference.substring(1)) : null;
+  }
+
+  /** Raw JSON-pointer walk; use {@link #resolveLocalSchema} rather than calling this directly. */
   private static JsonNode resolvePointer(JsonNode root, String pointer) {
     JsonNode current = root;
     for (String raw : pointer.split("/")) {
@@ -826,6 +842,12 @@ class SpecOpenObjectRatchetTest {
                                 {"$ref": "#/$defs/Open"}}}}}}},
             "/defs-typed":    {"get": {"responses": {"200": {"content": {"*/*": {"schema":
                                 {"$ref": "#/$defs/TypedWithOpenChild"}}}}}}},
+            "/ap-defs":       {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                                {"type": "object", "additionalProperties":
+                                  {"$ref": "#/$defs/TypedWithOpenChild"}}}}}}}},
+            "/unev-defs":     {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                                {"type": "object", "unevaluatedProperties":
+                                  {"$ref": "#/$defs/TypedWithOpenChild"}}}}}}}},
             "/external":      {"get": {"responses": {"200": {"content": {"*/*": {"schema":
                                 {"$ref": "https://example.test/x.json#/Foo"}}}}}}},
             "/dangling":      {"get": {"responses": {"200": {"content": {"*/*": {"schema":
@@ -851,7 +873,10 @@ class SpecOpenObjectRatchetTest {
             // a local pointer outside components/schemas is resolved, not ignored
             "GET /defs-ref 200 -> #/$defs/Open",
             // ⚠️ and a TYPED $defs target is TRAVERSED, not just classified at its root:
-            // the open child is reported at its own location inside the target
+            // the open child is reported at its own location inside the target. BOTH map-value
+            // forms must reach it — additionalProperties and unevaluatedProperties each used to
+            // consult a second, component-only resolver that answered "says nothing" for a $defs
+            // pointer, so the parent was reported open and the walker returned before descending.
             "#/$defs/TypedWithOpenChild.payload",
             // forms that cannot be resolved from the captured document fail LOUDLY
             "GET /external 200 -> UNRESOLVABLE https://example.test/x.json#/Foo",
@@ -990,7 +1015,8 @@ class SpecOpenObjectRatchetTest {
       // A closure entry is either a component NAME (walked as `#Name`, the frozen location form)
       // or a raw local POINTER such as `#/$defs/X`, which is its own location.
       boolean isPointer = name.startsWith("#/");
-      JsonNode resolvedTarget = isPointer ? resolvePointer(spec, name.substring(1)) : schemas.get(name);
+      JsonNode resolvedTarget =
+          isPointer ? resolveLocalSchema(spec, name) : schemas.get(name);
       walk(spec, schemas, resolvedTarget, isPointer ? name : "#" + name, "", found, refs);
       refs.stream().filter(r -> !visited.contains(r)).forEach(queue::push);
     }
@@ -1013,7 +1039,7 @@ class SpecOpenObjectRatchetTest {
       // schema correctly and its unit case passed, while this branch dropped it before publication
       // ever saw it — so a `true` sitting at a response root, under `items`, as a property or in a
       // composition branch was invisible. Evaluate here rather than bailing on "not an object".
-      if (isOpenObject(node, schemas)) {
+      if (isOpenObject(node, root)) {
         found.add(where + pointer);
       }
       return;
@@ -1034,13 +1060,13 @@ class SpecOpenObjectRatchetTest {
         found.add(where + pointer + " -> UNRESOLVABLE " + referenceKeyword + " " + target);
       } else if (target.startsWith(COMPONENT_PREFIX)) {
         String name = target.substring(COMPONENT_PREFIX.length());
-        JsonNode component = schemas.get(name);
+        JsonNode component = resolveLocalSchema(root, target);
         if (component == null) {
           // A DANGLING component reference publishes a shape nothing can verify. Reporting it is
           // the fails-safe reading; the previous code seeded a closure entry that resolved to
           // nothing and moved on, which is the silent direction.
           found.add(where + pointer + " -> " + target);
-        } else if (isOpenObject(component, schemas)) {
+        } else if (isOpenObject(component, root)) {
           found.add(where + pointer + " -> " + name);
         } else {
           refs.add(name);
@@ -1048,8 +1074,8 @@ class SpecOpenObjectRatchetTest {
       } else if (target.startsWith("#/")) {
         // Any other LOCAL pointer (#/$defs/X, and anything else in-document) is resolved rather
         // than ignored — silently skipping it published an unchecked shape.
-        JsonNode resolved = resolvePointer(root, target.substring(1));
-        if (resolved == null || isOpenObject(resolved, schemas)) {
+        JsonNode resolved = resolveLocalSchema(root, target);
+        if (resolved == null || isOpenObject(resolved, root)) {
           found.add(where + pointer + " -> " + target);
         } else {
           // ⚠️ RESOLVE THEN KEEP WALKING. Classifying the target's ROOT and stopping meant a
@@ -1074,7 +1100,7 @@ class SpecOpenObjectRatchetTest {
       // replacement for them (that was draft-07). Returning here meant a frozen reference site
       // absorbed any opaque sibling for free — the reference-site allowance hole this test closed
       // once already, re-entering through a different door.
-    } else if (isOpenObject(node, schemas)) {
+    } else if (isOpenObject(node, root)) {
       found.add(where + pointer);
       return;
     }
@@ -1224,7 +1250,7 @@ class SpecOpenObjectRatchetTest {
    * still cannot type the response and the diff gate still cannot see a rename. They are genuinely
    * constraining for VALIDATION, which is exactly why the reframing matters.
    */
-  private static boolean disclosesKeyInformation(JsonNode node, JsonNode schemas) {
+  private static boolean disclosesKeyInformation(JsonNode node, JsonNode root) {
     if (!node.isObject()) {
       return false; // a missing branch, or a boolean schema: publishes no key names either way
     }
@@ -1251,7 +1277,7 @@ class SpecOpenObjectRatchetTest {
     }
     for (String keyword : List.of("additionalProperties", "unevaluatedProperties")) {
       if (node.has(keyword)
-          && valueSchemaSaysSomething(node.get(keyword), schemas, new HashSet<>())) {
+          && valueSchemaSaysSomething(node.get(keyword), root, new HashSet<>())) {
         return true;
       }
     }
@@ -1262,12 +1288,12 @@ class SpecOpenObjectRatchetTest {
     // `not: {"type":"string"}` and `if/then` over scalar facets restrict the instance but publish
     // no key names, so a client is still untyped and the diff gate still blind. Ask the SUBSCHEMA
     // the same disclosure question, defaulting to non-disclosing when it answers no.
-    if (node.has("not") && disclosesKeyInformation(node.path("not"), schemas)) {
+    if (node.has("not") && disclosesKeyInformation(node.path("not"), root)) {
       return true;
     }
     if (node.has("if") && (node.has("then") || node.has("else"))) { // a lone `if` has no effect
-      return disclosesKeyInformation(node.path("then"), schemas)
-          || disclosesKeyInformation(node.path("else"), schemas);
+      return disclosesKeyInformation(node.path("then"), root)
+          || disclosesKeyInformation(node.path("else"), root);
     }
     return false;
   }
@@ -1290,7 +1316,7 @@ class SpecOpenObjectRatchetTest {
    * an unresolvable target says nothing and the node therefore reads open.
    */
   private static boolean valueSchemaSaysSomething(
-      JsonNode schema, JsonNode schemas, Set<String> seen) {
+      JsonNode schema, JsonNode root, Set<String> seen) {
     if (schema.isBoolean()) {
       return !schema.booleanValue();
     }
@@ -1299,17 +1325,13 @@ class SpecOpenObjectRatchetTest {
     }
     JsonNode ref = schema.get("$ref");
     if (ref != null) {
-      if (!ref.asText().startsWith(COMPONENT_PREFIX)) {
-        return false;
+      JsonNode target = resolveLocalSchema(root, ref.asText());
+      if (target == null || !seen.add(ref.asText())) {
+        return false; // unresolvable, external, or a reference cycle
       }
-      String name = ref.asText().substring(COMPONENT_PREFIX.length());
-      JsonNode target = schemas.get(name);
-      if (target == null || !seen.add(name)) {
-        return false; // unresolvable, or a reference cycle
-      }
-      return valueSchemaSaysSomething(target, schemas, seen);
+      return valueSchemaSaysSomething(target, root, seen);
     }
-    return schema.has("type") || disclosesKeyInformation(schema, schemas);
+    return schema.has("type") || disclosesKeyInformation(schema, root);
   }
 
   /**
@@ -1363,7 +1385,7 @@ class SpecOpenObjectRatchetTest {
     return isOpenObject(node, JsonNodeFactory.instance.objectNode());
   }
 
-  private static boolean isOpenObject(JsonNode node, JsonNode schemas) {
+  private static boolean isOpenObject(JsonNode node, JsonNode root) {
     if (node == null) {
       return false;
     }
@@ -1377,7 +1399,7 @@ class SpecOpenObjectRatchetTest {
     if (!types.isEmpty() && !types.contains("object")) {
       return false;
     }
-    return !disclosesKeyInformation(node, schemas);
+    return !disclosesKeyInformation(node, root);
   }
 
   /** The declared type(s); empty when absent, so an untyped schema is judged on its keywords. */

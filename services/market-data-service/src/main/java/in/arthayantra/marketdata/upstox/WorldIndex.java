@@ -32,19 +32,19 @@ public record WorldIndex(
     String key,
     @Schema(types = {"string", "null"})
     String tradingSymbol,
-    @Schema(types = {"number", "null"})
+    @Schema(type = "string", types = {"string", "null"})
     BigDecimal ltp,
-    @Schema(types = {"number", "null"})
+    @Schema(type = "string", types = {"string", "null"})
     BigDecimal prevClose,
-    @Schema(types = {"number", "null"})
+    @Schema(type = "string", types = {"string", "null"})
     BigDecimal netChange,
-    @Schema(types = {"number", "null"})
+    @Schema(type = "string", types = {"string", "null"})
     BigDecimal changePct,
-    @Schema(types = {"number", "null"})
+    @Schema(type = "string", types = {"string", "null"})
     BigDecimal open,
-    @Schema(types = {"number", "null"})
+    @Schema(type = "string", types = {"string", "null"})
     BigDecimal high,
-    @Schema(types = {"number", "null"})
+    @Schema(type = "string", types = {"string", "null"})
     BigDecimal low,
     @Schema(types = {"string", "null"})
     OffsetDateTime asOf,

@@ -50,10 +50,10 @@ public class FuturesOiChartService {
   /** One interval's candle: real per-bucket OHLC + the contract's OI at that bucket (null when absent). */
   public record FutOiCandle(
       OffsetDateTime time,
-      BigDecimal open,
-      BigDecimal high,
-      BigDecimal low,
-      BigDecimal close,
+      @Schema(type = "string") BigDecimal open,
+      @Schema(type = "string") BigDecimal high,
+      @Schema(type = "string") BigDecimal low,
+      @Schema(type = "string") BigDecimal close,
       long volume,
       @Schema(types = {"integer", "null"})
       Long oi) {}

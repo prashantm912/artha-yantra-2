@@ -30,11 +30,11 @@ public class FuturesBankGridService {
       String underlying,
       String tradingsymbol,
       LocalDate expiry,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal pricePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pricePct,
       long oi,
       long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal oiPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal oiPct,
       @Schema(types = {"string", "null"}) OiInterpretation interpretation) {}
 
   public record BankGrid(

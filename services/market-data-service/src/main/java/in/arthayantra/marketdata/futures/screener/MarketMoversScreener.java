@@ -44,16 +44,16 @@ public final class MarketMoversScreener {
   /** One graded mover row (LTP/move/OI%/quadrant/breakout/OH-OL/daily-RSI + the long/short verdicts). */
   public record ScreenerRow(
       String symbol,
-      BigDecimal ltp,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal pricePct,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal oiPct,
       OiInterpretation interpretation,
       int breakoutDays,
       boolean openHigh,
       boolean openLow,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal dailyRsi,
       long volume,
       boolean longCandidate,

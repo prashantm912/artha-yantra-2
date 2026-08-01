@@ -8,28 +8,37 @@
 // `Insight.priority` was a BigDecimal-as-string field it never reached (fixed below). It stays
 // key-presence-only because other divergences remain, measured 2026-08-02 by assigning each
 // generated schema into (and out of) its hand-written counterpart under `tsc --strict` and reading
-// the errors. Caveat on the method itself: a WIRE→HAND assignment failure is a real type
-// incompatibility, but assignability is NOT exact-key equality — an optional hand-written field
-// that the wire always sends passes silently in that direction too, so this catches type
-// mismatches, not presence mismatches (e.g. `SignalDto`'s `scalperDetail`/`expiresAt`/
-// `suggestedQty`/`tradeableExchange`/`tradeableTradingsymbol`/`strategyVersionId` are optional in
-// signals.ts but always-present on the wire — invisible to this check, harmless in practice since
-// the wire never omits them, but not proof of exact equality). Within that caveat: (1) several
-// fields the app narrows to a TS string-literal union (`side`, `signalType`, `status`, `severity`,
-// `dataTrust`, `op`, …) while springdoc emits a plain `string` — the transport DTOs don't declare
-// Java enums for these; (2) the transport DTOs declare some fields as raw `JsonNode`
-// (`SignalViews.java`, `Insight.java`), which springdoc can only type `unknown` — the app gives
-// these a real shape it knows from what the DTO actually serializes, which OpenAPI *could* express
-// if the backend exposed typed records instead of `JsonNode` (`scoreBreakdown`, `scalperDetail`,
-// `diagnostic`, `evidence`, `priorityDetail`); and (3) a few hand-written optional fields
-// (`Entry.signalId` & 3 siblings, `StrategySummary.currentVersion`) are typed `T | undefined`
-// where the wire is `T | null` (always present, nullable) — a staleness bug in the hand types, not
-// fixed here. `Insight.priority` (hand-typed `number | null` against a `string | null` wire) WAS a
-// real bug and is fixed in this PR. `TradeDto.closedAt` looked like the same class (wire
-// `string | null`, hand-written `string`) but investigation showed it isn't one: every write path
-// that sets a position's status to CLOSED sets `closed_at` atomically in the same statement
+// the errors.
+//
+// Caveat on the method itself: a WIRE→HAND assignment failure is a real type incompatibility, but
+// assignability is NOT exact-key equality — an optional hand-written field that the wire always
+// sends passes silently in that direction too, so this catches type mismatches, not presence
+// mismatches. Example: `SignalDto`'s `scalperDetail`/`expiresAt`/`suggestedQty`/
+// `tradeableExchange`/`tradeableTradingsymbol`/`strategyVersionId` are optional in signals.ts but
+// always-present on the generated REST RESPONSE — invisible to this check either way, not proof
+// of exact equality. That "always-present" claim is scoped to the REST response, not "the wire"
+// generally: `SignalDto` also models the live STOMP frame (signals.ts:11), and per
+// signals.ts:155-158 the STOMP frame MAY omit `scalperDetail` — so that one field's optionality on
+// the hand type is load-bearing for STOMP, not just slack against a REST guarantee it never needs.
+//
+// Within that caveat, the type-level divergences found: (1) several fields the app narrows to a TS
+// string-literal union (`side`, `signalType`, `status`, `severity`, `dataTrust`, `op`, …) while
+// springdoc emits a plain `string` — the transport DTOs don't declare Java enums for these; (2) the
+// transport DTOs declare some fields as raw `JsonNode` (`SignalViews.java`, `Insight.java`), which
+// springdoc can only type `unknown` — the app gives these a real shape it knows from what the DTO
+// actually serializes, which OpenAPI *could* express if the backend exposed typed records instead
+// of `JsonNode` (`scoreBreakdown`, `scalperDetail`, `diagnostic`, `evidence`, `priorityDetail`);
+// and (3) a few hand-written optional fields (`Entry.signalId` & 3 siblings,
+// `StrategySummary.currentVersion`) are typed `T | undefined` where the wire is `T | null` (always
+// present, nullable) — a staleness bug in the hand types, not fixed here.
+//
+// `Insight.priority` (hand-typed `number | null` against a `string | null` wire) WAS a real bug
+// and is fixed in this PR. `TradeDto.closedAt` looked like the same class (wire `string | null`,
+// hand-written `string`) but investigation showed it isn't one: every write path that sets a
+// position's status to CLOSED sets `closed_at` atomically in the same statement
 // (`PaperPositionRepository.close()`), so a `TradeDto` row can never actually carry a null one —
 // the wire's nullable annotation is the stale side here, a backend fix out of scope for this PR.
+//
 // Full findings + file:line evidence for every case: the `chore/contracts-bridge-tightening` PR
 // description (2026-08-02 investigation) — tightening AssertKeys itself is a separate, follow-up
 // change.

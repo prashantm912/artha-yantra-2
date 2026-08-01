@@ -543,6 +543,16 @@ public class SignalEngine {
   // returns, so ay_signal_eval_duration_seconds_count can never tell these outcomes apart; that is
   // part of why the chart-stage blind spot hid for so long.
   private final java.util.Map<Outcome, Counter> outcomeCounters = new java.util.EnumMap<>(Outcome.class);
+  // The PER-STRATEGY dimension the meters above deliberately do NOT carry (F5 unit U2 / V053): 63
+  // slugs x 7 outcomes would add 441 Prometheus series to a scrape that exists to be cheap, so the
+  // dimension lives here and its read surface is a database row, not a meter. Keyed by the IST
+  // SESSION DATE OF THE BAR so a count is attributed by the bar it came from rather than by when the
+  // flush happens — that is what lets StrategyEvalDenominatorRepository write plain cumulative values
+  // with no cross-date ambiguity and no checkpoint. Written by the single eval thread, read by
+  // SignalEvalOutcomeRollupJob's scheduler thread: ConcurrentHashMap + LongAdder, never a lock the
+  // eval thread can contend on.
+  private final ConcurrentHashMap<StrategyEvalKey, java.util.concurrent.atomic.LongAdder>
+      strategyEvalCounts = new ConcurrentHashMap<>();
   // Identifies THIS generation of the counters above. Born with them and never reassigned, so a
   // restart necessarily yields both zeroed counters and a fresh epoch — the invariant that lets
   // SignalEvalOutcomeRollupJob keep its delta checkpoint in the DB instead of in memory (V045).
@@ -1266,6 +1276,69 @@ public class SignalEngine {
   }
 
   /**
+   * One per-strategy evaluation counter: which SESSION the bar belonged to, which strategy evaluated
+   * it, and how it ended. The session date is part of the key rather than inferred at flush time, so
+   * a count produced at 15:58 on Friday still lands on FRIDAY's row when the next flush is Monday
+   * 09:00.
+   *
+   * @param sessionDate IST calendar date of the evaluated bar — sessions never cross IST midnight, so
+   *     the IST date IS the session date
+   * @param slug {@link Loaded#slug()}, the identity that survives a republish
+   */
+  record StrategyEvalKey(LocalDate sessionDate, String slug, Outcome outcome) {}
+
+  /**
+   * A read of every per-strategy evaluation counter, stamped with the epoch they belong to — the
+   * per-strategy twin of {@link OutcomeSnapshot}, and paired with the epoch for the same reason: a
+   * restart yields BOTH a fresh epoch and zeroed adders, and {@code boot_id} is what stops the new
+   * boot's smaller totals from overwriting the previous boot's rows.
+   *
+   * @param counts every observed (session date, slug, outcome); absent keys are genuine zeros
+   */
+  record StrategyEvalSnapshot(UUID epoch, Map<StrategyEvalKey, Long> counts) {}
+
+  /**
+   * A point-in-time read of the per-strategy counters, for {@link SignalEvalOutcomeRollupJob} to
+   * persist (V053).
+   *
+   * <p><b>Costs the eval thread nothing</b> — same reasoning as {@link #outcomeSnapshot()}: a read of
+   * adders already maintained in memory, taken on the rollup's own scheduler thread. The map
+   * iteration is weakly consistent, which is harmless here: a key inserted mid-iteration is simply
+   * picked up by the next flush, and because the persisted value is an absolute cumulative that the
+   * upsert REPLACES, being late can never double count.
+   *
+   * <p>Unlike {@link #outcomeSnapshot()} this does NOT pre-seed every combination with zero. 63 slugs
+   * x 7 outcomes of mostly-zero rows would be noise, and it would say something false: process
+   * liveness is V045's question and V045 still answers it. Here an absent row means "this combination
+   * was never observed", which is exactly what a denominator needs.
+   */
+  StrategyEvalSnapshot strategyEvalSnapshot() {
+    Map<StrategyEvalKey, Long> counts = new LinkedHashMap<>();
+    strategyEvalCounts.forEach((key, adder) -> counts.put(key, adder.sum()));
+    return new StrategyEvalSnapshot(counterEpoch, counts);
+  }
+
+  /**
+   * Drops per-strategy counters for sessions strictly before {@code sessionDate}, bounding the map to
+   * the current session (plus, for one tick each morning, the previous session's tail).
+   *
+   * <p><b>Call this only AFTER the snapshot has been persisted</b> — {@link
+   * SignalEvalOutcomeRollupJob} does, and that ordering is what makes eviction lossless: the row
+   * carrying an evicted key's final value is already committed. Without eviction the map would grow
+   * by up to 441 entries per day of uptime and the flush would rewrite every past day's rows on every
+   * tick.
+   *
+   * <p><b>Why a re-created adder cannot under-report.</b> Only a bar whose IST date is before
+   * {@code sessionDate} could re-create an evicted key, and no such bar can be evaluated:
+   * {@code LiveSeriesStore.append} rejects any candle that is not strictly after the series' last bar
+   * ({@code onClosedBar} returns immediately on a false append), and the series has already advanced
+   * past that date. The bound is a property of the intake path, not an assumption about timing.
+   */
+  void evictStrategyEvalCountsBefore(LocalDate sessionDate) {
+    strategyEvalCounts.keySet().removeIf(key -> key.sessionDate().isBefore(sessionDate));
+  }
+
+  /**
    * True iff any loaded strategy subscribes a 1m channel, so {@link SubscriberHealthCanary} stays
    * quiet when there is nothing to receive (no intraday strategy loaded / all-empty-universe session).
    */
@@ -1472,9 +1545,43 @@ public class SignalEngine {
       // construction. Counter-only: this decides nothing and must never alter what is traded.
       Outcome outcome =
           decideEntry(strategy, exchange, tradingsymbol, interval, bar, bank, primary, index);
-      outcomeCounters.get(outcome).increment();
+      countEvaluation(strategy, bar, outcome);
       warnIfUnscoreablePastWarmup(outcome, strategy, exchange, tradingsymbol, interval, bar);
     }
+  }
+
+  /**
+   * Counts ONE completed entry evaluation, at both resolutions: the fleet {@code
+   * ay_signal_eval_outcome_total} meter (persisted by V045) and the per-strategy denominator
+   * (persisted by V053).
+   *
+   * <p><b>Both increments live here so they can never diverge.</b> The single-increment-site
+   * invariant the caller documents — {@code decideEntry} returns exactly one {@link Outcome} on every
+   * path, so Σ(outcomes) == evaluations — now covers the per-strategy dimension too, which means the
+   * per-slug totals SUM to the fleet total by construction rather than by agreement between two call
+   * sites.
+   *
+   * <p><b>Nothing here touches I/O.</b> A {@code Counter.increment()}, one key allocation, one
+   * {@code ConcurrentHashMap} lookup (lock-free on the bin-head fast path, which is the steady state
+   * once a slug/outcome pair has been seen once in a session) and one {@code LongAdder.increment()}.
+   * The database is only ever reached from {@link SignalEvalOutcomeRollupJob}'s own scheduler thread.
+   *
+   * <p><b>The session date comes from the BAR, not the clock.</b> A count belongs to the session it
+   * was produced in, and taking it from {@code bar.bucketStart()} means a late flush cannot
+   * mis-attribute it — this is precisely what V045 cannot do, since a Micrometer counter carries a
+   * total and no timing. Normalized through {@link Ist#OFFSET} first: reading {@code toLocalDate()}
+   * off a UTC-offset value is the repo's standing off-by-one trap.
+   */
+  void countEvaluation(Loaded strategy, EngineCandle bar, Outcome outcome) {
+    outcomeCounters.get(outcome).increment();
+    strategyEvalCounts
+        .computeIfAbsent(
+            new StrategyEvalKey(
+                bar.bucketStart().withOffsetSameInstant(Ist.OFFSET).toLocalDate(),
+                strategy.slug(),
+                outcome),
+            key -> new java.util.concurrent.atomic.LongAdder())
+        .increment();
   }
 
   /**

@@ -100,9 +100,12 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
     }
   }
 
+  @Autowired private StrategyEvalDenominatorRepository denominators;
+
   private SignalEvalOutcomeRollupJob job(
       SignalEngine engine, SignalEvalOutcomeRepository repo, Clock clock, int retentionDays) {
-    return new SignalEvalOutcomeRollupJob(engine, repo, events, clock, environment, retentionDays);
+    return new SignalEvalOutcomeRollupJob(
+        engine, repo, denominators, events, clock, environment, retentionDays);
   }
 
   /** An engine whose counters return the given values in succession, all under one epoch. */
@@ -116,6 +119,10 @@ class SignalEvalOutcomeRollupIntegrationTest extends StrategySignalIntegrationTe
     OutcomeSnapshot[] rest = new OutcomeSnapshot[snapshots.length - 1];
     System.arraycopy(snapshots, 1, rest, 0, rest.length);
     when(engine.outcomeSnapshot()).thenReturn(snapshots[0], rest);
+    // The V053 side-channel is exercised by StrategyEvalDenominatorIntegrationTest; here it only
+    // needs to be non-null so flushOnShutdown() can run the V045 assertions unchanged.
+    when(engine.strategyEvalSnapshot())
+        .thenReturn(new SignalEngine.StrategyEvalSnapshot(epoch, Map.of()));
     return engine;
   }
 

@@ -1,0 +1,131 @@
+-- The PER-STRATEGY evaluation denominator (signal-analysis README §7 row 5, F5 unit U2).
+--
+-- WHY. V045's counters are FLEET-level: `outcomeCounters` is one Micrometer Counter per Outcome with
+-- no per-strategy dimension, so "how many bars did scalp-xyz-nifty evaluate today?" — the DENOMINATOR
+-- every per-strategy support-rate and pass-rate needs — does not exist. Today every such rate is
+-- either computed against the fleet total (wrong whenever strategies differ in session window,
+-- universe or load date) or reconstructed by hand off the 3m grid. This table supplies the real one.
+--
+-- WHY THIS IS NOT THE ROW-PER-EVAL DESIGN V045 REJECTED. V045's header rejects a row per no-entry per
+-- strategy per bar: ~7,875 evaluations/day at ~2,624 bytes a rejection row (~20 MB/day) and ~63
+-- inline writes every bar on the sole eval thread. This is a DAY-KEYED ROLLUP, not an event log: at
+-- most one row per (IST session date, boot, strategy slug, outcome) — 63 slugs x 7 outcomes = 441
+-- rows/day/boot at the ABSOLUTE maximum, and in practice far fewer because most strategies only ever
+-- reach two or three outcomes in a session. ~18x fewer rows than the rejected shape, three orders of
+-- magnitude fewer bytes, and — as with V045 — ZERO added I/O on the eval thread: the eval path does
+-- ONE in-memory LongAdder increment (SignalEngine.countEvaluation), and only the existing V045
+-- scheduler ever touches the database.
+--
+-- ============================================================================================
+-- THE WRITE PROTOCOL: cumulative values, REPLACED. This is deliberately NOT V045's delta protocol.
+-- ============================================================================================
+-- eval_count is the CUMULATIVE number of evaluations for this exact (session_date, boot_id,
+-- strategy_slug, outcome), and the upsert REPLACES it:
+--
+--   INSERT ... ON CONFLICT (session_date, boot_id, strategy_slug, outcome)
+--   DO UPDATE SET eval_count = EXCLUDED.eval_count
+--
+-- WHY A DOUBLE COUNT IS UNREACHABLE, by construction rather than by guard. The value written is a
+-- pure function of one in-memory adder — `strategyEvalCounts.get(key).sum()` — and the statement
+-- assigns that value to the row. Nothing on the database side ADDS, so re-running a flush cannot
+-- accumulate: a second flush with an unchanged adder writes the identical number, and a second flush
+-- with a grown adder writes the correct larger number. Every failure mode that forces V045 to keep a
+-- durable checkpoint therefore collapses to a no-op here:
+--   * LOST ACKNOWLEDGEMENT -- Postgres commits, the caller never learns it. The next flush writes the
+--     same-or-larger absolute value over the same row. Nothing is double counted, because no delta
+--     was ever computed.
+--   * FAILED WRITE -- the adder is untouched by a failed write, so the next flush carries the whole
+--     unrecorded window. Nothing is lost; only the intra-day update cadence degrades.
+--   * RESTART MID-DAY -- a restart mints a fresh boot_id (SignalEngine.counterEpoch, born with the
+--     counters) AND zeroes the adders. The new boot writes DIFFERENT rows, so it can never overwrite
+--     the previous boot's totals with its own smaller ones. A day's true total is
+--     SUM(eval_count) across boots (see the canonical query below), which is exact across any number
+--     of restarts.
+-- The writer holds no state between flushes and needs no checkpoint read at all.
+--
+-- WHY THE SESSION DATE IS A COLUMN AND ALSO PART OF THE IN-MEMORY KEY. The adder map is keyed by
+-- (IST session date of the evaluated BAR, slug, outcome), so a count is attributed by the bar it came
+-- from, never by when the flush happened. That removes V045's cross-date ambiguity entirely: there is
+-- no `recovered_from` here and there cannot be one. A count produced at 15:58 on Friday but not
+-- flushed until Monday 09:00 still lands on FRIDAY's row, because Friday travels with it. (V045
+-- cannot do this: a Micrometer counter carries a total and no timing, so a recovered span there is
+-- genuinely unattributable.)
+--
+-- session_date is a real DATE computed in Java from the bar's IST offset, NOT a `::date` cast of a
+-- timestamptz. In-container now()/::date is UTC, so a cast would be off by one across IST midnight
+-- for exactly the rows an operator cares about; storing the session date directly means the consuming
+-- query is a plain `WHERE session_date = DATE '2026-08-01'` with no offset arithmetic to get wrong.
+--
+-- WHAT IS AND IS NOT GUARANTEED:
+--   GUARANTEED  -- no double count, on any failure path, with no checkpoint and no coordination.
+--   GUARANTEED  -- a restart mid-session never corrupts the day: the boots are separate rows and the
+--                  day total is their SUM.
+--   GUARANTEED  -- counts are attributed to the SESSION DATE OF THE BAR, never to the flush time.
+--   GUARANTEED  -- a failed or delayed flush loses nothing; the next one carries the full total.
+--   NOT GUARANTEED -- evaluations since the last successful flush are lost if the process is HARD
+--                  killed (they exist only in JVM memory, exactly as for V045). A graceful stop
+--                  flushes via @PreDestroy.
+--   NOT GUARANTEED -- the ABSENCE of a row does not prove the strategy evaluated nothing; it proves
+--                  no (date, boot, slug, outcome) combination was ever observed. Process liveness is
+--                  V045's job, and it still answers it — this table deliberately does not write
+--                  zero rows for every strategy x outcome pair, which is what keeps it at ~441.
+--
+-- CANONICAL DENOMINATOR QUERY -- "what did each strategy evaluate on date X, and what was its mix":
+--
+--   SELECT strategy_slug,
+--          SUM(eval_count)                                        AS evaluations,
+--          SUM(eval_count) FILTER (WHERE outcome = 'fired')       AS fired,
+--          ROUND(100.0 * SUM(eval_count) FILTER (WHERE outcome = 'fired')
+--                / NULLIF(SUM(eval_count), 0), 2)                 AS fire_pct,
+--          COUNT(DISTINCT boot_id)                                AS boots
+--     FROM strategy.strategy_eval_denominator
+--    WHERE session_date = DATE '2026-08-01'
+--    GROUP BY strategy_slug
+--    ORDER BY evaluations DESC;
+--
+-- The SUM over boot_id is what makes a restart invisible to the answer. Joining a per-strategy
+-- rejection/signal count against `evaluations` gives a rate with a real denominator for the first
+-- time.
+--
+-- OBSERVABILITY ONLY. Nothing here is read by any trading decision. The flush runs on the EXISTING
+-- V045 scheduler (evalOutcomeTaskScheduler — a dedicated expendable single daemon thread; see
+-- MonitorSchedulingConfig for why neither the default pool nor the fenced monitor pool is safe), so
+-- no new scheduler is introduced. The golden replay boots no scheduler and the deterministic backtest
+-- runner never constructs a SignalEngine, so no row is ever written on a backtest -> parity-safe by
+-- construction.
+--
+-- NO PER-SLUG METER. The in-memory dimension is deliberately NOT published to Micrometer: 63 slugs x
+-- 7 outcomes would add 441 Prometheus series to a scrape that exists to be cheap. The database row is
+-- the read surface.
+--
+-- RETENTION: shares V045's horizon and its 02:30-IST daily prune knob
+-- (artha.signals.eval-outcome-retention-days / ARTHA_SIGNALS_EVAL_OUTCOME_RETENTION_DAYS; <= 0
+-- DISABLES the prune rather than wiping the table). 441 rows/day * 180d ~= 79k rows -- a few MB. The
+-- prune deletes by session_date and cannot orphan anything: unlike V045 there is no checkpoint to
+-- read back, so a deleted row can only ever cost history, never correctness of a live boot.
+
+CREATE TABLE strategy_eval_denominator (
+  session_date   DATE   NOT NULL, -- IST session date OF THE EVALUATED BAR (computed in Java from the
+                                  -- bar's IST offset, never a ::date cast — see the header).
+  boot_id        UUID   NOT NULL, -- the counter epoch (SignalEngine.counterEpoch), so a restart
+                                  -- writes NEW rows instead of overwriting the earlier boot's.
+  strategy_slug  TEXT   NOT NULL, -- SignalEngine.Loaded.slug() — the stable identity across
+                                  -- republishes (a version id would fragment a day per republish).
+  outcome        TEXT   NOT NULL, -- SignalEngine.Outcome tag: fired / confluence-blocked /
+                                  -- confluence-gate-absent / discipline-paused /
+                                  -- composite-below-threshold / chart-gate-failed /
+                                  -- unscoreable-indicators-warming
+  eval_count     BIGINT NOT NULL, -- CUMULATIVE for this exact key, REPLACED on conflict. Not a delta:
+                                  -- that is what makes a double flush a no-op.
+  PRIMARY KEY (session_date, boot_id, strategy_slug, outcome)
+);
+
+COMMENT ON TABLE strategy_eval_denominator IS
+  'Per-strategy per-IST-session-date evaluation counts — the denominator for per-strategy rates. Day-keyed cumulative values REPLACED on conflict, so a double flush or a mid-day restart cannot double count. Observability only.';
+
+-- The denominator query filters by session_date and groups by slug; the PK's leading session_date
+-- already serves it, so no secondary index is needed.
+
+-- ay_strategy is the READ-ONLY per-schema role. Writing here needs UPDATE (the upsert merge) and only
+-- the `artha` owner does it, matching V045's grant exactly.
+GRANT SELECT ON strategy_eval_denominator TO ay_strategy;

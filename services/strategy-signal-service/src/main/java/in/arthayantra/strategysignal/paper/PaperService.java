@@ -9,6 +9,9 @@ import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
 import in.arthayantra.strategysignal.signals.SignalRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -23,6 +26,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -243,8 +247,19 @@ public class PaperService {
    */
   private final Duration signalTakeMaxAge;
   private final TransactionTemplate txTemplate;
+  /**
+   * M4 (#128): incremented whenever an OPEN position's live MTM cannot be computed because no tick
+   * has ever arrived for it (structurally the case for non-ticking swing/funnel equities — the live
+   * feed is index/options only). VISIBILITY only: {@code mark}/{@code unrealized} stay {@code null}
+   * exactly as before, unchanged for every consumer — this counter exists so the owner has real
+   * numbers on how often/how many positions are "MTM blind" before deciding whether a daily-close
+   * fallback should stay display-only or feed risk sizing
+   * (docs/signal-analysis/2026-08-02-e4-128-batch-scoping.md, M4).
+   */
+  private final Counter mtmBlindCounter;
 
-  /** Wires the ledger collaborators. */
+  /** Wires the ledger collaborators, registering the M4 MTM-blind visibility counter. */
+  @Autowired
   public PaperService(
       PaperOrderRepository orders,
       PaperPositionRepository positions,
@@ -266,7 +281,8 @@ public class PaperService {
           long tickMaxAgeSeconds,
       @org.springframework.beans.factory.annotation.Value(
               "${artha.paper.signal-take-max-age-minutes:60}")
-          long signalTakeMaxAgeMinutes) {
+          long signalTakeMaxAgeMinutes,
+      MeterRegistry meterRegistry) {
     this.orders = orders;
     this.positions = positions;
     this.fills = fills;
@@ -284,6 +300,35 @@ public class PaperService {
     this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
     this.signalTakeMaxAge = Duration.ofMinutes(signalTakeMaxAgeMinutes);
     this.txTemplate = new TransactionTemplate(transactionManager);
+    this.mtmBlindCounter = meterRegistry.counter("ay_paper_mtm_blind_total");
+  }
+
+  /**
+   * Test-only convenience (pre-M4 signature): a private, unshared registry absorbs the MTM-blind
+   * counter, so every existing direct-construction call site keeps compiling byte-identical.
+   */
+  public PaperService(
+      PaperOrderRepository orders,
+      PaperPositionRepository positions,
+      PaperFillService fills,
+      LastTickReader lastTick,
+      InstrumentMetaClient instruments,
+      SignalRepository signals,
+      PaperAccountService accountService,
+      BookResolver books,
+      RiskService risk,
+      ScalperAccountModel accounts,
+      ApplicationEventPublisher events,
+      PaperStaleTickAlerter staleTicks,
+      PaperOrderRejectionRecorder rejections,
+      PlatformTransactionManager transactionManager,
+      BigDecimal perTradeRiskPct,
+      long tickMaxAgeSeconds,
+      long signalTakeMaxAgeMinutes) {
+    this(
+        orders, positions, fills, lastTick, instruments, signals, accountService, books, risk,
+        accounts, events, staleTicks, rejections, transactionManager, perTradeRiskPct,
+        tickMaxAgeSeconds, signalTakeMaxAgeMinutes, new SimpleMeterRegistry());
   }
 
   /**
@@ -1077,6 +1122,8 @@ public class PaperService {
                 ? mark.subtract(row.avgEntryPrice())
                 : row.avgEntryPrice().subtract(mark);
         unrealized = move.multiply(BigDecimal.valueOf(row.qty())).setScale(2, RoundingMode.HALF_UP);
+      } else {
+        recordMtmBlind(id, row.exchange(), row.tradingsymbol());
       }
     }
     List<OrderLeg> legs =
@@ -1320,6 +1367,8 @@ public class PaperService {
               ? mark.subtract(row.avgEntryPrice())
               : row.avgEntryPrice().subtract(mark);
       unrealized = move.multiply(BigDecimal.valueOf(row.qty())).setScale(2, RoundingMode.HALF_UP);
+    } else {
+      recordMtmBlind(row.id(), row.exchange(), row.tradingsymbol());
     }
     return new PositionDto(
         row.id(), row.exchange(), row.tradingsymbol(), row.side(), row.qty(), row.avgEntryPrice(),
@@ -1331,5 +1380,18 @@ public class PaperService {
     return new TradeDto(
         row.id(), row.exchange(), row.tradingsymbol(), row.side(), row.qty(), row.avgEntryPrice(),
         row.realizedPnl(), row.openedAt(), row.closedAt());
+  }
+
+  /**
+   * M4 (#128) visibility: an OPEN position with no live tick — {@code mark}/{@code unrealized} stay
+   * {@code null} to every caller of {@link #positionDetail} / {@link #openPositions}, exactly as
+   * before this counter existed. Never a refusal, never a value change — see {@link #mtmBlindCounter}.
+   */
+  private void recordMtmBlind(long id, String exchange, String tradingsymbol) {
+    mtmBlindCounter.increment();
+    log.warn(
+        "MTM blind: no live tick for OPEN position {} {}:{} — mark/unrealized left null"
+            + " (visibility only, #128 M4)",
+        id, exchange, tradingsymbol);
   }
 }

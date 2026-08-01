@@ -103,7 +103,10 @@ public final class ManasAroraSwingBacktest {
   private static final double MAX_OPEN_RISK_PCT = 0.06; // ... while total open risk stays ≤ 6%
   private static final int MAX_LOTS = 3; // §3.4 up to 3 lots per position
 
-  private static final double VOL_MIN = 1.2; // expanding-volume gate (§4.7)
+  // Package-private (M8, #128): the swing volume-gate divergence characterization test
+  // (ManasVolumeGateDivergenceTest) reads this SAME production default to characterize the §4.7
+  // expanding-volume gate against the live §4.3 absolute-liquidity gate (ManasGates.liquidVolume).
+  static final double VOL_MIN = 1.2; // expanding-volume gate (§4.7)
   private static final int WEEKLY = 5; // geometry recompute cadence (sessions)
   private static final int GEO_LOOKBACK = 400; // detector window
   private static final int MIN_BARS = 260; // 252 for the 52-week gate + slack
@@ -594,7 +597,13 @@ public final class ManasAroraSwingBacktest {
     return out;
   }
 
-  private static double[] volumeRatio(double[] v, int lookback) {
+  /**
+   * §4.7 expanding-volume ratio: {@code v[i] / mean(v[i-lookback..i-1])}, {@code 0} before {@code
+   * lookback} bars of history exist. Package-private (M8, #128) so the swing volume-gate divergence
+   * characterization test ({@code ManasVolumeGateDivergenceTest}) can drive this SAME production
+   * formula directly, alongside the live {@code ManasGates.liquidVolume} absolute-floor gate.
+   */
+  static double[] volumeRatio(double[] v, int lookback) {
     double[] out = new double[v.length];
     for (int i = 0; i < v.length; i++) {
       if (i < lookback) {

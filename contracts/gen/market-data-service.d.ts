@@ -2397,21 +2397,21 @@ export interface components {
         PortfolioStat: {
             /** Format: int32 */
             slots: number;
-            totalReturnPct: number;
-            cagrPct: number;
-            maxDrawdownPct: number;
-            sharpe: number;
+            totalReturnPct: string;
+            cagrPct: string;
+            maxDrawdownPct: string;
+            sharpe: string;
             /** Format: int32 */
             tradesTaken: number;
             /** Format: int32 */
             tradesSkipped: number;
-            avgExposurePct: number;
+            avgExposurePct: string;
             /** Format: int32 */
             months: number;
-            positiveMonthsPct: number;
-            bestMonthPct: number;
-            worstMonthPct: number;
-            avgMonthPct: number;
+            positiveMonthsPct: string;
+            bestMonthPct: string;
+            worstMonthPct: string;
+            avgMonthPct: string;
             annual: components["schemas"]["YearReturn"][];
         };
         Report: {
@@ -2438,15 +2438,15 @@ export interface components {
             wins: number;
             /** Format: int32 */
             losses: number;
-            winRatePct: number;
-            avgWinPct: number;
-            avgLossPct: number;
-            payoffRatio: number;
-            expectancyPct: number;
-            profitFactor: number;
-            avgBarsHeld: number;
-            bestTradePct: number;
-            worstTradePct: number;
+            winRatePct: string;
+            avgWinPct: string;
+            avgLossPct: string;
+            payoffRatio: string;
+            expectancyPct: string;
+            profitFactor: string;
+            avgBarsHeld: string;
+            bestTradePct: string;
+            worstTradePct: string;
             /** Format: int32 */
             longestHoldBars: number;
             /** Format: int32 */
@@ -2455,30 +2455,30 @@ export interface components {
             maxWinStreak: number;
             /** Format: int32 */
             maxLossStreak: number;
-            stopOutPct: number;
+            stopOutPct: string;
         };
         YearReturn: {
             /** Format: int32 */
             year: number;
-            returnPct: number;
+            returnPct: string;
             /** Format: int32 */
             trades: number;
         };
         MinerviniRow: {
             symbol: string;
             exchange: string;
-            close: number;
-            sma50: number | null;
-            sma150: number | null;
-            sma200: number | null;
-            high52w: number | null;
-            low52w: number | null;
-            pctFromHigh: number | null;
-            pctAboveLow: number | null;
-            rsRank: number | null;
-            avgTurnover50: number | null;
-            freeFloatMcapCr: number | null;
-            freeFloatPct: number | null;
+            close: string;
+            sma50: string | null;
+            sma150: string | null;
+            sma200: string | null;
+            high52w: string | null;
+            low52w: string | null;
+            pctFromHigh: string | null;
+            pctAboveLow: string | null;
+            rsRank: string | null;
+            avgTurnover50: string | null;
+            freeFloatMcapCr: string | null;
+            freeFloatPct: string | null;
             gates: boolean[];
             /** Format: int32 */
             gatesPassed: number;
@@ -2519,31 +2519,31 @@ export interface components {
             horizonSessions: number;
             /** Format: int32 */
             sampleCount: number;
-            winRatePct: number | null;
-            beatBenchmarkRatePct: number | null;
-            meanReturnPct: number | null;
-            meanBenchmarkReturnPct: number | null;
-            meanExcessReturnPct: number | null;
-            medianReturnPct: number | null;
+            winRatePct: string | null;
+            beatBenchmarkRatePct: string | null;
+            meanReturnPct: string | null;
+            meanBenchmarkReturnPct: string | null;
+            meanExcessReturnPct: string | null;
+            medianReturnPct: string | null;
         };
         ManasPortfolioStat: {
             /** Format: int32 */
             slots: number;
-            totalReturnPct: number;
-            cagrPct: number;
-            maxDrawdownPct: number;
-            sharpe: number;
+            totalReturnPct: string;
+            cagrPct: string;
+            maxDrawdownPct: string;
+            sharpe: string;
             /** Format: int32 */
             tradesTaken: number;
             /** Format: int32 */
             tradesSkipped: number;
-            avgExposurePct: number;
+            avgExposurePct: string;
             /** Format: int32 */
             months: number;
-            positiveMonthsPct: number;
-            bestMonthPct: number;
-            worstMonthPct: number;
-            avgMonthPct: number;
+            positiveMonthsPct: string;
+            bestMonthPct: string;
+            worstMonthPct: string;
+            avgMonthPct: string;
             annual: components["schemas"]["ManasYearReturn"][];
         };
         ManasReport: {
@@ -2570,15 +2570,15 @@ export interface components {
             wins: number;
             /** Format: int32 */
             losses: number;
-            winRatePct: number;
-            avgWinPct: number;
-            avgLossPct: number;
-            payoffRatio: number;
-            expectancyPct: number;
-            profitFactor: number;
-            avgBarsHeld: number;
-            bestTradePct: number;
-            worstTradePct: number;
+            winRatePct: string;
+            avgWinPct: string;
+            avgLossPct: string;
+            payoffRatio: string;
+            expectancyPct: string;
+            profitFactor: string;
+            avgBarsHeld: string;
+            bestTradePct: string;
+            worstTradePct: string;
             /** Format: int32 */
             longestHoldBars: number;
             /** Format: int32 */
@@ -2587,40 +2587,40 @@ export interface components {
             maxWinStreak: number;
             /** Format: int32 */
             maxLossStreak: number;
-            stopOutPct: number;
+            stopOutPct: string;
         };
         ManasYearReturn: {
             /** Format: int32 */
             year: number;
-            returnPct: number;
+            returnPct: string;
             /** Format: int32 */
             trades: number;
         };
         ManasRow: {
             symbol: string;
             exchange: string;
-            close: number;
-            sma50: number | null;
-            sma200: number | null;
-            high52w: number | null;
-            low52w: number | null;
-            avgVol20: number | null;
-            avgVol50: number | null;
-            turnover50: number | null;
-            withinHighPct: number | null;
-            aboveLowPct: number | null;
+            close: string;
+            sma50: string | null;
+            sma200: string | null;
+            high52w: string | null;
+            low52w: string | null;
+            avgVol20: string | null;
+            avgVol50: string | null;
+            turnover50: string | null;
+            withinHighPct: string | null;
+            aboveLowPct: string | null;
             withinHigh: boolean;
             aboveSma50: boolean;
             liquidVolume: boolean;
             liquidDepth: boolean;
             lowCap: boolean;
-            freeFloatMcapCr: number | null;
-            freeFloatPct: number | null;
+            freeFloatMcapCr: string | null;
+            freeFloatPct: string | null;
             gates: boolean[];
             /** Format: int32 */
             gatesPassed: number;
             passesAll: boolean;
-            rsRank: number | null;
+            rsRank: string | null;
         };
         ManasScreenResponse: {
             items: components["schemas"]["ManasRow"][];
@@ -2652,17 +2652,17 @@ export interface components {
             runAt: string;
             /** Format: int32 */
             symbolsScanned: number;
-            capital: number;
-            totalReturnPct: number;
-            cagrPct: number;
-            maxDrawdownPct: number;
-            sharpe: number;
+            capital: string;
+            totalReturnPct: string;
+            cagrPct: string;
+            maxDrawdownPct: string;
+            sharpe: string;
             /** Format: int32 */
             tradesTaken: number;
             /** Format: int32 */
             tradesSkipped: number;
-            winRatePct: number;
-            profitFactor: number;
+            winRatePct: string;
+            profitFactor: string;
             report: components["schemas"]["JsonNode"];
             trades: components["schemas"]["DeepSwingTrade"][];
         };
@@ -2671,15 +2671,15 @@ export interface components {
             setup: string;
             /** Format: date */
             entryDate: string;
-            entryPrice: number;
+            entryPrice: string;
             /** Format: date */
             exitDate: string;
-            exitPrice: number;
-            pnlPct: number;
+            exitPrice: string;
+            pnlPct: string;
             /** Format: int32 */
             barsHeld: number;
             exitReason: string;
-            rsRankAtEntry: number;
+            rsRankAtEntry: string;
         };
         JsonNode: unknown;
         WarmStatus: {
@@ -2917,11 +2917,11 @@ export interface components {
         Row: {
             exchange: string;
             tradingsymbol: string;
-            latestClose: number;
-            pastClose: number;
-            value: number;
-            avgVolume: number | null;
-            distanceFromHigh52w: number | null;
+            latestClose: string;
+            pastClose: string;
+            value: string;
+            avgVolume: string | null;
+            distanceFromHigh52w: string | null;
             label: string | null;
         };
         ScreenerResponse: {
@@ -2945,7 +2945,7 @@ export interface components {
         RotationResult: {
             /** Format: int32 */
             slots: number;
-            marginPct: number;
+            marginPct: string;
             /** Format: int32 */
             rotations: number;
             net: components["schemas"]["PortfolioStat"];
@@ -2957,10 +2957,10 @@ export interface components {
             tradesTaken: number;
             /** Format: int32 */
             tradesSkipped: number;
-            grossCagrPct: number;
-            netCagrPct: number;
-            netDrawdownPct: number;
-            netSharpe: number;
+            grossCagrPct: string;
+            netCagrPct: string;
+            netDrawdownPct: string;
+            netSharpe: string;
         };
         SweepCell: {
             /** Format: int64 */
@@ -2969,9 +2969,9 @@ export interface components {
             floorTurnover: number;
             /** Format: int32 */
             trades: number;
-            netCagrPct: number;
-            netDrawdownPct: number;
-            netSharpe: number;
+            netCagrPct: string;
+            netDrawdownPct: string;
+            netSharpe: string;
         };
         MinerviniFunnel: {
             /** Format: date */
@@ -2983,26 +2983,26 @@ export interface components {
         };
         MinerviniFunnelRow: {
             symbol: string;
-            close: number;
-            rsRank: number | null;
+            close: string;
+            rsRank: string | null;
             /** Format: int32 */
             stage: number | null;
             isVcp: boolean;
-            pivot: number | null;
-            cheatPivot: number | null;
+            pivot: string | null;
+            cheatPivot: string | null;
             thrust: boolean;
             footprint: string | null;
-            pctToPivot: number | null;
+            pctToPivot: string | null;
         };
         Regime: {
             regime: string;
-            advanceRatio: number | null;
+            advanceRatio: string | null;
             /** Format: int32 */
             sessions: number;
         };
         DiffRow: {
             symbol: string;
-            rsRank: number | null;
+            rsRank: string | null;
         };
         ScreenDiff: {
             /** Format: date */
@@ -3030,9 +3030,9 @@ export interface components {
         Geometry: {
             isVcp: boolean;
             footprint: string | null;
-            pivot: number | null;
-            deepestPct: number | null;
-            tightestPct: number | null;
+            pivot: string | null;
+            deepestPct: string | null;
+            tightestPct: string | null;
             /** Format: int32 */
             contractionCount: number | null;
             /** Format: int32 */
@@ -3043,7 +3043,7 @@ export interface components {
             shakeout: boolean;
             /** Format: int32 */
             baseCount: number | null;
-            cheatPivot: number | null;
+            cheatPivot: string | null;
             thrust: boolean;
             rejectReason: string | null;
         };
@@ -3053,18 +3053,18 @@ export interface components {
             /** Format: date */
             screenDate: string | null;
             scanned: boolean;
-            close: number | null;
-            sma50: number | null;
-            sma150: number | null;
-            sma200: number | null;
-            high52w: number | null;
-            low52w: number | null;
-            pctFromHigh: number | null;
-            pctAboveLow: number | null;
-            rsRank: number | null;
-            avgTurnover50: number | null;
-            freeFloatMcapCr: number | null;
-            freeFloatPct: number | null;
+            close: string | null;
+            sma50: string | null;
+            sma150: string | null;
+            sma200: string | null;
+            high52w: string | null;
+            low52w: string | null;
+            pctFromHigh: string | null;
+            pctAboveLow: string | null;
+            rsRank: string | null;
+            avgTurnover50: string | null;
+            freeFloatMcapCr: string | null;
+            freeFloatPct: string | null;
             gates: boolean[];
             /** Format: int32 */
             gatesPassed: number;
@@ -3110,10 +3110,10 @@ export interface components {
             tradesTaken: number;
             /** Format: int32 */
             tradesSkipped: number;
-            grossCagrPct: number;
-            netCagrPct: number;
-            netDrawdownPct: number;
-            netSharpe: number;
+            grossCagrPct: string;
+            netCagrPct: string;
+            netDrawdownPct: string;
+            netSharpe: string;
         };
         ManasFunnel: {
             /** Format: date */
@@ -3125,15 +3125,15 @@ export interface components {
         };
         ManasFunnelRow: {
             symbol: string;
-            close: number;
-            aboveLowPct: number | null;
+            close: string;
+            aboveLowPct: string | null;
             setupType: string | null;
-            pivot: number | null;
+            pivot: string | null;
             footprint: string | null;
-            pctToPivot: number | null;
-            breakoutPivot: number | null;
-            vcpPivot: number | null;
-            rsRank: number | null;
+            pctToPivot: string | null;
+            breakoutPivot: string | null;
+            vcpPivot: string | null;
+            rsRank: string | null;
         };
         ManasCandidateAnalysis: {
             symbol: string;
@@ -3141,23 +3141,23 @@ export interface components {
             /** Format: date */
             screenDate: string | null;
             scanned: boolean;
-            close: number | null;
-            sma50: number | null;
-            sma200: number | null;
-            high52w: number | null;
-            low52w: number | null;
-            withinHighPct: number | null;
-            aboveLowPct: number | null;
-            avgVol20: number | null;
-            avgVol50: number | null;
-            turnover50: number | null;
+            close: string | null;
+            sma50: string | null;
+            sma200: string | null;
+            high52w: string | null;
+            low52w: string | null;
+            withinHighPct: string | null;
+            aboveLowPct: string | null;
+            avgVol20: string | null;
+            avgVol50: string | null;
+            turnover50: string | null;
             withinHigh: boolean;
             aboveSma50: boolean;
             liquidVolume: boolean;
             liquidDepth: boolean;
             lowCap: boolean;
-            freeFloatMcapCr: number | null;
-            freeFloatPct: number | null;
+            freeFloatMcapCr: string | null;
+            freeFloatPct: string | null;
             gates: boolean[];
             /** Format: int32 */
             gatesPassed: number;
@@ -3168,7 +3168,7 @@ export interface components {
             setupType: string;
             valid: boolean;
             footprint: string | null;
-            pivot: number | null;
+            pivot: string | null;
             /** Format: int32 */
             baseWeeks: number | null;
             rejectReason: string | null;

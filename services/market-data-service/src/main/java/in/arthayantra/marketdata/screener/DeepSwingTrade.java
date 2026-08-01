@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.screener;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
@@ -16,10 +17,10 @@ public record DeepSwingTrade(
     String symbol,
     String setup,
     LocalDate entryDate,
-    BigDecimal entryPrice,
+    @Schema(type = "string") BigDecimal entryPrice,
     LocalDate exitDate,
-    BigDecimal exitPrice,
-    BigDecimal pnlPct,
+    @Schema(type = "string") BigDecimal exitPrice,
+    @Schema(type = "string") BigDecimal pnlPct,
     int barsHeld,
     String exitReason,
-    BigDecimal rsRankAtEntry) {}
+    @Schema(type = "string") BigDecimal rsRankAtEntry) {}

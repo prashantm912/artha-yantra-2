@@ -28,12 +28,12 @@ public class ScreenerService {
   public record Row(
       String exchange,
       String tradingsymbol,
-      BigDecimal latestClose,
-      BigDecimal pastClose,
-      BigDecimal value,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string") BigDecimal latestClose,
+      @Schema(type = "string") BigDecimal pastClose,
+      @Schema(type = "string") BigDecimal value,
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal avgVolume,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal distanceFromHigh52w,
       @Schema(types = {"string", "null"})
       String label) {}

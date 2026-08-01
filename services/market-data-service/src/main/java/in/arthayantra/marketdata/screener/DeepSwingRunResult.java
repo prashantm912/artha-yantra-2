@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.screener;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -20,14 +21,14 @@ public record DeepSwingRunResult(
     LocalDate fromDate,
     String runAt,
     int symbolsScanned,
-    BigDecimal capital,
-    BigDecimal totalReturnPct,
-    BigDecimal cagrPct,
-    BigDecimal maxDrawdownPct,
-    BigDecimal sharpe,
+    @Schema(type = "string") BigDecimal capital,
+    @Schema(type = "string") BigDecimal totalReturnPct,
+    @Schema(type = "string") BigDecimal cagrPct,
+    @Schema(type = "string") BigDecimal maxDrawdownPct,
+    @Schema(type = "string") BigDecimal sharpe,
     int tradesTaken,
     int tradesSkipped,
-    BigDecimal winRatePct,
-    BigDecimal profitFactor,
+    @Schema(type = "string") BigDecimal winRatePct,
+    @Schema(type = "string") BigDecimal profitFactor,
     JsonNode report,
     List<DeepSwingTrade> trades) {}

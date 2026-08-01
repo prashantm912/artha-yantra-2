@@ -645,12 +645,18 @@ restart services, or write during market hours.
   all SENSEX-rooted. **Check the EXECUTION root, not just the OI root** — they are different
   instruments under ADR-0003's three-way decoupling. ⚠ 07-24 (Friday, no expiry, 550 SENSEX fails)
   does not fit, so the claim is *an expiry saturates the expiring root*, NOT *only an expiry can*.
-- ⚠ **A dot at 0% is THREE explanations deep now, and the third one has no probe** (added 2026-07-30,
-  §3.28): a dead input (null — the canary sees it), a **frozen** input (one distinct value — #1111's
-  probe sees it), or a **live, moving operand that never crosses its threshold** (nothing sees it).
-  `breadth` on 2026-07-30 was the third: 0/814 with 10 distinct values over 23–32, against a `> 32`
-  rule whose session max was exactly 32. In a `live` run do not classify at all (§3.21); at EOD place
-  the dot's own threshold on the operand's session min/max **before** reaching for a data explanation.
+- ⚠ **A dot at 0% is THREE explanations deep now, and the third one HAS a probe since G16** (added
+  2026-07-30, §3.28; probe added 2026-08-01): a dead input (null — the canary sees it), a **frozen**
+  input (one distinct value — #1111's probe sees it), or a **live, moving operand that never crosses
+  its threshold** — now the `neverCrossing` NEAR-MISS state on `/api/v1/signal-rejections/dot-health`
+  (`DotHealthCanary.nearMiss`): strictly one-sided supports (~0% or ~100%) AND the session extremum
+  within epsilon of the dot's rule, judged only for fixed-global-threshold dots (breadth today).
+  `breadth` on 2026-07-30 was the discovered case: 0/814 with 10 distinct values over 23–32, against
+  a `> 32` rule whose session max was exactly 32. ⚠ The probe deliberately does NOT flag a 0% dot
+  far from its line (the 07-31 `oi_spurt` conjunct-starved reading — regime, not telemetry), and it
+  is telemetry-only (never pages; the threshold is doctrine). In a `live` run do not classify at all
+  (§3.21) — the flag reads "so far today"; at EOD still place the dot's own threshold on the
+  operand's session min/max **before** reaching for a data explanation.
 - Capture liveness: `max(bucket)` on 1m candles + snapshot counts vs wall clock.
 
 ### 4.2 Live counterfactual — "would loosening knob X have made money TODAY?"

@@ -161,7 +161,10 @@ type _DotHealth = AssertKeys<
   Schemas['DotHealth'],
   'asOf' | 'session' | 'rowsScanned' | 'rowsInspected' | 'dots'
 >;
-type _DotState = AssertKeys<Schemas['DotState'], 'dot' | 'alive' | 'required' | 'frozen' | 'detail'>;
+type _DotState = AssertKeys<
+  Schemas['DotState'],
+  'dot' | 'alive' | 'required' | 'frozen' | 'neverCrossing' | 'detail'
+>;
 
 // --- registry CRUD (D3: the whole surface was Map-returning, so the spec had no shape at all) ---
 type _StrategyListItem = AssertKeys<

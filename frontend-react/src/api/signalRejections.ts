@@ -166,6 +166,14 @@ export interface DotState {
    * so `detail` says whether the freeze is by design.
    */
   frozen: boolean;
+  /**
+   * True for the FOURTH input state (G16): live AND moving (so neither the liveness nor the frozen
+   * probe can see it) yet strictly one-sided on supports with the session extremum within a small
+   * distance of the dot's threshold — breadth on 2026-07-30: 0/814 supports, 10 distinct values,
+   * session max EXACTLY 32 against its `> 32` rule. Telemetry only, never pages; `detail` carries
+   * the numbers.
+   */
+  neverCrossing: boolean;
   /** Human liveness detail ("input live in the last N rejections" / "input dead across N" / "no rejections yet today"). */
   detail: string;
 }

@@ -567,4 +567,114 @@ class DotHealthCanaryTest {
         .filteredOn(s -> s.dot().equals("futures_oi") || s.dot().equals("underlying_oi"))
         .allSatisfy(s -> assertThat(s.alive()).isTrue());
   }
+
+  /**
+   * G16 fixture: one CE row per 3m bar whose breadth dot was SCORED (the persisted confluence
+   * breakdown carries the side-resolved {@code supports} verdict the composite actually used).
+   */
+  private static SignalRejectionRepository.RejectionRow[] breadthScoredRows(
+      int count, java.util.function.IntUnaryOperator advancesForBar,
+      java.util.function.IntPredicate supportsForBar) {
+    OffsetDateTime base = OffsetDateTime.parse("2026-06-10T09:15:00+05:30");
+    SignalRejectionRepository.RejectionRow[] rows =
+        new SignalRejectionRepository.RejectionRow[count];
+    for (int i = 0; i < count; i++) {
+      String json =
+          "{\"context\":{\"macro\":{\"advances\":" + advancesForBar.applyAsInt(i)
+              + ",\"declines\":20}},\"confluence\":{\"dots\":[{\"dot\":\"breadth\","
+              + "\"weight\":1.0,\"supports\":" + supportsForBar.test(i)
+              + ",\"reason\":\"advances/declines > 32\"}]}}";
+      try {
+        rows[i] = new SignalRejectionRepository.RejectionRow(
+            1, null, "slug", "NFO", "FUT", "3m", "CE", "confluence-composite", null, null, null,
+            "r", null, null, MAPPER.readTree(json), base.plusMinutes(3L * i),
+            OffsetDateTime.now());
+      } catch (Exception e) {
+        throw new IllegalStateException(e);
+      }
+    }
+    return rows;
+  }
+
+  private DotHealthCanary.DotState breadthState(DotHealthCanary canary) {
+    return canary.evaluate().dots().stream()
+        .filter(s -> s.dot().equals("breadth"))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  @Test
+  void aLiveMovingNeverCrossingOperandFlagsNearMissAndNeverPages() {
+    // G16's discovered case, 2026-07-30: breadth 0/814 supports off a completely healthy input —
+    // moving values (10 distinct), rule `advances > 32`, session max EXACTLY 32. The liveness probe
+    // is right (alive), the G12 probe is right (not frozen) — and the dot still contributed a
+    // constant all session. THIS is the state the near-miss probe exists for.
+    stubRows(breadthScoredRows(10, i -> 23 + i, i -> false)); // advances 23..32, never supported
+    DotHealthCanary canary = canary("breadth");
+
+    DotHealthCanary.DotState breadth = breadthState(canary);
+    assertThat(breadth.alive()).as("input genuinely live").isTrue();
+    assertThat(breadth.frozen()).as("moving values — not the G12 state").isFalse();
+    assertThat(breadth.neverCrossing()).isTrue();
+    assertThat(breadth.detail())
+        .contains("NEAR-MISS")
+        .contains("0/10")
+        .contains("session max 32")
+        .contains("never crossing");
+
+    // Telemetry only: the dot is alive and not frozen, and the near-miss state itself never pages
+    // (the threshold is doctrine; whether a near-miss deserves an alert cadence is an owner call).
+    canary.sweep();
+    verifyNoInteractions(events);
+  }
+
+  @Test
+  void aNormallyDiscriminatingDotIsNotNearMiss() {
+    // Mixed supports = the dot discriminated today. A single crossing proves the operand CAN cross,
+    // so the strictly-one-sided requirement reads false however close the extremum sits.
+    stubRows(breadthScoredRows(10, i -> 28 + i, i -> 28 + i > 32)); // advances 28..37, 5 crossings
+    assertThat(breadthState(canary("breadth")).neverCrossing()).isFalse();
+  }
+
+  @Test
+  void aZeroSupportDayFarFromTheLineIsRegimeNotNearMiss() {
+    // The 2026-07-31 oi_spurt shape (§3.28 check: "not never-crossing-by-threshold — conjunct-
+    // starved, regime"): 0% support with the operand nowhere near the line is a market verdict,
+    // not a telemetry state. Max advances 14 against > 32 (gap 18 > epsilon 3) must NOT flag —
+    // this is what separates the detector from re-litigating the threshold.
+    stubRows(breadthScoredRows(10, i -> 5 + i, i -> false)); // advances 5..14
+    DotHealthCanary.DotState breadth = breadthState(canary("breadth"));
+    assertThat(breadth.neverCrossing()).isFalse();
+    assertThat(breadth.detail()).doesNotContain("NEAR-MISS");
+  }
+
+  @Test
+  void aFrozenDotStaysFrozenAndIsNotAlsoNearMiss() {
+    // The states are disjoint by construction: one distinct value is the G12 freeze (already
+    // reported and, for a required CONTINUOUS dot, already paged) — re-flagging it as a near miss
+    // would double-report one defect under two names.
+    stubRows(breadthScoredRows(10, i -> 30, i -> false)); // one distinct value, at gap 2 (< epsilon)
+    DotHealthCanary.DotState breadth = breadthState(canary("breadth"));
+    assertThat(breadth.frozen()).isTrue();
+    assertThat(breadth.neverCrossing()).isFalse();
+    assertThat(breadth.detail()).contains("FROZEN").doesNotContain("NEAR-MISS");
+  }
+
+  @Test
+  void theAlwaysCrossingMirrorFlagsWithinEpsilonAboveTheLine() {
+    // The ~100% mirror: every row supported, session min just over the line — the dot never
+    // discriminates either, it adds a constant weight from the other side.
+    stubRows(breadthScoredRows(10, i -> 33 + (i % 3), i -> true)); // advances 33..35, min 33
+    DotHealthCanary.DotState breadth = breadthState(canary("breadth"));
+    assertThat(breadth.neverCrossing()).isTrue();
+    assertThat(breadth.detail()).contains("NEAR-MISS").contains("never discriminating");
+  }
+
+  @Test
+  void tooFewScoredBarsAbstainFromTheNearMissAssertion() {
+    // Same discipline as MIN_FROZEN_BARS: the flag is an assertion, and an un-evidenced assertion
+    // must read false. A perfect near-miss signature on 5 bars is mid-session noise, not a state.
+    stubRows(breadthScoredRows(5, i -> 28 + i, i -> false)); // 5 bars < MIN_NEAR_MISS_BARS
+    assertThat(breadthState(canary("breadth")).neverCrossing()).isFalse();
+  }
 }

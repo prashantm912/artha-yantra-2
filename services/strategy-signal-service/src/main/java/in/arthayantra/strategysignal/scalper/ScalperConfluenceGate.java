@@ -1056,7 +1056,11 @@ public class ScalperConfluenceGate {
             cfg.has("iv-per-strike"), cfg.has("premium-skew"), cfg.has("dow-confluence"),
             // T24: the dot must test the SAME floor the rail did (effVolFloor above), not the
             // static per-index default it resolved on its own.
-            effVolFloor);
+            effVolFloor,
+            // A3: `iv_rank` is default-OFF. Its input is suppressed below the 60-trading-day
+            // IvAnalyticsService history floor and would start resolving on a CALENDAR trigger
+            // (~late Sep 2026) — arming it stays an owner decision (tag ⇒ republish), never a date.
+            cfg.has("iv-rank-dot"));
     diag.confluence = conf;
     diag.confluenceThreshold = cfg.confluenceThreshold();
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();

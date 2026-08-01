@@ -372,20 +372,33 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       assertThat(row.stopLoss()).isNull();
       assertThat(row.target()).isNull();
 
-      Map<String, Object> latencyStamp =
-          jdbc.queryForMap(
-              "SELECT generated_at, emitted_at, emit_latency_ms FROM signals WHERE id = ?",
-              row.id());
-      assertThat(((java.sql.Timestamp) latencyStamp.get("generated_at")).toInstant())
-          .as("latency instrumentation never rewrites the deterministic bar-bucket instant")
-          .isEqualTo(row.generatedAt().toInstant());
-      assertThat(((java.sql.Timestamp) latencyStamp.get("emitted_at")).toInstant())
-          .isEqualTo(LIVE_NOW.toInstant());
-      assertThat(latencyStamp.get("emit_latency_ms")).isEqualTo(0L);
-      assertThat(meterRegistry.find("ay_signal_bar_to_emit_seconds").timer())
-          .isNotNull()
-          .extracting(timer -> timer.count())
-          .isEqualTo(1L);
+      // AWAITED for the same reason as the outcome counter below — everything read here is written
+      // AFTER the INSERT this test gated on. `stampEmissionLatency` runs its UPDATE and only then
+      // records the bar-to-emit timer, so a bare read can see a null `emitted_at` (an NPE on
+      // .toInstant(), which would surface looking like an unrelated bug rather than a race) or a
+      // timer still at 0. Both re-read inside the same block so each poll re-samples together.
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .untilAsserted(
+              () -> {
+                Map<String, Object> latencyStamp =
+                    jdbc.queryForMap(
+                        "SELECT generated_at, emitted_at, emit_latency_ms FROM signals WHERE id = ?",
+                        row.id());
+                assertThat(latencyStamp.get("emitted_at"))
+                    .as("the emission stamp is written post-commit — await it, never read it bare")
+                    .isNotNull();
+                assertThat(((java.sql.Timestamp) latencyStamp.get("generated_at")).toInstant())
+                    .as("latency instrumentation never rewrites the deterministic bar-bucket instant")
+                    .isEqualTo(row.generatedAt().toInstant());
+                assertThat(((java.sql.Timestamp) latencyStamp.get("emitted_at")).toInstant())
+                    .isEqualTo(LIVE_NOW.toInstant());
+                assertThat(latencyStamp.get("emit_latency_ms")).isEqualTo(0L);
+                assertThat(meterRegistry.find("ay_signal_bar_to_emit_seconds").timer())
+                    .isNotNull()
+                    .extracting(timer -> timer.count())
+                    .isEqualTo(1L);
+              });
 
       // chip task_37ee83e0: the per-outcome counters are wired on the LIVE eval path (not just the
       // classifier), and EVERY tag is pre-registered at boot — a not-yet-happened outcome must
@@ -397,9 +410,32 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       Counter fired =
           meterRegistry.find("ay_signal_eval_outcome_total").tag("outcome", "fired").counter();
       assertThat(fired).isNotNull();
-      assertThat(fired.count())
-          .as("the bar that emitted the signal above counted as an outcome")
-          .isGreaterThanOrEqualTo(1.0);
+      // AWAITED, not asserted outright: the emit (which persists the row this test already awaited
+      // above) happens INSIDE decideEntry, while the outcome counter increments at its CALL SITE —
+      // SignalEngine "THE ONLY increment site", strictly after decideEntry returns. The await on the
+      // persisted row therefore unblocks in the MIDDLE of that window, and everything still pending
+      // on the single signal-eval thread sits inside it: the emitted_at UPDATE + timer record, a
+      // conditional fired-diagnostic UPDATE, a real Redis publish, and a SYNCHRONOUS SignalEmitted
+      // fan-out to four listeners (one of which issues further DB queries). A bare assertion here
+      // races all of that and reads fired==0.
+      //
+      // Observed ~1-in-1230 on a full-suite run and never in isolation: 54 IT classes sharing the
+      // base and many Spring contexts change surefire scheduling and machine load, whereas one class
+      // in a near-idle JVM closes the window before the assertion. (NOT a JaCoCo-instrumentation
+      // difference — `prepare-agent` has no <phase>, so it binds to `initialize` and instruments
+      // `test` identically; only the report/check goals are verify-bound, and they run after tests.)
+      // Awaiting closes the window without weakening the assertion — a counter that never increments
+      // still fails, and an undercount can never be silent: the increment is unconditional after
+      // decideEntry, and a throw in between is caught at SignalEngine:1394-1401, which bumps
+      // ay_signal_eval_failures_total AND logs ERROR. 10s matches this class's untilAsserted
+      // convention (:1373); its GATING awaits use 20s, the consistent bump if CI ever flakes here.
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .untilAsserted(
+              () ->
+                  assertThat(fired.count())
+                      .as("the bar that emitted the signal above counted as an outcome")
+                      .isGreaterThanOrEqualTo(1.0));
 
       // renderer invariant on the persisted breakdown
       BigDecimal contributions = BigDecimal.ZERO;

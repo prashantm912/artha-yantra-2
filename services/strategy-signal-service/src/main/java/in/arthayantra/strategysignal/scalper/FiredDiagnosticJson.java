@@ -77,6 +77,11 @@ public final class FiredDiagnosticJson {
         n.put("dot", ds.dot());
         n.put("weight", ds.weight());
         n.put("supports", ds.supports());
+        // F5 U4a — in lockstep with SignalEngine.rejectionDiagnosticJson: `absent` marks a dot whose
+        // INPUT was missing (withheld from BOTH num and den). It qualifies `supports`, which also
+        // reads false for a withheld dot, so the fired-vs-rejected contrast can now separate "no
+        // data" from "data said no" without inferring it from the weight sum.
+        n.put("absent", ds.absent());
         n.put("reason", ds.reason());
       }
     }

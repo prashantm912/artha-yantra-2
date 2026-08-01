@@ -5583,11 +5583,14 @@
           "frozen" : {
             "type" : "boolean"
           },
+          "neverCrossing" : {
+            "type" : "boolean"
+          },
           "detail" : {
             "type" : "string"
           }
         },
-        "required" : [ "alive", "detail", "dot", "frozen", "required" ]
+        "required" : [ "alive", "detail", "dot", "frozen", "neverCrossing", "required" ]
       },
       "ShadowVariantListResponse" : {
         "type" : "object",

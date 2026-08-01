@@ -4,6 +4,7 @@ import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -23,18 +24,22 @@ import org.springframework.stereotype.Service;
 @Service
 public class PaperAccountService {
 
-  /** The /paper account header payload. */
+  /**
+   * The /paper account header payload. The two per-class maps carry {@code BigDecimal} values, which
+   * ride the wire as strings exactly like every other decimal here — {@code additionalPropertiesSchema}
+   * overrides the inferred map-value schema the same way {@code type = "string"} overrides a plain field.
+   */
   public record AccountDto(
-      BigDecimal startingCapital,
-      BigDecimal cash,
-      BigDecimal equity,
-      BigDecimal realized,
-      BigDecimal unrealized,
-      BigDecimal dayPnl,
+      @Schema(type = "string") BigDecimal startingCapital,
+      @Schema(type = "string") BigDecimal cash,
+      @Schema(type = "string") BigDecimal equity,
+      @Schema(type = "string") BigDecimal realized,
+      @Schema(type = "string") BigDecimal unrealized,
+      @Schema(type = "string") BigDecimal dayPnl,
       int openPositions,
-      BigDecimal capitalUsed,
-      Map<String, BigDecimal> usageByClass,
-      Map<String, BigDecimal> marginPercents) {}
+      @Schema(type = "string") BigDecimal capitalUsed,
+      @Schema(additionalPropertiesSchema = String.class) Map<String, BigDecimal> usageByClass,
+      @Schema(additionalPropertiesSchema = String.class) Map<String, BigDecimal> marginPercents) {}
 
   private final PaperAccountRepository account;
   private final PaperPositionRepository positions;

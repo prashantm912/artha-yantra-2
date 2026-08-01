@@ -35,7 +35,7 @@ public class ShadowVariantsController {
   public record RailOverrideView(
       String rail,
       boolean disable,
-      @Schema(types = {"number", "null"}) BigDecimal threshold,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal threshold,
       @Schema(types = {"string", "null"}) String passWhen) {}
 
   /**
@@ -46,7 +46,7 @@ public class ShadowVariantsController {
    */
   public record VariantSpecView(
       @Schema(types = {"array", "null"}) List<RailOverrideView> rails,
-      @Schema(types = {"number", "null"}) BigDecimal compositeThreshold,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal compositeThreshold,
       @Schema(types = {"string", "null"}) String nullPolicy) {}
 
   /** One registered variant. */

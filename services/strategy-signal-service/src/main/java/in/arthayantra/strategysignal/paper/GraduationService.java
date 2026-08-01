@@ -58,9 +58,9 @@ public class GraduationService {
   /** The thresholds this service scored against (echoed to the UI so the board is self-describing). */
   public record Thresholds(
       int minTrades,
-      BigDecimal minProfitFactor,
-      BigDecimal minExpectancy,
-      BigDecimal maxDrawdownPct) {}
+      @Schema(type = "string") BigDecimal minProfitFactor,
+      @Schema(type = "string") BigDecimal minExpectancy,
+      @Schema(type = "string") BigDecimal maxDrawdownPct) {}
 
   /** One scored criterion: its name, the required bound (human string), the actual value, pass/fail. */
   public record Criterion(String name, String required, String actual, boolean pass) {}
@@ -72,11 +72,11 @@ public class GraduationService {
       String name,
       String stage,
       int trades,
-      BigDecimal netRealized,
-      @Schema(types = {"number", "null"}) BigDecimal winRate,
-      @Schema(types = {"number", "null"}) BigDecimal profitFactor,
-      BigDecimal expectancy,
-      BigDecimal maxDrawdownPct,
+      @Schema(type = "string") BigDecimal netRealized,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal winRate,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal profitFactor,
+      @Schema(type = "string") BigDecimal expectancy,
+      @Schema(type = "string") BigDecimal maxDrawdownPct,
       List<Criterion> criteria) {}
 
   /** The whole board: one row per live strategy + the thresholds used. */

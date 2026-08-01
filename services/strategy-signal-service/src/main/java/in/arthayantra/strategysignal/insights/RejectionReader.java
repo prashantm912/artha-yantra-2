@@ -367,7 +367,7 @@ public class RejectionReader {
    * see {@link DotCounts}.
    */
   public record FiredRow(
-      long signalId, String tradingsymbol, String side, BigDecimal composite,
+      long signalId, String tradingsymbol, String side, @Schema(type = "string") BigDecimal composite,
       int dotSupports, int dotTotal, OffsetDateTime generatedAt) {}
 
   /**
@@ -377,8 +377,8 @@ public class RejectionReader {
   public record RejectedRow(
       long rejectionId, String tradingsymbol,
       @Schema(types = {"string", "null"}) String side,
-      @Schema(types = {"number", "null"}) BigDecimal composite,
-      @Schema(types = {"number", "null"}) BigDecimal threshold,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal composite,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal threshold,
       String blockingRail, int dotSupports, int dotTotal, OffsetDateTime generatedAt) {}
 
   /**
@@ -390,8 +390,8 @@ public class RejectionReader {
    */
   public record Contrast(
       int firedCount, int rejectedCount,
-      @Schema(types = {"number", "null"}) BigDecimal meanCompositeFired,
-      @Schema(types = {"number", "null"}) BigDecimal meanCompositeRejected,
-      @Schema(types = {"number", "null"}) BigDecimal meanSupportRatioFired,
-      @Schema(types = {"number", "null"}) BigDecimal meanSupportRatioRejected) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal meanCompositeFired,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal meanCompositeRejected,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal meanSupportRatioFired,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal meanSupportRatioRejected) {}
 }

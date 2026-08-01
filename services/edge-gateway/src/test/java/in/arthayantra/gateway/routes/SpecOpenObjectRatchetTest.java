@@ -272,6 +272,15 @@ class SpecOpenObjectRatchetTest {
                   "#OpeningSignal.minerviniDetail/anyOf/0 -> JsonNode",
                   "#OpeningSignal.scalperDetail/anyOf/0 -> JsonNode",
                   "#RejectionRow.diagnostic -> JsonNode",
+                  // ⚠️ ARRIVED MID-REVIEW from V054 (F5 U3), and the ratchet caught it on a rebase
+                  // rather than a human noticing: a NEW `JsonNode dataHealth` field on a record
+                  // this list already covered. Under the blanket `#JsonNode` exemption this branch
+                  // started with, it would have been absorbed in silence — the reference-site
+                  // granularity is exactly what makes it a new line. Its shape is in fact known
+                  // ({degraded, contextBearing, oiSuppressed, flags[]}, SignalRejectionRepository:
+                  // 55), so this is typed-record DEBT rather than a polymorphic stop, recorded here
+                  // rather than fixed because it is another change's surface.
+                  "#RejectionRow.dataHealth/anyOf/0 -> JsonNode",
                   // ⚠️ ARRIVED WITH #1191's conversion: RiskController's opaque Map became the
                   // typed RiskSettingRow, but its `value` stayed a JsonNode — the response is
                   // narrower, not closed. Under a blanket `#JsonNode` exemption this would have

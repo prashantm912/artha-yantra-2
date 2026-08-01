@@ -367,6 +367,13 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("dow-confluence"))
           .as(id + " dow-confluence unarmed (Dow is manual)")
           .isFalse();
+      // A3 iv-rank-dot un-armed everywhere. The dot's input is suppressed below the 60-trading-day
+      // IvAnalyticsService history floor and would start resolving on a CALENDAR trigger (~late Sep
+      // 2026) — the tag makes that an owner arming decision, so the shipped fleet must stay unarmed
+      // until one is made. Arming ALSO requires a republish (the engine reads the PUBLISHED config).
+      assertThat(tags.contains("iv-rank-dot"))
+          .as(id + " iv-rank-dot unarmed (arming the iv_rank dot is an owner decision)")
+          .isFalse();
 
       // E2 M4/M6 — the two HARD OI gates with NO soft-dot duplicate in the scorer (the flat-OI stand-aside
       // trap §6.5 + the max-standing-OI S/R wall §4.7): armed on the scalp-connect-the-dots family, its

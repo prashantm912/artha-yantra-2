@@ -56,6 +56,12 @@
       "rationale": "The OpenAPI 3.1 nullable spelling. 'object' is one of the permitted types and no properties/additionalProperties narrows it, so this is the same open-object case as a bare {\"type\": \"object\"} plus 'or null'."
     },
     {
+      "id": "unknown-keyword-beside-vacuous-known-keyword",
+      "schema": { "unknownFutureKeyword": 1, "properties": {} },
+      "expectedOpen": true,
+      "rationale": "Disproves 'an unknown keyword always fails loudly, so pairing it with anything is still caught': a predicate that treats a RECOGNISED keyword's mere PRESENCE as constraining (rather than checking whether its value is vacuous) would read the co-occurring empty 'properties' as a real constraint and report this schema closed, silently laundering the unrecognised keyword's fail-open signal into a false negative. Both keywords here are individually non-constraining - unknownFutureKeyword because it fails open by design, {} properties because it is vacuous - and the schema must read open on their combination too. Named explicitly per cross-vendor review of #1196, which ruled the predicate must be VALUE-aware, not presence-aware, for exactly this reason."
+    },
+    {
       "id": "unrecognised-keyword-fails-open",
       "schema": { "unknownFutureKeyword": 1 },
       "expectedOpen": true,
@@ -78,6 +84,12 @@
       "schema": { "type": "object", "properties": {} },
       "expectedOpen": true,
       "rationale": "An EMPTY properties map promises nothing - it is not 'zero keys allowed', it is 'nothing declared'. Without additionalProperties: false to seal it, any key is still legal. Distinguishes this from the object-with-real-properties case below, and from sealed-empty-object which adds the seal."
+    },
+    {
+      "id": "properties-empty-no-type",
+      "schema": { "properties": {} },
+      "expectedOpen": true,
+      "rationale": "The same vacuous-properties reasoning as type-object-empty-properties, but WITHOUT an explicit 'type' key - pinned separately because a predicate can (and #1196's first draft's reference copy in this fixture did) handle the two cases through DIFFERENT code paths: an explicit value-aware check for 'properties' guards the typed branch correctly, but a separate presence-only fallback used for the no-type case can independently treat 'properties' PRESENCE (even empty) as constraining, closing this schema by mistake while the typed sibling passes. Cross-vendor review of #1196 ruled this class of bug 'presence mistaken for constraint' and required a value-aware fix wherever a keyword can carry a vacuous value."
     },
     {
       "id": "type-object-additionalProperties-empty-schema",
@@ -152,16 +164,34 @@
       "rationale": "Declaring a required key is a real constraint - the consumer is promised key 'a' WILL be present - even with no 'properties' entry describing its type. A predicate that only looks at 'properties' would call this open and miss the promise."
     },
     {
+      "id": "required-empty",
+      "schema": { "required": [] },
+      "expectedOpen": true,
+      "rationale": "CORRECTED per cross-vendor review of #1196: an EMPTY required list promises nothing - it is not 'no keys allowed', it is 'no key is guaranteed'. This fixture's first draft treated mere PRESENCE of 'required' as pinning (grouped with $ref/allOf/etc. in a presence-only keyword list) and, having reasoned the vacuous case was too speculative to be worth a graded row ('no generator has been observed to emit it'), left the miss undetected rather than fixed. Overruled: doctrine does not wait for an observed instance, and the sibling required-only row above proves the SAME keyword genuinely constrains when non-empty, so a predicate must inspect the VALUE, not the key's presence."
+    },
+    {
       "id": "minProperties-real",
       "schema": { "type": "object", "minProperties": 1 },
       "expectedOpen": false,
-      "rationale": "minProperties: 1 promises at least one key is always present, a real (if untyped) constraint. Considered and deliberately NOT pinning the trivial minProperties: 0 case here - see 'rejected' notes below."
+      "rationale": "minProperties: 1 promises at least one key is always present, a real (if untyped) constraint."
     },
     {
-      "id": "patternProperties",
+      "id": "minProperties-zero",
+      "schema": { "minProperties": 0 },
+      "expectedOpen": true,
+      "rationale": "CORRECTED per cross-vendor review of #1196: minProperties: 0 is trivially true of every object (an object always has zero or more properties), so it promises nothing beyond the default. This fixture's first draft named this exact case in its rationale for minProperties-real and again in a 'considered and rejected' entry, reasoned it was real by strict doctrine but too speculative to grade without an observed instance, and left it out. Overruled: the sibling minProperties-real row proves the SAME keyword genuinely constrains at a non-zero value, so a predicate must inspect the VALUE, not the key's presence - the boundary value is exactly where a presence-only check breaks."
+    },
+    {
+      "id": "patternProperties-real",
       "schema": { "type": "object", "patternProperties": { "^S_": { "type": "string" } } },
       "expectedOpen": false,
       "rationale": "Pattern-bound keys are a real constraint on the object's shape even without a literal 'properties' entry."
+    },
+    {
+      "id": "patternProperties-empty",
+      "schema": { "patternProperties": {} },
+      "expectedOpen": true,
+      "rationale": "CORRECTED per cross-vendor review of #1196: an EMPTY patternProperties map matches no pattern at all, so it constrains nothing - the same vacuous-value class as required-empty and minProperties-zero, missed for the same reason (this fixture's first draft treated the keyword's PRESENCE, not its value, as pinning)."
     },
     {
       "id": "type-string-baseline",
@@ -212,10 +242,10 @@
       "rationale": "const pins the value to exactly one literal - maximally constrained."
     },
     {
-      "id": "format-constrained",
+      "id": "format-alone-is-annotation",
       "schema": { "format": "uuid" },
-      "expectedOpen": false,
-      "rationale": "format narrows the legal value space (e.g. a UUID-shaped string) even without an explicit 'type'."
+      "expectedOpen": true,
+      "rationale": "CORRECTED by cross-vendor review after this fixture's first draft had it backwards (originally id 'format-constrained', expectedOpen: false, on the reasoning 'format narrows the legal value space'). That reasoning is wrong: OpenAPI 3.1 states formats do not imply a type, and JSON Schema 2020-12 defines 'format' as belonging to the format-ANNOTATION vocabulary by default - it documents an intended shape but asserts nothing unless the separate format-ASSERTION vocabulary is explicitly active, which neither springdoc nor pydantic opt into. A typeless {\"format\": \"uuid\"} therefore still permits ANY JSON value, string or otherwise - exactly as open as {}. #1196's original predicate classified format as constraining (in its CONSTRAINING keyword list) and this fixture's first draft copied that classification uncritically instead of checking the spec text."
     },
     {
       "id": "bounded-string",
@@ -257,8 +287,8 @@
       "note": "A Map<String, OpenThing> - {\"type\":\"object\",\"additionalProperties\":{\"$ref\":\"#/components/schemas/OpenComponent\"}}. Traced through both walk functions: the outer predicate reads closed (additionalProperties has a declared, non-empty shape), and the walker separately recurses into the additionalProperties value at the '{}' pointer, which then resolves the $ref and reports '<site>{} -> OpenComponent' if the target is open. Not a blind spot; not added as a graded row because it is a straightforward composition of two already-pinned mechanisms (additionalProperties-typed's 'has a declared shape' branch, plus ref-to-open-component's arrow convention) rather than a new one, and adding it as a locationGrammar example would need a synthetic (not sourced) string identical in kind to the one already included."
     },
     {
-      "id": "vacuous-pins-contents-keyword",
-      "note": "Whether a technically-present but VACUOUS keyword in the pins-contents family - required: [], minProperties: 0, patternProperties: {} - should read as open, since each imposes no constraint in isolation (an empty required list requires nothing; minProperties: 0 is true of every object; an empty patternProperties map matches no pattern). Both current implementations treat PRESENCE of the keyword as pinning, regardless of whether its value is vacuous - a conservative bias (it can only under-report an open object as closed, never the reverse) but a real gap by strict doctrine. NOT added as a graded predicateCases row: every blind spot this fixture's own history is built from (component aliasing, a Map FIELD inside a typed record, annotation-only) was found via an ACTUAL response-reachable instance in a real spec; I found no evidence any generator in this platform (springdoc, pydantic) ever emits a vacuous form of these keywords rather than simply omitting the keyword. Encoding a hypothetical nobody has observed as if it were an equal-weight doctrine finding risks presenting speculation as evidence. Recorded here, and again in the open-doubts of the receipt, rather than silently dropped."
+      "id": "vacuous-pins-contents-keyword-CORRECTED",
+      "note": "OVERRULED, kept here as a record of the mistake rather than silently rewritten. This fixture's FIRST DRAFT reasoned here that vacuous forms of required/minProperties/patternProperties (required: [], minProperties: 0, patternProperties: {}) were 'real by strict doctrine but too speculative to grade without an observed instance', and deliberately left them out as predicateCases rows. Cross-vendor review of #1196 overruled that call directly: these keywords are VALUE-dependent, and a predicate that treats their mere PRESENCE as pinning (rather than checking whether the value is vacuous) mistakes presence for constraint - the same bug shape as the annotation-only miss this fixture exists to prevent, just on a different keyword family. 'No observed instance in a real spec' was the wrong bar for a doctrine fixture: the point of pinning behaviour BEFORE it is observed in the wild is to make it impossible for a predicate to regress there unnoticed. All three vacuous forms are now graded rows (properties-empty-no-type, required-empty, minProperties-zero, patternProperties-empty), plus the combination case (unknown-keyword-beside-vacuous-known-keyword) that disproves 'an unrecognised keyword always fails loudly'. format-alone-is-annotation was a second, independent miss caught in the same review pass (format is annotation-only per OpenAPI 3.1 / JSON Schema 2020-12 by default, never a constraint, regardless of value - not merely vacuous at one value like the others)."
     },
     {
       "id": "request-body-schemas",

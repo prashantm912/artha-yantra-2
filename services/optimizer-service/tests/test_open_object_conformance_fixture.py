@@ -13,17 +13,26 @@ file rather than by a reviewer noticing.
 
 #1196 was still an open, actively-changing PR when this file was authored - its two target files
 do not exist on this branch's base. This test therefore carries its OWN reference copy of
-``_is_open``, calibrated against ``test_open_object_ratchet.py``'s implementation and
-independently re-derived from doctrine for every row in the fixture, rather than importing
-production code that is not there to import. ⚠️ Calibration note: as read on the #1196 branch on
-2026-08-02, that file's ``_is_open`` does NOT implement the annotation-only branch that
-edge-gateway's Java predicate does (it returns False / closed for ``{"title": "..."}``) - a live
-cross-language disagreement with this fixture's doctrine, reported rather than quietly matched.
-See this PR's open-doubts.
+``_is_open``, independently re-derived from doctrine for every row in the fixture and empirically
+checked against the actual committed #1196 code at the time of writing (imported and called
+directly, not read-and-hand-traced), rather than importing production code that is not there to
+import.
 
 When #1196 lands, the intended follow-up is for both production suites to read this SAME fixture
 directly (ideally by exposing their predicate as testable and asserting equality against it,
 retiring the duplicate below) - tracked as an open doubt, not silently assumed done here.
+
+CORRECTION HISTORY, kept honest rather than quietly folded away. This fixture's first draft got
+two things wrong, both caught by cross-vendor review, neither by hand-tracing after the fact:
+(1) it claimed a live disagreement between #1196's Java and Python predicates over
+``{"title": "..."}``, based on reading an ACTIVELY-CHANGING worktree rather than running the
+committed code - importing and calling the real function immediately falsified it, both sides
+agree and match this fixture. (2) it classified ``required``/``minProperties``/``patternProperties``
+as pinning on mere PRESENCE and ``format`` as always constraining; review ruled the first three are
+constraints only at a NON-vacuous value and ``format`` is never a constraint by default (OpenAPI
+3.1 / JSON Schema 2020-12: format is annotation-only unless the format-assertion vocabulary is
+explicitly active, which neither springdoc nor pydantic opt into). Both fixes are reflected in
+``_is_open`` below and pinned by fixture rows.
 """
 
 import json
@@ -43,7 +52,11 @@ def _find_repo_root() -> Path:
 
 FIXTURE_PATH = _find_repo_root() / "contracts" / "fixtures" / "open-object-conformance.json"
 
-# Keywords that pin what an object may CONTAIN. Any of them present => not an open object.
+# Keywords that ALWAYS pin what an object may CONTAIN, at any value. required/minProperties/
+# patternProperties are handled below instead, VALUE-aware, because each has a vacuous value
+# (empty list / zero / empty dict) that constrains nothing - a correction from this fixture's
+# first draft, which put them here unconditionally; cross-vendor review of #1196 ruled that
+# mistakes a keyword's PRESENCE for a real constraint. See the module docstring.
 PINS_CONTENTS = (
     "$ref",
     "allOf",
@@ -55,19 +68,19 @@ PINS_CONTENTS = (
     "enum",
     "const",
     "discriminator",
-    "patternProperties",
     "propertyNames",
     "dependentSchemas",
     "unevaluatedProperties",
-    "required",
-    "minProperties",
     "maxProperties",
 )
 
-# Every keyword that says ANYTHING about a value; unrecognised keywords fail OPEN.
+# Every keyword that says ANYTHING about a value; unrecognised keywords fail OPEN. `format` is
+# deliberately absent - annotation-only by default, never a constraint (another first-draft
+# correction; see the module docstring) - and `properties` is deliberately absent too: by the
+# time this fallback runs it can only be absent or vacuously empty (a non-empty value already
+# returned False above), so testing its presence here would silently reintroduce that same bug.
 CONSTRAINING = PINS_CONTENTS + (
     "type",
-    "properties",
     "additionalProperties",
     "unevaluatedItems",
     "contains",
@@ -83,7 +96,6 @@ CONSTRAINING = PINS_CONTENTS + (
     "maxLength",
     "minLength",
     "pattern",
-    "format",
     "maxItems",
     "minItems",
     "uniqueItems",
@@ -92,9 +104,30 @@ CONSTRAINING = PINS_CONTENTS + (
 )
 
 
+def _has_non_vacuous_required(node: dict) -> bool:
+    required = node.get("required")
+    return required is not None and len(required) > 0
+
+
+def _has_non_vacuous_min_properties(node: dict) -> bool:
+    min_properties = node.get("minProperties")
+    return min_properties is not None and min_properties > 0
+
+
+def _has_non_vacuous_pattern_properties(node: dict) -> bool:
+    pattern_properties = node.get("patternProperties")
+    return pattern_properties is not None and len(pattern_properties) > 0
+
+
 def _is_open(node: Any) -> bool:
     """Reference copy of the is-open predicate; see the module docstring for why a copy exists."""
     if any(k in node for k in PINS_CONTENTS):
+        return False
+    if (
+        _has_non_vacuous_required(node)
+        or _has_non_vacuous_min_properties(node)
+        or _has_non_vacuous_pattern_properties(node)
+    ):
         return False
     properties = node.get("properties")
     if properties is not None and len(properties) > 0:

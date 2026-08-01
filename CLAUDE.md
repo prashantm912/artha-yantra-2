@@ -169,7 +169,14 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `contracts/fixtures/open-object-conformance.json`** (same rule as `exit-equivalence.json` above):
   change either only by updating the fixture AND both suites in the same PR. Cross-vendor review
   round 2 on #1196 found BOTH implementations independently missed the annotation-only case — one
-  bug, two places, found once — which is why the fixture exists.
+  bug, two places, found once — which is why the fixture exists. **A further review round ruled the
+  predicate must be VALUE-aware, not presence-aware:** `required`/`minProperties`/`patternProperties`
+  constrain only at a non-vacuous value (`[]`/`0`/`{}` promise nothing — mere PRESENCE of the
+  keyword is not a constraint), and `format` is annotation-only by default at ANY value (OpenAPI 3.1
+  + JSON Schema 2020-12 — never a constraint unless the format-assertion vocabulary is explicitly
+  active, which neither springdoc nor pydantic opt into). The fixture's own first draft got this
+  wrong too (had already named the vacuous-keyword class and talked itself out of pinning it) —
+  a live reminder that "no observed instance in a real spec" is the wrong bar for a doctrine fixture.
 - **Modulith module cycles (strategy-signal):** `notifier` imports `signals` (`SignalEmitted`), so
   signals code must NEVER import notifier — alert via an in-process event record published from
   signals + an `@EventListener` in notifier (`DotInputAlert`/`DotAlertListener` is the template).

@@ -308,6 +308,9 @@ public class OptionsAnalyticsController {
   }
 
   /** One strike's interval OI move for the Interval-wise OI bars (e.g. {@code "57400 PE"}). */
+  // @Schema(name) is load-bearing: OptionsDigestService.StrikeMove shares this simple name
+  // (fields identical TODAY, but identical twins drift — task_1c04803f).
+  @Schema(name = "IntervalWiseOiStrikeMove")
   public record StrikeMove(String strike, long oiChange, OiInterpretation interpretation) {}
 
   /** Top OI gainer/loser strikes across three lookbacks (oipulse §options/interval-wise-oi). */

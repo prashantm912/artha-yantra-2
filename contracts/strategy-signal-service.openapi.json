@@ -6159,7 +6159,7 @@
           "criteria" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/Criterion"
+              "$ref" : "#/components/schemas/EvidenceCriterion"
             }
           },
           "graduatedAt" : {
@@ -6175,7 +6175,7 @@
           "rejectionProfile" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/RailCount"
+              "$ref" : "#/components/schemas/EvidenceRailCount"
             }
           },
           "openSellDecisions" : {
@@ -6195,6 +6195,37 @@
           }
         },
         "required" : [ "asOf", "criteria", "crossingTimeline", "enabled", "graduatedAt", "name", "notes", "openSellDecisions", "rejectionProfile", "slug", "stage", "strategyId" ]
+      },
+      "EvidenceCriterion" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "required" : {
+            "type" : "string"
+          },
+          "actual" : {
+            "type" : "string"
+          },
+          "pass" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "actual", "name", "pass", "required" ]
+      },
+      "EvidenceRailCount" : {
+        "type" : "object",
+        "properties" : {
+          "rail" : {
+            "type" : "string"
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "count", "rail" ]
       },
       "OpenSell" : {
         "type" : "object",

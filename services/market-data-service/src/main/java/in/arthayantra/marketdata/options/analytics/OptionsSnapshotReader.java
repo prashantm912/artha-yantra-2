@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.options.analytics;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.options.OiInterval;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
@@ -38,17 +39,31 @@ public class OptionsSnapshotReader {
     this.calendar = calendar;
   }
 
-  /** One downsampled point per (bucket, strike, optionType): last() of each point-in-time stat. */
+  /**
+   * One downsampled point per (bucket, strike, optionType): last() of each point-in-time stat.
+   *
+   * <p>Nullability is load-bearing now that this record is ENUMERATED into the OpenAPI spec (D3:
+   * {@code /oi-analysis} + {@code /oi-analysis/strike-series} stopped returning an opaque {@code
+   * Map}). Only the three PK-derived columns are NOT NULL in V006 ({@code ts} / {@code strike} /
+   * {@code option_type}); {@code ltp} / {@code oi} / {@code volume} / {@code iv} are nullable
+   * columns, {@code oi_change} is nullable by V007_1 and is additionally null for the FIRST bucket
+   * of each leg on the candle-derived path, and {@code spot} is null whenever the bucket carried no
+   * underlying sample. The candle-derived reader passes {@code iv} as a literal null (§11.12), which
+   * is exactly what {@code OptionsAnalyticsController.oiFreshness} tests to label a read "derived".
+   *
+   * <p>Spelled as the 3.1 type union, NOT {@code @Schema(nullable = true)} — the latter is a silent
+   * no-op at OpenAPI 3.1 and would publish these as non-nullable, a lie in the generated TS.
+   */
   public record StrikePoint(
       OffsetDateTime bucket,
       BigDecimal strike,
       String optionType,
-      BigDecimal ltp,
-      Long oi,
-      Long oiChange,
-      BigDecimal iv,
-      BigDecimal spot,
-      Long volume) {}
+      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(types = {"integer", "null"}) Long oi,
+      @Schema(types = {"integer", "null"}) Long oiChange,
+      @Schema(types = {"number", "null"}) BigDecimal iv,
+      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(types = {"integer", "null"}) Long volume) {}
 
   /**
    * Session OHLC of the per-strike option premium ({@code ltp}) plus volume, for Open=High grading

@@ -210,11 +210,61 @@ class MapReturnRatchetTest {
    * <p>Whenever this pattern is widened again, re-derive ALL FOUR counts before trusting any floor:
    * a floor is only as strong as the counter's ability to see every shape, and 0 is the strongest
    * floor there is.
+   *
+   * <p>market-data-service 7 → 2 (D3 options-analytics slice, 2026-08-01, immediately after the
+   * widening above): the four convertible {@code OptionsAnalyticsController} handlers — {@code
+   * oiAnalysis}, {@code strikeSeries}, {@code multipleOi}, {@code optionsChart} — PLUS the {@code
+   * WatchlistController.create} the paragraph above had to leave for "another service's slice".
+   * This is that slice, so the 7 the widening raised is now paid off in full. <b>THE FLOOR IS NOW AT
+   * ITS DOCUMENTED MINIMUM</b>: the
+   * remaining 2 are exactly the {@code oiExpiry} / {@code openHighStrategy} pair the row above
+   * assessed as deliberate stops, re-verified against the code in this slice (empty path 3 keys vs
+   * populated 4 and 5). Lowering this further REQUIRES a shape decision about those two responses,
+   * not a refactor.
+   *
+   * <p>{@code optionsChart} is the one worth studying: the handler was re-emitting a service record
+   * field-by-field through a {@code LinkedHashMap} that listed {@code ce}/{@code pe} FIRST, while the
+   * record declared them LAST. Returning the record as-was would have silently reshuffled a live OI
+   * page's payload, so {@code OptOiChart}'s components were reordered to the emitted order instead —
+   * the wire stays byte-identical and the service stays the single source of truth. {@code
+   * multipleOi} likewise mirrors its {@code LinkedHashMap} order; {@code strikeSeries} came from a
+   * 6-key {@code Map.of}, so its order is NORMALISED, not preserved.
+   *
+   * <p>Per the item-schema lesson above, the newly exposed item records were audited BEFORE capture.
+   * {@code OptionsSnapshotReader.StrikePoint} is the big one — SIX of its nine components are
+   * nullable ({@code ltp}/{@code oi}/{@code oiChange}/{@code iv}/{@code spot}/{@code volume}), only
+   * the three PK columns being NOT NULL in V006; unannotated it would have published all nine as
+   * non-nullable. {@code OptCandle}'s left-joined {@code oi}/{@code iv} and {@code OptOiChart}'s
+   * off-hours {@code underlyingLtp}/{@code underlyingDayOpen} are the same class of miss. All were
+   * cross-checked three ways: the V006/V007_1 DDL, the in-repo null tests that already existed
+   * ({@code oiFreshness} tests {@code iv == null}, {@code multipleOi} tests {@code spot != null}),
+   * and the hand-written FE types, which independently declare the identical nullable set.
+   *
+   * <p><b>The 2 is regex-independent, which is the property worth keeping.</b> Re-derived against
+   * all THREE patterns this evening produced, in the order they landed: 6 − 4 = 2 under the
+   * ORIGINAL, 7 − 5 = 2 under #1188's {@code ResponseEntity} widening, and 2 under #1191's
+   * {@code java.util.} qualifier widening — market-data contains no fully-qualified handler either,
+   * so that door closed without moving this row. Each was measured, not carried forward; a count
+   * that survives three regex changes in one evening is exactly the kind that goes stale silently.
+   *
+   * <p>⚠️ <b>THE SCALAR-TYPE TRAP, and the sharpest lesson of this slice</b> (cross-vendor review):
+   * making an opaque Map visible has to make the spec's claim TRUE, not merely PRESENT. The first
+   * cut published every exposed {@code BigDecimal} as {@code number}, because that is what bare
+   * springdoc infers from the Java type — but {@code ArthaJacksonAutoConfiguration} registers
+   * {@code ToStringSerializer} for {@code BigDecimal} platform-wide, so every decimal is a JSON
+   * STRING on our wire. The conversion therefore replaced a schema that claimed NOTHING with one
+   * that claimed something FALSE, and the generated TS client inherited the lie — strictly worse
+   * than the Map. They are now {@code @Schema(type = "string")} /
+   * {@code types = {"string", "null"}}. <b>Check this on every future Map→record conversion:</b>
+   * a key-set test cannot catch it, because {@code asText()} returns the same value for a textual
+   * node and a numeric one — assert {@code isTextual()} (see
+   * {@code OptionsAnalyticsWireShapeIntegrationTest}). {@code Long}/{@code long} columns are
+   * genuinely JSON numbers and correctly stay {@code integer}.
    */
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
-          "market-data-service", 7,
+          "market-data-service", 2,
           "strategy-signal-service", 0,
           "backtest-service", 2);
 

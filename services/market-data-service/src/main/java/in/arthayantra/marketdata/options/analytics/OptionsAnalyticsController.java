@@ -210,13 +210,52 @@ public class OptionsAnalyticsController {
   // ── /multiple-oi (oipulse Multiple OI Chart): per-leg OI line + the underlying price line ────────────
 
   /** One bucket of a leg's OI line (null oi where the leg has no snapshot at that bucket). */
-  public record OiLinePoint(OffsetDateTime bucket, Long oi) {}
+  public record OiLinePoint(
+      OffsetDateTime bucket, @Schema(types = {"integer", "null"}) Long oi) {}
 
   /** One selected leg ("57200 CE") and its per-bucket OI series. */
   public record OiLeg(String leg, List<OiLinePoint> points) {}
 
-  /** One bucket of the underlying price (spot) reference line. */
-  public record SpotPoint(OffsetDateTime bucket, BigDecimal spot) {}
+  /** One bucket of the underlying price (spot) reference line (null where no bucket carried one). */
+  public record SpotPoint(
+      OffsetDateTime bucket, @Schema(types = {"number", "null"}) BigDecimal spot) {}
+
+  /**
+   * {@code /oi-analysis}: the {@code {items}} envelope of raw per-strike chain points (D3 — was an
+   * opaque {@code Map}). Unconditional: the handler emits this one key on every path, including the
+   * no-snapshot path, whose {@code items} is simply empty.
+   */
+  public record OiAnalysis(List<OptionsSnapshotReader.StrikePoint> items) {}
+
+  /**
+   * {@code /oi-analysis/strike-series}: one strike's CE+PE points across the session buckets, plus
+   * the echo of the resolved query. D3 — was a 6-key {@code Map.of}, whose iteration order is
+   * JVM-salted, so this record NORMALISES the key order rather than preserving one (there was no
+   * stable emitted order to preserve); the key SET and every value are unchanged. Every component is
+   * non-null by construction — {@code Map.of} rejects nulls, so the pre-D3 handler would have thrown
+   * on any of them, and the only empty path throws a 422 before reaching here.
+   */
+  public record StrikeSeries(
+      List<OptionsSnapshotReader.StrikePoint> items,
+      String underlying,
+      LocalDate expiry,
+      BigDecimal strike,
+      String interval,
+      OffsetDateTime asOf) {}
+
+  /**
+   * {@code /multiple-oi}: the selected legs' OI lines + the one shared underlying-price line. D3 —
+   * was a {@code LinkedHashMap}, so its insertion order WAS the emitted order and is load-bearing:
+   * these components mirror it exactly ({@code items}, {@code spot}, then the query echo). All are
+   * non-null; the nullability lives one level down, in {@code OiLinePoint.oi}/{@code SpotPoint.spot}.
+   */
+  public record MultipleOi(
+      List<OiLeg> items,
+      List<SpotPoint> spot,
+      String underlying,
+      LocalDate expiry,
+      String interval,
+      OffsetDateTime asOf) {}
 
   @GetMapping("/oi-stats")
   public OiStats oiStats(
@@ -443,7 +482,7 @@ public class OptionsAnalyticsController {
 
   /** /oi-analysis: the data-table archetype source (per-strike rows for the latest bucket). */
   @GetMapping("/oi-analysis")
-  public Map<String, Object> oiAnalysis(
+  public OiAnalysis oiAnalysis(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -452,7 +491,7 @@ public class OptionsAnalyticsController {
     OiQuery q = OiQuery.of(mode, name, date, interval, expiry);
     LocalDate exp = requireExpiry(q);
     List<OptionsSnapshotReader.StrikePoint> latest = reader.latest(q.name(), exp, q.interval(), q.date());
-    return Map.of("items", latest); // {items:[...]} envelope (CLAUDE.md)
+    return new OiAnalysis(latest); // {items:[...]} envelope (CLAUDE.md)
   }
 
   /**
@@ -530,7 +569,7 @@ public class OptionsAnalyticsController {
    * when that strike has no snapshots; 422 only when the underlying has none at all.
    */
   @GetMapping("/oi-analysis/strike-series")
-  public Map<String, Object> strikeSeries(
+  public StrikeSeries strikeSeries(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -550,13 +589,7 @@ public class OptionsAnalyticsController {
     OffsetDateTime to = newest.plus(q.interval().bucket());
     List<OptionsSnapshotReader.StrikePoint> series =
         reader.strikeSeries(q.name(), exp, strike, q.interval(), from, to);
-    return Map.of(
-        "items", series,
-        "underlying", q.name(),
-        "expiry", exp,
-        "strike", strike,
-        "interval", q.interval().token(),
-        "asOf", newest);
+    return new StrikeSeries(series, q.name(), exp, strike, q.interval().token(), newest);
   }
 
   /**
@@ -564,10 +597,10 @@ public class OptionsAnalyticsController {
    * user-selected option legs' OI lines (right axis) + the underlying price line (left axis) over the
    * session. {@code leg} is a REPEATED param ({@code ?leg=57200 CE&leg=57100 PE}). One snapshot read
    * (all strikes) is folded per leg + a single spot line (the chain-wide underlying price per bucket).
-   * Map envelope. 400 when no leg is given; 422 only when the underlying has no snapshot at all.
+   * 400 when no leg is given; 422 only when the underlying has no snapshot at all.
    */
   @GetMapping("/multiple-oi")
-  public Map<String, Object> multipleOi(
+  public MultipleOi multipleOi(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -620,14 +653,8 @@ public class OptionsAnalyticsController {
       spot.add(new SpotPoint(b, spotByBucket.get(b)));
     }
 
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("items", items);
-    out.put("spot", spot);
-    out.put("underlying", q.name());
-    out.put("expiry", exp);
-    out.put("interval", q.interval().token());
-    out.put("asOf", newest);
-    return out;
+    // Component order mirrors the pre-D3 LinkedHashMap insertion order — see MultipleOi.
+    return new MultipleOi(items, spot, q.name(), exp, q.interval().token(), newest);
   }
 
   /** Parses a leg label ("57200 CE") into the snapshot join key; 400 on a malformed leg. */
@@ -836,11 +863,16 @@ public class OptionsAnalyticsController {
    * /options-chart: the oipulse Options Chart (plan §options/options-chart) — per LEG (Call + Put of one
    * {@code strike}) the option-premium candlestick + OI line (the FE adds VWAP + day H/L). One fetch
    * returns BOTH legs; the FE Show toggle picks which render. {@code interval} is RAW MINUTES
-   * (1/3/5/10/15/30/60). Map envelope (no typed schema). 422 on an unlisted strike, 400 on an off-set
-   * interval. The nullable header quote (off-hours) rides a LinkedHashMap (Map.of rejects nulls).
+   * (1/3/5/10/15/30/60). 422 on an unlisted strike, 400 on an off-set interval.
+   *
+   * <p>D3: this used to re-emit the service record field-by-field through a {@code LinkedHashMap}
+   * purely to carry the nullable header quote ({@code Map.of} rejects nulls). Jackson emits a record
+   * component whether or not it is null, so the record serves that need directly — and {@code
+   * OptOiChart}'s components were reordered to the map's ce/pe-first insertion order so the response
+   * stays byte-identical.
    */
   @GetMapping("/options-chart")
-  public Map<String, Object> optionsChart(
+  public OptionsOiChartService.OptOiChart optionsChart(
       @RequestParam(required = false) String mode,
       @RequestParam String name,
       @RequestParam(required = false) String date,
@@ -848,21 +880,7 @@ public class OptionsAnalyticsController {
       @RequestParam BigDecimal strike,
       @RequestParam(required = false, defaultValue = "3") int interval) {
     OiQuery q = OiQuery.of(mode, name, date, null, expiry);
-    OptionsOiChartService.OptOiChart chart =
-        optionsOiChartService.chart(q.name(), q.expiry(), strike, interval, q.date());
-    Map<String, Object> out = new LinkedHashMap<>();
-    out.put("ce", chart.ce());
-    out.put("pe", chart.pe());
-    out.put("underlying", chart.underlying());
-    out.put("expiry", chart.expiry());
-    out.put("strike", chart.strike());
-    out.put("ceTradingsymbol", chart.ceTradingsymbol());
-    out.put("peTradingsymbol", chart.peTradingsymbol());
-    out.put("interval", chart.interval());
-    out.put("underlyingLtp", chart.underlyingLtp()); // nullable off-hours
-    out.put("underlyingDayOpen", chart.underlyingDayOpen()); // nullable off-hours
-    out.put("asOf", chart.asOf());
-    return out;
+    return optionsOiChartService.chart(q.name(), q.expiry(), strike, interval, q.date());
   }
 
   /**

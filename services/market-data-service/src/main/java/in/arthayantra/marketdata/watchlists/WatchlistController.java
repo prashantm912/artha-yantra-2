@@ -40,6 +40,15 @@ public class WatchlistController {
   public record WatchlistView(
       UUID id, String name, OffsetDateTime createdAt, List<ItemRequest> items) {}
 
+  /**
+   * The 201 body of {@link #create} (D3 — was a {@code Map<String, Object>}). Both components are
+   * non-null: {@code id} is freshly minted and {@code name} is rejected with a 400 when blank, and
+   * the pre-D3 {@code Map.of} would have thrown on either being null. Key order is NORMALISED, not
+   * preserved — a 2-key {@code Map.of}'s iteration order is JVM-salted, so there was no stable
+   * emitted order to preserve.
+   */
+  public record WatchlistCreated(UUID id, String name) {}
+
   private final JdbcTemplate jdbc;
   private final InstrumentRepository instruments;
 
@@ -51,7 +60,7 @@ public class WatchlistController {
 
   /** Creates a watchlist; duplicate names are 409. */
   @PostMapping
-  public ResponseEntity<Map<String, Object>> create(@RequestBody NameRequest request) {
+  public ResponseEntity<WatchlistCreated> create(@RequestBody NameRequest request) {
     if (request.name() == null || request.name().isBlank()) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "watchlist name is required");
     }
@@ -63,7 +72,7 @@ public class WatchlistController {
           ErrorCodes.CONFLICT_WATCHLIST_NAME, "watchlist '" + request.name() + "' already exists");
     }
     return ResponseEntity.status(HttpStatus.CREATED)
-        .body(Map.of("id", id, "name", request.name()));
+        .body(new WatchlistCreated(id, request.name()));
   }
 
   /** All watchlists with their items. */

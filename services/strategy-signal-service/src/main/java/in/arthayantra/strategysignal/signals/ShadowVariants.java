@@ -138,7 +138,7 @@ public class ShadowVariants {
 
   /**
    * Validates + builds ONE variant from a runtime registration (EVO E3 §11). {@code specNode} is the
-   * vocabulary BODY ({@code {rails, compositeThreshold}}, the {@code name} is separate); it is
+   * vocabulary BODY ({@code {rails, compositeThreshold, nullPolicy}}, the {@code name} is separate); it is
    * STRICT-parsed so an unknown knob kind (e.g. an ENV-plane relative-vol field, §2.3) is rejected,
    * then run through the SAME name-regex + rail-shape rules as the env JSON. Throws {@link
    * IllegalArgumentException} on any violation — the registry surfaces it as a 422. The strictness

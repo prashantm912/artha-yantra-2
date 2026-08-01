@@ -1458,6 +1458,7 @@ export interface components {
         VariantSpecView: {
             rails: components["schemas"]["RailOverrideView"][] | null;
             compositeThreshold: number | null;
+            nullPolicy: string | null;
         };
         ResetBody: {
             confirm?: boolean;

@@ -4276,9 +4276,12 @@
           },
           "compositeThreshold" : {
             "type" : [ "number", "null" ]
+          },
+          "nullPolicy" : {
+            "type" : [ "string", "null" ]
           }
         },
-        "required" : [ "compositeThreshold", "rails" ]
+        "required" : [ "compositeThreshold", "nullPolicy", "rails" ]
       },
       "ResetBody" : {
         "type" : "object",

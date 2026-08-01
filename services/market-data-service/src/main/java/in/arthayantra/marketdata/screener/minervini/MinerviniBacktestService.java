@@ -74,6 +74,12 @@ public class MinerviniBacktestService {
   // v7 slot sweep: does adding concurrent positions capture more of the signal flood?
   private static final int[] SLOT_SWEEP = {8, 12, 16, 20, 24};
 
+  // The five records below keep their PLAIN component names: they are the INCUMBENT owners of
+  // SetupStat / YearReturn / PortfolioStat / Report / SlotCell in the published spec, and the
+  // ManasAroraBacktestService twins that used to collapse into them are the ones that got renamed
+  // (task_1c04803f). Removing a published component name breaks generated clients even when the
+  // JSON is byte-identical, and openapi-diff cannot see it — so the split is additive by design.
+
   /** Per-setup aggregate over the backtest window. Decimals ride as JSON strings. */
   public record SetupStat(
       String setup,

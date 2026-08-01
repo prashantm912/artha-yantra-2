@@ -25,7 +25,8 @@
     "params": [],
     "requestBody": true,
     "responses": [
-      "200"
+      "200",
+      "422"
     ]
   }
 }

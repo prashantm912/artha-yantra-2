@@ -49,22 +49,42 @@
 -- (2026-07-28). DataHealthFlags therefore resolves the calendar from context.underlying, and
 -- DataHealthFlagsTest pins both directions on a real NSE-only monthly expiry.
 --
--- When the exemption applies the row records oiSuppressed=true and omits the ENTIRE OI flag group
--- (never a subset — the skip nulls the whole block in one act); the macro inputs on that row are
--- still judged normally, because MarketOiClient.macro() is untouched by the skip.
+-- When the exemption applies the row records oiSuppressed=true and omits the ENTIRE CHAIN-OI flag
+-- group (never a subset — the skip nulls the whole chain read in one act). Two things stay judged:
+-- the macro inputs (MarketOiClient.macro() is untouched by the skip) and the FUTURES BASIS, which is
+-- price-derived and which the skip explicitly KEEPS — withholding it would blind the one field on
+-- the Oi record whose absence the skip does not explain.
 --
 -- ---- WHAT IS FLAGGED -------------------------------------------------------------------------
 -- Every absence-bearing input the scorer and gates actually consume, not a convenient subset. A
 -- partial source failure (e.g. the FII bias drops out while the OI block is healthy) MUST name the
 -- specific input: a row that reports nothing wrong when something is wrong is a FALSE CLEAN, and on
 -- a data-health surface that is worse than no surface — it converts an unknown into a confident
--- wrong answer. Macro: breadth, atm-iv, iv-rank, iv-pair, iv-slope, premium-skew, vix-direction,
--- vix-level, fii, fii-bias, constituent-bias, dow. OI (withheld as a group under S24): oi-inert,
--- sentiment, sentiment-slope, oi-delta, oi-imbalance, oi-divergence, oi-spurt.
+-- wrong answer.
 --
--- Note vix-DIRECTION is a distinct flag from vix-level: `vixRising` is the vix dot's verdict-bearing
--- input (ScalperGates:596 degrades to pass on null) while `vixLevel` is only the reported operand,
--- so a present level with an absent direction is a silently blind dot.
+--   macro (never withheld)  breadth, atm-iv, iv-rank, iv-pair, iv-slope, premium-skew,
+--                           vix-direction, vix-level, fii, fii-bias, constituent-bias, dow
+--   basis (never withheld)  futures-basis
+--   chain OI (S24 group)    oi-inert, futures-quadrant, underlying-quadrant, sentiment,
+--                           sentiment-slope, oi-delta, oi-divergence, oi-spurt
+--
+-- Three distinctions the flag set encodes, each of which was a false clean when it was missing:
+--   * vix-DIRECTION is separate from vix-level. `vixRising` is the vix dot's verdict-bearing input
+--     (ScalperGates:596 degrades to pass on null); `vixLevel` is only the reported operand.
+--   * the QUADRANTS are flagged on OiQuadrant.NEUTRAL, which is not a market state — its javadoc is
+--     explicit that it exists only to represent "snapshot unavailable" without a null that would NPE
+--     the gates. `oi.futures()` decides ScalperGates.oiQuadrant while `sentimentPct` beside it is
+--     merely reported, so a failed futures/banks read used to pass as healthy.
+--   * the call/put IMBALANCE gets NO flag. The producer returns null iff both deltas are present and
+--     exactly zero (MarketOiClient:735-741) — an ordinary flat chain that flatOiStandAside reads as
+--     its meaningful stand-aside sentinel. That is a value, not an absence; genuine absence there is
+--     missing deltas, which oi-delta already covers.
+--
+-- Completeness is RATCHETED, not documented: DataHealthFlagsTest reflects over every Macro/Oi record
+-- component and fails unless each is classified — mapped to a flag (then proved to produce it, and
+-- to sit in the right S24 group) or exempted with a written reason. Adding a component without
+-- deciding is a build failure. That exists because the documentation-only rule already decayed once:
+-- the first "cover every input" pass still missed the futures quadrant and the futures basis.
 --
 -- ============================================================================================
 -- WHAT THE COLUMN READS AS TODAY (measured, so nobody reads a true value as a bug)

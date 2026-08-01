@@ -20,8 +20,14 @@ import java.util.Locale;
  * a convenient subset: a partial source failure (say the FII bias drops out while the OI block is
  * perfectly healthy) must name the specific input, because the alternative is a row that reports
  * nothing wrong. A false clean on a data-health surface is worse than no surface — it converts an
- * unknown into a confident wrong answer. When adding an input to {@code ConnectTheDotsScorer} or
- * {@code ScalperGates} that null-checks its way to a degraded verdict, add its flag here too.
+ * unknown into a confident wrong answer.
+ *
+ * <p>That completeness is RATCHETED, not merely documented. {@code DataHealthFlagsTest} reflects
+ * over every {@code Macro} and {@code Oi} record component and fails unless each is explicitly
+ * classified — either mapped to a flag (and then proved to actually produce it when absent, and to
+ * sit in the right S24 group) or exempted with a written reason. Adding a component without
+ * deciding is a build failure. This exists because a documentation-only rule already decayed: the
+ * first pass at "cover every input" still missed the futures quadrant and the futures basis.
  *
  * <p><b>A flag means the input was ABSENT when the gate scored this bar.</b> It never means "the
  * input had an unremarkable value". That line is where a naive port of {@link DotHealthCanary}'s
@@ -39,10 +45,16 @@ import java.util.Locale;
  * <p><b>The S24 per-root exemption.</b> On a MONTHLY index expiry {@code MarketOiClient.oi()} skips
  * the whole OI block by design — the expiring series' writers are unwinding, so chain OI is corrupt —
  * and returns an inert {@code Oi}: NEUTRAL on both quadrants, null on every soft numeric
- * (MarketOiClient:347-356). Every OI dot is then legitimately non-confirming, so the ENTIRE OI flag
- * group is withheld — never a subset — and {@code oiSuppressed} records why. The macro flags are
- * still emitted: {@code MarketOiClient.macro()} is untouched by the skip, so a dead breadth on an
- * expiry day is as real as on any other day. ⚠️ The suppression is keyed PER OI ROOT, NOT per
+ * (MarketOiClient:347-356). Every chain-OI dot is then legitimately non-confirming, so the ENTIRE
+ * CHAIN-OI flag group is withheld — never a subset — and {@code oiSuppressed} records why.
+ *
+ * <p>Two things are deliberately OUTSIDE that group and are still judged on an expiry day. The macro
+ * flags, because {@code MarketOiClient.macro()} is untouched by the skip — a dead breadth on an
+ * expiry day is as real as on any other. And {@link #FUTURES_BASIS_ABSENT}, because the basis is
+ * price-derived and the skip explicitly KEEPS it: withholding it would blind the one field on the
+ * {@code Oi} record whose absence the skip does not explain. Group membership is pinned per record
+ * component by {@code DataHealthFlagsTest}'s coverage ratchet. ⚠️ The suppression is keyed PER OI
+ * ROOT, NOT per
  * date: NSE's monthly index expiry is the last Tuesday, BSE's (SENSEX) the last Thursday, and
  * {@code MarketOiClient} keys on the row's own underlying. On an NSE-only expiry day a SENSEX-rooted
  * OI read is NOT suppressed and a dead OI block there IS a genuine outage — a date-keyed exemption
@@ -102,9 +114,18 @@ public record DataHealthFlags(
   /** No Dow direction — the global cue was unconfigured, off-hours or history. */
   public static final String DOW_ABSENT = "dow-absent";
 
-  // ---- OI-block inputs. ALL of these are withheld together when oiSuppressed, because the S24
-  // skip nulls the WHOLE block at once — flagging any one of them there reports a defect that the
-  // design deliberately caused. See the class javadoc. ------------------------------------------
+  /**
+   * No futures basis. This lives on the {@code Oi} record but is NOT part of the suppressed group:
+   * the basis is PRICE-derived, so {@code MarketOiClient.oi()} deliberately KEEPS it through the S24
+   * skip (MarketOiClient:350-355). A null basis on an expiry day is therefore a real failure, and
+   * withholding it would blind exactly the one OI-record field the skip does not explain.
+   * {@code ScalperGates.futuresBasis} degrades to pass on null (:851-855).
+   */
+  public static final String FUTURES_BASIS_ABSENT = "futures-basis-absent";
+
+  // ---- CHAIN-OI inputs. ALL of these are withheld together when oiSuppressed, because the S24
+  // skip nulls the WHOLE chain read at once — flagging any one of them there reports a defect that
+  // the design deliberately caused. See the class javadoc. --------------------------------------
 
   /**
    * The OI half contributed nothing at all: both quadrants NEUTRAL and every soft numeric null (or
@@ -112,17 +133,37 @@ public record DataHealthFlags(
    */
   public static final String OI_INERT = "oi-inert";
 
+  /**
+   * The futures OI snapshot was unavailable. {@link OiQuadrant#NEUTRAL} is not a market state — its
+   * javadoc is explicit that it exists ONLY to represent "data missing" without a null that would
+   * NPE the gates. It is the verdict-bearing input of {@code ScalperGates.oiQuadrant} (:582-584,
+   * weight 1.5); {@code sentimentPct} beside it is merely the reported operand, so a failed
+   * {@code futures/banks} read alongside a healthy sentiment used to read clean.
+   */
+  public static final String FUTURES_QUADRANT_ABSENT = "futures-quadrant-absent";
+
+  /**
+   * The underlying OI snapshot was unavailable — same NEUTRAL-means-missing sentinel, read by the
+   * {@code underlying_oi} dot and by {@code oiSpurt}'s quadrant check.
+   */
+  public static final String UNDERLYING_QUADRANT_ABSENT = "underlying-quadrant-absent";
+
   /** No active-strike sentiment — the {@code sentiment} dot cannot confirm (scorer:215). */
   public static final String SENTIMENT_ABSENT = "sentiment-absent";
 
   /** No sentiment slope — the {@code sentiment_slope} dot cannot confirm (scorer:219). */
   public static final String SENTIMENT_SLOPE_ABSENT = "sentiment-slope-absent";
 
-  /** No CE/PE OI deltas — the {@code trending_cross} dot cannot confirm (scorer:310-318). */
+  /**
+   * No CE/PE OI deltas — the {@code trending_cross} dot cannot confirm (scorer:310-318). This is
+   * ALSO the only genuine absence behind a null {@code callPutDeltaImbalancePct}: the producer
+   * returns null from {@code imbalancePct} iff {@code max(|ceDelta|,|peDelta|) == 0}
+   * (MarketOiClient:735-741), i.e. both deltas are present and exactly zero — an ordinary flat
+   * chain that {@code ScalperGates.flatOiStandAside} reads as its meaningful stand-aside SENTINEL
+   * (:732-740). A null imbalance therefore gets NO flag of its own: with the deltas present it is a
+   * value, and with them missing this flag already covers it.
+   */
   public static final String OI_DELTA_ABSENT = "oi-delta-absent";
-
-  /** No call/put delta imbalance — read by several OI gates + HeroZero/TrendChange. */
-  public static final String OI_IMBALANCE_ABSENT = "oi-imbalance-absent";
 
   /** No PE−CE divergence % — the divergence gate cannot read (ScalperGates:692). */
   public static final String OI_DIVERGENCE_ABSENT = "oi-divergence-absent";
@@ -207,22 +248,38 @@ public record DataHealthFlags(
       flags.add(DOW_ABSENT);
     }
 
-    // ---- OI. Withheld WHOLESALE under S24: the skip nulls the entire block in one act, so any
-    // per-field flag here would report a defect the design deliberately caused.
+    // ---- FUTURES BASIS. On the Oi record but NOT in the suppressed group: it is price-derived and
+    // MarketOiClient KEEPS it through the S24 skip, so a null basis is a real failure on any day.
+    if (context.oi() == null || context.oi().futuresBasis() == null) {
+      flags.add(FUTURES_BASIS_ABSENT);
+    }
+
+    // ---- CHAIN OI. Withheld WHOLESALE under S24: the skip nulls the entire chain read in one act,
+    // so any per-field flag here would report a defect the design deliberately caused.
     if (!oiSuppressed) {
-      flags.addAll(oiFlags(context.oi()));
+      flags.addAll(chainOiFlags(context.oi()));
     }
     return new DataHealthFlags(!flags.isEmpty(), true, oiSuppressed, List.copyOf(flags));
   }
 
   /**
-   * The OI block's absences. A null {@code Oi} is total absence — every flag fires, which is what
-   * that state means. Callers must withhold this ENTIRE list under S24, never a subset.
+   * The CHAIN-OI absences — everything the S24 skip empties. A null {@code Oi} is total absence, so
+   * every flag fires. Callers must withhold this ENTIRE list under S24, never a subset.
+   *
+   * <p>{@code futuresBasis} is deliberately NOT here: it survives the skip and is judged separately.
+   * {@code callPutDeltaImbalancePct} is deliberately NOT here either: its null is the flat-chain
+   * sentinel, a value rather than an absence — see {@link #OI_DELTA_ABSENT}.
    */
-  private static List<String> oiFlags(ScalperGateContext.Oi oi) {
-    List<String> flags = new ArrayList<>(7);
+  private static List<String> chainOiFlags(ScalperGateContext.Oi oi) {
+    List<String> flags = new ArrayList<>(8);
     if (oiInert(oi)) {
       flags.add(OI_INERT);
+    }
+    if (quadrantInert(oi == null ? null : oi.futures())) {
+      flags.add(FUTURES_QUADRANT_ABSENT);
+    }
+    if (quadrantInert(oi == null ? null : oi.underlying())) {
+      flags.add(UNDERLYING_QUADRANT_ABSENT);
     }
     if (oi == null || oi.sentimentPct() == null) {
       flags.add(SENTIMENT_ABSENT);
@@ -232,9 +289,6 @@ public record DataHealthFlags(
     }
     if (oi == null || oi.ceOiDelta() == null || oi.peOiDelta() == null) {
       flags.add(OI_DELTA_ABSENT);
-    }
-    if (oi == null || oi.callPutDeltaImbalancePct() == null) {
-      flags.add(OI_IMBALANCE_ABSENT);
     }
     if (oi == null || oi.oiDivergencePct() == null) {
       flags.add(OI_DIVERGENCE_ABSENT);

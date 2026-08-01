@@ -5,10 +5,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategysignal.scalper.OiQuadrant;
 import in.arthayantra.strategysignal.scalper.ScalperGateContext;
+import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -78,10 +82,18 @@ class DataHealthFlagsTest {
         constituentBias, ceIvSlope, peIvSlope, premiumSkewPct, dowUp, fiiBiasSign);
   }
 
-  /** The live OI block with exactly ONE field nulled (the OI half of the same fixture idea). */
+  /**
+   * The live OI block with exactly ONE field made ABSENT. Note the quadrants: absence there is
+   * {@link OiQuadrant#NEUTRAL}, not null — NEUTRAL is the sentinel the live assembler uses to say
+   * "snapshot unavailable" without a null that would NPE the gates, so the fixture must model the
+   * real shape.
+   */
   private static ScalperGateContext.Oi oiWithout(String absent) {
+    OiQuadrant underlying = OiQuadrant.LONG_BUILDUP;
+    OiQuadrant futures = OiQuadrant.SHORT_COVERING;
     BigDecimal sentimentPct = new BigDecimal("58.0");
     BigDecimal trendingPeMinusCePct = new BigDecimal("4.2");
+    BigDecimal futuresBasis = new BigDecimal("31.5");
     BigDecimal ceOiDelta = new BigDecimal("120000");
     BigDecimal peOiDelta = new BigDecimal("240000");
     BigDecimal callPutDeltaImbalancePct = new BigDecimal("12.0");
@@ -91,8 +103,11 @@ class DataHealthFlagsTest {
     BigDecimal oiDivergencePct = new BigDecimal("22.0");
     if (absent != null) {
       switch (absent) {
+        case "underlying" -> underlying = OiQuadrant.NEUTRAL;
+        case "futures" -> futures = OiQuadrant.NEUTRAL;
         case "sentimentPct" -> sentimentPct = null;
         case "trendingPeMinusCePct" -> trendingPeMinusCePct = null;
+        case "futuresBasis" -> futuresBasis = null;
         case "ceOiDelta" -> ceOiDelta = null;
         case "peOiDelta" -> peOiDelta = null;
         case "callPutDeltaImbalancePct" -> callPutDeltaImbalancePct = null;
@@ -104,9 +119,9 @@ class DataHealthFlagsTest {
       }
     }
     return new ScalperGateContext.Oi(
-        OiQuadrant.LONG_BUILDUP, OiQuadrant.SHORT_COVERING, sentimentPct, trendingPeMinusCePct,
-        new BigDecimal("31.5"), ceOiDelta, peOiDelta, callPutDeltaImbalancePct, true, true,
-        sentimentSlope, spurtOiPct, spurtPricePct, oiDivergencePct);
+        underlying, futures, sentimentPct, trendingPeMinusCePct, futuresBasis, ceOiDelta, peOiDelta,
+        callPutDeltaImbalancePct, true, true, sentimentSlope, spurtOiPct, spurtPricePct,
+        oiDivergencePct);
   }
 
   /** A live OI read on an ordinary bar: quadrants resolved, magnitudes present. */
@@ -184,13 +199,18 @@ class DataHealthFlagsTest {
         .isFalse();
   }
 
-  /** The full OI flag group — what an entirely dead OI block reports off an expiry day. */
-  private static final String[] ALL_OI_FLAGS = {
+  /**
+   * The CHAIN-OI flag group — what the S24-shaped inert block reports off an expiry day. Excludes
+   * {@code futures-basis-absent}: the inert shape KEEPS the price-derived basis, which is exactly
+   * why that flag sits outside this group.
+   */
+  private static final String[] ALL_CHAIN_OI_FLAGS = {
     DataHealthFlags.OI_INERT,
+    DataHealthFlags.FUTURES_QUADRANT_ABSENT,
+    DataHealthFlags.UNDERLYING_QUADRANT_ABSENT,
     DataHealthFlags.SENTIMENT_ABSENT,
     DataHealthFlags.SENTIMENT_SLOPE_ABSENT,
     DataHealthFlags.OI_DELTA_ABSENT,
-    DataHealthFlags.OI_IMBALANCE_ABSENT,
     DataHealthFlags.OI_DIVERGENCE_ABSENT,
     DataHealthFlags.OI_SPURT_ABSENT,
   };
@@ -203,7 +223,7 @@ class DataHealthFlagsTest {
     assertThat(health.oiSuppressed()).isFalse();
     assertThat(health.degraded()).isTrue();
     // The whole-block summary AND every field it emptied — the inert shape nulls them all.
-    assertThat(health.flags()).containsExactlyInAnyOrder(ALL_OI_FLAGS);
+    assertThat(health.flags()).containsExactlyInAnyOrder(ALL_CHAIN_OI_FLAGS);
   }
 
   @Test
@@ -211,11 +231,16 @@ class DataHealthFlagsTest {
     // The trap a naive port of the canary's window probes falls into: per row, a zero spurt and a
     // NEUTRAL quadrant are ordinary. Measured live 2026-07-20..31, spurtPricePct = 0 on ~43% of
     // context-bearing rows on NON-expiry sessions. Only a WHOLLY empty OI block is inert.
+    // ⚠️ The quadrants here are REAL states, not NEUTRAL. This fixture used to pass NEUTRAL to mean
+    // "flat market", which review round 2 showed is wrong: OiQuadrant.NEUTRAL's javadoc is explicit
+    // that it is the "snapshot unavailable" sentinel, NOT one of the four source states. A genuinely
+    // quiet-but-live bar resolves its quadrants and merely reports zero magnitudes.
     ScalperGateContext.Oi quiet =
         new ScalperGateContext.Oi(
-            OiQuadrant.NEUTRAL, OiQuadrant.NEUTRAL, new BigDecimal("50.0"), BigDecimal.ZERO,
-            new BigDecimal("31.5"), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false,
-            false, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.SHORT_COVERING, new BigDecimal("50.0"),
+            BigDecimal.ZERO, new BigDecimal("31.5"), BigDecimal.ZERO, BigDecimal.ZERO,
+            BigDecimal.ZERO, false, false, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+            BigDecimal.ZERO);
 
     DataHealthFlags health =
         DataHealthFlags.of(context("NIFTY 50", quiet, healthyMacro()), ORDINARY_DAY);
@@ -269,7 +294,7 @@ class DataHealthFlagsTest {
         DataHealthFlags.of(context("SENSEX", inertOi(), healthyMacro()), nseOnly);
     assertThat(sensex.oiSuppressed()).as("BSE monthly is the last THURSDAY — not today").isFalse();
     assertThat(sensex.degraded()).isTrue();
-    assertThat(sensex.flags()).containsExactlyInAnyOrder(ALL_OI_FLAGS);
+    assertThat(sensex.flags()).containsExactlyInAnyOrder(ALL_CHAIN_OI_FLAGS);
 
     // (c) the mirror image on a BSE-only monthly expiry — the exemption must not be one-directional.
     LocalDate bseOnly = bseOnlyMonthlyExpiry2026();
@@ -338,65 +363,196 @@ class DataHealthFlagsTest {
             DataHealthFlags.DOW_ABSENT);
   }
 
-  /**
-   * Cross-vendor review Major 1. Each absence-bearing input the scorer/gates consume must be
-   * nameable ON ITS OWN, with everything else — including the whole OI block — healthy. If any of
-   * these produced no flag, the row would read "every gate input was present" while a dot or gate
-   * was silently blind: a FALSE CLEAN, which on a data-health surface is worse than no surface.
-   */
-  @Test
-  void aPartialSourceFailureNamesTheSpecificInputWhileTheOiBlockStaysHealthy() {
-    record Case(String flag, ScalperGateContext.Macro macro) {}
-    List<Case> cases =
-        List.of(
-            new Case(DataHealthFlags.ATM_IV_ABSENT, macroWithout("atmIv")),
-            new Case(DataHealthFlags.IV_RANK_ABSENT, macroWithout("ivRank")),
-            new Case(DataHealthFlags.IV_PAIR_ABSENT, macroWithout("ceIvAvg6")),
-            new Case(DataHealthFlags.IV_PAIR_ABSENT, macroWithout("peIvAvg6")),
-            new Case(DataHealthFlags.IV_SLOPE_ABSENT, macroWithout("ceIvSlope")),
-            new Case(DataHealthFlags.IV_SLOPE_ABSENT, macroWithout("peIvSlope")),
-            new Case(DataHealthFlags.PREMIUM_SKEW_ABSENT, macroWithout("premiumSkewPct")),
-            new Case(DataHealthFlags.VIX_DIRECTION_ABSENT, macroWithout("vixRising")),
-            new Case(DataHealthFlags.VIX_LEVEL_ABSENT, macroWithout("vixLevel")),
-            new Case(DataHealthFlags.FII_ABSENT, macroWithout("fiiLongPct")),
-            new Case(DataHealthFlags.FII_BIAS_ABSENT, macroWithout("fiiBiasSign")),
-            new Case(DataHealthFlags.CONSTITUENT_BIAS_ABSENT, macroWithout("constituentBias")),
-            new Case(DataHealthFlags.DOW_ABSENT, macroWithout("dowUp")));
+  // =============================================================================================
+  // THE COVERAGE RATCHET (cross-vendor review round 2)
+  // =============================================================================================
+  // A javadoc rule saying "add a flag when you add an input" is not enough — it already decayed
+  // once: the first pass at "cover every absence-bearing input" still missed the futures QUADRANT
+  // (OiQuadrant.NEUTRAL is the "snapshot unavailable" sentinel, not a market state) and the futures
+  // BASIS. Both were false cleans, found in review rather than by the suite.
+  //
+  // So every record component of Macro and Oi must be EXPLICITLY classified below: either mapped to
+  // a flag — and then proved to actually produce that flag when it alone is absent, and to sit in
+  // the right S24 group — or exempted with a written reason. Reflection makes the list exhaustive,
+  // so ADDING a component without deciding fails the build, and REMOVING one leaves a stale entry
+  // that also fails. Deliberately NOT a source-scanner over ScalperGates: that would be brittle and
+  // would fail for reasons unrelated to data health.
 
-    for (Case c : cases) {
-      DataHealthFlags health =
-          DataHealthFlags.of(context("NIFTY 50", liveOi(), c.macro()), ORDINARY_DAY);
-      assertThat(health.flags())
-          .as("one absent macro input names exactly itself: %s", c.flag())
-          .containsExactly(c.flag());
-      assertThat(health.degraded()).as("%s marks the row degraded", c.flag()).isTrue();
+  /** How one gate-context record component is accounted for by {@link DataHealthFlags}. */
+  private record Coverage(String flag, boolean s24Suppressed, String exemptReason) {
+
+    /** Absence produces {@code flag}, judged on every row (macro, or the S24-surviving basis). */
+    static Coverage flagged(String flag) {
+      return new Coverage(flag, false, null);
+    }
+
+    /** Absence produces {@code flag}, but the whole chain-OI group is withheld under S24. */
+    static Coverage suppressedFlag(String flag) {
+      return new Coverage(flag, true, null);
+    }
+
+    /** Absence is deliberately NOT flagged; the reason is the documentation. */
+    static Coverage exempt(String reason) {
+      return new Coverage(null, false, reason);
     }
   }
 
-  /** The same, for each OI-block input — with every MACRO input healthy. */
-  @Test
-  void aPartialOiFailureNamesTheSpecificInputWhileMacroStaysHealthy() {
-    record Case(String flag, ScalperGateContext.Oi oi) {}
-    List<Case> cases =
-        List.of(
-            new Case(DataHealthFlags.SENTIMENT_ABSENT, oiWithout("sentimentPct")),
-            new Case(DataHealthFlags.SENTIMENT_SLOPE_ABSENT, oiWithout("sentimentSlope")),
-            new Case(DataHealthFlags.OI_DELTA_ABSENT, oiWithout("ceOiDelta")),
-            new Case(DataHealthFlags.OI_DELTA_ABSENT, oiWithout("peOiDelta")),
-            new Case(DataHealthFlags.OI_IMBALANCE_ABSENT, oiWithout("callPutDeltaImbalancePct")),
-            new Case(DataHealthFlags.OI_DIVERGENCE_ABSENT, oiWithout("oiDivergencePct")),
-            new Case(DataHealthFlags.OI_SPURT_ABSENT, oiWithout("spurtOiPct")),
-            new Case(DataHealthFlags.OI_SPURT_ABSENT, oiWithout("spurtPricePct")));
+  private static final Map<String, Coverage> MACRO_COVERAGE =
+      Map.ofEntries(
+          Map.entry("atmIv", Coverage.flagged(DataHealthFlags.ATM_IV_ABSENT)),
+          Map.entry("ivRank", Coverage.flagged(DataHealthFlags.IV_RANK_ABSENT)),
+          Map.entry("vixLevel", Coverage.flagged(DataHealthFlags.VIX_LEVEL_ABSENT)),
+          Map.entry("vixRising", Coverage.flagged(DataHealthFlags.VIX_DIRECTION_ABSENT)),
+          Map.entry("fiiLongPct", Coverage.flagged(DataHealthFlags.FII_ABSENT)),
+          Map.entry("ceIvAvg6", Coverage.flagged(DataHealthFlags.IV_PAIR_ABSENT)),
+          Map.entry("peIvAvg6", Coverage.flagged(DataHealthFlags.IV_PAIR_ABSENT)),
+          Map.entry("constituentBias", Coverage.flagged(DataHealthFlags.CONSTITUENT_BIAS_ABSENT)),
+          Map.entry("ceIvSlope", Coverage.flagged(DataHealthFlags.IV_SLOPE_ABSENT)),
+          Map.entry("peIvSlope", Coverage.flagged(DataHealthFlags.IV_SLOPE_ABSENT)),
+          Map.entry("premiumSkewPct", Coverage.flagged(DataHealthFlags.PREMIUM_SKEW_ABSENT)),
+          Map.entry("dowUp", Coverage.flagged(DataHealthFlags.DOW_ABSENT)),
+          Map.entry("fiiBiasSign", Coverage.flagged(DataHealthFlags.FII_BIAS_ABSENT)),
+          // Primitive ints — individually un-nullable. Their ABSENCE is the {0,0} PAIR, which
+          // breadth-absent covers and breadthIsAbsentOnlyWhenBothCountsAreZero pins.
+          Map.entry("advances", Coverage.exempt("breadth pair -> " + DataHealthFlags.BREADTH_ABSENT)),
+          Map.entry("declines", Coverage.exempt("breadth pair -> " + DataHealthFlags.BREADTH_ABSENT)));
 
-    for (Case c : cases) {
-      DataHealthFlags health =
-          DataHealthFlags.of(context("NIFTY 50", c.oi(), healthyMacro()), ORDINARY_DAY);
-      assertThat(health.flags())
-          .as("one absent OI input names exactly itself: %s", c.flag())
-          .containsExactly(c.flag());
-      assertThat(health.degraded()).as("%s marks the row degraded", c.flag()).isTrue();
-      assertThat(health.oiSuppressed()).isFalse();
-    }
+  private static final Map<String, Coverage> OI_COVERAGE =
+      Map.ofEntries(
+          Map.entry("futures", Coverage.suppressedFlag(DataHealthFlags.FUTURES_QUADRANT_ABSENT)),
+          Map.entry(
+              "underlying", Coverage.suppressedFlag(DataHealthFlags.UNDERLYING_QUADRANT_ABSENT)),
+          Map.entry("sentimentPct", Coverage.suppressedFlag(DataHealthFlags.SENTIMENT_ABSENT)),
+          Map.entry(
+              "sentimentSlope", Coverage.suppressedFlag(DataHealthFlags.SENTIMENT_SLOPE_ABSENT)),
+          Map.entry("ceOiDelta", Coverage.suppressedFlag(DataHealthFlags.OI_DELTA_ABSENT)),
+          Map.entry("peOiDelta", Coverage.suppressedFlag(DataHealthFlags.OI_DELTA_ABSENT)),
+          Map.entry(
+              "oiDivergencePct", Coverage.suppressedFlag(DataHealthFlags.OI_DIVERGENCE_ABSENT)),
+          Map.entry("spurtOiPct", Coverage.suppressedFlag(DataHealthFlags.OI_SPURT_ABSENT)),
+          Map.entry("spurtPricePct", Coverage.suppressedFlag(DataHealthFlags.OI_SPURT_ABSENT)),
+          // NOT suppressed: price-derived, and MarketOiClient KEEPS it through the S24 skip, so a
+          // null basis is a real failure even on the root's own expiry day.
+          Map.entry("futuresBasis", Coverage.flagged(DataHealthFlags.FUTURES_BASIS_ABSENT)),
+          // Review round 2 Major C: imbalancePct returns null IFF both deltas are present and
+          // exactly zero (MarketOiClient:735-741) — an ordinary flat chain that flatOiStandAside
+          // reads as its meaningful sentinel. That is a VALUE, not an absence; the only genuine
+          // absence behind it is missing deltas, which oi-delta-absent already covers.
+          Map.entry(
+              "callPutDeltaImbalancePct",
+              Coverage.exempt("null is the flat-chain sentinel; absence -> oi-delta-absent")),
+          Map.entry(
+              "trendingPeMinusCePct",
+              Coverage.exempt("diagnostic-only; no dot or gate reads it")),
+          // Primitive booleans — cannot be absent.
+          Map.entry("crossedThisWindow", Coverage.exempt("primitive boolean, cannot be absent")),
+          Map.entry("gapWidening", Coverage.exempt("primitive boolean, cannot be absent")));
+
+  private static List<String> componentNames(Class<?> record) {
+    return Arrays.stream(record.getRecordComponents()).map(RecordComponent::getName).toList();
+  }
+
+  @Test
+  void everyMacroComponentIsExplicitlyClassified() {
+    assertThat(componentNames(ScalperGateContext.Macro.class))
+        .as(
+            "every Macro component needs a flag or a written exemption — a new input that nobody"
+                + " classified is how a false clean gets shipped")
+        .containsExactlyInAnyOrderElementsOf(MACRO_COVERAGE.keySet());
+  }
+
+  @Test
+  void everyOiComponentIsExplicitlyClassified() {
+    assertThat(componentNames(ScalperGateContext.Oi.class))
+        .as("every Oi component needs a flag or a written exemption")
+        .containsExactlyInAnyOrderElementsOf(OI_COVERAGE.keySet());
+  }
+
+  /**
+   * The classification is not merely declared — each flagged macro input, absent ALONE with
+   * everything else (including the whole OI block) healthy, must name exactly itself.
+   */
+  @Test
+  void everyFlaggedMacroComponentProducesItsFlagWhenAbsentAlone() {
+    MACRO_COVERAGE.forEach(
+        (component, coverage) -> {
+          if (coverage.flag() == null) {
+            return;
+          }
+          DataHealthFlags health =
+              DataHealthFlags.of(
+                  context("NIFTY 50", liveOi(), macroWithout(component)), ORDINARY_DAY);
+          assertThat(health.flags())
+              .as("absent macro input '%s' names exactly %s", component, coverage.flag())
+              .containsExactly(coverage.flag());
+          assertThat(health.degraded()).as("'%s' marks the row degraded", component).isTrue();
+        });
+  }
+
+  /** The same for each flagged OI input, with every MACRO input healthy. */
+  @Test
+  void everyFlaggedOiComponentProducesItsFlagWhenAbsentAlone() {
+    OI_COVERAGE.forEach(
+        (component, coverage) -> {
+          if (coverage.flag() == null) {
+            return;
+          }
+          DataHealthFlags health =
+              DataHealthFlags.of(
+                  context("NIFTY 50", oiWithout(component), healthyMacro()), ORDINARY_DAY);
+          assertThat(health.flags())
+              .as("absent OI input '%s' names exactly %s", component, coverage.flag())
+              .containsExactly(coverage.flag());
+          assertThat(health.degraded()).as("'%s' marks the row degraded", component).isTrue();
+          assertThat(health.oiSuppressed()).isFalse();
+        });
+  }
+
+  /**
+   * S24 group membership, pinned per component. On the root's own monthly expiry the chain-OI flags
+   * must vanish and the NON-suppressed ones must survive — the exact distinction Major B was about
+   * ({@code futuresBasis} is price-derived and the skip keeps it, so withholding it would blind the
+   * one Oi field the skip does not explain).
+   */
+  @Test
+  void eachOiComponentIsWithheldUnderS24OnlyIfItsGroupSaysSo() {
+    LocalDate expiry = nseOnlyMonthlyExpiry2026();
+    OI_COVERAGE.forEach(
+        (component, coverage) -> {
+          if (coverage.flag() == null) {
+            return;
+          }
+          DataHealthFlags health =
+              DataHealthFlags.of(
+                  context("NIFTY 50", oiWithout(component), healthyMacro()), expiry);
+          assertThat(health.oiSuppressed()).isTrue();
+          if (coverage.s24Suppressed()) {
+            assertThat(health.flags())
+                .as("chain-OI input '%s' is withheld on the root's expiry (S24)", component)
+                .isEmpty();
+          } else {
+            assertThat(health.flags())
+                .as(
+                    "'%s' SURVIVES the S24 skip, so its absence is still a real failure on an"
+                        + " expiry day",
+                    component)
+                .containsExactly(coverage.flag());
+          }
+        });
+  }
+
+  /** A null imbalance with both deltas PRESENT is the flat-chain sentinel — a value, not absence. */
+  @Test
+  void aFlatChainImbalanceSentinelIsNotAnAbsence() {
+    DataHealthFlags health =
+        DataHealthFlags.of(
+            context("NIFTY 50", oiWithout("callPutDeltaImbalancePct"), healthyMacro()),
+            ORDINARY_DAY);
+
+    assertThat(health.flags())
+        .as("a flat chain (both deltas present, imbalance null) is an ordinary market state")
+        .isEmpty();
+    assertThat(health.degraded()).isFalse();
   }
 
   /** Every OI flag is withheld together under S24 — never a subset (review Major 1). */
@@ -413,27 +569,23 @@ class DataHealthFlagsTest {
     assertThat(health.flags()).isEmpty();
     assertThat(health.degraded()).isFalse();
 
-    // …and a fully-null OI block on the expiring root likewise contributes nothing.
+    // …and a fully-null OI block on the expiring root contributes nothing FROM THE CHAIN GROUP —
+    // but the basis is NOT in that group (it survives the S24 skip), so its absence still stands.
+    // This is Major B stated as an assertion: the skip explains the chain read, never the basis.
     DataHealthFlags nullOi =
         DataHealthFlags.of(context("NIFTY 50", null, healthyMacro()), nseOnly);
-    assertThat(nullOi.flags()).isEmpty();
-    assertThat(nullOi.degraded()).isFalse();
+    assertThat(nullOi.flags()).containsExactly(DataHealthFlags.FUTURES_BASIS_ABSENT);
+    assertThat(nullOi.degraded()).isTrue();
   }
 
   @Test
-  void aNullOiBlockFlagsEveryOiInput() {
+  void aNullOiBlockFlagsEveryOiInputIncludingTheUnsuppressedBasis() {
     DataHealthFlags health =
         DataHealthFlags.of(context("NIFTY 50", null, healthyMacro()), ORDINARY_DAY);
 
-    assertThat(health.flags())
-        .containsExactlyInAnyOrder(
-            DataHealthFlags.OI_INERT,
-            DataHealthFlags.SENTIMENT_ABSENT,
-            DataHealthFlags.SENTIMENT_SLOPE_ABSENT,
-            DataHealthFlags.OI_DELTA_ABSENT,
-            DataHealthFlags.OI_IMBALANCE_ABSENT,
-            DataHealthFlags.OI_DIVERGENCE_ABSENT,
-            DataHealthFlags.OI_SPURT_ABSENT);
+    List<String> expected = new ArrayList<>(List.of(ALL_CHAIN_OI_FLAGS));
+    expected.add(DataHealthFlags.FUTURES_BASIS_ABSENT);
+    assertThat(health.flags()).containsExactlyInAnyOrderElementsOf(expected);
   }
 
   /**

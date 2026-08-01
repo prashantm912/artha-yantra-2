@@ -47,7 +47,13 @@ public class SignalRejectionsController {
     return dotHealth.evaluate();
   }
 
-  /** Paged/filtered rejection history, newest first. */
+  /**
+   * Paged/filtered rejection history, newest first.
+   *
+   * <p>{@code degraded} (F5 U3) narrows to rows whose gate inputs were absent when the bar was
+   * scored — omit it for every row, {@code true} for the compromised ones, {@code false} for the
+   * clean ones. See {@link DataHealthFlags} for what a flag does and does not mean.
+   */
   @GetMapping
   public SignalViews.RejectionPage list(
       @RequestParam(required = false) UUID strategyVersionId,
@@ -58,13 +64,15 @@ public class SignalRejectionsController {
           OffsetDateTime from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime to,
+      @RequestParam(required = false) Boolean degraded,
       @RequestParam(defaultValue = "100") int limit,
       @RequestParam(defaultValue = "0") int offset) {
     int boundedLimit = Math.min(Math.max(limit, 1), 500);
     int boundedOffset = Math.max(offset, 0);
     List<SignalRejectionRepository.RejectionRow> items =
         repository.list(
-            strategyVersionId, rail, exchange, tradingsymbol, from, to, boundedLimit, boundedOffset);
+            strategyVersionId, rail, exchange, tradingsymbol, from, to, degraded, boundedLimit,
+            boundedOffset);
     return new SignalViews.RejectionPage(items, boundedLimit, boundedOffset);
   }
 

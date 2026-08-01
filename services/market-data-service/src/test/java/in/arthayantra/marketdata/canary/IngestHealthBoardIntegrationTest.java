@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.env.MockEnvironment;
+import org.springframework.scheduling.TaskScheduler;
 
 /**
  * A11 ingest-health-board IT (app-platform audit §6.3 / §9.1). Runs the REAL board SQL + the reused
@@ -112,7 +113,17 @@ class IngestHealthBoardIntegrationTest extends MarketDataIntegrationTestBase {
   private IngestHealthBoard board(Clock clock) {
     MockEnvironment env = new MockEnvironment();
     IngestCoverageCanary canary =
-        new IngestCoverageCanary(jdbc, mock(NtfyClient.class), CAL, clock, new SimpleMeterRegistry(), env, true, 120);
+        new IngestCoverageCanary(
+            jdbc,
+            mock(NtfyClient.class),
+            CAL,
+            clock,
+            new SimpleMeterRegistry(),
+            env,
+            mock(TaskScheduler.class),
+            true,
+            120,
+            "0 45 8 * * MON-FRI");
     return new IngestHealthBoard(jdbc, canary, CAL, clock, 120);
   }
 

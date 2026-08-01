@@ -71,8 +71,11 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   a `-pl` install skips parent POMs and nested lib submodules
   (`libs/common-web/servlet`, `libs/black76-math`), so the compose fat JAR silently
   embeds a stale lib. In **PowerShell**, a `-D` property containing dots must be QUOTED
-  (`'-Dspotless.check.skip=true'`) — unquoted, PS hands Maven a split token and it dies with
-  `Unknown lifecycle phase ".check.skip=true"`.
+  (`'-Dcontracts.capture=true'`) — unquoted, PS hands Maven a split token and it dies with
+  `Unknown lifecycle phase ".capture=true"`. (An earlier example here used
+  `-Dspotless.check.skip=true`, which is INERT — no spotless plugin exists in this repo; it rode
+  along in ~8 builder briefs on 2026-07-31 before two builders independently caught it. Checkstyle
+  is the formatting gate.)
 - **CI `build-test` is sharded per-service** (`.github/workflows/ci-java.yml`): a 3-leg
   matrix (`market-data` / `backtest` / `strategy-gateway` = strategy-signal + edge-gateway),
   each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the
@@ -518,7 +521,11 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `GET /repos/{o}/{r}/rulesets` — rulesets are a SECOND, independent mechanism that can block a
   merge with classic protection looking clean (ours is `[]`).
 - **Every non-`hotfix/*` PR body needs the anchored `Cross-vendor review:` verdict line** — the
-  required `verdict` check (`ci-review-verdict.yml`, reads the body LIVE so an edit + rerun fixes it)
+  `verdict` check (`ci-review-verdict.yml`, reads the body LIVE so an edit + rerun fixes it).
+  ⚠️ **`verdict` is NOT in branch protection's required contexts** (verified against the protection
+  API 2026-08-01: the six required are `contracts`, `e2e`, `gitleaks`, and the three `build-test`
+  shards — it failed red on #1156 and blocked nothing). The discipline is convention enforced by
+  the Architect, not by GitHub; promoting it to required is a one-call owner decision. The check
   accepts `APPROVED`/`REQUEST_CHANGES (resolved)`/`NEEDS_REWORK (resolved)` each with
   `— <routed model> (<Vendor>)` model↔vendor PAIRED, or `SKIPPED (<reason>)`. Open builder PRs with
   `PENDING (...)` — red verdict until the review resolves is the DESIGN, not a failure. And with

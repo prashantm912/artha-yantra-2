@@ -1,6 +1,6 @@
 package in.arthayantra.strategysignal.signals;
 
-import in.arthayantra.strategysignal.scalper.RailMarginSigns;
+import in.arthayantra.strategysignal.scalper.RailMarginSign;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -90,12 +90,23 @@ public class RejectionWriter {
       String diagnosticJson,
       OffsetDateTime barTime,
       ScalperConfluenceGate.RejectionDiagnostic diagnostic) {
-    flagSelfContradiction(
-        strategySlug, exchange, tradingsymbol, blockingRail,
-        blockingOperand, blockingThreshold, blockingMargin, barTime);
+    // G17/T14 sign invariant. The LOOKUP + COUNTER run here on the caller: both are O(1) in-memory,
+    // and the count must survive even when a saturated queue drops the record. The WARN does NOT —
+    // review round 1 (Major): this is the sole `signal-eval` thread and logging is I/O, which is
+    // exactly what this writer exists to keep off it (see the class doc). So the warning rides the
+    // bounded async path alongside the insert.
+    boolean selfContradicting = selfContradicting(diagnostic, blockingMargin);
+    if (selfContradicting) {
+      signContradictions.increment();
+    }
     queue.submit(
         () -> {
           try {
+            if (selfContradicting) {
+              warnSelfContradiction(
+                  strategySlug, exchange, tradingsymbol, blockingRail, blockingOperand,
+                  blockingThreshold, blockingMargin, barTime, diagnostic.marginSign());
+            }
             long rejectionId =
                 repository.insert(
                     strategyVersionId, strategySlug, exchange, tradingsymbol, interval, side,
@@ -119,35 +130,41 @@ public class RejectionWriter {
 
   /**
    * G17 / T14 sign-aware margin invariant: a first-block whose {@code blockingMargin} sits STRICTLY
-   * on the passing side of its own rail's operator (floor rail with a positive margin, ceiling rail
-   * — vwap-distance — with a negative one) is a row that contradicts itself: it records a block the
-   * operand did not justify (2026-07-20 §6.3 logged 7 such rows; 2026-07-23 §2.3 proved the sign
-   * that means "blocked" is per-rail, killing the naive {@code margin < 0} guard). The expected
-   * sign comes from {@link RailMarginSigns}, whose table test derives every entry from the gate's
-   * own operator. DIAGNOSTIC ONLY, checked before the enqueue so a saturated queue cannot hide a
-   * contradiction: count + WARN, never throw, never suppress the write — the defect is intermittent
-   * (three clean sessions running as of 2026-07-31), which is exactly why a standing assertion
-   * beats another session of eyeballing, and why the contradicting row must still persist (it IS
-   * the evidence).
+   * on the passing side of its own rail's operator (a floor rail with a positive margin, a ceiling
+   * rail with a negative one) is a row that contradicts itself — it records a block the operand did
+   * not justify (2026-07-20 §6.3 logged 7 such rows; 2026-07-23 §2.3 proved the sign that means
+   * "blocked" is per-rail, killing the naive {@code margin < 0} guard).
+   *
+   * <p>The expected sign is DERIVED: the gate function that did the comparing stamps it on its
+   * {@link in.arthayantra.strategysignal.scalper.GateOutcome}, and it rides the diagnostic to here,
+   * so nothing can drift out of step with the wiring (review round 1 rejected a static name→sign
+   * table for exactly that reason — it could not see a config-armed two-bound rail). A null
+   * diagnostic asserts nothing.
+   *
+   * <p>Runs on the CALLER — O(1) and allocation-free, so the count is recorded even when a
+   * saturated queue drops the record. Never throws, and never suppresses the write: the
+   * contradicting row IS the evidence.
    */
-  private void flagSelfContradiction(
-      String strategySlug, String exchange, String tradingsymbol, String blockingRail,
-      BigDecimal operand, BigDecimal threshold, BigDecimal margin, OffsetDateTime barTime) {
+  private boolean selfContradicting(
+      ScalperConfluenceGate.RejectionDiagnostic diagnostic, BigDecimal margin) {
     try {
-      if (!RailMarginSigns.contradicts(blockingRail, margin)) {
-        return;
-      }
-      signContradictions.increment();
-      log.warn(
-          "self-contradicting rejection row: {} {}:{} bar {} blocked by rail '{}' with margin {}"
-              + " on the PASSING side of its operator (operand {} vs threshold {}, expected {})"
-              + " — persisted anyway; the row is the evidence (G17/T14)",
-          strategySlug, exchange, tradingsymbol, barTime, blockingRail, margin, operand, threshold,
-          RailMarginSigns.of(blockingRail));
+      return diagnostic != null && RailMarginSign.contradicts(diagnostic.marginSign(), margin);
     } catch (RuntimeException e) {
-      // A diagnostic about a diagnostic must never touch the eval path — swallow and note.
-      log.warn("sign-invariant check failed for rail '{}': {}", blockingRail, e.toString());
+      return false; // a diagnostic about a diagnostic must never touch the eval path
     }
+  }
+
+  /** The WARN half of the invariant — emitted on the writer thread, never on {@code signal-eval}. */
+  private void warnSelfContradiction(
+      String strategySlug, String exchange, String tradingsymbol, String blockingRail,
+      BigDecimal operand, BigDecimal threshold, BigDecimal margin, OffsetDateTime barTime,
+      RailMarginSign expected) {
+    log.warn(
+        "self-contradicting rejection row: {} {}:{} bar {} blocked by rail '{}' with margin {}"
+            + " on the PASSING side of its operator (operand {} vs threshold {}, expected {})"
+            + " — persisted anyway; the row is the evidence (G17/T14)",
+        strategySlug, exchange, tradingsymbol, barTime, blockingRail, margin, operand, threshold,
+        expected);
   }
 
   @PreDestroy

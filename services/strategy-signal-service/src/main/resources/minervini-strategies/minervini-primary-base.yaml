@@ -1,14 +1,19 @@
-# Minervini Primary Base — live swing long (Phase-9 MV-9.1). Fires as the daily close breaks out
-# above the prior 52-week high (a fresh high after the first base) on expanding volume. WEEK52_HIGH
-# is computed in-engine over the prior 252 bars (no seeding needed). Universe = the SEPA funnel; exit
-# doctrine = 8% stop then the 50-day-MA trail. Paper-only (auto-paper) until the reliability bar is met.
+# Minervini 52-Week Breakout (Primary Base proxy) — live swing long (Phase-9 MV-9.1). Fires as the
+# daily close breaks out above the prior 52-week high (a fresh high after the first base) on expanding
+# volume. This is a generic 52-week-high breakout, NOT the doctrine's Primary Base (a young post-IPO
+# leader's first base) — the platform holds no IPO-date data to gate on (audit M38, renamed 2026-08-02;
+# was "Minervini Primary Base" — see docs/signal-analysis/2026-08-01-e4-e8-decision-sheet.md §2e).
+# WEEK52_HIGH is computed in-engine over the prior 252 bars (no seeding needed). Universe = the SEPA
+# funnel; exit doctrine = 8% stop then the 50-day-MA trail. Paper-only (auto-paper) until the
+# reliability bar is met.
 schema: strategy-schema/v1
 id: minervini-primary-base
-name: "Minervini Primary Base"
+name: "Minervini 52-Week Breakout (Primary Base proxy)"
 version: 1.0.0
 description: >-
-  SEPA swing long: buy a fresh 52-week-high breakout on expanding volume; protect with an
-  8% stop then trail the 50-day MA. Universe = the daily SEPA funnel.
+  SEPA swing long: buy a fresh 52-week-high breakout on expanding volume — a generic breakout, not
+  gated on IPO/young-leader status (no IPO-date data available); protect with an 8% stop then trail
+  the 50-day MA. Universe = the daily SEPA funnel.
 author: owner
 tags: [minervini, swing, equity, primary-base]
 universe:

@@ -131,4 +131,21 @@ public interface EmissionGuard {
       BigDecimal premium,
       BigDecimal stopDistance,
       String side) {}
+
+  /**
+   * Add-path observability fix (E4 decision-sheet §2f — a narrow fix, NOT the whole of M40; see
+   * {@code docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md} for the residual,
+   * reachable-today gap this does NOT close): records that a §3.4.3 pyramid ADD was blocked because
+   * it would have breached the family's portfolio open-risk cap. Three of RiskService's four audited
+   * threshold rails — daily-loss, profit-target, heat-cap — write a durable {@code risk_audit} row AND
+   * push an ntfy alert on trip; the fourth, deployment, audits only (no alert). Before this method
+   * existed, a pyramid-cap block matched NEITHER group — it only reached the application log
+   * (SwingBatchEngine's own {@code log.info}), so re-arming pyramiding ({@code
+   * artha.manas-arora.pyramid.enabled}, currently default OFF — this call site is UNREACHABLE today,
+   * since a disabled policy's {@code hasRoom} never lets an add reach the risk-cap check) would have
+   * silently omitted the one governor-trip TYPE from both the audit trail and ntfy. The signals module
+   * owns only this port; the paper adapter supplies the durable implementation (mirrors {@link
+   * #recordZeroSizedEntry}). Default no-op keeps non-paper and test adapters permissive.
+   */
+  default void recordPyramidRiskCapBreach(String book, String symbol, String detail) {}
 }

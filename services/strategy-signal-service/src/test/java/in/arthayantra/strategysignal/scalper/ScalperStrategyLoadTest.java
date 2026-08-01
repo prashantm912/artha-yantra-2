@@ -374,6 +374,17 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("iv-rank-dot"))
           .as(id + " iv-rank-dot unarmed (arming the iv_rank dot is an owner decision)")
           .isFalse();
+      // F5 U4b dot-null-withheld un-armed everywhere. Unifying the scorer's three missing-input rules
+      // to "input-missing => withheld" CHANGES which signals fire, and is mechanically a LOOSENING for
+      // all remaining ENABLED dots that currently score a gap against the side — the direction in which
+      // every measured entry-gate loosening here (T1, T7, G13, G10) has lost money. Deliberately not a
+      // fixed count: it is fifteen of the default eighteen, but SEVENTEEN on the connect-the-dots
+      // family asserted below, whose armed `iv-per-strike` adds two more opponent-on-missing dots
+      // (iv_slope + iv_abs_band) — and this test is about exactly those live configurations. It ships
+      // inert and earns its case through the `dot-null-withheld` shadow variant; arming needs a republish.
+      assertThat(tags.contains("dot-null-withheld"))
+          .as(id + " dot-null-withheld unarmed (the unified null rule is an owner decision)")
+          .isFalse();
 
       // E2 M4/M6 — the two HARD OI gates with NO soft-dot duplicate in the scorer (the flat-OI stand-aside
       // trap §6.5 + the max-standing-OI S/R wall §4.7): armed on the scalp-connect-the-dots family, its

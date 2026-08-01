@@ -30,7 +30,8 @@ import org.springframework.stereotype.Component;
  * <pre>{@code
  * [{"name":"vol-off","rails":[{"rail":"volume-floor","disable":true}]},
  *  {"name":"vol-12k5","rails":[{"rail":"volume-floor","threshold":12500,"passWhen":"GTE"}]},
- *  {"name":"composite-070","compositeThreshold":0.70}]
+ *  {"name":"composite-070","compositeThreshold":0.70},
+ *  {"name":"dot-null-withheld","nullPolicy":"withheld"}]
  * }</pre>
  *
  * <p>Empty (the code default) disables challengers entirely. A parse error logs and yields NO
@@ -43,13 +44,26 @@ public class ShadowVariants {
   private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,31}");
   static final String CHAMPION = "champion";
   static final String COMPOSITE_RAIL = "confluence-composite";
+  /** The one recognised {@code nullPolicy} value — F5 U4b's unified "input-missing ⇒ withheld" rule. */
+  static final String NULL_POLICY_WITHHELD = "withheld";
 
   /** One rail override: {@code disable} wins; otherwise operand-vs-threshold per {@code passWhen}. */
   public record RailOverride(String rail, boolean disable, BigDecimal threshold, String passWhen) {}
 
-  /** One challenger book definition. */
+  /**
+   * One challenger book definition. {@code nullWithheld} (F5 U4b, spec key {@code "nullPolicy":
+   * "withheld"}) scores against the confluence's {@code withheldAggregate} instead of the champion's
+   * composite — the evidence lane for the DEFAULT-OFF {@code dot-null-withheld} dot-null unification.
+   */
   public record Variant(
-      String name, Map<String, RailOverride> rails, BigDecimal compositeThreshold) {}
+      String name, Map<String, RailOverride> rails, BigDecimal compositeThreshold,
+      boolean nullWithheld) {
+
+    /** Pre-U4b 3-arg form: {@code nullWithheld} defaults to false (the champion composite rules). */
+    public Variant(String name, Map<String, RailOverride> rails, BigDecimal compositeThreshold) {
+      this(name, rails, compositeThreshold, false);
+    }
+  }
 
   private final List<Variant> variants;
 
@@ -100,7 +114,17 @@ public class ShadowVariants {
                       return new RailOverride(r.rail, r.disable, r.threshold, passWhen);
                     })
                 .collect(Collectors.toMap(RailOverride::rail, Function.identity()));
-    return new Variant(name, rails, raw.compositeThreshold);
+    boolean nullWithheld = false;
+    if (raw.nullPolicy != null) {
+      // ONE recognised value: the vocabulary names the policy it opts into rather than a boolean, so
+      // a future third policy is an added constant, not a second flag that can contradict this one.
+      if (!NULL_POLICY_WITHHELD.equals(raw.nullPolicy.toLowerCase(Locale.ROOT))) {
+        throw new IllegalArgumentException(
+            name + ": nullPolicy must be \"" + NULL_POLICY_WITHHELD + "\"");
+      }
+      nullWithheld = true;
+    }
+    return new Variant(name, rails, raw.compositeThreshold, nullWithheld);
   }
 
   /**
@@ -114,7 +138,7 @@ public class ShadowVariants {
 
   /**
    * Validates + builds ONE variant from a runtime registration (EVO E3 §11). {@code specNode} is the
-   * vocabulary BODY ({@code {rails, compositeThreshold}}, the {@code name} is separate); it is
+   * vocabulary BODY ({@code {rails, compositeThreshold, nullPolicy}}, the {@code name} is separate); it is
    * STRICT-parsed so an unknown knob kind (e.g. an ENV-plane relative-vol field, §2.3) is rejected,
    * then run through the SAME name-regex + rail-shape rules as the env JSON. Throws {@link
    * IllegalArgumentException} on any violation — the registry surfaces it as a 422. The strictness
@@ -133,13 +157,14 @@ public class ShadowVariants {
     } catch (Exception e) {
       throw new IllegalArgumentException(
           "unrecognized shadow-variant spec (unknown knob kind — the vocabulary is rail"
-              + " disable / rail threshold+passWhen / compositeThreshold): "
+              + " disable / rail threshold+passWhen / compositeThreshold / nullPolicy): "
               + rootMessage(e));
     }
     RawVariant raw = new RawVariant();
     raw.name = name;
     raw.rails = spec == null ? null : spec.rails;
     raw.compositeThreshold = spec == null ? null : spec.compositeThreshold;
+    raw.nullPolicy = spec == null ? null : spec.nullPolicy;
     return validated(raw);
   }
 
@@ -208,7 +233,74 @@ public class ShadowVariants {
     }
     BigDecimal floor =
         v.compositeThreshold() != null ? v.compositeThreshold() : d.compositeThreshold();
-    return d.compositeScore() != null && floor != null && d.compositeScore().compareTo(floor) >= 0;
+    if (v.nullWithheld() && !armedPolicyCouldHaveFired(d)) {
+      return false;
+    }
+    BigDecimal composite = compositeFor(d, v);
+    return composite != null && floor != null && composite.compareTo(floor) >= 0;
+  }
+
+  /**
+   * Whether a {@code nullPolicy} variant may consider this bar at all (F5 U4b, review Critical).
+   *
+   * <p>The recalculated scalar is NOT the armed verdict. {@code ConnectTheDotsScorer} makes a side
+   * valid only when the scalar clears the threshold AND all three DECISIVE legs hold — hard-VWAP
+   * alignment, 60m bias agreement, and no IV stand-aside — none of which the null policy changes.
+   * Accepting on the scalar alone would open challenger positions on bars the ARMED policy still
+   * rejects, so the book's PnL would not be noisy but WRONG. That divergence is observed, not
+   * theoretical: {@code ScalperConfluenceGate.compositeMargin} records 4 live rows where the
+   * aggregate cleared the threshold while a decisive leg blocked.
+   *
+   * <p>Fail-closed on a missing counterfactual: no confluence (the direction-neutral straddle
+   * stand-in), no recorded {@code withheldAggregate} (a pre-U4b row), or legs that did not hold all
+   * DECLINE. Declining is deliberate rather than degrading to champion behaviour — a bar with no
+   * counterfactual has nothing for this experiment to measure, and booking it under the variant's
+   * name would attribute a champion-duplicate row to the proposal.
+   *
+   * <p>Scope note: this guard is deliberately confined to {@code nullPolicy} variants. The champion
+   * book and the rail-override variants keep their existing floor-ruled semantics ({@code
+   * COMPOSITE_RAIL} is skipped above); widening it would silently shrink live books this change has
+   * no mandate to touch.
+   */
+  private static boolean armedPolicyCouldHaveFired(ScalperConfluenceGate.RejectionDiagnostic d) {
+    return d.confluence() != null
+        && d.confluence().withheldAggregate() != null
+        && d.confluence().decisiveLegsHeld();
+  }
+
+  /**
+   * The composite this variant scores against: the champion's recorded score, or — for a
+   * {@code nullPolicy: withheld} variant (F5 U4b) — the MAX of it and the confluence's
+   * {@code withheldAggregate}, the number the composite WOULD have been had every input-missing dot
+   * been withheld rather than scored.
+   *
+   * <p>The {@code max} is the §3.3.3 relaxing-or-neutral clamp in its per-bar form: unifying the
+   * null rule moves the composite BOTH ways — withholding an opposes-in-denominator dot RAISES it,
+   * withholding one that currently reads a null as SUPPORT ({@code vix} / {@code basis} / and, when
+   * enabled, {@code premium_skew} / {@code dow}) LOWERS it — and the shadow writer only ever sees
+   * REJECTED entries, so an unclamped variant would shed champion-accepted rows whose fired-side
+   * counterparts are invisible here.
+   *
+   * <p><b>⚠️ This plane measures the PROMOTION half only and CANNOT authorize arming.</b> The clamp
+   * that keeps the book unbiased is the same thing that hides the tightening half, and the
+   * rejection-only writer never observes a champion-FIRED trade that WITHHELD would have removed. So
+   * this book answers "which extra entries would the unified rule admit, and did they pay?" — never
+   * "is the unified rule net-positive?". The strategy-evolution design (§ accepted-entry scoring)
+   * requires counterfactual replay or a paper A/B for the tightening direction; an arming verdict
+   * needs that paired plane, not this one. A further caveat for whoever reads the book: the shadow
+   * exit monitor deliberately omits confluence/indicator exits, while twelve live strategies carry
+   * {@code oi-confluence-exit} and re-evaluate this same scorer on the EXIT path — for those, arming
+   * would change exits too, which this book does not model.
+   */
+  private static BigDecimal compositeFor(ScalperConfluenceGate.RejectionDiagnostic d, Variant v) {
+    BigDecimal champion = d.compositeScore();
+    // A nullWithheld variant only reaches here past armedPolicyCouldHaveFired, so the confluence and
+    // its shadow are both present; the guards stay so this stays correct if it is ever called first.
+    if (!v.nullWithheld() || d.confluence() == null || d.confluence().withheldAggregate() == null) {
+      return champion;
+    }
+    BigDecimal withheld = d.confluence().withheldAggregate();
+    return champion == null ? withheld : champion.max(withheld);
   }
 
   /** The §3.3.3 clamp: floor overrides may only lower, cap overrides may only raise. */
@@ -226,12 +318,14 @@ public class ShadowVariants {
     public String name;
     public List<RawRail> rails;
     public BigDecimal compositeThreshold;
+    public String nullPolicy;
   }
 
   /** Jackson shape of a runtime-registration spec BODY (the variant minus its name). */
   static final class RawSpec {
     public List<RawRail> rails;
     public BigDecimal compositeThreshold;
+    public String nullPolicy;
   }
 
   /** Jackson shape of one rail override. */

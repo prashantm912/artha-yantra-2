@@ -412,7 +412,9 @@ class ScalperGatesTest {
     assertThat(ScalperGates.supertrend15mAlign(-1, CE).pass()).isFalse(); // 15m down opposes CE
     assertThat(ScalperGates.supertrend15mAlign(-1, PE).pass()).isTrue(); // 15m down confirms PE
     assertThat(ScalperGates.supertrend15mAlign(1, PE).pass()).isFalse();
-    // dir 0 (unwarmed / mid-flip) fail-OPENs on either side — never blocks a confirmed 3m entry.
+    // dir 0 (unwarmed / out of range — NOT a mid-flip; Ta4jIndicators.supertrendDirection:48-69
+    // emits only ±1, so 0 can only mean the indicator returned null) fail-OPENs on either side —
+    // never blocks a confirmed 3m entry.
     assertThat(ScalperGates.supertrend15mAlign(0, CE).pass()).isTrue();
     assertThat(ScalperGates.supertrend15mAlign(0, PE).pass()).isTrue();
   }

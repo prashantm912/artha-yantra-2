@@ -378,7 +378,9 @@ public final class ConnectTheDotsScorer {
     // neither support nor opposition — so a data gap never dilutes the composite. In the degenerate case
     // where EVERY dot is absent the denominator is 0 and the aggregate is ZERO → below any positive
     // threshold → neither bullish nor bearish (fail-closed no-confluence-support), the same guard an
-    // empty dot list hits. In practice the decisive VWAP dot is never absent, so den > 0 on the live path.
+    // empty dot list hits. In practice the decisive VWAP dot is never absent, so den > 0 on the live
+    // path — and U4b does not weaken that: WITHHELD can only mark vwap absent when close/vwap are
+    // null, i.e. there is no real bar, and the hard VWAP gate (`vwapSide` below) already blocks that.
     double num = 0;
     double den = 0;
     // U4b shadow: the SAME arithmetic with every input-missing dot ALSO withheld — what the composite

@@ -19,24 +19,24 @@ import org.springframework.stereotype.Service;
 public class OiPremiumService {
 
   public record PremiumRow(
-      BigDecimal strike,
-      @Schema(types = {"number", "null"}) BigDecimal straddle,
-      @Schema(types = {"number", "null"}) BigDecimal ce,
-      @Schema(types = {"number", "null"}) BigDecimal pe) {}
+      @Schema(type = "string") BigDecimal strike,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal straddle,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ce,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pe) {}
 
   public record PremiumChain(
       List<PremiumRow> items,
-      @Schema(types = {"number", "null"}) BigDecimal atmStrike,
-      @Schema(types = {"number", "null"}) BigDecimal atmStraddle,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atmStrike,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atmStraddle,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
       @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   /** One bucket's ATM straddle (the intraday decay/move curve point). */
   public record PremiumSeriesPoint(
       OffsetDateTime bucket,
-      @Schema(types = {"number", "null"}) BigDecimal atmStrike,
-      @Schema(types = {"number", "null"}) BigDecimal atmStraddle,
-      @Schema(types = {"number", "null"}) BigDecimal spot) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atmStrike,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atmStraddle,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot) {}
 
   public record PremiumSeries(
       List<PremiumSeriesPoint> items,

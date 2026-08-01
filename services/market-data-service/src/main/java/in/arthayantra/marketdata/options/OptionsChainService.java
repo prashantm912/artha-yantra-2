@@ -54,29 +54,29 @@ public class OptionsChainService {
   public record Leg(
       @Schema(types = {"string", "null"}) String exchange,
       String tradingsymbol,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal bid,
-      @Schema(types = {"number", "null"}) BigDecimal ask,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal bid,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ask,
       @Schema(types = {"integer", "null"}) Long volume,
       @Schema(types = {"integer", "null"}) Long oi,
       @Schema(types = {"integer", "null"}) Long prevOi,
-      @Schema(types = {"number", "null"}) BigDecimal iv,
-      @Schema(types = {"number", "null"}) BigDecimal delta,
-      @Schema(types = {"number", "null"}) BigDecimal gamma,
-      @Schema(types = {"number", "null"}) BigDecimal theta,
-      @Schema(types = {"number", "null"}) BigDecimal vega,
-      @Schema(types = {"number", "null"}) BigDecimal rho,
-      @Schema(types = {"number", "null"}) BigDecimal vanna,
-      @Schema(types = {"number", "null"}) BigDecimal charm,
-      @Schema(types = {"number", "null"}) BigDecimal vomma,
-      @Schema(types = {"number", "null"}) BigDecimal speed,
-      @Schema(types = {"number", "null"}) BigDecimal zomma,
-      @Schema(types = {"number", "null"}) BigDecimal color,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal iv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal delta,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal gamma,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal theta,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal vega,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal rho,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal vanna,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal charm,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal vomma,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal speed,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal zomma,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal color,
       @Schema(types = {"string", "null"}) String ivReason,
       @Schema(types = {"string", "null"}) String priceSource) {}
 
   /** One chain row. */
-  public record StrikeRow(BigDecimal strike, Leg ce, Leg pe) {}
+  public record StrikeRow(@Schema(type = "string") BigDecimal strike, Leg ce, Leg pe) {}
 
   /**
    * The computed chain.
@@ -91,11 +91,11 @@ public class OptionsChainService {
   public record Chain(
       String underlying,
       LocalDate expiry,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
-      @Schema(types = {"number", "null"}) BigDecimal forward,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal forward,
       String forwardSource,
-      BigDecimal riskFreeRate,
-      @Schema(types = {"number", "null"}) BigDecimal pcr,
+      @Schema(type = "string") BigDecimal riskFreeRate,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pcr,
       boolean stale,
       boolean lastCaptured,
       OffsetDateTime asOf,

@@ -3208,11 +3208,11 @@ export interface components {
             ceOi: number;
             /** Format: int64 */
             peOi: number;
-            spot: number | null;
+            spot: string | null;
             /** @enum {string} */
             trend: "UP" | "DOWN" | "FLAT";
-            ceLtp: number | null;
-            peLtp: number | null;
+            ceLtp: string | null;
+            peLtp: string | null;
         };
         TrendSeries: {
             items: components["schemas"]["OiTrendPoint"][];
@@ -3221,22 +3221,22 @@ export interface components {
             freshness?: components["schemas"]["DataFreshness"];
         };
         StrikeSessionStat: {
-            strike: number;
+            strike: string;
             optionType: string;
-            open: number | null;
-            high: number | null;
-            low: number | null;
-            last: number | null;
+            open: string | null;
+            high: string | null;
+            low: string | null;
+            last: string | null;
             /** Format: int64 */
             dayVolume: number | null;
             /** Format: int64 */
             declineVolume: number | null;
-            prevClose: number | null;
+            prevClose: string | null;
             ohMark: boolean;
             olMark: boolean;
-            fallPctFromOpen: number | null;
-            fallPctFromPrevClose: number | null;
-            oiChangePct: number | null;
+            fallPctFromOpen: string | null;
+            fallPctFromPrevClose: string | null;
+            oiChangePct: string | null;
         };
         StrikeSessionStats: {
             /** Format: date-time */
@@ -3244,8 +3244,8 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            spot: number | null;
-            atmStrike: number | null;
+            spot: string | null;
+            atmStrike: string | null;
             /** Format: int32 */
             interval: number;
             items: components["schemas"]["StrikeSessionStat"][];
@@ -3253,12 +3253,12 @@ export interface components {
         StraddleCandle: {
             /** Format: date-time */
             time: string;
-            open: number;
-            high: number;
-            low: number;
-            close: number;
-            ceClose: number;
-            peClose: number;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
+            ceClose: string;
+            peClose: string;
             /** Format: int64 */
             volume: number;
         };
@@ -3266,16 +3266,16 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            callStrike: number;
-            putStrike: number;
+            callStrike: string;
+            putStrike: string;
             interval: string;
-            underlyingLtp: number | null;
-            underlyingDayOpen: number | null;
+            underlyingLtp: string | null;
+            underlyingDayOpen: string | null;
             /** Format: date-time */
             asOf: string;
-            combinedVwap: number | null;
-            slBufferPoints: number;
-            slLevel: number | null;
+            combinedVwap: string | null;
+            slBufferPoints: string;
+            slLevel: string | null;
             items: components["schemas"]["StraddleCandle"][];
         };
         SpurtChain: {
@@ -3287,24 +3287,24 @@ export interface components {
         SpurtSummary: {
             /** @enum {string} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
-            spotDelta: number | null;
+            spotDelta: string | null;
             /** Format: int64 */
             oiChange: number;
-            oiChangePct: number | null;
-            priceChangePct: number | null;
+            oiChangePct: string | null;
+            priceChangePct: string | null;
         };
         StrikeSpurt: {
-            strike: number;
+            strike: string;
             optionType: string;
-            ltp: number | null;
-            prevLtp: number | null;
+            ltp: string | null;
+            prevLtp: string | null;
             /** Format: int64 */
             oi: number | null;
             /** Format: int64 */
             oiChange: number;
-            spurtPct: number | null;
-            ltpChange: number | null;
-            ltpChangePct: number | null;
+            spurtPct: string | null;
+            ltpChange: string | null;
+            ltpChangePct: string | null;
             /** Format: int64 */
             volume: number | null;
             /** @enum {string} */
@@ -3312,17 +3312,17 @@ export interface components {
         };
         PremiumChain: {
             items: components["schemas"]["PremiumRow"][];
-            atmStrike: number | null;
-            atmStraddle: number | null;
-            spot: number | null;
+            atmStrike: string | null;
+            atmStraddle: string | null;
+            spot: string | null;
             /** Format: date-time */
             asOf: string | null;
         };
         PremiumRow: {
-            strike: number;
-            straddle: number | null;
-            ce: number | null;
-            pe: number | null;
+            strike: string;
+            straddle: string | null;
+            ce: string | null;
+            pe: string | null;
         };
         PremiumSeries: {
             items: components["schemas"]["PremiumSeriesPoint"][];
@@ -3332,14 +3332,14 @@ export interface components {
         PremiumSeriesPoint: {
             /** Format: date-time */
             bucket: string;
-            atmStrike: number | null;
-            atmStraddle: number | null;
-            spot: number | null;
+            atmStrike: string | null;
+            atmStraddle: string | null;
+            spot: string | null;
         };
         PcrSeriesPoint: {
             time: string;
-            pcr: number | null;
-            spot: number | null;
+            pcr: string | null;
+            spot: string | null;
         };
         OptCandle: {
             /** Format: date-time */
@@ -3370,8 +3370,8 @@ export interface components {
             asOf: string;
         };
         OiStats: {
-            pcr: number | null;
-            maxPain: number | null;
+            pcr: string | null;
+            maxPain: string | null;
             /** Format: int64 */
             ceOi: number;
             /** Format: int64 */
@@ -3455,16 +3455,16 @@ export interface components {
         HistoryPoint: {
             /** Format: date */
             date: string;
-            iv: number;
-            atmIv: number;
-            iv30d: number;
-            spot: number;
+            iv: string | null;
+            atmIv: string | null;
+            iv30d: string | null;
+            spot: string | null;
         };
         IvHistory: {
             underlying: string;
             series: components["schemas"]["HistoryPoint"][];
-            currentIv: number;
-            rank: number;
+            currentIv: string | null;
+            rank: string | null;
             /** Format: int32 */
             percentile: number;
             /** Format: int32 */
@@ -3494,11 +3494,11 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            spot: number | null;
-            forward: number | null;
+            spot: string | null;
+            forward: string | null;
             forwardSource: string;
-            riskFreeRate: number;
-            pcr: number | null;
+            riskFreeRate: string;
+            pcr: string | null;
             stale: boolean;
             lastCaptured: boolean;
             /** Format: date-time */
@@ -3508,32 +3508,32 @@ export interface components {
         Leg: {
             exchange: string | null;
             tradingsymbol: string;
-            ltp: number | null;
-            bid: number | null;
-            ask: number | null;
+            ltp: string | null;
+            bid: string | null;
+            ask: string | null;
             /** Format: int64 */
             volume: number | null;
             /** Format: int64 */
             oi: number | null;
             /** Format: int64 */
             prevOi: number | null;
-            iv: number | null;
-            delta: number | null;
-            gamma: number | null;
-            theta: number | null;
-            vega: number | null;
-            rho: number | null;
-            vanna: number | null;
-            charm: number | null;
-            vomma: number | null;
-            speed: number | null;
-            zomma: number | null;
-            color: number | null;
+            iv: string | null;
+            delta: string | null;
+            gamma: string | null;
+            theta: string | null;
+            vega: string | null;
+            rho: string | null;
+            vanna: string | null;
+            charm: string | null;
+            vomma: string | null;
+            speed: string | null;
+            zomma: string | null;
+            color: string | null;
             ivReason: string | null;
             priceSource: string | null;
         };
         StrikeRow: {
-            strike: number;
+            strike: string;
             ce: components["schemas"]["Leg"];
             pe: components["schemas"]["Leg"];
         };
@@ -3551,39 +3551,39 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            strike: number;
+            strike: string;
             optionType: string;
             tradingsymbol: string;
-            ltp: number | null;
-            bid: number | null;
-            ask: number | null;
+            ltp: string | null;
+            bid: string | null;
+            ask: string | null;
             /** Format: int64 */
             volume: number | null;
             /** Format: int64 */
             oi: number | null;
             /** Format: int64 */
             oiChange: number | null;
-            spotPrice: number | null;
-            iv: number | null;
-            delta: number | null;
-            gamma: number | null;
-            theta: number | null;
-            vega: number | null;
-            rho: number | null;
+            spotPrice: string | null;
+            iv: string | null;
+            delta: string | null;
+            gamma: string | null;
+            theta: string | null;
+            vega: string | null;
+            rho: string | null;
             ivReason: string | null;
             priceSource: string | null;
-            forwardPrice: number | null;
-            riskFreeRate: number | null;
+            forwardPrice: string | null;
+            riskFreeRate: string | null;
         };
         ChainTable: {
             underlying: string;
             /** Format: date */
             expiry: string;
-            spot: number | null;
-            forward: number | null;
+            spot: string | null;
+            forward: string | null;
             forwardSource: string;
-            riskFreeRate: number;
-            pcr: number | null;
+            riskFreeRate: string | null;
+            pcr: string | null;
             stale: boolean;
             lastCaptured: boolean;
             /** Format: date-time */
@@ -3597,30 +3597,30 @@ export interface components {
             deltas: components["schemas"]["LegDeltas"] | null;
         };
         ChainTableRow: {
-            strike: number;
+            strike: string;
             ce: components["schemas"]["ChainTableLeg"];
             pe: components["schemas"]["ChainTableLeg"];
         };
         LegDeltas: {
             /** Format: int64 */
             oiChange: number | null;
-            oiChangePct: number | null;
-            ltpChange: number | null;
-            ltpChangePct: number | null;
+            oiChangePct: string | null;
+            ltpChange: string | null;
+            ltpChangePct: string | null;
             /** @enum {string} */
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         CalendarSpreadChart: {
             underlying: string;
-            strike: number;
+            strike: string;
             optionType: string;
             /** Format: date */
             nearExpiry: string;
             /** Format: date */
             farExpiry: string;
             interval: string;
-            underlyingLtp: number | null;
-            underlyingDayOpen: number | null;
+            underlyingLtp: string | null;
+            underlyingDayOpen: string | null;
             /** Format: date-time */
             asOf: string;
             items: components["schemas"]["SpreadCandle"][];
@@ -3628,12 +3628,12 @@ export interface components {
         SpreadCandle: {
             /** Format: date-time */
             time: string;
-            open: number;
-            high: number;
-            low: number;
-            close: number;
-            nearClose: number;
-            farClose: number;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
+            nearClose: string;
+            farClose: string;
             /** Format: int64 */
             volume: number;
         };
@@ -3643,13 +3643,13 @@ export interface components {
             asOf: string | null;
         };
         BigOiRow: {
-            strike: number;
+            strike: string;
             optionType: string;
             /** Format: int64 */
             oi: number;
             /** Format: int64 */
             oiChange: number;
-            ltp: number | null;
+            ltp: string | null;
         };
         BigOiLog: {
             items: components["schemas"]["LogEvent"][];
@@ -3658,11 +3658,11 @@ export interface components {
         };
         LogEvent: {
             time: string;
-            spot: number | null;
-            strike: number;
+            spot: string | null;
+            strike: string;
             optionType: string;
-            ltp: number | null;
-            ltpChange: number | null;
+            ltp: string | null;
+            ltpChange: string | null;
             /** Format: int64 */
             oi: number | null;
             /** Format: int64 */
@@ -3673,9 +3673,9 @@ export interface components {
         ActiveStrikeIvPoint: {
             /** Format: date-time */
             bucket: string;
-            ceIv: number | null;
-            peIv: number | null;
-            price: number | null;
+            ceIv: string | null;
+            peIv: string | null;
+            price: string | null;
         };
         ActiveStrikeOiPoint: {
             /** Format: date-time */
@@ -3686,8 +3686,8 @@ export interface components {
             peOi: number;
         };
         ActiveStrikesResponse: {
-            sentimentPct: number | null;
-            sentimentLevelPct?: number;
+            sentimentPct: string | null;
+            sentimentLevelPct?: string;
             items: components["schemas"]["StrikeView"][];
             sentimentSeries?: components["schemas"]["SentimentPoint"][];
             activeStrikeOiSeries?: components["schemas"]["ActiveStrikeOiPoint"][];
@@ -3700,11 +3700,11 @@ export interface components {
         SentimentPoint: {
             /** Format: date-time */
             bucket: string;
-            sentimentPct: number | null;
-            levelPct: number | null;
+            sentimentPct: string | null;
+            levelPct: string | null;
         };
         StrikeView: {
-            strike: number;
+            strike: string;
             /** Format: int64 */
             ceOi: number;
             /** Format: int64 */
@@ -3743,8 +3743,8 @@ export interface components {
             detail: string;
             /** Format: int32 */
             bucketsCompared: number;
-            meanDivergencePct: number | null;
-            maxDivergencePct: number | null;
+            meanDivergencePct: string | null;
+            maxDivergencePct: string | null;
         };
         BoardReport: {
             /** Format: date-time */
@@ -4390,8 +4390,8 @@ export interface components {
             changedCount: number;
         };
         AtmIv: {
-            iv: number | null;
-            rank: number | null;
+            iv: string | null;
+            rank: string | null;
             /** Format: int32 */
             percentile: number | null;
             /** Format: int32 */
@@ -4399,14 +4399,14 @@ export interface components {
             insufficientHistory: boolean;
         };
         MaxPain: {
-            now: number;
-            atOpen: number | null;
-            drift: number | null;
+            now: string | null;
+            atOpen: string | null;
+            drift: string | null;
         };
         OiStructure: {
             /** @enum {string} */
             verdict: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
-            spotDelta: number | null;
+            spotDelta: string | null;
             /** Format: int64 */
             oiChange: number;
         };
@@ -4435,17 +4435,17 @@ export interface components {
             interpretation: "LONG_BUILDUP" | "SHORT_BUILDUP" | "SHORT_COVERING" | "LONG_UNWINDING";
         };
         Pcr: {
-            now: number | null;
-            atOpen: number | null;
-            priorEod: number | null;
-            deltaVsOpen: number | null;
-            deltaVsPriorEod: number | null;
+            now: string | null;
+            atOpen: string | null;
+            priorEod: string | null;
+            deltaVsOpen: string | null;
+            deltaVsPriorEod: string | null;
         };
         Straddle: {
-            atmStrike: number | null;
-            now: number | null;
-            atOpen: number | null;
-            deltaPct: number | null;
+            atmStrike: string | null;
+            now: string | null;
+            atOpen: string | null;
+            deltaPct: string | null;
         };
         BanksSummary: {
             /** Format: int32 */
@@ -4558,10 +4558,10 @@ export interface components {
             aTotalOi: number | null;
             /** Format: int64 */
             bTotalOi: number | null;
-            aPcr: number | null;
-            bPcr: number | null;
-            aSpot: number | null;
-            bSpot: number | null;
+            aPcr: string | null;
+            bPcr: string | null;
+            aSpot: string | null;
+            bSpot: string | null;
         };
         ExpiryCompare: {
             underlying: string;
@@ -4582,10 +4582,10 @@ export interface components {
             ceOi: number;
             /** Format: int64 */
             peOi: number;
-            pcr: number | null;
-            spot: number | null;
-            ceLtp: number | null;
-            peLtp: number | null;
+            pcr: string | null;
+            spot: string | null;
+            ceLtp: string | null;
+            peLtp: string | null;
         };
         ExpirySide: {
             /** Format: date */

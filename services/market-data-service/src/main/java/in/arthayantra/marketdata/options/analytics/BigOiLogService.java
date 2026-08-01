@@ -27,11 +27,11 @@ public class BigOiLogService {
   /** One logged move: bucket time (IST "HH:mm"), the leg, its interval deltas + classification. */
   public record LogEvent(
       String time,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
-      BigDecimal strike,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
+      @Schema(type = "string") BigDecimal strike,
       String optionType,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal ltpChange,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpChange,
       @Schema(types = {"integer", "null"}) Long oi,
       long oiChange,
       OiInterpretation interpretation) {}

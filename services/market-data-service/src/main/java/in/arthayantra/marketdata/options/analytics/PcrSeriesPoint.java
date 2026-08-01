@@ -11,5 +11,5 @@ import java.math.BigDecimal;
  */
 public record PcrSeriesPoint(
     String time,
-    @Schema(types = {"number", "null"}) BigDecimal pcr,
-    @Schema(types = {"number", "null"}) BigDecimal spot) {}
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal pcr,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal spot) {}

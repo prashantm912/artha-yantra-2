@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.options;
 
 import in.arthayantra.marketdata.options.IvDailySummaryRepository.RollupRow;
 import in.arthayantra.marketdata.options.IvDailySummaryRepository.Summary;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -39,16 +40,28 @@ public class IvAnalyticsService {
   /** Trailing window length for rank/percentile. */
   static final int WINDOW_DAYS = 365;
 
-  /** One day in the history series. */
+  /**
+   * One day in the history series. Every decimal is nullable: {@code iv} falls back from {@code
+   * iv30d} to {@code atmIv} and is null when BOTH are (`ivHistory`, IvAnalyticsService); {@code
+   * atmIv}/{@code iv30d}/{@code spot} are nullable columns ({@code iv_daily_summary}, V009:13-15).
+   */
   public record HistoryPoint(
-      LocalDate date, BigDecimal iv, BigDecimal atmIv, BigDecimal iv30d, BigDecimal spot) {}
+      LocalDate date,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal iv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atmIv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal iv30d,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot) {}
 
-  /** The iv-history read DTO. */
+  /**
+   * The iv-history read DTO. {@code currentIv}/{@code rank} are null on an empty series and {@code
+   * rank} is additionally null below the history floor (insufficient-history state) — see {@link
+   * RankStat}.
+   */
   public record IvHistory(
       String underlying,
       List<HistoryPoint> series,
-      BigDecimal currentIv,
-      BigDecimal rank,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal currentIv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal rank,
       Integer percentile,
       int windowDays,
       int floorDays,

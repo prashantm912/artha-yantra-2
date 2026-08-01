@@ -237,7 +237,7 @@ public class RejectionReader {
    * this mean would step the series at the deploy boundary for no market reason, and the step is NOT
    * invertible from the aggregate, because the mean runs over rows with DIFFERENT dot counts (the
    * optional {@code iv_slope} / {@code iv_abs_band} / {@code premium_skew} / {@code dow} dots are
-   * conditionally added, {@code ConnectTheDotsScorer:210-243}).
+   * conditionally added, {@code ConnectTheDotsScorer:242-275}).
    *
    * <p><b>Why a MIXED day returns null rather than a mean of just its modern rows.</b> The row lists
    * and {@code firedCount}/{@code rejectedCount} beside this figure cover EVERY row, so a mean over
@@ -313,7 +313,7 @@ public class RejectionReader {
       // dot of a modern row and on none of a legacy one — one dot carrying it settles the row.
       flagged |= d.has("absent");
       if (d.path("absent").asBoolean(false)) {
-        // Withheld: out of BOTH counts, mirroring ConnectTheDotsScorer.score (:252-260). Skipping it
+        // Withheld: out of BOTH counts, mirroring ConnectTheDotsScorer.score (:284-292). Skipping it
         // from the numerator too is a no-op today (the one absent-capable dot, `iv_rank`, is built
         // `!ivRankAbsent && ...` so absent always reads supports=false) but it is the rule, not a
         // coincidence, and it holds if a future absent dot is ever constructed differently.
@@ -331,14 +331,15 @@ public class RejectionReader {
    * One row's dot counts plus the PROVENANCE the response row cannot carry.
    *
    * <p>{@code total} is the SCOREABLE dot population: dots flagged {@code absent:true} are excluded,
-   * matching {@code ConnectTheDotsScorer.score} (:252-260), which withholds a missing-input dot from
+   * matching {@code ConnectTheDotsScorer.score} (:284-292), which withholds a missing-input dot from
    * BOTH its numerator and its denominator so a data gap is never scored as evidence against the
    * side. Counting them — the behaviour this replaces — reported e.g. 17/18 where the scorer's
    * population was 17, i.e. the reader charged the side for a dot the scorer had refused to charge
-   * it for. Today exactly one dot can be absent ({@code iv_rank}, {@code ConnectTheDotsScorer:200}):
-   * it is withheld on the bars where the IV-history rank is unavailable — {@code
-   * MarketOiClient:517-522} supplies a rank only once the 60-trading-day history floor is met, so
-   * the dot is withheld until that history matures, NOT on every row unconditionally.
+   * it for. Today exactly one dot can be absent: {@code iv_rank}, whose withholding condition is
+   * {@code ivRankNull || !ivRankDot} ({@code ConnectTheDotsScorer:231-234}) — the IV-history rank is
+   * unavailable ({@code MarketOiClient:517-522} supplies one only past the 60-trading-day floor), OR
+   * the {@code iv-rank-dot} tag is unarmed, which is the DEFAULT since #1179 deliberately stopped
+   * the maturing floor from self-arming the dot on a calendar trigger.
    *
    * <p>{@code absentFlagged} says whether the row was written after the flag began being serialized.
    * A row written before it has no {@code absent} key at all, so {@code path("absent")} reads every

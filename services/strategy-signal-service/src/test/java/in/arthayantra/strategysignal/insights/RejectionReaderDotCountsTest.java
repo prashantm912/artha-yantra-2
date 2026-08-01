@@ -15,13 +15,15 @@ import org.junit.jupiter.api.Test;
  *
  * <p><b>The defect.</b> {@code countSupports} counted every element of the {@code dots[]} array into
  * {@code total}, including dots the scorer had WITHHELD. {@code ConnectTheDotsScorer.score}
- * (:252-260) drops an {@code absent} dot from BOTH its numerator and its denominator precisely so a
+ * (:284-292) drops an {@code absent} dot from BOTH its numerator and its denominator precisely so a
  * data gap is never scored as evidence against the side — so on a session where {@code iv_rank} has
  * no data the reader reported 17/18 where the scorer's population was 17. Exactly one dot is
- * absent-capable today: {@code iv_rank} ({@code ConnectTheDotsScorer:200-202} is the only 6-arg
- * {@code add} call site, of 22 total). It is withheld on the bars where the IV-history rank is
- * unavailable — {@code MarketOiClient:517-522} supplies a rank once the 60-trading-day history floor
- * is met — so the miscount bit whenever that history was short, NOT on every row unconditionally.
+ * absent-capable today: {@code iv_rank} ({@code ConnectTheDotsScorer:233-234} is the only 6-arg
+ * {@code add} call site, of 22 total). Its withholding condition is {@code ivRankNull ||
+ * !ivRankDot} (:231-232) — the IV-history rank is unavailable ({@code MarketOiClient:517-522}
+ * supplies one only past the 60-trading-day floor), OR the {@code iv-rank-dot} tag is unarmed, the
+ * DEFAULT since #1179 stopped the maturing floor from self-arming the dot. So the miscount bit
+ * whenever the dot was withheld for EITHER reason, not on every row unconditionally.
  *
  * <p><b>The discontinuity this pins.</b> The fix is only possible because the flag is now serialized;
  * rows written before that carry NO {@code absent} key, so {@code path("absent").asBoolean(false)}
@@ -73,7 +75,7 @@ class RejectionReaderDotCountsTest {
 
   @Test
   void modernRowWithWithheldDotExcludesItFromBothCounts() {
-    // The reported case: 18 dots, iv_rank withheld for want of data, 17 of the rest supporting.
+    // The reported case: 18 dots, iv_rank withheld (no data, or the dot unarmed), 17 supporting.
     // Pre-fix this read 17/18; the scorer's own population was 17.
     String[] elements = new String[18];
     for (int i = 0; i < 17; i++) {

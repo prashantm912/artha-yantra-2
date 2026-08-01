@@ -57,12 +57,36 @@ class MapReturnRatchetTest {
    * neither camp. No conditional keys existed on any of the 12 (every null was {@code put}
    * explicitly), so no response gained or lost a key.
    *
-   * <p>⚠️ The threshold is 4 because this test counts only {@code *Controller.java}. A shell grep
-   * over all of {@code src/main} returns 6 — it also catches two {@code describe()} methods on
+   * <p>⚠️ The threshold counts only {@code *Controller.java}. A shell grep over all of {@code
+   * src/main} still returns 2 at a floor of ZERO — it also catches two {@code describe()} methods on
    * pyramid POLICY classes, which are not handlers. The assertion is {@code
    * isLessThanOrEqualTo}, so an over-stated threshold passes while silently leaving room for new
-   * opaque handlers; the first version of this row said 6 and would have let two through
+   * opaque handlers; an earlier version of this row said 6 and would have let two through
    * (cross-vendor review, 2026-07-29). Count with the test's own regex, not a broader one.
+   *
+   * <p>strategy-signal-service 4 → 0 (D3 strategy-signal slice, 2026-08-01): the last four —
+   * {@code RiskController.settings}/{@code update}, {@code UniverseController.universe} and
+   * {@code NotifierController.test}. All four were UNCONDITIONAL: every key was {@code put} on
+   * every path and the {@code LinkedHashMap}s already emitted explicit nulls, so no response gained
+   * or lost a key (verified by serializing the pre-conversion handlers and diffing the key sets).
+   * The risk surface was typed at the SERVICE — {@code RiskSettingsRepository.auditTail} was the
+   * real opaque source ({@code jdbc.queryForList}), so it now returns {@code AuditEntry} and
+   * {@code RiskService.settingsView} assembles the envelope.
+   *
+   * <p>⚠️ TWO things on that risk conversion that a pure retyping would have got wrong. (1) The
+   * audit row's wire key is {@code created_at}, SNAKE_CASE — {@code queryForList} keys are SQL
+   * COLUMN LABELS, not Jackson property names, so it never went through camelCase conversion the
+   * way its sibling {@code updatedAt} did; {@code AuditEntry} pins it with {@code @JsonProperty}.
+   * (2) That column's VALUE FORMAT does change, the one thing here that is not byte-identical: it
+   * was a raw {@code java.sql.Timestamp} rendering as {@code "…T10:00:00.000+00:00"} and is now an
+   * {@code OffsetDateTime} rendering as {@code "…T10:00:00Z"} (both ISO-8601, same instant). It is
+   * the format its sibling {@code updatedAt} on the same response already used. Nothing reads the
+   * field ({@code frontend-react} consumes only {@code items}), so this was taken deliberately
+   * rather than keeping {@code java.sql.Timestamp} as a record component.
+   *
+   * <p>{@code NotifierController.TestSendResult} is the one record NOT declared at its service:
+   * {@code NotifierService.sendTest} returns {@code void}, so there was no service-layer map to
+   * relocate — the handler synthesizes the constant itself.
    *
    * <p>strategy-signal-service 18 → 14 (2026-07-29, same day): the paper read surface + the
    * journal list. {@code PaperController}'s {@code positions} / {@code trades} / {@code pnl} and
@@ -170,16 +194,44 @@ class MapReturnRatchetTest {
    * exists, and converting it lowers the number to 6. backtest stays at 2 because its two
    * newly-countable handlers were converted in the same change — a widened regex that simultaneously
    * ratchets a count down is the only combination that proves the widening actually bites.
+   *
+   * <p><b>The qualifier hole, closed 2026-08-01 (D3 strategy-signal slice).</b> #1188 widened for
+   * {@code ResponseEntity} but not for a FULLY-QUALIFIED {@code java.util.Map}, so the same class of
+   * blind spot survived one door down. It was found the hard way: the strategy-signal slice's first
+   * attempt to red-proof its new 0 floor reverted a handler as {@code public java.util.Map<String,
+   * Object>}, and the ratchet passed GREEN — a falsely-green proof, and proof that an opaque handler
+   * could coexist with a floor of 0. Both halves were then measured explicitly: with that handler in
+   * the tree the pre-fix pattern reports BUILD SUCCESS, the post-fix pattern reports {@code now has 1
+   * ... (frozen at 0)}. Unlike the {@code ResponseEntity} widening this moved NO count — all four
+   * services were re-derived with the real {@code java.util.regex} engine and none contained a
+   * fully-qualified handler (edge-gateway 0, market-data 7, strategy-signal 0, backtest 2, unchanged
+   * old-vs-new). It closes a door rather than correcting a number.
+   *
+   * <p>Whenever this pattern is widened again, re-derive ALL FOUR counts before trusting any floor:
+   * a floor is only as strong as the counter's ability to see every shape, and 0 is the strongest
+   * floor there is.
    */
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
           "market-data-service", 7,
-          "strategy-signal-service", 4,
+          "strategy-signal-service", 0,
           "backtest-service", 2);
 
+  /**
+   * ⚠️ The optional {@code java\.util\.} is load-bearing, not tidiness. Without it a handler declared
+   * {@code public java.util.Map<String, Object> foo()} — legal, compiles, needs no import — is
+   * INVISIBLE to this counter, so an opaque handler can coexist with a floor of 0 while the gate
+   * stays green. That is not hypothetical: the D3 strategy-signal slice's first attempt to red-proof
+   * its new 0 floor reverted a handler using the fully-qualified form, and the ratchet passed. The
+   * proof was falsely green and the bypass was real. Widened here (2026-08-01) after #1188's
+   * {@code ResponseEntity} widening left the qualifier out.
+   *
+   * <p>No service contained a fully-qualified handler when this widened, so no floor moved — the
+   * fix closes a door rather than correcting a count.
+   */
   private static final Pattern MAP_RETURN =
-      Pattern.compile("public (Mono<|ResponseEntity<)?Map<String, Object>");
+      Pattern.compile("public (?:Mono<|ResponseEntity<)?(?:java\\.util\\.)?Map<String, Object>");
 
   @Test
   void mapReturningControllerMethodsNeverIncrease() throws IOException {

@@ -1211,6 +1211,24 @@ export interface components {
             key?: string;
             value?: components["schemas"]["JsonNode"];
         };
+        AuditEntry: {
+            key: string;
+            action: string;
+            detail: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        RiskSettingRow: {
+            key: string;
+            value: components["schemas"]["JsonNode"];
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        RiskSettings: {
+            book: string;
+            items: components["schemas"]["RiskSettingRow"][];
+            audit: components["schemas"]["AuditEntry"][];
+        };
         AccountBody: {
             startingCapital?: number;
             book?: string;
@@ -1300,6 +1318,9 @@ export interface components {
             version: string;
             /** Format: uuid */
             versionId: string;
+            status: string;
+        };
+        TestSendResult: {
             status: string;
         };
         ToggleResult: {
@@ -1712,6 +1733,19 @@ export interface components {
         };
         VersionListResponse: {
             items: components["schemas"]["VersionListItem"][];
+        };
+        Constituent: {
+            exchange: string;
+            tradingsymbol: string;
+        };
+        UniverseInfo: {
+            mode: string;
+            asOf: string | null;
+            /** Format: int32 */
+            constituentCount: number;
+            checksum: string;
+            survivorshipCaveat: string | null;
+            items: components["schemas"]["Constituent"][];
         };
         DiffResponse: {
             structured: components["schemas"]["Op"][];
@@ -2380,9 +2414,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RiskSettings"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2415,9 +2447,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["RiskSettings"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -2745,9 +2775,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["TestSendResult"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -3599,9 +3627,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["UniverseInfo"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

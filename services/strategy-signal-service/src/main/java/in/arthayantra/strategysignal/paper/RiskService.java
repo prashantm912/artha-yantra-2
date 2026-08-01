@@ -310,8 +310,21 @@ public class RiskService {
   }
 
   /** Recent trip/flip audit rows for a book. */
-  public List<java.util.Map<String, Object>> audit(String book, int limit) {
+  public List<RiskSettingsRepository.AuditEntry> audit(String book, int limit) {
     return settings.auditTail(book, limit);
+  }
+
+  /**
+   * A book's settings panel: its limit rows plus the recent trip/flip audit tail. Assembled HERE
+   * rather than in the controller so the records are the single source of truth for the wire shape
+   * (D3), not a controller-side re-mapping.
+   */
+  public RiskViews.RiskSettings settingsView(String book) {
+    List<RiskViews.RiskSettingRow> items =
+        all(book).stream()
+            .map(s -> new RiskViews.RiskSettingRow(s.key(), s.value(), s.updatedAt()))
+            .toList();
+    return new RiskViews.RiskSettings(book, items, audit(book, 20));
   }
 
   /** Upserts a book's limit (audited as a flip). */

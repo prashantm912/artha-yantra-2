@@ -5,6 +5,7 @@ import in.arthayantra.common.web.error.ErrorCodes;
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.marketdata.freshness.DataFreshness;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -37,7 +38,12 @@ public class FiiDiiController {
     this.clock = clock;
   }
 
-  public record LongShortRow(LocalDate tradeDate, long fiiLong, long fiiShort, BigDecimal ratio) {}
+  /** {@code ratio} is null when {@code fiiShort} is zero (`longShort()`'s division guard). */
+  public record LongShortRow(
+      LocalDate tradeDate,
+      long fiiLong,
+      long fiiShort,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ratio) {}
 
   @GetMapping("/cash")
   public FiiDiiEnvelopes.Cash cash(

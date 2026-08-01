@@ -54,9 +54,9 @@ public class MarketSurfaceController {
 
   /** The Dow global-cue quote: LTP + prev close + signed direction (+1 up / −1 down / 0 flat). */
   public record DowQuote(
-      BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal prevClose,
-      @Schema(types = {"number", "null"}) BigDecimal change,
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal change,
       @Schema(types = {"integer", "null"}) Integer direction) {}
 
   /**
@@ -84,13 +84,13 @@ public class MarketSurfaceController {
 
   /** INDIA VIX quote: LTP + day OHLC + change vs the previous close (the §20.7.4 header VIX). */
   public record VixQuote(
-      BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal dayHigh,
-      @Schema(types = {"number", "null"}) BigDecimal dayLow,
-      @Schema(types = {"number", "null"}) BigDecimal dayOpen,
-      @Schema(types = {"number", "null"}) BigDecimal prevClose,
-      @Schema(types = {"number", "null"}) BigDecimal change,
-      @Schema(types = {"number", "null"}) BigDecimal changePct,
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayHigh,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayLow,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal change,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal changePct,
       OffsetDateTime asOf) {}
 
   /** GET /vix: the INDIA VIX quote (the pinned index); 422 DATA_GAP when no quote (off-hours / mock). */

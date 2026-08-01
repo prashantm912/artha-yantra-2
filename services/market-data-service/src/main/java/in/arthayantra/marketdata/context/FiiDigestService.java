@@ -37,12 +37,12 @@ import org.springframework.stereotype.Service;
 public class FiiDigestService {
 
   /** FII cash net + consecutive-day streak + a flip flag (today's sign ≠ yesterday's). */
-  public record FiiCash(LocalDate tradeDate, BigDecimal net, int streakDays, String streakSide, boolean flip) {}
+  public record FiiCash(LocalDate tradeDate, @Schema(type = "string") BigDecimal net, int streakDays, String streakSide, boolean flip) {}
 
   /** FII vs DII cash direction — divergent when their latest nets point opposite ways. */
   public record DiiDivergence(
-      @Schema(types = {"number", "null"}) BigDecimal fiiNet,
-      @Schema(types = {"number", "null"}) BigDecimal diiNet,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal fiiNet,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal diiNet,
       boolean divergent) {}
 
   /** FII index-futures long/short ratio + Δ vs prior + percentile over available history (§6.5). */
@@ -50,8 +50,8 @@ public class FiiDigestService {
       LocalDate tradeDate,
       long indexLong,
       long indexShort,
-      @Schema(types = {"number", "null"}) BigDecimal ratio,
-      @Schema(types = {"number", "null"}) BigDecimal ratioDelta,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ratio,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ratioDelta,
       @Schema(types = {"integer", "null"}) Integer percentile,
       int windowSessions,
       boolean lowConfidence) {}
@@ -67,7 +67,7 @@ public class FiiDigestService {
   public record FiiDerivativeAvailability(
       boolean available,
       @Schema(types = {"string", "null"}) LocalDate tradeDate,
-      @Schema(types = {"number", "null"}) BigDecimal indexFuturesNet,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal indexFuturesNet,
       @Schema(types = {"string", "null"}) String reason) {}
 
   /** The FII/DII context digest. {@code dataTrust} = OK/DEGRADED/BLOCKED. */

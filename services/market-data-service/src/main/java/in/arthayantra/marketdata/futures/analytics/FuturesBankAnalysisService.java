@@ -39,8 +39,8 @@ public class FuturesBankAnalysisService {
   @Schema(types = {"object", "null"})
   public record BankAnalysisCell(
       String bank,
-      @Schema(types = {"number", "null"}) BigDecimal ltpPct,
-      @Schema(types = {"number", "null"}) BigDecimal oiPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal oiPct,
       // NULLABLE ENUM — this annotation is only HALF the contract (cross-vendor review, 2026-07-30).
       // `interp` is declared null and assigned only when `prev != null`, so it IS null for each
       // bank's FIRST point, inside an otherwise non-null cell.

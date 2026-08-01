@@ -20,8 +20,8 @@ public record PreOpenIndex(
     String key,
     // all four are null when the live tick did not resolve — the index still lists so the pre-open
     // table shows the full set (UpstoxMarketStatusClient:233)
-    @Schema(types = {"number", "null"}) BigDecimal ltp,
-    @Schema(types = {"number", "null"}) BigDecimal prevClose,
-    @Schema(types = {"number", "null"}) BigDecimal netChange,
-    @Schema(types = {"number", "null"}) BigDecimal changePct,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal netChange,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal changePct,
     OffsetDateTime asOf) {}

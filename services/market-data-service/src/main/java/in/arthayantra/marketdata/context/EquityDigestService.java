@@ -40,47 +40,47 @@ public class EquityDigestService {
       int declines,
       int unchanged,
       int total,
-      @Schema(types = {"number", "null"}) BigDecimal adRatio,
-      @Schema(types = {"number", "null"}) BigDecimal adRatioPrior,
-      @Schema(types = {"number", "null"}) BigDecimal adRatioDelta) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal adRatio,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal adRatioPrior,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal adRatioDelta) {}
 
   /** Universe-wide above-20/50-DMA counts + the share of the qualifying universe. */
   public record AboveMa(
       int universe20,
       int above20,
-      @Schema(types = {"number", "null"}) BigDecimal pctAbove20,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pctAbove20,
       int universe50,
       int above50,
-      @Schema(types = {"number", "null"}) BigDecimal pctAbove50) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pctAbove50) {}
 
   /** The 10-session A/D moving average vs the Zweig thrust threshold (config-pinned). */
   public record BreadthThrust(
       int windowSessions,
-      @Schema(types = {"number", "null"}) BigDecimal advRatioMa,
-      BigDecimal threshold,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal advRatioMa,
+      @Schema(type = "string") BigDecimal threshold,
       boolean thrust) {}
 
   /** One sector's session performance + its day-over-day rank movement. */
   public record SectorRotation(
       String sector,
-      BigDecimal avgChangePct,
+      @Schema(type = "string") BigDecimal avgChangePct,
       int stocks,
       int rankToday,
       @Schema(types = {"integer", "null"}) Integer rankPrior,
       @Schema(types = {"integer", "null"}) Integer rankDelta) {}
 
   /** One delivery-% z-score outlier (unusually high delivery vs the symbol's trailing 20 sessions). */
-  public record DeliveryOutlier(String symbol, BigDecimal deliveryPct, BigDecimal mean20, BigDecimal z) {}
+  public record DeliveryOutlier(String symbol, @Schema(type = "string") BigDecimal deliveryPct, @Schema(type = "string") BigDecimal mean20, @Schema(type = "string") BigDecimal z) {}
 
   /** One returns leader for the digest window (default 1-week). */
-  public record ReturnLeader(String symbol, String sector, BigDecimal returnPct) {}
+  public record ReturnLeader(String symbol, String sector, @Schema(type = "string") BigDecimal returnPct) {}
 
   /** Index-move concentration: the top-N names' share of the session's total absolute contribution. */
   public record IndexConcentration(
       String index,
-      @Schema(types = {"number", "null"}) BigDecimal indexChangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal indexChangePct,
       int topN,
-      @Schema(types = {"number", "null"}) BigDecimal topShare) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal topShare) {}
 
   /** The equity context digest. {@code dataTrust} = OK/DEGRADED/BLOCKED. */
   public record EquityDigest(

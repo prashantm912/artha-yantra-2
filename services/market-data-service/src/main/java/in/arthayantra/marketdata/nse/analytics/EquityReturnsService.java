@@ -39,12 +39,12 @@ public class EquityReturnsService {
   public record ReturnsRow(
       String symbol,
       String industry,
-      BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal r1d,
-      @Schema(types = {"number", "null"}) BigDecimal r1w,
-      @Schema(types = {"number", "null"}) BigDecimal r1m,
-      @Schema(types = {"number", "null"}) BigDecimal r6m,
-      @Schema(types = {"number", "null"}) BigDecimal r1y) {}
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal r1d,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal r1w,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal r1m,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal r6m,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal r1y) {}
 
   /** The whole screener for the latest accrued session. */
   public record Returns(

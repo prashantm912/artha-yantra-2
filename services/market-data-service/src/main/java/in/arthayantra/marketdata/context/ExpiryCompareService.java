@@ -49,10 +49,10 @@ public class ExpiryCompareService {
       long totalOi,
       long ceOi,
       long peOi,
-      @Schema(types = {"number", "null"}) BigDecimal pcr,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
-      @Schema(types = {"number", "null"}) BigDecimal ceLtp,
-      @Schema(types = {"number", "null"}) BigDecimal peLtp) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pcr,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ceLtp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal peLtp) {}
 
   /** One expiry's side of the compare (its trending series + its own trust). */
   public record ExpirySide(
@@ -67,10 +67,10 @@ public class ExpiryCompareService {
       OffsetDateTime bucket,
       @Schema(types = {"integer", "null"}) Long aTotalOi,
       @Schema(types = {"integer", "null"}) Long bTotalOi,
-      @Schema(types = {"number", "null"}) BigDecimal aPcr,
-      @Schema(types = {"number", "null"}) BigDecimal bPcr,
-      @Schema(types = {"number", "null"}) BigDecimal aSpot,
-      @Schema(types = {"number", "null"}) BigDecimal bSpot) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal aPcr,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal bPcr,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal aSpot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal bSpot) {}
 
   /** The cross-expiry compare. {@code dataTrust} = OK/DEGRADED/BLOCKED. */
   public record ExpiryCompare(

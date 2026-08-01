@@ -9,6 +9,7 @@ import in.arthayantra.marketdata.kite.FuturesContractSource;
 import in.arthayantra.marketdata.kite.FuturesContractSource.FutContract;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -51,11 +52,11 @@ public class OpenHighService {
   /** One O=H or O=L setup: the day OHL + LTP + how far the LTP is from the matched level (%). */
   public record Setup(
       String symbol,
-      BigDecimal dayOpen,
-      BigDecimal dayHigh,
-      BigDecimal dayLow,
-      BigDecimal ltp,
-      BigDecimal farPct) {}
+      @Schema(type = "string") BigDecimal dayOpen,
+      @Schema(type = "string") BigDecimal dayHigh,
+      @Schema(type = "string") BigDecimal dayLow,
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string") BigDecimal farPct) {}
 
   /** The two mirrored lists for an index: opened-at-high (bearish) + opened-at-low (bullish). */
   public record OpenHigh(

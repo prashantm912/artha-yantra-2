@@ -46,17 +46,21 @@ public class OptionsDigestService {
 
   /** PCR now, at session-open, and at prior-day EOD, plus the two intraday/day deltas. */
   public record Pcr(
-      @Schema(types = {"number", "null"}) BigDecimal now,
-      @Schema(types = {"number", "null"}) BigDecimal atOpen,
-      @Schema(types = {"number", "null"}) BigDecimal priorEod,
-      @Schema(types = {"number", "null"}) BigDecimal deltaVsOpen,
-      @Schema(types = {"number", "null"}) BigDecimal deltaVsPriorEod) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal now,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal priorEod,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal deltaVsOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal deltaVsPriorEod) {}
 
-  /** Max-pain now, at session-open, and the intraday drift (now − at-open, in index points). */
+  /**
+   * Max-pain now, at session-open, and the intraday drift (now − at-open, in index points). {@code
+   * now} is null when the fold's strike chain is empty ({@code fold()}: {@code chain.isEmpty() ?
+   * null : MaxPainCalculator.maxPain(chain)}).
+   */
   public record MaxPain(
-      BigDecimal now,
-      @Schema(types = {"number", "null"}) BigDecimal atOpen,
-      @Schema(types = {"number", "null"}) BigDecimal drift) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal now,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal drift) {}
 
   /** One top-mover strike (label {@code "57400 PE"}) with its ΔOI-since-open + 4-state read. */
   // @Schema(name) is load-bearing: OptionsAnalyticsController.StrikeMove shares this simple name
@@ -78,15 +82,15 @@ public class OptionsDigestService {
 
   /** ATM straddle premium now vs session-open (the §6.1.1 premium fold, window-anchored to 09:15). */
   public record Straddle(
-      @Schema(types = {"number", "null"}) BigDecimal atmStrike,
-      @Schema(types = {"number", "null"}) BigDecimal now,
-      @Schema(types = {"number", "null"}) BigDecimal atOpen,
-      @Schema(types = {"number", "null"}) BigDecimal deltaPct) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atmStrike,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal now,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal deltaPct) {}
 
   /** ATM IV + its trailing-window rank/percentile ({@code insufficientHistory} true below the floor). */
   public record AtmIv(
-      @Schema(types = {"number", "null"}) BigDecimal iv,
-      @Schema(types = {"number", "null"}) BigDecimal rank,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal iv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal rank,
       @Schema(types = {"integer", "null"}) Integer percentile,
       int windowSessions,
       boolean insufficientHistory) {}
@@ -94,7 +98,7 @@ public class OptionsDigestService {
   /** The underlying 4-state OI-structure verdict (spot direction × total ΔOI direction, since open). */
   public record OiStructure(
       OiInterpretation verdict,
-      @Schema(types = {"number", "null"}) BigDecimal spotDelta,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spotDelta,
       long oiChange) {}
 
   /** The options context digest for one (underlying, expiry). {@code dataTrust} = OK/DEGRADED/BLOCKED. */

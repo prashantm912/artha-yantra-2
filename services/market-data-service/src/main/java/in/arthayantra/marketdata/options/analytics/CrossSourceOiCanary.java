@@ -57,8 +57,8 @@ public class CrossSourceOiCanary {
       String status,
       String detail,
       int bucketsCompared,
-      @Schema(types = {"number", "null"}) BigDecimal meanDivergencePct,
-      @Schema(types = {"number", "null"}) BigDecimal maxDivergencePct) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal meanDivergencePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal maxDivergencePct) {}
 
   /** The whole report: worst-of the per-underlying statuses. */
   public record CrossSourceReport(

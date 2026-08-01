@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.nse.analytics;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
@@ -20,12 +21,13 @@ public class NseEodReader {
     this.jdbc = jdbc;
   }
 
+  /** {@code buyValue}/{@code sellValue}/{@code netValue} are nullable columns (V012, no NOT NULL). */
   public record FiiDiiRow(
       LocalDate tradeDate,
       String category,
-      BigDecimal buyValue,
-      BigDecimal sellValue,
-      BigDecimal netValue) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal buyValue,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sellValue,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal netValue) {}
 
   public record ParticipantOiRow(
       LocalDate tradeDate,
@@ -45,12 +47,13 @@ public class NseEodReader {
       long totalLongContracts,
       long totalShortContracts) {}
 
+  /** {@code buyValue}/{@code sellValue}/{@code netValue} are nullable columns (V024, no NOT NULL). */
   public record FiiDerivativeRow(
       LocalDate tradeDate,
       String segment,
-      BigDecimal buyValue,
-      BigDecimal sellValue,
-      BigDecimal netValue) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal buyValue,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sellValue,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal netValue) {}
 
   public List<FiiDerivativeRow> fiiDerivativeStats(LocalDate from, LocalDate to) {
     return jdbc.query(

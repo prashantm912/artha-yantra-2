@@ -67,6 +67,8 @@ const MOCK_ROW: SignalRejectionDto = {
     confluence: null,
     context: null,
   },
+  dataHealth: { degraded: false, contextBearing: true, oiSuppressed: false, flags: [] },
+  degraded: false,
   barTime: '2026-07-10T09:20:00+05:30',
   generatedAt: '2026-07-10T09:20:01+05:30',
 };
@@ -145,6 +147,83 @@ describe('RejectionsPage main table (adopted onto DataTable)', () => {
     expect(collapse).toHaveAttribute('aria-expanded', 'true');
     expect(within(t).getByText('Rails evaluated')).toBeInTheDocument();
     expect(within(t).getByText('Context')).toBeInTheDocument();
+  });
+
+  it('badges a degraded row with a WORD + the flag count, and names the absent inputs when expanded', () => {
+    state.items = [
+      {
+        ...MOCK_ROW,
+        degraded: true,
+        dataHealth: {
+          degraded: true,
+          contextBearing: true,
+          oiSuppressed: false,
+          flags: ['iv-rank-absent', 'dow-absent'],
+        },
+      },
+    ];
+    renderPage();
+
+    const t = table();
+    // Colour is never the only cue — the verdict WORD carries it, with the count beside it.
+    expect(within(t).getByText('Degraded')).toBeInTheDocument();
+    expect(within(t).getByText('(2)')).toBeInTheDocument();
+
+    fireEvent.click(within(t).getByRole('button', { name: 'Expand details' }));
+    expect(within(t).getByText('Input health')).toBeInTheDocument();
+    expect(within(t).getByText('2 gate inputs absent when this bar was scored')).toBeInTheDocument();
+    // The SPECIFIC inputs, not just "something was wrong".
+    expect(within(t).getByText('iv-rank-absent')).toBeInTheDocument();
+    expect(within(t).getByText('dow-absent')).toBeInTheDocument();
+  });
+
+  it('does NOT mark a row degraded when its OI root is on ITS OWN monthly expiry (S24, by design)', () => {
+    // The per-root rule made visible: an inert OI block on the expiring root is not an outage, so the
+    // row reads OK and says why. A root-blind badge would paint a whole normal session as broken.
+    state.items = [
+      {
+        ...MOCK_ROW,
+        degraded: false,
+        dataHealth: {
+          degraded: false,
+          contextBearing: true,
+          oiSuppressed: true,
+          flags: [],
+        },
+      },
+    ];
+    renderPage();
+
+    const t = table();
+    expect(within(t).getByText(/OK · expiry/)).toBeInTheDocument();
+    expect(within(t).queryByText('Degraded')).toBeNull();
+
+    fireEvent.click(within(t).getByRole('button', { name: 'Expand details' }));
+    expect(within(t).getByText(/inert/)).toBeInTheDocument();
+    expect(within(t).getByText(/monthly\s+index expiry \(S24\)/)).toBeInTheDocument();
+  });
+
+  it('renders an un-judged row as “—”, never as healthy', () => {
+    // Two ways a row has no verdict: it predates V054, or it blocked before the chain fetch. Neither
+    // is a clean bill of health, so neither may render as OK.
+    state.items = [{ ...MOCK_ROW, degraded: false, dataHealth: null }];
+    renderPage();
+
+    const t = table();
+    expect(within(t).queryByText('OK')).toBeNull();
+    fireEvent.click(within(t).getByRole('button', { name: 'Expand details' }));
+    expect(within(t).getByText(/never judged, so treat it as unknown rather than healthy/))
+      .toBeInTheDocument();
+  });
+
+  it('offers a gate-input health filter alongside the rail filter', () => {
+    state.items = [MOCK_ROW];
+    renderPage();
+
+    const filter = screen.getByLabelText('Filter by gate-input health');
+    expect(filter).toBeInTheDocument();
+    fireEvent.change(filter, { target: { value: 'degraded' } });
+    expect((filter as HTMLSelectElement).value).toBe('degraded');
   });
 
   it('gives each confluence dot a non-colour supports/opposes cue (WCAG 1.4.1)', () => {

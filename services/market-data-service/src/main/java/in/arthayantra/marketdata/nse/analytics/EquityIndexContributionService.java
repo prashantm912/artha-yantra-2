@@ -49,21 +49,21 @@ public class EquityIndexContributionService {
   public record ContribRow(
       int rank,
       String symbol,
-      BigDecimal contribution,
-      BigDecimal changePct,
-      BigDecimal close,
-      @Schema(types = {"number", "null"}) BigDecimal points) {}
+      @Schema(type = "string") BigDecimal contribution,
+      @Schema(type = "string") BigDecimal changePct,
+      @Schema(type = "string") BigDecimal close,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal points) {}
 
   /** Advances + declines, each ranked by |contribution|, with their summed contributions + points.
    * {@code live} marks an intraday quote-based fold (vs the EOD bhavcopy read). */
   public record IndexContribution(
       String index,
-      BigDecimal indexChangePct,
-      BigDecimal advanceTotal,
-      BigDecimal declineTotal,
-      @Schema(types = {"number", "null"}) BigDecimal indexLevel,
-      @Schema(types = {"number", "null"}) BigDecimal advancePoints,
-      @Schema(types = {"number", "null"}) BigDecimal declinePoints,
+      @Schema(type = "string") BigDecimal indexChangePct,
+      @Schema(type = "string") BigDecimal advanceTotal,
+      @Schema(type = "string") BigDecimal declineTotal,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal indexLevel,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal advancePoints,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal declinePoints,
       List<ContribRow> advances,
       List<ContribRow> declines,
       LocalDate asOf,

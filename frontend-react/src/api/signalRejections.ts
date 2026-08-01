@@ -62,6 +62,25 @@ export interface RejectionDiagnostic {
   context?: RejectionContext | null;
 }
 
+/**
+ * Per-row gate-input health, computed when the row was recorded (F5 U3, V054). A flag means the input
+ * was ABSENT when the gate scored that bar — never that its value was unremarkable.
+ */
+export interface RejectionDataHealth {
+  degraded: boolean;
+  /** False when the block landed before the chain fetch — uninformative, NOT unhealthy. */
+  contextBearing: boolean;
+  /**
+   * True when this row's OI root is on ITS OWN monthly index expiry (NSE last Tuesday / BSE last
+   * Thursday), where MarketOiClient skips the OI block by design (S24). The OI flag is then withheld
+   * — an inert OI block on that root's expiry is not a defect. Keyed per root, so the other root's
+   * rows the same session are still judged normally.
+   */
+  oiSuppressed: boolean;
+  /** The absent inputs, e.g. `iv-rank-absent`, `breadth-absent`, `oi-inert`. */
+  flags: string[];
+}
+
 /** One rejection row. */
 export interface SignalRejectionDto {
   id: number;
@@ -79,6 +98,9 @@ export interface SignalRejectionDto {
   compositeScore: Num;
   compositeThreshold: Num;
   diagnostic: RejectionDiagnostic;
+  /** null on rows recorded before V054 — "never computed", NOT "judged healthy". */
+  dataHealth?: RejectionDataHealth | null;
+  degraded: boolean;
   barTime: string;
   generatedAt: string;
 }
@@ -97,8 +119,9 @@ const KEY = 'signal-rejections';
 
 /**
  * REST history of blocked scalper entries, newest first. `rail` filters to one blocking condition;
- * `from`/`to` are ISO datetimes bounding `generated_at` (Live=today vs a picked day). All filters join
- * the query key so each combination caches separately.
+ * `from`/`to` are ISO datetimes bounding `generated_at` (Live=today vs a picked day); `degraded`
+ * narrows to rows whose gate inputs were (or were not) absent. All filters join the query key so each
+ * combination caches separately.
  */
 export function useSignalRejections(
   strategyVersionId: string | null = null,
@@ -107,15 +130,17 @@ export function useSignalRejections(
   to: string | null = null,
   limit = 200,
   offset = 0,
+  degraded: boolean | null = null,
 ) {
   return useQuery({
-    queryKey: [KEY, strategyVersionId, rail, from, to, limit, offset],
+    queryKey: [KEY, strategyVersionId, rail, from, to, limit, offset, degraded],
     queryFn: () => {
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
       if (strategyVersionId) params.set('strategyVersionId', strategyVersionId);
       if (rail) params.set('rail', rail);
       if (from) params.set('from', from);
       if (to) params.set('to', to);
+      if (degraded !== null) params.set('degraded', String(degraded));
       return apiFetch<RejectionPage>(`/signal-rejections?${params.toString()}`);
     },
   });

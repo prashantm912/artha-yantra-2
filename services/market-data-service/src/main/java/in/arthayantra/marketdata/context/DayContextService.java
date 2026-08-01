@@ -50,25 +50,25 @@ public class DayContextService {
 
   /** INDIA VIX quote (level + change vs prev close + a coarse regime band). Null when unavailable. */
   public record Vix(
-      BigDecimal level,
-      @Schema(types = {"number", "null"}) BigDecimal change,
-      @Schema(types = {"number", "null"}) BigDecimal changePct,
+      @Schema(type = "string") BigDecimal level,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal change,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal changePct,
       String band,
       @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}
 
   /** One overnight global-index cue (top mover by |%change|). */
   public record GlobalCue(
       @Schema(types = {"string", "null"}) String name,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
-      BigDecimal changePct) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string") BigDecimal changePct) {}
 
   /** Primary-index price action off the daily candles — the intraday/overnight structure read. */
   public record IndexPriceAction(
       String symbol,
-      @Schema(types = {"number", "null"}) BigDecimal gapOpenPct,
-      BigDecimal dayRange,
-      BigDecimal avgRange20,
-      @Schema(types = {"number", "null"}) BigDecimal rangeVsAvg,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal gapOpenPct,
+      @Schema(type = "string") BigDecimal dayRange,
+      @Schema(type = "string") BigDecimal avgRange20,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal rangeVsAvg,
       String direction,
       @Schema(types = {"string", "null"}) String rangeState,
       LocalDate asOfDate) {}

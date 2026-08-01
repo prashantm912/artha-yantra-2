@@ -34,13 +34,13 @@ public class BreadthService {
       int declines,
       int unchanged,
       int total,
-      @Schema(types = {"number", "null"}) BigDecimal avgDeliveryPct) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal avgDeliveryPct) {}
 
   public record DeliveryRow(
       String symbol,
-      BigDecimal deliveryPct,
-      @Schema(types = {"number", "null"}) BigDecimal close,
-      @Schema(types = {"number", "null"}) BigDecimal pctChange) {}
+      @Schema(type = "string") BigDecimal deliveryPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal close,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pctChange) {}
 
   public record Breadth(
       BreadthSummary summary,

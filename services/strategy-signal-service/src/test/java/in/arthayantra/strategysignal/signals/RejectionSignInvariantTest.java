@@ -16,13 +16,11 @@ import in.arthayantra.strategysignal.scalper.RailMarginSign;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
-import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -90,6 +88,32 @@ class RejectionSignInvariantTest {
     return meters.counter("ay_signal_rejection_sign_contradiction_total").count();
   }
 
+  /**
+   * Deterministic barrier for the ASYNC half of the writer — call it before EVERY assertion on
+   * {@code logs.list}. {@link RejectionWriter#record} ends in {@code queue.submit(...)} and the WARN
+   * is emitted on the writer thread ({@code RejectionWriter:102-109}), so a log assertion made
+   * straight after {@code record()} races the writer and is unreliable in BOTH directions: an
+   * {@code anyMatch} fails intermittently under full-suite load, and a {@code noneMatch} passes
+   * VACUOUSLY (measured — a genuinely contradicting row left {@code noneMatch} green while the
+   * synchronous counter proved the WARN had already been emitted).
+   *
+   * <p>This is the barrier the sibling writer tests already use for exactly this assertion shape
+   * ({@code RejectionWriterTest:255}, {@code CompositeRejectionWriterTest:198},
+   * {@code BoundedAsyncWriterTest:132}). The drain returns as soon as the queue empties and the
+   * executor terminates, which both guarantees the append HAPPENED and establishes the
+   * happens-before edge that makes reading the appender's plain {@code ArrayList} from the test
+   * thread safe. The budget matches the {@code timeout(2_000)} convention in this class.
+   *
+   * <p>⚠️ Do NOT "simplify" this away and assert on {@code logs.list} directly. The WARN was moved
+   * onto the writer thread deliberately (review round 1, see
+   * {@link #theCounterIsSynchronousButTheWarnIsEmittedOnTheWriterThread}) because logging is I/O and
+   * the sole {@code signal-eval} thread must never park on it — the fix belongs in the test, not in
+   * the writer. It also SHUTS THE WRITER DOWN, so call it once, after the last {@code record()}.
+   */
+  private void drainWriter() {
+    writer.drainAndShutdown(2_000);
+  }
+
   @Test
   void aSelfContradictingRowIsCountedWarnedAndStillPersisted() {
     // The 2026-07-23 §2.3 id-7794 shape: confluence-composite blocked while its own operand
@@ -98,6 +122,8 @@ class RejectionSignInvariantTest {
         new BigDecimal("0.0373"), RailMarginSign.NEGATIVE_WHEN_BLOCKED);
 
     assertThat(contradictions()).isEqualTo(1.0);
+    // The WARN rides the writer thread — wait for the drain before reading the appender.
+    drainWriter();
     assertThat(logs.list)
         .as("the contradiction WARNs with the full row identity")
         .anyMatch(
@@ -120,6 +146,9 @@ class RejectionSignInvariantTest {
     record("vwap-distance", new BigDecimal("0.0041"), new BigDecimal("0.0040"),
         new BigDecimal("0.0001"), RailMarginSign.POSITIVE_WHEN_BLOCKED);
     assertThat(contradictions()).isZero();
+    // Without this the noneMatch is VACUOUS — it would pass simply because the writer thread has
+    // not appended yet, not because no WARN was emitted.
+    drainWriter();
     assertThat(logs.list)
         .noneMatch(e -> e.getFormattedMessage().contains("self-contradicting"));
   }
@@ -185,13 +214,9 @@ class RejectionSignInvariantTest {
 
     // The WARN is not. Assert the emitting THREAD rather than racing on whether it has happened
     // yet: the writer picks the task up immediately, so a "not yet logged" check would be a
-    // timing race, while the thread name is a durable fact about where the I/O ran.
-    Awaitility.await()
-        .atMost(Duration.ofSeconds(5))
-        .until(
-            () ->
-                logs.list.stream()
-                    .anyMatch(e -> e.getFormattedMessage().contains("self-contradicting")));
+    // timing race, while the thread name is a durable fact about where the I/O ran. The drain (not
+    // a poll) is what makes the read deterministic — see drainWriter().
+    drainWriter();
     ILoggingEvent warn =
         logs.list.stream()
             .filter(e -> e.getFormattedMessage().contains("self-contradicting"))

@@ -62,18 +62,23 @@ cd "$REPO"
 #     independent and measured reason as well (openapi_relabel_30.py refuses the pydantic
 #     `anyOf: [{...}, {"type":"null"}]` form, 134 occurrences); see the long loop-1 comment
 #     in ci-contracts.yml's breaking-gate step. It gets the semantic staleness gate instead.
-NON_JAVA_SERVICES="optimizer-service"
+#   margin-service - Python/FastAPI SPAN appliance, gated into ci-contracts alongside
+#     optimizer-service (previously EXEMPT_SERVICES - see below). Excluded from the breaking
+#     gate for the SAME measured reason as optimizer-service: even its four routes' pydantic
+#     Optional fields (e.g. PositionIn.expiry, SizeResponse.limitingRail) and its plain-dict
+#     /health response serialize as `anyOf: [{type: X}, {type: "null"}]` with a `title`
+#     sibling, and openapi_relabel_30.py refuses that shape (measured: exit 2 on
+#     contracts/margin-service.openapi.json, at paths./health.get.responses.200 first). It
+#     gets the semantic staleness gate instead (margin_spec_staleness.py mirrors
+#     optimizer_spec_staleness.py).
+NON_JAVA_SERVICES="optimizer-service margin-service"
 
 # Directories under services/ that are NOT contract services at all - no committed
-# OpenAPI spec, therefore in none of ci-contracts' gates.
-#   margin-service - Python/FastAPI SPAN appliance. It publishes four routes and a
-#     hand-maintained contracts/margin-service.api-surface.json, but no OpenAPI document
-#     was ever dumped for it, so ci-contracts has never covered it. Its only CI is
-#     ci-margin.yml, which is `paths:`-filtered and not a required context - the same
-#     shape as ci-optimizer. RECORDED HERE RATHER THAN FIXED: giving it a spec is a real
-#     change with its own relabel/diff questions, not a rename. This entry exists so the
-#     gap is a declaration somebody chose, not an absence nobody noticed.
-EXEMPT_SERVICES="margin-service"
+# OpenAPI spec, therefore in none of ci-contracts' gates. Currently empty: margin-service
+# was the last resident (Python/FastAPI SPAN appliance with only a hand-maintained
+# api-surface.json and no OpenAPI document) and has since been given one - see
+# NON_JAVA_SERVICES above.
+EXEMPT_SERVICES=""
 # -----------------------------------------------------------------------------------
 
 die() { printf 'contract-service inventory: %s\n' "$*" >&2; exit 1; }

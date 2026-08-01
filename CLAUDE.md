@@ -276,6 +276,24 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   SEPARATE path-filtered workflows** (`.github/workflows/ci-optimizer.yml`, trigger `paths:
   services/optimizer-service/**`) — NOT in the default `gh pr checks` rollup; a Python PR's ruff+pytest
   gate shows under `gh run list --workflow ci-optimizer.yml`, so don't read its absence as "skipped".
+- **margin-service (Python SPAN appliance, `/api/v1/margin`) now carries the same two-artifact
+  contract gate as optimizer-service** — it was the one service with no committed OpenAPI spec at
+  all until closed. `services/margin-service/tests/test_openapi_contract.py` captures BOTH
+  `contracts/margin-service.api-surface.json` (asserted every run) and the FastAPI-native
+  `contracts/margin-service.openapi.json` (asserted by `.github/scripts/margin_spec_staleness.py`,
+  a required, unconditional ci-contracts step — same `app routes -> api-surface.json -> openapi.json`
+  chain as optimizer-service). **Re-capture:** `cd services/margin-service && CONTRACTS_CAPTURE=1
+  python -m pytest tests/test_openapi_contract.py` writes both files, then regenerate the TS client
+  with `npm run gen:api` (frontend-react) or directly `npx openapi-typescript@7
+  contracts/margin-service.openapi.json -o contracts/gen/margin-service.d.ts`. Classified NON_JAVA
+  in `.github/scripts/contract_service_inventory.sh` (no `pom.xml`) for the SAME measured reason as
+  optimizer-service: even its four routes' pydantic `Optional` fields and its plain-dict `/health`
+  response serialize as the `anyOf: [{type: X}, {type: "null"}]`-with-`title` shape
+  `openapi_relabel_30.py` refuses (exit 2) — so it is exempt from the openapi-diff breaking gate and
+  the Java-only warn-vs-code step, and gets the semantic staleness gate instead. ⚠️ Its 422 responses
+  still use FastAPI's stock `HTTPValidationError` shape, not the shared `{code,message,details}`
+  envelope other services converged on (§8.3) — a pre-existing runtime inconsistency, not a spec/CI
+  defect, left unfixed by this gating change.
 - **Backtest/optimizer submission identity + precedence (2b):** `strategyId` is the registry **UUID**
   (NOT the slug); omit `strategyVersion` → the optimizer/runner pins the latest published, else latest
   draft. Terminal job status string is `completed`; results are keyed by `resultRef` (the run id), read

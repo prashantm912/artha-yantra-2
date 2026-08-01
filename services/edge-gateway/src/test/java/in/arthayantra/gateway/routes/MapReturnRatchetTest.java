@@ -151,16 +151,35 @@ class MapReturnRatchetTest {
    * keys as nulls to the empty response — a wire change on a live OI page needing a deliberate
    * shape decision, not a refactor. {@code openHighStrategy} says so itself: "nullable off-hours
    * (LinkedHashMap permits null; Map.of would not)". So the floor can reach 2, not 0.
+   *
+   * <p>⚠️ <b>REGEX WIDENED 2026-08-01 (D3 backtest slice) — the ratchet was BLIND to {@code
+   * ResponseEntity<Map<String, Object>>}.</b> The old pattern anchored on {@code public} immediately
+   * followed by {@code Mono<}-or-nothing, so a handler that wrapped its opaque map in a {@code
+   * ResponseEntity} (to set a 202/201 status) was never counted — while publishing exactly the same
+   * {@code additionalProperties:{}} blob this ratchet exists to prevent. Three existed platform-wide,
+   * uncounted: {@code JobsController.run} and {@code JobsController.cancel} in backtest (converted in
+   * this slice) and {@code WatchlistController.create} in market-data (NOT converted — another
+   * service's slice). {@code JobsController.run}'s own javadoc had written the gap down as though it
+   * were a property of the design: "{@code ResponseEntity<Map>} is NOT a ratchet-counted Map return".
+   * It was a hole in the counter, not a safe shape.
+   *
+   * <p><b>market-data-service 6 → 7 is a MEASUREMENT CORRECTION, not a regression</b> — no handler
+   * was added; {@code WatchlistController.create} has been opaque all along and is only now visible.
+   * Raising the number is strictly TIGHTER than leaving it: before, any service could add unlimited
+   * {@code ResponseEntity}-wrapped maps and stay green; now market-data is capped at the one that
+   * exists, and converting it lowers the number to 6. backtest stays at 2 because its two
+   * newly-countable handlers were converted in the same change — a widened regex that simultaneously
+   * ratchets a count down is the only combination that proves the widening actually bites.
    */
   private static final Map<String, Integer> FROZEN =
       Map.of(
           "edge-gateway", 0,
-          "market-data-service", 6,
+          "market-data-service", 7,
           "strategy-signal-service", 4,
           "backtest-service", 2);
 
   private static final Pattern MAP_RETURN =
-      Pattern.compile("public (Mono<)?Map<String, Object>");
+      Pattern.compile("public (Mono<|ResponseEntity<)?Map<String, Object>");
 
   @Test
   void mapReturningControllerMethodsNeverIncrease() throws IOException {

@@ -18,6 +18,17 @@ import org.junit.jupiter.api.Test;
  * DOWN (convert to a record — then lower the frozen number here), never UP. New endpoints must
  * return typed records so the breaking-diff gate actually sees them.
  *
+ * <p><b>⚠️ THIS TEST IS HALF THE INSTRUMENT — see {@link SpecOpenObjectRatchetTest}.</b> It asks how
+ * the SOURCE is typed; the sibling asks what the CAPTURED SPEC publishes, and the two are blind to
+ * different things. This one is defeated by formatting (a tab, a return type wrapped across lines,
+ * a doubled {@code Mono<ResponseEntity<Map<…>>>} wrapper — all measured, all invisible here) and by
+ * opacity that is not spelled {@code Map} at all: a {@code JsonNode} or {@code Object} return, or a
+ * {@code Map} FIELD inside a record this test counts as converted. edge-gateway sits at 0 below and
+ * still publishes two unconstrained open objects for exactly those reasons. The sibling is blind to
+ * anything the capture did not produce — a handler on the wrong profile, or a branch that has not
+ * re-captured yet — which this test still sees. Neither is complete; do not describe either as if
+ * it were, and lower BOTH when a handler is converted.
+ *
  * <p>Same pure-file pattern as {@link GatewayRouteAllowlistTest}: walks the sibling services'
  * sources from the repo root, rides the ci-java strategy-gateway shard, no containers.
  */

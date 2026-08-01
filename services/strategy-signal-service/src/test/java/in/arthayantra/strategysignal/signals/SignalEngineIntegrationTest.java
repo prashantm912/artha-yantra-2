@@ -397,9 +397,21 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       Counter fired =
           meterRegistry.find("ay_signal_eval_outcome_total").tag("outcome", "fired").counter();
       assertThat(fired).isNotNull();
-      assertThat(fired.count())
-          .as("the bar that emitted the signal above counted as an outcome")
-          .isGreaterThanOrEqualTo(1.0);
+      // AWAITED, not asserted outright: the emit (which persists the row this test already awaited
+      // above, and stamps the bar-to-emit timer) happens INSIDE decideEntry, while the outcome
+      // counter increments at its CALL SITE — SignalEngine "THE ONLY increment site", strictly after
+      // decideEntry returns. So the await on the persisted signal row unblocks in the middle of that
+      // window and a bare assertion here races the signal-eval thread: it reads timer==1 with
+      // fired==0. Reproduced under `verify` (JaCoCo instrumentation widens the window); green under
+      // plain `test`, which is why it stayed hidden. Awaiting closes the window without weakening
+      // the assertion — a counter that never increments still fails.
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .untilAsserted(
+              () ->
+                  assertThat(fired.count())
+                      .as("the bar that emitted the signal above counted as an outcome")
+                      .isGreaterThanOrEqualTo(1.0));
 
       // renderer invariant on the persisted breakdown
       BigDecimal contributions = BigDecimal.ZERO;

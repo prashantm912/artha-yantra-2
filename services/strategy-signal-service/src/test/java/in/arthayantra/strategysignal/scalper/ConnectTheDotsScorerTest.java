@@ -503,19 +503,89 @@ class ConnectTheDotsScorerTest {
   }
 
   @Test
-  void presentIvRankStillCountsInTheDenominator() {
-    // ivRank 80 (>= the 50 "low" cut) is PRESENT, so it stays in the denominator scoring supports=false
-    // (not absent). The all-else-aligned aggregate is 18.8/19.6 = 0.9592 — the contrast that proves a
-    // PRESENT rank is still counted, only a NULL one is withheld.
-    Confluence r =
-        ConnectTheDotsScorer.score(
-            ctx(BULL_CHART, BULL_OI, bullMacroWithIvRank(bd("80"))), CE, 1, T, P, true);
+  void presentIvRankStillCountsInTheDenominatorWhenArmed() {
+    // ARMED (A3 `iv-rank-dot`), ivRank 80 (>= the 50 "low" cut) is PRESENT, so it stays in the
+    // denominator scoring supports=false (not absent). The all-else-aligned aggregate is
+    // 18.8/19.6 = 0.9592 — the contrast that proves a PRESENT rank is counted once ARMED, while a NULL
+    // one (and, per A3, any unarmed one) is withheld.
+    Confluence r = armedIvRank(bd("80"));
 
     DotScore ivRank =
         r.dots().stream().filter(d -> d.dot().equals("iv_rank")).findFirst().orElseThrow();
     assertThat(ivRank.absent()).isFalse();
     assertThat(ivRank.supports()).isFalse();
     assertThat(r.aggregate()).isEqualByComparingTo("0.9592");
+
+    // …and a LOW rank, armed, supports: arming restores the full "IV rank low = cheap premium" grade.
+    DotScore low =
+        armedIvRank(bd("30")).dots().stream()
+            .filter(d -> d.dot().equals("iv_rank")).findFirst().orElseThrow();
+    assertThat(low.absent()).isFalse();
+    assertThat(low.supports()).isTrue();
+  }
+
+  /** CE score over the all-aligned baseline with the A3 {@code iv-rank-dot} ARMED. */
+  private static Confluence armedIvRank(BigDecimal ivRank) {
+    return ConnectTheDotsScorer.score(
+        ctx(BULL_CHART, BULL_OI, bullMacroWithIvRank(ivRank)), CE, 1, T, P, true,
+        false, false, false, null, true);
+  }
+
+  // ------------------------------------------------- A3: the iv_rank dot is default-OFF behind its tag
+
+  @Test
+  void ivRankDotUnarmedIsAbsentEvenWithAPresentRank() {
+    // A3 (Architect, 2026-08-01) — the September self-arm this closes. `IvAnalyticsService` suppresses
+    // the rank below 60 trading days of `marketdata.iv_daily_summary` history; live capture began
+    // 2026-06-15, so the input is honest-NULL today. When the floor is reached the rank starts
+    // resolving and, without this gate, a 0.8-weight dot would enter the composite denominator
+    // (18.80 -> 19.60) fleet-wide on a CALENDAR trigger — no deploy, no owner arming decision.
+    // Unarmed, a PRESENT rank is withheld from BOTH num and den in either direction:
+    // a would-OPPOSE rank (80 >= the 50 "low" cut) does not drag the aggregate down …
+    Confluence high =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, BULL_OI, bullMacroWithIvRank(bd("80"))), CE, 1, T, P, true);
+    DotScore highDot =
+        high.dots().stream().filter(d -> d.dot().equals("iv_rank")).findFirst().orElseThrow();
+    assertThat(highDot.absent()).as("unarmed => withheld, whatever the input says").isTrue();
+    assertThat(highDot.supports()).isFalse();
+    assertThat(high.aggregate()).isEqualByComparingTo("1.0"); // not 0.9592 (= counted, scoring against)
+
+    // … and a would-SUPPORT rank (30 < 50) does not prop it up either — the dot is inert, not lenient.
+    Confluence low =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, BULL_OI, bullMacroWithIvRank(bd("30"))), CE, 1, T, P, true);
+    DotScore lowDot =
+        low.dots().stream().filter(d -> d.dot().equals("iv_rank")).findFirst().orElseThrow();
+    assertThat(lowDot.absent()).isTrue();
+    assertThat(lowDot.supports()).as("unarmed never contributes support either").isFalse();
+  }
+
+  @Test
+  void unarmedWithANullRankIsByteIdenticalToTheUngatedForm() {
+    // A3 parity guard — TODAY's shape. The input is null on every live and historical row, so an
+    // unarmed deploy must be a no-op: the whole dot LIST (name/weight/supports/reason/absent, in
+    // order) and the aggregate match the pre-gate reading exactly. The reason string is pinned too
+    // because it rides the `scalper_detail` side-channel (SignalEngine#2351, FiredDiagnosticJson#80) —
+    // the "no data" wording must survive the gate; only an unarmed PRESENT rank gets new wording.
+    Confluence r =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, BULL_OI, bullMacroWithIvRank(null)), CE, 1, T, P, true);
+
+    assertThat(r.dots()).hasSize(18);
+    assertThat(r.aggregate()).isEqualByComparingTo("1.0");
+    assertThat(r.dots().stream().map(DotScore::dot))
+        .containsExactly(
+            "vwap", "supertrend", "vwma", "psar", "rsi", "volume", "futures_oi", "underlying_oi",
+            "trending_cross", "sentiment", "drastic_oi", "sentiment_slope", "oi_spurt", "breadth",
+            "vix", "basis", "iv_rank", "iv_pair");
+    DotScore ivRank =
+        r.dots().stream().filter(d -> d.dot().equals("iv_rank")).findFirst().orElseThrow();
+    assertThat(ivRank)
+        .isEqualTo(new DotScore("iv_rank", 0.8, false, "IV rank absent (no data — withheld)", true));
+    // The armed reading on the SAME null input is identical too — arming cannot conjure a rank.
+    assertThat(armedIvRank(null).dots()).isEqualTo(r.dots());
+    assertThat(armedIvRank(null).aggregate()).isEqualByComparingTo(r.aggregate());
   }
 
   @Test

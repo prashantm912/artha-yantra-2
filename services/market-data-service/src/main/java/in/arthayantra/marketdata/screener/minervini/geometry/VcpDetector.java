@@ -84,6 +84,28 @@ public class VcpDetector {
     this.maxBaseDepthPct = maxBaseDepthPct;
     this.minBaseWeeks = minBaseWeeks;
     this.maxBaseWeeks = maxBaseWeeks;
+    // TRIPWIRE (2026-08-02, E4 decision-sheet §2g): baseWeeks (below) measures only the trailing
+    // narrowing contraction, not the classical multi-week base the [min,max]-week window assumes —
+    // a LATENT, self-documented mismeasure that is harmless ONLY because the live floor is 0
+    // (disabled). Re-arming any positive floor without first fixing the measurement reproduces
+    // M39's ~99% VCP trade annihilation. Fail fast at construction so the floor can never go live
+    // silently again: fires on every app boot from WHATEVER source resolves this property (today,
+    // that's only the compiled `@Value(...:0)` default or a bundled application.yml override — no
+    // docker-compose/.env passthrough exists for any artha.minervini.vcp.* knob, so a live `.env`
+    // edit alone does nothing today; if one is ever added, the guard still holds, since it fires on
+    // construction regardless of property source) AND immediately in any test that builds a Spring
+    // context (a stray change to the compiled default).
+    if (minBaseWeeks > 0) {
+      throw new IllegalStateException(
+          "artha.minervini.vcp.min-base-weeks=" + minBaseWeeks + " arms a base-duration FLOOR, but "
+              + "VcpDetector.baseWeeks (= round(durationDays/5)) measures only the trailing "
+              + "narrowing contraction (observed live avg ~0.7 weeks), NOT the classical multi-week "
+              + "base the [min,max]-week window assumes. Arming this floor without first fixing that "
+              + "measurement reproduces M39's ~99% VCP trade annihilation "
+              + "(docs/strategies/m39-vcp-caps-backtest-2026-07-06.md §4 \"option 2\"). Fix "
+              + "baseWeeks to span the FULL base before arming this floor — see "
+              + "docs/signal-analysis/2026-08-01-e4-e8-decision-sheet.md §2g.");
+    }
   }
 
   /** Detects the most recent VCP base in {@code bars} (oldest→newest). */

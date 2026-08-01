@@ -35,6 +35,13 @@ public class RiskService {
   public static final String HEAT_CAP_PCT = "heat_cap_pct";
   /** When ON, an emitted ENTRY auto-opens a paper position at the suggested qty (no manual take). */
   public static final String AUTO_PAPER_TRADE = "auto_paper_trade";
+  /**
+   * M40 governor-coverage marker: a Manas §3.4.3 pyramid ADD blocked by the family's portfolio
+   * open-risk cap. NOT a {@code risk_settings} row — the cap itself is the pyramid policy's own
+   * {@code artha.manas-arora.pyramid.max-portfolio-risk-pct} knob, not a DB-editable limit — so this
+   * key exists only as a {@code risk_audit} label, mirroring the other trip-audited rails' treatment.
+   */
+  public static final String PYRAMID_RISK_CAP = "pyramid_risk_cap";
 
   private static final Logger log = LoggerFactory.getLogger(RiskService.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
@@ -270,6 +277,25 @@ public class RiskService {
     settings.audit(book, HEAT_CAP_PCT, "TRIP", detail);
     log.warn("risk heat cap {} tripped ({})", book, detail);
     pushAlert("ArthaYantra Risk — heat cap (" + book + ")", detail);
+  }
+
+  /**
+   * Audits + ntfy-alerts a Manas pyramid ADD blocked by the portfolio open-risk cap (deduped per IST
+   * day per book, like {@link #recordHeatTrip}). Called via the {@code EmissionGuard} port so
+   * {@code swing}/{@code manas} — which must never import this module (the acyclic module-graph rule
+   * that already forced the port pattern for every other paper↔swing signal) — never need to know
+   * this class exists.
+   */
+  public void recordPyramidRiskCapBreach(String book, String symbol, String detail) {
+    LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
+    String dedupKey = tripKey(book, PYRAMID_RISK_CAP);
+    if (today.equals(trippedOn.get(dedupKey))) {
+      return;
+    }
+    trippedOn.put(dedupKey, today);
+    settings.audit(book, PYRAMID_RISK_CAP, "TRIP", detail);
+    log.warn("risk pyramid-cap {} tripped for {} ({})", book, symbol, detail);
+    pushAlert("ArthaYantra Risk — pyramid open-risk cap (" + book + ")", detail);
   }
 
   /** One fail-soft ntfy push for a governor trip (skipped silently when ntfy is unconfigured). */

@@ -141,6 +141,8 @@ class ManasAroraSwingEngineTest {
     verify(r.signals()).stampManasAroraDetail(anyLong(), detail.capture());
     assertThat(detail.getValue())
         .isEqualTo("{\"setup\":\"manas-arora-breakout\",\"setupType\":\"breakout\",\"pivot\":\"150\",\"pyramidLot\":2}");
+    // A non-breaching add must never spuriously trip the add-path observability fix's audit/alert.
+    verify(r.guard(), never()).recordPyramidRiskCapBreach(any(), any(), any());
   }
 
   @Test
@@ -149,6 +151,15 @@ class ManasAroraSwingEngineTest {
 
     assertThat(r.run().entries()).as("the risk cap blocks the add").isZero();
     verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+    // Add-path observability fix only (E4 §2f — NOT the whole of M40; the aggregate-risk gap on
+    // FRESH entries is separate, live, and unfixed here — see
+    // docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md). Three of RiskService's four
+    // audited rails (daily-loss/profit-target/heat-cap) write a risk_audit row + push an ntfy alert on
+    // trip; deployment audits only. Before this fix the pyramid risk-cap block matched neither group —
+    // this proves it now reaches the same EmissionGuard governor surface (RiskServicePyramidCapTest
+    // proves what the paper adapter does with the call from there: audits + alerts, deduped per IST
+    // day, matching the audit+alert group).
+    verify(r.guard()).recordPyramidRiskCapBreach(eq(Books.MANAS_ARORA), eq("TESTCO"), any());
   }
 
   @Test
@@ -224,7 +235,10 @@ class ManasAroraSwingEngineTest {
   }
 
   private record AddResult(
-      SwingBatchEngine.SwingRun run, SignalRepository signals, ApplicationEventPublisher events) {}
+      SwingBatchEngine.SwingRun run,
+      SignalRepository signals,
+      ApplicationEventPublisher events,
+      EmissionGuard guard) {}
 
   private AddResult runPyramidAdd(BigDecimal existingOpenRiskInr) throws IOException {
     return runPyramidAdd(existingOpenRiskInr, null, null);
@@ -271,7 +285,7 @@ class ManasAroraSwingEngineTest {
             funnel, signals, new ManasPyramidPolicy(true, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
             new ObjectMapper(), true, 520, 10, 1440);
 
-    return new AddResult(engine.runDaily(doctrine, requiredBarDate), signals, events);
+    return new AddResult(engine.runDaily(doctrine, requiredBarDate), signals, events, guard);
   }
 
   // ---- harness --------------------------------------------------------------------------------

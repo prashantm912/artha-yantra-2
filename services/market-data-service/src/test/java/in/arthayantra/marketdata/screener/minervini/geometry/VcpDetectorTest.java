@@ -16,8 +16,9 @@ import org.junit.jupiter.api.Test;
 class VcpDetectorTest {
 
   // Default thresholds (mirror the @Value defaults): 2.5% zig-zag, 2–6 contractions, ratio 0.2–0.9,
-  // final-vol-low 0.5, cheat-fraction 0.5, thrust +100% in ≤40 sessions.
-  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 3, 65);
+  // final-vol-low 0.5, cheat-fraction 0.5, thrust +100% in ≤40 sessions. min-base-weeks=0 mirrors the
+  // LIVE default — the constructor now fail-fasts on a positive value (see VcpMinBaseWeeksTripwireTest).
+  private final VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 0, 65);
 
   @Test
   void reproducesCanonicalFootprint() {

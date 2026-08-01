@@ -236,14 +236,34 @@ Run in order; each answers one question. Canned SQL in §6.
     (650 absolute AND ≤10% of the expected sum — a thin frozen bar still fires), so a surviving WARN
     means either the frozen-partial regression (persistent one-directional ~⅔ shortfall) or a new
     attribution defect. Investigate, don't tolerate-away. **The ± PAIR is the benign fingerprint —
-    keep reading unpaired as the alarming shape.** ⚠ G9 (2026-07-29) proposed scaling the absolute
-    arm with bar size, since the residue is proportional (2.4–3.7% of a thick opening bar), and the
-    mechanism now EXISTS (`...volume-tolerance-pct`) but **ships dormant at 0 — today's gate is
-    unchanged**. It stays dormant because the pair's halves are wildly different fractions of their
-    OWN buckets (07-29's ±16,835 pair: 3.7% of the 460,005 opening bucket, 11.9% of the 141,245 next
-    one), so any pct that quiets the thick half leaves the thin half WARNing — turning a benign
-    paired event into an unpaired one and destroying exactly the corroboration this check relies on.
-    Raising it needs pair-aware suppression first (keyed on the ± partner, not bucket size).
+    keep reading unpaired as the alarming shape.**
+    **PAIR-AWARE since G9 (2026-08-01):** that fingerprint is now read by the canary itself, not
+    only by you — a non-benign bucket is held one bucket, and when the next one carries the
+    equal-and-opposite lot-multiple partner **both halves are suppressed together** and logged once
+    as `partial-bucket straddle:` at INFO (meter `ay_signal_partial_bucket_straddle_total`). Neither
+    half is ever suppressed alone, so **an unpaired WARN still means exactly what this section says
+    it means** — the grep above is unchanged and still counts only real, uncorroborated events (the
+    INFO line deliberately carries neither the `canary:` nor the `shortfall` token, so it cannot
+    inflate the count). **The real latency bounds**, measured from a bucket completing at T (60 s
+    sweep, 3 m bucket): a >25%-of-bucket skew — the frozen-partial signature — is never deferred and
+    still WARNs by **T+60 s, unchanged**; a same-sign sustained drift is released when the next
+    bucket is classified, so its first WARN lands by **T+4 m, one full bucket later**; and a partner
+    that never arrives surfaces by **T+5 m, up to ~4 minutes later than before**. Budget for that
+    when reading a live session. **After a strategy-signal restart expect MORE WARNs, not fewer:**
+    a fresh process starts with an empty lot-size cache and cannot prove a pair is lot-quantised, so
+    the first pair it sees is reported as two unpaired events. That is the fail-closed design, not a
+    defect — do not chase it. (A half deferred by the previous process is carried across the restart
+    in Redis and still reported; if Redis is unavailable the canary simply never defers, i.e. it
+    behaves exactly as it did before G9.) Note too that a session's honest health line is now
+    **WARNs + straddles**, not WARNs alone. A straddle count that climbs while WARNs stay at zero is the
+    benign residue doing what §3.17 describes; a straddle count that collapses to zero while WARNs
+    appear is the real signal.
+    ⚠ G9 also shipped a bar-size scaling arm (`...volume-tolerance-pct`) but it **stays dormant at
+    0 — today's per-event gate is unchanged**, and pair awareness does NOT make it safe to arm: the
+    pair's halves are wildly different fractions of their OWN buckets (07-29's ±16,835 pair: 3.7% of
+    the 460,005 opening bucket, 11.9% of the 141,245 next one), so any pct that quiets the thick
+    half leaves the thin half WARNing with no partner left to corroborate it — manufacturing the
+    unpaired shape instead of removing it. Pinned by test; leave it at 0.
 18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
     2026-07-27) — the live scalper signal series is the **dated front future**, and
     `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27

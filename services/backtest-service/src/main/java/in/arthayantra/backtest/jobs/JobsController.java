@@ -52,18 +52,15 @@ public class JobsController {
    * Submit a backtest → 202 with the jobId (§D.5) + the as-submitted provenance block (roadmap #22a):
    * the engine identity + config checksum + pinned universe + profile known at submission (the content
    * hash / dataset epoch / evidence policy are resolved when the worker executes the run and are read
-   * from {@code GET /runs/{id}/provenance}). {@code ResponseEntity<Map>} is NOT a ratchet-counted Map
-   * return; the provenance VALUE is a typed record.
+   * from {@code GET /runs/{id}/provenance}).
    */
   @PostMapping("/run")
-  public ResponseEntity<Map<String, Object>> run(@RequestBody BacktestRunRequest request) {
+  public ResponseEntity<JobViews.BacktestRunAccepted> run(@RequestBody BacktestRunRequest request) {
     Job job = service.submit(request, MDC.get(ArthaHeaders.MDC_REQUEST_ID));
     return ResponseEntity.accepted()
         .body(
-            Map.of(
-                "jobId", job.id().toString(),
-                "status", job.status().db(),
-                "provenance", submissionProvenance(job)));
+            new JobViews.BacktestRunAccepted(
+                job.id().toString(), job.status().db(), submissionProvenance(job)));
   }
 
   /** The partial, as-submitted provenance block — the fields known before the worker runs the replay. */
@@ -170,12 +167,12 @@ public class JobsController {
 
   /** Cancel: 204 if still queued, 202 {@code cancelling} if running (observed at a checkpoint). */
   @DeleteMapping("/jobs/{jobId}")
-  public ResponseEntity<Map<String, Object>> cancel(@PathVariable UUID jobId) {
+  public ResponseEntity<JobViews.JobCancelAccepted> cancel(@PathVariable UUID jobId) {
     JobsService.CancelOutcome outcome = service.cancel(jobId);
     if (outcome == JobsService.CancelOutcome.CANCELLED) {
       return ResponseEntity.noContent().build();
     }
-    return ResponseEntity.accepted().body(Map.of("status", "cancelling"));
+    return ResponseEntity.accepted().body(new JobViews.JobCancelAccepted("cancelling"));
   }
 
   private static JobViews.BacktestJobSummary summary(Job job, String totalReturn) {

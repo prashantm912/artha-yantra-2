@@ -2044,11 +2044,11 @@ export interface components {
             symbol: string;
             exchange: string;
             side: string;
-            qty: string;
+            qty: string | null;
             product: string;
             avgPrice: string;
-            ltp: string;
-            mtmPnl: string;
+            ltp: string | null;
+            mtmPnl: string | null;
         };
         Positions: {
             items: components["schemas"]["PositionEntry"][];

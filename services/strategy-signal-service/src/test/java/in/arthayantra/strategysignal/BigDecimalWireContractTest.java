@@ -388,6 +388,31 @@ class BigDecimalWireContractTest {
     }
   }
 
+  /**
+   * {@code ltp}/{@code mtmPnl}/{@code qty} are nullable, not merely undocumented: {@code
+   * RestOpenAlgoOrderReadGatewayTest#mapsPositionsAndDerivesSideFromSignedQty} feeds a REAL
+   * OpenAlgo positionbook fixture that omits {@code ltp}/{@code pnl} on two of its three rows, and
+   * that test asserts the resulting {@code PositionEntry.ltp()}/{@code .mtmPnl()} ARE null — this
+   * test is the wire-shape half of the same claim: a null domain value must serialize as a PRESENT
+   * JSON null, never be silently dropped, so the spec's {@code types = {"string", "null"}} is a
+   * measured claim about a case a real fixture exercises, not an assumption.
+   */
+  @Test
+  void positionEntryNullableDecimalsStayPresentAndNull() {
+    JsonNode node =
+        wire(new OrderGateway.PositionEntry("INFY", "NSE", "SELL", bd("-1"), "MIS", bd("0.00"), null, null));
+    assertThat(node.get("avgPrice").isTextual()).as("avgPrice").isTrue();
+    for (String field : List.of("ltp", "mtmPnl")) {
+      assertThat(node.has(field)).as(field + " present").isTrue();
+      assertThat(node.get(field).isNull()).as(field + " null").isTrue();
+    }
+
+    JsonNode flatQty =
+        wire(new OrderGateway.PositionEntry("YESBANK", "NSE", "FLAT", null, "MIS", bd("0.00"), null, null));
+    assertThat(flatQty.has("qty")).as("qty present").isTrue();
+    assertThat(flatQty.get("qty").isNull()).as("qty null").isTrue();
+  }
+
   @Test
   void orderGatewayFundsNotConfiguredDecimalsStayPresentAndNull() {
     JsonNode node = wire(OrderGateway.Funds.notConfigured());

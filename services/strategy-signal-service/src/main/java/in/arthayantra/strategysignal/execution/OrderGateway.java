@@ -60,16 +60,25 @@ public interface OrderGateway {
       String status,
       String timestamp) {}
 
-  /** One net-position row. {@code qty} is signed (negative = short); {@code side} is its derived BUY/SELL. */
+  /**
+   * One net-position row. {@code qty} is signed (negative = short); {@code side} is its derived
+   * BUY/SELL. {@code ltp}/{@code mtmPnl} are nullable: OpenAlgo's positionbook doc sample omits them
+   * (they ride the broker-mapped/normalized shape, not the bare documented fields — see {@code
+   * OpenAlgoPosition}'s javadoc), and an omitted JSON key deserializes to a null record component.
+   * {@code qty} is ALSO spelled nullable: the mapper ({@code
+   * RestOpenAlgoOrderReadGateway#toPositionEntry}) explicitly null-checks {@code p.quantity()}
+   * before deriving {@code side}, so the construction site itself treats it as possibly absent even
+   * though no fixture currently exercises that branch.
+   */
   record PositionEntry(
       String symbol,
       String exchange,
       String side,
-      @Schema(type = "string") BigDecimal qty,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal qty,
       String product,
       @Schema(type = "string") BigDecimal avgPrice,
-      @Schema(type = "string") BigDecimal ltp,
-      @Schema(type = "string") BigDecimal mtmPnl) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal mtmPnl) {}
 
   /** One tradebook (fill) row. */
   record TradebookEntry(

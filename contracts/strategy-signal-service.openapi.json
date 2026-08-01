@@ -5938,7 +5938,7 @@
             "type" : "string"
           },
           "qty" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "product" : {
             "type" : "string"
@@ -5947,10 +5947,10 @@
             "type" : "string"
           },
           "ltp" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "mtmPnl" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "avgPrice", "exchange", "ltp", "mtmPnl", "product", "qty", "side", "symbol" ]

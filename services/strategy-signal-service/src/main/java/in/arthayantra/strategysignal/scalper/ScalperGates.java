@@ -161,7 +161,10 @@ public final class ScalperGates {
   public static GateOutcome volume(String underlying, BigDecimal volume, BigDecimal floorOverride) {
     BigDecimal floor = volumeFloorFor(underlying, floorOverride);
     boolean ok = volume != null && volume.compareTo(floor) >= 0;
-    return new GateOutcome(ok, volume, (ok ? "volume >= " : "volume < ") + floor.toPlainString());
+    // G17: floor operator (>= floor) -> a block can only undershoot.
+    return new GateOutcome(
+        ok, volume, (ok ? "volume >= " : "volume < ") + floor.toPlainString(),
+        RailMarginSign.NEGATIVE_WHEN_BLOCKED);
   }
 
   /**
@@ -321,10 +324,13 @@ public final class ScalperGates {
       return GateOutcome.fail(null, "rsi unavailable");
     }
     boolean ok = currentRsi.compareTo(recoveryLevel) >= 0;
+    // G17: floor operator (>= recoveryLevel). The PE mirror returns inert PASSes above, so a block
+    // can only come from this CE branch -> one sign covers every reachable block.
     return new GateOutcome(
         ok,
         currentRsi,
-        ok ? "rsi recovered to >= " + recoveryLevel : "rsi still recovering (< " + recoveryLevel + ")");
+        ok ? "rsi recovered to >= " + recoveryLevel : "rsi still recovering (< " + recoveryLevel + ")",
+        RailMarginSign.NEGATIVE_WHEN_BLOCKED);
   }
 
   /**
@@ -424,8 +430,10 @@ public final class ScalperGates {
     BigDecimal distPct =
         close.subtract(psar).abs().multiply(HUNDRED).divide(close.abs(), 4, RoundingMode.HALF_UP);
     boolean ok = distPct.compareTo(PSAR_DISTANCE_MIN_PCT) >= 0;
+    // G17: floor operator (>= PSAR_DISTANCE_MIN_PCT).
     return new GateOutcome(
-        ok, distPct, "psar gap " + distPct.toPlainString() + (ok ? "% durable" : "% too tight"));
+        ok, distPct, "psar gap " + distPct.toPlainString() + (ok ? "% durable" : "% too tight"),
+        RailMarginSign.NEGATIVE_WHEN_BLOCKED);
   }
 
   /**
@@ -446,11 +454,21 @@ public final class ScalperGates {
     boolean tooFar = maxFrac != null && frac.compareTo(maxFrac) > 0;
     boolean tooClose = minFrac != null && minFrac.signum() > 0 && frac.compareTo(minFrac) < 0;
     boolean ok = !tooFar && !tooClose;
+    // G17 (review round 1): the sign is DERIVED from the armed configuration, not declared once.
+    // With only the max clause this is a ceiling -> a block always overshoots (the 2026-07-23 §2.3
+    // rows, correct with a POSITIVE margin). Arming minFrac makes it a two-bound BAND: a too-CLOSE
+    // block undershoots the recorded max threshold and carries a NEGATIVE margin, so no single
+    // sign holds and the rail asserts nothing rather than mis-flagging correct behaviour.
+    RailMarginSign sign =
+        minFrac != null && minFrac.signum() > 0
+            ? RailMarginSign.UNSIGNED
+            : RailMarginSign.POSITIVE_WHEN_BLOCKED;
     return new GateOutcome(
         ok,
         frac,
         "|close-vwap|/close " + frac.toPlainString()
-            + (ok ? " within band" : tooFar ? " too far from VWAP" : " too close (VWAP pin)"));
+            + (ok ? " within band" : tooFar ? " too far from VWAP" : " too close (VWAP pin)"),
+        sign);
   }
 
   /**
@@ -566,7 +584,11 @@ public final class ScalperGates {
     int count = side == OptionType.CE ? m.advances() : m.declines();
     boolean ok = count > 32;
     String label = side == OptionType.CE ? "advances " : "declines ";
-    return new GateOutcome(ok, BigDecimal.valueOf(count), label + count + (ok ? " > 32" : " <= 32"));
+    // G17: STRICT floor (> 32) and side-independent (PE reads declines against the same bound), so
+    // a block at exactly 32 carries margin 0 — which contradicts() never flags.
+    return new GateOutcome(
+        ok, BigDecimal.valueOf(count), label + count + (ok ? " > 32" : " <= 32"),
+        RailMarginSign.NEGATIVE_WHEN_BLOCKED);
   }
 
   /** VIX falling favours CE; rising favours PE (unknown direction never blocks). */
@@ -606,10 +628,12 @@ public final class ScalperGates {
       return GateOutcome.pass(null, "call-put dOI imbalance unavailable (degrade -> pass)");
     }
     boolean ok = imbalance.compareTo(floorPct) >= 0;
+    // G17: floor operator (>= floorPct).
     return new GateOutcome(
         ok,
         imbalance,
-        "call-put dOI imbalance " + imbalance.toPlainString() + (ok ? " >= " : " < ") + floorPct.toPlainString());
+        "call-put dOI imbalance " + imbalance.toPlainString() + (ok ? " >= " : " < ") + floorPct.toPlainString(),
+        RailMarginSign.NEGATIVE_WHEN_BLOCKED);
   }
 
   /**
@@ -740,8 +764,10 @@ public final class ScalperGates {
       return GateOutcome.pass(null, "side IV unavailable (degrade -> pass)");
     }
     boolean ok = iv.compareTo(capFraction) <= 0;
+    // G17: ceiling operator (<= capFraction).
     return new GateOutcome(
-        ok, iv, ok ? "side IV <= cap (buyable)" : "side IV > cap (too rich, sellers' market)");
+        ok, iv, ok ? "side IV <= cap (buyable)" : "side IV > cap (too rich, sellers' market)",
+        RailMarginSign.POSITIVE_WHEN_BLOCKED);
   }
 
   /**
@@ -854,10 +880,12 @@ public final class ScalperGates {
       return GateOutcome.pass(null, "no indicator cluster (degrade -> pass)");
     }
     boolean ok = nearest.compareTo(maxPct) <= 0;
+    // G17: ceiling operator (<= maxPct) -> a block can only overshoot.
     return new GateOutcome(
         ok,
         nearest,
-        "nearest-indicator dist " + nearest.toPlainString() + (ok ? " <= " : " > ") + maxPct.toPlainString());
+        "nearest-indicator dist " + nearest.toPlainString() + (ok ? " <= " : " > ") + maxPct.toPlainString(),
+        RailMarginSign.POSITIVE_WHEN_BLOCKED);
   }
 
   /**
@@ -921,10 +949,13 @@ public final class ScalperGates {
             && !gap.bullish()
             && gap.sizePoints() != null
             && gap.sizePoints().compareTo(suppressPts) >= 0;
+    // G17: the only block is a gap at/above suppressPts, so the recorded margin is >= 0 (a
+    // ceiling-shaped veto). CE never blocks here, so the PE direction is the only reachable one.
     return new GateOutcome(
         !suppressed,
         gap == null ? null : gap.sizePoints(),
-        suppressed ? "large gap-down suppresses PE (no-put)" : "gap-size side ok");
+        suppressed ? "large gap-down suppresses PE (no-put)" : "gap-size side ok",
+        RailMarginSign.POSITIVE_WHEN_BLOCKED);
   }
 
   private static boolean gt(BigDecimal a, BigDecimal b) {

@@ -233,8 +233,39 @@ public class ShadowVariants {
     }
     BigDecimal floor =
         v.compositeThreshold() != null ? v.compositeThreshold() : d.compositeThreshold();
+    if (v.nullWithheld() && !armedPolicyCouldHaveFired(d)) {
+      return false;
+    }
     BigDecimal composite = compositeFor(d, v);
     return composite != null && floor != null && composite.compareTo(floor) >= 0;
+  }
+
+  /**
+   * Whether a {@code nullPolicy} variant may consider this bar at all (F5 U4b, review Critical).
+   *
+   * <p>The recalculated scalar is NOT the armed verdict. {@code ConnectTheDotsScorer} makes a side
+   * valid only when the scalar clears the threshold AND all three DECISIVE legs hold — hard-VWAP
+   * alignment, 60m bias agreement, and no IV stand-aside — none of which the null policy changes.
+   * Accepting on the scalar alone would open challenger positions on bars the ARMED policy still
+   * rejects, so the book's PnL would not be noisy but WRONG. That divergence is observed, not
+   * theoretical: {@code ScalperConfluenceGate.compositeMargin} records 4 live rows where the
+   * aggregate cleared the threshold while a decisive leg blocked.
+   *
+   * <p>Fail-closed on a missing counterfactual: no confluence (the direction-neutral straddle
+   * stand-in), no recorded {@code withheldAggregate} (a pre-U4b row), or legs that did not hold all
+   * DECLINE. Declining is deliberate rather than degrading to champion behaviour — a bar with no
+   * counterfactual has nothing for this experiment to measure, and booking it under the variant's
+   * name would attribute a champion-duplicate row to the proposal.
+   *
+   * <p>Scope note: this guard is deliberately confined to {@code nullPolicy} variants. The champion
+   * book and the rail-override variants keep their existing floor-ruled semantics ({@code
+   * COMPOSITE_RAIL} is skipped above); widening it would silently shrink live books this change has
+   * no mandate to touch.
+   */
+  private static boolean armedPolicyCouldHaveFired(ScalperConfluenceGate.RejectionDiagnostic d) {
+    return d.confluence() != null
+        && d.confluence().withheldAggregate() != null
+        && d.confluence().decisiveLegsHeld();
   }
 
   /**
@@ -243,21 +274,28 @@ public class ShadowVariants {
    * {@code withheldAggregate}, the number the composite WOULD have been had every input-missing dot
    * been withheld rather than scored.
    *
-   * <p>The {@code max} is the §3.3.3 relaxing-or-neutral clamp in its per-bar form, and it is load
-   * bearing: unifying the null rule moves the composite BOTH ways — withholding one of the fifteen
-   * opposes-in-denominator dots RAISES it, withholding one of the four that currently read a null as
-   * SUPPORT ({@code vix} / {@code basis} / {@code premium_skew} / {@code dow}) LOWERS it. The shadow
-   * writer only ever sees REJECTED entries, so an unclamped variant would silently drop
-   * champion-accepted rows (whose counterparts among the champion-ACCEPTED-and-FIRED signals are
-   * invisible here) and bias its own book upward. Clamped, the variant's book is the champion's PLUS
-   * exactly the rows the unified rule promoted — which is the measurement being asked for.
+   * <p>The {@code max} is the §3.3.3 relaxing-or-neutral clamp in its per-bar form: unifying the
+   * null rule moves the composite BOTH ways — withholding an opposes-in-denominator dot RAISES it,
+   * withholding one that currently reads a null as SUPPORT ({@code vix} / {@code basis} / and, when
+   * enabled, {@code premium_skew} / {@code dow}) LOWERS it — and the shadow writer only ever sees
+   * REJECTED entries, so an unclamped variant would shed champion-accepted rows whose fired-side
+   * counterparts are invisible here.
    *
-   * <p>A pre-U4b diagnostic (or the direction-neutral straddle stand-in) carries no confluence, and
-   * one built before the shadow existed carries a null {@code withheldAggregate}: both degrade to the
-   * champion composite, i.e. to champion behaviour.
+   * <p><b>⚠️ This plane measures the PROMOTION half only and CANNOT authorize arming.</b> The clamp
+   * that keeps the book unbiased is the same thing that hides the tightening half, and the
+   * rejection-only writer never observes a champion-FIRED trade that WITHHELD would have removed. So
+   * this book answers "which extra entries would the unified rule admit, and did they pay?" — never
+   * "is the unified rule net-positive?". The strategy-evolution design (§ accepted-entry scoring)
+   * requires counterfactual replay or a paper A/B for the tightening direction; an arming verdict
+   * needs that paired plane, not this one. A further caveat for whoever reads the book: the shadow
+   * exit monitor deliberately omits confluence/indicator exits, while twelve live strategies carry
+   * {@code oi-confluence-exit} and re-evaluate this same scorer on the EXIT path — for those, arming
+   * would change exits too, which this book does not model.
    */
   private static BigDecimal compositeFor(ScalperConfluenceGate.RejectionDiagnostic d, Variant v) {
     BigDecimal champion = d.compositeScore();
+    // A nullWithheld variant only reaches here past armedPolicyCouldHaveFired, so the confluence and
+    // its shadow are both present; the guards stay so this stays correct if it is ever called first.
     if (!v.nullWithheld() || d.confluence() == null || d.confluence().withheldAggregate() == null) {
       return champion;
     }

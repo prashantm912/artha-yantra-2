@@ -757,7 +757,14 @@ class ConnectTheDotsScorerTest {
 
     // With NO gaps at all the shadow is the aggregate under either policy — the number only diverges
     // where data is actually missing, so a clean bar can never make the challenger look different.
+    //
+    // It is RECORDED on that clean bar all the same, and that is the point: the shadow is computed
+    // unconditionally on every scored bar, never only on bars that happen to have a gap. Were it
+    // populated just for gappy bars, the champion-vs-shadow comparison population would be silently
+    // biased toward the interesting ones and the measured delta would overstate the rule's effect.
     Confluence clean = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, 1, T, P, true);
+    assertThat(clean.dots()).noneMatch(DotScore::inputMissing); // genuinely a no-gap bar
+    assertThat(clean.withheldAggregate()).as("recorded even with nothing to withhold").isNotNull();
     assertThat(clean.withheldAggregate()).isEqualByComparingTo(clean.aggregate());
   }
 
@@ -788,5 +795,68 @@ class ConnectTheDotsScorerTest {
   private static Confluence withheld(Chart c, Oi oi, Macro m) {
     return ConnectTheDotsScorer.score(
         ctx(c, oi, m), CE, 1, T, P, true, false, false, false, null, false, NullPolicy.WITHHELD);
+  }
+
+  // ------------------------------------- U4b review Critical: the scalar is NOT the armed verdict
+
+  @Test
+  void decisiveLegsHeldIsFalseWhenAnyOneDecisiveLegFails() {
+    // `valid` is decisive-legs AND scalar. A consumer asking "would the ARMED policy have fired?"
+    // that reads only the recalculated scalar would book trades the armed policy still rejects —
+    // and that divergence is LIVE-observed, not hypothetical (ScalperConfluenceGate.compositeMargin
+    // documents 4 rows where the aggregate cleared while a decisive leg blocked). Each of the three
+    // legs is red-proofed independently, on a bar whose aggregate clears comfortably.
+
+    // Baseline: every leg holds.
+    Confluence ok = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, 1, T, P, true);
+    assertThat(ok.decisiveLegsHeld()).isTrue();
+    assertThat(ok.bullish()).isTrue();
+
+    // Leg 1 — hard VWAP: close BELOW vwap on a CE, with vwapHardGate on.
+    Chart wrongSideOfVwap = new Chart(bd("98"), bd("99"), bd("97"), bd("96"), 1, bd("65"), bd("130000"));
+    Confluence vwapFails =
+        ConnectTheDotsScorer.score(ctx(wrongSideOfVwap, BULL_OI, BULL_MACRO), CE, 1, T, P, true);
+    assertThat(vwapFails.vwapAligned()).isFalse();
+    assertThat(vwapFails.decisiveLegsHeld()).as("hard-VWAP is decisive").isFalse();
+    assertThat(vwapFails.bullish()).isFalse();
+
+    // …and the SAME bar with vwapHardGate OFF (#9 opening tick before 10:30) keeps the legs held —
+    // the leg is the HARD GATE, not the dot, so the counterfactual must respect that distinction.
+    Confluence vwapSoft =
+        ConnectTheDotsScorer.score(ctx(wrongSideOfVwap, BULL_OI, BULL_MACRO), CE, 1, T, P, false);
+    assertThat(vwapSoft.decisiveLegsHeld()).as("soft VWAP is not decisive").isTrue();
+
+    // Leg 2 — 60m bias disagrees with the side (bias60mDir = -1 on a CE).
+    Confluence biasFails =
+        ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, -1, T, P, true);
+    assertThat(biasFails.biasAligned()).isFalse();
+    assertThat(biasFails.decisiveLegsHeld()).as("60m bias is decisive").isFalse();
+    assertThat(biasFails.bullish()).isFalse();
+
+    // Leg 3 — the T2.8 40/40 both-IV-high stand-aside (both >= 0.40, gap under 0.10).
+    Macro bothIvHigh =
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), bd("0.45"), bd("0.45"));
+    Confluence standAside =
+        ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, bothIvHigh), CE, 1, T, P, true);
+    assertThat(standAside.standAside()).isTrue();
+    assertThat(standAside.decisiveLegsHeld()).as("IV stand-aside is decisive").isFalse();
+    assertThat(standAside.bullish()).isFalse();
+  }
+
+  @Test
+  void decisiveLegsAreIndependentOfTheNullPolicy() {
+    // The three legs never read the aggregate, so arming cannot flip them — which is WHY the armed
+    // counterfactual is exactly `decisiveLegsHeld && withheldAggregate >= threshold`.
+    Confluence legacy = ConnectTheDotsScorer.score(ctx(BULL_CHART, GAPPY_OI, GAPPY_MACRO), CE, 1, T, P, true);
+    Confluence armed = withheld(BULL_CHART, GAPPY_OI, GAPPY_MACRO);
+    assertThat(armed.decisiveLegsHeld()).isEqualTo(legacy.decisiveLegsHeld()).isTrue();
+
+    Confluence legacyBias =
+        ConnectTheDotsScorer.score(ctx(BULL_CHART, GAPPY_OI, GAPPY_MACRO), CE, -1, T, P, true);
+    Confluence armedBias =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, GAPPY_OI, GAPPY_MACRO), CE, -1, T, P, true, false, false, false, null,
+            false, NullPolicy.WITHHELD);
+    assertThat(armedBias.decisiveLegsHeld()).isEqualTo(legacyBias.decisiveLegsHeld()).isFalse();
   }
 }

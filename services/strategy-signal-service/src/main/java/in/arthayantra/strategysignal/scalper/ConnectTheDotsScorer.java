@@ -88,20 +88,32 @@ public final class ConnectTheDotsScorer {
    * {@code inputMissing} dot ALSO withheld. It is computed on every bar under BOTH {@link NullPolicy}
    * values and read by NOTHING on the live path — {@code bullish}/{@code bearish} resolve from
    * {@code aggregate} alone — so it is what the composite WOULD have been under the unified rule,
-   * available for the {@code dot-null-withheld} shadow variant to put a real PnL label on the
-   * proposal before anyone arms it. Under {@link NullPolicy#WITHHELD} it equals {@code aggregate} by
+   * available for the {@code dot-null-withheld} shadow variant to put a PnL label on the proposal
+   * before anyone arms it. Under {@link NullPolicy#WITHHELD} it equals {@code aggregate} by
    * construction.
+   *
+   * <p>{@code decisiveLegsHeld} is the other half of that counterfactual: the conjunction of the
+   * three POLICY-INDEPENDENT decisive legs (hard-VWAP alignment, 60m bias, no IV stand-aside) that
+   * {@code valid} requires ALONGSIDE the scalar. A consumer asking "would the armed policy have
+   * fired?" must read {@code decisiveLegsHeld && withheldAggregate >= threshold} — the scalar alone
+   * is NOT the verdict, and bars where it clears while a decisive leg blocks are observed live.
    */
   public record Confluence(
       BigDecimal aggregate, OptionType side, boolean bullish, boolean bearish,
       boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots,
-      BigDecimal withheldAggregate) {
+      BigDecimal withheldAggregate, boolean decisiveLegsHeld) {
 
-    /** Pre-U4b 8-arg form: {@code withheldAggregate} mirrors {@code aggregate} (no shadow recorded). */
+    /**
+     * Pre-U4b 8-arg form: {@code withheldAggregate} mirrors {@code aggregate} (no shadow recorded)
+     * and {@code decisiveLegsHeld} is FALSE — fail-closed, so a hand-built or legacy confluence can
+     * never let a counterfactual consumer conclude the armed policy would have fired.
+     */
     public Confluence(
         BigDecimal aggregate, OptionType side, boolean bullish, boolean bearish,
         boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots) {
-      this(aggregate, side, bullish, bearish, vwapAligned, biasAligned, standAside, dots, aggregate);
+      this(
+          aggregate, side, bullish, bearish, vwapAligned, biasAligned, standAside, dots, aggregate,
+          false);
     }
   }
 
@@ -230,7 +242,10 @@ public final class ConnectTheDotsScorer {
    *
    * <p><b>The inconsistency this closes.</b> Three unreconciled missing-input rules coexist in the
    * dot list — see {@link NullPolicy} for the full map. The same data gap therefore HELPS the side on
-   * {@code vix}/{@code basis}/{@code premium_skew}/{@code dow}, HURTS it on the other fifteen (the
+   * {@code vix}/{@code basis}/{@code premium_skew}/{@code dow}, HURTS it on all remaining ENABLED
+   * dots (fifteen of the default eighteen, plus the two the {@code iv-per-strike} tag adds — {@code
+   * iv_slope} and {@code iv_abs_band} are opponent-on-missing too, and that tag IS armed on live
+   * Connecting-Dots configs, so the real count is seventeen there) (the
    * {@link OiQuadrant#NEUTRAL} "snapshot unavailable" sentinel included), and VANISHES on
    * {@code iv_rank}. {@link NullPolicy#WITHHELD} makes all three the third rule: an input-missing dot
    * leaves both the numerator and the denominator, so a data gap is never evidence either way.
@@ -259,9 +274,13 @@ public final class ConnectTheDotsScorer {
     // U4b: the per-dot "its INPUT was unavailable" reads. Single-sourced as locals where two dots
     // share an input, so the WITHHELD policy and the always-computed shadow aggregate below judge
     // exactly the same fact, and a future dot cannot drift from its neighbours' definition.
-    // `supertrendDir == 0` and `OiQuadrant.NEUTRAL` are the documented no-data sentinels of an int /
-    // enum input (see OiQuadrant.NEUTRAL's javadoc and ScalperGates.supertrend15mAlign); breadth's
-    // int pair reads {0,0} exactly when the summary was absent (MarketOiClient#942).
+    // `supertrendDir == 0` and `OiQuadrant.NEUTRAL` are the no-data sentinels of an int / enum
+    // input. NEUTRAL says so in its own javadoc. For supertrend, 0 is UNAMBIGUOUSLY no-data:
+    // `Ta4jIndicators.supertrendDirection` (:48-69) emits only ±1 (a boolean isUpTrend picks it)
+    // and null only when unwarmed or out of range, and the sentinel's sole producer is
+    // `ScalperConfluenceGate:1271`, `supertrend == null ? 0 : supertrend.signum()` — signum() of ±1
+    // is never 0. (A "mid-flip" third state does not exist; ScalperGates said it did and was wrong.)
+    // breadth's int pair reads {0,0} exactly when the summary was absent (MarketOiClient#942).
     boolean closeMissing = c.close() == null;
     boolean oiDeltasMissing = oi.ceOiDelta() == null || oi.peOiDelta() == null;
     boolean underlyingQuadrantMissing = oi.underlying() == OiQuadrant.NEUTRAL;
@@ -409,11 +428,20 @@ public final class ConnectTheDotsScorer {
     boolean biasAligned = bias60mDir == 0 || (ce ? bias60mDir > 0 : bias60mDir < 0);
     // VWAP is decisive by default; the #9 opening-tick-before-10:30 path drops it from the HARD gate
     // (vwapHardGate=false) so the OI/sentiment confluence carries the signal — VWAP stays a soft dot.
-    boolean valid =
-        (!vwapHardGate || vwapSide) && biasAligned && !standAside && aggregate.compareTo(threshold) >= 0;
+    //
+    // U4b: the three DECISIVE legs are factored out (same conjunction, `&&` is associative, so
+    // `valid` is byte-identical) because they are POLICY-INDEPENDENT — not one of them reads the
+    // aggregate. That makes the counterfactual exact: "would the ARMED policy have fired this bar?"
+    // is `decisiveLegsHeld && withheldAggregate >= threshold`, never the scalar alone. The
+    // distinction is not hypothetical — `ScalperConfluenceGate.compositeMargin` documents 4 live
+    // rows (3 on 2026-07-24, 1 on 07-23) where the aggregate CLEARED the threshold while a decisive
+    // leg blocked, which is exactly the shape that would let a challenger book a trade the armed
+    // policy still rejects.
+    boolean decisiveLegsHeld = (!vwapHardGate || vwapSide) && biasAligned && !standAside;
+    boolean valid = decisiveLegsHeld && aggregate.compareTo(threshold) >= 0;
     return new Confluence(
         aggregate, side, valid && ce, valid && !ce, vwapSide, biasAligned, standAside, dots,
-        withheldAggregate);
+        withheldAggregate, decisiveLegsHeld);
   }
 
   /** The confluence ratio at the frozen 4-dp scale; an empty denominator is ZERO (fail-closed). */

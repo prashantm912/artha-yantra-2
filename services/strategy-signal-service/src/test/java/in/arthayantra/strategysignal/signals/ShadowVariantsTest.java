@@ -177,10 +177,16 @@ class ShadowVariantsTest {
 
   /** A rejection whose confluence recorded the given champion aggregate + U4b shadow aggregate. */
   private static RejectionDiagnostic diagWithShadow(String composite, String withheld, String threshold) {
+    return diagWithShadow(composite, withheld, threshold, true);
+  }
+
+  /** As above, with the three decisive legs (hard VWAP / 60m bias / stand-aside) held or not. */
+  private static RejectionDiagnostic diagWithShadow(
+      String composite, String withheld, String threshold, boolean decisiveLegsHeld) {
     ConnectTheDotsScorer.Confluence conf =
         new ConnectTheDotsScorer.Confluence(
             new BigDecimal(composite), OptionType.CE, false, false, true, true, false, List.of(),
-            withheld == null ? null : new BigDecimal(withheld));
+            withheld == null ? null : new BigDecimal(withheld), decisiveLegsHeld);
     return new RejectionDiagnostic(
         "confluence-composite", OptionType.CE, null, null, null, "t",
         new BigDecimal(composite), new BigDecimal(threshold),
@@ -211,13 +217,35 @@ class ShadowVariantsTest {
   }
 
   @Test
-  void nullWithheldDegradesToChampionWhenNoShadowWasRecorded() {
-    // A pre-U4b row, or the direction-neutral straddle stand-in: no confluence / no shadow number.
-    assertThat(ShadowVariants.accepts(diagWithShadow("0.70", null, "0.60"), NULL_WITHHELD)).isTrue();
+  void nullWithheldDeclinesWhenTheDecisiveLegsDidNotHold() {
+    // Review Critical. `valid` is decisive-legs AND scalar, and the null policy changes only the
+    // scalar. A bar whose recalculated composite clears the floor while hard-VWAP / 60m-bias /
+    // stand-aside blocked is a bar the ARMED policy still REJECTS — booking it would make the
+    // challenger's PnL wrong, not merely noisy. (Live-observed shape: ScalperConfluenceGate
+    // .compositeMargin records 4 rows with the aggregate clearing while a decisive leg blocked.)
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.55", "0.72", "0.60", false), NULL_WITHHELD))
+        .as("the scalar alone must never open a challenger position")
+        .isFalse();
+    // The identical bar with the legs held is the one the experiment is entitled to book.
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.55", "0.72", "0.60", true), NULL_WITHHELD))
+        .isTrue();
+  }
+
+  @Test
+  void nullWithheldDeclinesWhenNoCounterfactualWasRecorded() {
+    // Fail-closed rather than degrade-to-champion: a bar with no recorded shadow has nothing for
+    // this experiment to measure, and booking it under the variant's name would attribute a
+    // champion-duplicate row to the proposal.
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.70", null, "0.60"), NULL_WITHHELD)).isFalse();
     assertThat(ShadowVariants.accepts(diagWithShadow("0.55", null, "0.60"), NULL_WITHHELD)).isFalse();
+    // …and the direction-neutral straddle stand-in, which carries no confluence at all.
     RejectionDiagnostic noConfluence =
-        diag(List.of(rail("rsi-band", true, "62", "60")), "0.55", "0.60");
+        diag(List.of(rail("rsi-band", true, "62", "60")), "0.70", "0.60");
     assertThat(ShadowVariants.accepts(noConfluence, NULL_WITHHELD)).isFalse();
+    // A NON-nullPolicy variant is untouched by the guard — the champion book and the rail-override
+    // variants keep their existing floor-ruled semantics on exactly the same row.
+    ShadowVariants.Variant plain = variants("[{\"name\":\"noop3\",\"rails\":[]}]").all().get(0);
+    assertThat(ShadowVariants.accepts(noConfluence, plain)).isTrue();
   }
 
   @Test

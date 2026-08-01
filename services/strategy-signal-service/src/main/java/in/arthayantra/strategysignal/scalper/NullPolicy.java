@@ -12,10 +12,12 @@ package in.arthayantra.strategysignal.scalper;
  *       denominator (the P3 {@code absent} path), so the gap is not evidence in either direction.
  *   <li><b>supports</b> — {@code vix}, {@code basis}, {@code premium_skew}, {@code dow}: a null
  *       input scores as a PASSING dot, so a dead feed silently props the composite up.
- *   <li><b>opposes-in-denominator</b> — every other dot, including the {@link OiQuadrant#NEUTRAL}
- *       "snapshot unavailable" sentinel: a null input scores {@code supports=false} while still
- *       counting its full weight in the denominator, so the gap is scored as evidence AGAINST the
- *       side.
+ *   <li><b>opposes-in-denominator</b> — every other ENABLED dot, including the {@link
+ *       OiQuadrant#NEUTRAL} "snapshot unavailable" sentinel: a null input scores {@code
+ *       supports=false} while still counting its full weight in the denominator, so the gap is
+ *       scored as evidence AGAINST the side. Fifteen of the default eighteen dots, and seventeen
+ *       once the {@code iv-per-strike} tag adds {@code iv_slope} + {@code iv_abs_band} (both also
+ *       opponent-on-missing) — so this class GROWS with the enabled dot set, it is not a fixed list.
  * </ul>
  *
  * <p>{@link #WITHHELD} unifies all three to the first rule. It is DEFAULT-OFF behind the

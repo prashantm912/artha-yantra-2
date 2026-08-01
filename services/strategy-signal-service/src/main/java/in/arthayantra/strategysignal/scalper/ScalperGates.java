@@ -407,7 +407,13 @@ public final class ScalperGates {
   /**
    * E6 §3.10/§4.14.6 15-minute SuperTrend confirmation (tag {@code supertrend-15m}): the higher-TF trend
    * must AGREE with the side — CE needs {@code dir15m > 0} (15m uptrend), PE {@code dir15m < 0}. An
-   * UNKNOWN direction ({@code dir15m == 0}: the 15m series unwarmed / mid-flip) PASSES — the
+   * UNKNOWN direction ({@code dir15m == 0}: the 15m series is unwarmed or out of range — NOT a
+   * "mid-flip", which this comment used to claim and which cannot occur: {@code
+   * Ta4jIndicators.supertrendDirection} (:48-69) returns ONLY {@code ±1}, picked by the boolean
+   * {@code supertrend.isUpTrend(index)}, and {@code null} in exactly two cases — {@code index <
+   * unstable} or {@code index >= series.size()}. The sole producer of the sentinel is {@code
+   * ScalperConfluenceGate:648}, {@code st15 == null ? 0 : st15.signum()}, and {@code signum()} of
+   * {@code ±1} is never 0, so {@code 0 ⟺ null ⟺ no data}) PASSES — the
    * {@code bias60m}/VIX fail-OPEN convention, so a missing higher-TF trend never blocks a confirmed 3m entry.
    */
   public static GateOutcome supertrend15mAlign(int dir15m, OptionType side) {

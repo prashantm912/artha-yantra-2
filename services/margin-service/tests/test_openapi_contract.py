@@ -79,6 +79,16 @@ def test_openapi_surface_matches_committed_contract():
     )
 
 
+#  FastAPI's OWN auto-generated schemas for its default RequestValidationError handling - nobody
+# authors these, so a "code changed, forgot to re-dump" story can never apply to them, and their
+# property set is NOT stable: measured directly, fastapi 0.115.6 (this repo's hash-locked CI pin)
+# emits `ValidationError: {loc, msg, type}`, while fastapi 0.136.3 (a newer local interpreter) adds
+# `ctx` + `input` - genuine framework churn of exactly the kind the module docstring already warns
+# about for the full serialized schema, just narrower than expected: it turns out NOT every
+# property name is version-stable, only ones the application itself declares are.
+_FRAMEWORK_SCHEMAS = frozenset({"HTTPValidationError", "ValidationError"})
+
+
 def _component_property_keys(spec: dict) -> dict:
     """Property-NAME projection per schema component - deliberately narrower than a raw-spec pin
     (see the module docstring on why that churns across Python/fastapi/pydantic versions), but a
@@ -87,9 +97,13 @@ def _component_property_keys(spec: dict) -> dict:
     of break the route surface above and ci-contracts' removed-component-name gate cannot: a
     response-field RENAME that changes no route and no component KEY (margin-service's
     SizeResponse.target -> targetPrice, e.g.) - measured to pass every other margin-service gate
-    silently before this test existed."""
+    silently before this test existed. Excludes `_FRAMEWORK_SCHEMAS` - see its comment."""
     schemas = spec.get("components", {}).get("schemas", {})
-    return {name: sorted(schema.get("properties", {}).keys()) for name, schema in schemas.items()}
+    return {
+        name: sorted(schema.get("properties", {}).keys())
+        for name, schema in schemas.items()
+        if name not in _FRAMEWORK_SCHEMAS
+    }
 
 
 def test_component_property_names_match_committed_spec():

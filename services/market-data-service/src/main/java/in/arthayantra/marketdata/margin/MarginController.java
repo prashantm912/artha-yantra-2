@@ -69,14 +69,14 @@ public class MarginController {
   public record MarginResponse(
       boolean priced,
       @Schema(types = {"string", "null"}) String unpricedReason,
-      @Schema(types = {"number", "null"}) BigDecimal spanMargin,
-      @Schema(types = {"number", "null"}) BigDecimal exposureMargin,
-      @Schema(types = {"number", "null"}) BigDecimal equityMargin,
-      @Schema(types = {"number", "null"}) BigDecimal netBuyPremium,
-      @Schema(types = {"number", "null"}) BigDecimal additionalMargin,
-      @Schema(types = {"number", "null"}) BigDecimal totalMargin,
-      @Schema(types = {"number", "null"}) BigDecimal requiredMargin,
-      @Schema(types = {"number", "null"}) BigDecimal finalMargin) {
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spanMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal exposureMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal equityMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal netBuyPremium,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal additionalMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal totalMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal requiredMargin,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal finalMargin) {
 
     static MarginResponse unpriced(String reason) {
       return new MarginResponse(false, reason, null, null, null, null, null, null, null, null);

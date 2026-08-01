@@ -32,14 +32,14 @@ public class EquityDeliveryService {
   /** One trading day's delivery row; {@code dayRange = high − low}, {@code dayRangePct = range/close}. */
   public record DeliveryDay(
       LocalDate date,
-      @Schema(types = {"number", "null"}) BigDecimal open,
-      @Schema(types = {"number", "null"}) BigDecimal high,
-      @Schema(types = {"number", "null"}) BigDecimal low,
-      @Schema(types = {"number", "null"}) BigDecimal close,
-      @Schema(types = {"number", "null"}) BigDecimal ltpChangePct,
-      @Schema(types = {"number", "null"}) BigDecimal deliveryPct,
-      @Schema(types = {"number", "null"}) BigDecimal dayRange,
-      @Schema(types = {"number", "null"}) BigDecimal dayRangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal open,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal high,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal low,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal close,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpChangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal deliveryPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayRange,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayRangePct,
       @Schema(types = {"integer", "null"}) Long deliveryQty,
       @Schema(types = {"integer", "null"}) Long totalTradedQty) {}
 

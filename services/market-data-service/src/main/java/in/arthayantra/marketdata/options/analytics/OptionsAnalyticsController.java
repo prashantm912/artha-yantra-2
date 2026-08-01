@@ -138,17 +138,17 @@ public class OptionsAnalyticsController {
   }
 
   public record OiStats(
-      @Schema(types = {"number", "null"}) BigDecimal pcr,
-      @Schema(types = {"number", "null"}) BigDecimal maxPain,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pcr,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal maxPain,
       long ceOi,
       long peOi,
       OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {}
 
   public record ActiveStrikesResponse(
-      @Schema(types = {"number", "null"}) BigDecimal sentimentPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sentimentPct,
       // §18.6: the oipulse LEVEL-based sentiment beside the ΔOI-flow number, for the live compare.
-      @JsonInclude(JsonInclude.Include.NON_NULL) BigDecimal sentimentLevelPct,
+      @JsonInclude(JsonInclude.Include.NON_NULL) @Schema(type = "string") BigDecimal sentimentLevelPct,
       List<StrikeView> items,
       @JsonInclude(JsonInclude.Include.NON_NULL) List<ActiveStrikeService.SentimentPoint>
               sentimentSeries,
@@ -162,7 +162,7 @@ public class OptionsAnalyticsController {
       OffsetDateTime asOf,
       @JsonInclude(JsonInclude.Include.NON_NULL) DataFreshness freshness) {}
 
-  public record StrikeView(BigDecimal strike, long ceOi, long peOi) {}
+  public record StrikeView(@Schema(type = "string") BigDecimal strike, long ceOi, long peOi) {}
 
   /**
    * Interval deltas overlaid on a live chain leg (the §20.7.1 faithful columns the point-in-time
@@ -171,9 +171,9 @@ public class OptionsAnalyticsController {
    */
   public record LegDeltas(
       @Schema(types = {"integer", "null"}) Long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal oiChangePct,
-      @Schema(types = {"number", "null"}) BigDecimal ltpChange,
-      @Schema(types = {"number", "null"}) BigDecimal ltpChangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal oiChangePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpChange,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltpChangePct,
       OiInterpretation interpretation) {}
 
   /** A live chain leg (greeks/IV/OI/LTP from {@code /chain}) plus its interval deltas (or null). */
@@ -181,7 +181,7 @@ public class OptionsAnalyticsController {
       OptionsChainService.Leg leg, @Schema(types = {"object", "null"}) LegDeltas deltas) {}
 
   /** One faithful-chain row: CE | strike | PE, each leg enriched with deltas. */
-  public record ChainTableRow(BigDecimal strike, ChainTableLeg ce, ChainTableLeg pe) {}
+  public record ChainTableRow(@Schema(type = "string") BigDecimal strike, ChainTableLeg ce, ChainTableLeg pe) {}
 
   /**
    * The faithful Options Chain feed: the live chain header + enriched rows + the delta interval.
@@ -191,15 +191,19 @@ public class OptionsAnalyticsController {
    * render it as an explicit staleness badge. It is orthogonal to {@code stale} (market not open),
    * and always false in HISTORY mode, which is an explicit request for a past session rather than a
    * degraded live read.
+   *
+   * <p>{@code riskFreeRate} is null in HISTORY mode ({@code historicalChainTable} has no live
+   * forward/rate context to project from, so {@code forward}/{@code riskFreeRate} both ride null) —
+   * only the LIVE path resolves it from the configured {@code artha.options.risk-free-rate}.
    */
   public record ChainTable(
       String underlying,
       LocalDate expiry,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
-      @Schema(types = {"number", "null"}) BigDecimal forward,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal forward,
       String forwardSource,
-      BigDecimal riskFreeRate,
-      @Schema(types = {"number", "null"}) BigDecimal pcr,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal riskFreeRate,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pcr,
       boolean stale,
       boolean lastCaptured,
       OffsetDateTime asOf,

@@ -12,8 +12,8 @@ import org.springframework.stereotype.Service;
 public class OiBigOiService {
 
   public record BigOiRow(
-      BigDecimal strike, String optionType, long oi, long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal ltp) {}
+      @Schema(type = "string") BigDecimal strike, String optionType, long oi, long oiChange,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp) {}
 
   public record BigOi(
       List<BigOiRow> items,

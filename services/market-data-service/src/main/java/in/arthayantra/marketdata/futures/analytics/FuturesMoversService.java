@@ -30,12 +30,12 @@ public class FuturesMoversService {
 
   public record MoverRow(
       String tradingsymbol,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal pricePct,
-      @Schema(types = {"number", "null"}) BigDecimal oiPct,
-      @Schema(types = {"number", "null"}) BigDecimal dayOpen,
-      @Schema(types = {"number", "null"}) BigDecimal dayHigh,
-      @Schema(types = {"number", "null"}) BigDecimal dayLow,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pricePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal oiPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayHigh,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal dayLow,
       OiInterpretation interpretation) {}
 
   public record Movers(
@@ -56,10 +56,10 @@ public class FuturesMoversService {
   public record BankRow(
       String tradingsymbol,
       LocalDate expiry,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
       long oi,
       long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal basis,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal basis,
       @Schema(types = {"string", "null"}) OiInterpretation interpretation) {}
 
   public record Banks(

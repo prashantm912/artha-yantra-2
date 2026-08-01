@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.freshness.DataFreshness;
 import in.arthayantra.marketdata.nse.analytics.NseEodReader.ParticipantOiRow;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -40,12 +41,16 @@ public class ParticipantBiasService {
     this.candles = candles;
   }
 
-  /** The combined FII EOD bias for a date (sign drives the gate; the rest is surfaced for the UI). */
+  /**
+   * The combined FII EOD bias for a date (sign drives the gate; the rest is surfaced for the UI).
+   * {@code fiiLongPct} is null on the insufficient-history {@link #neutral} shell and whenever the
+   * FII index-futures book is flat ({@code totalFut == 0} in {@link #classify}).
+   */
   public record Bias(
       LocalDate tradeDate,
       String fiiClassification,
       String bias,
-      BigDecimal fiiLongPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal fiiLongPct,
       long callNet,
       long putNet,
       String legBias,

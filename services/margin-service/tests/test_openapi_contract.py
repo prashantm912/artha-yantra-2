@@ -79,30 +79,35 @@ def test_openapi_surface_matches_committed_contract():
     )
 
 
-#  FastAPI's OWN auto-generated schemas for its default RequestValidationError handling - nobody
-# authors these, so a "code changed, forgot to re-dump" story can never apply to them, and their
-# property set is NOT stable: measured directly, fastapi 0.115.6 (this repo's hash-locked CI pin)
-# emits `ValidationError: {loc, msg, type}`, while fastapi 0.136.3 (a newer local interpreter) adds
-# `ctx` + `input` - genuine framework churn of exactly the kind the module docstring already warns
-# about for the full serialized schema, just narrower than expected: it turns out NOT every
-# property name is version-stable, only ones the application itself declares are.
-_FRAMEWORK_SCHEMAS = frozenset({"HTTPValidationError", "ValidationError"})
+# The two EXACT property names measured to churn by fastapi VERSION alone inside its own
+# auto-generated `ValidationError` schema (default RequestValidationError handling): fastapi
+# 0.115.6 (this repo's hash-locked CI pin) emits `{loc, msg, type}`; fastapi 0.136.3 (a newer
+# local interpreter) adds `ctx` + `input`. Deliberately NOT a component-NAME exclusion - an
+# earlier version of this fix excluded any schema named `ValidationError`/`HTTPValidationError`
+# wholesale, which is an exemption keyed on provenance-by-NAME: a SERVICE-AUTHORED schema that
+# happened to share either name would have every real rename inside it silently pass too (caught
+# in review, reproduced: renaming a field under a same-named schema left the projections
+# identical). Dropping only these two literal property names, from every schema uniformly, scopes
+# the exemption to the exact measured symptom instead of a class of names - it cannot silently
+# widen, and a rename of any OTHER property (including inside a component literally named
+# `ValidationError`) is still caught.
+_VERSION_VOLATILE_PROPERTIES = frozenset({"ctx", "input"})
 
 
 def _component_property_keys(spec: dict) -> dict:
     """Property-NAME projection per schema component - deliberately narrower than a raw-spec pin
     (see the module docstring on why that churns across Python/fastapi/pydantic versions), but a
     property's NAME is stable across all of them; only the JSON-Schema keyword spelling of its
-    TYPE varies (e.g. anyOf branch shape/ordering/title casing). This catches precisely the class
-    of break the route surface above and ci-contracts' removed-component-name gate cannot: a
-    response-field RENAME that changes no route and no component KEY (margin-service's
+    TYPE varies (e.g. anyOf branch shape/ordering/title casing) - except the two literal names in
+    `_VERSION_VOLATILE_PROPERTIES`, dropped everywhere (see its comment). This catches precisely
+    the class of break the route surface above and ci-contracts' removed-component-name gate
+    cannot: a response-field RENAME that changes no route and no component KEY (margin-service's
     SizeResponse.target -> targetPrice, e.g.) - measured to pass every other margin-service gate
-    silently before this test existed. Excludes `_FRAMEWORK_SCHEMAS` - see its comment."""
+    silently before this test existed. Every component is compared, by name, with no exclusion."""
     schemas = spec.get("components", {}).get("schemas", {})
     return {
-        name: sorted(schema.get("properties", {}).keys())
+        name: sorted(set(schema.get("properties", {}).keys()) - _VERSION_VOLATILE_PROPERTIES)
         for name, schema in schemas.items()
-        if name not in _FRAMEWORK_SCHEMAS
     }
 
 
@@ -121,3 +126,18 @@ def test_component_property_names_match_committed_spec():
         "re-capturing the spec. Re-capture with:  CONTRACTS_CAPTURE=1 python -m pytest "
         "tests/test_openapi_contract.py  and commit the result."
     )
+
+
+def test_component_property_keys_catches_a_rename_under_a_reserved_schema_name():
+    """Regression pin for exactly the hazard a review round caught (and reproduced): an EARLIER
+    version of `_component_property_keys` excluded any component NAMED `ValidationError` or
+    `HTTPValidationError` wholesale, so a SERVICE-AUTHORED schema that happened to share either
+    reserved name would have any real rename inside it (unrelated to the ctx/input version churn)
+    pass silently - measured: both projections came back `{}` regardless of content. The fix
+    compares every component by name with no exclusion, only dropping the two literal property
+    names known to churn by fastapi version - so this exact rename must still be caught."""
+    before = {"ValidationError": {"properties": {"reason": {"type": "string"}}}}
+    after = {"ValidationError": {"properties": {"why": {"type": "string"}}}}
+    committed = {"components": {"schemas": before}}
+    live_renamed = {"components": {"schemas": after}}
+    assert _component_property_keys(committed) != _component_property_keys(live_renamed)

@@ -537,6 +537,12 @@ public class SignalEngine {
 
   private final Timer evalTimer;
   private final Timer barToEmitTimer;
+  // G8/T26: the telescoping stage split of the bar-close->emit path. INSTRUMENTATION ONLY — every
+  // hook is a nullable-safe no-op and nothing here decides anything. ay_signal_bar_to_emit_seconds
+  // measured 17.0s mean across ALL 20 of 2026-07-29's signals (entries AND exits, one 606ms
+  // outlier), killing the strike-resolution hypothesis without naming a replacement; these stages
+  // are what let the next session's scrape name the stage instead of the total.
+  private final EmitStageRecorder emitStages;
   private final Counter emitted;
   private final Counter evalFailures;
   // One counter per Outcome — see the enum. evalTimer wraps onClosedBar INCLUDING its early
@@ -599,6 +605,7 @@ public class SignalEngine {
         Timer.builder("ay_signal_bar_to_emit_seconds")
             .publishPercentiles(0.5, 0.95)
             .register(meterRegistry);
+    this.emitStages = new EmitStageRecorder(meterRegistry);
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
     this.evalFailures = meterRegistry.counter("ay_signal_eval_failures_total");
     // ---- Engine-liveness read surface (chip task_0bed1621) --------------------------------------
@@ -1385,12 +1392,25 @@ public class SignalEngine {
         continue;
       }
       try {
-        if (strategy.definition().primaryTimeframe().equals("1m")) {
-          evaluateAtBarClose(strategy, exchange, tradingsymbol, bar, "1m");
-        } else if (!"btst".equals(strategy.definition().session().style())) {
-          evaluateCoarsePrimary(strategy, exchange, tradingsymbol, bar);
+        // G8/T26: THE bar-driven trace scope, opened here rather than inside the evaluation so it
+        // starts BEFORE any per-strategy work. evaluateCoarsePrimary does synchronous
+        // seriesStore.refreshFromRest calls (primary + every declared higher timeframe) ahead of
+        // the evaluation, so a scope opened deeper would bill that strategy's OWN REST latency to
+        // pre_eval — the bucket that means "queue drain + EARLIER strategies", i.e. it would read
+        // as queueing. That is precisely the misattribution T26 exists to prevent. One scope here
+        // covers all six bar-driven emit sites (1m primary, coarse boundary, intrabar exit); the
+        // clock-driven BTST pre-close path never passes through here and stays untraced by design.
+        emitStages.beginEvaluation(currentBarReceivedAtMs.get(), clock.millis());
+        try {
+          if (strategy.definition().primaryTimeframe().equals("1m")) {
+            evaluateAtBarClose(strategy, exchange, tradingsymbol, bar, "1m");
+          } else if (!"btst".equals(strategy.definition().session().style())) {
+            evaluateCoarsePrimary(strategy, exchange, tradingsymbol, bar);
+          }
+          // btst primaries evaluate ONLY at the pre-close clock (scheduled below)
+        } finally {
+          emitStages.endEvaluation();
         }
-        // btst primaries evaluate ONLY at the pre-close clock (scheduled below)
       } catch (RuntimeException e) {
         // The bar is already consumed off the queue — a failed ENTRY decision for it is gone for
         // good (the next qualifying bar re-fires; EXIT anchors stay ACTIVE and self-heal). The
@@ -1937,6 +1957,7 @@ public class SignalEngine {
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
       EntryEvaluator.Evaluation evaluation, ScalperConfluenceGate.Decision decision,
       ScalperConfluenceGate.FiredDiagnostic firedDiagnostic) {
+    emitStages.markEmitStart(clock.millis()); // G8/T26: gate_eval ends, leg_resolve begins
     // Per-book risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission for
     // this strategy's book for the rest of the IST day — exit/stop evaluation (emit()) is NOT gated.
     // entryVeto is behaviourally identical to entryAllowed (a single call, same decision AND audit
@@ -2088,6 +2109,7 @@ public class SignalEngine {
     // scalper_detail and silently fell back to the definition direction (wrong side for a PE scalp).
     BigDecimal stampQty = suggestedQty;
     BigDecimal stopLevel = stopLoss;
+    emitStages.markPersistStart(clock.millis());
     long id =
         tx.execute(
             status -> {
@@ -2105,6 +2127,7 @@ public class SignalEngine {
               }
               return newId;
             });
+    emitStages.markPersistEnd(clock.millis());
     stampEmissionLatency(id);
     if (suggestedQty == null
         && decision != null
@@ -2174,6 +2197,7 @@ public class SignalEngine {
         new SignalEmitted(
             id, strategy.versionId(), exchange, tradingsymbol, side, entryPrice, stopLoss, target,
             evaluation.breakdown().composite(), evaluation.breakdown().threshold(), scalp));
+    emitStages.recordEmitComplete(EmitStageRecorder.DIRECTION_ENTRY, clock.millis());
   }
 
   /**
@@ -2424,10 +2448,12 @@ public class SignalEngine {
   private void emit(
       Loaded strategy, String exchange, String tradingsymbol, String interval, String type,
       EngineCandle bar, SignalRepository.SignalRow anchor, String exitReason) {
+    emitStages.markEmitStart(clock.millis()); // G8/T26: gate_eval ends, leg_resolve begins
     String side = "SELL".equals(anchor.side()) ? "BUY" : "SELL"; // the closing side
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     // Insert + anchor transition commit atomically: a failure between them left the entry ACTIVE
     // next to a persisted EXIT — the next bar then emitted a duplicate EXIT for the same anchor.
+    emitStages.markPersistStart(clock.millis());
     long id =
         tx.execute(
             status -> {
@@ -2440,6 +2466,7 @@ public class SignalEngine {
               signals.transition(anchor.id(), "EXPIRED"); // the entry resolved — the pair is closed
               return newId;
             });
+    emitStages.markPersistEnd(clock.millis());
     stampEmissionLatency(id);
     emitted.increment();
     publisher.publish(
@@ -2451,6 +2478,7 @@ public class SignalEngine {
     events.publishEvent(new SignalExited(anchor.id(), id, exitReason));
     log.info("EXIT signal #{} {} {}:{} at {} ({})", id, strategy.slug(), exchange, tradingsymbol,
         bar.close(), exitReason);
+    emitStages.recordEmitComplete(EmitStageRecorder.DIRECTION_EXIT, clock.millis());
   }
 
   /** Live-only wall-clock side-channel; deterministic replay never enters either emit method. */

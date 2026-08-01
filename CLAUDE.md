@@ -287,9 +287,16 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
 - **Empty `strategy.signal_rejections` does NOT mean the engine is dead** — `recordRejection`'s two call
   sites are BOTH downstream of the `chart != FIRED` early return (`SignalEngine:~1132`), so ONLY the
   `confluence-blocked` outcome writes a row. On a down tape every scalper exits at the chart/composite stage
-  and the table stays empty ALL session — normal, not starvation. Liveness = **Σ `ay_signal_eval_outcome_total`
-  ADVANCING** (persisted to `signal_eval_outcomes`, V045). NEVER restart on an empty rejections table alone
-  (cost a needless live restart 2026-07-20).
+  and the table stays empty ALL session — normal, not starvation. NEVER restart on an empty rejections table
+  alone (cost a needless live restart 2026-07-20). ⚠️ **CORRECTION 2026-08-01 — this bullet used to say
+  "Liveness = Σ `ay_signal_eval_outcome_total` ADVANCING", which is the OVERSTATED form and contradicts the
+  ledger (the authority, §0 group-G note): Σ(outcomes) is an ATTRIBUTION primitive — an evidence panel —
+  and NOTHING may be armed on it.** Its increment site sits inside the `else` of `if (activeEntry.isPresent())`
+  below two `continue`s, and btst never evaluates from `onClosedBar` at all, so Σ is **LEGITIMATELY FLAT while
+  bars flow** in four normal states: outside a session window, whole book in position, context-only symbols,
+  btst — measured live as structurally flat 15:00–15:30 EVERY non-expiry day. Correct reading: **advancing ⇒
+  alive (sound positive proof); flat ⇏ dead (unsound negative proof).** The signals safe to key liveness on are
+  `lastBarReceivedAtMs` / `lastBarEvaluatedAtMs`.
 - **A scalper YAML/config change is a SILENT NO-OP until RE-PUBLISHED.** `ScalperStrategySeeder` mints a
   fresh DRAFT on boot (`resyncConfig`→`update`), never publishes; the live engine runs the *published*
   version. After deploying a config change, `POST /api/v1/strategies/{id}/publish` each affected strategy

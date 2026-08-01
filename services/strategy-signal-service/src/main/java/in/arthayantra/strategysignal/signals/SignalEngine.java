@@ -537,6 +537,12 @@ public class SignalEngine {
 
   private final Timer evalTimer;
   private final Timer barToEmitTimer;
+  // G8/T26: the telescoping stage split of the bar-close->emit path. INSTRUMENTATION ONLY — every
+  // hook is a nullable-safe no-op and nothing here decides anything. ay_signal_bar_to_emit_seconds
+  // measured 17.0s mean across ALL 20 of 2026-07-29's signals (entries AND exits, one 606ms
+  // outlier), killing the strike-resolution hypothesis without naming a replacement; these stages
+  // are what let the next session's scrape name the stage instead of the total.
+  private final EmitStageRecorder emitStages;
   private final Counter emitted;
   private final Counter evalFailures;
   // One counter per Outcome — see the enum. evalTimer wraps onClosedBar INCLUDING its early
@@ -599,6 +605,7 @@ public class SignalEngine {
         Timer.builder("ay_signal_bar_to_emit_seconds")
             .publishPercentiles(0.5, 0.95)
             .register(meterRegistry);
+    this.emitStages = new EmitStageRecorder(meterRegistry);
     this.emitted = meterRegistry.counter("ay_signals_emitted_total");
     this.evalFailures = meterRegistry.counter("ay_signal_eval_failures_total");
     // ---- Engine-liveness read surface (chip task_0bed1621) --------------------------------------
@@ -1403,7 +1410,23 @@ public class SignalEngine {
     }
   }
 
+  /**
+   * G8/T26 trace scope for the BAR-DRIVEN evaluation path (both the 1m primary and the coarse
+   * boundary). Opens the stage trace against THIS bar's causal Redis receipt stamp and closes it in
+   * a finally, so a strategy that evaluates without emitting leaks no stamps into the next one.
+   * INSTRUMENTATION ONLY — the delegate below is the unchanged evaluation.
+   */
   private void evaluateAtBarClose(
+      Loaded strategy, String exchange, String tradingsymbol, EngineCandle bar, String interval) {
+    emitStages.beginEvaluation(currentBarReceivedAtMs.get(), clock.millis());
+    try {
+      evaluateAtBarCloseTraced(strategy, exchange, tradingsymbol, bar, interval);
+    } finally {
+      emitStages.endEvaluation();
+    }
+  }
+
+  private void evaluateAtBarCloseTraced(
       Loaded strategy, String exchange, String tradingsymbol, EngineCandle bar, String interval) {
     // Long-lived bank per (version, instrument) — the D17 lesson applied live (audit P1-12):
     // rebuilding per bar gave every evaluation a COLD ta4j cache, recomputing recursive
@@ -1690,29 +1713,44 @@ public class SignalEngine {
     }
     // A9 [FP-5]: 1m exit-level pass while a position-anchoring entry is active
     if (strategy.definition().session().exitIntrabar()) {
-      Optional<SignalRepository.SignalRow> activeEntry =
-          signals.activeEntry(strategy.versionId(), exchange, tradingsymbol);
-      if (activeEntry.isPresent()) {
-        EngineSeries primary = seriesStore.series(primaryKey);
-        EngineSeries oneMinute = seriesStore.series(new SeriesKey(exchange, tradingsymbol, "1m"));
-        if (primary == null || oneMinute == null) {
-          return;
-        }
-        int entryPrimaryIndex =
-            entryAnchorIndex(primary, primaryInterval, activeEntry.get().generatedAt().toInstant());
-        // the 1m anchor stays generatedAt itself: the 1m TRIGGER bar exists in the 1m series and
-        // is the correct 1m-scan start (no coarse off-by-one applies on the 1m axis)
-        int entryOneMinuteIndex =
-            Math.max(oneMinute.indexAtOrBefore(activeEntry.get().generatedAt().toInstant()), 0);
-        Optional<ExitEvaluator.ExitDecision> exit =
-            ExitEvaluator.evaluateIntrabarLevels(
-                strategy.definition(), primary, entryPrimaryIndex, oneMinute,
-                scalperPositionDirection(strategy, activeEntry.get()), activeEntry.get().entryPrice(),
-                entryOneMinuteIndex, oneMinute.size() - 1);
-        if (exit.isPresent()) {
-          emit(strategy, exchange, tradingsymbol, "1m", "EXIT", bar, activeEntry.get(),
-              exit.get().type().toUpperCase(java.util.Locale.ROOT));
-        }
+      // G8/T26: the SIXTH bar-driven emit site — a coarse-primary strategy exiting on a 1m bar
+      // NEVER passes through evaluateAtBarClose, so it needs its own trace scope or its emits
+      // would silently record nothing (finally-closed, same as the boundary path above).
+      emitStages.beginEvaluation(currentBarReceivedAtMs.get(), clock.millis());
+      try {
+        evaluateIntrabarExit(strategy, exchange, tradingsymbol, bar, primaryInterval, primaryKey);
+      } finally {
+        emitStages.endEvaluation();
+      }
+    }
+  }
+
+  /** The A9 [FP-5] intrabar exit body — unchanged logic, lifted so the trace scope can wrap it. */
+  private void evaluateIntrabarExit(
+      Loaded strategy, String exchange, String tradingsymbol, EngineCandle bar,
+      String primaryInterval, SeriesKey primaryKey) {
+    Optional<SignalRepository.SignalRow> activeEntry =
+        signals.activeEntry(strategy.versionId(), exchange, tradingsymbol);
+    if (activeEntry.isPresent()) {
+      EngineSeries primary = seriesStore.series(primaryKey);
+      EngineSeries oneMinute = seriesStore.series(new SeriesKey(exchange, tradingsymbol, "1m"));
+      if (primary == null || oneMinute == null) {
+        return;
+      }
+      int entryPrimaryIndex =
+          entryAnchorIndex(primary, primaryInterval, activeEntry.get().generatedAt().toInstant());
+      // the 1m anchor stays generatedAt itself: the 1m TRIGGER bar exists in the 1m series and
+      // is the correct 1m-scan start (no coarse off-by-one applies on the 1m axis)
+      int entryOneMinuteIndex =
+          Math.max(oneMinute.indexAtOrBefore(activeEntry.get().generatedAt().toInstant()), 0);
+      Optional<ExitEvaluator.ExitDecision> exit =
+          ExitEvaluator.evaluateIntrabarLevels(
+              strategy.definition(), primary, entryPrimaryIndex, oneMinute,
+              scalperPositionDirection(strategy, activeEntry.get()), activeEntry.get().entryPrice(),
+              entryOneMinuteIndex, oneMinute.size() - 1);
+      if (exit.isPresent()) {
+        emit(strategy, exchange, tradingsymbol, "1m", "EXIT", bar, activeEntry.get(),
+            exit.get().type().toUpperCase(java.util.Locale.ROOT));
       }
     }
   }
@@ -1937,6 +1975,7 @@ public class SignalEngine {
       Loaded strategy, String exchange, String tradingsymbol, String interval, EngineCandle bar,
       EntryEvaluator.Evaluation evaluation, ScalperConfluenceGate.Decision decision,
       ScalperConfluenceGate.FiredDiagnostic firedDiagnostic) {
+    emitStages.markEmitStart(clock.millis()); // G8/T26: gate_eval ends, leg_resolve begins
     // Per-book risk gate: a daily-loss trip / kill switch / max-open cap pauses ENTRY emission for
     // this strategy's book for the rest of the IST day — exit/stop evaluation (emit()) is NOT gated.
     // entryVeto is behaviourally identical to entryAllowed (a single call, same decision AND audit
@@ -2088,6 +2127,7 @@ public class SignalEngine {
     // scalper_detail and silently fell back to the definition direction (wrong side for a PE scalp).
     BigDecimal stampQty = suggestedQty;
     BigDecimal stopLevel = stopLoss;
+    emitStages.markPersistStart(clock.millis());
     long id =
         tx.execute(
             status -> {
@@ -2105,6 +2145,7 @@ public class SignalEngine {
               }
               return newId;
             });
+    emitStages.markPersistEnd(clock.millis());
     stampEmissionLatency(id);
     if (suggestedQty == null
         && decision != null
@@ -2174,6 +2215,7 @@ public class SignalEngine {
         new SignalEmitted(
             id, strategy.versionId(), exchange, tradingsymbol, side, entryPrice, stopLoss, target,
             evaluation.breakdown().composite(), evaluation.breakdown().threshold(), scalp));
+    emitStages.recordEmitComplete(EmitStageRecorder.DIRECTION_ENTRY, clock.millis());
   }
 
   /**
@@ -2407,10 +2449,12 @@ public class SignalEngine {
   private void emit(
       Loaded strategy, String exchange, String tradingsymbol, String interval, String type,
       EngineCandle bar, SignalRepository.SignalRow anchor, String exitReason) {
+    emitStages.markEmitStart(clock.millis()); // G8/T26: gate_eval ends, leg_resolve begins
     String side = "SELL".equals(anchor.side()) ? "BUY" : "SELL"; // the closing side
     OffsetDateTime generatedAt = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
     // Insert + anchor transition commit atomically: a failure between them left the entry ACTIVE
     // next to a persisted EXIT — the next bar then emitted a duplicate EXIT for the same anchor.
+    emitStages.markPersistStart(clock.millis());
     long id =
         tx.execute(
             status -> {
@@ -2423,6 +2467,7 @@ public class SignalEngine {
               signals.transition(anchor.id(), "EXPIRED"); // the entry resolved — the pair is closed
               return newId;
             });
+    emitStages.markPersistEnd(clock.millis());
     stampEmissionLatency(id);
     emitted.increment();
     publisher.publish(
@@ -2434,6 +2479,7 @@ public class SignalEngine {
     events.publishEvent(new SignalExited(anchor.id(), id, exitReason));
     log.info("EXIT signal #{} {} {}:{} at {} ({})", id, strategy.slug(), exchange, tradingsymbol,
         bar.close(), exitReason);
+    emitStages.recordEmitComplete(EmitStageRecorder.DIRECTION_EXIT, clock.millis());
   }
 
   /** Live-only wall-clock side-channel; deterministic replay never enters either emit method. */

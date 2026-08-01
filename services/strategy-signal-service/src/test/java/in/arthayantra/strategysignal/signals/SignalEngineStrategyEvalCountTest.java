@@ -242,27 +242,71 @@ class SignalEngineStrategyEvalCountTest {
   }
 
   @Test
-  void theMapIsBoundedToTheTwoMostRecentlyCountedSessions() {
-    // The bound the prune exists for: without it the map grows by up to 441 entries per day of
-    // uptime and every past day's rows are rewritten on every 3m tick. Two sessions rather than one
-    // is what buys the straggler window above.
+  void anOutOfWindowSessionIsEvictedONLYONCEItsTotalIsDurable() {
+    // Two rules in one place, because they only make sense together (round-2 review found the second
+    // one missing). The BOUND: without eviction the map grows by up to 441 entries per day of uptime
+    // and every past day's rows are rewritten on every 3m tick. The CONDITION: eviction also needs a
+    // confirmed durable write, or a session whose flushes all failed is destroyed with nothing able
+    // to resend it — the guarantee "a failed write loses nothing" would be a lie.
+    StrategyEvalKey oldest = new StrategyEvalKey(SESSION, "scalp-bounded", Outcome.FIRED);
     try (Fixture fixture = Fixture.create()) {
+      SignalEngine engine = fixture.engine();
       SignalEngine.Loaded a = strategy("scalp-bounded");
 
-      fixture.engine().countEvaluation(a, bar(SESSION, "09:15"), Outcome.FIRED);
-      fixture.engine().countEvaluation(a, bar(SESSION.plusDays(1), "09:15"), Outcome.FIRED);
+      engine.countEvaluation(a, bar(SESSION, "09:15"), Outcome.FIRED);
+      engine.countEvaluation(a, bar(SESSION.plusDays(1), "09:15"), Outcome.FIRED);
       assertThat(fixture.perStrategy()).as("two sessions are retained").hasSize(2);
 
-      fixture.engine().countEvaluation(a, bar(SESSION.plusDays(2), "09:15"), Outcome.FIRED);
+      // Third session, but SESSION was never written — it must survive.
+      engine.countEvaluation(a, bar(SESSION.plusDays(2), "09:15"), Outcome.FIRED);
+      assertThat(fixture.perStrategy())
+          .as("unwritten ⇒ carried across the boundary, however far out of window")
+          .containsKey(oldest);
+
+      // Now it is durable. The next boundary may drop it.
+      engine.acknowledgeDenominatorWrites(Map.of(oldest, 1L));
+      engine.countEvaluation(a, bar(SESSION.plusDays(3), "09:15"), Outcome.FIRED);
 
       assertThat(fixture.perStrategy())
-          .containsOnlyKeys(
-              new StrategyEvalKey(SESSION.plusDays(1), "scalp-bounded", Outcome.FIRED),
-              new StrategyEvalKey(SESSION.plusDays(2), "scalp-bounded", Outcome.FIRED));
-      assertThat(fixture.engine().retainedSessions())
-          .isEqualTo(new SignalEngine.RetainedSessions(SESSION.plusDays(2), SESSION.plusDays(1)));
+          .as("durable + out of window ⇒ evicted, so the bound actually holds")
+          .doesNotContainKey(oldest)
+          // SESSION+1 is out of window too, but was never acknowledged — so it is STILL carried.
+          // The two rules acting at once on the same boundary, which is the point.
+          .containsKey(new StrategyEvalKey(SESSION.plusDays(1), "scalp-bounded", Outcome.FIRED))
+          .containsKey(new StrategyEvalKey(SESSION.plusDays(2), "scalp-bounded", Outcome.FIRED))
+          .containsKey(new StrategyEvalKey(SESSION.plusDays(3), "scalp-bounded", Outcome.FIRED));
+      assertThat(engine.acknowledgedDenominatorsForTest())
+          .as("the acknowledgement is dropped with its counter — the maps stay in step")
+          .doesNotContainKey(oldest);
+      assertThat(engine.retainedSessions())
+          .isEqualTo(new SignalEngine.RetainedSessions(SESSION.plusDays(3), SESSION.plusDays(2)));
       // The fleet counters are NOT pruned — V045's record is independent of this bound.
-      assertThat(fixture.fleetTotal(Outcome.FIRED)).isEqualTo(3L);
+      assertThat(fixture.fleetTotal(Outcome.FIRED)).isEqualTo(4L);
+    }
+  }
+
+  @Test
+  void aPendingKeyIsOnlyReportedUntilItIsAcknowledged() {
+    // The write-avoidance filter, at its source. The engine owns ONE record of what is durable, and
+    // it drives both what the flush sends and what may be evicted — keeping them off separate maps
+    // is what let round-2's Critical exist.
+    StrategyEvalKey key = new StrategyEvalKey(SESSION, "scalp-pending", Outcome.FIRED);
+    try (Fixture fixture = Fixture.create()) {
+      SignalEngine engine = fixture.engine();
+      SignalEngine.Loaded a = strategy("scalp-pending");
+
+      engine.countEvaluation(a, bar(SESSION, "09:15"), Outcome.FIRED);
+      assertThat(engine.pendingDenominatorWrites().counts()).containsEntry(key, 1L);
+
+      engine.acknowledgeDenominatorWrites(Map.of(key, 1L));
+      assertThat(engine.pendingDenominatorWrites().counts())
+          .as("acknowledged at its current value ⇒ nothing to send")
+          .isEmpty();
+
+      engine.countEvaluation(a, bar(SESSION, "09:18"), Outcome.FIRED);
+      assertThat(engine.pendingDenominatorWrites().counts())
+          .as("it moved again ⇒ pending again, at the new absolute total")
+          .containsEntry(key, 2L);
     }
   }
 

@@ -104,7 +104,9 @@ class StrategyEvalDenominatorIntegrationTest extends StrategySignalIntegrationTe
     }
     StrategyEvalSnapshot[] rest = new StrategyEvalSnapshot[snapshots.length - 1];
     System.arraycopy(snapshots, 1, rest, 0, rest.length);
-    when(engine.strategyEvalSnapshot()).thenReturn(snapshots[0], rest);
+    // The job now reads the PENDING set (unacknowledged keys) rather than every retained counter —
+    // the engine owns the "what is durable" record so the filter and the eviction cannot disagree.
+    when(engine.pendingDenominatorWrites()).thenReturn(snapshots[0], rest);
     when(engine.outcomeSnapshot())
         .thenReturn(new OutcomeSnapshot(epoch, new EnumMap<>(Outcome.class)));
     return engine;
@@ -214,78 +216,164 @@ class StrategyEvalDenominatorIntegrationTest extends StrategySignalIntegrationTe
         .isEqualTo(250L);
   }
 
+  /** Drives the REAL increment site {@code times} times for one (session, slug, outcome). */
+  private static void count(
+      SignalEngine engine, SignalEngine.Loaded strategy, LocalDate session, Outcome outcome,
+      int times) {
+    for (int i = 0; i < times; i++) {
+      engine.countEvaluation(
+          strategy, SignalEngineStrategyEvalCountTest.bar(session, "09:15"), outcome);
+    }
+  }
+
   @Test
   void anUnchangedKeyIsNotRewritten() {
     // Write-avoidance: the map holds two sessions, so writing every key every 3m tick would be
-    // ~124k row-upserts/day against <= 441 distinct live rows — mostly rewriting yesterday's
-    // unchanged rows 140 times. Only CHANGED keys are sent. The row must still read correctly.
+    // ~124k row-upserts/day against <= 441 distinct live rows. Only UNACKNOWLEDGED keys are sent.
+    // Driven through the REAL engine, because the pending/acknowledged record lives there now.
     LocalDate session = istToday();
-    UUID boot = UUID.randomUUID();
     String slug = uniqueSlug("scalp-unchanged");
-    Map<StrategyEvalKey, Long> unchanged = counts(key(session, slug, Outcome.FIRED), 11L);
+    try (SignalEngineStrategyEvalCountTest.Fixture fixture =
+        SignalEngineStrategyEvalCountTest.Fixture.create()) {
+      SignalEngine engine = fixture.engine();
+      UUID boot = engine.strategyEvalSnapshot().epoch();
+      SignalEvalOutcomeRollupJob job = job(engine, denominators, 180);
+      count(engine, SignalEngineStrategyEvalCountTest.strategy(slug), session, Outcome.FIRED, 11);
 
-    SignalEvalOutcomeRollupJob job = job(engineAt(boot, unchanged, unchanged), denominators, 180);
-
-    assertThat(job.flushStrategyDenominators()).as("first flush writes it").isEqualTo(1);
-    assertThat(job.flushStrategyDenominators())
-        .as("second flush sends NOTHING — the value did not move")
-        .isZero();
-    assertThat(storedCount(session, boot, slug, Outcome.FIRED))
-        .as("skipping the write did not cost the row")
-        .isEqualTo(11L);
+      assertThat(job.flushStrategyDenominators()).as("first flush writes it").isEqualTo(1);
+      assertThat(job.flushStrategyDenominators())
+          .as("second flush sends NOTHING — the value is already durable")
+          .isZero();
+      assertThat(storedCount(session, boot, slug, Outcome.FIRED))
+          .as("skipping the write did not cost the row")
+          .isEqualTo(11L);
+    }
   }
 
   @Test
   void onlyTheKeysThatMovedAreSent() {
     LocalDate session = istToday();
-    UUID boot = UUID.randomUUID();
     String slug = uniqueSlug("scalp-partial");
-    Map<StrategyEvalKey, Long> first =
-        counts(
-            key(session, slug, Outcome.FIRED), 1L,
-            key(session, slug, Outcome.CHART_GATE_FAILED), 50L);
-    Map<StrategyEvalKey, Long> second =
-        counts(
-            key(session, slug, Outcome.FIRED), 1L, // unchanged
-            key(session, slug, Outcome.CHART_GATE_FAILED), 63L); // moved
+    try (SignalEngineStrategyEvalCountTest.Fixture fixture =
+        SignalEngineStrategyEvalCountTest.Fixture.create()) {
+      SignalEngine engine = fixture.engine();
+      UUID boot = engine.strategyEvalSnapshot().epoch();
+      SignalEngine.Loaded strategy = SignalEngineStrategyEvalCountTest.strategy(slug);
+      SignalEvalOutcomeRollupJob job = job(engine, denominators, 180);
 
-    SignalEvalOutcomeRollupJob job = job(engineAt(boot, first, second), denominators, 180);
-    assertThat(job.flushStrategyDenominators()).isEqualTo(2);
+      count(engine, strategy, session, Outcome.FIRED, 1);
+      count(engine, strategy, session, Outcome.CHART_GATE_FAILED, 50);
+      assertThat(job.flushStrategyDenominators()).isEqualTo(2);
 
-    assertThat(job.flushStrategyDenominators()).as("one row, not two").isEqualTo(1);
-    assertThat(storedCount(session, boot, slug, Outcome.CHART_GATE_FAILED)).isEqualTo(63L);
-    assertThat(storedCount(session, boot, slug, Outcome.FIRED)).isEqualTo(1L);
+      count(engine, strategy, session, Outcome.CHART_GATE_FAILED, 13); // only this one moves
+      assertThat(job.flushStrategyDenominators()).as("one row, not two").isEqualTo(1);
+
+      assertThat(storedCount(session, boot, slug, Outcome.CHART_GATE_FAILED)).isEqualTo(63L);
+      assertThat(storedCount(session, boot, slug, Outcome.FIRED)).isEqualTo(1L);
+    }
   }
 
   @Test
-  void aFailedWriteDoesNotAdvanceTheWriteAvoidanceCache() {
-    // THE HAZARD the filter could introduce: if the cache advanced on a FAILED write, the skipped
-    // key would never be re-sent and the row would be permanently missing. It is advanced only
-    // after upsertCounts returns normally, so a failure leaves it behind and the next flush
-    // re-sends the full absolute total.
+  void aFailedWriteDoesNotRecordAnAcknowledgement() {
+    // THE HAZARD the filter could introduce: if the acknowledgement were recorded on a FAILED write,
+    // the key would be filtered out of the retry AND become evictable, and the row would be
+    // permanently missing. It is recorded only after upsertCounts returns normally.
     LocalDate session = istToday();
-    UUID boot = UUID.randomUUID();
-    String slug = uniqueSlug("scalp-cache-retry");
-    Map<StrategyEvalKey, Long> value = counts(key(session, slug, Outcome.FIRED), 8L);
-
+    String slug = uniqueSlug("scalp-ack-retry");
     StrategyEvalDenominatorRepository flaky = spy(unproxiedDenominators());
     doThrow(new RuntimeException("write failed"))
         .doCallRealMethod()
         .when(flaky)
         .upsertCounts(any(), any());
-    // The SAME job object across both flushes — had the cache advanced on the failure, it would now
-    // suppress the retry and the row would be permanently missing.
-    SignalEvalOutcomeRollupJob job = job(engineAt(boot, value, value), flaky, 180);
+    try (SignalEngineStrategyEvalCountTest.Fixture fixture =
+        SignalEngineStrategyEvalCountTest.Fixture.create()) {
+      SignalEngine engine = fixture.engine();
+      SignalEvalOutcomeRollupJob job = job(engine, flaky, 180);
+      count(engine, SignalEngineStrategyEvalCountTest.strategy(slug), session, Outcome.FIRED, 8);
 
-    assertThat(job.flushStrategyDenominators()).as("fail-soft: reported as 0").isZero();
-    assertThat(denominatorFor(session, slug)).as("nothing committed").isZero();
+      assertThat(job.flushStrategyDenominators()).as("fail-soft: reported as 0").isZero();
+      assertThat(denominatorFor(session, slug)).as("nothing committed").isZero();
+      assertThat(engine.acknowledgedDenominatorsForTest())
+          .as("a failed write acknowledges nothing")
+          .isEmpty();
 
-    assertThat(job.flushStrategyDenominators())
-        .as("the retry is NOT filtered away — the key is still considered unwritten")
-        .isEqualTo(1);
-    assertThat(denominatorFor(session, slug))
-        .as("the next flush re-sends the whole absolute total")
-        .isEqualTo(8L);
+      assertThat(job.flushStrategyDenominators())
+          .as("the retry is NOT filtered away — the key is still unacknowledged")
+          .isEqualTo(1);
+      assertThat(denominatorFor(session, slug))
+          .as("the next flush re-sends the whole absolute total")
+          .isEqualTo(8L);
+    }
+  }
+
+  @Test
+  void aSessionWhoseWritesAllFailedSurvivesLaterSessionBoundaries() {
+    // ROUND-2 CRITICAL. Eviction used to fire on the session boundary ALONE, so a session whose
+    // denominator writes had all failed was dropped from memory the moment the eval thread reached a
+    // third session — and nothing could ever resend it, because the source of truth was gone. The row
+    // stayed absent forever (or, if partially written, too small forever), silently contradicting the
+    // "a failed write loses nothing" guarantee. Eviction now also requires the live total to match a
+    // CONFIRMED durable write, so an unwritten session is carried across as many boundaries as it
+    // takes.
+    LocalDate sessionA = istToday().minusDays(2);
+    String slug = uniqueSlug("scalp-unwritten-session");
+    StrategyEvalDenominatorRepository flaky = spy(unproxiedDenominators());
+    doThrow(new RuntimeException("write failed"))
+        .doCallRealMethod()
+        .when(flaky)
+        .upsertCounts(any(), any());
+    try (SignalEngineStrategyEvalCountTest.Fixture fixture =
+        SignalEngineStrategyEvalCountTest.Fixture.create()) {
+      SignalEngine engine = fixture.engine();
+      UUID boot = engine.strategyEvalSnapshot().epoch();
+      SignalEngine.Loaded strategy = SignalEngineStrategyEvalCountTest.strategy(slug);
+
+      count(engine, strategy, sessionA, Outcome.FIRED, 5);
+      assertThat(job(engine, flaky, 180).flushStrategyDenominators())
+          .as("session A's only flush FAILS")
+          .isZero();
+
+      // Two session boundaries pass — A is now well outside the two-session retention window.
+      count(engine, strategy, sessionA.plusDays(1), Outcome.FIRED, 1);
+      count(engine, strategy, sessionA.plusDays(2), Outcome.FIRED, 1);
+      assertThat(engine.strategyEvalSnapshot().counts())
+          .as("A is RETAINED despite being out of window, because it was never written")
+          .containsKey(new StrategyEvalKey(sessionA, slug, Outcome.FIRED));
+
+      job(engine, denominators, 180).flushStrategyDenominators();
+
+      assertThat(storedCount(sessionA, boot, slug, Outcome.FIRED))
+          .as("session A's 5 evaluations land — they were carried, not orphaned")
+          .isEqualTo(5L);
+      assertThat(denominatorFor(sessionA.plusDays(2), slug)).isEqualTo(1L);
+    }
+  }
+
+  @Test
+  void anAcknowledgedOutOfWindowSessionIsStillEvicted() {
+    // The other side of the same rule: once a session's total IS durable, it must actually be
+    // dropped, or the bound the retention exists for is gone.
+    LocalDate sessionA = istToday().minusDays(2);
+    String slug = uniqueSlug("scalp-acked-evict");
+    try (SignalEngineStrategyEvalCountTest.Fixture fixture =
+        SignalEngineStrategyEvalCountTest.Fixture.create()) {
+      SignalEngine engine = fixture.engine();
+      SignalEngine.Loaded strategy = SignalEngineStrategyEvalCountTest.strategy(slug);
+      SignalEvalOutcomeRollupJob job = job(engine, denominators, 180);
+
+      count(engine, strategy, sessionA, Outcome.FIRED, 5);
+      job.flushStrategyDenominators(); // acknowledged at 5
+
+      count(engine, strategy, sessionA.plusDays(1), Outcome.FIRED, 1);
+      count(engine, strategy, sessionA.plusDays(2), Outcome.FIRED, 1);
+
+      assertThat(engine.strategyEvalSnapshot().counts())
+          .as("durable + out of window ⇒ evicted, so the map stays bounded")
+          .doesNotContainKey(new StrategyEvalKey(sessionA, slug, Outcome.FIRED));
+      assertThat(engine.acknowledgedDenominatorsForTest())
+          .as("its acknowledgement is dropped with it — the two maps stay in step")
+          .doesNotContainKey(new StrategyEvalKey(sessionA, slug, Outcome.FIRED));
+    }
   }
 
   @Test

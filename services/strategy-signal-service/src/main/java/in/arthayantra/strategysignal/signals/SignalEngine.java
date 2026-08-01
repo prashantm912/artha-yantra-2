@@ -566,6 +566,16 @@ public class SignalEngine {
   // read a stale date.
   private volatile LocalDate newestCountedSession;
   private volatile LocalDate previousCountedSession;
+  // The value most recently CONFIRMED durable per V053 key, written by SignalEvalOutcomeRollupJob
+  // ONLY after a successful upsert. It is what makes eviction safe: an out-of-window key is retained
+  // until its live total equals its acknowledgement, so a session whose writes all FAILED can never
+  // be dropped. Round-2 review caught the hole this closes — eviction used to fire on the session
+  // boundary alone, which silently orphaned an unwritten (or partially written) session forever: no
+  // later snapshot could resend it because the source of truth was gone. Also serves as the
+  // write-avoidance filter (see pendingDenominatorWrites), so there is ONE record of "what is
+  // durable" rather than two that can disagree.
+  private final ConcurrentHashMap<StrategyEvalKey, Long> acknowledgedDenominators =
+      new ConcurrentHashMap<>();
   // Identifies THIS generation of the counters above. Born with them and never reassigned, so a
   // restart necessarily yields both zeroed counters and a fresh epoch — the invariant that lets
   // SignalEvalOutcomeRollupJob keep its delta checkpoint in the DB instead of in memory (V045).
@@ -1332,6 +1342,52 @@ public class SignalEngine {
   }
 
   /**
+   * The counters NOT yet durably persisted at their current value — exactly what a flush must send,
+   * and the only method {@link SignalEvalOutcomeRollupJob} uses to build its statement.
+   *
+   * <p><b>Why the filter lives here rather than in the job.</b> "What is durable" is now load-bearing
+   * twice over: it decides what to write, AND it decides when a key may be evicted. Keeping the two
+   * off one map would let them disagree, which is precisely how round-2 review's Critical arose — a
+   * job-side write cache said "already written" while the engine dropped the key anyway, and the
+   * count was lost with nothing able to resend it.
+   *
+   * <p>Writing all retained keys every tick would be ~124k row-upserts/day against ≤ 441 distinct
+   * rows (mostly rewriting the previous session unchanged, 140 times). In steady state this returns
+   * roughly one key per loaded strategy per tick.
+   */
+  StrategyEvalSnapshot pendingDenominatorWrites() {
+    Map<StrategyEvalKey, Long> pending = new LinkedHashMap<>();
+    strategyEvalCounts.forEach(
+        (key, adder) -> {
+          long total = adder.sum();
+          Long durable = acknowledgedDenominators.get(key);
+          if (durable == null || durable != total) {
+            pending.put(key, total);
+          }
+        });
+    return new StrategyEvalSnapshot(counterEpoch, pending);
+  }
+
+  /**
+   * Records that these exact per-key values are now durable. Called by {@link
+   * SignalEvalOutcomeRollupJob} ONLY after {@code upsertCounts} returns normally — never
+   * speculatively, because an acknowledgement is what permits eviction.
+   *
+   * <p>Safe against the eval thread racing it: if a counter advanced between the snapshot and this
+   * call, the acknowledged value is simply behind the live total, so the key stays pending (it is
+   * re-sent, harmlessly, since the write is an absolute REPLACE) and stays un-evictable. The failure
+   * direction is always "write again", never "drop".
+   */
+  void acknowledgeDenominatorWrites(Map<StrategyEvalKey, Long> written) {
+    acknowledgedDenominators.putAll(written);
+  }
+
+  /** Test seam: what the engine currently believes is durable. */
+  Map<StrategyEvalKey, Long> acknowledgedDenominatorsForTest() {
+    return Map.copyOf(acknowledgedDenominators);
+  }
+
+  /**
    * The two session dates whose per-strategy counters are retained, for tests and for the field
    * comments below. {@code previous} is null until a second session has been counted.
    */
@@ -1609,14 +1665,52 @@ public class SignalEngine {
     if (newestCountedSession == null || session.isAfter(newestCountedSession)) {
       previousCountedSession = newestCountedSession; // null on the first bar of a boot
       newestCountedSession = session;
-      RetainedSessions retained = retainedSessions();
-      strategyEvalCounts.keySet().removeIf(key -> !retained.retains(key.sessionDate()));
+      evictDurableOutOfWindowCounters(retainedSessions());
     }
     strategyEvalCounts
         .computeIfAbsent(
             new StrategyEvalKey(session, strategy.slug(), outcome),
             key -> new java.util.concurrent.atomic.LongAdder())
         .increment();
+  }
+
+  /**
+   * Drops per-strategy counters that are BOTH outside the two-session retention window AND durably
+   * persisted at their current value. Runs on the eval thread, from {@link #countEvaluation} only.
+   *
+   * <p><b>The acknowledgement condition is the whole point.</b> An earlier revision evicted on the
+   * session boundary ALONE, and round-2 cross-vendor review showed that silently destroys data: if
+   * denominator writes failed throughout a session — or a late count landed with no successful flush
+   * after it — the adder was removed anyway, and no future snapshot could resend it because the
+   * source of truth was gone. The damage was invisible in both directions: a partially written row
+   * stayed too small forever, an unwritten one stayed absent forever, and both contradicted the
+   * "a failed write loses nothing" guarantee this design is sold on. Requiring
+   * {@code sum() == acknowledged} means an unwritten session is simply carried until it lands.
+   *
+   * <p>Eviction stays here rather than moving back to the flush thread: the prune must remain on the
+   * one thread that can recreate a key, which is what closed round-1's Critical. Both conditions are
+   * now checked in the same place.
+   *
+   * <p><b>Bound.</b> Normally two sessions (≤ 2 × 63 slugs × 7 outcomes = 882 keys). While writes are
+   * FAILING it grows by ≤ 441 keys/session (~35 KB) — deliberately, because the alternative is losing
+   * them — and every failed flush raises an ops alert, so it is neither silent nor open-ended in
+   * practice. The acknowledgement entry is removed with its counter, so the two maps stay in step.
+   */
+  private void evictDurableOutOfWindowCounters(RetainedSessions retained) {
+    strategyEvalCounts
+        .entrySet()
+        .removeIf(
+            entry -> {
+              if (retained.retains(entry.getKey().sessionDate())) {
+                return false;
+              }
+              Long durable = acknowledgedDenominators.get(entry.getKey());
+              if (durable == null || durable != entry.getValue().sum()) {
+                return false; // never written, or written before later counts arrived — keep it
+              }
+              acknowledgedDenominators.remove(entry.getKey());
+              return true;
+            });
   }
 
   /**

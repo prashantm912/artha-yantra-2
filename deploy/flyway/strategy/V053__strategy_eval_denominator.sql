@@ -73,6 +73,21 @@
 -- only once that thread has counted a bar from a strictly newer session, so a straggler for the session
 -- that just ended still finds its key alive.
 --
+-- AND EVICTION REQUIRES A DURABLE ACKNOWLEDGEMENT, NOT JUST A SESSION BOUNDARY. An out-of-window key is
+-- retained until its live total equals the value the flush CONFIRMED written (SignalEngine
+-- .acknowledgeDenominatorWrites, recorded only after upsertCounts returns normally). Evicting on the
+-- boundary alone was a second, separate defect -- caught in round 2 of cross-vendor review -- and it
+-- destroyed data silently in both directions: if writes failed throughout a session, or a late count
+-- landed with no successful flush after it, the adder was dropped anyway and NO later snapshot could
+-- resend it, so a partially written row stayed too small forever and an unwritten one stayed absent
+-- forever. That directly contradicted the "a failed write loses nothing" guarantee below. It is also a
+-- lesson about composition: the eval-thread prune and the send-only-what-changed filter were each
+-- correct in isolation, and the hole appeared exactly where they met -- the filter's "any failure
+-- re-sends" premise depends on the key still being retained. ONE record of what is durable, owned by
+-- the engine and consulted by both, is what closes it. Cost: while writes are failing the map grows by
+-- <= 441 keys/session (~35 KB), deliberately, because the alternative is losing them -- and every
+-- failed flush raises an ops alert, so the growth is neither silent nor open-ended in practice.
+--
 -- WHAT IS AND IS NOT GUARANTEED:
 --   GUARANTEED  -- no double count, on any failure path, with no checkpoint and no coordination.
 --   GUARANTEED  -- a restart mid-session never corrupts the day: the boots are separate rows and the
@@ -85,10 +100,14 @@
 --   NOT GUARANTEED -- evaluations since the last successful flush are lost if the process is HARD
 --                  killed (they exist only in JVM memory, exactly as for V045). A graceful stop
 --                  flushes via @PreDestroy.
+--   GUARANTEED  -- a session whose writes ALL failed is never dropped: eviction needs the live total
+--                  to match a confirmed durable write, so the counters are carried until they land,
+--                  however many session boundaries pass in between.
 --   NOT GUARANTEED -- a bar evaluated after the eval thread has advanced through TWO later sessions
---                  falls outside the retained window and would restart that key from zero. Reaching
---                  it needs the FIFO to deliver bars out of session order across two days AND the
---                  stack to have survived a multi-session eval stall that every canary pages for.
+--                  AND that key's earlier total was already durably written falls outside the
+--                  retained window and would restart that key from zero. Reaching it needs the FIFO
+--                  to deliver bars out of session order across two days AND the stack to have
+--                  survived a multi-session eval stall that every canary pages for.
 --   NOT GUARANTEED -- the ABSENCE of a row does not prove the strategy evaluated nothing; it proves
 --                  no (date, boot, slug, outcome) combination was ever observed. Process liveness is
 --                  V045's job, and it still answers it — this table deliberately does not write

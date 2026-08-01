@@ -112,16 +112,6 @@ public class SignalEvalOutcomeRollupJob {
    */
   static final int BUCKET_SECONDS = 180;
 
-  /**
-   * The last value successfully written per V053 key — a write-avoidance cache, never a correctness
-   * dependency. See {@link #flushStrategyDenominators()} for why it cannot cost a count: it is
-   * advanced only after a successful upsert, so any failure (or a restart, which empties it) makes
-   * the next flush re-send. Concurrent because {@code @PreDestroy} may run it off the scheduler
-   * thread; bounded because it is intersected with the engine's two-session key set every flush.
-   */
-  private final java.util.Map<SignalEngine.StrategyEvalKey, Long> lastWrittenDenominators =
-      new java.util.concurrent.ConcurrentHashMap<>();
-
   private final SignalEngine engine;
   private final SignalEvalOutcomeRepository repository;
   private final StrategyEvalDenominatorRepository denominators;
@@ -258,24 +248,28 @@ public class SignalEvalOutcomeRollupJob {
    * job, done on the EVAL thread against the newest session that thread has actually counted — the
    * one place where the prune and the recreate cannot race. See that method's javadoc.
    *
-   * <p>The map holds at most TWO sessions (≤ 2 × 63 slugs × 7 outcomes = 882 keys). Writing all of
-   * them every tick would be ~124k row-upserts/day against ≤ 441 distinct live rows — mostly
-   * rewriting yesterday's unchanged rows 140 times — so this flush sends only the keys whose value
-   * CHANGED since the last successful write ({@link #lastWrittenDenominators}). In steady state that
-   * is roughly one key per loaded strategy per tick (each evaluates ~1 bar per 3m primary bar), i.e.
-   * tens of rows rather than hundreds, and it keeps dead-tuple churn off a live trading database.
+   * <p><b>Only UNACKNOWLEDGED keys are sent.</b> Writing all retained keys every tick would be ~124k
+   * row-upserts/day against ≤ 441 distinct live rows — mostly rewriting the previous session
+   * unchanged, 140 times. {@code SignalEngine.pendingDenominatorWrites()} returns just the keys whose
+   * live total differs from what is durable, which in steady state is roughly one key per loaded
+   * strategy per tick, and keeps dead-tuple churn off a live trading database.
    *
-   * <p><b>The filter cannot cost correctness, by construction.</b> It is a write-avoidance cache over
-   * an idempotent absolute-REPLACE write, and it is advanced ONLY after {@code upsertCounts} returns
-   * normally. A throw, a lost acknowledgement, or a whole JVM restart therefore leaves it behind or
-   * empty, and the next flush re-sends — it can only ever cause MORE writes than necessary, never
-   * fewer than correctness requires. Nothing else writes this table, and the prune cannot delete a
-   * row the filter believes is current: the engine retains two sessions while the prune deletes
-   * strictly before {@code today − retentionDays}, and {@code retentionDays ≤ 0} is refused, so even
-   * a horizon of 1 keeps both retained sessions.
+   * <p><b>The acknowledgement is recorded ONLY after the write commits, and it is load-bearing
+   * twice.</b> It suppresses the next write AND it is what permits the engine to evict an
+   * out-of-window counter. Round-2 review found the hole in the earlier split design: a job-side
+   * write cache decided what to send while the engine evicted on the session boundary alone, so a
+   * session whose writes had all failed was dropped with nothing able to resend it. One record of
+   * "what is durable", owned by the engine, removes the possibility of the two disagreeing. A throw,
+   * a lost acknowledgement, or a JVM restart therefore leaves the key pending AND un-evictable, and
+   * the next flush re-sends its full absolute total — the failure direction is always "write again",
+   * never "drop".
    *
-   * <p>Yesterday's rows are still rewritten whenever they change, which is what lets a bar closing
-   * after the 15:57 tick reach its own {@code session_date} — the date travels in the key.
+   * <p>The prune cannot delete a row the acknowledgement believes current: the engine retains two
+   * sessions while the prune deletes strictly before {@code today − retentionDays}, and
+   * {@code retentionDays ≤ 0} is refused, so even a horizon of 1 keeps both retained sessions.
+   *
+   * <p>The previous session's rows are still rewritten whenever they change, which is what lets a bar
+   * closing after the 15:57 tick reach its own {@code session_date} — the date travels in the key.
    *
    * <p>Fail-soft in its own right: a failure here is logged and ops-alerted but never propagates, and
    * — deliberately called AFTER {@link #rollup()} — it can neither delay nor fail the V045 record.
@@ -284,16 +278,16 @@ public class SignalEvalOutcomeRollupJob {
    */
   int flushStrategyDenominators() {
     try {
-      SignalEngine.StrategyEvalSnapshot snapshot = engine.strategyEvalSnapshot();
-      Map<SignalEngine.StrategyEvalKey, Long> changed = changedSince(snapshot.counts());
-      int rows = changed.isEmpty() ? 0 : denominators.upsertCounts(snapshot.epoch(), changed);
-      // Advance the cache ONLY after a successful write, and drop keys the engine no longer holds so
-      // it stays bounded by the engine's own two-session window.
-      lastWrittenDenominators.keySet().retainAll(snapshot.counts().keySet());
-      lastWrittenDenominators.putAll(changed);
+      SignalEngine.StrategyEvalSnapshot pending = engine.pendingDenominatorWrites();
+      if (pending.counts().isEmpty()) {
+        return 0;
+      }
+      int rows = denominators.upsertCounts(pending.epoch(), pending.counts());
+      // ONLY after the write commits. The acknowledgement is what later PERMITS eviction, so
+      // recording it speculatively would reintroduce the exact hole round-2 review found.
+      engine.acknowledgeDenominatorWrites(pending.counts());
       log.debug(
-          "strategy_eval_denominator flush: boot={} rows={} of {} retained key(s)",
-          snapshot.epoch(), rows, snapshot.counts().size());
+          "strategy_eval_denominator flush: boot={} rows={}", pending.epoch(), rows);
       return rows;
     } catch (RuntimeException e) {
       // Nothing to compensate: the adders are untouched by a failed write, so the next flush writes
@@ -307,27 +301,6 @@ public class SignalEvalOutcomeRollupJob {
               + e.getMessage());
       return 0;
     }
-  }
-
-  /**
-   * The subset of {@code counts} whose value differs from the last successfully written one — new
-   * keys included, since {@code null != value}.
-   *
-   * <p>Package-visible and dependent only on the cache field so the filter's semantics are unit
-   * testable. It never REMOVES a key from the write: a key present in {@code counts} with an
-   * unchanged value is already durable at exactly that value, because the cache is advanced only
-   * after a successful absolute-REPLACE upsert of that same number.
-   */
-  Map<SignalEngine.StrategyEvalKey, Long> changedSince(
-      Map<SignalEngine.StrategyEvalKey, Long> counts) {
-    Map<SignalEngine.StrategyEvalKey, Long> changed = new LinkedHashMap<>();
-    counts.forEach(
-        (key, count) -> {
-          if (!count.equals(lastWrittenDenominators.get(key))) {
-            changed.put(key, count);
-          }
-        });
-    return changed;
   }
 
   /**

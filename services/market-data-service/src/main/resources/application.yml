@@ -113,6 +113,11 @@ artha:
       base-url: ${ARTHA_UPSTOX_ANALYTICS_BASE_URL:https://api.upstox.com}
       token-file: ${ARTHA_UPSTOX_ANALYTICS_TOKEN_FILE:/run/secrets/upstox_analytics_token}
     canary-enabled: ${ARTHA_UPSTOX_CANARY_ENABLED:false}   # U7 daily contract drift probe (ntfy on drift)
+    # Connecting-Dots Dow factor off the ALREADY-LIVE Upstox world-indices feed (GLOBAL_INDEX|^DJI).
+    # HOLD-tier: arming makes the Dow dot real, which CHANGES WHICH SIGNALS FIRE (today it contributes
+    # Neutral to every composite) — owner decision after forward measurement. Requires analytics.enabled;
+    # mutually exclusive with artha.openalgo.global-quotes-enabled (both on ⇒ context refuses to start).
+    global-quotes-enabled: ${ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED:false}
 
 # B-3: the per-endpoint-family resilience stack — exactly one resilience
 # dependency. Limiter saturation queues up to 5s (virtual threads), then 429

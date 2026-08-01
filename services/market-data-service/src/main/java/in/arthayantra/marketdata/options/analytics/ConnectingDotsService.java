@@ -36,9 +36,9 @@ import org.springframework.stereotype.Service;
  * RSI / Volume / OI-Interpretation (the candle's {@code oi}); the INDEX daily candle drives Daily
  * Trend; INDIA VIX candles drive Vix; the option snapshots ({@link OptionsSnapshotReader} +
  * {@link ActiveStrikeService}) drive Active-Strike OI and Active-Strike IV. Dow Jones rides the
- * dedicated OpenAlgo global-quote feed ({@link GlobalQuoteSource}) — live LTP-direction, Neutral in
- * history mode or when the feed is unconfigured (the study confirms {@code inDow≈0} during Indian
- * hours anyway).
+ * dedicated global-quote feed ({@link GlobalQuoteSource}, OpenAlgo- or Upstox-backed) — live
+ * LTP-direction, Neutral in history mode or when the feed is unconfigured (the study confirms
+ * {@code inDow≈0} during Indian hours anyway).
  *
  * <p>The exact oipulse per-factor raw→enum cutoffs and the composite WEIGHTS are server-side (unknown);
  * ours are a documented approximation (the composite uses the empirically-fitted net→trend mapping from
@@ -308,12 +308,17 @@ public class ConnectingDotsService {
 
   /**
    * Dow Jones factor (plan §3): a single global cue applied to every row of the session. Live mode
-   * (the session IS today IST) → the OpenAlgo {@code DOWJONES@GLOBAL_INDEX} LTP vs its prev close
-   * (globals are LTP-only, so direction is from the OHLC close slot). History mode (a past date) →
-   * Neutral, since there is no global historical series. Best-effort: the global feed bean is absent
-   * unless {@code artha.openalgo.global-quotes-enabled=true}, and any fetch failure → Neutral.
+   * (the session IS today IST) → the {@code DOWJONES@GLOBAL_INDEX} LTP vs its prev close (globals are
+   * LTP-only, so direction is from the OHLC close slot). History mode (a past date) → Neutral, since
+   * there is no global historical series. Best-effort: the global feed bean is absent unless one of
+   * {@code artha.openalgo.global-quotes-enabled} / {@code artha.upstox.global-quotes-enabled} is on,
+   * and any fetch failure → Neutral (counted as {@code ay_global_quote_degraded_total}, never silent).
+   *
+   * <p>Package-private, not private, purely as a test seam: it is the ONLY place the global feed
+   * reaches a factor code, and the live path cannot be reached from the session-scoped {@code matrix}
+   * without a whole candle spine. Arithmetic and callers are unchanged.
    */
-  private int dowFactor(LocalDate sess) {
+  int dowFactor(LocalDate sess) {
     LocalDate today = OffsetDateTime.now(clock).withOffsetSameInstant(Ist.OFFSET).toLocalDate();
     if (!sess.equals(today)) {
       return NEUTRAL;

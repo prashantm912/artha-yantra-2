@@ -2,6 +2,10 @@
 
 **Written 2026-08-01. MEASUREMENT ONLY — no production code changed, nothing armed, no dot redefined.**
 
+> **§12 addendum (same day)** measures the §9 change/deviation operand (**R2**) that this document
+> flagged as unmeasured. It is a **second DO-NOT-BUILD**, and it also **red-proofs the kill criteria
+> used here** — a pure random walk passes them. Read §12 before proposing any successor operand.
+
 ---
 
 ## Verdict
@@ -430,3 +434,264 @@ All queries above are READ-ONLY. No writes, no DDL, no live-DB state was changed
    quarantined in the spot-checked day, and I did not verify the count across the whole range, so the
    filter is untested rather than known-inert. It can only have removed data flagged bad, so it
    cannot manufacture the observed constancy.
+
+---
+
+# §12 ADDENDUM (2026-08-01) — R2, the residual operand from §9
+
+**MEASUREMENT ONLY. Same read-only harness, same sample, same live `artha`. No code, nothing armed.**
+
+## 12.0 Verdict
+
+**DO NOT BUILD.** R2 **passes all three pre-committed kill criteria** — and that fact carries no
+information, because **a pure random walk, detrended identically, passes them too** (§12.4 red-proof:
+0/19 zero-flip sessions, max/p50 6.3x, CE/PE balance 0.85–0.98). The only test with discriminating
+power is the forward-outcome test, and under a **block-preserving null** the directional edge is
+**not separable from chance at the thresholds where the dot would actually arm**: p75 gives
+**p = 0.056 (NIFTY 50)** and **p = 0.082 (SENSEX)**, one-sided, uncorrected.
+
+Supporting, each independently sufficient to stop a build:
+
+- **Session-level sign robustness fails on SENSEX: the CE−PE spread is positive on 8 of 14 sessions
+  (57%)** — a coin flip — with a per-session range of [−10.3, +22.5] bps. NIFTY is 12 of 15 (80%),
+  range [−17.0, +25.0]. This is the G10 lesson (a sign that flipped on 5 of 265 legs) repeating.
+- **Effect size is immaterial through this dot.** At p75 the spread is **+4.3 NIFTY index points over
+  30 minutes**, delivered through a dot worth 0.8 of an 18.80 denominator (**4.3% of the composite**),
+  on a gate where G13 measured the composite as the binding rail on **0.9%** of blocks.
+- **The warm-up costs the open.** A 15-bar trailing baseline nulls the operand for the first ~30
+  minutes of every session — null rate rises from 3–5% (R1) to **11.95% / 11.02%** — and the open is
+  prime scalping time.
+
+Unlike R1, **R2 is not structurally dead** — it is *indistinguishable from chance* at armable
+thresholds, which is a different and more dangerous failure: it looks alive on every distributional
+check. Against the standing prior that every measured loosening of the scalper entry gate has lost
+money (T1/T7/G13/G10), an operand that cannot be shown to beat a coin is a loosening with no
+demonstrated edge.
+
+**I endorse the coordinator's pre-stated conclusion for G13:** `iv_pair` is unfixable as a per-bar
+dot. It stays dead-but-symmetric, withholding support from both sides equally, which leans the gate
+slightly stricter — the historically safe direction.
+
+## 12.1 Windows — pre-declared before any result was inspected
+
+Cadence is **2.0 min/bar** (computed: median inter-bar gap, 187 bars on 2026-07-30).
+
+| id | definition | justification |
+|---|---|---|
+| **B1 `R2-TRAIL`** | `R1(t) − median(R1[t−15 … t−1])`, trailing, **excluding** the current bar | 15 bars = ~30 min = the **G11 `time_stop` horizon** the scalper actually trades. Chosen from the trade horizon, not from a result. Exclusive so a bar cannot contaminate its own baseline. |
+| **B2 `R2-OPEN`** | `R1(t) − median(first 5 valid bars of the session)` | The session-open anchor named in the brief. |
+
+Both are reported in full below. Neither was tuned; no other window was tried.
+
+## 12.2 Distribution (computed)
+
+`R2-TRAIL`:
+
+| underlying / scope | n | p10 | p50 | p90 | max\|x\| | p50\|x\| | p90\|x\| | max/p50 | neg% |
+|---|---|---|---|---|---|---|---|---|---|
+| NIFTY 50 / non-expiry | 2831 | −0.00092 | +0.00002 | +0.00099 | 0.00762 | 0.00039 | 0.00145 | 19.38x | 48.1% |
+| NIFTY 50 / expiry | 1176 | −0.01932 | +0.00052 | +0.02104 | 0.43377 | 0.00752 | 0.03220 | 57.70x | 48.6% |
+| SENSEX / non-expiry | 3295 | −0.00071 | +0.00001 | +0.00075 | 0.00743 | 0.00032 | 0.00106 | 22.85x | 49.1% |
+| SENSEX / expiry | 661 | −0.01252 | −0.00017 | +0.01476 | 0.18382 | 0.00495 | 0.02019 | 37.12x | 51.6% |
+
+`R2-OPEN`:
+
+| underlying / scope | n | p10 | p50 | p90 | max\|x\| | p50\|x\| | p90\|x\| | max/p50 | neg% |
+|---|---|---|---|---|---|---|---|---|---|
+| NIFTY 50 / non-expiry | 3021 | −0.00201 | +0.00009 | +0.00245 | 0.01155 | 0.00097 | 0.00312 | 11.88x | 46.4% |
+| NIFTY 50 / expiry | 1246 | −0.02170 | +0.00241 | +0.03007 | 0.46156 | 0.01319 | 0.03799 | 34.99x | 45.1% |
+| SENSEX / non-expiry | 3515 | −0.00140 | −0.00005 | +0.00215 | 0.00784 | 0.00079 | 0.00251 | 9.96x | 51.3% |
+| SENSEX / expiry | 701 | −0.01587 | −0.00205 | +0.00949 | 0.18328 | 0.00542 | 0.02028 | 33.80x | 60.9% |
+
+**Null rate incl. warm-up:** `R2-TRAIL` 11.95% (NIFTY) / 11.02% (SENSEX); `R2-OPEN` 6.24% / 5.17%.
+Against R1's 3.38% / 2.25% — the trailing baseline costs ~8 points of coverage, all of it at the open.
+
+## 12.3 The three pre-committed criteria — all PASS
+
+**KILL#1, near-constant within a session — PASS.**
+
+| operand | underlying | non-expiry sessions | zero-flip sessions | median flips/session | pos% (min / median / max) |
+|---|---|---|---|---|---|
+| R2-TRAIL | NIFTY 50 | 19 | **0** | 42.9 | 42 / 52 / 79 |
+| R2-TRAIL | SENSEX | 22 | **0** | 45.6 | 33 / 52 / 79 |
+| R2-OPEN | NIFTY 50 | 19 | **0** | 18.7 | 2 / 57 / 97 |
+| R2-OPEN | SENSEX | 22 | 1 | 19.5 | 6 / 49 / 100 |
+
+**KILL#2, a threshold where BOTH sides are alive — PASS**, and this is the criterion R1 died on.
+`R2-TRAIL`, non-expiry (`balance` = min(CE,PE)/max(CE,PE)):
+
+| G | NIFTY CE | NIFTY PE | balance | SENSEX CE | SENSEX PE | balance |
+|---|---|---|---|---|---|---|
+| p50 | 26.4% | 23.6% | 0.90 | 25.7% | 24.3% | 0.94 |
+| p70 | 15.3% | 14.8% | **0.97** | 15.4% | 14.6% | **0.95** |
+| p75 | 13.0% | 12.0% | 0.93 | 12.9% | 12.1% | 0.93 |
+| p85 | 7.8% | 7.2% | 0.91 | 7.7% | 7.3% | 0.94 |
+| p90 | 5.3% | 4.8% | 0.91 | 5.5% | 4.5% | 0.81 |
+
+(`R2-OPEN` is weaker and degrades with threshold — NIFTY balance 0.73 → 0.42 from p50 to p90, SENSEX
+0.97 → 0.20, i.e. one-sided by p90, because a fixed open anchor re-inherits the day's drift.)
+
+**KILL#3, discrimination confined to expiry / final minutes — PASS.** `R2-TRAIL` non-expiry p50|x| is
+0.00039 (NIFTY) / 0.00032 (SENSEX) against 0.00061 / 0.00063 for non-expiry bars after 15:00 — only
+~1.6–2.0x, so the operand is not a closing-bell artifact. The five largest |R2| bars remain expiry-day
+final-minutes (07-07 15:23/15:25/15:27, 06-30 15:24/15:26 and the SENSEX equivalents) — the same
+near-zero-time-value degeneracy §4.1 flagged — but the non-expiry body stands on its own.
+
+**Root threshold split — NOT disqualifying this time.** `R2-TRAIL` p75|x| is 0.00080 (NIFTY) vs
+0.00063 (SENSEX) = **1.26x** (`R2-OPEN`: 1.35x), against R1's 1.8x. A single fleet-wide knob is far
+more defensible for a residual than for a level. Recorded as asked; it is not what kills R2.
+
+## 12.4 Red-proof — the criteria cannot discriminate a residual
+
+A synthetic random walk sized to the observed session (187 bars, `sd(Δ) = 0.00048`, starting at the
+observed −0.005 put-skew level), detrended with the identical 15-bar trailing median, over 19
+synthetic sessions:
+
+| criterion | random walk | verdict |
+|---|---|---|
+| zero-flip sessions | **0 / 19** | passes KILL#1 |
+| median flips/session | 26.7 | passes KILL#1 |
+| max/p50(\|x\|) | **6.3x** | passes (line is ~3x) |
+| neg% | 47.0% | passes |
+| CE/PE balance @ p75 / p90 | **0.85 / 0.98** | passes KILL#2 |
+
+**A series containing zero information passes every pre-committed criterion.** This is mechanical:
+subtracting a trailing median forces a zero-median, sign-symmetric, oscillating series regardless of
+what the input is. The criteria were built to catch a *level* that does not move; they are **blind by
+construction to a residual**. R2's PASS in §12.3 is therefore not evidence of anything.
+
+This is the reusable lesson: **a distribution-shape gate is the right test for a level operand and
+the wrong test for a deviation operand.** Any future residual/deviation proposal must be gated on a
+forward-outcome test with a block-preserving null, not on percentiles and sign flips.
+
+## 12.5 The test that does discriminate — forward spot at the scalper's horizon
+
+The dot's claim is directional: *call wing bid up relative to its recent level → bullish → supports
+CE*. If that is true, `R2 > 0` must precede spot **rising** over the next ~30 min. `spot_price` is
+already in the §10 extraction, so this is exact and needs no pricing model. Non-expiry only, forward
+window +15 bars, within-session.
+
+`R2-TRAIL`, NIFTY 50 (n=2546; unconditional +0.56 bps, up% 51.1%):
+
+| G | n CE | CE fwd mean | CE up% | n PE | PE fwd mean | PE up% | CE−PE |
+|---|---|---|---|---|---|---|---|
+| p50 | 671 | +1.53 bps | 56.9% | 602 | +0.77 bps | 49.5% | +0.77 |
+| p75 | 320 | +2.54 bps | **61.9%** | 317 | +0.73 bps | 49.5% | +1.81 |
+| p90 | 128 | +2.93 bps | 60.9% | 127 | −0.73 bps | 44.9% | +3.65 |
+
+`R2-TRAIL`, SENSEX (n=2965; unconditional −0.08 bps, up% 50.2%):
+
+| G | n CE | CE fwd mean | CE up% | n PE | PE fwd mean | PE up% | CE−PE |
+|---|---|---|---|---|---|---|---|
+| p50 | 768 | +0.77 bps | 52.5% | 715 | −1.14 bps | 46.0% | +1.91 |
+| p75 | 380 | +0.59 bps | 52.6% | 362 | −1.02 bps | 46.1% | +1.60 |
+| p90 | 150 | +2.22 bps | 56.7% | 147 | −2.48 bps | 45.6% | +4.70 |
+
+The separation is **correctly signed and monotone in threshold on both roots** — the signature of a
+real effect rather than noise. It looked, at this stage, like a BUILD. It is not, for two reasons.
+
+### 12.5.1 Session-level sign robustness
+
+| operand / root | sessions | CE−PE spread POSITIVE on | median | range |
+|---|---|---|---|---|
+| R2-TRAIL / NIFTY 50 @ p75 | 15 | **12 (80%)** | +3.22 bps | [−17.0, +25.0] |
+| R2-TRAIL / SENSEX @ p75 | 14 | **8 (57%)** | +1.39 bps | [−10.3, +22.5] |
+
+**SENSEX is a coin flip at the session level**, and both roots span zero by a wide margin. With an
+effective sample of ~14–15 sessions, a pooled average is exactly the statistic the
+`sampling-window-bugs-invisible-to-tests` topic warns about.
+
+### 12.5.2 Permutation test — and why the first one was wrong
+
+| root / G | naive shuffle (WRONG) | circular shift (CORRECT) |
+|---|---|---|
+| NIFTY p75 | z=+3.26, p=0.0000 | **z=+1.55, p=0.0560 — NOT separable** |
+| NIFTY p90 | z=+3.40, p=0.0005 | z=+1.79, p=0.0395 |
+| SENSEX p75 | z=+2.69, p=0.0035 | **z=+1.40, p=0.0820 — NOT separable** |
+| SENSEX p90 | z=+3.91, p=0.0000 | z=+1.97, p=0.0245 |
+
+⚠️ **I ran the wrong null first and it would have produced a BUILD.** A naive within-session shuffle
+destroys R2's own autocorrelation (lag-1 **+0.611** NIFTY / **+0.543** SENSEX), so shuffled CE
+selections are *scattered* while real ones arrive in contiguous **runs**. Overlapping 15-bar forward
+windows inside a run carry far fewer independent observations than scattered ones, so the naive null
+understates variability and inflates z. A **circular shift** of R2 within the session preserves its
+autocorrelation and run structure exactly and destroys only the alignment with the forward return.
+It roughly **doubles the null sd** (0.83→1.79, 1.32→2.50, 0.89→1.77, 1.51→2.92) and the significance
+collapses.
+
+At **p75 — the only band with enough observations to arm a dot on — neither root separates.** The two
+p90 cells sit at p=0.0395 / 0.0245 one-sided, uncorrected, on a test chosen after seeing the data,
+across 4 cells; Bonferroni gives 0.158 / 0.098 and **neither survives**. Those cells are also the
+thinnest (128/127 and 150/147 observations, arriving in runs).
+
+### 12.5.3 Effect size, if one ignored all of the above
+
+| root | G | spread | in index points over ~30 min |
+|---|---|---|---|
+| NIFTY 50 | p75 | +1.78 bps | **+4.3 pts** |
+| NIFTY 50 | p90 | +3.63 bps | +8.8 pts |
+| SENSEX | p75 | +1.58 bps | +12.3 pts |
+| SENSEX | p90 | +4.41 bps | +34.3 pts |
+
+⚠️ **Do not read the points column as SENSEX being the better root** — the two roots are near-identical
+in bps (1.78 vs 1.58); SENSEX's larger point counts are purely its 3.2x higher index level. bps is the
+comparable unit.
+
+Even taking +4.3 NIFTY points at face value: it arrives through a dot worth **0.8 / 18.80 = 4.3%** of
+the composite, on a gate where the composite is the binding rail on **0.9%** of blocks (G13 §3,
+sourced). The realistic delta on bars that actually fire is negligible.
+
+## 12.6 Re-runnable derivation
+
+**The SQL is unchanged — §10 verbatim.** R2 is a deterministic post-processing of that extraction; no
+new query, no new DB access. Given the §10 CSV (one row per `ts` × underlying, ordered):
+
+1. Keep rows where `n_ce_above = 3 AND n_pe_below = 3`; `R1 = ce_wing3 − pe_wing3`.
+2. Partition by `(underlying, IST session date)`, order by `ts`, drop null-R1 bars.
+3. `R2-TRAIL(i) = R1(i) − median(R1[i−15 … i−1])` for `i ≥ 15`, else null.
+   `R2-OPEN(i)  = R1(i) − median(R1[0 … 4])` for `i ≥ 5`, else null.
+4. Expiry labelling and the monthly rule are §10's.
+5. Forward test: `fwd(i) = spot(i+15)/spot(i) − 1`, within session, `i+15 < n`.
+6. Null: **circular shift** of the R2 array within each session (`x[k:] + x[:k]`, `k` uniform),
+   forward returns held in place, 2000 draws. A plain shuffle is invalid — §12.5.2.
+
+Session inventory, gap days and the `+05:30` bounding discipline are §2 and §10. Everything here is
+read-only; no writes, no DDL, no live-DB state changed.
+
+## 12.7 Claim labels
+
+- **computed** this session from the §10 extraction (8,997 bar-rows, live `artha`, 2026-06-15 →
+  07-31): every figure in §12.1–§12.5, including both permutation tests and the §12.4 random-walk
+  red-proof (seed 20260801, 2000 draws each).
+- **computed**: the 2.0 min/bar cadence (median inter-bar gap, 187 bars, 2026-07-30) that sizes the
+  15-bar window.
+- **sourced**, not re-derived: the 18.80 composite denominator and `W_IV = 0.8`, and the "composite
+  binds on 0.9% of blocks / volume-floor on 88%" rail distribution — both from
+  `docs/signal-analysis/2026-07-29-g13-iv-bloc-counterfactual.md` §1 and §3; the G11 30-minute
+  `time_stop`; the T1/T7/G13/G10 loosening prior; the G10 "sign flipped on 5 of 265 legs" precedent.
+- **assumed**: that forward *spot* direction is the right proxy for the dot's directional claim. A
+  long option leg's P&L is not linear in spot (theta, vega, the premium exits), so this is a
+  necessary-not-sufficient proxy — see open doubts.
+
+## 12.8 Open doubts
+
+1. **Forward spot is a proxy, not the leg P&L.** The dot claims direction; I tested direction. A real
+   leg carries theta and vega over the same 30 minutes, and G11's exit doctrine resolves most legs at
+   the time stop. A spot-direction edge that fails to separate from chance cannot become a P&L edge,
+   so the verdict direction is safe — but a *passing* spot test would not have been sufficient either.
+2. **The p90 cells are not cleanly dead.** p=0.0395 / 0.0245 one-sided survive as raw numbers and die
+   only on multiple-comparison correction and thin-cell/run-structure grounds. If the owner wants this
+   door genuinely shut rather than "not shown open", the honest instrument is forward paper on real
+   captured OI, not more retrospective slicing of the same 15–22 sessions.
+3. **Effective sample is unchanged from §2** — ~15–22 sessions after the warm-up and forward-window
+   losses. All percentile and bps figures in §12 inherit the same ~1-significant-figure caveat.
+4. **I chose the forward-outcome test after the pre-committed criteria had already passed.** That is
+   the correct scientific move (the criteria were proven blind), but it is post-hoc, and I did not
+   pre-register the threshold set, the horizon, or the null. Recorded so it is not later read as a
+   pre-registered result.
+5. **Only two baseline windows were tried, both pre-declared.** I did not sweep the window, deliberately
+   — sweeping would manufacture a passing result. It follows that I have **not** shown that *no* window
+   works, only that the two principled ones do not.
+6. **The §12.4 red-proof used one synthetic parameterisation** (gaussian increments at the observed
+   `sd(Δ)`). Real R1 has fatter tails than a gaussian walk. A fatter-tailed synthetic would pass the
+   criteria at least as easily, so the conclusion is conservative in the right direction.

@@ -97,17 +97,56 @@ class JobLifecycleIntegrationTest extends BacktestIntegrationTestBase {
         .andExpect(jsonPath("$.code").value(ErrorCodes.NOT_FOUND_RESOURCE));
   }
 
+  /**
+   * The submission body's EXACT key set, over the real endpoint (ledger D3 Map-return burn-down).
+   * {@code POST /run} used to return a {@code ResponseEntity<Map<String, Object>>} — a form the
+   * contract gate publishes as a bare {@code additionalProperties:{}} object AND that the
+   * {@code MapReturnRatchetTest} regex never counted, so nothing anywhere guarded these three keys.
+   * Asserted here against the live serializer so the retyping to {@code BacktestRunAccepted} is
+   * provably key-for-key identical rather than merely believed to be.
+   */
+  @Test
+  void submitBodyCarriesExactlyJobIdStatusAndProvenance() throws Exception {
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/backtests/run")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(runBody(KNOWN)))
+            .andExpect(status().isAccepted())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    JsonNode parsed = objectMapper.readTree(body);
+    assertThat(fieldNames(parsed)).containsExactlyInAnyOrder("jobId", "status", "provenance");
+    assertThat(parsed.path("provenance").isObject()).isTrue();
+    // The provenance VALUE was already a typed record; pin the submission-time nulls so typing the
+    // ENVELOPE cannot quietly change what the partial block reports (§D.15 "not known yet").
+    assertThat(fieldNames(parsed.path("provenance")))
+        .contains("engineSha", "configHash", "profile", "warmStatus");
+    assertThat(parsed.path("provenance").path("warmStatus").asText()).isEqualTo("PREFLIGHT_OK");
+    assertThat(parsed.path("provenance").path("contentHash").isNull()).isTrue();
+  }
+
   @Test
   void cancelDrivesTheJobToCancelled() throws Exception {
     String jobId = submit(KNOWN);
 
-    int cancelStatus =
-        mockMvc
-            .perform(delete("/api/v1/backtests/jobs/" + jobId))
-            .andReturn()
-            .getResponse()
-            .getStatus();
+    var cancelResponse =
+        mockMvc.perform(delete("/api/v1/backtests/jobs/" + jobId)).andReturn().getResponse();
+    int cancelStatus = cancelResponse.getStatus();
     assertThat(cancelStatus).isIn(202, 204); // 202 cancelling (running) or 204 (still queued)
+    // The 202 body is the OTHER former Map return on this controller: exactly one key, and the 204
+    // path carries no body at all. Both are pinned so the retyping cannot add or drop a key.
+    if (cancelStatus == 202) {
+      assertThat(fieldNames(objectMapper.readTree(cancelResponse.getContentAsString())))
+          .containsExactly("status");
+      assertThat(objectMapper.readTree(cancelResponse.getContentAsString()).path("status").asText())
+          .isEqualTo("cancelling");
+    } else {
+      assertThat(cancelResponse.getContentAsString()).isEmpty();
+    }
 
     await()
         .atMost(Duration.ofSeconds(20))
@@ -195,6 +234,12 @@ class JobLifecycleIntegrationTest extends BacktestIntegrationTestBase {
             .getResponse()
             .getContentAsString();
     return objectMapper.readTree(body);
+  }
+
+  private static List<String> fieldNames(JsonNode node) {
+    List<String> names = new java.util.ArrayList<>();
+    node.fieldNames().forEachRemaining(names::add);
+    return names;
   }
 
   private static String runBody(String strategyId) {

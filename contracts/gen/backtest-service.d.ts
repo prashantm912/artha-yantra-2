@@ -526,6 +526,27 @@ export interface components {
         StressOverrides: {
             slippageMultiplier?: number;
         };
+        BacktestRunAccepted: {
+            jobId: string;
+            status: string;
+            provenance: components["schemas"]["ProvenanceBlock"];
+        };
+        ProvenanceBlock: {
+            engineSha: string | null;
+            engineImage: string | null;
+            configHash: string | null;
+            dataHash: string | null;
+            contentHash: string | null;
+            /** Format: int64 */
+            datasetEpoch: number | null;
+            evidencePolicy: string | null;
+            universeChecksum: string | null;
+            premiumSource: string | null;
+            costClass: string | null;
+            profile: string;
+            warmStatus: string | null;
+            premiumContentUnverified: boolean | null;
+        };
         DeepSwingRunRequest: {
             family?: string;
             from?: string;
@@ -724,22 +745,6 @@ export interface components {
         SavedViewsResponse: {
             items: components["schemas"]["SavedView"][];
         };
-        ProvenanceBlock: {
-            engineSha: string | null;
-            engineImage: string | null;
-            configHash: string | null;
-            dataHash: string | null;
-            contentHash: string | null;
-            /** Format: int64 */
-            datasetEpoch: number | null;
-            evidencePolicy: string | null;
-            universeChecksum: string | null;
-            premiumSource: string | null;
-            costClass: string | null;
-            profile: string;
-            warmStatus: string | null;
-            premiumContentUnverified: boolean | null;
-        };
         RunComparability: {
             runId: string;
             /** Format: int64 */
@@ -899,6 +904,9 @@ export interface components {
                 [key: string]: number;
             };
         };
+        JobCancelAccepted: {
+            status: string;
+        };
         ErrorResponse: {
             code?: string;
             message?: string;
@@ -996,9 +1004,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["BacktestRunAccepted"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -1852,9 +1858,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["JobCancelAccepted"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

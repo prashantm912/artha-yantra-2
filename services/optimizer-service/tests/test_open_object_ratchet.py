@@ -29,6 +29,11 @@ graph — an inline open object at the spot it is written, and a ``$ref`` to an 
 component at the REFERENCING SITE. Full per-location expansion was measured and rejected: it
 re-reaches ``ErrorEnvelope.details`` through every operation's error response.
 
+WHAT COUNTS AS "NO CONSTRAINT" is value-aware, not presence-aware — see ``_constrains``. The
+predicate's default is NON-constraining so an unrecognised keyword reads OPEN and fails loudly,
+and ``test_an_unknown_keyword_is_never_silenced_by_an_inert_known_one`` ASSERTS that property
+rather than leaving it as a claim in this docstring, where it once sat and was false.
+
 BLIND SPOTS, stated because a future session will trust this docstring: this sees only what
 ``app.openapi()`` enumerates, so a route excluded from the schema (``include_in_schema=False``) is
 invisible here; and it is scoped to RESPONSES — request bodies are deliberately out, since the
@@ -115,58 +120,81 @@ FROZEN_OPEN_OBJECTS = {
 }
 
 
-# Keywords that pin what an object may CONTAIN. Any of them present => not an open object.
-PINS_CONTENTS = (
-    "$ref", "allOf", "anyOf", "oneOf", "not", "items", "prefixItems", "enum", "const",
-    "discriminator", "patternProperties", "propertyNames", "dependentSchemas",
-    "unevaluatedProperties", "required", "minProperties", "maxProperties",
-)
+# Keywords that constrain no matter what value they carry.
+ALWAYS_CONSTRAINS = frozenset({
+    "$ref", "const", "not", "propertyNames", "contains", "if", "then", "else",
+    "discriminator", "pattern", "multipleOf", "maximum", "minimum",
+    "exclusiveMaximum", "exclusiveMinimum", "maxLength", "maxItems",
+    "maxContains", "maxProperties",
+})
 
-# Every keyword that says ANYTHING about a value, used only for the typeless case below.
-#
-# The list deliberately enumerates what CONSTRAINS, not what is decoration — so a keyword nobody
-# here anticipated reads as "constrains nothing" and the schema is reported OPEN. That is a false
-# POSITIVE, which fails loudly and is resolved by a reviewed exemption or one more entry here. The
-# inverse list (enumerate the annotations, treat the rest as constraining) fails the other way,
-# silently, and that is exactly how this check acquired its first three holes.
-CONSTRAINING = frozenset(PINS_CONTENTS) | {
-    "type", "properties", "additionalProperties", "unevaluatedItems", "contains",
-    "dependentRequired", "if", "then", "else",
-    "multipleOf", "maximum", "exclusiveMaximum", "minimum", "exclusiveMinimum",
-    "maxLength", "minLength", "pattern", "format",
-    "maxItems", "minItems", "uniqueItems", "maxContains", "minContains",
+
+def _empty_container(value: Any) -> bool:
+    return isinstance(value, (dict, list)) and not value
+
+
+def _zero(value: Any) -> bool:
+    return value == 0 and not isinstance(value, bool)
+
+
+def _permissive(value: Any) -> bool:
+    return value is True or (isinstance(value, dict) and not value)
+
+
+# Keywords that constrain only when their VALUE is not a no-op, with the no-op test. An empty
+# `properties` map, an empty `required` list, `minProperties: 0` and friends are all present-but-
+# inert: they restrict nothing, so a schema carrying only those is as open as `{}`.
+VACUOUS_WHEN = {
+    "properties": _empty_container, "patternProperties": _empty_container,
+    "dependentSchemas": _empty_container, "dependentRequired": _empty_container,
+    "required": _empty_container, "allOf": _empty_container, "anyOf": _empty_container,
+    "oneOf": _empty_container, "enum": _empty_container, "prefixItems": _empty_container,
+    "minProperties": _zero, "minLength": _zero, "minItems": _zero, "minContains": _zero,
+    "uniqueItems": lambda v: v is False,
+    "additionalProperties": _permissive, "unevaluatedProperties": _permissive,
+    "unevaluatedItems": _permissive, "items": _permissive,
 }
+
+
+def _constrains(keyword: str, value: Any) -> bool:
+    """True when a keyword actually restricts the value, as opposed to merely being present.
+
+    The default is NON-constraining, and that is the whole fails-safe property. A keyword in
+    neither table — an annotation (``title`` / ``description`` / ``default`` / ``example`` /
+    ``deprecated`` / bare ``nullable``), or one nobody here anticipated — contributes nothing, so
+    its schema reads OPEN and fails LOUDLY. The inverse fails silently, and every hole this check
+    has had was of that shape.
+
+    ``format`` is deliberately in NEITHER table: OpenAPI 3.1 states that a format does not imply a
+    type, and JSON Schema 2020-12 makes ``format`` an annotation by default, so ``{"format":
+    "uuid"}`` with no ``type`` still permits an arbitrary object.
+    """
+    if keyword in ALWAYS_CONSTRAINS:
+        return True
+    vacuous = VACUOUS_WHEN.get(keyword)
+    return vacuous is not None and not vacuous(value)
 
 
 def _is_open(node: Any) -> bool:
     """True when the schema constrains nothing about an object's contents.
 
-    Three shapes qualify, and the third is the one this check was blind to until 2026-08-02:
+    VALUE-aware, not presence-aware, and the difference is load-bearing: the previous cut asked
+    only whether a constraining keyword was PRESENT, so ``{"properties": {}}`` read as constrained
+    and — fatally for the fails-safe claim — pairing an unknown keyword with any inert known one
+    went quiet. Measured across 18 distinct no-op keywords, all of which the presence check closed.
 
-    1. ``type: object`` with no ``properties`` and no constraining ``additionalProperties``;
-    2. ``additionalProperties`` of ``true``/``{}`` with no type;
-    3. ANNOTATION-ONLY — no type at all and nothing but decoration. The empty schema ``{}``, but
-       equally ``{"title": "x"}``. A title is a label, not a constraint; such a schema permits
-       literally any JSON. pydantic emits exactly this for a bare ``Any``, which is how
-       ``SliceCell.x``/``y`` and the trial-folds response sat unreported while this file claimed
-       43 frozen locations when the truth was 46.
+    Shapes this recognises: the empty schema ``{}``; annotation-only such as ``{"title": "x"}``
+    (pydantic's rendering of a bare ``Any``, and the miss that had this file reporting 43 frozen
+    locations of 46); ``type: object`` with nothing pinning its contents; ``additionalProperties``
+    of ``true``/``{}``; and any combination of inert keywords.
     """
     if not isinstance(node, dict):
         return False
-    if any(k in node for k in PINS_CONTENTS):
-        return False
-    if node.get("properties"):
-        return False
-    additional = node.get("additionalProperties")
-    if additional is not None and additional is not True and additional != {}:
-        return False
     declared = node.get("type")
     types = declared if isinstance(declared, list) else ([declared] if declared else [])
-    if types:
-        return "object" in types
-    if additional is not None:
-        return True
-    return all(k not in CONSTRAINING for k in node)
+    if types and "object" not in types:
+        return False
+    return all(not _constrains(k, v) for k, v in node.items() if k != "type")
 
 
 def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: set) -> None:
@@ -248,10 +276,22 @@ def test_the_open_object_predicate_recognises_every_unconstrained_shape():
         {"type": ["object", "null"]},
         {"type": "object", "additionalProperties": {}},
         {"type": "object", "additionalProperties": True},
-        {"type": "object", "properties": {}},                # empty properties promises nothing
         {"additionalProperties": True},
         {"nullable": True},                                  # 3.0 nullability alone constrains none
         {"unknownFutureKeyword": 1},                         # fails-safe: unrecognised => open
+        # PRESENT BUT INERT. Every one of these read CONSTRAINED under the presence-based
+        # predicate. `format` is here on the 3.1 reading: a format does not imply a type, and
+        # 2020-12 makes it an annotation by default, so this still permits any object.
+        {"type": "object", "properties": {}},
+        {"properties": {}},
+        {"required": []},
+        {"minProperties": 0},
+        {"patternProperties": {}},
+        {"format": "uuid"},
+        {"allOf": []},
+        {"enum": []},
+        {"uniqueItems": False},
+        {"items": True},
     ]
     for shape in open_shapes:
         assert _is_open(shape), f"expected OPEN but the predicate said constrained: {shape}"
@@ -268,12 +308,36 @@ def test_the_open_object_predicate_recognises_every_unconstrained_shape():
         {"anyOf": [{"type": "string"}]},
         {"enum": ["a", "b"]},
         {"const": 3},
-        {"format": "uuid"},
         {"title": "Bounded", "maxLength": 5},
+        {"minProperties": 1},
         {"type": "object", "required": ["a"]},
     ]
     for shape in constrained_shapes:
         assert not _is_open(shape), f"expected CONSTRAINED but the predicate said open: {shape}"
+
+
+def test_an_unknown_keyword_is_never_silenced_by_an_inert_known_one():
+    """The headline property, asserted rather than claimed.
+
+    This is the test the previous round needed and did not have. "An unanticipated keyword reads as
+    OPEN and fails loudly" was written into both headers as the justification for inverting the
+    lists, and it was false in all 18 of these combinations, because the check asked whether a
+    constraining keyword was PRESENT rather than whether it CONSTRAINED. Pair an unknown keyword
+    with ``"properties": {}`` and the schema went quiet.
+    """
+    inert = {
+        "properties": {}, "patternProperties": {}, "dependentSchemas": {},
+        "dependentRequired": {}, "required": [], "allOf": [], "anyOf": [], "oneOf": [],
+        "enum": [], "prefixItems": [], "minProperties": 0, "minLength": 0, "minItems": 0,
+        "minContains": 0, "uniqueItems": False, "additionalProperties": True,
+        "unevaluatedProperties": True, "unevaluatedItems": True, "items": True,
+    }
+    for keyword, noop in inert.items():
+        shape = {keyword: noop, "unknownFutureKeyword": 1}
+        assert _is_open(shape), (
+            f"an unknown keyword was silenced by an inert `{keyword}` — the fails-safe property "
+            f"does not hold for: {shape}"
+        )
 
 
 def test_no_response_publishes_an_unfrozen_open_object():

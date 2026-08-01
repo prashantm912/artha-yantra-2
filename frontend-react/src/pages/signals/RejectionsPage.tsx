@@ -16,6 +16,7 @@ import {
   useDotHealth,
   type Num,
   type DotState,
+  type RejectionDataHealth,
   type SignalRejectionDto,
 } from '../../api/signalRejections.ts';
 
@@ -61,6 +62,61 @@ function Margin({ value }: { value: Num }) {
   const n = typeof value === 'number' ? value : parseFloat(value);
   const cls = Number.isNaN(n) ? 'text-ay-muted' : n < 0 ? 'text-bear' : 'text-bull';
   return <span className={cls}>{n >= 0 ? '+' : ''}{fmtNum(value)}</span>;
+}
+
+/**
+ * The per-row data-health badge (F5 U3). Three states, each carrying a WORD — colour is never the
+ * only cue:
+ *   • "Degraded" (amber) — at least one gate input was ABSENT when this bar was scored; the tooltip
+ *     and the expanded panel name which.
+ *   • "OK" (muted) — every input was present.
+ *   • "—" — either the row predates V054 (never computed) or it blocked before the chain fetch, so
+ *     there is nothing to judge. Deliberately NOT rendered as "OK": absence of a verdict is not a
+ *     clean bill of health.
+ * A row on its OI root's monthly expiry carries an "expiry" note: the OI block is inert BY DESIGN
+ * there (S24), so it is not counted against the row.
+ */
+function HealthBadge({ row }: { row: SignalRejectionDto }) {
+  const h = row.dataHealth;
+  if (!h || !h.contextBearing) {
+    return (
+      <span
+        className="text-ay-muted"
+        title={
+          h
+            ? 'Blocked before the chain fetch — no gate inputs to judge.'
+            : 'Recorded before per-row data-health existed.'
+        }
+      >
+        —
+      </span>
+    );
+  }
+  if (!h.degraded) {
+    return (
+      <span className="text-ay-muted" title={healthTitle(h)}>
+        OK{h.oiSuppressed ? ' · expiry' : ''}
+      </span>
+    );
+  }
+  return (
+    // The WORD is the non-colour cue (WCAG 1.4.1) — no glyph, deliberately: the confluence-dot chips
+    // below already own ▲/▼ for supports/opposes, and reusing the shape here would read as the same
+    // axis.
+    <span className="text-warn" title={healthTitle(h)}>
+      Degraded<span className="text-ay-muted"> ({h.flags.length})</span>
+    </span>
+  );
+}
+
+/** The badge's tooltip: which inputs were absent, plus the by-design expiry note when it applies. */
+function healthTitle(h: RejectionDataHealth): string {
+  const suppressed = h.oiSuppressed
+    ? ' OI reads are inert BY DESIGN on this root’s monthly index expiry (S24) and are not counted.'
+    : '';
+  return h.flags.length === 0
+    ? `Every gate input was present.${suppressed}`
+    : `Absent gate inputs: ${h.flags.join(', ')}.${suppressed}`;
 }
 
 /** IST day + time for the dot-health as-of stamp. */
@@ -257,17 +313,34 @@ const REJECTION_COLUMNS: DataColumn<SignalRejectionDto>[] = [
     cellClassName: () => 'text-ay-muted',
     mobileLabel: 'Reason',
   },
+  {
+    id: 'health',
+    header: 'Inputs',
+    align: 'left',
+    render: (r) => <HealthBadge row={r} />,
+    mobileLabel: 'Inputs',
+  },
 ];
 
 export function RejectionsPage() {
   const [date, setDate] = useState<string>(todayIst());
   const [rail, setRail] = useState<string>('');
+  const [health, setHealth] = useState<string>('');
   const [offset, setOffset] = useState(0);
 
   const isToday = date === todayIst();
   const bounds = useMemo(() => dayBoundsIst(date), [date]);
+  const degraded = health === '' ? null : health === 'degraded';
 
-  const q = useSignalRejections(null, rail || null, bounds.from, bounds.to, PAGE_SIZE, offset);
+  const q = useSignalRejections(
+    null,
+    rail || null,
+    bounds.from,
+    bounds.to,
+    PAGE_SIZE,
+    offset,
+    degraded,
+  );
   const counts = useRejectionRailCounts(null, bounds.from, bounds.to);
   const shadow = useShadowSummary(bounds.from, bounds.to);
   const rows = q.data?.items ?? [];
@@ -304,6 +377,19 @@ export function RejectionsPage() {
           options={[
             { value: '', label: 'All rails' },
             ...railOptions.map((c) => ({ value: c.rail, label: `${c.rail} (${c.count})` })),
+          ]}
+        />
+        <Select
+          value={health}
+          ariaLabel="Filter by gate-input health"
+          onChange={(v) => {
+            setHealth(v);
+            setOffset(0);
+          }}
+          options={[
+            { value: '', label: 'Any input health' },
+            { value: 'degraded', label: 'Degraded inputs only' },
+            { value: 'clean', label: 'Healthy inputs only' },
           ]}
         />
       </div>
@@ -384,6 +470,13 @@ export function RejectionsPage() {
               Expand any row (the ▸ toggle is keyboard-accessible) for the full breakdown. {rows.length} blocked{' '}
               {rows.length === 1 ? 'entry' : 'entries'}
               {rail ? ` for rail “${rail}”` : ''}{offset > 0 ? ` (from row ${offset + 1})` : ''}.
+              {health === 'clean' && (
+                <>
+                  {' '}
+                  Rows recorded before per-row input health existed also match “healthy” — they were
+                  never judged, so read the Inputs column (“—”) rather than the filter.
+                </>
+              )}
             </p>
             <Pager offset={offset} limit={PAGE_SIZE} count={rows.length} onOffset={setOffset} />
           </BeatBlock>
@@ -466,9 +559,12 @@ function RejectionDetail({ row }: { row: SignalRejectionDto }) {
         )}
       </section>
 
-      {/* Raw context */}
+      {/* Raw context, preceded by the per-row input verdict that qualifies it */}
       <section>
-        <h3 className="mb-1 text-xs font-semibold uppercase text-ay-muted">Context</h3>
+        <h3 className="mb-1 text-xs font-semibold uppercase text-ay-muted">Input health</h3>
+        <HealthDetail health={row.dataHealth} />
+
+        <h3 className="mb-1 mt-3 text-xs font-semibold uppercase text-ay-muted">Context</h3>
         {ctx ? (
           <div className="grid grid-cols-1 gap-2 text-xs">
             <KeyVals title="OI" obj={ctx.oi} />
@@ -479,6 +575,54 @@ function RejectionDetail({ row }: { row: SignalRejectionDto }) {
           <p className="text-xs text-ay-muted">Blocked before the chain fetch — no OI/macro context.</p>
         )}
       </section>
+    </div>
+  );
+}
+
+/**
+ * The expanded per-row input verdict: exactly which gate inputs were ABSENT when this bar was scored,
+ * so the context values beside it can be read with the right amount of trust. Names the by-design S24
+ * expiry case explicitly rather than hiding it — an inert OI block on the root's own monthly expiry
+ * is not an outage, and a reader who does not know that mis-diagnoses the whole session.
+ */
+function HealthDetail({ health }: { health?: RejectionDataHealth | null }) {
+  if (!health) {
+    return (
+      <p className="text-xs text-ay-muted">
+        Not recorded — this row predates per-row input health. It was never judged, so treat it as
+        unknown rather than healthy.
+      </p>
+    );
+  }
+  if (!health.contextBearing) {
+    return (
+      <p className="text-xs text-ay-muted">
+        Blocked before the chain fetch, so no gate inputs were read — nothing to judge.
+      </p>
+    );
+  }
+  return (
+    <div className="text-xs">
+      <p className={health.degraded ? 'text-warn' : 'text-ay-muted'}>
+        {health.degraded
+          ? `${health.flags.length} gate input${health.flags.length === 1 ? '' : 's'} absent when this bar was scored`
+          : 'Every gate input was present.'}
+      </p>
+      {health.flags.length > 0 && (
+        <ul className="mt-1 flex flex-wrap gap-1">
+          {health.flags.map((f) => (
+            <li key={f} className="rounded bg-warn/15 px-1.5 py-0.5 text-[11px] text-warn">
+              {f}
+            </li>
+          ))}
+        </ul>
+      )}
+      {health.oiSuppressed && (
+        <p className="mt-1 text-ay-muted">
+          OI reads are inert <span className="font-medium">by design</span> on this root’s monthly
+          index expiry (S24) — not counted against the row.
+        </p>
+      )}
     </div>
   );
 }

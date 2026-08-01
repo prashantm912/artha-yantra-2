@@ -58,7 +58,7 @@ class SessionBarSideVerdictsIntegrationTest extends StrategySignalIntegrationTes
         rejections.insert(
             versionId(), slug, "NFO", "NIFTY26JULFUT", "3m", side, "confluence-composite",
             new BigDecimal("31"), new BigDecimal("32"), new BigDecimal("-1"), "advances 31 <= 32",
-            new BigDecimal("0.55"), new BigDecimal("0.60"), diagnostic, barTime);
+            new BigDecimal("0.55"), new BigDecimal("0.60"), diagnostic, barTime, null, false);
     jdbc.update("UPDATE signal_rejections SET generated_at = ? WHERE id = ?", stamp, id);
   }
 

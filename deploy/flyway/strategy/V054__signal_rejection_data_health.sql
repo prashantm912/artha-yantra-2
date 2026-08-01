@@ -1,0 +1,88 @@
+-- Per-row DATA-HEALTH flags on signal_rejections (signal-analysis README §7 row 4, F5 unit U3).
+--
+-- WHY. Dot health is only knowable in AGGREGATE today: DotHealthCanary reads today's newest N
+-- rejections and answers "is input X alive across the window", surfaced at
+-- GET /api/v1/signal-rejections/dot-health. That is the right shape for PAGING (an outage is a
+-- session-level fact) and the wrong shape for FORENSICS. The per-row question — "was THIS block
+-- computed on healthy inputs?" — is unanswerable after the fact, so every historical rate, every
+-- would-have-fired counterfactual and every dot-support tally silently mixes rows scored on live
+-- inputs with rows scored on dead ones. §3.7's hand-SQL can recover it, but only as a full JSONB
+-- scan over the whole table with a different expression per input, which is why it is run once in a
+-- while by hand rather than joined into the analysis.
+--
+-- This adds the precomputed answer at the seam that already knows it: RejectionWriter computes the
+-- flags in memory from the SAME ScalperGateContext the diagnostic is serialized from (pure function,
+-- DataHealthFlags), and the INSERT carries them. No new read, no new engine work — the eval thread
+-- is untouched, and the computation runs on the writer's existing bounded async thread.
+--
+--   data_health JSONB : {degraded, contextBearing, oiSuppressed, flags[]} — the evidence
+--   degraded    BOOL  : the indexable summary (true iff flags[] is non-empty)
+--
+-- ============================================================================================
+-- WHAT "degraded" MEANS, AND THE ONE EXEMPTION
+-- ============================================================================================
+-- A flag means ONE THING: the input was ABSENT when the gate scored this bar. It never means "the
+-- input had an unremarkable value". That distinction is load-bearing and is where a naive port of
+-- the canary's probes goes wrong: the canary asks "did spurtPricePct move at all across 40 rows",
+-- an aggregate question whose per-row analogue (spurtPricePct == 0) is a perfectly ordinary flat
+-- bar. Measured on live rows 2026-07-20..31, `spurtPricePct = 0` holds on ~43% of context-bearing
+-- rows across ALL sessions — it is a market state, not a defect, and flagging it per row would have
+-- made this column noise. Only unambiguous absence is flagged.
+--
+-- Rows blocked BEFORE the chain fetch (time-window / time-of-day / option-side rails) carry no
+-- context at all — ~23% of rows. Those are UNINFORMATIVE, not degraded: contextBearing=false,
+-- flags=[], degraded=false. This is T17's lesson (a context-less row cannot testify about dot
+-- liveness) applied per row instead of per window.
+--
+-- ---- THE S24 PER-ROOT EXEMPTION (the one case where an absent input is NOT a defect) ----------
+-- On a MONTHLY index expiry the expiring series' writers are unwinding, so MarketOiClient.oi()
+-- SKIPS the whole OI block by design and returns an inert Oi — NEUTRAL on both quadrants and NULL
+-- on every soft numeric (MarketOiClient:347-356). Every OI dot is then legitimately non-confirming.
+-- Flagging that as degraded would mark an entire normal session's rows as computed-on-bad-data.
+--
+-- CRITICALLY, THE SUPPRESSION IS KEYED PER OI ROOT, NOT PER DATE. NSE's monthly index expiry is the
+-- last Tuesday, BSE's (SENSEX) the last Thursday, and MarketOiClient keys on the row's OWN
+-- underlying via ScalperCalendars.forUnderlying. So on an NSE-only expiry day a SENSEX-rooted read
+-- is NOT suppressed and its dead OI block IS a genuine outage. A date-keyed (root-blind) exemption
+-- would silence exactly that. This is the misreading that cost a live investigation and was fixed in
+-- #1073, and the same root-blind mistake was made and corrected once already in DotHealthCanary
+-- (2026-07-28). DataHealthFlags therefore resolves the calendar from context.underlying, and
+-- DataHealthFlagsTest pins both directions on a real NSE-only monthly expiry.
+--
+-- When the exemption applies the row records oiSuppressed=true and simply omits the oi-inert flag;
+-- the macro inputs on that row are still judged normally.
+--
+-- ============================================================================================
+-- WHAT THE COLUMN READS AS TODAY (measured, so nobody reads a true value as a bug)
+-- ============================================================================================
+-- Over the 3,700 context-bearing rows from 2026-07-28..31, TWO macro inputs are absent on 100% of
+-- rows: `ivRank` (the IV-history floor is not met yet) and `dowUp` (the global Dow feed is un-armed
+-- by design). breadth / fii / vix / atmIv are absent on 0%. So `degraded` will read TRUE on
+-- essentially every context-bearing row until those two land, and the PARTIAL INDEX below will
+-- initially cover ~77% of the table rather than a small tail.
+--
+-- That is reported rather than papered over on purpose. Narrowing `degraded` to "the inputs I expect
+-- to be alive" would bake today's known-dead set into a schema column and quietly re-derive a
+-- healthy-looking metric from unhealthy data — the failure this row exists to prevent. The
+-- discriminating data is `flags[]`; `degraded` is the coarse gate over it, and it becomes selective
+-- when README §7 row 6 (dot-null semantics unification) lands. If the index cost bites before then,
+-- the fix is to narrow the INDEX predicate, not the meaning of the column.
+
+ALTER TABLE signal_rejections
+  ADD COLUMN data_health JSONB,
+  ADD COLUMN degraded    BOOLEAN NOT NULL DEFAULT false;
+
+COMMENT ON COLUMN signal_rejections.data_health IS
+  'Per-row gate-input health computed at record time: {degraded, contextBearing, oiSuppressed, flags[]}. A flag means the input was ABSENT, never that its value was unremarkable. NULL on rows written before V054.';
+COMMENT ON COLUMN signal_rejections.degraded IS
+  'True iff data_health.flags is non-empty — at least one gate input was absent when this bar was scored. S24 monthly-expiry OI inertness is exempt PER OI ROOT (NSE last Tuesday / BSE last Thursday) and does not set this.';
+
+-- Backfill is deliberately NOT attempted. The pre-V054 rows keep data_health NULL and degraded
+-- false, which is honest: "not computed" rather than a value reverse-engineered from the diagnostic
+-- JSON under today's flag definitions. `data_health IS NULL` is the exact test for "this row predates
+-- the flags", and §3.7's hand-SQL still answers the question for that history.
+
+-- The degraded feed read: the FE filter and every "show me the compromised rows" query are
+-- newest-first over a window, so the partial index mirrors idx_signal_rejections_generated's shape
+-- and carries only the flagged rows.
+CREATE INDEX idx_signal_rejections_degraded ON signal_rejections (generated_at DESC) WHERE degraded;

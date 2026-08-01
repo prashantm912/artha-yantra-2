@@ -82,7 +82,7 @@ class ShadowVariantRegistryIntegrationTest extends StrategySignalIntegrationTest
     return rejections.insert(
         versionId, slug, "NFO", "SVRFUT", "3m", "CE", "volume-floor", new BigDecimal("14000"),
         new BigDecimal("125000"), new BigDecimal("-111000"), "volume < 125000",
-        new BigDecimal("0.70"), new BigDecimal("0.60"), "{}", OffsetDateTime.now());
+        new BigDecimal("0.70"), new BigDecimal("0.60"), "{}", OffsetDateTime.now(), null, false);
   }
 
   private static RailCheck rail(String name, boolean pass, String operand, String threshold) {

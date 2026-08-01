@@ -11,6 +11,7 @@ import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.QuoteGateway;
 import in.arthayantra.marketdata.options.OiInterval;
 import in.arthayantra.marketdata.options.OptionsChainService;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -52,30 +53,53 @@ public class OptionsOiChartService {
   /** The fine grain the OI/IV snapshot series is read at, then re-keyed onto the candle grid (≈ #57). */
   private static final OiInterval OI_GRAIN = OiInterval.M3;
 
-  /** One interval's leg candle: real per-bucket premium OHLC + the leg's OI + IV at that bucket. */
+  /**
+   * One interval's leg candle: real per-bucket premium OHLC + the leg's OI + IV at that bucket.
+   *
+   * <p>OHLC + volume always exist (a bucket is only created by folding at least one 1m bar into it),
+   * but {@code oi}/{@code iv} ride a LEFT JOIN from the snapshot series — null on every candle whose
+   * bucket had no snapshot, which is the documented behaviour of this chart, not an edge case.
+   *
+   * <p>The premium OHLC and {@code iv} are {@code string} on the wire, not {@code number} —
+   * {@code ArthaJacksonAutoConfiguration} serializes every {@code BigDecimal} via {@code
+   * ToStringSerializer}. {@code volume} is a primitive {@code long} and is a real JSON number.
+   */
   public record OptCandle(
       OffsetDateTime time,
-      BigDecimal open,
-      BigDecimal high,
-      BigDecimal low,
-      BigDecimal close,
+      @Schema(type = "string") BigDecimal open,
+      @Schema(type = "string") BigDecimal high,
+      @Schema(type = "string") BigDecimal low,
+      @Schema(type = "string") BigDecimal close,
       long volume,
-      Long oi,
-      BigDecimal iv) {}
+      @Schema(types = {"integer", "null"}) Long oi,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal iv) {}
 
-  /** The options-chart payload: the header strip + the CE and PE per-interval candle+OI/IV series. */
+  /**
+   * The options-chart payload: the header strip + the CE and PE per-interval candle+OI/IV series.
+   *
+   * <p>⚠️ COMPONENT ORDER IS THE WIRE ORDER and is deliberate: {@code ce}/{@code pe} lead. Until D3
+   * the controller re-emitted this record through a {@code LinkedHashMap} that listed ce/pe first,
+   * so that WAS the emitted order; the components were reordered to match when the handler started
+   * returning this record directly, keeping the response byte-identical instead of quietly
+   * reshuffling a live OI page's payload. Do not "tidy" this back into header-first order.
+   *
+   * <p>{@code underlyingLtp}/{@code underlyingDayOpen} are null whenever the underlying quote does
+   * not resolve (off-hours, or a quote-gateway failure the chart deliberately survives), and like
+   * every {@code BigDecimal} on this platform they are {@code string} on the wire, not {@code
+   * number} — see {@code ArthaJacksonAutoConfiguration}.
+   */
   public record OptOiChart(
+      List<OptCandle> ce,
+      List<OptCandle> pe,
       String underlying,
       LocalDate expiry,
-      BigDecimal strike,
+      @Schema(type = "string") BigDecimal strike,
       String ceTradingsymbol,
       String peTradingsymbol,
       String interval,
-      BigDecimal underlyingLtp,
-      BigDecimal underlyingDayOpen,
-      OffsetDateTime asOf,
-      List<OptCandle> ce,
-      List<OptCandle> pe) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal underlyingLtp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal underlyingDayOpen,
+      OffsetDateTime asOf) {}
 
   private final InstrumentRepository instruments;
   private final OptionsChainService chainService;
@@ -142,6 +166,8 @@ public class OptionsOiChartService {
     QuoteGateway.Quote uq = underlyingQuote(chain, underlying);
     OffsetDateTime asOf = lastTime(ceItems, peItems);
     return new OptOiChart(
+        ceItems,
+        peItems,
         underlying,
         expiry,
         strike,
@@ -150,9 +176,7 @@ public class OptionsOiChartService {
         intervalMinutes + "m",
         uq == null ? null : uq.lastPrice(),
         uq == null || uq.ohlc() == null ? null : uq.ohlc().open(),
-        asOf,
-        ceItems,
-        peItems);
+        asOf);
   }
 
   /** Folds one leg's 1m candles to the interval and left-joins its re-keyed OI/IV (null when absent). */

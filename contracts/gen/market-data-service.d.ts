@@ -2377,6 +2377,11 @@ export interface components {
             createdAt: string;
             items: components["schemas"]["ItemRequest"][];
         };
+        WatchlistCreated: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
         SubscribeRequest: {
             exchange?: string;
             tradingsymbol?: string;
@@ -3336,6 +3341,34 @@ export interface components {
             pcr: number | null;
             spot: number | null;
         };
+        OptCandle: {
+            /** Format: date-time */
+            time: string;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
+            /** Format: int64 */
+            volume: number;
+            /** Format: int64 */
+            oi: number | null;
+            iv: string | null;
+        };
+        OptOiChart: {
+            ce: components["schemas"]["OptCandle"][];
+            pe: components["schemas"]["OptCandle"][];
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            strike: string;
+            ceTradingsymbol: string;
+            peTradingsymbol: string;
+            interval: string;
+            underlyingLtp: string | null;
+            underlyingDayOpen: string | null;
+            /** Format: date-time */
+            asOf: string;
+        };
         OiStats: {
             pcr: number | null;
             maxPain: number | null;
@@ -3365,6 +3398,59 @@ export interface components {
             /** Format: date-time */
             asOf: string | null;
             freshness?: components["schemas"]["DataFreshness"];
+        };
+        OiAnalysis: {
+            items: components["schemas"]["StrikePoint"][];
+        };
+        StrikePoint: {
+            /** Format: date-time */
+            bucket: string;
+            strike: string;
+            optionType: string;
+            ltp: string | null;
+            /** Format: int64 */
+            oi: number | null;
+            /** Format: int64 */
+            oiChange: number | null;
+            iv: string | null;
+            spot: string | null;
+            /** Format: int64 */
+            volume: number | null;
+        };
+        StrikeSeries: {
+            items: components["schemas"]["StrikePoint"][];
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            strike: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        MultipleOi: {
+            items: components["schemas"]["OiLeg"][];
+            spot: components["schemas"]["SpotPoint"][];
+            underlying: string;
+            /** Format: date */
+            expiry: string;
+            interval: string;
+            /** Format: date-time */
+            asOf: string;
+        };
+        OiLeg: {
+            leg: string;
+            points: components["schemas"]["OiLinePoint"][];
+        };
+        OiLinePoint: {
+            /** Format: date-time */
+            bucket: string;
+            /** Format: int64 */
+            oi: number | null;
+        };
+        SpotPoint: {
+            /** Format: date-time */
+            bucket: string;
+            spot: string | null;
         };
         HistoryPoint: {
             /** Format: date */
@@ -5147,9 +5233,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["WatchlistCreated"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7273,9 +7357,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OptOiChart"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7454,9 +7536,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["OiAnalysis"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7492,9 +7572,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["StrikeSeries"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7530,9 +7608,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: unknown;
-                    };
+                    "*/*": components["schemas"]["MultipleOi"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

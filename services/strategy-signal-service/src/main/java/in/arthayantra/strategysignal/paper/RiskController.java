@@ -5,9 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.common.web.error.ErrorCodes;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -50,29 +47,14 @@ public class RiskController {
 
   /** A book's current limits + the recent trip/flip audit ({@code book} absent → scalper). */
   @GetMapping("/settings")
-  public Map<String, Object> settings(@RequestParam(required = false) String book) {
+  public RiskViews.RiskSettings settings(@RequestParam(required = false) String book) {
     String b = (book == null || book.isBlank()) ? DEFAULT_BOOK : book;
-    List<Map<String, Object>> items =
-        risk.all(b).stream()
-            .map(
-                s -> {
-                  Map<String, Object> row = new LinkedHashMap<>();
-                  row.put("key", s.key());
-                  row.put("value", s.value());
-                  row.put("updatedAt", s.updatedAt());
-                  return row;
-                })
-            .toList();
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("book", b);
-    response.put("items", items);
-    response.put("audit", risk.audit(b, 20));
-    return response;
+    return risk.settingsView(b);
   }
 
   /** Upsert one of a book's limits (the E-14 pattern: DB row, never YAML). */
   @PutMapping("/settings")
-  public Map<String, Object> update(@RequestBody UpdateBody body) {
+  public RiskViews.RiskSettings update(@RequestBody UpdateBody body) {
     if (body.key() == null || !KEYS.contains(body.key()) || body.value() == null) {
       throw new ApiException(400, ErrorCodes.VALIDATION_FAILED, "key must be one of " + KEYS);
     }

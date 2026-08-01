@@ -1,6 +1,5 @@
 package in.arthayantra.strategysignal.notifier;
 
-import java.util.Map;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,10 +18,17 @@ public class NotifierController {
     this.notifier = notifier;
   }
 
+  /**
+   * The test-send outcome (D3 Map-return burn-down). Declared here rather than at the service
+   * because {@link NotifierService#sendTest} returns {@code void} — there is no service-layer map to
+   * relocate; the constant is synthesized by this handler and nowhere else.
+   */
+  public record TestSendResult(String status) {}
+
   /** Send a test push for a strategy; 422 when notifications are disabled/unconfigured. */
   @PostMapping("/{id}/notifications/test")
-  public Map<String, Object> test(@PathVariable UUID id) {
+  public TestSendResult test(@PathVariable UUID id) {
     notifier.sendTest(id);
-    return Map.of("status", "SENT");
+    return new TestSendResult("SENT");
   }
 }

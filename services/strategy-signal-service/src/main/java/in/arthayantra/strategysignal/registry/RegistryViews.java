@@ -79,6 +79,28 @@ public final class RegistryViews {
   /** {@code POST /strategies/{id}/publish}. */
   public record PublishResponse(UUID id, String version, UUID versionId, String status) {}
 
+  /**
+   * {@code GET /strategies/{id}/universe} — the Phase-44 resolved universe label.
+   *
+   * <p>Deliberately NOT {@link UniverseResolver.ResolvedUniverse}: the wire form adds the derived
+   * {@code constituentCount} and orders {@code items} LAST, so returning the resolver's record
+   * directly would silently change both the key set and the order. This pins the shape the
+   * {@code LinkedHashMap} emitted, component-for-component in the same sequence.
+   *
+   * <p>{@code asOf} and {@code survivorshipCaveat} are genuinely nullable — only the
+   * {@code index_constituents} branch supplies a caveat, and four of the six resolve branches pass
+   * a null {@code asOf} ({@code UniverseResolver:181,214,238} and the two funnels when the screen
+   * date is absent). The {@code LinkedHashMap} already emitted both as explicit nulls, so this is a
+   * retyping, not a shape change.
+   */
+  public record UniverseInfo(
+      String mode,
+      @Schema(types = {"string", "null"}) String asOf,
+      int constituentCount,
+      String checksum,
+      @Schema(types = {"string", "null"}) String survivorshipCaveat,
+      List<UniverseResolver.Constituent> items) {}
+
   /** {@code POST /strategies/{id}/rollback} — copy-forward, never history rewrite. */
   public record RollbackResponse(
       UUID id, String newVersion, String copiedFrom, String status) {}

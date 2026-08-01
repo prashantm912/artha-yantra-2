@@ -168,8 +168,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/WatchlistCreated"
                 }
               }
             }
@@ -3126,8 +3125,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/OptOiChart"
                 }
               }
             }
@@ -3449,8 +3447,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/OiAnalysis"
                 }
               }
             }
@@ -3521,8 +3518,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/StrikeSeries"
                 }
               }
             }
@@ -3596,8 +3592,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/MultipleOi"
                 }
               }
             }
@@ -7219,6 +7214,19 @@
         },
         "required" : [ "createdAt", "id", "items", "name" ]
       },
+      "WatchlistCreated" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "id", "name" ]
+      },
       "SubscribeRequest" : {
         "type" : "object",
         "properties" : {
@@ -9885,6 +9893,86 @@
         },
         "required" : [ "pcr", "spot", "time" ]
       },
+      "OptCandle" : {
+        "type" : "object",
+        "properties" : {
+          "time" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "open" : {
+            "type" : "string"
+          },
+          "high" : {
+            "type" : "string"
+          },
+          "low" : {
+            "type" : "string"
+          },
+          "close" : {
+            "type" : "string"
+          },
+          "volume" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "iv" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "close", "high", "iv", "low", "oi", "open", "time", "volume" ]
+      },
+      "OptOiChart" : {
+        "type" : "object",
+        "properties" : {
+          "ce" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OptCandle"
+            }
+          },
+          "pe" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OptCandle"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "strike" : {
+            "type" : "string"
+          },
+          "ceTradingsymbol" : {
+            "type" : "string"
+          },
+          "peTradingsymbol" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "underlyingLtp" : {
+            "type" : [ "string", "null" ]
+          },
+          "underlyingDayOpen" : {
+            "type" : [ "string", "null" ]
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "ce", "ceTradingsymbol", "expiry", "interval", "pe", "peTradingsymbol", "strike", "underlying", "underlyingDayOpen", "underlyingLtp" ]
+      },
       "OiStats" : {
         "type" : "object",
         "properties" : {
@@ -9970,6 +10058,158 @@
           }
         },
         "required" : [ "asOf", "buckets", "ce", "maxAbs", "pe", "strikes" ]
+      },
+      "OiAnalysis" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikePoint"
+            }
+          }
+        },
+        "required" : [ "items" ]
+      },
+      "StrikePoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "strike" : {
+            "type" : "string"
+          },
+          "optionType" : {
+            "type" : "string"
+          },
+          "ltp" : {
+            "type" : [ "string", "null" ]
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "oiChange" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          },
+          "iv" : {
+            "type" : [ "string", "null" ]
+          },
+          "spot" : {
+            "type" : [ "string", "null" ]
+          },
+          "volume" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          }
+        },
+        "required" : [ "bucket", "iv", "ltp", "oi", "oiChange", "optionType", "spot", "strike", "volume" ]
+      },
+      "StrikeSeries" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StrikePoint"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "strike" : {
+            "type" : "string"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "expiry", "interval", "items", "strike", "underlying" ]
+      },
+      "MultipleOi" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OiLeg"
+            }
+          },
+          "spot" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SpotPoint"
+            }
+          },
+          "underlying" : {
+            "type" : "string"
+          },
+          "expiry" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "interval" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "asOf", "expiry", "interval", "items", "spot", "underlying" ]
+      },
+      "OiLeg" : {
+        "type" : "object",
+        "properties" : {
+          "leg" : {
+            "type" : "string"
+          },
+          "points" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OiLinePoint"
+            }
+          }
+        },
+        "required" : [ "leg", "points" ]
+      },
+      "OiLinePoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "oi" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int64"
+          }
+        },
+        "required" : [ "bucket", "oi" ]
+      },
+      "SpotPoint" : {
+        "type" : "object",
+        "properties" : {
+          "bucket" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "spot" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "bucket", "spot" ]
       },
       "HistoryPoint" : {
         "type" : "object",

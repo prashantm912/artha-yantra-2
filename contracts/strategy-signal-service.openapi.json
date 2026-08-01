@@ -141,8 +141,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RiskSettings"
                 }
               }
             }
@@ -178,8 +177,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/RiskSettings"
                 }
               }
             }
@@ -595,8 +593,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/TestSendResult"
                 }
               }
             }
@@ -1689,8 +1686,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "type" : "object",
-                  "additionalProperties" : { }
+                  "$ref" : "#/components/schemas/UniverseInfo"
                 }
               }
             }
@@ -3619,6 +3615,62 @@
           }
         }
       },
+      "AuditEntry" : {
+        "type" : "object",
+        "properties" : {
+          "key" : {
+            "type" : "string"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "type" : [ "string", "null" ]
+          },
+          "created_at" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "action", "created_at", "detail", "key" ]
+      },
+      "RiskSettingRow" : {
+        "type" : "object",
+        "properties" : {
+          "key" : {
+            "type" : "string"
+          },
+          "value" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "key", "updatedAt", "value" ]
+      },
+      "RiskSettings" : {
+        "type" : "object",
+        "properties" : {
+          "book" : {
+            "type" : "string"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RiskSettingRow"
+            }
+          },
+          "audit" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AuditEntry"
+            }
+          }
+        },
+        "required" : [ "audit", "book", "items" ]
+      },
       "AccountBody" : {
         "type" : "object",
         "properties" : {
@@ -3851,6 +3903,15 @@
           }
         },
         "required" : [ "id", "status", "version", "versionId" ]
+      },
+      "TestSendResult" : {
+        "type" : "object",
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "status" ]
       },
       "ToggleResult" : {
         "type" : "object",
@@ -4985,6 +5046,46 @@
           }
         },
         "required" : [ "items" ]
+      },
+      "Constituent" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "tradingsymbol" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "exchange", "tradingsymbol" ]
+      },
+      "UniverseInfo" : {
+        "type" : "object",
+        "properties" : {
+          "mode" : {
+            "type" : "string"
+          },
+          "asOf" : {
+            "type" : [ "string", "null" ]
+          },
+          "constituentCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "checksum" : {
+            "type" : "string"
+          },
+          "survivorshipCaveat" : {
+            "type" : [ "string", "null" ]
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Constituent"
+            }
+          }
+        },
+        "required" : [ "asOf", "checksum", "constituentCount", "items", "mode", "survivorshipCaveat" ]
       },
       "DiffResponse" : {
         "type" : "object",

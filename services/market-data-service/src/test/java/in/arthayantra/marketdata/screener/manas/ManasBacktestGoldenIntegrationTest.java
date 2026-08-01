@@ -39,12 +39,19 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * curve — it exercises Minervini's simple "new 52-week-high" primary-base setup, but Manas has no
  * such setup: both Manas setups ({@code breakout}/{@code vcp}) need a genuinely detectable
  * consolidation base, which a smooth curve never forms (measured: {@code variedUptrend} at 60
- * symbols/600 days takes ZERO Manas trades in every variant). A golden pinned at all-zero trades
- * would characterize nothing — any refactor to the cost/RS-rank/exit formulas would leave it green.
- * So this fixture builds its OWN panel: the same uptrend-then-consolidation-then-volume-spike-
- * breakout-then-rollover shape {@code ManasAroraSwingBacktestTest.breakoutSeries()} already proves
- * takes a real trade, replicated (with a small per-symbol offset) across a small panel. The
- * {@code technical} variant (RS relaxed) is the target, so cross-sectional RS variety is not needed.
+ * symbols/600 days takes ZERO Manas trades in every variant). So this fixture builds its OWN panel:
+ * the same uptrend-then-consolidation-then-volume-spike-breakout-then-rollover shape {@code
+ * ManasAroraSwingBacktestTest.breakoutSeries()} already proves takes a real trade, replicated across
+ * a panel of {@value #SYMS} symbols.
+ *
+ * <p><b>Targets the PRODUCTION headline, not a relaxed proxy (audit fix — a first attempt at this
+ * golden pinned the RS-relaxed {@code technical} variant's FIFO-gross {@code portfolio()}, which
+ * left the RS-rank gate and the net-of-cost math both untested; live/manual runs report {@value
+ * #PRIMARY_VARIANT}'s {@code portfolioRsPriorityNet}).</b> The per-symbol uptrend STEEPNESS (not a
+ * uniform post-hoc price scale, which cancels out of a % return and produces a degenerate,
+ * all-tied RS distribution — measured on an earlier attempt) is varied across the panel so {@code
+ * weightedRs}'s trailing-return computation genuinely differentiates symbols, and volume is sized
+ * so the 20-day turnover clears the ₹37.5L/day floor {@code rs-turnover-nopyramid} also gates on.
  */
 @SpringBootTest(
     properties = {
@@ -55,7 +62,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class ManasBacktestGoldenIntegrationTest extends MarketDataIntegrationTestBase {
 
   private static final String PREFIX = "M27MANASGOLD";
-  private static final int SYMS = 5;
+  private static final int SYMS = 30;
   private static final int DAYS = 280;
   private static final LocalDate END = LocalDate.of(2025, 12, 31);
   // FROM = the panel's very first day, so the entry-date gate (`date.isBefore(from)`) never skips a
@@ -64,7 +71,11 @@ class ManasBacktestGoldenIntegrationTest extends MarketDataIntegrationTestBase {
   // 450-day lead-in took ZERO trades). DAYS=280 keeps the breakout at day 268, same as the proven
   // ManasAroraSwingBacktestTest.breakoutSeries() shape (256 uptrend + 12 consolidation + breakout).
   private static final LocalDate FROM = END.minusDays(DAYS - 1L);
-  private static final String PRIMARY_VARIANT = "technical";
+  // The PRODUCTION headline variant (ManasAroraBacktestService.PRIMARY_VARIANT) — RS-rank≥70 AND
+  // the turnover floor, single-lot. NOT "technical" (RS/turnover both relaxed): that variant would
+  // stay green under a broken RS-rank formula or cost model, which is exactly what this golden must
+  // catch (CLAUDE.md: RS-rank is the edge on this family, ~43% CAGR vs ~28% technical-only).
+  private static final String PRIMARY_VARIANT = "rs-turnover-nopyramid";
 
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ManasAroraBacktestService svc;
@@ -105,7 +116,7 @@ class ManasBacktestGoldenIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   private void seedSeries(String symbol, int k) {
-    List<Object[]> batch = breakoutPanel(symbol, k, DAYS, END);
+    List<Object[]> batch = breakoutPanel(symbol, k, SYMS, DAYS, END);
     jdbc.batchUpdate(
         "INSERT INTO candles(exchange,tradingsymbol,interval,bucket,open,high,low,close,volume,source)"
             + " VALUES('NSE',?, '1d', ?,?,?,?,?,?, 'BACKFILL') ON CONFLICT DO NOTHING",
@@ -113,37 +124,46 @@ class ManasBacktestGoldenIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   /**
-   * A deterministic, PER-SYMBOL-offset (by {@code k}) replica of {@code
-   * ManasAroraSwingBacktestTest.breakoutSeries()}'s proven shape, stretched to {@code days} bars
-   * ending on {@code end}: a long smooth uptrend (clears the §4.1 gates), a 12-day consolidation (a
-   * real {@code ConsolidationBreakout} base), a fresh-high breakout on 3x volume, then a rollover —
-   * every value a pure function of {@code (k, barIndex)}. Row shape matches {@code
-   * FixtureShape.variedUptrend}: {@code {symbol, bucket, open, high, low, close, volume}}.
+   * A deterministic, PER-SYMBOL-VARIED replica of {@code ManasAroraSwingBacktestTest.breakoutSeries()}'s
+   * proven shape, stretched to {@code days} bars ending on {@code end}: a long uptrend (clears the
+   * §4.1 gates) whose END LEVEL grows with {@code k} (180 .. 310 across the panel) — a genuine
+   * STEEPNESS gradient, not a uniform post-hoc scale (which cancels out of {@code weightedRs}'s %
+   * returns and produces a degenerate, all-tied RS distribution — measured on an earlier attempt
+   * that used a uniform {@code 1+0.01k} multiplier and got a 0-trade rs-turnover result). The
+   * consolidation and breakout are scaled proportionally to each symbol's own uptrend-end level, so
+   * every symbol clears the ENTRY gates identically; only the PRECEDING trend steepness (hence
+   * {@code weightedRs}) differs, letting the RS-rank≥70 gate genuinely admit the top performers and
+   * reject the rest. Volume is sized so the 20-day turnover clears the ₹37.5L/day floor. Row shape
+   * matches {@code FixtureShape.variedUptrend}: {@code {symbol, bucket, open, high, low, close, volume}}.
    */
-  private static List<Object[]> breakoutPanel(String symbol, int k, int days, LocalDate end) {
-    double offset = 1.0 + 0.01 * k; // tiny per-symbol scale so rows are not byte-identical
+  private static List<Object[]> breakoutPanel(
+      String symbol, int k, int totalSymbols, int days, LocalDate end) {
+    double growthFrac = totalSymbols <= 1 ? 0.0 : (double) k / (totalSymbols - 1); // 0..1
+    double uptrendEndValue = 180.0 + 130.0 * growthFrac; // 180 (k=0) .. 310 (k=last)
+    double consolidationScale = uptrendEndValue / 185.0; // 185 = breakoutSeries()'s own uptrend-end
     double[] close = new double[days];
     long[] volume = new long[days];
     int uptrendEnd = 256; // matches breakoutSeries()'s proven shape (256 uptrend + 12 consolidation)
+    long baseVolume = 400_000L; // price(180..310) * 400k clears the ₹37.5L/day turnover floor
     for (int i = 0; i < uptrendEnd; i++) {
-      close[i] = (80.0 + 105.0 * i / (uptrendEnd - 1)) * offset;
-      volume[i] = 1_000L;
+      close[i] = 80.0 + (uptrendEndValue - 80.0) * i / (uptrendEnd - 1);
+      volume[i] = baseVolume;
     }
     double[] base = {182, 179, 183, 180, 182, 178, 183, 181, 182, 179, 183, 180};
     for (int i = 0; i < base.length; i++) {
-      close[uptrendEnd + i] = base[i] * offset;
-      volume[uptrendEnd + i] = 1_000L;
+      close[uptrendEnd + i] = base[i] * consolidationScale;
+      volume[uptrendEnd + i] = baseVolume;
     }
     int breakoutIdx = uptrendEnd + base.length;
     double[] tail = {195, 197, 190, 178, 170};
     for (int i = 0; i < tail.length; i++) {
-      close[breakoutIdx + i] = tail[i] * offset;
-      volume[breakoutIdx + i] = i == 0 ? 3_000L : 1_000L; // 3x expanding-volume gate on the break bar
+      close[breakoutIdx + i] = tail[i] * consolidationScale;
+      volume[breakoutIdx + i] = i == 0 ? 3L * baseVolume : baseVolume; // 3x expanding-volume gate
     }
     int tailEnd = breakoutIdx + tail.length;
     for (int i = tailEnd; i < days; i++) {
-      close[i] = tail[tail.length - 1] * offset; // flat continuation after the rollover
-      volume[i] = 1_000L;
+      close[i] = tail[tail.length - 1] * consolidationScale; // flat continuation after the rollover
+      volume[i] = baseVolume;
     }
 
     List<Object[]> rows = new ArrayList<>(days);
@@ -166,9 +186,9 @@ class ManasBacktestGoldenIntegrationTest extends MarketDataIntegrationTestBase {
             .filter(r -> r.variant().equals(PRIMARY_VARIANT))
             .findFirst()
             .orElseThrow();
-    PortfolioStat portfolio = report.portfolio();
+    PortfolioStat portfolio = report.portfolioRsPriorityNet();
     assertThat(portfolio)
-        .as("the seeded panel must clear enough gates to take at least one trade")
+        .as("the seeded panel must clear the RS-rank + turnover gates to take at least one trade")
         .isNotNull();
 
     JsonNode golden = readGolden();

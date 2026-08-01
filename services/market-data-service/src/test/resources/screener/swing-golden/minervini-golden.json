@@ -1,8 +1,8 @@
 {
-  "comment": "M7/M27 (#128 batch scoping) frozen-output golden for MinerviniBacktestService, PRIMARY_VARIANT=technical, portfolio (FIFO gross). Captured by MinerviniBacktestGoldenIntegrationTest.headlineStatsMatchTheFrozenGolden over a fixed, seeded 60-symbol/600-day panel (FixtureShape.variedUptrend, prefix M27MVGOLD). Re-capture ONLY on a deliberate doctrine/formula change: run the test, copy the printed M27-GOLDEN[Minervini] line's values here, and note WHY in a commit message.",
-  "totalTrades": 24,
-  "tradesTaken": 24,
-  "cagrPct": "-11.95",
-  "maxDrawdownPct": "6.50",
-  "sharpe": "-6.50"
+  "comment": "M7/M27 (#128 batch scoping) frozen-output golden for MinerviniBacktestService. Targets the PRODUCTION headline: PRIMARY_VARIANT=rs-turnover (RS-rank>=70 AND the turnover floor), portfolioRsPriorityNet (RS-priority slots, NET of transaction costs), NOT the RS-relaxed technical variant or FIFO-gross portfolio(). Captured by MinerviniBacktestGoldenIntegrationTest.headlineStatsMatchTheFrozenGolden over a fixed, seeded 30-symbol/280-day panel with a genuine per-symbol uptrend-steepness gradient (primaryBasePanel, prefix M27MVGOLD) so weightedRs's cross-sectional RS-rank actually differentiates symbols (FixtureShape.variedUptrend's own per-symbol drift was measured to still produce ZERO rs-only/rs-turnover trades on this doctrine). Re-capture ONLY on a deliberate doctrine/formula change: run the test, copy the printed M27-GOLDEN[Minervini] line's values here, and note WHY in a commit message.",
+  "totalTrades": 14,
+  "tradesTaken": 8,
+  "cagrPct": "-100.00",
+  "maxDrawdownPct": "11.18",
+  "sharpe": "0.00"
 }

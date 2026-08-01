@@ -99,6 +99,22 @@ class ManasSwingExitEquivalenceTest {
       assertThat(liveExit).as(name + " (live)").isPresent();
       assertThat(liveExit.get().type()).as(name + " (live type)").isEqualTo("stop_loss");
       assertThat(liveOffset).as(name + " (live bar offset)").isEqualTo(expectedBarOffset);
+
+      // 3) the DEEP SIM's own outcome, via the SAME comparison simulateSetup's per-lot loop makes
+      // (ManasAroraSwingBacktest.stopBreached — not a hand-copied `<=`, the actual production
+      // predicate at the call site) — closes a gap the level-only check above cannot: a change to
+      // the comparison OPERATOR (e.g. `<=` to `<`) moves no level, so it would leave the live-only
+      // hit/no-hit check above untouched while genuinely breaking the deep sim's outcome.
+      List<String> postEntryOnly = postEntryCloses.subList(1, postEntryCloses.size());
+      int simOffset = -1;
+      for (int i = 0; i < postEntryOnly.size(); i++) {
+        if (ManasAroraSwingBacktest.stopBreached(Double.parseDouble(postEntryOnly.get(i)), simStop)) {
+          simOffset = i + 1; // +1: postEntryOnly[0] is bar offset 1 from the entry bar
+          break;
+        }
+      }
+      assertThat(simOffset).as(name + " (sim bar offset, real stopBreached predicate)")
+          .isEqualTo(expectedBarOffset);
     }
   }
 

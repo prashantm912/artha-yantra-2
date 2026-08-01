@@ -325,7 +325,7 @@ public final class ManasAroraSwingBacktest {
       // 2) per-lot initial-stop hits close only the breached lot(s).
       List<Lot> survivors = new ArrayList<>();
       for (Lot lot : lots) {
-        if (close[i] <= lot.initialStop) {
+        if (stopBreached(close[i], lot.initialStop)) {
           double exitPrice = fillPrice(bars, i, v.fillTiming());
           if (Double.isNaN(exitPrice)) {
             survivors.add(lot); // final-bar stop cannot execute at a nonexistent next open
@@ -373,6 +373,16 @@ public final class ManasAroraSwingBacktest {
     double atrStop = Double.isNaN(atr) ? entry * (1.0 - stopCapPct) : entry - atrMult * atr;
     double cap = entry * (1.0 - stopCapPct);
     return Math.max(atrStop, cap); // the tighter (higher) of the ATR stop and the cap
+  }
+
+  /**
+   * The per-lot initial-stop HIT check (simulateSetup's per-lot loop): a close AT OR BELOW the
+   * stop level breaches it. Extracted to a package-private predicate (M7, #128) so the swing
+   * exit-equivalence characterization fixture can assert this EXACT comparison — not just the
+   * {@link #initialStop} LEVEL — against the live {@code ExitEvaluator}'s own hit/no-hit decision.
+   */
+  static boolean stopBreached(double close, double stopLevel) {
+    return close <= stopLevel;
   }
 
   /**

@@ -176,6 +176,53 @@ class ManasAroraSwingEngineTest {
     verify(h.events, never()).publishEvent(argThat((Object e) -> e instanceof SignalExited));
   }
 
+  /**
+   * M6 characterization (#128 batch scoping, market-data-service's {@code
+   * ManasSwingExitEquivalenceTest} covers the deep-sim half): {@code lotsAsOf} admits a lot whose
+   * {@code generatedAt} date EQUALS the pinned session (a same-day catch-up run, or a live run
+   * where the entry pass just opened it), so {@code exitPass} evaluates {@code ExitEvaluator} at
+   * {@code entryIndex == series.size()-1} — the SAME bar the lot was opened on. Exercised through
+   * the REAL production path ({@code runDaily} → {@code exitPass} → {@code lotsAsOf} →
+   * {@code buildBank} → {@code ExitEvaluator.evaluate}), not a hand-rolled equivalent — a change to
+   * {@code lotsAsOf}'s date comparison (e.g. excluding same-day lots to "fix" M6 on the live side)
+   * would turn {@code exits()} to 0 and redden this test. The 4-bar series is deliberately too
+   * short for the config's ATR-based stop_loss/trailing_stop to warm up, isolating the square_off
+   * rule (a pure close-vs-past-close check, independent of entry timing) as the only reachable exit.
+   */
+  @Test
+  void aSameDayLotIsAdmittedAndEvaluatedOnItsOwnEntryBar() throws IOException {
+    ExitHarness h = new ExitHarness();
+    List<EngineCandle> sameDaySeries = fourBarSquareOffSeries();
+    OffsetDateTime entryBar = sameDaySeries.get(sameDaySeries.size() - 1).bucketStart();
+    LocalDate pinnedSession = entryBar.withOffsetSameInstant(IST).toLocalDate();
+    when(h.candles.fetch(any(), any(), any(), any(), any())).thenReturn(sameDaySeries);
+    h.stubAnchors(h.anchor(42L, entryBar)); // same calendar day as the pinned session
+
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine(false), pinnedSession);
+
+    assertThat(run.exits())
+        .as("live has no entry-bar guard: the same-day lot IS evaluated and its exit fires")
+        .isEqualTo(1);
+    assertThat(run.exitSkipped()).isZero();
+    ArgumentCaptor<String> reason = ArgumentCaptor.forClass(String.class);
+    verify(h.signals)
+        .insert(
+            any(), any(), any(), any(), eq("EXIT"), any(), any(), any(), any(), any(), any(),
+            any(), any(), reason.capture());
+    assertThat(reason.getValue()).isEqualTo("SQUARE_OFF");
+  }
+
+  /** 4 flat-OHLC bars [100,100,100,140] — too short for ATR(20) to warm, so only square_off
+   * (fast_pct=35/fast_bars=3, per manas-arora-breakout.yaml) is reachable: 140 >= 100*1.35. */
+  private static List<EngineCandle> fourBarSquareOffSeries() {
+    double[] closes = {100.0, 100.0, 100.0, 140.0};
+    List<EngineCandle> bars = new ArrayList<>();
+    for (int d = 0; d < closes.length; d++) {
+      bars.add(bar(200 + d, closes[d])); // day offset 200+ so it never collides with craftDecline()
+    }
+    return bars;
+  }
+
   @Test
   void aPositionWithPreAndPostSessionLotsIsRefusedWithoutAFalseMissingBarSkip() throws IOException {
     ExitHarness h = new ExitHarness();

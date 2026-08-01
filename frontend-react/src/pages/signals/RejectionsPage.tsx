@@ -98,6 +98,11 @@ function DotChip({ dot }: { dot: DotState }) {
             frozen
           </span>
         )}
+        {dot.neverCrossing && (
+          <span className="rounded bg-surface-2 px-1 py-0.5 text-[10px] uppercase tracking-wide text-ay-muted">
+            near-miss
+          </span>
+        )}
       </div>
       <div className="mt-0.5 text-caption">
         <span className={cn('font-semibold', textTone)}>{verdict}</span>

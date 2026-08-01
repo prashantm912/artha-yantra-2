@@ -42,9 +42,18 @@ public final class ConnectTheDotsScorer {
   /**
    * One confluence dot's contribution. {@code absent} (signal-analysis rollup §Proposals P3) marks a
    * dot whose INPUT data is MISSING: it is WITHHELD from BOTH the numerator and the denominator (it
-   * neither supports nor opposes), so a data gap is never scored as evidence against the side. The
-   * recorded side-channel keeps serializing {@code dot}/{@code weight}/{@code supports} only, so the
-   * JSON shape is unchanged — the exclusion shows up only in the (correspondingly higher) aggregate.
+   * neither supports nor opposes), so a data gap is never scored as evidence against the side.
+   *
+   * <p><b>{@code absent} IS serialized (F5 U4a / dead-dot A6).</b> It originally rode as a
+   * scoring-only field — the three live-only side-channels wrote {@code dot}/{@code weight}/{@code
+   * supports} (+{@code reason} on the two diagnostics) and the exclusion showed up ONLY as a
+   * correspondingly higher aggregate. Since a withheld dot ALSO reads {@code supports=false}, that
+   * made "no data" and "data said no" byte-identical in the persisted forensics, and the G13 iv-bloc
+   * counterfactual had to reverse-engineer absentness from the effective weight sum being 18.80
+   * rather than 19.60. All three serializers now emit the flag, so the fact is recorded, not
+   * inferred. This is a diagnostic key only: the aggregate arithmetic here is untouched, and none of
+   * the three columns is on the golden/parity path ({@code GoldenSignalsJson.write} lives in
+   * {@code libs/strategy-engine}, which never sees this class).
    */
   public record DotScore(String dot, double weight, boolean supports, String reason, boolean absent) {
 
@@ -148,6 +157,35 @@ public final class ConnectTheDotsScorer {
       ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
       ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot,
       boolean dowDot, BigDecimal volumeFloor) {
+    return score(
+        ctx, side, bias60mDir, threshold, props, vwapHardGate, ivPerStrikeGate, premiumSkewDot,
+        dowDot, volumeFloor, false);
+  }
+
+  /**
+   * As the 10-arg form but with the {@code iv_rank} dot opted in via the {@code iv-rank-dot} tag (A3,
+   * Architect 2026-08-01).
+   *
+   * <p><b>The calendar self-arm this closes.</b> {@code IvAnalyticsService} suppresses the rank below
+   * {@code artha.iv.rank-history-floor-days} (60 trading days) of {@code marketdata.iv_daily_summary}
+   * history — an intentional honesty floor. Live capture began 2026-06-15, so the input has been
+   * honest-NULL on every row so far and the dot has read absent for 13+ straight sessions. Once the
+   * floor is reached the rank starts resolving on its own, and this 0.8-weight dot would SILENTLY enter
+   * the composite denominator fleet-wide (18.80 → 19.60) on a CALENDAR trigger — no deploy, no owner
+   * arming decision. That is exactly the class of change the repo's default-OFF doctrine exists to
+   * prevent, so activation is now an explicit arming event (tag → new version → publish).
+   *
+   * <p>{@code ivRankDot} false ⇒ the dot is ABSENT — withheld from BOTH the numerator and the
+   * denominator, precisely as a null input already is — so the unarmed reading is byte-identical to the
+   * 10-arg form on today's data (the input is null everywhere, live and historical) and inert in BOTH
+   * directions once it is not (a would-oppose rank never drags the aggregate down; a would-support rank
+   * never props it up). The dot stays IN the list marked absent, so the recorded side-channel keeps its
+   * shape.
+   */
+  public static Confluence score(
+      ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
+      ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot,
+      boolean dowDot, BigDecimal volumeFloor, boolean ivRankDot) {
     Chart c = ctx.chart();
     Oi oi = ctx.oi();
     Macro m = ctx.macro();
@@ -184,13 +222,16 @@ public final class ConnectTheDotsScorer {
     add(dots, "breadth", W, ScalperGates.breadth(m, side).pass(), "advances/declines > 32");
     add(dots, "vix", W, ScalperGates.vix(m, side).pass(), "VIX direction");
     add(dots, "basis", W, ScalperGates.futuresBasis(oi, side).pass(), "futures basis");
-    // P3 (signal-analysis rollup §Proposals): ivRank is honest-NULL on every live row (no IV-rank
-    // source yet). A null INPUT is WITHHELD from the denominator (absent) — it neither supports nor
-    // opposes — rather than silently scoring supports=false against every candidate; a present rank
-    // keeps the "IV rank low = cheap premium" grade.
-    boolean ivRankAbsent = m.ivRank() == null;
+    // P3 (signal-analysis rollup §Proposals): ivRank is honest-NULL on every live row (the 60-trading-
+    // day IvAnalyticsService history floor is not met yet). A null INPUT is WITHHELD from the
+    // denominator (absent) — it neither supports nor opposes — rather than silently scoring
+    // supports=false against every candidate; a present rank keeps the "IV rank low = cheap premium"
+    // grade. A3: and the dot is DEFAULT-OFF behind `iv-rank-dot`, so reaching that floor cannot
+    // self-arm it on a calendar trigger — the unarmed dot is withheld exactly as a null input is.
+    boolean ivRankNull = m.ivRank() == null;
+    boolean ivRankAbsent = ivRankNull || !ivRankDot;
     add(dots, "iv_rank", W_IV, !ivRankAbsent && m.ivRank().compareTo(IV_RANK_LOW) < 0,
-        ivRankAbsent ? "IV rank absent (no data — withheld)" : "IV rank low (cheap premium)", ivRankAbsent);
+        ivRankReason(ivRankNull, ivRankDot), ivRankAbsent);
     // T2.8: the side's IV richer than the other by >= the gap; 40/40-both-high forces a stand-aside.
     // E4 iv-per-strike: a UNILATERAL buy-side IV>=40 ("buyer stays away", §4.6) also forces the
     // stand-aside when armed — the existing symmetric ivBothHighStandAside misses the one-sided case.
@@ -348,6 +389,19 @@ public final class ConnectTheDotsScorer {
   private static boolean buySideRich(Macro m, boolean ce, ScalperOiProps props) {
     BigDecimal buyIv = ce ? m.ceIvAvg6() : m.peIvAvg6();
     return buyIv != null && buyIv.compareTo(props.ivBothHighFloor()) >= 0;
+  }
+
+  /**
+   * The {@code iv_rank} dot's reason. The NULL-input case is checked FIRST and keeps its exact wording,
+   * so today's rows (null input, dot unarmed) serialize byte-identically to before the A3 gate; the
+   * unarmed-but-present case gets its own wording so a September diagnostic reads "unarmed", not the
+   * misleading "no data".
+   */
+  private static String ivRankReason(boolean ivRankNull, boolean ivRankDot) {
+    if (ivRankNull) {
+      return "IV rank absent (no data — withheld)";
+    }
+    return ivRankDot ? "IV rank low (cheap premium)" : "IV rank dot unarmed (withheld)";
   }
 
   private static void add(List<DotScore> dots, String name, double weight, boolean supports, String reason) {

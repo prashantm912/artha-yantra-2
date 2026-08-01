@@ -2086,7 +2086,7 @@ public class SignalEngine {
     String scalperDetail =
         decision == null
             ? null
-            : scalperDetailJson(decision, strategy.scalper());
+            : scalperDetailJson(objectMapper, decision, strategy.scalper());
     // INT §13 row 19 / FID P1-8 fired-side rail-operand side-channel: serialize the confluence gate's full
     // condition matrix (built from the SAME evaluation the Decision came from — never re-evaluated, so it
     // is deterministic) mirroring signal_rejections.diagnostic's shape. Built HERE (not inside the tx) so a
@@ -2206,9 +2206,12 @@ public class SignalEngine {
    * stamps {@code side:"NEUTRAL"}, the primary (CE) leg in the legacy {@code tradeable/strike/...}
    * fields, and a {@code legs[]} array carrying BOTH BUY legs ({exchange, tradingsymbol, side, option_type,
    * strike, option_ltp, iv, delta}) — the two-leg carrier the order/paper layer reads.
+   *
+   * <p>Static + package-private (no instance state beyond the mapper) so the serialized shape is
+   * directly testable — the same reason {@link #tradeableLeg} is.
    */
-  private String scalperDetailJson(
-      ScalperConfluenceGate.Decision d, ScalperConfig cfg) {
+  static String scalperDetailJson(
+      ObjectMapper objectMapper, ScalperConfluenceGate.Decision d, ScalperConfig cfg) {
     StrikePicker.Candidate c = d.pick().candidate();
     ObjectNode root = objectMapper.createObjectNode();
     root.put("side", d.neutral() ? "NEUTRAL" : d.side().name());
@@ -2233,6 +2236,10 @@ public class SignalEngine {
       n.put("dot", ds.dot());
       n.put("weight", ds.weight());
       n.put("supports", ds.supports());
+      // F5 U4a: absentness is a RECORDED fact. `absent` qualifies `supports` — a withheld dot
+      // (missing input, out of BOTH num and den) also reads supports=false, so without this key the
+      // two are indistinguishable and had to be told apart by arithmetic (see rejectionDiagnosticJson).
+      n.put("absent", ds.absent());
     }
     // #11 (section 3.11) two-leg carrier: only a neutral straddle adds the legs[] array, so the
     // single-leg directional side-channel stays byte-identical. The order/paper layer trades these.
@@ -2281,7 +2288,7 @@ public class SignalEngine {
         strategy.versionId(), strategy.slug(), exchange, tradingsymbol, interval,
         d.side() == null ? null : d.side().name(), d.blockingRail(), d.operand(), d.threshold(),
         d.margin(), d.reason(), d.compositeScore(), d.compositeThreshold(),
-        rejectionDiagnosticJson(d), barTime, d);
+        rejectionDiagnosticJson(objectMapper, d), barTime, d);
     log.info(
         "scalper confluence blocked entry: {} {}:{} rail={} operand={} threshold={} margin={} composite={}/{} ({})",
         strategy.slug(), exchange, tradingsymbol, d.blockingRail(), d.operand(), d.threshold(),
@@ -2322,8 +2329,12 @@ public class SignalEngine {
    * The full rejection diagnostic JSON: the blocking rail + margin, every rail evaluated up to the
    * block, the dot-by-dot Connect-the-Dots confluence (when the composite was reached), and the raw
    * OI/macro/chart context — the complete "why blocked" payload the Rejections page renders.
+   *
+   * <p>Static + package-private (no instance state beyond the mapper) so the serialized shape is
+   * directly testable — the same reason {@link #tradeableLeg} is.
    */
-  private String rejectionDiagnosticJson(ScalperConfluenceGate.RejectionDiagnostic d) {
+  static String rejectionDiagnosticJson(
+      ObjectMapper objectMapper, ScalperConfluenceGate.RejectionDiagnostic d) {
     ObjectNode root = objectMapper.createObjectNode();
     root.put("blockingRail", d.blockingRail());
     root.put("side", d.side() == null ? null : d.side().name());
@@ -2372,6 +2383,12 @@ public class SignalEngine {
         n.put("dot", ds.dot());
         n.put("weight", ds.weight());
         n.put("supports", ds.supports());
+        // F5 U4a / dead-dot A6: `absent` = the dot's INPUT was missing, so it was withheld from BOTH
+        // the numerator and the denominator (it neither supports nor opposes). It qualifies
+        // `supports`: a withheld dot ALSO reads supports=false, so before this key the forensics
+        // could not tell "no data" from "data said no" — the G13 iv-bloc counterfactual had to
+        // reverse-engineer it from the weight sum being 18.80 instead of 19.60. Recorded, not inferred.
+        n.put("absent", ds.absent());
         n.put("reason", ds.reason());
       }
     }

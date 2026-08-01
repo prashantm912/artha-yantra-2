@@ -28,6 +28,44 @@ check() { # check <description> <expected: KEPT|GONE> <branch> <output-file>
     fail=$((fail + 1))
   fi
 }
+# check_worktree <description> <expected: KEPT|GONE> <worktree-path> <output-file>
+# Branch existence (checked by `check` above) does not prove a WORKTREE was removed — `git worktree
+# remove` never deletes the branch ref, only the working directory + its registration.
+# ⚠️ Do NOT grep `git worktree list --porcelain` for this literal path (measured, 2026-08-01): on this
+# Windows/Git-Bash box, git reports worktree paths in WINDOWS form (`C:/Users/...`) while `$TMP` from
+# `mktemp -d` is POSIX form (`/tmp/...`) — the two spellings of the same directory never string-match,
+# so a porcelain grep silently reports GONE unconditionally, regardless of the real state. Directory
+# existence has no such format ambiguity: `git worktree remove` deletes the tree from disk, full stop.
+check_worktree() {
+  local desc="$1" want="$2" wt_path="$3" out="$4"
+  local got="GONE"
+  [ -d "$wt_path" ] && got="KEPT"
+  if [ "$got" = "$want" ]; then
+    printf 'ok   %-46s %s\n' "$desc" "$want"
+    pass=$((pass + 1))
+  else
+    printf 'FAIL %-46s want=%s got=%s\n' "$desc" "$want" "$got"
+    echo "--- script output ---"; cat "$out"; echo "---------------------"
+    fail=$((fail + 1))
+  fi
+}
+# check_not_flagged <description> <branch> <output-file>
+# The literal repro (2026-08-01): a live, never-pushed, untouched worktree appeared under the
+# `worktree  -> ` removal-candidate line in `--dry` output, before its agent had written a file.
+# --dry never physically deletes anything either way, so the only way to see the bug via --dry is to
+# check WHICH list the report put it in, not whether the directory survived. Matched by BRANCH NAME,
+# not by path — same Windows-vs-POSIX path-spelling trap as check_worktree above applies here too.
+check_not_flagged() {
+  local desc="$1" branch="$2" out="$3"
+  if grep -qE "^worktree  +-> .*\[$branch\]" "$out"; then
+    printf 'FAIL %-46s flagged for removal\n' "$desc"
+    echo "--- script output ---"; cat "$out"; echo "---------------------"
+    fail=$((fail + 1))
+  else
+    printf 'ok   %-46s %s\n' "$desc" "not flagged"
+    pass=$((pass + 1))
+  fi
+}
 
 git init --quiet --bare "$TMP/remote"
 git clone --quiet "$TMP/remote" "$TMP/local"
@@ -121,10 +159,27 @@ git checkout --quiet -b local-wip main
 echo wip > wip.txt && git add -A && git commit --quiet -m wip
 
 git checkout --quiet main
+
+# --- LIVE WORKTREE, clean, never pushed (the bug this fix addresses: a false DELETE) ---------------
+# Mirrors exactly how agents are dispatched here: `git worktree add <path> -b <branch> origin/main`.
+# That call sets branch.<branch>.remote=origin as a SIDE EFFECT of tracking the base branch — which is
+# what made the OLD "has a remote configured" check treat a never-pushed branch as pushed. The
+# worktree is left completely untouched (no commits, no dirty files, exactly like an agent's worktree
+# before it has written anything) and must survive both --dry and the real run verbatim.
+git worktree add --quiet "$TMP/wt-live" -b live-worktree-guard origin/main
+
+# --- LIVE WORKTREE, real committed work, squash-merged, remote deleted (the inverse case) -----------
+# Confirms the new guard does not regress real cleanup: a worktree that WAS pushed, WAS squash-merged,
+# and is clean must still be removed — and its now-orphaned branch handle cleaned up with it.
+git worktree add --quiet "$TMP/wt-merged" -b worktree-squash-merged origin/main
+(cd "$TMP/wt-merged" && echo w1 > wtfile.txt && git add -A && git commit --quiet -m 'worktree commit')
+git push --quiet -u origin worktree-squash-merged
+git merge --quiet --squash worktree-squash-merged && git commit --quiet -m 'squashed worktree work (#5)'
+
 git push --quiet origin main
 # GitHub's delete_branch_on_merge equivalent: drop the remote heads, then let the script see [gone].
 { echo "gh-rescue $GH_RESCUE_OID"; echo "stale-oid $STALE_MERGED_OID"; } > "$GH_FIXTURE"
-git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid
+git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid worktree-squash-merged
 
 echo "=== --dry must remove NOTHING ==="
 # ⚠️ No `|| true` (review R4). It masked the script's exit status, so a fatal error AFTER the one
@@ -138,6 +193,9 @@ else
 fi
 check "--dry leaves the squash-merged branch"  KEPT squash-merged "$TMP/dry.out"
 check "--dry leaves the unmerged branch"       KEPT never-merged  "$TMP/dry.out"
+# The literal repro: a never-pushed, untouched live worktree must NOT be listed as a removal
+# candidate in --dry output (RED against the pre-fix script — see receipt for the failure text).
+check_not_flagged "--dry does not flag the live worktree for removal" live-worktree-guard "$TMP/dry.out"
 
 echo
 echo "=== real run ==="
@@ -164,6 +222,14 @@ check "rename with unlanded deletion SURVIVES"  KEPT renames-a-file "$TMP/run.ou
 check "gh rescue removes a confirmed merge"     GONE gh-rescue      "$TMP/run.out"
 # R2 negative: gh still returns the OLD merged PR for this reused name; the new commit must survive.
 check "stale gh OID does NOT delete new work"   KEPT stale-oid      "$TMP/run.out"
+# The bug this fix pins: a clean, never-pushed live worktree must survive the real run, not just
+# --dry's report (RED against the pre-fix script — see receipt for the failure text).
+check_worktree "clean never-pushed worktree SURVIVES (the fix)" KEPT "$TMP/wt-live" "$TMP/run.out"
+check "live worktree's branch SURVIVES"                          KEPT live-worktree-guard "$TMP/run.out"
+# The inverse: a worktree that WAS pushed and WAS squash-merged must still be removed, worktree and
+# branch both — the fix must not regress the cleanup path the whole script exists for.
+check_worktree "squash-merged worktree is REMOVED"      GONE "$TMP/wt-merged" "$TMP/run.out"
+check "worktree-squash-merged branch is REMOVED"        GONE worktree-squash-merged "$TMP/run.out"
 
 echo
 echo "passed $pass, failed $fail"

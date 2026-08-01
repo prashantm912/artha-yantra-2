@@ -8,6 +8,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from './client.ts';
+import { compareDecimal } from '../lib/decimal.ts';
 
 /** Insight severity ladder (§2.1). */
 export const INSIGHT_SEVERITIES = ['INFO', 'NOTICE', 'WARN', 'CRITICAL'] as const;
@@ -87,7 +88,8 @@ export interface Insight {
   explanation: string;
   /** MANDATORY + non-empty on write; typed loosely for a null-safe render. */
   evidence?: InsightEvidence[] | null;
-  priority?: number | null;
+  /** BigDecimal-as-string on the wire (C-2.25) — compare via `compareDecimal`, never `Number`/`parseFloat`. */
+  priority?: string | null;
   priorityDetail?: PriorityDetail | null;
   dataTrust: InsightTrust;
   trustReasons?: string[] | null;
@@ -156,18 +158,19 @@ export function todayIst(): string {
 }
 
 /**
- * The priority band: from the explain contract when present (§3.4), else derived from the numeric
- * priority via the §3.2 bands (A ≥ 80, B 60–79, C 40–59, D < 40). `null` = unscored (a BLOCKED insight
- * carries no priority — never rank on bad data).
+ * The priority band: from the explain contract when present (§3.4), else derived from the
+ * decimal-string priority via the §3.2 bands (A ≥ 80, B 60–79, C 40–59, D < 40). `null` = unscored
+ * (a BLOCKED insight carries no priority — never rank on bad data). Compared via `compareDecimal`
+ * (never `Number`/`parseFloat` — C-2.25).
  */
 export function insightBand(insight: Insight): InsightBand | null {
   const b = insight.priorityDetail?.band;
   if (b === 'A' || b === 'B' || b === 'C' || b === 'D') return b;
   const p = insight.priority;
   if (p == null) return null;
-  if (p >= 80) return 'A';
-  if (p >= 60) return 'B';
-  if (p >= 40) return 'C';
+  if (compareDecimal(p, '80') >= 0) return 'A';
+  if (compareDecimal(p, '60') >= 0) return 'B';
+  if (compareDecimal(p, '40') >= 0) return 'C';
   return 'D';
 }
 

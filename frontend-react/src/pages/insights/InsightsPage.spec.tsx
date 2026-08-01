@@ -30,7 +30,7 @@ const SIGNAL: Insight = {
     },
     { label: 'PCR shift', value: '0.87→1.14 since open' },
   ],
-  priority: 82.75,
+  priority: '82.75',
   priorityDetail: {
     score: 82.75,
     band: 'A',

@@ -3,22 +3,36 @@
 // springdoc-generated schema. A backend rename/remove on a typed endpoint now fails `tsc -b`
 // instead of rendering "—" at runtime. Key-presence only, deliberately — but NOT for the money
 // reason this comment used to give: PR #1203 retyped every response-reachable BigDecimal in
-// strategy-signal to `string`, so springdoc and our hand-written types (C-2.25) now agree on every
-// money field; a full structural check would no longer be red there. It stays key-presence-only
-// because OTHER divergences remain, measured 2026-08-02 by assigning each generated schema
-// directly into its hand-written counterpart under `tsc --strict` and reading the errors: (1)
-// several fields the app narrows to a TS string-literal union (`side`, `signalType`, `status`,
-// `severity`, `dataTrust`, `op`, …) while springdoc emits a plain `string` — the backend DTOs
-// aren't annotated as enums; (2) JSON fields springdoc can only type as an opaque `JsonNode`
-// (`scoreBreakdown`, `scalperDetail`, `diagnostic`, `evidence`, `priorityDetail`) where the app
-// gives a real shape it knows from the Java DTO but the spec can't express; (3) a few hand-written
-// optional fields (`Entry.signalId` & 3 siblings, `StrategySummary.currentVersion`) are typed
-// `T | undefined` where the wire is `T | null` (always present, nullable) — a narrower staleness
-// bug in the hand types, not a wire-shape gap; and (4) `Insight.priority` is hand-typed
-// `number | null` while the wire is `string | null` — the same BigDecimal-as-string fact #1203
-// fixed elsewhere, just not caught here since key-presence never checked field types. Full findings
-// + file:line evidence for every case: the `chore/contracts-bridge-tightening` PR description
-// (2026-08-02 investigation) — tightening AssertKeys itself is a separate, follow-up change.
+// TradeDto/AccountDto/PositionDto (strategy-signal) to `string`, so springdoc and our hand-written
+// types (C-2.25) now agree on THOSE fields. #1203 did not sweep the whole service, though —
+// `Insight.priority` was a BigDecimal-as-string field it never reached (fixed below). It stays
+// key-presence-only because other divergences remain, measured 2026-08-02 by assigning each
+// generated schema into (and out of) its hand-written counterpart under `tsc --strict` and reading
+// the errors. Caveat on the method itself: a WIRE→HAND assignment failure is a real type
+// incompatibility, but assignability is NOT exact-key equality — an optional hand-written field
+// that the wire always sends passes silently in that direction too, so this catches type
+// mismatches, not presence mismatches (e.g. `SignalDto`'s `scalperDetail`/`expiresAt`/
+// `suggestedQty`/`tradeableExchange`/`tradeableTradingsymbol`/`strategyVersionId` are optional in
+// signals.ts but always-present on the wire — invisible to this check, harmless in practice since
+// the wire never omits them, but not proof of exact equality). Within that caveat: (1) several
+// fields the app narrows to a TS string-literal union (`side`, `signalType`, `status`, `severity`,
+// `dataTrust`, `op`, …) while springdoc emits a plain `string` — the transport DTOs don't declare
+// Java enums for these; (2) the transport DTOs declare some fields as raw `JsonNode`
+// (`SignalViews.java`, `Insight.java`), which springdoc can only type `unknown` — the app gives
+// these a real shape it knows from what the DTO actually serializes, which OpenAPI *could* express
+// if the backend exposed typed records instead of `JsonNode` (`scoreBreakdown`, `scalperDetail`,
+// `diagnostic`, `evidence`, `priorityDetail`); and (3) a few hand-written optional fields
+// (`Entry.signalId` & 3 siblings, `StrategySummary.currentVersion`) are typed `T | undefined`
+// where the wire is `T | null` (always present, nullable) — a staleness bug in the hand types, not
+// fixed here. `Insight.priority` (hand-typed `number | null` against a `string | null` wire) WAS a
+// real bug and is fixed in this PR. `TradeDto.closedAt` looked like the same class (wire
+// `string | null`, hand-written `string`) but investigation showed it isn't one: every write path
+// that sets a position's status to CLOSED sets `closed_at` atomically in the same statement
+// (`PaperPositionRepository.close()`), so a `TradeDto` row can never actually carry a null one —
+// the wire's nullable annotation is the stale side here, a backend fix out of scope for this PR.
+// Full findings + file:line evidence for every case: the `chore/contracts-bridge-tightening` PR
+// description (2026-08-02 investigation) — tightening AssertKeys itself is a separate, follow-up
+// change.
 //
 // The Map-returning endpoints are being retyped to records (ledger D3 slice 1), and each one that
 // lands moves out of "runtime-verified only" and into this file. Crossed over on 2026-07-29: the

@@ -27,14 +27,14 @@ function insight(partial: Partial<Insight>): Insight {
 
 describe('insightBand', () => {
   it('prefers the explain-contract band when present', () => {
-    expect(insightBand(insight({ priority: 10, priorityDetail: { score: 82, band: 'A', trustCap: 1, components: [] } }))).toBe('A');
+    expect(insightBand(insight({ priority: '10', priorityDetail: { score: 82, band: 'A', trustCap: 1, components: [] } }))).toBe('A');
   });
 
-  it('derives the band from the numeric priority via the §3.2 thresholds', () => {
-    expect(insightBand(insight({ priority: 85 }))).toBe('A');
-    expect(insightBand(insight({ priority: 60 }))).toBe('B');
-    expect(insightBand(insight({ priority: 40 }))).toBe('C');
-    expect(insightBand(insight({ priority: 39.9 }))).toBe('D');
+  it('derives the band from the decimal-string priority via the §3.2 thresholds', () => {
+    expect(insightBand(insight({ priority: '85' }))).toBe('A');
+    expect(insightBand(insight({ priority: '60' }))).toBe('B');
+    expect(insightBand(insight({ priority: '40' }))).toBe('C');
+    expect(insightBand(insight({ priority: '39.9' }))).toBe('D');
   });
 
   it('returns null for an unscored (BLOCKED) insight', () => {

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -105,7 +106,7 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
     // Pre-arm review M1 (the load-bearing case): a persistent condition (e.g. a dead data source)
     // regenerates every 15 minutes; only the FIRST sighting may push. Before the fix every refresh
     // re-published — ~96 pushes/day from one CRITICAL over a weekend.
-    InsightCandidate candidate = candidate("I4_M1:" + UUID.randomUUID(), null);
+    InsightCandidate candidate = candidate("I4_M1:" + UUID.randomUUID(), Severity.WARN, null);
     InsightGenerator generator = mock(InsightGenerator.class);
     when(generator.type()).thenReturn(InsightType.DATA_TRUST);
     when(generator.generate(any())).thenReturn(List.of(candidate));
@@ -123,7 +124,7 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
     // Pre-arm review M3 (delivery loop): ACK closes the OPEN row and the next sweep re-inserts —
     // the re-insert must land suppressed while the original cooldown runs, or acknowledging an
     // alert re-pages it.
-    InsightCandidate candidate = candidate("I4_M3:" + UUID.randomUUID(), 30);
+    InsightCandidate candidate = candidate("I4_M3:" + UUID.randomUUID(), Severity.WARN, 30);
     InsightGenerator generator = mock(InsightGenerator.class);
     when(generator.type()).thenReturn(InsightType.DATA_TRUST);
     when(generator.generate(any())).thenReturn(List.of(candidate));
@@ -179,6 +180,80 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   @Test
+  void cooldownExpiryRedeliversOnceAndReArmsTheWindow() {
+    // Pre-arm review round 2: a constant-key insight with a cooldown (the CONTEXT_SHIFT design)
+    // paces re-alerts — silent inside the window, ONE redelivery at expiry, then silent again in
+    // the re-armed window. The upsert's cooldown CASE re-stamps at expiry, so the prior row's
+    // stamp is the delivered-cycle marker (no refresh-loop self-re-arm).
+    InsightCandidate candidate = candidate("I4_EXPIRY:" + UUID.randomUUID(), Severity.WARN, 45);
+    InsightGenerator generator = mock(InsightGenerator.class);
+    when(generator.type()).thenReturn(InsightType.DATA_TRUST);
+    when(generator.generate(any())).thenReturn(List.of(candidate));
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    InsightEngine engine = engineDeliveringTo(generator, events);
+
+    engine.runTrustSweep(); // insert → push 1, cooldown armed
+    engine.runTrustSweep(); // unchanged refresh INSIDE the window → silent
+    jdbc.update(
+        "UPDATE insights SET cooldown_until = now() - interval '1 minute'"
+            + " WHERE dedupe_key = ? AND status = 'OPEN'",
+        candidate.dedupeKey()); // the 45-minute window elapses
+    engine.runTrustSweep(); // expired cycle → push 2 + re-stamp
+    engine.runTrustSweep(); // unchanged refresh inside the RE-ARMED window → silent
+
+    verify(events, times(2)).publishEvent(any(InsightDeliveryAlert.class));
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT cooldown_until > now() FROM insights WHERE dedupe_key = ? AND status = 'OPEN'",
+                Boolean.class,
+                candidate.dedupeKey()))
+        .isTrue();
+  }
+
+  @Test
+  void severityEscalationInsideTheCooldownDeliversAnotherPush() {
+    // Pre-arm review round 2 (the red-proofed case): WARN delivered, the refresh escalates it to
+    // CRITICAL while the cooldown still runs — a condition getting WORSE must page, and the
+    // escalating refresh must not be cooldown-suppressed.
+    String key = "I4_ESCALATE:" + UUID.randomUUID();
+    InsightGenerator generator = mock(InsightGenerator.class);
+    when(generator.type()).thenReturn(InsightType.DATA_TRUST);
+    when(generator.generate(any()))
+        .thenReturn(
+            List.of(candidate(key, Severity.WARN, 45)), List.of(candidate(key, Severity.CRITICAL, 45)));
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    InsightEngine engine = engineDeliveringTo(generator, events);
+
+    engine.runTrustSweep(); // WARN insert → push 1, cooldown armed
+    engine.runTrustSweep(); // WARN→CRITICAL refresh inside the cooldown → push 2
+
+    verify(events, times(2)).publishEvent(any(InsightDeliveryAlert.class));
+    Insight open = repository.findOpen(key).orElseThrow();
+    assertThat(open.severity()).isEqualTo("CRITICAL");
+    assertThat(open.suppressed()).isFalse();
+  }
+
+  @Test
+  void severityFloorCrossingOnRefreshDelivers() {
+    // Pre-arm review round 2: an INFO insert sits below the NOTICE phone floor (zero pushes); the
+    // refresh that crosses the floor (INFO→NOTICE) is an escalation and must deliver.
+    String key = "I4_FLOOR:" + UUID.randomUUID();
+    InsightGenerator generator = mock(InsightGenerator.class);
+    when(generator.type()).thenReturn(InsightType.DATA_TRUST);
+    when(generator.generate(any()))
+        .thenReturn(
+            List.of(candidate(key, Severity.INFO, null)), List.of(candidate(key, Severity.NOTICE, null)));
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    InsightEngine engine = engineDeliveringTo(generator, events);
+
+    engine.runTrustSweep(); // INFO insert → below the floor, no push
+    verify(events, never()).publishEvent(any());
+    engine.runTrustSweep(); // INFO→NOTICE refresh crosses the floor → push
+
+    verify(events, times(1)).publishEvent(any(InsightDeliveryAlert.class));
+  }
+
+  @Test
   void legacyScopelessMuteActionRowsAreNotDeliveryMutes() {
     // Pre-arm review M5: pre-I4 MUTE_TYPE rows were audit-only — without the delivery marker they
     // must never read as permanent global mutes (marker-gated on purpose, deliberately no migration).
@@ -199,10 +274,10 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   /** A minimal persistent-condition candidate (DATA_TRUST-shaped) with an optional cooldown. */
-  private static InsightCandidate candidate(String dedupeKey, Integer cooldownMinutes) {
+  private static InsightCandidate candidate(String dedupeKey, Severity severity, Integer cooldownMinutes) {
     return new InsightCandidate(
         InsightType.DATA_TRUST,
-        Severity.WARN,
+        severity,
         "dataops",
         "persistent condition",
         "persistent condition",

@@ -197,7 +197,16 @@ public class InsightEngine {
   private void persist(InsightCandidate c, OffsetDateTime now) {
     try {
       OffsetDateTime cooldownUntil = c.cooldownMinutes() == null ? null : now.plusMinutes(c.cooldownMinutes());
-      boolean suppressed = c.suppressed() || repository.isCooling(c.dedupeKey(), now);
+      // The delivery decision needs the refresh target BEFORE the upsert overwrites it: severity
+      // escalation and cooldown-cycle expiry are judged against the prior OPEN occurrence.
+      Insight prior = repository.findOpen(c.dedupeKey()).orElse(null);
+      boolean escalated =
+          prior != null && c.severity().compareTo(Severity.valueOf(prior.severity())) > 0;
+      boolean cooldownExpired =
+          prior != null && prior.cooldownUntil() != null && !prior.cooldownUntil().isAfter(now);
+      // An escalating refresh is never cooldown-suppressed: a condition getting WORSE must page
+      // even inside the pacing window (pre-arm review round 2 — WARN→CRITICAL / floor crossing).
+      boolean suppressed = c.suppressed() || (repository.isCooling(c.dedupeKey(), now) && !escalated);
       Insight row =
           new Insight(
               UUID.randomUUID(),
@@ -226,9 +235,14 @@ public class InsightEngine {
       }
       // Stage-1 WS delivery (§9.3): the publisher no-ops in shadow mode (flag default OFF), so nothing
       // pushes until the owner arms it — the durable row above is always the record of truth.
-      // Delivery fires ONLY on a newly INSERTED occurrence (pre-arm review M1): a refresh of the
-      // existing OPEN row — the 15-min resweep of a persistent condition — must never re-push.
-      if (upsert.inserted()) {
+      // Delivery fires on a NEW occurrence (insert, review M1), a severity ESCALATION on refresh
+      // (review round 2 — WARN→CRITICAL / floor crossing must page; publish() applies the floor),
+      // or a COOLDOWN-CYCLE EXPIRY (paced re-alerts, the CONTEXT_SHIFT design). An unchanged
+      // refresh inside its cooldown stays silent — the M1 win. No last-delivered column is needed:
+      // the upsert's cooldown CASE re-stamps cooldown_until exactly when an expired cycle
+      // refreshes, so the prior row's stamp read above IS the delivered-cycle marker and an
+      // expired-cycle redelivery re-arms its own window (never a refresh-loop self-re-arm).
+      if (upsert.inserted() || escalated || cooldownExpired) {
         publisher.publish(upsert.insight());
       }
     } catch (RuntimeException e) {

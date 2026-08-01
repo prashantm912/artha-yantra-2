@@ -130,6 +130,17 @@ public class InsightRepository {
   }
 
   /**
+   * The OPEN row a regeneration of this dedupe key would refresh, if one exists (the engine's
+   * delivery decision reads the PRIOR severity + cooldown stamp before the upsert overwrites them).
+   */
+  public Optional<Insight> findOpen(String dedupeKey) {
+    return jdbc
+        .query("SELECT * FROM insights WHERE dedupe_key = ? AND status = 'OPEN'", this::map, dedupeKey)
+        .stream()
+        .findFirst();
+  }
+
+  /**
    * True when the LATEST row for this dedupe key — ANY status — is still inside its cooldown
    * window. Status-blind on purpose (pre-arm review M3): ACK/DISMISS closes the OPEN row and the
    * next sweep re-inserts, so an OPEN-only check would let acknowledging an alert defeat the

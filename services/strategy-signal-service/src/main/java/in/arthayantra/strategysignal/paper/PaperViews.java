@@ -43,7 +43,7 @@ public final class PaperViews {
   public record TradePage(List<PaperService.TradeDto> items, int limit, int offset) {}
 
   /** One point on the cumulative realized-equity curve ({@code date} is an IST calendar day). */
-  public record EquityPoint(String date, BigDecimal equity) {}
+  public record EquityPoint(String date, @Schema(type = "string") BigDecimal equity) {}
 
   /**
    * The closed-trade rollup for a book.
@@ -53,10 +53,10 @@ public final class PaperViews {
    * former {@code LinkedHashMap}'s put order.
    */
   public record PnlSummary(
-      BigDecimal realizedTotal,
+      @Schema(type = "string") BigDecimal realizedTotal,
       int trades,
-      @Schema(types = {"number", "null"}) BigDecimal winRate,
-      @Schema(types = {"number", "null"}) BigDecimal expectancy) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal winRate,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal expectancy) {}
 
   /** {@code GET /api/v1/paper/pnl} — the daily equity curve plus its summary. */
   public record Pnl(List<EquityPoint> points, PnlSummary summary) {}

@@ -1,0 +1,558 @@
+package in.arthayantra.strategysignal;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.common.web.jackson.ArthaJacksonAutoConfiguration;
+import in.arthayantra.strategysignal.execution.OrderGateway;
+import in.arthayantra.strategysignal.insights.Insight;
+import in.arthayantra.strategysignal.insights.RejectionReader;
+import in.arthayantra.strategysignal.insights.SignalCompareReader;
+import in.arthayantra.strategysignal.insights.StrategyEvidenceReader;
+import in.arthayantra.strategysignal.paper.GraduationController;
+import in.arthayantra.strategysignal.paper.GraduationService;
+import in.arthayantra.strategysignal.paper.PaperAccountService;
+import in.arthayantra.strategysignal.paper.PaperController;
+import in.arthayantra.strategysignal.paper.PaperMarginController;
+import in.arthayantra.strategysignal.paper.PaperService;
+import in.arthayantra.strategysignal.paper.PaperViews;
+import in.arthayantra.strategysignal.signals.ShadowPositionRepository;
+import in.arthayantra.strategysignal.signals.ShadowVariantsController;
+import in.arthayantra.strategysignal.signals.SignalRejectionRepository;
+import in.arthayantra.strategysignal.signals.SignalViews;
+import in.arthayantra.strategysignal.swing.SellDecisionRepository;
+import in.arthayantra.strategysignal.swing.SwingSellDecisionService;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
+
+/**
+ * Pins the WIRE FORM of every {@code BigDecimal} on a strategy-signal RESPONSE record, so the
+ * committed OpenAPI spec's {@code type: string} is a measured claim rather than an annotation
+ * nobody checked (CLAUDE.md, #1195; the backtest / market-data precedents are #1197 / #1190).
+ *
+ * <p>Why this test has to exist: {@code ArthaJacksonAutoConfiguration} routes every {@code
+ * BigDecimal} through {@code ToStringSerializer} platform-wide, so these fields are decimal
+ * STRINGS on the wire — but springdoc infers {@code number} from the Java type, and {@code
+ * @Schema(types = ...)} UNIONS with that inference instead of replacing it. Only {@code type =
+ * "string"} replaces it. A test that read values with {@code asText()} would pass against a
+ * number node too and prove nothing; every decimal assertion here is {@code isTextual()}.
+ *
+ * <p>The mapper is built the way Boot builds it (common-web-core's {@code
+ * ArthaJacksonConventionsTest} is the same instrument), so deleting the {@code
+ * serializerByType(BigDecimal.class, ...)} line turns every decimal assertion RED while the
+ * integral-count / string / boolean assertions stay GREEN — the contrast that shows they
+ * discriminate.
+ */
+class BigDecimalWireContractTest {
+
+  private ObjectMapper mapper;
+
+  @BeforeEach
+  void buildMapperTheWayBootWould() {
+    Jackson2ObjectMapperBuilder builder = Jackson2ObjectMapperBuilder.json();
+    new ArthaJacksonAutoConfiguration().arthaJacksonCustomizer().customize(builder);
+    mapper = builder.build();
+  }
+
+  private JsonNode wire(Object value) {
+    return mapper.valueToTree(value);
+  }
+
+  private static BigDecimal bd(String v) {
+    return new BigDecimal(v);
+  }
+
+  // ---- paper/PaperService -------------------------------------------------------------------
+
+  @Test
+  void tradeDtoDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new PaperService.TradeDto(
+                1L, "NFO", "NIFTY26JUL24500CE", "BUY", 50L, bd("101.5000"), bd("245.0000"),
+                OffsetDateTime.now(), OffsetDateTime.now()));
+    assertThat(node.get("avgEntryPrice").isTextual()).as("avgEntryPrice").isTrue();
+    assertThat(node.get("realizedPnl").isTextual()).as("realizedPnl").isTrue();
+  }
+
+  @Test
+  void feeBreakdownDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new PaperService.FeeBreakdown(
+                bd("10.5"), bd("1.2"), bd("0.3"), bd("2.1"), bd("0.05"), bd("0.02"), bd("14.17")));
+    for (String field :
+        List.of("brokerage", "stt", "exchangeTxn", "gst", "stamp", "sebi", "total")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void positionDtoDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new PaperService.PositionDto(
+                1L, "NFO", "NIFTY26JUL24500CE", "BUY", 50L, bd("101.5"), bd("110.0"), bd("475.0"),
+                bd("0"), "OPEN", OffsetDateTime.now(), bd("95.0"), bd("120.0"), null));
+    for (String field :
+        List.of("avgEntryPrice", "markPrice", "unrealizedPnl", "realizedPnl", "stopLoss", "takeProfit")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void positionDtoNullableDecimalsStayPresentAndNull() {
+    JsonNode node =
+        wire(
+            new PaperService.PositionDto(
+                1L, "NFO", "NIFTY26JUL24500CE", "BUY", 50L, bd("101.5"), null, null, bd("0"),
+                "OPEN", OffsetDateTime.now(), null, null, null));
+    for (String field : List.of("markPrice", "unrealizedPnl", "stopLoss", "takeProfit")) {
+      assertThat(node.has(field)).as(field + " present").isTrue();
+      assertThat(node.get(field).isNull()).as(field + " null").isTrue();
+    }
+  }
+
+  @Test
+  void openingSignalDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new PaperService.OpeningSignal(
+                1L, "FIRED", "BUY", bd("101.5"), bd("95.0"), bd("120.0"), bd("0.82"),
+                OffsetDateTime.now(), null, null, null));
+    for (String field : List.of("entryPrice", "stopLoss", "target", "compositeScore")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void orderLegDecimalsAreTextualOnTheWire() {
+    PaperService.FeeBreakdown fees =
+        new PaperService.FeeBreakdown(
+            bd("1"), bd("1"), bd("1"), bd("1"), bd("1"), bd("1"), bd("6"));
+    JsonNode node =
+        wire(
+            new PaperService.OrderLeg(
+                1L, 2L, "BUY", 50L, "FILLED", OffsetDateTime.now(), OffsetDateTime.now(),
+                bd("101.5"), "SIMULATED", bd("0.05"), fees));
+    assertThat(node.get("fillPrice").isTextual()).as("fillPrice").isTrue();
+    assertThat(node.get("slippageApplied").isTextual()).as("slippageApplied").isTrue();
+  }
+
+  @Test
+  void positionDetailDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new PaperService.PositionDetail(
+                1L, "manas-1", "NFO", "NIFTY26JUL24500CE", "BUY", 50L, bd("101.5"), bd("110.0"),
+                bd("475.0"), bd("0"), "OPEN", OffsetDateTime.now(), null, null, bd("95.0"),
+                bd("120.0"), 1L, bd("50000"), bd("12.5"), 0, 9L, null, List.of()));
+    for (String field :
+        List.of(
+            "avgEntryPrice", "markPrice", "unrealizedPnl", "realizedPnl", "stopLoss", "takeProfit",
+            "marginSnapshot", "marginPct")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  // ---- paper/GraduationController + GraduationService (name-collision twins) ----------------
+
+  @Test
+  void graduationControllerThresholdsAndStrategyGraduationAreTextualOnTheWire() {
+    JsonNode t =
+        wire(new GraduationController.Thresholds(20, bd("1.3"), bd("0"), bd("25")));
+    for (String field : List.of("minProfitFactor", "minExpectancy", "maxDrawdownPct")) {
+      assertThat(t.get(field).isTextual()).as(field).isTrue();
+    }
+    JsonNode g =
+        wire(
+            new GraduationController.StrategyGraduation(
+                UUID.randomUUID(), "manas-1", "Manas 1", "TAKE_ELIGIBLE", 25, bd("5000"),
+                bd("0.6"), bd("1.8"), bd("120.5"), bd("8.2"), List.of()));
+    for (String field :
+        List.of("netRealized", "winRate", "profitFactor", "expectancy", "maxDrawdownPct")) {
+      assertThat(g.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void graduationControllerPromotionDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new GraduationController.Promotion(
+                UUID.randomUUID(), OffsetDateTime.now(), 25, bd("120.5"), bd("1.9"), bd("8.2")));
+    for (String field : List.of("expectancy", "sharpe", "maxDrawdownPct")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void graduationServiceTwinsCarryTheSameAnnotationsAsTheController() {
+    // GraduationService.Thresholds/StrategyGraduation share their simple name with
+    // GraduationController's (springdoc collapses same-named schemas into ONE component), so
+    // both twins must carry identical @Schema annotations even though only one is ever
+    // actually reachable from a controller signature (verified: GraduationService's are not).
+    JsonNode t =
+        wire(new GraduationService.Thresholds(20, bd("1.3"), bd("0"), bd("25")));
+    for (String field : List.of("minProfitFactor", "minExpectancy", "maxDrawdownPct")) {
+      assertThat(t.get(field).isTextual()).as(field).isTrue();
+    }
+    JsonNode g =
+        wire(
+            new GraduationService.StrategyGraduation(
+                UUID.randomUUID(), "manas-1", "Manas 1", "TAKE_ELIGIBLE", 25, bd("5000"),
+                bd("0.6"), bd("1.8"), bd("120.5"), bd("8.2"), List.of()));
+    for (String field :
+        List.of("netRealized", "winRate", "profitFactor", "expectancy", "maxDrawdownPct")) {
+      assertThat(g.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  // ---- swing/SwingSellDecisionService + SellDecisionRepository --------------------------------
+
+  @Test
+  void swingSellDecisionDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new SwingSellDecisionService.SwingSellDecision(
+                1L, "TCS", "VCP", 2, null, null, bd("3500.0"), bd("3600.0"), bd("2.86"),
+                bd("3400.0"), bd("3550.0"), true, false, null, "HOLD"));
+    for (String field :
+        List.of("entryPrice", "currentPrice", "unrealizedPct", "stopLevel", "trailLevel")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void sellDecisionRowDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new SellDecisionRepository.SellDecisionRow(
+                1L, "manas-1", LocalDate.now(), OffsetDateTime.now(), 2L, "NSE", "TCS", null,
+                null, "VCP", null, bd("3500.0"), bd("3600.0"), bd("2.86"), bd("3400.0"),
+                bd("3550.0"), true, false, null, "HOLD", null));
+    for (String field :
+        List.of("entryPrice", "currentPrice", "unrealizedPct", "stopLevel", "trailLevel")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  // ---- signals/SignalRejectionRepository + ShadowPositionRepository + SignalViews -----------
+
+  @Test
+  void signalRejectionRowDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new SignalRejectionRepository.RejectionRow(
+                1L, UUID.randomUUID(), "scalp-gap-theory-nifty", "NFO", "NIFTY26JUL24500CE", "3m",
+                "BUY", "confluence-blocked", bd("0.55"), bd("0.65"), bd("0.10"), "below rail",
+                bd("0.61"), bd("0.65"), null, OffsetDateTime.now(), OffsetDateTime.now()));
+    for (String field :
+        List.of(
+            "blockingOperand", "blockingThreshold", "blockingMargin", "compositeScore",
+            "compositeThreshold")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void shadowVariantSummaryDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(new ShadowPositionRepository.VariantSummary("baseline", 2, 8, 5, 3, bd("120.5"), bd("9500.0"), 0));
+    assertThat(node.get("pnlPoints").isTextual()).as("pnlPoints").isTrue();
+    assertThat(node.get("pnlNet").isTextual()).as("pnlNet").isTrue();
+  }
+
+  @Test
+  void signalDtoDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new SignalViews.SignalDto(
+                1L, UUID.randomUUID(), "NFO", "NIFTY26JUL24500CE", "3m", "ENTRY", "BUY",
+                bd("101.5"), bd("95.0"), bd("120.0"), bd("0.82"), null, "FIRED",
+                OffsetDateTime.now(), null, bd("50"), null, null, null, null));
+    for (String field :
+        List.of("entryPrice", "stopLoss", "target", "compositeScore", "suggestedQty")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  // ---- signals/ShadowVariantsController ------------------------------------------------------
+
+  @Test
+  void shadowVariantRailOverrideAndSpecDecimalsAreTextualOnTheWire() {
+    JsonNode rail =
+        wire(new ShadowVariantsController.RailOverrideView("relative-volume-floor", true, bd("1.5"), null));
+    assertThat(rail.get("threshold").isTextual()).as("threshold").isTrue();
+
+    JsonNode spec =
+        wire(
+            new ShadowVariantsController.VariantSpecView(
+                List.of(new ShadowVariantsController.RailOverrideView("r", false, bd("2.0"), "gte")),
+                bd("0.68"),
+                null));
+    assertThat(spec.get("compositeThreshold").isTextual()).as("compositeThreshold").isTrue();
+    assertThat(spec.get("rails").get(0).get("threshold").isTextual()).as("rails[0].threshold").isTrue();
+  }
+
+  // ---- paper/PaperViews -----------------------------------------------------------------------
+
+  @Test
+  void equityPointAndPnlSummaryDecimalsAreTextualOnTheWire() {
+    JsonNode point = wire(new PaperViews.EquityPoint("2026-07-31", bd("150000.00")));
+    assertThat(point.get("equity").isTextual()).as("equity").isTrue();
+
+    JsonNode summary = wire(new PaperViews.PnlSummary(bd("12500.50"), 42, bd("0.55"), bd("297.63")));
+    for (String field : List.of("realizedTotal", "winRate", "expectancy")) {
+      assertThat(summary.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  // ---- paper/PaperMarginController -------------------------------------------------------------
+
+  @Test
+  void marginHeatDecimalsAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new PaperMarginController.MarginHeat(
+                true, null, bd("337004.85"), bd("50000.0"), bd("387004.85"), bd("380000.0"),
+                bd("188604.45"), 3, 3, OffsetDateTime.now()));
+    for (String field :
+        List.of("spanMargin", "exposureMargin", "totalMargin", "requiredMargin", "finalMargin")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void marginHeatUnpricedDecimalsStayPresentAndNull() {
+    // MarginHeat.unpriced(...) is package-private (paper-package only); construct the same
+    // all-null shape directly via the public canonical constructor instead.
+    JsonNode node =
+        wire(
+            new PaperMarginController.MarginHeat(
+                false, "no open positions", null, null, null, null, null, 0, 0,
+                OffsetDateTime.now()));
+    for (String field :
+        List.of("spanMargin", "exposureMargin", "totalMargin", "requiredMargin", "finalMargin")) {
+      assertThat(node.has(field)).as(field + " present").isTrue();
+      assertThat(node.get(field).isNull()).as(field + " null").isTrue();
+    }
+  }
+
+  // ---- execution/OrderGateway -------------------------------------------------------------------
+
+  @Test
+  void orderGatewayReadSurfaceDecimalsAreTextualOnTheWire() {
+    JsonNode book =
+        wire(
+            new OrderGateway.OrderbookEntry(
+                "NIFTY26JUL24500CE", "NFO", "BUY", bd("50"), bd("101.5"), bd("95.0"), "LIMIT",
+                "MIS", "OA123", "COMPLETE", "2026-07-31T09:20:00+05:30"));
+    for (String field : List.of("qty", "price", "triggerPrice")) {
+      assertThat(book.get(field).isTextual()).as(field).isTrue();
+    }
+
+    JsonNode pos =
+        wire(
+            new OrderGateway.PositionEntry(
+                "NIFTY26JUL24500CE", "NFO", "BUY", bd("50"), "MIS", bd("101.5"), bd("110.0"),
+                bd("475.0")));
+    for (String field : List.of("qty", "avgPrice", "ltp", "mtmPnl")) {
+      assertThat(pos.get(field).isTextual()).as(field).isTrue();
+    }
+
+    JsonNode trade =
+        wire(
+            new OrderGateway.TradebookEntry(
+                "NIFTY26JUL24500CE", "NFO", "BUY", bd("50"), bd("101.5"), bd("5075.0"), "MIS",
+                "OA123", "2026-07-31T09:20:00+05:30"));
+    for (String field : List.of("qty", "price", "tradeValue")) {
+      assertThat(trade.get(field).isTextual()).as(field).isTrue();
+    }
+
+    JsonNode funds =
+        wire(
+            new OrderGateway.Funds(
+                "OK", bd("100000.0"), bd("0"), bd("475.0"), bd("120.0"), bd("50000.0")));
+    for (String field :
+        List.of("availableCash", "collateral", "m2mRealized", "m2mUnrealized", "utilisedDebits")) {
+      assertThat(funds.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void orderGatewayFundsNotConfiguredDecimalsStayPresentAndNull() {
+    JsonNode node = wire(OrderGateway.Funds.notConfigured());
+    for (String field :
+        List.of("availableCash", "collateral", "m2mRealized", "m2mUnrealized", "utilisedDebits")) {
+      assertThat(node.has(field)).as(field + " present").isTrue();
+      assertThat(node.get(field).isNull()).as(field + " null").isTrue();
+    }
+  }
+
+  // ---- insights/Insight, StrategyEvidenceReader, RejectionReader, SignalCompareReader ----------
+
+  @Test
+  void insightPriorityIsTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new Insight(
+                UUID.randomUUID(), OffsetDateTime.now(), "STRATEGY_EVIDENCE", "NOTICE", "STRATEGY",
+                "title", "explanation", null, bd("0.42"), null, "TRUSTED", List.of(), "dk-1", null,
+                false, "OPEN", null, "v1", "hash1"));
+    assertThat(node.get("priority").isTextual()).as("priority").isTrue();
+  }
+
+  @Test
+  void openSellUnrealizedPctIsTextualOnTheWire() {
+    JsonNode node =
+        wire(new StrategyEvidenceReader.OpenSell(1L, LocalDate.now(), "TCS", "SELL (target)", bd("6.4"), false));
+    assertThat(node.get("unrealizedPct").isTextual()).as("unrealizedPct").isTrue();
+  }
+
+  @Test
+  void firedAndRejectedRowAndContrastDecimalsAreTextualOnTheWire() {
+    JsonNode fired =
+        wire(
+            new RejectionReader.FiredRow(
+                1L, "NIFTY26JUL24500CE", "BUY", bd("0.82"), 4, 5, OffsetDateTime.now()));
+    assertThat(fired.get("composite").isTextual()).as("composite").isTrue();
+
+    JsonNode rejected =
+        wire(
+            new RejectionReader.RejectedRow(
+                2L, "NIFTY26JUL24500CE", "BUY", bd("0.55"), bd("0.65"), "confluence-blocked", 2, 5,
+                OffsetDateTime.now()));
+    assertThat(rejected.get("composite").isTextual()).as("rejected composite").isTrue();
+    assertThat(rejected.get("threshold").isTextual()).as("rejected threshold").isTrue();
+
+    JsonNode contrast = wire(new RejectionReader.Contrast(10, 20, bd("0.80"), bd("0.55"), bd("0.9"), bd("0.4")));
+    for (String field :
+        List.of(
+            "meanCompositeFired", "meanCompositeRejected", "meanSupportRatioFired",
+            "meanSupportRatioRejected")) {
+      assertThat(contrast.get(field).isTextual()).as(field).isTrue();
+    }
+  }
+
+  @Test
+  void compareColumnAndComponentPointAndTicketPrefillDecimalsAreTextualOnTheWire() {
+    SignalCompareReader.ComponentPoint component =
+        new SignalCompareReader.ComponentPoint("oi_confluence", bd("0.3"), bd("0.9"));
+    JsonNode componentNode = wire(component);
+    assertThat(componentNode.get("points").isTextual()).as("points").isTrue();
+    assertThat(componentNode.get("c").isTextual()).as("c").isTrue();
+
+    JsonNode column =
+        wire(
+            new SignalCompareReader.CompareColumn(
+                1L, "NIFTY26JUL24500CE", "BUY", "scalper", "manas-1", bd("0.82"), "HIGH",
+                List.of(component), bd("2350.0"), "~₹15,000", bd("2.4"), bd("101.5"), bd("95.0"),
+                bd("120.0"), "TRUSTED", List.of(), "SCORED"));
+    for (String field :
+        List.of("priority", "optionLegCost", "riskReward", "entryPrice", "stopLoss", "target")) {
+      assertThat(column.get(field).isTextual()).as(field).isTrue();
+    }
+
+    JsonNode ticket =
+        wire(
+            new SignalCompareReader.TicketPrefill(
+                1L, "NFO", "NIFTY26JUL24500CE", "BUY", 50L, bd("95.0"), bd("120.0")));
+    assertThat(ticket.get("stopLoss").isTextual()).as("ticket stopLoss").isTrue();
+    assertThat(ticket.get("target").isTextual()).as("ticket target").isTrue();
+  }
+
+  // ---- paper/PaperAccountService (incl. the two Map<String,BigDecimal> value schemas) ---------
+
+  @Test
+  void accountDtoDecimalsIncludingMapValuesAreTextualOnTheWire() {
+    JsonNode node =
+        wire(
+            new PaperAccountService.AccountDto(
+                bd("150000.00"), bd("162500.50"), bd("165000.00"), bd("12500.50"), bd("2500.00"),
+                bd("475.00"), 3, bd("50000.00"),
+                Map.of("OPTION_LONG", bd("2350.00")),
+                Map.of("FUTURES", bd("12.5"))));
+    for (String field :
+        List.of(
+            "startingCapital", "cash", "equity", "realized", "unrealized", "dayPnl",
+            "capitalUsed")) {
+      assertThat(node.get(field).isTextual()).as(field).isTrue();
+    }
+    assertThat(node.get("usageByClass").get("OPTION_LONG").isTextual())
+        .as("usageByClass map value")
+        .isTrue();
+    assertThat(node.get("marginPercents").get("FUTURES").isTextual())
+        .as("marginPercents map value")
+        .isTrue();
+  }
+
+  // ---- the integral/boolean/string contrast -----------------------------------------------------
+
+  /**
+   * The other half of the constraint: {@code long}/{@code int}/{@code Long}/{@code Integer} counts
+   * are NOT string-serialized, so the spec must keep advertising them as {@code integer}. Lives in
+   * its own test on purpose — sharing a method with the decimal assertions would let an earlier
+   * failure mask it, and it is the assertion that stays GREEN when the platform serializer is
+   * removed.
+   */
+  @Test
+  void everyCountAndIdStaysAnIntegralNumber() {
+    JsonNode trade =
+        wire(
+            new PaperService.TradeDto(
+                1L, "NFO", "NIFTY26JUL24500CE", "BUY", 50L, bd("101.5"), bd("245.0"),
+                OffsetDateTime.now(), null));
+    assertThat(trade.get("id").isIntegralNumber()).as("id").isTrue();
+    assertThat(trade.get("qty").isIntegralNumber()).as("qty").isTrue();
+
+    JsonNode graduation =
+        wire(
+            new GraduationController.StrategyGraduation(
+                UUID.randomUUID(), "manas-1", "Manas 1", "TAKE_ELIGIBLE", 25, bd("5000"),
+                bd("0.6"), bd("1.8"), bd("120.5"), bd("8.2"), List.of()));
+    assertThat(graduation.get("trades").isIntegralNumber()).as("trades").isTrue();
+
+    JsonNode variant =
+        wire(new ShadowPositionRepository.VariantSummary("baseline", 2, 8, 5, 3, bd("120.5"), bd("9500.0"), 0));
+    assertThat(variant.get("open").isIntegralNumber()).as("open").isTrue();
+    assertThat(variant.get("closed").isIntegralNumber()).as("closed").isTrue();
+    assertThat(variant.get("unpriced").isIntegralNumber()).as("unpriced").isTrue();
+
+    JsonNode heat =
+        wire(
+            new PaperMarginController.MarginHeat(
+                true, null, bd("1"), bd("1"), bd("1"), bd("1"), bd("1"), 3, 3,
+                OffsetDateTime.now()));
+    assertThat(heat.get("openPositions").isIntegralNumber()).as("openPositions").isTrue();
+    assertThat(heat.get("pricedLegs").isIntegralNumber()).as("pricedLegs").isTrue();
+  }
+
+  /**
+   * The far edge of the scope boundary. {@code PaperController.OrderBody}/{@code BracketBody}/
+   * {@code CloseBody}/{@code AccountBody} are the only decimals still typed {@code number} in this
+   * service's spec, and there {@code number} is TRUE: they are REQUEST-only (never returned by any
+   * endpoint — verified over the captured spec's request/response reachability graph), the platform
+   * customizes SERIALIZATION only, and Jackson's stock {@code BigDecimal} deserializer still accepts
+   * a JSON number. Retyping them would be the same class of lie pointing the other way.
+   */
+  @Test
+  void requestSideDecimalsStillAcceptPlainJsonNumbers() throws Exception {
+    PaperController.OrderBody body =
+        mapper.readValue(
+            "{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY26JUL24500CE\",\"side\":\"BUY\","
+                + "\"qty\":50,\"price\":101.5,\"stopLoss\":95,\"takeProfit\":120.25}",
+            PaperController.OrderBody.class);
+    assertThat(body.price()).isEqualByComparingTo("101.5");
+    assertThat(body.stopLoss()).isEqualByComparingTo("95");
+    assertThat(body.takeProfit()).isEqualByComparingTo("120.25");
+  }
+}

@@ -61,8 +61,9 @@ public class ShadowPositionRepository {
    * book total reads as if the unpriced losers never happened.
    */
   public record VariantSummary(
-      String variant, long open, long closed, long wins, long losses, BigDecimal pnlPoints,
-      @Schema(types = {"number", "null"}) BigDecimal pnlNet, long unpriced) {}
+      String variant, long open, long closed, long wins, long losses,
+      @Schema(type = "string") BigDecimal pnlPoints,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pnlNet, long unpriced) {}
 
   private final JdbcTemplate jdbc;
 

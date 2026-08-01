@@ -51,9 +51,9 @@ public interface OrderGateway {
       String symbol,
       String exchange,
       String action,
-      BigDecimal qty,
-      BigDecimal price,
-      BigDecimal triggerPrice,
+      @Schema(type = "string") BigDecimal qty,
+      @Schema(type = "string") BigDecimal price,
+      @Schema(type = "string") BigDecimal triggerPrice,
       String pricetype,
       String product,
       String orderId,
@@ -65,20 +65,20 @@ public interface OrderGateway {
       String symbol,
       String exchange,
       String side,
-      BigDecimal qty,
+      @Schema(type = "string") BigDecimal qty,
       String product,
-      BigDecimal avgPrice,
-      BigDecimal ltp,
-      BigDecimal mtmPnl) {}
+      @Schema(type = "string") BigDecimal avgPrice,
+      @Schema(type = "string") BigDecimal ltp,
+      @Schema(type = "string") BigDecimal mtmPnl) {}
 
   /** One tradebook (fill) row. */
   record TradebookEntry(
       String symbol,
       String exchange,
       String action,
-      BigDecimal qty,
-      BigDecimal price,
-      BigDecimal tradeValue,
+      @Schema(type = "string") BigDecimal qty,
+      @Schema(type = "string") BigDecimal price,
+      @Schema(type = "string") BigDecimal tradeValue,
       String product,
       String orderId,
       String tradeTime) {}
@@ -86,11 +86,11 @@ public interface OrderGateway {
   /** The funds/margin snapshot. {@code status} is {@code OK} or {@code NOT_CONFIGURED} (sentinel). */
   record Funds(
       String status,
-      @Schema(types = {"number", "null"}) BigDecimal availableCash,
-      @Schema(types = {"number", "null"}) BigDecimal collateral,
-      @Schema(types = {"number", "null"}) BigDecimal m2mRealized,
-      @Schema(types = {"number", "null"}) BigDecimal m2mUnrealized,
-      @Schema(types = {"number", "null"}) BigDecimal utilisedDebits) {
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal availableCash,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal collateral,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal m2mRealized,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal m2mUnrealized,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal utilisedDebits) {
 
     /** The fail-safe row a disabled gateway returns — all-null amounts, {@code NOT_CONFIGURED}. */
     public static Funds notConfigured() {

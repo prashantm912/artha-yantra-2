@@ -1234,20 +1234,20 @@ export interface components {
             book?: string;
         };
         AccountDto: {
-            startingCapital: number;
-            cash: number;
-            equity: number;
-            realized: number;
-            unrealized: number;
-            dayPnl: number;
+            startingCapital: string;
+            cash: string;
+            equity: string;
+            realized: string;
+            unrealized: string;
+            dayPnl: string;
             /** Format: int32 */
             openPositions: number;
-            capitalUsed: number;
+            capitalUsed: string;
             usageByClass: {
-                [key: string]: number;
+                [key: string]: string;
             };
             marginPercents: {
-                [key: string]: number;
+                [key: string]: string;
             };
         };
         JournalBody: {
@@ -1372,17 +1372,17 @@ export interface components {
             interval: string;
             signalType: string;
             side: string;
-            entryPrice: number | null;
-            stopLoss: number | null;
-            target: number | null;
-            compositeScore: number;
+            entryPrice: string | null;
+            stopLoss: string | null;
+            target: string | null;
+            compositeScore: string;
             scoreBreakdown: components["schemas"]["JsonNode"];
             status: string;
             /** Format: date-time */
             generatedAt: string;
             /** Format: date-time */
             expiresAt: string | null;
-            suggestedQty: number | null;
+            suggestedQty: string | null;
             tradeableExchange: string | null;
             tradeableTradingsymbol: string | null;
             scalperDetail: components["schemas"]["JsonNode"] | null;
@@ -1405,11 +1405,11 @@ export interface components {
             stage: number | null;
             setupType: string | null;
             footprint: string | null;
-            entryPrice: number | null;
-            currentPrice: number | null;
-            unrealizedPct: number | null;
-            stopLevel: number | null;
-            trailLevel: number | null;
+            entryPrice: string | null;
+            currentPrice: string | null;
+            unrealizedPct: string | null;
+            stopLevel: string | null;
+            trailLevel: string | null;
             stillBuyable: boolean;
             sellingNow: boolean;
             sellReason: string | null;
@@ -1459,7 +1459,7 @@ export interface components {
         RailOverrideView: {
             rail: string;
             disable: boolean;
-            threshold: number | null;
+            threshold: string | null;
             passWhen: string | null;
         };
         ShadowVariantView: {
@@ -1478,7 +1478,7 @@ export interface components {
         };
         VariantSpecView: {
             rails: components["schemas"]["RailOverrideView"][] | null;
-            compositeThreshold: number | null;
+            compositeThreshold: string | null;
             nullPolicy: string | null;
         };
         ResetBody: {
@@ -1496,8 +1496,8 @@ export interface components {
             side: string;
             /** Format: int64 */
             qty: number;
-            avgEntryPrice: number;
-            realizedPnl: number;
+            avgEntryPrice: string;
+            realizedPnl: string;
             /** Format: date-time */
             openedAt: string;
             /** Format: date-time */
@@ -1525,15 +1525,15 @@ export interface components {
             side: string;
             /** Format: int64 */
             qty: number;
-            avgEntryPrice: number;
-            markPrice: number | null;
-            unrealizedPnl: number | null;
-            realizedPnl: number;
+            avgEntryPrice: string;
+            markPrice: string | null;
+            unrealizedPnl: string | null;
+            realizedPnl: string;
             status: string;
             /** Format: date-time */
             openedAt: string;
-            stopLoss: number | null;
-            takeProfit: number | null;
+            stopLoss: string | null;
+            takeProfit: string | null;
             buyingPowerWarning: string | null;
         };
         FeedbackRequest: {
@@ -1580,8 +1580,8 @@ export interface components {
             side: string;
             /** Format: int64 */
             qty: number | null;
-            stopLoss: number | null;
-            target: number | null;
+            stopLoss: string | null;
+            target: string | null;
         };
         NotificationRequest: {
             enabled?: boolean;
@@ -1598,23 +1598,23 @@ export interface components {
             takeProfit?: number;
         };
         FeeBreakdown: {
-            brokerage: number;
-            stt: number;
-            exchangeTxn: number;
-            gst: number;
-            stamp: number;
-            sebi: number;
-            total: number;
+            brokerage: string;
+            stt: string;
+            exchangeTxn: string;
+            gst: string;
+            stamp: string;
+            sebi: string;
+            total: string;
         };
         OpeningSignal: {
             /** Format: int64 */
             signalId: number;
             status: string;
             side: string;
-            entryPrice: number | null;
-            stopLoss: number | null;
-            target: number | null;
-            compositeScore: number;
+            entryPrice: string | null;
+            stopLoss: string | null;
+            target: string | null;
+            compositeScore: string;
             /** Format: date-time */
             generatedAt: string;
             scalperDetail: components["schemas"]["JsonNode"] | null;
@@ -1634,9 +1634,9 @@ export interface components {
             placedAt: string;
             /** Format: date-time */
             filledAt: string | null;
-            fillPrice: number | null;
+            fillPrice: string | null;
             fillSimulator: string | null;
-            slippageApplied: number | null;
+            slippageApplied: string | null;
             fees: components["schemas"]["FeeBreakdown"];
         };
         PositionDetail: {
@@ -1648,22 +1648,22 @@ export interface components {
             side: string;
             /** Format: int64 */
             qty: number;
-            avgEntryPrice: number;
-            markPrice: number | null;
-            unrealizedPnl: number | null;
-            realizedPnl: number;
+            avgEntryPrice: string;
+            markPrice: string | null;
+            unrealizedPnl: string | null;
+            realizedPnl: string;
             status: string;
             /** Format: date-time */
             openedAt: string;
             /** Format: date-time */
             closedAt: string | null;
             closeReason: string | null;
-            stopLoss: number | null;
-            takeProfit: number | null;
+            stopLoss: string | null;
+            takeProfit: string | null;
             /** Format: int64 */
             advisedLots: number | null;
-            marginSnapshot: number | null;
-            marginPct: number | null;
+            marginSnapshot: string | null;
+            marginPct: string | null;
             /** Format: int32 */
             subaccountIdx: number | null;
             /** Format: int64 */
@@ -1793,19 +1793,19 @@ export interface components {
             stage: string;
             /** Format: int32 */
             trades: number;
-            netRealized: number;
-            winRate: number | null;
-            profitFactor: number | null;
-            expectancy: number;
-            maxDrawdownPct: number;
+            netRealized: string;
+            winRate: string | null;
+            profitFactor: string | null;
+            expectancy: string;
+            maxDrawdownPct: string;
             criteria: components["schemas"]["Criterion"][];
         };
         Thresholds: {
             /** Format: int32 */
             minTrades: number;
-            minProfitFactor: number;
-            minExpectancy: number;
-            maxDrawdownPct: number;
+            minProfitFactor: string;
+            minExpectancy: string;
+            maxDrawdownPct: string;
         };
         Promotion: {
             /** Format: uuid */
@@ -1814,9 +1814,9 @@ export interface components {
             graduatedAt: string;
             /** Format: int32 */
             trades: number;
-            expectancy: number | null;
-            sharpe: number | null;
-            maxDrawdownPct: number | null;
+            expectancy: string | null;
+            sharpe: string | null;
+            maxDrawdownPct: string | null;
         };
         SignalPage: {
             items: components["schemas"]["SignalDto"][];
@@ -1837,11 +1837,11 @@ export interface components {
             stage: number | null;
             setupType: string | null;
             footprint: string | null;
-            entryPrice: number | null;
-            currentPrice: number;
-            unrealizedPct: number | null;
-            stopLevel: number | null;
-            trailLevel: number | null;
+            entryPrice: string | null;
+            currentPrice: string;
+            unrealizedPct: string | null;
+            stopLevel: string | null;
+            trailLevel: string | null;
             stillBuyable: boolean;
             sellingNow: boolean;
             sellReason: string | null;
@@ -1908,12 +1908,12 @@ export interface components {
             interval: string;
             side: string | null;
             blockingRail: string;
-            blockingOperand: number | null;
-            blockingThreshold: number | null;
-            blockingMargin: number | null;
+            blockingOperand: string | null;
+            blockingThreshold: string | null;
+            blockingMargin: string | null;
             blockingReason: string | null;
-            compositeScore: number | null;
-            compositeThreshold: number | null;
+            compositeScore: string | null;
+            compositeThreshold: string | null;
             diagnostic: components["schemas"]["JsonNode"];
             /** Format: date-time */
             barTime: string;
@@ -1933,8 +1933,8 @@ export interface components {
             wins: number;
             /** Format: int64 */
             losses: number;
-            pnlPoints: number;
-            pnlNet: number | null;
+            pnlPoints: string;
+            pnlNet: string | null;
             /** Format: int64 */
             unpriced: number;
         };
@@ -1978,27 +1978,27 @@ export interface components {
         };
         EquityPoint: {
             date: string;
-            equity: number;
+            equity: string;
         };
         Pnl: {
             points: components["schemas"]["EquityPoint"][];
             summary: components["schemas"]["PnlSummary"];
         };
         PnlSummary: {
-            realizedTotal: number;
+            realizedTotal: string;
             /** Format: int32 */
             trades: number;
-            winRate: number | null;
-            expectancy: number | null;
+            winRate: string | null;
+            expectancy: string | null;
         };
         MarginHeat: {
             priced: boolean;
             unpricedReason: string | null;
-            spanMargin: number | null;
-            exposureMargin: number | null;
-            totalMargin: number | null;
-            requiredMargin: number | null;
-            finalMargin: number | null;
+            spanMargin: string | null;
+            exposureMargin: string | null;
+            totalMargin: string | null;
+            requiredMargin: string | null;
+            finalMargin: string | null;
             /** Format: int32 */
             openPositions: number;
             /** Format: int32 */
@@ -2033,9 +2033,9 @@ export interface components {
             symbol: string;
             exchange: string;
             action: string;
-            qty: number;
-            price: number;
-            tradeValue: number;
+            qty: string;
+            price: string;
+            tradeValue: string;
             product: string;
             orderId: string;
             tradeTime: string;
@@ -2044,11 +2044,11 @@ export interface components {
             symbol: string;
             exchange: string;
             side: string;
-            qty: number;
+            qty: string;
             product: string;
-            avgPrice: number;
-            ltp: number;
-            mtmPnl: number;
+            avgPrice: string;
+            ltp: string;
+            mtmPnl: string;
         };
         Positions: {
             items: components["schemas"]["PositionEntry"][];
@@ -2060,9 +2060,9 @@ export interface components {
             symbol: string;
             exchange: string;
             action: string;
-            qty: number;
-            price: number;
-            triggerPrice: number;
+            qty: string;
+            price: string;
+            triggerPrice: string;
             pricetype: string;
             product: string;
             orderId: string;
@@ -2071,11 +2071,11 @@ export interface components {
         };
         Funds: {
             status: string;
-            availableCash: number | null;
-            collateral: number | null;
-            m2mRealized: number | null;
-            m2mUnrealized: number | null;
-            utilisedDebits: number | null;
+            availableCash: string | null;
+            collateral: string | null;
+            m2mRealized: string | null;
+            m2mUnrealized: string | null;
+            utilisedDebits: string | null;
         };
         JournalPage: {
             items: components["schemas"]["Entry"][];
@@ -2095,7 +2095,7 @@ export interface components {
             title: string;
             explanation: string;
             evidence: components["schemas"]["JsonNode"];
-            priority: number | null;
+            priority: string | null;
             priorityDetail: components["schemas"]["JsonNode"] | null;
             dataTrust: string;
             trustReasons: string[];
@@ -2178,7 +2178,7 @@ export interface components {
             runDate: string;
             symbol: string;
             verdict: string;
-            unrealizedPct: number | null;
+            unrealizedPct: string | null;
             acknowledged: boolean;
         };
         NotificationEventRow: {
@@ -2212,17 +2212,17 @@ export interface components {
             firedCount: number;
             /** Format: int32 */
             rejectedCount: number;
-            meanCompositeFired: number | null;
-            meanCompositeRejected: number | null;
-            meanSupportRatioFired: number | null;
-            meanSupportRatioRejected: number | null;
+            meanCompositeFired: string | null;
+            meanCompositeRejected: string | null;
+            meanSupportRatioFired: string | null;
+            meanSupportRatioRejected: string | null;
         };
         FiredRow: {
             /** Format: int64 */
             signalId: number;
             tradingsymbol: string;
             side: string;
-            composite: number;
+            composite: string;
             /** Format: int32 */
             dotSupports: number;
             /** Format: int32 */
@@ -2244,8 +2244,8 @@ export interface components {
             rejectionId: number;
             tradingsymbol: string;
             side: string | null;
-            composite: number | null;
-            threshold: number | null;
+            composite: string | null;
+            threshold: string | null;
             blockingRail: string;
             /** Format: int32 */
             dotSupports: number;
@@ -2261,15 +2261,15 @@ export interface components {
             side: string;
             family: string;
             book: string;
-            priority: number | null;
+            priority: string | null;
             band: string | null;
             components: components["schemas"]["ComponentPoint"][];
-            optionLegCost: number | null;
+            optionLegCost: string | null;
             marginEstimate: string;
-            riskReward: number | null;
-            entryPrice: number | null;
-            stopLoss: number | null;
-            target: number | null;
+            riskReward: string | null;
+            entryPrice: string | null;
+            stopLoss: string | null;
+            target: string | null;
             dataTrust: string;
             trustReasons: string[];
             scored: string;
@@ -2284,8 +2284,8 @@ export interface components {
         };
         ComponentPoint: {
             key: string;
-            points: number | null;
-            c: number | null;
+            points: string | null;
+            c: string | null;
         };
         ErrorResponse: {
             code?: string;

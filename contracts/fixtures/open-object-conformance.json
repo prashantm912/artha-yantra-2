@@ -1,0 +1,268 @@
+{
+  "comment": "Cross-language conformance fixture for the open-object ratchet (PR #1196: SpecOpenObjectRatchetTest.java over the four committed Java service specs, test_open_object_ratchet.py over the optimizer's live app.openapi()). Both suites walk the same OpenAPI schema graph, looking for an UNCONSTRAINED OPEN OBJECT (a schema that promises the consumer nothing) and formatting its position as a LOCATION STRING. They agreed on both only by convention and code review, not by a shared source of truth: cross-vendor review round 2 on #1196 found BOTH implementations returned 'closed' for an annotation-only schema like {\"title\": \"...\"}, which is semantically exactly as open as {} - one bug, two places, found once. This file exists so that never happens invisibly again. rows in 'predicateCases' are DOCTRINE, derived from first principles about what 'imposes no constraint on an object's contents' means - NOT a snapshot of what either implementation currently returns. Where a suite disagrees with a row here, THIS FILE is right and the suite has a bug to fix; a disagreement is a finding to report, never a reason to edit this file to match the code. Changing the is-open predicate or the location-string grammar requires updating this fixture AND both consuming suites in the SAME PR (mirrors contracts/fixtures/exit-equivalence.json's rule for premium-exit semantics, CLAUDE.md).",
+  "predicateCases": [
+    {
+      "id": "empty-schema",
+      "schema": {},
+      "expectedOpen": true,
+      "rationale": "The empty schema {} imposes zero constraints - any JSON value validates against it. This is the textbook open object and the worst case: it is how springdoc renders a Jackson JsonNode or a bare Object, and how pydantic renders a bare Any."
+    },
+    {
+      "id": "annotation-title-only",
+      "schema": { "title": "Response" },
+      "expectedOpen": true,
+      "rationale": "A title is a label, not a constraint. This schema still permits any JSON. This is the shape cross-vendor review found BOTH #1196 implementations missing: pydantic emits exactly this for a bare Any field, and three response-reachable instances (#SliceCell.x, #SliceCell.y, the folds handler's -> Any) sat unreported in the optimizer spec while the ratchet believed it had found all open locations."
+    },
+    {
+      "id": "annotation-description-only",
+      "schema": { "description": "whatever the handler felt like" },
+      "expectedOpen": true,
+      "rationale": "Same reasoning as title: description documents, it does not restrict shape."
+    },
+    {
+      "id": "annotation-default-only",
+      "schema": { "default": null },
+      "expectedOpen": true,
+      "rationale": "default is a value HINT for a client that omits the field; it says nothing about what values are legal when the field IS present. A schema with only a default keyword still accepts any JSON."
+    },
+    {
+      "id": "annotation-deprecated-only",
+      "schema": { "deprecated": true },
+      "expectedOpen": true,
+      "rationale": "deprecated is a lifecycle annotation aimed at documentation tooling, not a value constraint."
+    },
+    {
+      "id": "annotation-example-only",
+      "schema": { "example": "anything at all" },
+      "expectedOpen": true,
+      "rationale": "OpenAPI 3.0's singular `example` keyword is illustrative metadata, not a constraint - springdoc emits this alongside plenty of otherwise-untyped fields."
+    },
+    {
+      "id": "annotation-combo",
+      "schema": { "title": "X", "description": "Y", "default": null },
+      "expectedOpen": true,
+      "rationale": "Stacking multiple annotation-only keywords does not create a constraint; the schema is still open. Pinned because a predicate that special-cases exactly one annotation keyword (title) but not a combination is a plausible half-fix."
+    },
+    {
+      "id": "nullable-alone",
+      "schema": { "nullable": true },
+      "expectedOpen": true,
+      "rationale": "OpenAPI 3.0 nullable, on its own with no type, says only 'null is also legal' - it adds a permitted value, it does not remove any. Still open."
+    },
+    {
+      "id": "type-union-object-null",
+      "schema": { "type": ["object", "null"] },
+      "expectedOpen": true,
+      "rationale": "The OpenAPI 3.1 nullable spelling. 'object' is one of the permitted types and no properties/additionalProperties narrows it, so this is the same open-object case as a bare {\"type\": \"object\"} plus 'or null'."
+    },
+    {
+      "id": "unrecognised-keyword-fails-open",
+      "schema": { "unknownFutureKeyword": 1 },
+      "expectedOpen": true,
+      "rationale": "Doctrine: an unrecognised keyword must be treated as NOT constraining (fail OPEN, fail LOUD) rather than assumed to constrain (fail closed, fail SILENT). The inverse design - enumerate known annotations, treat everything else as constraining - is how this check would silently stop seeing a real future keyword; enumerating known CONSTRAINTS and defaulting unknown input to 'open' means a keyword nobody anticipated is reported as a ratchet finding a human reviews, not swallowed."
+    },
+    {
+      "id": "vendor-extension-fails-open",
+      "schema": { "x-internal-note": "draft" },
+      "expectedOpen": true,
+      "rationale": "Not a new mechanism - the same fail-open path as unrecognised-keyword-fails-open, pinned separately because an OpenAPI vendor extension (x-*) is a realistic shape springdoc/pydantic tooling can attach, unlike an arbitrary made-up keyword."
+    },
+    {
+      "id": "type-object-bare",
+      "schema": { "type": "object" },
+      "expectedOpen": true,
+      "rationale": "type: object with no properties and no additionalProperties is the canonical unconstrained object - every key is legal, none is promised."
+    },
+    {
+      "id": "type-object-empty-properties",
+      "schema": { "type": "object", "properties": {} },
+      "expectedOpen": true,
+      "rationale": "An EMPTY properties map promises nothing - it is not 'zero keys allowed', it is 'nothing declared'. Without additionalProperties: false to seal it, any key is still legal. Distinguishes this from the object-with-real-properties case below, and from sealed-empty-object which adds the seal."
+    },
+    {
+      "id": "type-object-additionalProperties-empty-schema",
+      "schema": { "type": "object", "additionalProperties": {} },
+      "expectedOpen": true,
+      "rationale": "additionalProperties: {} means 'any additional key may hold any JSON value' - the value schema itself is open, so the map is open."
+    },
+    {
+      "id": "type-object-additionalProperties-true",
+      "schema": { "type": "object", "additionalProperties": true },
+      "expectedOpen": true,
+      "rationale": "additionalProperties: true is the boolean spelling of the same thing as additionalProperties: {}."
+    },
+    {
+      "id": "additionalProperties-true-no-type",
+      "schema": { "additionalProperties": true },
+      "expectedOpen": true,
+      "rationale": "A real OpenAPI idiom: some generators emit additionalProperties without an explicit type: object, since additionalProperties only makes sense for objects. Absence of 'type' must not be read as absence of the constraint question - it defaults to the same object semantics."
+    },
+    {
+      "id": "additionalProperties-empty-schema-no-type",
+      "schema": { "additionalProperties": {} },
+      "expectedOpen": true,
+      "rationale": "Same as above with the object-value spelling of additionalProperties instead of the boolean."
+    },
+    {
+      "id": "ref-to-open-component",
+      "schema": { "$ref": "#/components/schemas/OpenComponent" },
+      "expectedOpen": false,
+      "rationale": "Deliberately CLOSED under the pure per-node predicate, and this is the subtle point the location-grammar section exists to state precisely: a bare $ref node always reads as 'pinned' to the predicate - it points somewhere, so in isolation it is not itself the empty schema. Openness is decided by resolving the $ref's TARGET (here, OpenComponent, which is the empty-schema case above and therefore open) and the WALKER - not the per-node predicate - attributes that opacity to the REFERENCING SITE using the location-grammar's ' -> ComponentName' suffix (see locationGrammar.examples). Freezing the component NAME instead of the site was #1196's round-2 Major-1 defect: one #JsonNode line silently authorised 40 response locations and every future one."
+    },
+    {
+      "id": "record-with-open-field",
+      "schema": { "type": "object", "properties": { "value": {} } },
+      "expectedOpen": false,
+      "rationale": "The OUTER record is closed - it declares a real 'properties' map, so the per-node predicate over THIS node must say false. The 'typed record containing an open field' scenario is not a single predicate case: the record's own openness (false, this row) and its .value field's openness (true, the empty-schema row, tested independently by the walker at pointer '.value') are two separate calls. A predicate that percolates any nested open field up to make the OUTER schema read as open would over-trigger on every record that has so much as one JsonNode field, drowning the ratchet in noise; a predicate that fails to test the field independently misses it entirely (the exact MapReturnRatchetTest blind spot - a Map/JsonNode FIELD inside an otherwise-typed record, e.g. #SystemStatus.jobs, is invisible to a source-level regex but must not be invisible here)."
+    },
+    {
+      "id": "object-with-real-properties",
+      "schema": { "type": "object", "properties": { "a": { "type": "string" } } },
+      "expectedOpen": false,
+      "rationale": "A declared, typed property is a real constraint: the consumer is promised key 'a' is a string if present. Baseline closed case."
+    },
+    {
+      "id": "additionalProperties-typed",
+      "schema": { "type": "object", "additionalProperties": { "type": "string" } },
+      "expectedOpen": false,
+      "rationale": "additionalProperties with a TYPED value schema (Map<String, String>) enumerates the value shape even though the keys are open - a consumer can still type what it reads, and a value-shape break still diffs. NOT flagged, deliberately, per both suites' header comments; this is the boundary case that proves the predicate does not treat every additionalProperties as open."
+    },
+    {
+      "id": "additionalProperties-typed-no-type",
+      "schema": { "additionalProperties": { "type": "string" } },
+      "expectedOpen": false,
+      "rationale": "Same as additionalProperties-typed with the implicit-object spelling (no explicit 'type' key) - confirms the no-type branch checks the additionalProperties VALUE's shape, not merely whether the keyword is present."
+    },
+    {
+      "id": "additionalProperties-false",
+      "schema": { "type": "object", "additionalProperties": false },
+      "expectedOpen": false,
+      "rationale": "additionalProperties: false is the opposite extreme from open - it says NO key beyond those in 'properties' (here, none) is permitted at all. The most constrained object schema possible, and a plausible confusion point if a predicate treated 'additionalProperties present' as inherently open without checking its value."
+    },
+    {
+      "id": "sealed-empty-object",
+      "schema": { "type": "object", "properties": {}, "additionalProperties": false },
+      "expectedOpen": false,
+      "rationale": "Combines type-object-empty-properties (open on its own) with additionalProperties: false (the seal) - the seal wins: this schema legally matches ONLY the literal empty object {}, which is a fully constrained (if narrow) shape, not an unconstrained one. Pinned because it is the sharpest test of additionalProperties:false actually overriding an otherwise-open properties map."
+    },
+    {
+      "id": "required-only",
+      "schema": { "type": "object", "required": ["a"] },
+      "expectedOpen": false,
+      "rationale": "Declaring a required key is a real constraint - the consumer is promised key 'a' WILL be present - even with no 'properties' entry describing its type. A predicate that only looks at 'properties' would call this open and miss the promise."
+    },
+    {
+      "id": "minProperties-real",
+      "schema": { "type": "object", "minProperties": 1 },
+      "expectedOpen": false,
+      "rationale": "minProperties: 1 promises at least one key is always present, a real (if untyped) constraint. Considered and deliberately NOT pinning the trivial minProperties: 0 case here - see 'rejected' notes below."
+    },
+    {
+      "id": "patternProperties",
+      "schema": { "type": "object", "patternProperties": { "^S_": { "type": "string" } } },
+      "expectedOpen": false,
+      "rationale": "Pattern-bound keys are a real constraint on the object's shape even without a literal 'properties' entry."
+    },
+    {
+      "id": "type-string-baseline",
+      "schema": { "type": "string" },
+      "expectedOpen": false,
+      "rationale": "Baseline non-object control: a scalar type is never an open OBJECT regardless of any other keyword."
+    },
+    {
+      "id": "type-union-string-null",
+      "schema": { "type": ["string", "null"] },
+      "expectedOpen": false,
+      "rationale": "A nullable scalar - 'object' is not one of the permitted types, so this is never an open object."
+    },
+    {
+      "id": "type-mismatch-with-additionalProperties",
+      "schema": { "type": "string", "additionalProperties": {} },
+      "expectedOpen": false,
+      "rationale": "A nonsensical combination (additionalProperties has no meaning for a string schema) included to pin decision ORDER: an explicit 'type' that is not 'object' must win outright, even when additionalProperties is present and would otherwise read as open. If a future edit reordered the checks so additionalProperties were tested before type, this row would flip to a false positive."
+    },
+    {
+      "id": "array-with-open-items",
+      "schema": { "type": "array", "items": {} },
+      "expectedOpen": false,
+      "rationale": "The ARRAY schema itself is not an open OBJECT - arrays are never objects. Its ITEM schema ({}) is independently open and must be reported by the walker at the '[]' pointer, not by this predicate call reading the array as a whole."
+    },
+    {
+      "id": "allOf-composed",
+      "schema": { "allOf": [{ "type": "object" }] },
+      "expectedOpen": false,
+      "rationale": "Presence of allOf is itself treated as a real constraint (a composed/discriminated shape) even when a branch is unconstrained - the WALKER recurses into each allOf/anyOf/oneOf branch independently and reports an open branch at its own pointer (e.g. '#Insight.priorityDetail/anyOf/0 -> JsonNode'), so this outer node correctly reading closed does not hide an open branch; it relocates the finding to the branch. See 'considered and rejected: composed-with-open-branch' below for why this is not a blind spot."
+    },
+    {
+      "id": "anyOf-composed",
+      "schema": { "anyOf": [{ "type": "string" }] },
+      "expectedOpen": false,
+      "rationale": "Same reasoning as allOf-composed, with a constrained (not open) branch as the control."
+    },
+    {
+      "id": "enum-constrained",
+      "schema": { "enum": ["a", "b"] },
+      "expectedOpen": false,
+      "rationale": "An enum is a hard constraint on the set of legal values."
+    },
+    {
+      "id": "const-constrained",
+      "schema": { "const": 3 },
+      "expectedOpen": false,
+      "rationale": "const pins the value to exactly one literal - maximally constrained."
+    },
+    {
+      "id": "format-constrained",
+      "schema": { "format": "uuid" },
+      "expectedOpen": false,
+      "rationale": "format narrows the legal value space (e.g. a UUID-shaped string) even without an explicit 'type'."
+    },
+    {
+      "id": "bounded-string",
+      "schema": { "title": "Bounded", "maxLength": 5 },
+      "expectedOpen": false,
+      "rationale": "Demonstrates that a genuine constraint (maxLength) alongside an annotation (title) must still read as closed - annotations do not launder a schema that also carries a real constraint into 'open'."
+    }
+  ],
+  "locationGrammar": {
+    "description": "Every unconstrained open object is reported as a LOCATION STRING naming where opacity is WRITTEN INTO the schema graph (#1196 round-2 Major-1: the unit is the WRITE site, never the component name - freezing a component name once would silently authorise every future use of it). Grammar, in the two suites' shared vocabulary: a ROOT identifies either a response ('METHOD /path STATUS', method upper-cased) or a component ('#ComponentName'); zero or more SUFFIXES extend the root into a nested position ('.fieldName' for an object property, '[]' for an array item, '{}' for an additionalProperties value, '/allOf/<i>' | '/anyOf/<i>' | '/oneOf/<i>' for a composed-schema branch, and suffixes may repeat/chain); an optional trailing ' -> ComponentName' names a $ref whose TARGET is itself open, attributing the opacity to the referencing site rather than the component.",
+    "pattern": "^(?:#[A-Za-z][A-Za-z0-9]*|[A-Z]+ \\S+ \\d+)(?:\\.[A-Za-z][A-Za-z0-9]*|\\[\\]|\\{\\}|/(?:allOf|anyOf|oneOf)/\\d+)*( -> [A-Za-z][A-Za-z0-9]*)?$",
+    "positiveExamples": [
+      { "location": "POST /api/v1/auth/login 200", "form": "response root, inline open object, no suffix", "sourced": "edge-gateway FROZEN_OPEN_OBJECTS, #1196 branch as of 2026-08-02" },
+      { "location": "GET /api/v1/market/options/oi-expiry 200", "form": "response root, inline open object", "sourced": "market-data-service FROZEN_OPEN_OBJECTS, #1196 branch as of 2026-08-02" },
+      { "location": "GET /api/v1/backtests/{backtestId}/folds 200 -> JsonNode", "form": "response root -> reference to an open component", "sourced": "backtest-service FROZEN_OPEN_OBJECTS, #1196 branch as of 2026-08-02" },
+      { "location": "#SystemStatus.jobs", "form": "component root + field suffix, inline open object (a Map field inside an otherwise-typed record)", "sourced": "edge-gateway FROZEN_OPEN_OBJECTS, #1196 branch as of 2026-08-02" },
+      { "location": "#DeepSwingRunResult.report -> JsonNode", "form": "component root + field suffix -> reference to an open component", "sourced": "market-data-service FROZEN_OPEN_OBJECTS, #1196 branch as of 2026-08-02" },
+      { "location": "#Insight.priorityDetail/anyOf/0 -> JsonNode", "form": "component root + field suffix + anyOf branch suffix -> reference to an open component", "sourced": "strategy-signal-service FROZEN_OPEN_OBJECTS, #1196 branch as of 2026-08-02" },
+      { "location": "#BacktestTradeItem.contributions/anyOf/0 -> JsonNode", "form": "component root + field suffix + anyOf branch suffix -> reference", "sourced": "backtest-service FROZEN_OPEN_OBJECTS, #1196 branch as of 2026-08-02" },
+      { "location": "POST /api/v1/optimizations/run 202", "form": "response root, inline open object (a fixed-shape dict[str, Any])", "sourced": "optimizer-service FROZEN_OPEN_OBJECTS, #1196 branch as of 2026-08-02" },
+      { "location": "#AblationModel.evaluation/anyOf/0", "form": "component root + field suffix + anyOf branch suffix, inline open object (no reference arrow: the branch itself is the empty schema, not a $ref to one)", "sourced": "optimizer-service FROZEN_OPEN_OBJECTS, #1196 branch as of 2026-08-02" },
+      { "location": "GET /api/v1/example 200 -> OpenComponent", "form": "response root -> reference to an open component, additionalProperties/{} variant not otherwise represented above", "sourced": "constructed illustration, not read from any live spec - demonstrates the ref-to-open-component convention pinned by the ref-to-open-component predicateCases row" }
+    ],
+    "negativeExamples": [
+      { "location": "get /api/v1/auth/login 200", "reason": "lower-cased HTTP method - the grammar requires upper-case, matching how both suites format method.toUpperCase()/method.upper()" },
+      { "location": "SystemStatus.jobs", "reason": "missing the leading '#' on a component root" },
+      { "location": "#SystemStatus.jobs -> ", "reason": "dangling reference arrow with no component name" },
+      { "location": "#SystemStatus..jobs", "reason": "doubled field separator - not a grammar this format ever produces" },
+      { "location": "POST /api/v1/auth/login", "reason": "response root missing its status code" }
+    ]
+  },
+  "consideredAndRejected": [
+    {
+      "id": "composed-with-open-branch",
+      "note": "Whether a node like {\"anyOf\": [{}]} should itself be reported open, since one branch is unconstrained. Rejected as a predicateCases row: the WALKER already recurses into every allOf/anyOf/oneOf branch independently (see #Insight.priorityDetail/anyOf/0 -> JsonNode, a real example), so the correct behaviour is the OUTER node reading closed (it is a real discriminated/composed shape) while the specific open BRANCH is reported at its own pointer. Verified by tracing both suites' walk functions, not merely asserted."
+    },
+    {
+      "id": "additionalProperties-ref-to-open-component",
+      "note": "A Map<String, OpenThing> - {\"type\":\"object\",\"additionalProperties\":{\"$ref\":\"#/components/schemas/OpenComponent\"}}. Traced through both walk functions: the outer predicate reads closed (additionalProperties has a declared, non-empty shape), and the walker separately recurses into the additionalProperties value at the '{}' pointer, which then resolves the $ref and reports '<site>{} -> OpenComponent' if the target is open. Not a blind spot; not added as a graded row because it is a straightforward composition of two already-pinned mechanisms (additionalProperties-typed's 'has a declared shape' branch, plus ref-to-open-component's arrow convention) rather than a new one, and adding it as a locationGrammar example would need a synthetic (not sourced) string identical in kind to the one already included."
+    },
+    {
+      "id": "vacuous-pins-contents-keyword",
+      "note": "Whether a technically-present but VACUOUS keyword in the pins-contents family - required: [], minProperties: 0, patternProperties: {} - should read as open, since each imposes no constraint in isolation (an empty required list requires nothing; minProperties: 0 is true of every object; an empty patternProperties map matches no pattern). Both current implementations treat PRESENCE of the keyword as pinning, regardless of whether its value is vacuous - a conservative bias (it can only under-report an open object as closed, never the reverse) but a real gap by strict doctrine. NOT added as a graded predicateCases row: every blind spot this fixture's own history is built from (component aliasing, a Map FIELD inside a typed record, annotation-only) was found via an ACTUAL response-reachable instance in a real spec; I found no evidence any generator in this platform (springdoc, pydantic) ever emits a vacuous form of these keywords rather than simply omitting the keyword. Encoding a hypothetical nobody has observed as if it were an equal-weight doctrine finding risks presenting speculation as evidence. Recorded here, and again in the open-doubts of the receipt, rather than silently dropped."
+    },
+    {
+      "id": "request-body-schemas",
+      "note": "Both suites are scoped to RESPONSE schemas only, by design (the ratchet is about what we PUBLISH) - this fixture inherits that scope and does not attempt to pin a request-body predicate case, since the question 'is this schema open' is unchanged by which side of the wire it sits on, but WHETHER the walk seeds request bodies at all is a suite-level scoping decision documented in each suite's own header, not a predicate-shape question this fixture is responsible for."
+    }
+  ]
+}

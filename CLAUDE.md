@@ -159,6 +159,17 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `MapReturnRatchetTest` freezes the Map-returning handler COUNT per service (Maps are invisible
   to the contract gate); a new Map endpoint fails the strategy-gateway CI shard. Cost 2 CI cycles
   on 2026-07-03 (both new endpoints caught). Records also enumerate into the spec — strictly better.
+- **No response may publish an unconstrained open object** (`type: object` with no `properties`,
+  `additionalProperties: {}`/`true`, or the empty schema `{}` — including ANNOTATION-ONLY schemas
+  like `{"title": "..."}`, which constrain nothing and are exactly as open as `{}`) outside a named,
+  frozen exemption: `SpecOpenObjectRatchetTest` walks the four committed Java specs,
+  `test_open_object_ratchet.py` walks the optimizer's live `app.openapi()`. **The is-open predicate
+  and the location-string grammar (where opacity is written into the schema graph — e.g.
+  `#Component.field -> JsonNode`) are pinned by a shared fixture,
+  `contracts/fixtures/open-object-conformance.json`** (same rule as `exit-equivalence.json` above):
+  change either only by updating the fixture AND both suites in the same PR. Cross-vendor review
+  round 2 on #1196 found BOTH implementations independently missed the annotation-only case — one
+  bug, two places, found once — which is why the fixture exists.
 - **Modulith module cycles (strategy-signal):** `notifier` imports `signals` (`SignalEmitted`), so
   signals code must NEVER import notifier — alert via an in-process event record published from
   signals + an `@EventListener` in notifier (`DotInputAlert`/`DotAlertListener` is the template).

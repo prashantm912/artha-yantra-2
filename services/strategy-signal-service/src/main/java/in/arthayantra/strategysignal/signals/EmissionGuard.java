@@ -131,4 +131,18 @@ public interface EmissionGuard {
       BigDecimal premium,
       BigDecimal stopDistance,
       String side) {}
+
+  /**
+   * M40 governor-coverage fix: records that a §3.4.3 pyramid ADD was blocked because it would have
+   * breached the family's portfolio open-risk cap. Every OTHER RiskService threshold rail (daily-loss
+   * / profit-target / deployment / heat-cap) writes a durable {@code risk_audit} row + pushes an ntfy
+   * alert on trip; before this method existed, a pyramid-cap block only reached the application log
+   * (SwingBatchEngine's own {@code log.info}), so re-arming pyramiding ({@code
+   * artha.manas-arora.pyramid.enabled}, currently default OFF — this call site is UNREACHABLE today,
+   * since a disabled policy's {@code hasRoom} never lets an add reach the risk-cap check) would have
+   * silently omitted the one governor-trip TYPE from both the audit trail and ntfy. The signals module
+   * owns only this port; the paper adapter supplies the durable implementation (mirrors {@link
+   * #recordZeroSizedEntry}). Default no-op keeps non-paper and test adapters permissive.
+   */
+  default void recordPyramidRiskCapBreach(String book, String symbol, String detail) {}
 }

@@ -186,6 +186,11 @@ public class PaperEmissionGuard implements EmissionGuard {
   }
 
   @Override
+  public void recordPyramidRiskCapBreach(String book, String symbol, String detail) {
+    risk.recordPyramidRiskCapBreach(book, symbol, detail);
+  }
+
+  @Override
   public void recordZeroSizedEntry(
       long signalId,
       String strategySlug,

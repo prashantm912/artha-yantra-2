@@ -501,6 +501,17 @@ public class SwingBatchEngine {
             log.info(
                 "{} swing: pyramid add for {} would breach the open-risk cap — skipped",
                 doctrine.batchName(), c.symbol());
+            // M40 coverage fix: every OTHER governor rail (daily-loss/profit/deployment/heat-cap)
+            // writes a risk_audit row + ntfy alert on trip; this rail must too, or re-arming
+            // pyramiding would silently omit the one trip type from the owner's audit/alert surface.
+            emissionGuard.ifPresent(
+                g ->
+                    g.recordPyramidRiskCapBreach(
+                        doctrine.book(),
+                        c.symbol(),
+                        "pyramid add for " + c.symbol() + " blocked by the "
+                            + pyramid.describe().getOrDefault("maxPortfolioRiskPct", "?")
+                            + "% portfolio open-risk cap"));
             break; // no setup may add more risk for this symbol this run
           }
           if (deadline.expired()) {

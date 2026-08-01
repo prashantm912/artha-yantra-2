@@ -141,6 +141,8 @@ class ManasAroraSwingEngineTest {
     verify(r.signals()).stampManasAroraDetail(anyLong(), detail.capture());
     assertThat(detail.getValue())
         .isEqualTo("{\"setup\":\"manas-arora-breakout\",\"setupType\":\"breakout\",\"pivot\":\"150\",\"pyramidLot\":2}");
+    // A non-breaching add must never spuriously trip the M40 governor-coverage audit/alert.
+    verify(r.guard(), never()).recordPyramidRiskCapBreach(any(), any(), any());
   }
 
   @Test
@@ -149,6 +151,12 @@ class ManasAroraSwingEngineTest {
 
     assertThat(r.run().entries()).as("the risk cap blocks the add").isZero();
     verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
+    // M40 governor-coverage fix: every OTHER RiskService threshold rail (daily-loss / profit-target /
+    // deployment / heat-cap) writes a risk_audit row + ntfy alert on trip; before this fix the pyramid
+    // risk-cap block reached only SwingBatchEngine's own log.info line — this proves it now ALSO
+    // reaches the same EmissionGuard governor surface (RiskServicePyramidCapTest proves what the paper
+    // adapter does with the call from there: audits + alerts, deduped per IST day).
+    verify(r.guard()).recordPyramidRiskCapBreach(eq(Books.MANAS_ARORA), eq("TESTCO"), any());
   }
 
   @Test
@@ -224,7 +232,10 @@ class ManasAroraSwingEngineTest {
   }
 
   private record AddResult(
-      SwingBatchEngine.SwingRun run, SignalRepository signals, ApplicationEventPublisher events) {}
+      SwingBatchEngine.SwingRun run,
+      SignalRepository signals,
+      ApplicationEventPublisher events,
+      EmissionGuard guard) {}
 
   private AddResult runPyramidAdd(BigDecimal existingOpenRiskInr) throws IOException {
     return runPyramidAdd(existingOpenRiskInr, null, null);
@@ -271,7 +282,7 @@ class ManasAroraSwingEngineTest {
             funnel, signals, new ManasPyramidPolicy(true, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
             new ObjectMapper(), true, 520, 10, 1440);
 
-    return new AddResult(engine.runDaily(doctrine, requiredBarDate), signals, events);
+    return new AddResult(engine.runDaily(doctrine, requiredBarDate), signals, events, guard);
   }
 
   // ---- harness --------------------------------------------------------------------------------

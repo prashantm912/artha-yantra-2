@@ -13,12 +13,21 @@ The SAME BYTES labelled 3.0.1 diff correctly and report `Missing property: items
 (string)`. So the gate relabels both sides before handing them to openapi-diff. The COMMITTED specs
 stay 3.1.0 — this is a transform on throwaway copies.
 
-ONE 3.1 construct converts instead of refusing: the nullability type array. `type: ["number",
-"null"]` and 3.0's `type: number, nullable: true` state the same fact (a canonical, lossless
-two-way mapping), and it is the only way springdoc can express a nullable response field at 3.1 —
-swagger-core's 3.1 serializer silently DROPS `nullable`, so `@Schema(types = {"number","null"})`
-is the source-side spelling (strategy-signal's stopLoss/target carry it). Genuine unions
-(`type: ["string","integer"]`) have no 3.0 equivalent and still refuse.
+THREE 3.1 constructs convert instead of refusing, all variations on the same nullability idiom.
+`type: ["number", "null"]` and 3.0's `type: number, nullable: true` state the same fact (a
+canonical, lossless two-way mapping), and it is the only way springdoc can express a nullable
+response field at 3.1 — swagger-core's 3.1 serializer silently DROPS `nullable`, so
+`@Schema(types = {"number","null"})` is the source-side spelling (strategy-signal's stopLoss/target
+carry it). Genuine unions (`type: ["string","integer"]`) have no 3.0 equivalent and still refuse.
+Pydantic's FastAPI specs (optimizer-service, margin-service) spell the SAME fact a third way,
+`anyOf: [<schema>, {"type": "null"}]` (bare, or with a `title` sibling on request bodies) — a
+`$ref` branch converts to a bare `$ref` (task_ade97df8's original case; nullability and any sibling
+`title` are legitimately dropped, since openapi-diff is blind to nullability either way and the
+alternative — leaving `title` beside a hoisted `$ref` — is exactly the "$ref with sibling keys"
+shape `scan()` refuses below), and a non-`$ref` (primitive, object, or a genuine multi-branch union)
+branch converts to that branch's own keys plus `nullable: true`, or to a trimmed `anyOf` plus
+`nullable: true` when more than one non-null branch remains — both confirmed valid OpenAPI 3.0 by
+the validator backstop, never assumed.
 
 The relabel is lossless ONLY while the specs use no OTHER 3.1-only construct, and this GUARANTEES
 that rather than assuming it — with an ALLOW-LIST, not a deny-list. After relabeling, it VALIDATES the
@@ -94,6 +103,15 @@ def downgrade_nullable_ref_anyof(node):
     remains byte-identical to the pre-annotation copy. Genuine unions and every other ``anyOf`` shape
     still fall through to the validator/refusal path.
 
+    Tolerates ONE extra sibling: a bare ``title`` (pydantic's requestBody wrapper schemas carry
+    ``{"anyOf": [...], "title": "Body"}`` — optimizer-service measured, 2 occurrences). ``title`` is
+    dropped along with nullability rather than kept beside the hoisted ``$ref``: a ``$ref`` WITH a
+    sibling key is precisely the shape ``scan()`` below refuses (3.0 ignores such siblings, 3.1
+    applies them), so keeping it would trade one hazard for another. Any OTHER sibling key still
+    routes to the validator/refusal path unchanged — this does not become a general "anyOf plus
+    anything" rule. Measured: none of the four Java specs carry a titled ``$ref``-nullable node
+    (springdoc's bare form is the only one seen there), so this widening is byte-identical for them.
+
     **Never descends INTO a composition branch** (``anyOf`` / ``oneOf`` / ``allOf``). Recursing into
     one was a real hole, caught in review: ``oneOf: [anyOf: [$ref, null], string]`` got rewritten to
     ``oneOf: [$ref, string]`` — a silent semantic change that is VALID 3.0, so the validator backstop
@@ -104,7 +122,7 @@ def downgrade_nullable_ref_anyof(node):
     """
     if isinstance(node, dict):
         any_of = node.get("anyOf")
-        if set(node) == {"anyOf"} and isinstance(any_of, list) and len(any_of) == 2:
+        if set(node) <= {"anyOf", "title"} and isinstance(any_of, list) and len(any_of) == 2:
             ref_branch, null_branch = any_of
             if (
                 isinstance(ref_branch, dict)
@@ -124,6 +142,62 @@ def downgrade_nullable_ref_anyof(node):
     elif isinstance(node, list):
         for value in node:
             downgrade_nullable_ref_anyof(value)
+
+
+def downgrade_nullable_primitive_anyof(node):
+    """Downgrade a NON-``$ref`` nullable ``anyOf`` union for the throwaway 3.0 diff copy.
+
+    Pydantic (FastAPI) spells `Optional[X]` as ``anyOf: [<schema for X>, {"type": "null"}]``, with a
+    ``title`` sibling on every model FIELD (``LegIn.expiry``) and no sibling at all on a bare response
+    schema (margin-service's ``/health``). Measured across margin-service + optimizer-service (the
+    two non-Java specs), the non-null branch is always one of: a bare primitive (``{"type":
+    "string"}``), an object-with-``additionalProperties`` map type, an empty schema (``{}``, pydantic's
+    ``Optional[Any]``), or — when MORE than one non-null branch survives (margin-service's
+    ``SizeRequest.stop: number | string-pattern | None``) — a genuine union alongside nullability.
+
+    All four are sound, lossless 3.0 spellings, confirmed by the validator backstop, never assumed:
+      * exactly one non-null branch remains -> hoist that branch's own keys onto this node (its
+        `type`, and anything else it carries, e.g. `additionalProperties`) and set `nullable: true`,
+        the identical idiom `downgrade_nullable_type_arrays` above uses for the type-array spelling
+        of the same fact.
+      * more than one non-null branch remains -> keep `anyOf` holding just the non-null branches and
+        set `nullable: true` beside it. `anyOf` and `nullable` coexisting is valid OAS 3.0 (`nullable`
+        is an orthogonal schema-level flag, not exclusive with `anyOf`) — confirmed against
+        openapi-spec-validator, not assumed from the spec text.
+
+    Never matches a branch that IS or CONTAINS a `$ref`, `anyOf`, `oneOf`, or `allOf` — those are
+    `downgrade_nullable_ref_anyof`'s narrower job (a `$ref` needs the sibling-keys care described
+    there) or a nested composition this pass must not silently absorb; either refuses downstream
+    instead. Never descends INTO a composition branch, for the same reason
+    `downgrade_nullable_ref_anyof` does not (see its docstring) — this function runs AFTER that one,
+    so an already-converted `$ref` node no longer carries `anyOf` and is untouched here.
+    """
+    if isinstance(node, dict):
+        any_of = node.get("anyOf")
+        if isinstance(any_of, list) and len(any_of) >= 2:
+            null_branches = [b for b in any_of if isinstance(b, dict) and b == {"type": "null"}]
+            rest = [b for b in any_of if b not in null_branches]
+            if (
+                len(null_branches) == 1
+                and len(rest) >= 1
+                and all(
+                    isinstance(b, dict) and not (COMPOSITION_KEYS | {"$ref"}) & set(b)
+                    for b in rest
+                )
+            ):
+                del node["anyOf"]
+                if len(rest) == 1:
+                    node.update(rest[0])
+                else:
+                    node["anyOf"] = rest
+                node["nullable"] = True
+        for key, value in node.items():
+            if key in COMPOSITION_KEYS:
+                continue  # see the docstring: descending here can silently mangle a nested union
+            downgrade_nullable_primitive_anyof(value)
+    elif isinstance(node, list):
+        for value in node:
+            downgrade_nullable_primitive_anyof(value)
 
 
 def scan(node, path, found):
@@ -205,6 +279,8 @@ def main():
     downgrade_nullable_type_arrays(spec.get("paths"))
     downgrade_nullable_ref_anyof(spec.get("components"))
     downgrade_nullable_ref_anyof(spec.get("paths"))
+    downgrade_nullable_primitive_anyof(spec.get("components"))
+    downgrade_nullable_primitive_anyof(spec.get("paths"))
 
     found = deny_list_hits(spec)
     if found:

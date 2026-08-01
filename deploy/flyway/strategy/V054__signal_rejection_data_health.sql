@@ -49,8 +49,22 @@
 -- (2026-07-28). DataHealthFlags therefore resolves the calendar from context.underlying, and
 -- DataHealthFlagsTest pins both directions on a real NSE-only monthly expiry.
 --
--- When the exemption applies the row records oiSuppressed=true and simply omits the oi-inert flag;
--- the macro inputs on that row are still judged normally.
+-- When the exemption applies the row records oiSuppressed=true and omits the ENTIRE OI flag group
+-- (never a subset — the skip nulls the whole block in one act); the macro inputs on that row are
+-- still judged normally, because MarketOiClient.macro() is untouched by the skip.
+--
+-- ---- WHAT IS FLAGGED -------------------------------------------------------------------------
+-- Every absence-bearing input the scorer and gates actually consume, not a convenient subset. A
+-- partial source failure (e.g. the FII bias drops out while the OI block is healthy) MUST name the
+-- specific input: a row that reports nothing wrong when something is wrong is a FALSE CLEAN, and on
+-- a data-health surface that is worse than no surface — it converts an unknown into a confident
+-- wrong answer. Macro: breadth, atm-iv, iv-rank, iv-pair, iv-slope, premium-skew, vix-direction,
+-- vix-level, fii, fii-bias, constituent-bias, dow. OI (withheld as a group under S24): oi-inert,
+-- sentiment, sentiment-slope, oi-delta, oi-imbalance, oi-divergence, oi-spurt.
+--
+-- Note vix-DIRECTION is a distinct flag from vix-level: `vixRising` is the vix dot's verdict-bearing
+-- input (ScalperGates:596 degrades to pass on null) while `vixLevel` is only the reported operand,
+-- so a present level with an absent direction is a silently blind dot.
 --
 -- ============================================================================================
 -- WHAT THE COLUMN READS AS TODAY (measured, so nobody reads a true value as a bug)

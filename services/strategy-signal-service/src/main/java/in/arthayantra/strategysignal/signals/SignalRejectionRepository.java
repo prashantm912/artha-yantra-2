@@ -116,10 +116,11 @@ public class SignalRejectionRepository {
    * Paged history with optional filters (newest first).
    *
    * <p>{@code degraded} narrows to rows whose gate inputs were (or were not) healthy — see {@link
-   * DataHealthFlags}. {@code TRUE} rides the V054 partial index; {@code null} does not filter. Note
-   * that rows written before V054 carry {@code degraded = false} because that is the column default,
-   * NOT because their inputs were judged healthy — {@code data_health IS NULL} is the test for
-   * "never computed", and a false-filtered page therefore mixes the two.
+   * DataHealthFlags}. {@code TRUE} rides the V054 partial index. {@code FALSE} means GENUINELY
+   * CLEAN, not merely "the boolean is false": it additionally requires a computed verdict
+   * ({@code data_health IS NOT NULL} — pre-V054 rows carry the column default, never judged) and a
+   * context-bearing one ({@code contextBearing} — a row blocked before the chain fetch read no
+   * inputs at all). {@code null} does not filter.
    */
   public List<RejectionRow> list(
       UUID strategyVersionId, String blockingRail, String exchange, String tradingsymbol,
@@ -127,8 +128,19 @@ public class SignalRejectionRepository {
     StringBuilder sql = new StringBuilder("SELECT * FROM signal_rejections WHERE 1=1");
     List<Object> args = new ArrayList<>();
     if (degraded != null) {
-      sql.append(" AND degraded = ?");
-      args.add(degraded);
+      if (degraded) {
+        sql.append(" AND degraded");
+      } else {
+        // NOT the mirror of the true branch. `degraded = false` is the state of THREE different
+        // populations: genuinely-clean rows, rows written before V054 (the column default, never
+        // judged), and context-less rows the classifier declined to judge. Only the first is
+        // "healthy inputs", so this predicate matches the UI's OK badge EXACTLY — same three
+        // conditions, in the same order. A caption cannot fix a filter that returns the wrong rows,
+        // and the badge and the filter must never be able to disagree.
+        sql.append(
+            " AND NOT degraded AND data_health IS NOT NULL"
+                + " AND (data_health->>'contextBearing')::boolean");
+      }
     }
     if (strategyVersionId != null) {
       sql.append(" AND strategy_version_id = ?");

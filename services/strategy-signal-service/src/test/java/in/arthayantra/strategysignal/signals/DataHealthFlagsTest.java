@@ -8,6 +8,7 @@ import in.arthayantra.strategysignal.scalper.ScalperGateContext;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -20,42 +21,97 @@ import org.junit.jupiter.api.Test;
  */
 class DataHealthFlagsTest {
 
+  /** Positional alias for {@code Macro}'s canonical constructor, so the fixtures read once. */
+  private static ScalperGateContext.Macro macro(
+      BigDecimal atmIv, BigDecimal ivRank, BigDecimal vixLevel, Boolean vixRising, int advances,
+      int declines, BigDecimal fiiLongPct, BigDecimal ceIvAvg6, BigDecimal peIvAvg6,
+      BigDecimal constituentBias, BigDecimal ceIvSlope, BigDecimal peIvSlope,
+      BigDecimal premiumSkewPct, Boolean dowUp, BigDecimal fiiBiasSign) {
+    return new ScalperGateContext.Macro(
+        atmIv, ivRank, vixLevel, vixRising, advances, declines, fiiLongPct, ceIvAvg6, peIvAvg6,
+        constituentBias, ceIvSlope, peIvSlope, premiumSkewPct, dowUp, fiiBiasSign);
+  }
+
   /** Every macro input present and plausible — the "nothing is wrong" baseline. */
   private static ScalperGateContext.Macro healthyMacro() {
-    return new ScalperGateContext.Macro(
-        new BigDecimal("12.5"), // atmIv
-        new BigDecimal("43.0"), // ivRank
-        new BigDecimal("11.2"), // vixLevel
-        Boolean.TRUE, // vixRising
-        31, // advances
-        18, // declines
-        new BigDecimal("54.0"), // fiiLongPct
-        new BigDecimal("12.1"), // ceIvAvg6
-        new BigDecimal("12.4"), // peIvAvg6
-        new BigDecimal("0.3"), // constituentBias
-        new BigDecimal("0.1"), // ceIvSlope
-        new BigDecimal("-0.1"), // peIvSlope
-        new BigDecimal("2.5"), // premiumSkewPct
-        Boolean.TRUE, // dowUp
-        BigDecimal.ONE); // fiiBiasSign
+    return macroWithout(null);
+  }
+
+  /**
+   * The healthy macro with exactly ONE field nulled — the partial-source-failure fixture. Nulling by
+   * name (rather than 13 hand-written literals) keeps each case honest: every other input is
+   * provably still present, so a flag that appears can only have come from the named absence.
+   */
+  private static ScalperGateContext.Macro macroWithout(String absent) {
+    BigDecimal atmIv = new BigDecimal("12.5");
+    BigDecimal ivRank = new BigDecimal("43.0");
+    BigDecimal vixLevel = new BigDecimal("11.2");
+    Boolean vixRising = Boolean.TRUE;
+    BigDecimal fiiLongPct = new BigDecimal("54.0");
+    BigDecimal ceIvAvg6 = new BigDecimal("12.1");
+    BigDecimal peIvAvg6 = new BigDecimal("12.4");
+    BigDecimal constituentBias = new BigDecimal("0.3");
+    BigDecimal ceIvSlope = new BigDecimal("0.1");
+    BigDecimal peIvSlope = new BigDecimal("-0.1");
+    BigDecimal premiumSkewPct = new BigDecimal("2.5");
+    Boolean dowUp = Boolean.TRUE;
+    BigDecimal fiiBiasSign = BigDecimal.ONE;
+    if (absent != null) {
+      switch (absent) {
+        case "atmIv" -> atmIv = null;
+        case "ivRank" -> ivRank = null;
+        case "vixLevel" -> vixLevel = null;
+        case "vixRising" -> vixRising = null;
+        case "fiiLongPct" -> fiiLongPct = null;
+        case "ceIvAvg6" -> ceIvAvg6 = null;
+        case "peIvAvg6" -> peIvAvg6 = null;
+        case "constituentBias" -> constituentBias = null;
+        case "ceIvSlope" -> ceIvSlope = null;
+        case "peIvSlope" -> peIvSlope = null;
+        case "premiumSkewPct" -> premiumSkewPct = null;
+        case "dowUp" -> dowUp = null;
+        case "fiiBiasSign" -> fiiBiasSign = null;
+        default -> throw new IllegalArgumentException("unknown Macro field: " + absent);
+      }
+    }
+    return macro(atmIv, ivRank, vixLevel, vixRising, 31, 18, fiiLongPct, ceIvAvg6, peIvAvg6,
+        constituentBias, ceIvSlope, peIvSlope, premiumSkewPct, dowUp, fiiBiasSign);
+  }
+
+  /** The live OI block with exactly ONE field nulled (the OI half of the same fixture idea). */
+  private static ScalperGateContext.Oi oiWithout(String absent) {
+    BigDecimal sentimentPct = new BigDecimal("58.0");
+    BigDecimal trendingPeMinusCePct = new BigDecimal("4.2");
+    BigDecimal ceOiDelta = new BigDecimal("120000");
+    BigDecimal peOiDelta = new BigDecimal("240000");
+    BigDecimal callPutDeltaImbalancePct = new BigDecimal("12.0");
+    BigDecimal sentimentSlope = new BigDecimal("0.8");
+    BigDecimal spurtOiPct = new BigDecimal("9.0");
+    BigDecimal spurtPricePct = new BigDecimal("1.4");
+    BigDecimal oiDivergencePct = new BigDecimal("22.0");
+    if (absent != null) {
+      switch (absent) {
+        case "sentimentPct" -> sentimentPct = null;
+        case "trendingPeMinusCePct" -> trendingPeMinusCePct = null;
+        case "ceOiDelta" -> ceOiDelta = null;
+        case "peOiDelta" -> peOiDelta = null;
+        case "callPutDeltaImbalancePct" -> callPutDeltaImbalancePct = null;
+        case "sentimentSlope" -> sentimentSlope = null;
+        case "spurtOiPct" -> spurtOiPct = null;
+        case "spurtPricePct" -> spurtPricePct = null;
+        case "oiDivergencePct" -> oiDivergencePct = null;
+        default -> throw new IllegalArgumentException("unknown Oi field: " + absent);
+      }
+    }
+    return new ScalperGateContext.Oi(
+        OiQuadrant.LONG_BUILDUP, OiQuadrant.SHORT_COVERING, sentimentPct, trendingPeMinusCePct,
+        new BigDecimal("31.5"), ceOiDelta, peOiDelta, callPutDeltaImbalancePct, true, true,
+        sentimentSlope, spurtOiPct, spurtPricePct, oiDivergencePct);
   }
 
   /** A live OI read on an ordinary bar: quadrants resolved, magnitudes present. */
   private static ScalperGateContext.Oi liveOi() {
-    return new ScalperGateContext.Oi(
-        OiQuadrant.LONG_BUILDUP, // underlying
-        OiQuadrant.SHORT_COVERING, // futures
-        new BigDecimal("58.0"), // sentimentPct
-        new BigDecimal("4.2"), // trendingPeMinusCePct
-        new BigDecimal("31.5"), // futuresBasis
-        new BigDecimal("120000"), // ceOiDelta
-        new BigDecimal("240000"), // peOiDelta
-        new BigDecimal("12.0"), // callPutDeltaImbalancePct
-        true, // crossedThisWindow
-        true, // gapWidening
-        new BigDecimal("0.8"), // sentimentSlope
-        new BigDecimal("9.0"), // spurtOiPct
-        new BigDecimal("1.4")); // spurtPricePct
+    return oiWithout(null);
   }
 
   /**
@@ -99,43 +155,45 @@ class DataHealthFlagsTest {
 
   @Test
   void anAbsentMacroInputIsFlaggedSpecificallyAndMarksTheRowDegraded() {
-    ScalperGateContext.Macro noIvRank =
-        new ScalperGateContext.Macro(
-            new BigDecimal("12.5"), null, new BigDecimal("11.2"), Boolean.TRUE, 31, 18,
-            new BigDecimal("54.0"), new BigDecimal("12.1"), new BigDecimal("12.4"),
-            new BigDecimal("0.3"), new BigDecimal("0.1"), new BigDecimal("-0.1"),
-            new BigDecimal("2.5"), Boolean.TRUE, BigDecimal.ONE);
-
     DataHealthFlags health =
-        DataHealthFlags.of(context("NIFTY 50", liveOi(), noIvRank), ORDINARY_DAY);
+        DataHealthFlags.of(context("NIFTY 50", liveOi(), macroWithout("ivRank")), ORDINARY_DAY);
 
     assertThat(health.degraded()).isTrue();
     // SPECIFIC, not just "something is wrong": only the absent input is named.
     assertThat(health.flags()).containsExactly(DataHealthFlags.IV_RANK_ABSENT);
   }
 
+  /** Breadth is the one macro input whose absence is a ZERO PAIR, not a null. */
+  private static ScalperGateContext.Macro breadth(int advances, int declines) {
+    return macro(
+        new BigDecimal("12.5"), new BigDecimal("43.0"), new BigDecimal("11.2"), Boolean.TRUE,
+        advances, declines, new BigDecimal("54.0"), new BigDecimal("12.1"), new BigDecimal("12.4"),
+        new BigDecimal("0.3"), new BigDecimal("0.1"), new BigDecimal("-0.1"), new BigDecimal("2.5"),
+        Boolean.TRUE, BigDecimal.ONE);
+  }
+
   @Test
   void breadthIsAbsentOnlyWhenBothCountsAreZero() {
-    ScalperGateContext.Macro deadBreadth =
-        new ScalperGateContext.Macro(
-            new BigDecimal("12.5"), new BigDecimal("43.0"), new BigDecimal("11.2"), Boolean.TRUE,
-            0, 0, new BigDecimal("54.0"), new BigDecimal("12.1"), new BigDecimal("12.4"),
-            new BigDecimal("0.3"), new BigDecimal("0.1"), new BigDecimal("-0.1"),
-            new BigDecimal("2.5"), Boolean.TRUE, BigDecimal.ONE);
-
-    assertThat(DataHealthFlags.of(context("NIFTY 50", liveOi(), deadBreadth), ORDINARY_DAY).flags())
+    assertThat(DataHealthFlags.of(context("NIFTY 50", liveOi(), breadth(0, 0)), ORDINARY_DAY).flags())
         .containsExactly(DataHealthFlags.BREADTH_ABSENT);
 
     // A decisively one-sided tape (every constituent down) is a MARKET STATE, not a dead read.
-    ScalperGateContext.Macro oneSided =
-        new ScalperGateContext.Macro(
-            new BigDecimal("12.5"), new BigDecimal("43.0"), new BigDecimal("11.2"), Boolean.TRUE,
-            0, 50, new BigDecimal("54.0"), new BigDecimal("12.1"), new BigDecimal("12.4"),
-            new BigDecimal("0.3"), new BigDecimal("0.1"), new BigDecimal("-0.1"),
-            new BigDecimal("2.5"), Boolean.TRUE, BigDecimal.ONE);
-    assertThat(DataHealthFlags.of(context("NIFTY 50", liveOi(), oneSided), ORDINARY_DAY).degraded())
+    assertThat(
+            DataHealthFlags.of(context("NIFTY 50", liveOi(), breadth(0, 50)), ORDINARY_DAY)
+                .degraded())
         .isFalse();
   }
+
+  /** The full OI flag group — what an entirely dead OI block reports off an expiry day. */
+  private static final String[] ALL_OI_FLAGS = {
+    DataHealthFlags.OI_INERT,
+    DataHealthFlags.SENTIMENT_ABSENT,
+    DataHealthFlags.SENTIMENT_SLOPE_ABSENT,
+    DataHealthFlags.OI_DELTA_ABSENT,
+    DataHealthFlags.OI_IMBALANCE_ABSENT,
+    DataHealthFlags.OI_DIVERGENCE_ABSENT,
+    DataHealthFlags.OI_SPURT_ABSENT,
+  };
 
   @Test
   void anInertOiBlockOnAnOrdinaryDayIsDegraded() {
@@ -144,7 +202,8 @@ class DataHealthFlagsTest {
 
     assertThat(health.oiSuppressed()).isFalse();
     assertThat(health.degraded()).isTrue();
-    assertThat(health.flags()).containsExactly(DataHealthFlags.OI_INERT);
+    // The whole-block summary AND every field it emptied — the inert shape nulls them all.
+    assertThat(health.flags()).containsExactlyInAnyOrder(ALL_OI_FLAGS);
   }
 
   @Test
@@ -156,7 +215,7 @@ class DataHealthFlagsTest {
         new ScalperGateContext.Oi(
             OiQuadrant.NEUTRAL, OiQuadrant.NEUTRAL, new BigDecimal("50.0"), BigDecimal.ZERO,
             new BigDecimal("31.5"), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, false,
-            false, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+            false, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
 
     DataHealthFlags health =
         DataHealthFlags.of(context("NIFTY 50", quiet, healthyMacro()), ORDINARY_DAY);
@@ -210,7 +269,7 @@ class DataHealthFlagsTest {
         DataHealthFlags.of(context("SENSEX", inertOi(), healthyMacro()), nseOnly);
     assertThat(sensex.oiSuppressed()).as("BSE monthly is the last THURSDAY — not today").isFalse();
     assertThat(sensex.degraded()).isTrue();
-    assertThat(sensex.flags()).containsExactly(DataHealthFlags.OI_INERT);
+    assertThat(sensex.flags()).containsExactlyInAnyOrder(ALL_OI_FLAGS);
 
     // (c) the mirror image on a BSE-only monthly expiry — the exemption must not be one-directional.
     LocalDate bseOnly = bseOnlyMonthlyExpiry2026();
@@ -224,19 +283,12 @@ class DataHealthFlagsTest {
   }
 
   @Test
-  void suppressionStandsDownOnlyTheOiFlagNotTheMacroOnes() {
+  void suppressionStandsDownOnlyTheOiFlagsNotTheMacroOnes() {
     // The OI block is exempt on the root's expiry; the macro reads are not — MarketOiClient.macro()
     // is untouched by the S24 skip, so a dead breadth that day is still an outage.
-    ScalperGateContext.Macro deadBreadth =
-        new ScalperGateContext.Macro(
-            new BigDecimal("12.5"), new BigDecimal("43.0"), new BigDecimal("11.2"), Boolean.TRUE,
-            0, 0, new BigDecimal("54.0"), new BigDecimal("12.1"), new BigDecimal("12.4"),
-            new BigDecimal("0.3"), new BigDecimal("0.1"), new BigDecimal("-0.1"),
-            new BigDecimal("2.5"), Boolean.TRUE, BigDecimal.ONE);
-
     DataHealthFlags health =
         DataHealthFlags.of(
-            context("NIFTY 50", inertOi(), deadBreadth), nseOnlyMonthlyExpiry2026());
+            context("NIFTY 50", inertOi(), breadth(0, 0)), nseOnlyMonthlyExpiry2026());
 
     assertThat(health.oiSuppressed()).isTrue();
     assertThat(health.flags()).containsExactly(DataHealthFlags.BREADTH_ABSENT);
@@ -275,9 +327,133 @@ class DataHealthFlagsTest {
             DataHealthFlags.BREADTH_ABSENT,
             DataHealthFlags.ATM_IV_ABSENT,
             DataHealthFlags.IV_RANK_ABSENT,
-            DataHealthFlags.VIX_ABSENT,
+            DataHealthFlags.IV_PAIR_ABSENT,
+            DataHealthFlags.IV_SLOPE_ABSENT,
+            DataHealthFlags.PREMIUM_SKEW_ABSENT,
+            DataHealthFlags.VIX_DIRECTION_ABSENT,
+            DataHealthFlags.VIX_LEVEL_ABSENT,
             DataHealthFlags.FII_ABSENT,
+            DataHealthFlags.FII_BIAS_ABSENT,
+            DataHealthFlags.CONSTITUENT_BIAS_ABSENT,
             DataHealthFlags.DOW_ABSENT);
+  }
+
+  /**
+   * Cross-vendor review Major 1. Each absence-bearing input the scorer/gates consume must be
+   * nameable ON ITS OWN, with everything else — including the whole OI block — healthy. If any of
+   * these produced no flag, the row would read "every gate input was present" while a dot or gate
+   * was silently blind: a FALSE CLEAN, which on a data-health surface is worse than no surface.
+   */
+  @Test
+  void aPartialSourceFailureNamesTheSpecificInputWhileTheOiBlockStaysHealthy() {
+    record Case(String flag, ScalperGateContext.Macro macro) {}
+    List<Case> cases =
+        List.of(
+            new Case(DataHealthFlags.ATM_IV_ABSENT, macroWithout("atmIv")),
+            new Case(DataHealthFlags.IV_RANK_ABSENT, macroWithout("ivRank")),
+            new Case(DataHealthFlags.IV_PAIR_ABSENT, macroWithout("ceIvAvg6")),
+            new Case(DataHealthFlags.IV_PAIR_ABSENT, macroWithout("peIvAvg6")),
+            new Case(DataHealthFlags.IV_SLOPE_ABSENT, macroWithout("ceIvSlope")),
+            new Case(DataHealthFlags.IV_SLOPE_ABSENT, macroWithout("peIvSlope")),
+            new Case(DataHealthFlags.PREMIUM_SKEW_ABSENT, macroWithout("premiumSkewPct")),
+            new Case(DataHealthFlags.VIX_DIRECTION_ABSENT, macroWithout("vixRising")),
+            new Case(DataHealthFlags.VIX_LEVEL_ABSENT, macroWithout("vixLevel")),
+            new Case(DataHealthFlags.FII_ABSENT, macroWithout("fiiLongPct")),
+            new Case(DataHealthFlags.FII_BIAS_ABSENT, macroWithout("fiiBiasSign")),
+            new Case(DataHealthFlags.CONSTITUENT_BIAS_ABSENT, macroWithout("constituentBias")),
+            new Case(DataHealthFlags.DOW_ABSENT, macroWithout("dowUp")));
+
+    for (Case c : cases) {
+      DataHealthFlags health =
+          DataHealthFlags.of(context("NIFTY 50", liveOi(), c.macro()), ORDINARY_DAY);
+      assertThat(health.flags())
+          .as("one absent macro input names exactly itself: %s", c.flag())
+          .containsExactly(c.flag());
+      assertThat(health.degraded()).as("%s marks the row degraded", c.flag()).isTrue();
+    }
+  }
+
+  /** The same, for each OI-block input — with every MACRO input healthy. */
+  @Test
+  void aPartialOiFailureNamesTheSpecificInputWhileMacroStaysHealthy() {
+    record Case(String flag, ScalperGateContext.Oi oi) {}
+    List<Case> cases =
+        List.of(
+            new Case(DataHealthFlags.SENTIMENT_ABSENT, oiWithout("sentimentPct")),
+            new Case(DataHealthFlags.SENTIMENT_SLOPE_ABSENT, oiWithout("sentimentSlope")),
+            new Case(DataHealthFlags.OI_DELTA_ABSENT, oiWithout("ceOiDelta")),
+            new Case(DataHealthFlags.OI_DELTA_ABSENT, oiWithout("peOiDelta")),
+            new Case(DataHealthFlags.OI_IMBALANCE_ABSENT, oiWithout("callPutDeltaImbalancePct")),
+            new Case(DataHealthFlags.OI_DIVERGENCE_ABSENT, oiWithout("oiDivergencePct")),
+            new Case(DataHealthFlags.OI_SPURT_ABSENT, oiWithout("spurtOiPct")),
+            new Case(DataHealthFlags.OI_SPURT_ABSENT, oiWithout("spurtPricePct")));
+
+    for (Case c : cases) {
+      DataHealthFlags health =
+          DataHealthFlags.of(context("NIFTY 50", c.oi(), healthyMacro()), ORDINARY_DAY);
+      assertThat(health.flags())
+          .as("one absent OI input names exactly itself: %s", c.flag())
+          .containsExactly(c.flag());
+      assertThat(health.degraded()).as("%s marks the row degraded", c.flag()).isTrue();
+      assertThat(health.oiSuppressed()).isFalse();
+    }
+  }
+
+  /** Every OI flag is withheld together under S24 — never a subset (review Major 1). */
+  @Test
+  void s24WithholdsTheWholeOiGroupNotJustTheInertSummary() {
+    LocalDate nseOnly = nseOnlyMonthlyExpiry2026();
+    // A partially-degraded OI block (not the whole-block inert shape) on the expiring root: every
+    // one of its flags must still be withheld, because the S24 skip is what emptied it.
+    DataHealthFlags health =
+        DataHealthFlags.of(
+            context("NIFTY 50", oiWithout("sentimentPct"), healthyMacro()), nseOnly);
+
+    assertThat(health.oiSuppressed()).isTrue();
+    assertThat(health.flags()).isEmpty();
+    assertThat(health.degraded()).isFalse();
+
+    // …and a fully-null OI block on the expiring root likewise contributes nothing.
+    DataHealthFlags nullOi =
+        DataHealthFlags.of(context("NIFTY 50", null, healthyMacro()), nseOnly);
+    assertThat(nullOi.flags()).isEmpty();
+    assertThat(nullOi.degraded()).isFalse();
+  }
+
+  @Test
+  void aNullOiBlockFlagsEveryOiInput() {
+    DataHealthFlags health =
+        DataHealthFlags.of(context("NIFTY 50", null, healthyMacro()), ORDINARY_DAY);
+
+    assertThat(health.flags())
+        .containsExactlyInAnyOrder(
+            DataHealthFlags.OI_INERT,
+            DataHealthFlags.SENTIMENT_ABSENT,
+            DataHealthFlags.SENTIMENT_SLOPE_ABSENT,
+            DataHealthFlags.OI_DELTA_ABSENT,
+            DataHealthFlags.OI_IMBALANCE_ABSENT,
+            DataHealthFlags.OI_DIVERGENCE_ABSENT,
+            DataHealthFlags.OI_SPURT_ABSENT);
+  }
+
+  /**
+   * A zero is a VALUE, not an absence — a conflicting FII read and a flat constituent push both
+   * degrade their gate to pass, but neither is missing data. Flagging them would break this class's
+   * one rule and re-introduce the noise the per-row design exists to avoid.
+   */
+  @Test
+  void aZeroSignedMacroReadIsAValueNotAnAbsence() {
+    ScalperGateContext.Macro zeroed =
+        macro(
+            new BigDecimal("12.5"), new BigDecimal("43.0"), new BigDecimal("11.2"), Boolean.TRUE,
+            31, 18, new BigDecimal("54.0"), new BigDecimal("12.1"), new BigDecimal("12.4"),
+            BigDecimal.ZERO, new BigDecimal("0.1"), new BigDecimal("-0.1"), new BigDecimal("2.5"),
+            Boolean.TRUE, BigDecimal.ZERO);
+
+    DataHealthFlags health = DataHealthFlags.of(context("NIFTY 50", liveOi(), zeroed), ORDINARY_DAY);
+
+    assertThat(health.degraded()).isFalse();
+    assertThat(health.flags()).isEmpty();
   }
 
   /** A 2026 day that is an NSE monthly index expiry but NOT a BSE one (NSE Tuesday vs BSE Thursday). */

@@ -16,6 +16,13 @@ import java.util.Locale;
  * thread. It reads the SAME {@link ScalperGateContext} the diagnostic JSON is serialized from, so the
  * flags can never disagree with the row they annotate.
  *
+ * <p>The flag set covers EVERY absence-bearing input the scorer and the gates actually consume, not
+ * a convenient subset: a partial source failure (say the FII bias drops out while the OI block is
+ * perfectly healthy) must name the specific input, because the alternative is a row that reports
+ * nothing wrong. A false clean on a data-health surface is worse than no surface — it converts an
+ * unknown into a confident wrong answer. When adding an input to {@code ConnectTheDotsScorer} or
+ * {@code ScalperGates} that null-checks its way to a degraded verdict, add its flag here too.
+ *
  * <p><b>A flag means the input was ABSENT when the gate scored this bar.</b> It never means "the
  * input had an unremarkable value". That line is where a naive port of {@link DotHealthCanary}'s
  * probes goes wrong, and the difference is not cosmetic: the canary asks aggregate questions over a
@@ -32,8 +39,10 @@ import java.util.Locale;
  * <p><b>The S24 per-root exemption.</b> On a MONTHLY index expiry {@code MarketOiClient.oi()} skips
  * the whole OI block by design — the expiring series' writers are unwinding, so chain OI is corrupt —
  * and returns an inert {@code Oi}: NEUTRAL on both quadrants, null on every soft numeric
- * (MarketOiClient:347-356). Every OI dot is then legitimately non-confirming, so {@link #OI_INERT}
- * is withheld and {@code oiSuppressed} records why. ⚠️ The suppression is keyed PER OI ROOT, NOT per
+ * (MarketOiClient:347-356). Every OI dot is then legitimately non-confirming, so the ENTIRE OI flag
+ * group is withheld — never a subset — and {@code oiSuppressed} records why. The macro flags are
+ * still emitted: {@code MarketOiClient.macro()} is untouched by the skip, so a dead breadth on an
+ * expiry day is as real as on any other day. ⚠️ The suppression is keyed PER OI ROOT, NOT per
  * date: NSE's monthly index expiry is the last Tuesday, BSE's (SENSEX) the last Thursday, and
  * {@code MarketOiClient} keys on the row's own underlying. On an NSE-only expiry day a SENSEX-rooted
  * OI read is NOT suppressed and a dead OI block there IS a genuine outage — a date-keyed exemption
@@ -50,29 +59,76 @@ import java.util.Locale;
 public record DataHealthFlags(
     boolean degraded, boolean contextBearing, boolean oiSuppressed, List<String> flags) {
 
+  // ---- MACRO inputs. NEVER withheld: MarketOiClient.macro() is untouched by the S24 skip, so a
+  // macro absence on an expiry day is as real as on any other day. ------------------------------
+
   /** Breadth read failed: a real session always has at least one advance or decline. */
   public static final String BREADTH_ABSENT = "breadth-absent";
 
-  /** No ATM IV on the chain read. */
+  /** No ATM IV — the {@code iv_abs_band} dot cannot confirm (ConnectTheDotsScorer:251-254). */
   public static final String ATM_IV_ABSENT = "atm-iv-absent";
 
   /** No IV rank — the /iv-history daily series was short or unavailable. */
   public static final String IV_RANK_ABSENT = "iv-rank-absent";
 
-  /** No India VIX level. */
-  public static final String VIX_ABSENT = "vix-absent";
+  /** No 6-strike CE/PE IV — the {@code iv_pair} dot AND the {@code iv-buyer-cap} risk rail go blind. */
+  public static final String IV_PAIR_ABSENT = "iv-pair-absent";
 
-  /** No FII long %. */
+  /** No per-strike IV slope — the {@code iv_slope} dot cannot confirm (ConnectTheDotsScorer:246). */
+  public static final String IV_SLOPE_ABSENT = "iv-slope-absent";
+
+  /** No ATM premium skew — the {@code premium_skew} warning dot degrades to neutral (:263-266). */
+  public static final String PREMIUM_SKEW_ABSENT = "premium-skew-absent";
+
+  /**
+   * No VIX DIRECTION. This — not the level — is the vix dot's verdict-bearing input: a null
+   * {@code vixRising} makes {@code ScalperGates.vix} degrade to pass while {@code vixLevel} is
+   * merely the reported operand (ScalperGates:596-601).
+   */
+  public static final String VIX_DIRECTION_ABSENT = "vix-direction-absent";
+
+  /** No India VIX level — the vix dot's reported operand is missing. */
+  public static final String VIX_LEVEL_ABSENT = "vix-level-absent";
+
+  /** No FII long % — the {@code fii-flow} gate cannot read (ScalperGates.fiiBias). */
   public static final String FII_ABSENT = "fii-absent";
+
+  /** No combined FII bias sign — the {@code fii-dii-gate} degrades to pass (ScalperGates:819). */
+  public static final String FII_BIAS_ABSENT = "fii-bias-absent";
+
+  /** No heavyweight push — the {@code constituent-gate} degrades to pass (ScalperGates:838). */
+  public static final String CONSTITUENT_BIAS_ABSENT = "constituent-bias-absent";
 
   /** No Dow direction — the global cue was unconfigured, off-hours or history. */
   public static final String DOW_ABSENT = "dow-absent";
 
+  // ---- OI-block inputs. ALL of these are withheld together when oiSuppressed, because the S24
+  // skip nulls the WHOLE block at once — flagging any one of them there reports a defect that the
+  // design deliberately caused. See the class javadoc. ------------------------------------------
+
   /**
-   * The OI half contributed nothing: both quadrants NEUTRAL and every soft numeric null (or no
-   * {@code Oi} at all). Withheld when {@code oiSuppressed} — see the class javadoc.
+   * The OI half contributed nothing at all: both quadrants NEUTRAL and every soft numeric null (or
+   * no {@code Oi} at all). The whole-block summary that sits alongside the per-field flags below.
    */
   public static final String OI_INERT = "oi-inert";
+
+  /** No active-strike sentiment — the {@code sentiment} dot cannot confirm (scorer:215). */
+  public static final String SENTIMENT_ABSENT = "sentiment-absent";
+
+  /** No sentiment slope — the {@code sentiment_slope} dot cannot confirm (scorer:219). */
+  public static final String SENTIMENT_SLOPE_ABSENT = "sentiment-slope-absent";
+
+  /** No CE/PE OI deltas — the {@code trending_cross} dot cannot confirm (scorer:310-318). */
+  public static final String OI_DELTA_ABSENT = "oi-delta-absent";
+
+  /** No call/put delta imbalance — read by several OI gates + HeroZero/TrendChange. */
+  public static final String OI_IMBALANCE_ABSENT = "oi-imbalance-absent";
+
+  /** No PE−CE divergence % — the divergence gate cannot read (ScalperGates:692). */
+  public static final String OI_DIVERGENCE_ABSENT = "oi-divergence-absent";
+
+  /** No spurt magnitudes — the {@code oi_spurt} dot cannot confirm (scorer:344-352). */
+  public static final String OI_SPURT_ABSENT = "oi-spurt-absent";
 
   /**
    * The per-root expiry calendars. Memoized as statics because {@code nse()}/{@code bse()} re-read
@@ -104,11 +160,12 @@ public record DataHealthFlags(
       return NO_CONTEXT;
     }
     boolean oiSuppressed = oiSuppressed(context.underlying(), sessionDate);
-    List<String> flags = new ArrayList<>(7);
+    List<String> flags = new ArrayList<>(19);
 
-    ScalperGateContext.Macro macro = context.macro();
+    // ---- MACRO. Judged on every row, expiry or not. -------------------------------------------
     // A null Macro means every macro input is absent; flagging each individually needs no special
     // case and the resulting row says exactly that.
+    ScalperGateContext.Macro macro = context.macro();
     if (macro == null || macro.advances() + macro.declines() == 0) {
       flags.add(BREADTH_ABSENT);
     }
@@ -118,19 +175,74 @@ public record DataHealthFlags(
     if (macro == null || macro.ivRank() == null) {
       flags.add(IV_RANK_ABSENT);
     }
+    // EITHER leg missing blinds the pair comparison and the buyer cap, so one flag covers both.
+    if (macro == null || macro.ceIvAvg6() == null || macro.peIvAvg6() == null) {
+      flags.add(IV_PAIR_ABSENT);
+    }
+    if (macro == null || macro.ceIvSlope() == null || macro.peIvSlope() == null) {
+      flags.add(IV_SLOPE_ABSENT);
+    }
+    if (macro == null || macro.premiumSkewPct() == null) {
+      flags.add(PREMIUM_SKEW_ABSENT);
+    }
+    if (macro == null || macro.vixRising() == null) {
+      flags.add(VIX_DIRECTION_ABSENT);
+    }
     if (macro == null || macro.vixLevel() == null) {
-      flags.add(VIX_ABSENT);
+      flags.add(VIX_LEVEL_ABSENT);
     }
     if (macro == null || macro.fiiLongPct() == null) {
       flags.add(FII_ABSENT);
     }
+    // Only NULL is absence. A zero sign is a real "conflicting participant read" and a zero
+    // constituent push is a real flat tape — both degrade the gate to pass, but neither is missing
+    // data, and flagging them would break this class's one rule.
+    if (macro == null || macro.fiiBiasSign() == null) {
+      flags.add(FII_BIAS_ABSENT);
+    }
+    if (macro == null || macro.constituentBias() == null) {
+      flags.add(CONSTITUENT_BIAS_ABSENT);
+    }
     if (macro == null || macro.dowUp() == null) {
       flags.add(DOW_ABSENT);
     }
-    if (!oiSuppressed && oiInert(context.oi())) {
-      flags.add(OI_INERT);
+
+    // ---- OI. Withheld WHOLESALE under S24: the skip nulls the entire block in one act, so any
+    // per-field flag here would report a defect the design deliberately caused.
+    if (!oiSuppressed) {
+      flags.addAll(oiFlags(context.oi()));
     }
     return new DataHealthFlags(!flags.isEmpty(), true, oiSuppressed, List.copyOf(flags));
+  }
+
+  /**
+   * The OI block's absences. A null {@code Oi} is total absence — every flag fires, which is what
+   * that state means. Callers must withhold this ENTIRE list under S24, never a subset.
+   */
+  private static List<String> oiFlags(ScalperGateContext.Oi oi) {
+    List<String> flags = new ArrayList<>(7);
+    if (oiInert(oi)) {
+      flags.add(OI_INERT);
+    }
+    if (oi == null || oi.sentimentPct() == null) {
+      flags.add(SENTIMENT_ABSENT);
+    }
+    if (oi == null || oi.sentimentSlope() == null) {
+      flags.add(SENTIMENT_SLOPE_ABSENT);
+    }
+    if (oi == null || oi.ceOiDelta() == null || oi.peOiDelta() == null) {
+      flags.add(OI_DELTA_ABSENT);
+    }
+    if (oi == null || oi.callPutDeltaImbalancePct() == null) {
+      flags.add(OI_IMBALANCE_ABSENT);
+    }
+    if (oi == null || oi.oiDivergencePct() == null) {
+      flags.add(OI_DIVERGENCE_ABSENT);
+    }
+    if (oi == null || oi.spurtOiPct() == null || oi.spurtPricePct() == null) {
+      flags.add(OI_SPURT_ABSENT);
+    }
+    return flags;
   }
 
   /**

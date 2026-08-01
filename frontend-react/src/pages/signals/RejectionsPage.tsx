@@ -470,13 +470,6 @@ export function RejectionsPage() {
               Expand any row (the ▸ toggle is keyboard-accessible) for the full breakdown. {rows.length} blocked{' '}
               {rows.length === 1 ? 'entry' : 'entries'}
               {rail ? ` for rail “${rail}”` : ''}{offset > 0 ? ` (from row ${offset + 1})` : ''}.
-              {health === 'clean' && (
-                <>
-                  {' '}
-                  Rows recorded before per-row input health existed also match “healthy” — they were
-                  never judged, so read the Inputs column (“—”) rather than the filter.
-                </>
-              )}
             </p>
             <Pager offset={offset} limit={PAGE_SIZE} count={rows.length} onOffset={setOffset} />
           </BeatBlock>

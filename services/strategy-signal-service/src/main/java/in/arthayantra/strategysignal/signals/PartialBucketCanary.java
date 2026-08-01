@@ -39,11 +39,25 @@ import org.springframework.stereotype.Component;
  * edge and the edge itself is credited to the earlier bucket by the broker and the later one by
  * tick-agg, so consecutive buckets carry equal-and-opposite lot-multiple skews (measured ≤8 lots =
  * 520 on 35 of 37 events, 2026-07-24). A mismatch is treated as benign only when it clears BOTH
- * gates: at most the absolute tolerance (default 650 = 10 NIFTY lots) AND at most 10% of the
- * expected 1m sum — the relative gate keeps a frozen partial on a genuinely THIN bucket (e.g. 400
- * frozen of a true 1,000) firing even though its absolute shortfall is small. The frozen
- * first-minute signature (~2/3 of the bucket missing) fails both gates on any bar. Override the
- * absolute gate live via {@code artha.signals.partial-bucket-canary.volume-tolerance}.
+ * gates: at most the absolute tolerance — {@code max(volume-tolerance,
+ * volume-tolerance-pct% of the expected 1m sum)}, default floor 650 = 10 NIFTY lots — AND at most
+ * 10% of the expected 1m sum. The relative gate keeps a frozen partial on a genuinely THIN bucket
+ * (e.g. 400 frozen of a true 1,000) firing even though its absolute shortfall is small. The frozen
+ * first-minute signature (~2/3 of the bucket missing) fails both gates on any bar. Both knobs are
+ * live-tunable: {@code artha.signals.partial-bucket-canary.volume-tolerance} (floor) +
+ * {@code ...volume-tolerance-pct} (scaling).
+ *
+ * <p>⚠️ <b>{@code volume-tolerance-pct} DEFAULTS TO 0 — the scaling mechanism ships DORMANT, and
+ * raising it is not safe yet</b> (G9/T23, 2026-07-29). The residue IS proportional (2.4–3.7% of a
+ * thick opening bar) so scaling looks right, but the benign straddle arrives as an equal-and-opposite
+ * PAIR across consecutive buckets whose members differ hugely as a FRACTION of their own bucket: the
+ * 07-29 ±16,835 pair is 3.7% of the 460,005 opening bucket but 11.9% of the 141,245 next one. Any
+ * pct>0 large enough to quiet the thick half leaves the thin half WARNing, converting a benign PAIRED
+ * event into an <b>unpaired</b> one — precisely the signature the runbook (signal-analysis README
+ * §3.17) teaches operators to read as a real defect, with its corroborating partner now suppressed.
+ * At pct=0 the predicate is byte-identical to the pre-G9 fixed-absolute gate (pinned by test), so no
+ * event changes state. Do NOT raise this until pair-aware suppression exists — suppression must key
+ * on the ± partner, not on either bucket's size alone.
  *
  * <p>Depends ONLY on {@link LiveSeriesStore} (never {@link SignalEngine}) and shares the engine's
  * on/off gate ({@code artha.signals.engine-enabled}, default on): the 3m series only exist when the
@@ -66,19 +80,26 @@ public class PartialBucketCanary {
   private final Clock clock;
   private final Counter mismatches;
   private final long volumeTolerance;
+  private final double volumeTolerancePct;
   // Once per (series, bucket): the last completed 3m bucket already flagged for each 3m series.
   private final Map<SeriesKey, Instant> flagged = new ConcurrentHashMap<>();
 
-  /** Wires the shared series store, the clock, the meter and the (tunable) exact-sum tolerance. */
+  /**
+   * Wires the shared series store, the clock, the meter and the (tunable) absolute-arm basis: a
+   * fixed floor plus a percent-of-expected-sum scale (0 = the pre-G9 fixed-absolute gate).
+   */
   public PartialBucketCanary(
       LiveSeriesStore store,
       Clock clock,
       MeterRegistry meterRegistry,
-      @Value("${artha.signals.partial-bucket-canary.volume-tolerance:650}") long volumeTolerance) {
+      @Value("${artha.signals.partial-bucket-canary.volume-tolerance:650}") long volumeTolerance,
+      @Value("${artha.signals.partial-bucket-canary.volume-tolerance-pct:0.0}")
+          double volumeTolerancePct) {
     this.store = store;
     this.clock = clock;
     this.mismatches = meterRegistry.counter("ay_signal_partial_bucket_mismatch_total");
     this.volumeTolerance = volumeTolerance;
+    this.volumeTolerancePct = volumeTolerancePct;
   }
 
   /** Sweeps every warmed 3m series, comparing its last completed bar to the 1m sum. */
@@ -126,10 +147,15 @@ public class PartialBucketCanary {
     }
     long actual = last.volume();
     long diff = Math.abs(actual - expected);
-    // benign needs BOTH gates: ≤ the absolute lot tolerance AND ≤ 10% of the expected sum — the
-    // relative gate keeps a frozen partial on a thin bucket firing (its absolute shortfall is small
-    // but its relative one is ~2/3); a zero-volume expected sum tolerates only an exact match.
-    if (diff <= volumeTolerance && diff * 10L <= expected) {
+    // benign needs BOTH gates: ≤ the absolute arm (a fixed floor, optionally scaled by a percent
+    // of the expected sum — DORMANT at the shipped pct=0, where this is exactly the pre-G9 fixed
+    // gate; the class javadoc explains why pct>0 manufactures false-unpaired events) AND ≤ 10% of
+    // the expected sum. The relative gate keeps a frozen partial on a thin bucket firing (its
+    // absolute shortfall is small but its relative one is ~2/3); a zero-volume expected sum
+    // tolerates only an exact match.
+    long absoluteTolerance =
+        Math.max(volumeTolerance, (long) (expected * volumeTolerancePct / 100.0));
+    if (diff <= absoluteTolerance && diff * 10L <= expected) {
       flagged.remove(threeMinKey); // healthy for this series — allow the next bucket to re-flag
       return;
     }

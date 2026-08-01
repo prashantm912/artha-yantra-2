@@ -11,6 +11,10 @@ import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 
 /**
  * The audit B1 / FID P0-1 live done-check as a unit test: the canary compares each completed 3m
@@ -32,8 +36,9 @@ class PartialBucketCanaryTest {
         new BigDecimal("99"), new BigDecimal("100.5"), volume, null);
   }
 
+  // pct 0 = the pre-G9 fixed-absolute gate; the scaled-basis tests pass the shipped 5.0 explicitly.
   private static PartialBucketCanary canary(LiveSeriesStore store, MeterRegistry registry) {
-    return new PartialBucketCanary(store, CLOCK, registry, 0L);
+    return new PartialBucketCanary(store, CLOCK, registry, 0L, 0.0);
   }
 
   @Test
@@ -81,7 +86,7 @@ class PartialBucketCanaryTest {
     // tick-agg sum 15,000 vs broker-official 14,480: a 520 (8-lot) boundary straddle — benign.
     store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 14_480));
     MeterRegistry registry = new SimpleMeterRegistry();
-    new PartialBucketCanary(store, CLOCK, registry, 650L).sweep();
+    new PartialBucketCanary(store, CLOCK, registry, 650L, 5.0).sweep();
     assertThat(registry.counter(COUNTER).count()).as("8-lot residue absorbed").isZero();
 
     LiveSeriesStore frozen = new LiveSeriesStore(null, CLOCK);
@@ -91,7 +96,7 @@ class PartialBucketCanaryTest {
     // the real regression: the 3m bar frozen at its first minute — shortfall 10,000 >> 650.
     frozen.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 5_000));
     MeterRegistry frozenRegistry = new SimpleMeterRegistry();
-    new PartialBucketCanary(frozen, CLOCK, frozenRegistry, 650L).sweep();
+    new PartialBucketCanary(frozen, CLOCK, frozenRegistry, 650L, 5.0).sweep();
     assertThat(frozenRegistry.counter(COUNTER).count()).as("frozen partial still fires").isEqualTo(1.0);
   }
 
@@ -107,9 +112,145 @@ class PartialBucketCanaryTest {
     store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 400));
     MeterRegistry registry = new SimpleMeterRegistry();
 
-    new PartialBucketCanary(store, CLOCK, registry, 650L).sweep();
+    new PartialBucketCanary(store, CLOCK, registry, 650L, 5.0).sweep();
 
     assertThat(registry.counter(COUNTER).count()).as("thin frozen bar not masked").isEqualTo(1.0);
+  }
+
+  @Test
+  void thickOpeningBarBoundaryStraddleResidueDoesNotFire() {
+    // G9/T23 (2026-07-29, cleanest session in the series): 6 WARNs, all exact ± pairs on
+    // consecutive buckets, largest 16,835 = 259 lots = 3.7% of the 09:15 opening bucket's 460,005
+    // 1m sum (broker-official 3m bar 476,840) — provably benign boundary straddle, yet it alarmed
+    // because the absolute arm was a fixed 650. The absolute arm's basis scales with bar size so
+    // this shape stays quiet.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 153_335));
+    // tick-agg sum 460,005 vs broker-official 476,840: |diff| 16,835 (3.7% of expected).
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 476_840));
+    MeterRegistry registry = new SimpleMeterRegistry();
+
+    new PartialBucketCanary(store, CLOCK, registry, 650L, 5.0).sweep();
+
+    assertThat(registry.counter(COUNTER).count()).as("thick-bar straddle absorbed").isZero();
+  }
+
+  @Test
+  void pctZeroRestoresTheFixedAbsoluteGateAndTheThickBarStraddleFiresAgain() {
+    // THE SHIPPED-DEFAULT PATH (G9 review, 2026-07-29): pct defaults to 0, so the live decision
+    // function is byte-identical to the pre-G9 fixed-absolute gate and the same 07-29 opening
+    // bucket that pct=5 would absorb still fires. The scaling mechanism ships DORMANT because any
+    // pct>0 quiets only the thick half of a benign ± pair, manufacturing a false-unpaired event.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 153_335));
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 476_840));
+    MeterRegistry registry = new SimpleMeterRegistry();
+
+    new PartialBucketCanary(store, CLOCK, registry, 650L, 0.0).sweep();
+
+    assertThat(registry.counter(COUNTER).count()).as("pct=0 = fixed gate").isEqualTo(1.0);
+  }
+
+  @Test
+  void theSpringWiredDefaultIsDormantSoLiveBehaviourIsUnchanged() {
+    // The explicit-argument tests above cannot see the @Value default, which is what actually
+    // ships. Bind the real bean with NO property set: the 07-29 opening bucket must still WARN,
+    // proving the shipped default reproduces pre-G9 behaviour rather than silently scaling.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 153_335));
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 476_840));
+    MeterRegistry registry = new SimpleMeterRegistry();
+
+    canaryContext(store, registry)
+        .run(
+            context -> {
+              context.getBean(PartialBucketCanary.class).sweep();
+              assertThat(registry.counter(COUNTER).count())
+                  .as("no property set: the shipped default is the pre-G9 fixed gate")
+                  .isEqualTo(1.0);
+            });
+  }
+
+  @Test
+  void theScalingKnobBindsFromItsDocumentedPropertyName() {
+    // #653-class guard: a knob whose property name does not match its compose/.env passthrough is
+    // a silent no-op. Setting the documented key to 5.0 must actually change the decision (the
+    // same bucket goes quiet), proving the name in application config reaches this constructor.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 153_335));
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 476_840));
+    MeterRegistry registry = new SimpleMeterRegistry();
+
+    canaryContext(store, registry)
+        .withPropertyValues("artha.signals.partial-bucket-canary.volume-tolerance-pct=5.0")
+        .run(
+            context -> {
+              context.getBean(PartialBucketCanary.class).sweep();
+              assertThat(registry.counter(COUNTER).count())
+                  .as("the documented property name reaches the constructor")
+                  .isZero();
+            });
+  }
+
+  private static ApplicationContextRunner canaryContext(
+      LiveSeriesStore store, MeterRegistry registry) {
+    return new ApplicationContextRunner()
+        .withUserConfiguration(PlaceholderConfig.class)
+        .withBean(LiveSeriesStore.class, () -> store)
+        .withBean(Clock.class, () -> CLOCK)
+        .withBean(MeterRegistry.class, () -> registry)
+        .withBean(PartialBucketCanary.class);
+  }
+
+  /** Resolves the constructor's {@code @Value} placeholders (and their defaults) in the runner. */
+  @Configuration
+  static class PlaceholderConfig {
+    @Bean
+    static PropertySourcesPlaceholderConfigurer placeholders() {
+      return new PropertySourcesPlaceholderConfigurer();
+    }
+  }
+
+  @Test
+  void aThinBarWithTheSameAbsoluteDivergenceStillFires() {
+    // The scaled basis must never buy a thin bar extra headroom: the same 16,835 divergence on a
+    // 300-volume bucket is a gross defect — max(650, 5% of 300 = 15) stays 650, and the relative
+    // arm fails too, so it fires.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 100));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 100));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 100));
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 17_135));
+    MeterRegistry registry = new SimpleMeterRegistry();
+
+    new PartialBucketCanary(store, CLOCK, registry, 650L, 5.0).sweep();
+
+    assertThat(registry.counter(COUNTER).count()).as("thin bar keeps the floor").isEqualTo(1.0);
+  }
+
+  @Test
+  void frozenPartialOnAThickBarStillFiresUnderTheScaledBasis() {
+    // The scaling must never absorb the actual regression signature on the bars it relaxes: a 3m
+    // bar frozen at its first minute of the 07-29-sized bucket is a ~66% shortfall — far beyond
+    // both the 5% scaled absolute arm (23,000) and the 10% relative arm.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 153_335));
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 153_335));
+    MeterRegistry registry = new SimpleMeterRegistry();
+
+    new PartialBucketCanary(store, CLOCK, registry, 650L, 5.0).sweep();
+
+    assertThat(registry.counter(COUNTER).count()).as("thick frozen partial fires").isEqualTo(1.0);
   }
 
   @Test

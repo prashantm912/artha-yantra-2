@@ -132,7 +132,35 @@ public class ScalperConfluenceGate {
       String underlying,
       LocalDate expiry,
       StrikePicker.Pick pick,
-      BigDecimal structuralStop) {}
+      BigDecimal structuralStop,
+      // G17/T14: the comparison direction of the BLOCKING rail, declared by the gate function that
+      // compared it. The persist seam judges `margin` against this, so the self-contradiction check
+      // is derived from the operator rather than a name table that drifts from the wiring.
+      RailMarginSign marginSign) {
+
+    /** Pre-G17 form: {@code marginSign} defaults to UNSIGNED (asserts nothing). */
+    public RejectionDiagnostic(
+        String blockingRail,
+        OptionType side,
+        BigDecimal operand,
+        BigDecimal threshold,
+        BigDecimal margin,
+        String reason,
+        BigDecimal compositeScore,
+        BigDecimal compositeThreshold,
+        List<RailCheck> checks,
+        Confluence confluence,
+        ScalperGateContext context,
+        String underlying,
+        LocalDate expiry,
+        StrikePicker.Pick pick,
+        BigDecimal structuralStop) {
+      this(
+          blockingRail, side, operand, threshold, margin, reason, compositeScore, compositeThreshold,
+          checks, confluence, context, underlying, expiry, pick, structuralStop,
+          RailMarginSign.UNSIGNED);
+    }
+  }
 
   /**
    * INT §13 row 19 / FID P1-8: the fired-side counterpart of {@link RejectionDiagnostic}. When the gate
@@ -183,6 +211,10 @@ public class ScalperConfluenceGate {
     private Confluence confluence;
     private BigDecimal confluenceThreshold;
     private RailCheck firstFailure;
+    // G17/T14: the comparison direction the FIRST failing rail declared, captured alongside it so
+    // the persist seam can judge the summary margin against the operator that produced it. Kept
+    // here rather than on RailCheck so the diagnostic JSON + its 3 test builders stay untouched.
+    private RailMarginSign firstFailureSign = RailMarginSign.UNSIGNED;
     private String underlying;
     private LocalDate expiry;
     private StrikePicker.Pick pick;
@@ -193,10 +225,11 @@ public class ScalperConfluenceGate {
       return firstFailure != null;
     }
 
-    private RailCheck record(RailCheck rc) {
+    private RailCheck record(RailCheck rc, RailMarginSign sign) {
       checks.add(rc);
       if (!rc.pass() && firstFailure == null) {
         firstFailure = rc; // the FIRST failing rail becomes the summary blockingRail
+        firstFailureSign = sign; // ...and its operator direction rides with it (G17)
       }
       return rc;
     }
@@ -208,13 +241,16 @@ public class ScalperConfluenceGate {
           operand != null && threshold != null ? operand.subtract(threshold) : null;
       return !record(
               new RailCheck(
-                  rail, o.pass(), operand, threshold, margin, o.reason(), RailPolicies.of(rail)))
+                  rail, o.pass(), operand, threshold, margin, o.reason(), RailPolicies.of(rail)),
+              o.marginSign()) // DERIVED: the sign the gate function itself declared
           .pass();
     }
 
     /** Records a boolean/verdict rail (no scalar operand); returns true when it FAILED. */
     boolean failsBool(String rail, boolean pass, String reason) {
-      return !record(new RailCheck(rail, pass, null, null, null, reason, RailPolicies.of(rail)))
+      return !record(
+              new RailCheck(rail, pass, null, null, null, reason, RailPolicies.of(rail)),
+              RailMarginSign.UNSIGNED) // no scalar operand/threshold -> margin is always null
           .pass();
     }
 
@@ -223,7 +259,10 @@ public class ScalperConfluenceGate {
       return !record(
               new RailCheck(
                   rail, valid, aggregate, threshold,
-                  compositeMargin(valid, aggregate, threshold), reason, RailPolicies.of(rail)))
+                  compositeMargin(valid, aggregate, threshold), reason, RailPolicies.of(rail)),
+              // aggregate >= threshold is a floor; compositeMargin() already records NULL for a
+              // decisive-leg block (B5/#985), so a NON-null blocked margin is the scalar shortfall.
+              RailMarginSign.NEGATIVE_WHEN_BLOCKED)
           .pass();
     }
 
@@ -239,7 +278,8 @@ public class ScalperConfluenceGate {
           new RejectionDiagnostic(
               b.rail(), side, b.operand(), b.threshold(), b.margin(), b.reason(),
               confluence == null ? null : confluence.aggregate(), confluenceThreshold,
-              List.copyOf(checks), confluence, context, underlying, expiry, pick, structuralStop),
+              List.copyOf(checks), confluence, context, underlying, expiry, pick, structuralStop,
+              firstFailureSign),
           null);
     }
 
@@ -1016,7 +1056,11 @@ public class ScalperConfluenceGate {
             cfg.has("iv-per-strike"), cfg.has("premium-skew"), cfg.has("dow-confluence"),
             // T24: the dot must test the SAME floor the rail did (effVolFloor above), not the
             // static per-index default it resolved on its own.
-            effVolFloor);
+            effVolFloor,
+            // A3: `iv_rank` is default-OFF. Its input is suppressed below the 60-trading-day
+            // IvAnalyticsService history floor and would start resolving on a CALENDAR trigger
+            // (~late Sep 2026) — arming it stays an owner decision (tag ⇒ republish), never a date.
+            cfg.has("iv-rank-dot"));
     diag.confluence = conf;
     diag.confluenceThreshold = cfg.confluenceThreshold();
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();

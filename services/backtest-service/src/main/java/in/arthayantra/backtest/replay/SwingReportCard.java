@@ -1,5 +1,6 @@
 package in.arthayantra.backtest.replay;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
@@ -14,17 +15,22 @@ import java.util.List;
  *
  * <p>All percentages use each trade's {@code pnlPct} (position-size-independent). This is a read-only
  * analytics — it never touches the replay/parity path, so it cannot move a golden vector.
+ *
+ * <p>Every {@code BigDecimal} carries an explicit {@code type = "string"}: the platform mapper routes
+ * BigDecimal through {@code ToStringSerializer}, so these are decimal STRINGS on the wire while
+ * springdoc would otherwise infer {@code number}. The counts ({@code trades}/{@code wins}/{@code
+ * losses}) are {@code int} and stay {@code integer} — only decimals are string-serialized.
  */
 public record SwingReportCard(
     int trades,
     int wins,
     int losses,
-    BigDecimal battingAvgPct,
-    BigDecimal avgWinPct,
-    BigDecimal avgLossPct,
-    BigDecimal payoffRatio,
-    BigDecimal expectancyPct,
-    BigDecimal avgBarsHeld,
+    @Schema(type = "string") BigDecimal battingAvgPct,
+    @Schema(type = "string") BigDecimal avgWinPct,
+    @Schema(type = "string") BigDecimal avgLossPct,
+    @Schema(type = "string") BigDecimal payoffRatio,
+    @Schema(type = "string") BigDecimal expectancyPct,
+    @Schema(type = "string") BigDecimal avgBarsHeld,
     boolean meetsReliabilityBar,
     String grade) {
 

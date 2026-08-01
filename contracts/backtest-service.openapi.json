@@ -1984,19 +1984,19 @@
             "type" : "string"
           },
           "entryPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "exitTs" : {
             "type" : [ "string", "null" ]
           },
           "exitPrice" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pnl" : {
-            "type" : "number"
+            "type" : "string"
           },
           "pnlPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "exitReason" : {
             "type" : [ "string", "null" ]
@@ -2022,10 +2022,10 @@
             "type" : [ "string", "null" ]
           },
           "stopLoss" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "takeProfit" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "barsHeld", "contributions", "entryPrice", "entryTs", "exchange", "exitPrice", "exitReason", "exitTs", "pnl", "pnlPct", "qty", "seq", "side", "stopLoss", "takeProfit", "touchBasis", "tradingsymbol" ]
@@ -2124,22 +2124,22 @@
             "format" : "int32"
           },
           "battingAvgPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgWinPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgLossPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "payoffRatio" : {
-            "type" : "number"
+            "type" : "string"
           },
           "expectancyPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgBarsHeld" : {
-            "type" : "number"
+            "type" : "string"
           },
           "meetsReliabilityBar" : {
             "type" : "boolean"
@@ -2177,7 +2177,7 @@
             "format" : "int32"
           },
           "maxComposite" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sampleBucket" : {
             "type" : [ "string", "null" ],
@@ -2694,19 +2694,19 @@
             "format" : "int32"
           },
           "netPnlInr" : {
-            "type" : "number"
+            "type" : "string"
           },
           "grossPremiumPoints" : {
-            "type" : "number"
+            "type" : "string"
           },
           "winRate" : {
-            "type" : "number"
+            "type" : "string"
           },
           "expectancyInr" : {
-            "type" : "number"
+            "type" : "string"
           },
           "maxDrawdownInr" : {
-            "type" : "number"
+            "type" : "string"
           },
           "exitReasonCounts" : {
             "type" : "object",

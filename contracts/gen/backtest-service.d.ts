@@ -654,11 +654,11 @@ export interface components {
             /** Format: int64 */
             qty: number;
             entryTs: string;
-            entryPrice: number;
+            entryPrice: string;
             exitTs: string | null;
-            exitPrice: number | null;
-            pnl: number;
-            pnlPct: number;
+            exitPrice: string | null;
+            pnl: string;
+            pnlPct: string;
             exitReason: string | null;
             /** Format: int32 */
             barsHeld: number;
@@ -666,8 +666,8 @@ export interface components {
             contributions: components["schemas"]["JsonNode"] | null;
             exchange: string | null;
             tradingsymbol: string | null;
-            stopLoss: number | null;
-            takeProfit: number | null;
+            stopLoss: string | null;
+            takeProfit: string | null;
         };
         BacktestTradePage: {
             items: components["schemas"]["BacktestTradeItem"][];
@@ -702,12 +702,12 @@ export interface components {
             wins: number;
             /** Format: int32 */
             losses: number;
-            battingAvgPct: number;
-            avgWinPct: number;
-            avgLossPct: number;
-            payoffRatio: number;
-            expectancyPct: number;
-            avgBarsHeld: number;
+            battingAvgPct: string;
+            avgWinPct: string;
+            avgLossPct: string;
+            payoffRatio: string;
+            expectancyPct: string;
+            avgBarsHeld: string;
             meetsReliabilityBar: boolean;
             grade: string;
         };
@@ -720,7 +720,7 @@ export interface components {
             reason: string;
             /** Format: int32 */
             bars: number;
-            maxComposite: number | null;
+            maxComposite: string | null;
             /** Format: date-time */
             sampleBucket: string | null;
             sampleBreakdown: components["schemas"]["JsonNode"];
@@ -895,11 +895,11 @@ export interface components {
             name: string;
             /** Format: int32 */
             tradeCount: number;
-            netPnlInr: number;
-            grossPremiumPoints: number;
-            winRate: number;
-            expectancyInr: number;
-            maxDrawdownInr: number;
+            netPnlInr: string;
+            grossPremiumPoints: string;
+            winRate: string;
+            expectancyInr: string;
+            maxDrawdownInr: string;
             exitReasonCounts: {
                 [key: string]: number;
             };

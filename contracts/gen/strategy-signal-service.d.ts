@@ -1915,6 +1915,8 @@ export interface components {
             compositeScore: string | null;
             compositeThreshold: string | null;
             diagnostic: components["schemas"]["JsonNode"];
+            dataHealth: components["schemas"]["JsonNode"] | null;
+            degraded: boolean;
             /** Format: date-time */
             barTime: string;
             /** Format: date-time */
@@ -4154,6 +4156,7 @@ export interface operations {
                 tradingsymbol?: string;
                 from?: string;
                 to?: string;
+                degraded?: boolean;
                 limit?: number;
                 offset?: number;
             };

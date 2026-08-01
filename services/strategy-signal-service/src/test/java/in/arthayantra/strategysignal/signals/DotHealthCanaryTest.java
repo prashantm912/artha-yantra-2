@@ -71,7 +71,7 @@ class DotHealthCanaryTest {
       return new SignalRejectionRepository.RejectionRow(
           1, null, "slug", "NFO", "FUT", "3m", "CE", "volume-floor", null, null, null, "r",
           null, null, MAPPER.readTree("{\"context\":" + contextJson + "}"),
-          barTime, OffsetDateTime.now());
+          null, false, barTime, OffsetDateTime.now());
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
@@ -162,7 +162,7 @@ class DotHealthCanaryTest {
       return new SignalRejectionRepository.RejectionRow(
           1, null, "slug", "NFO", "FUT", "3m", "CE", "time-window", null, null, null, "r",
           null, null, MAPPER.readTree("{\"checks\":[{\"rail\":\"time-window\",\"pass\":false}]}"),
-          OffsetDateTime.now(), OffsetDateTime.now());
+          null, false, OffsetDateTime.now(), OffsetDateTime.now());
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
@@ -593,7 +593,7 @@ class DotHealthCanaryTest {
       rows[i] = new SignalRejectionRepository.RejectionRow(
           1, null, "slug", "NFO", "FUT", "3m", "CE", "confluence-composite", null, null, null,
           "r", null, null, breadthDiagnostic(advancesForBar.applyAsInt(i), supportsForBar.test(i)),
-          base.plusMinutes(3L * i), OffsetDateTime.now());
+          null, false, base.plusMinutes(3L * i), OffsetDateTime.now());
     }
     return rows;
   }

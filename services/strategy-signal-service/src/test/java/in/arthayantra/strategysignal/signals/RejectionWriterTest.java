@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.signals;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -16,6 +17,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -59,8 +61,8 @@ class RejectionWriterTest {
         .when(repo)
         .insert(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any());
-    RejectionWriter writer = new RejectionWriter(repo, shadow, meters);
+            any(), any(), any(), any(), anyBoolean());
+    RejectionWriter writer = new RejectionWriter(repo, shadow, new ObjectMapper(), meters);
     try {
       int n = RejectionWriter.QUEUE_CAPACITY * 8;
       long start = System.nanoTime();
@@ -92,8 +94,8 @@ class RejectionWriterTest {
         .when(repo)
         .insert(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any());
-    RejectionWriter writer = new RejectionWriter(repo, shadow, meters);
+            any(), any(), any(), any(), anyBoolean());
+    RejectionWriter writer = new RejectionWriter(repo, shadow, new ObjectMapper(), meters);
     try {
       assertThatCode(() -> record(writer)).doesNotThrowAnyException();
       // The background thread DID attempt the insert (fail-soft proven) and swallowed the exception —
@@ -101,7 +103,7 @@ class RejectionWriterTest {
       verify(repo, timeout(2_000))
           .insert(
               any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-              any(), any(), any());
+              any(), any(), any(), any(), anyBoolean());
       verify(shadow, never())
           .maybeOpen(anyLong(), any(), any(), any(), any(), any(), any());
       assertThat(meters.counter("ay_signal_rejection_dropped_total").count())
@@ -122,11 +124,11 @@ class RejectionWriterTest {
         .when(repo)
         .insert(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any());
+            any(), any(), any(), any(), anyBoolean());
     doThrow(new RuntimeException("shadow boom"))
         .when(shadow)
         .maybeOpen(anyLong(), any(), any(), any(), any(), any(), any());
-    RejectionWriter writer = new RejectionWriter(repo, shadow, meters);
+    RejectionWriter writer = new RejectionWriter(repo, shadow, new ObjectMapper(), meters);
     try {
       assertThatCode(() -> record(writer)).doesNotThrowAnyException();
       verify(shadow, timeout(2_000))
@@ -153,8 +155,8 @@ class RejectionWriterTest {
         .when(repo)
         .insert(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any());
-    RejectionWriter writer = new RejectionWriter(repo, shadow, meters);
+            any(), any(), any(), any(), anyBoolean());
+    RejectionWriter writer = new RejectionWriter(repo, shadow, new ObjectMapper(), meters);
     for (int i = 0; i < 5; i++) {
       record(writer);
     }
@@ -163,7 +165,7 @@ class RejectionWriterTest {
     verify(repo, times(5))
         .insert(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any());
+            any(), any(), any(), any(), anyBoolean());
     assertThat(meters.counter("ay_signal_rejection_shutdown_dropped_total").count())
         .as("a graceful drain persists every accepted record — nothing lost")
         .isZero();
@@ -190,8 +192,8 @@ class RejectionWriterTest {
         .when(repo)
         .insert(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any());
-    RejectionWriter writer = new RejectionWriter(repo, shadow, meters);
+            any(), any(), any(), any(), anyBoolean());
+    RejectionWriter writer = new RejectionWriter(repo, shadow, new ObjectMapper(), meters);
     try {
       for (int i = 0; i < 4; i++) {
         record(writer);
@@ -235,7 +237,7 @@ class RejectionWriterTest {
         .when(repo)
         .insert(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any());
+            any(), any(), any(), any(), anyBoolean());
 
     Logger writerLog = (Logger) LoggerFactory.getLogger(RejectionWriter.class);
     ListAppender<ILoggingEvent> logs = new ListAppender<>();
@@ -244,7 +246,7 @@ class RejectionWriterTest {
 
     SimpleMeterRegistry meters = new SimpleMeterRegistry();
     ShadowBookService shadow = mock(ShadowBookService.class);
-    RejectionWriter writer = new RejectionWriter(repo, shadow, meters);
+    RejectionWriter writer = new RejectionWriter(repo, shadow, new ObjectMapper(), meters);
     try {
       record(writer); // the ONLY task — it becomes the in-flight insert, nothing sits in the queue
       assertThat(started.await(2, TimeUnit.SECONDS))
@@ -293,8 +295,8 @@ class RejectionWriterTest {
         .when(repo)
         .insert(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any());
-    RejectionWriter writer = new RejectionWriter(repo, shadow, meters);
+            any(), any(), any(), any(), anyBoolean());
+    RejectionWriter writer = new RejectionWriter(repo, shadow, new ObjectMapper(), meters);
     record(writer); // sole task → the in-flight insert
     assertThat(started.await(2, TimeUnit.SECONDS))
         .as("the writer thread is confirmed inside the insert")

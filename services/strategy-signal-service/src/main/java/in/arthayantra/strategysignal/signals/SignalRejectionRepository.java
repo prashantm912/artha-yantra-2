@@ -49,6 +49,11 @@ public class SignalRejectionRepository {
       @Schema(type = "string", types = {"string", "null"}) BigDecimal compositeScore,
       @Schema(type = "string", types = {"string", "null"}) BigDecimal compositeThreshold,
       JsonNode diagnostic,
+      // F5 U3 (V054): the per-row gate-input health computed at record time —
+      // {degraded, contextBearing, oiSuppressed, flags[]}. NULL on rows written before V054, which
+      // is the exact test for "this row predates the flags" (no backfill was attempted).
+      @Schema(types = {"object", "null"}) JsonNode dataHealth,
+      boolean degraded,
       OffsetDateTime barTime,
       OffsetDateTime generatedAt) {}
 
@@ -77,29 +82,66 @@ public class SignalRejectionRepository {
       BigDecimal compositeScore,
       BigDecimal compositeThreshold,
       String diagnosticJson,
-      OffsetDateTime barTime) {
+      OffsetDateTime barTime,
+      String dataHealthJson,
+      boolean degraded) {
     Long id =
         jdbc.queryForObject(
             """
             INSERT INTO signal_rejections
               (strategy_version_id, strategy_slug, exchange, tradingsymbol, "interval", side,
                blocking_rail, blocking_operand, blocking_threshold, blocking_margin, blocking_reason,
-               composite_score, composite_threshold, diagnostic, bar_time)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?) RETURNING id
+               composite_score, composite_threshold, diagnostic, bar_time, data_health, degraded)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?) RETURNING id
             """,
             Long.class,
             strategyVersionId, strategySlug, exchange, tradingsymbol, interval, side,
             blockingRail, blockingOperand, blockingThreshold, blockingMargin, blockingReason,
-            compositeScore, compositeThreshold, diagnosticJson, barTime);
+            compositeScore, compositeThreshold, diagnosticJson, barTime, dataHealthJson, degraded);
     return id == null ? -1 : id;
   }
 
-  /** Paged history with optional filters (newest first). */
+  /**
+   * Paged history with optional filters (newest first). Pre-F5-U3 overload: no data-health filter.
+   * Kept so the canary's fixed call shape and every existing caller stay byte-identical.
+   */
   public List<RejectionRow> list(
       UUID strategyVersionId, String blockingRail, String exchange, String tradingsymbol,
       OffsetDateTime from, OffsetDateTime to, int limit, int offset) {
+    return list(strategyVersionId, blockingRail, exchange, tradingsymbol, from, to, null, limit,
+        offset);
+  }
+
+  /**
+   * Paged history with optional filters (newest first).
+   *
+   * <p>{@code degraded} narrows to rows whose gate inputs were (or were not) healthy — see {@link
+   * DataHealthFlags}. {@code TRUE} rides the V054 partial index. {@code FALSE} means GENUINELY
+   * CLEAN, not merely "the boolean is false": it additionally requires a computed verdict
+   * ({@code data_health IS NOT NULL} — pre-V054 rows carry the column default, never judged) and a
+   * context-bearing one ({@code contextBearing} — a row blocked before the chain fetch read no
+   * inputs at all). {@code null} does not filter.
+   */
+  public List<RejectionRow> list(
+      UUID strategyVersionId, String blockingRail, String exchange, String tradingsymbol,
+      OffsetDateTime from, OffsetDateTime to, Boolean degraded, int limit, int offset) {
     StringBuilder sql = new StringBuilder("SELECT * FROM signal_rejections WHERE 1=1");
     List<Object> args = new ArrayList<>();
+    if (degraded != null) {
+      if (degraded) {
+        sql.append(" AND degraded");
+      } else {
+        // NOT the mirror of the true branch. `degraded = false` is the state of THREE different
+        // populations: genuinely-clean rows, rows written before V054 (the column default, never
+        // judged), and context-less rows the classifier declined to judge. Only the first is
+        // "healthy inputs", so this predicate matches the UI's OK badge EXACTLY — same three
+        // conditions, in the same order. A caption cannot fix a filter that returns the wrong rows,
+        // and the badge and the filter must never be able to disagree.
+        sql.append(
+            " AND NOT degraded AND data_health IS NOT NULL"
+                + " AND (data_health->>'contextBearing')::boolean");
+      }
+    }
     if (strategyVersionId != null) {
       sql.append(" AND strategy_version_id = ?");
       args.add(strategyVersionId);
@@ -218,11 +260,19 @@ public class SignalRejectionRepository {
         rs.getBigDecimal("composite_score"),
         rs.getBigDecimal("composite_threshold"),
         readTree(rs.getString("diagnostic")),
+        readTree(rs.getString("data_health")),
+        rs.getBoolean("degraded"),
         rs.getObject("bar_time", OffsetDateTime.class),
         rs.getObject("generated_at", OffsetDateTime.class));
   }
 
   private JsonNode readTree(String json) {
+    // NULL-safe since V054: `diagnostic` is NOT NULL so it never reaches this branch, but
+    // `data_health` is null on every row written before the column existed (no backfill), and
+    // ObjectMapper.readTree(null) throws IllegalArgumentException rather than yielding null.
+    if (json == null) {
+      return null;
+    }
     try {
       return objectMapper.readTree(json);
     } catch (JsonProcessingException e) {

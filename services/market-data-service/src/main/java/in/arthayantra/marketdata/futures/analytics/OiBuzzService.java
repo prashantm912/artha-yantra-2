@@ -75,6 +75,10 @@ public class OiBuzzService {
       OiInterpretation interpretation) {}
 
   /** The heatmap for one index: tiles (gainers first) + advance/decline counters + the feed time. */
+  // @Schema(name) is load-bearing: OiHeatmapService.Heatmap shares this simple name with a DISJOINT
+  // field set, and springdoc keys components by simple name — until this rename, the oi-buzz-heatmap
+  // endpoint published the options heatmap's fields and none of its own (task_1c04803f).
+  @Schema(name = "OiBuzzHeatmap")
   public record Heatmap(
       String index, int advance, int decline, List<Tile> tiles,
       @Schema(types = {"string", "null"}) OffsetDateTime asOf) {}

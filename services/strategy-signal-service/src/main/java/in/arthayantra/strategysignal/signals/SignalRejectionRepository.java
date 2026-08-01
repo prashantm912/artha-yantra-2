@@ -193,13 +193,11 @@ public class SignalRejectionRepository {
   /**
    * One (rail, count) aggregate row.
    *
-   * <p>⚠️ A SECOND record with this simple name exists — {@code
-   * StrategyEvidenceReader.RailCount}, the dossier rejection profile — and springdoc collapses
-   * duplicate simple names into ONE {@code #/components/schemas/RailCount}. That is safe only while
-   * the two stay structurally identical, which they are today (same components, same order, same
-   * types, neither annotated). Change one and the other's published schema silently changes with it:
-   * rename a component, add a field, or add a {@code @Schema} here and the dossier endpoint starts
-   * publishing it too. Keep them in lockstep or give one a distinct name.
+   * <p>A SECOND record with this simple name exists — {@code StrategyEvidenceReader.RailCount},
+   * the dossier rejection profile. It publishes as {@code EvidenceRailCount} via {@code
+   * @Schema(name)} (task_1c04803f), so the two no longer collapse; this one keeps the plain
+   * {@code RailCount} name because the FE contracts bridge binds it. The ContractCaptureTest
+   * collision assertion now fails any new same-named twin.
    */
   public record RailCount(String rail, long count) {}
 

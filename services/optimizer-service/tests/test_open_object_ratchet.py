@@ -120,81 +120,72 @@ FROZEN_OPEN_OBJECTS = {
 }
 
 
-# Keywords that constrain no matter what value they carry.
-ALWAYS_CONSTRAINS = frozenset({
-    "$ref", "const", "not", "propertyNames", "contains", "if", "then", "else",
-    "discriminator", "pattern", "multipleOf", "maximum", "minimum",
-    "exclusiveMaximum", "exclusiveMinimum", "maxLength", "maxItems",
-    "maxContains", "maxProperties",
-})
-
-
-def _empty_container(value: Any) -> bool:
-    return isinstance(value, (dict, list)) and not value
-
-
-def _zero(value: Any) -> bool:
-    return value == 0 and not isinstance(value, bool)
-
-
-def _permissive(value: Any) -> bool:
+def _says_nothing(value):
+    """A schema that says nothing at all: boolean true, or the empty schema."""
     return value is True or (isinstance(value, dict) and not value)
 
 
-# Keywords that constrain only when their VALUE is not a no-op, with the no-op test. An empty
-# `properties` map, an empty `required` list, `minProperties: 0` and friends are all present-but-
-# inert: they restrict nothing, so a schema carrying only those is as open as `{}`.
-VACUOUS_WHEN = {
-    "properties": _empty_container, "patternProperties": _empty_container,
-    "dependentSchemas": _empty_container, "dependentRequired": _empty_container,
-    "required": _empty_container, "allOf": _empty_container, "anyOf": _empty_container,
-    "oneOf": _empty_container, "enum": _empty_container, "prefixItems": _empty_container,
-    "minProperties": _zero, "minLength": _zero, "minItems": _zero, "minContains": _zero,
-    "uniqueItems": lambda v: v is False,
-    "additionalProperties": _permissive, "unevaluatedProperties": _permissive,
-    "unevaluatedItems": _permissive, "items": _permissive,
-}
+def _nonempty(value):
+    return bool(value) if isinstance(value, (dict, list)) else value is not None
 
 
-def _constrains(keyword: str, value: Any) -> bool:
-    """True when a keyword actually restricts the value, as opposed to merely being present.
+def _discloses_key_information(node: dict) -> bool:
+    """Does this node put ANY information about the object's KEYS into the published document?
 
-    The default is NON-constraining, and that is the whole fails-safe property. A keyword in
-    neither table — an annotation (``title`` / ``description`` / ``default`` / ``example`` /
-    ``deprecated`` / bare ``nullable``), or one nobody here anticipated — contributes nothing, so
-    its schema reads OPEN and fails LOUDLY. The inverse fails silently, and every hole this check
-    has had was of that shape.
+    This asks DISCLOSURE, not validation, and the distinction is the whole design. Four consecutive
+    review rounds killed a keyword classifier that tried to decide "does keyword K with value V
+    restrict the instance" by table lookup. That is re-implementing a JSON Schema validator badly --
+    the spec has ~40 keywords with interactions a table cannot hold (``contains`` + ``minContains:
+    0``, a lone ``if`` with no branch, ``maxContains`` without ``contains``, ``not: false``) -- and
+    each round found more of them.
 
-    ``format`` is deliberately in NEITHER table: OpenAPI 3.1 states that a format does not imply a
-    type, and JSON Schema 2020-12 makes ``format`` an annotation by default, so ``{"format":
-    "uuid"}`` with no ``type`` still permits an arbitrary object.
+    But the ratchet never needed validation semantics. It exists because a response that publishes
+    no key information is invisible to the breaking-diff gate and generates an untyped client. That
+    is a STRUCTURAL question about the document with a short closed answer: only the keywords below
+    put key information on the wire. Every numeric / string / array facet is irrelevant by
+    construction rather than by classification, and so are ``format``, ``discriminator`` and
+    ``nullable``. All ten counterexamples that killed the previous cut fall out of this definition
+    without being listed.
+
+    The default is NON-disclosing, so an unrecognised keyword can never close a schema.
+
+    DELIBERATE divergence from a reviewer ruling, stated so it is seen: ``minProperties`` /
+    ``maxProperties`` do NOT disclose. They bound how MANY keys exist, never WHICH -- a consumer
+    still cannot type the response and the diff gate still cannot see a rename. They are genuinely
+    constraining for VALIDATION, which is exactly why the reframing matters.
     """
-    if keyword in ALWAYS_CONSTRAINS:
+    if "$ref" in node:
+        return True                                     # delegates disclosure to the target
+    for keyword in ("properties", "patternProperties", "required", "dependentSchemas",
+                    "dependentRequired", "allOf", "anyOf", "oneOf", "enum"):
+        if _nonempty(node.get(keyword)):
+            return True
+    if "const" in node:
         return True
-    vacuous = VACUOUS_WHEN.get(keyword)
-    return vacuous is not None and not vacuous(value)
+    for keyword in ("additionalProperties", "unevaluatedProperties", "propertyNames"):
+        value = node.get(keyword)
+        if value is not None and not _says_nothing(value):
+            return True                                 # pins the value or key-name shape
+    if "not" in node and node["not"] is not False:
+        return True                                     # `not: false` is the identity
+    return "if" in node and ("then" in node or "else" in node)   # a lone `if` has no effect
 
 
-def _is_open(node: Any) -> bool:
-    """True when the schema constrains nothing about an object's contents.
+def _is_open(node) -> bool:
+    """True when the schema publishes nothing about the keys of the object it describes.
 
-    VALUE-aware, not presence-aware, and the difference is load-bearing: the previous cut asked
-    only whether a constraining keyword was PRESENT, so ``{"properties": {}}`` read as constrained
-    and — fatally for the fails-safe claim — pairing an unknown keyword with any inert known one
-    went quiet. Measured across 18 distinct no-op keywords, all of which the presence check closed.
-
-    Shapes this recognises: the empty schema ``{}``; annotation-only such as ``{"title": "x"}``
-    (pydantic's rendering of a bare ``Any``, and the miss that had this file reporting 43 frozen
-    locations of 46); ``type: object`` with nothing pinning its contents; ``additionalProperties``
-    of ``true``/``{}``; and any combination of inert keywords.
+    The empty schema ``{}``, the boolean ``true`` schema, annotation-only such as ``{"title":
+    "x"}``, ``type: object`` with nothing enumerated, or a permissive ``additionalProperties``.
     """
+    if node is True:
+        return True                                     # the boolean TRUE schema admits anything
     if not isinstance(node, dict):
-        return False
+        return False                                    # includes boolean FALSE: admits nothing
     declared = node.get("type")
     types = declared if isinstance(declared, list) else ([declared] if declared else [])
     if types and "object" not in types:
         return False
-    return all(not _constrains(k, v) for k, v in node.items() if k != "type")
+    return not _discloses_key_information(node)
 
 
 def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: set) -> None:
@@ -292,6 +283,29 @@ def test_the_open_object_predicate_recognises_every_unconstrained_shape():
         {"enum": []},
         {"uniqueItems": False},
         {"items": True},
+        # THE TEN that the ALWAYS_CONSTRAINS list closed by fiat. Each discloses nothing about the
+        # object's keys, and each now falls out of the definition rather than being listed:
+        # `not: false` is the identity; `propertyNames: true` names no name; a lone `if` has no
+        # branch to apply and lone `then`/`else` are ignored without it; `discriminator` is OAS
+        # dispatch metadata; the empty regex matches every string; `maxContains` does nothing
+        # without `contains`; and an adjacent `minContains: 0` makes `contains` always pass.
+        {"not": False},
+        {"propertyNames": True},
+        {"propertyNames": {}},
+        {"if": {"type": "string"}},
+        {"then": {"type": "string"}},
+        {"else": {"type": "string"}},
+        {"discriminator": {"propertyName": "kind"}},
+        {"pattern": ""},
+        {"maxContains": 2},
+        {"contains": {"type": "string"}, "minContains": 0},
+        # Facets bound the SIZE of the object, never which keys it has, so a consumer still cannot
+        # type the response — see the divergence note on _discloses_key_information.
+        {"type": "object", "minProperties": 1},
+        {"type": "object", "maxProperties": 3},
+        {"maximum": 5},
+        {"minLength": 3},
+        True,                                            # the boolean TRUE schema
     ]
     for shape in open_shapes:
         assert _is_open(shape), f"expected OPEN but the predicate said constrained: {shape}"
@@ -308,9 +322,13 @@ def test_the_open_object_predicate_recognises_every_unconstrained_shape():
         {"anyOf": [{"type": "string"}]},
         {"enum": ["a", "b"]},
         {"const": 3},
-        {"title": "Bounded", "maxLength": 5},
-        {"minProperties": 1},
         {"type": "object", "required": ["a"]},
+        {"patternProperties": {"^x": {"type": "string"}}},
+        {"propertyNames": {"pattern": "^x"}},
+        {"type": "object", "additionalProperties": False},      # a CLOSED object
+        {"not": {"required": ["a"]}},
+        {"if": {"required": ["a"]}, "then": {"required": ["b"]}},
+        False,                                                  # the boolean FALSE schema
     ]
     for shape in constrained_shapes:
         assert not _is_open(shape), f"expected CONSTRAINED but the predicate said open: {shape}"

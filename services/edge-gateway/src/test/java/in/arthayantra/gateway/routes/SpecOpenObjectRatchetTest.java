@@ -15,7 +15,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.function.Predicate;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
@@ -102,42 +101,52 @@ import org.junit.jupiter.api.Test;
  * DECISION was made: the shape was settled when the field was written. A new opaque decision
  * always writes a new site, and that is what this catches.
  *
- * <h2>What counts as "no constraint" — enumerated, not guessed</h2>
+ * <h2>Why this asks DISCLOSURE rather than validation</h2>
  *
- * <p>FOUR times now a check on this surface has been beaten by a shape nobody listed: the source
- * regex could not see a {@code Map} field inside a typed record; this test's first cut aliased
- * every use of a component to one name; its second called {@code {"title": "x"}} constrained
- * because it was not literally <code>{}</code>; and its third asked whether a constraining keyword
- * was PRESENT rather than whether it CONSTRAINED, so {@code {"properties": {}}} — and an unknown
- * keyword sitting beside any inert known one — read closed. Every one of those was an enumeration
- * of what to CATCH.
+ * <p>FIVE times a check on this surface was beaten by a shape nobody listed: the source regex could
+ * not see a {@code Map} field inside a typed record; this test's first cut aliased every use of a
+ * component to one name; its second called {@code {"title": "x"}} constrained; its third asked
+ * whether a keyword was PRESENT rather than whether it CONSTRAINED; and its fourth hardcoded 19
+ * keywords as "always constraining", ten of which are not ({@code not: false}, {@code
+ * propertyNames: true}, a lone {@code if}/{@code then}/{@code else}, {@code discriminator}, {@code
+ * pattern: ""}, a bare {@code maxContains}, {@code contains} neutralised by {@code minContains: 0},
+ * and a {@code $ref} to the boolean {@code true} schema).
  *
- * <p>So the population is censused, not sampled. Population rule, stated because the count depends
- * on it: every distinct schema node this check EVALUATES, deduplicated by (spec, location), with a
- * component body counted ONCE per spec however many sites reference it — including a {@code $ref}
- * target judged at a reference site and therefore never walked as a component. Across all five
- * committed specs, the nodes declaring no {@code type}, by exact key set:
+ * <p>Every one of those was an attempt to decide VALIDATION semantics — "does keyword K with value
+ * V restrict the instance" — by table lookup. That is re-implementing a JSON Schema validator
+ * badly, and it does not converge: the spec has ~40 keywords whose effects depend on their value,
+ * on sibling keywords, and on the instance type.
+ *
+ * <p><b>The ratchet never needed validation semantics.</b> It exists because a response that
+ * publishes no key information is invisible to ci-contracts' breaking-diff gate and generates an
+ * untyped client. That is a STRUCTURAL question about the document — does it disclose the keys? —
+ * with a short closed answer, and it makes the whole numeric/string/array facet family irrelevant
+ * BY CONSTRUCTION rather than by classification. All ten counterexamples above fall out of the
+ * definition without being listed; see {@link #disclosesKeyInformation}.
+ *
+ * <p>Measured before adoption: the disclosure predicate produces the IDENTICAL location set to the
+ * keyword one on all five committed specs (13 / 3 / 4 / 46 / 11), so this is a change of reasoning,
+ * not of verdict. A JSON Schema VALIDATOR was also prototyped and rejected — it answers
+ * "accepts any object", which is a different question: {@code ErrorResponse} enumerates three keys
+ * but declares no {@code required}, so a validator calls it open while the diff gate and the
+ * generated client both see its shape perfectly well.
+ *
+ * <p>Population census, stated because the count depends on the rule: every distinct schema node
+ * this check EVALUATES, deduplicated by (spec, location), a component body counted ONCE per spec
+ * however many sites reference it — including a {@code $ref} target judged at a reference site and
+ * therefore never walked as a component. Across all five specs, the nodes declaring no {@code
+ * type}, by exact key set — <b>four key sets, 169 nodes, of which two key sets are unconstrained</b>:
  *
  * <pre>
- *   121  ["anyOf", "title"]   constrained (a non-empty anyOf pins it)
- *    38  ["anyOf"]            constrained
- *     7  {}                   OPEN — already caught
- *     3  ["title"]            OPEN — the annotation-only miss, all three in optimizer (pydantic
- *                                    `Any`); the four unconstrained key sets total 169 nodes
+ *   121  ["anyOf", "title"]   discloses (a non-empty anyOf pins the shape)
+ *    38  ["anyOf"]            discloses
+ *     7  {}                   OPEN
+ *     3  ["title"]            OPEN — annotation-only, all three in optimizer (pydantic `Any`)
  * </pre>
  *
- * <p>Two unconstrained key sets, nothing else. Shapes reasoned through beyond the census and
- * confirmed handled: annotation-only in any combination ({@code description} / {@code default} /
- * {@code example} / {@code deprecated} / bare {@code nullable} / {@code format}), any inert known
- * keyword, an {@code allOf}/{@code anyOf} branch that is itself open (recursed, reported at the
- * branch pointer), {@code items: {}} under {@code type: array} (reported at {@code []}), a
- * {@code Map} whose VALUE schema is open (reported at <code>{}</code>), and a {@code $ref} to an
- * annotation-only component (reported at the reference site — the same fix as {@code JsonNode}).
- *
  * <p>⚠️ The fails-safe property — an unrecognised keyword reads OPEN and cannot be silenced by an
- * inert neighbour — is now ASSERTED by {@link #anUnknownKeywordIsNeverSilencedByAnInertKnownOne}
- * over all 19 inert-capable keywords, not claimed in prose. It was claimed in prose once and was
- * false in 18 of them.
+ * inert neighbour — is ASSERTED by {@link #anUnknownKeywordIsNeverSilencedByAnInertKnownOne}, not
+ * claimed in prose. It was claimed in prose once and was false in 18 combinations.
  *
  * <h2>⚠️ This test's OWN blind spot</h2>
  *
@@ -318,7 +327,30 @@ class SpecOpenObjectRatchetTest {
             "{\"allOf\": []}",
             "{\"enum\": []}",
             "{\"uniqueItems\": false}",
-            "{\"items\": true}");
+            "{\"items\": true}",
+            // ⚠️ THE TEN that the ALWAYS_CONSTRAINS list closed by fiat. Each discloses nothing
+            // about the object's keys, and each now falls out of the definition rather than being
+            // listed: `not: false` is the identity; `propertyNames: true` names no name; a lone
+            // `if` has no branch to apply and lone `then`/`else` are ignored without it;
+            // `discriminator` is OAS dispatch metadata; the empty regex matches every string;
+            // `maxContains` does nothing without `contains`; and an adjacent `minContains: 0`
+            // makes `contains` always pass.
+            "{\"not\": false}",
+            "{\"propertyNames\": true}",
+            "{\"propertyNames\": {}}",
+            "{\"if\": {\"type\": \"string\"}}",
+            "{\"then\": {\"type\": \"string\"}}",
+            "{\"else\": {\"type\": \"string\"}}",
+            "{\"discriminator\": {\"propertyName\": \"kind\"}}",
+            "{\"pattern\": \"\"}",
+            "{\"maxContains\": 2}",
+            "{\"contains\": {\"type\": \"string\"}, \"minContains\": 0}",
+            // Facets bound the SIZE of the object, never which keys it has, so a consumer still
+            // cannot type the response — see the divergence note on disclosesKeyInformation.
+            "{\"type\": \"object\", \"minProperties\": 1}",
+            "{\"type\": \"object\", \"maxProperties\": 3}",
+            "{\"maximum\": 5}",
+            "{\"minLength\": 3}");
     for (String json : open) {
       assertThat(isOpenObject(mapper.readTree(json)))
           .withFailMessage("expected OPEN but the predicate said constrained: %s", json)
@@ -338,14 +370,22 @@ class SpecOpenObjectRatchetTest {
             "{\"anyOf\": [{\"type\": \"string\"}]}",
             "{\"enum\": [\"a\", \"b\"]}",
             "{\"const\": 3}",
-            "{\"title\": \"Bounded\", \"maxLength\": 5}",
-            "{\"minProperties\": 1}",
-            "{\"type\": \"object\", \"required\": [\"a\"]}");
+            "{\"type\": \"object\", \"required\": [\"a\"]}",
+            "{\"patternProperties\": {\"^x\": {\"type\": \"string\"}}}",
+            "{\"propertyNames\": {\"pattern\": \"^x\"}}",
+            "{\"type\": \"object\", \"additionalProperties\": false}", // a CLOSED object
+            "{\"not\": {\"required\": [\"a\"]}}",
+            "{\"if\": {\"required\": [\"a\"]}, \"then\": {\"required\": [\"b\"]}}");
     for (String json : constrained) {
       assertThat(isOpenObject(mapper.readTree(json)))
           .withFailMessage("expected CONSTRAINED but the predicate said open: %s", json)
           .isFalse();
     }
+
+    // Boolean schemas: `true` admits anything (the 10th counterexample, a $ref to it), `false`
+    // admits nothing. Both were mishandled — the walk required an object node and closed both.
+    assertThat(isOpenObject(mapper.readTree("true"))).isTrue();
+    assertThat(isOpenObject(mapper.readTree("false"))).isFalse();
   }
 
   /**
@@ -509,7 +549,7 @@ class SpecOpenObjectRatchetTest {
       // A reference to a component that IS an open object (JsonNode -> `{}`) makes THIS SITE the
       // opacity, not the component: freezing the component name once would authorise unlimited
       // further uses of it. Freezing the site means each new exposure is a new line.
-      if (target != null && isOpenObject(target)) {
+      if (isOpenObject(target)) {
         found.add(where + pointer + " -> " + name);
       } else {
         refs.add(name);
@@ -542,105 +582,92 @@ class SpecOpenObjectRatchetTest {
     }
   }
 
-  /** Keywords that constrain no matter what value they carry. */
-  private static final Set<String> ALWAYS_CONSTRAINS =
-      Set.of(
-          "$ref",
-          "const",
-          "not",
-          "propertyNames",
-          "contains",
-          "if",
-          "then",
-          "else",
-          "discriminator",
-          "pattern",
-          "multipleOf",
-          "maximum",
-          "minimum",
-          "exclusiveMaximum",
-          "exclusiveMinimum",
-          "maxLength",
-          "maxItems",
-          "maxContains",
-          "maxProperties");
-
-  private static final Predicate<JsonNode> EMPTY_CONTAINER =
-      value -> value.isContainerNode() && value.isEmpty();
-  private static final Predicate<JsonNode> ZERO = value -> value.isNumber() && value.asInt() == 0;
-  private static final Predicate<JsonNode> PERMISSIVE =
-      value ->
-          (value.isBoolean() && value.booleanValue()) || (value.isObject() && value.isEmpty());
-
   /**
-   * Keywords that constrain only when their VALUE is not a no-op, with the no-op test. An empty
-   * {@code properties} map, an empty {@code required} list, {@code minProperties: 0} and friends
-   * are all present-but-inert: they restrict nothing, so a schema carrying only those is as open as
-   * <code>{}</code>.
-   */
-  private static final Map<String, Predicate<JsonNode>> VACUOUS_WHEN =
-      Map.ofEntries(
-          Map.entry("properties", EMPTY_CONTAINER),
-          Map.entry("patternProperties", EMPTY_CONTAINER),
-          Map.entry("dependentSchemas", EMPTY_CONTAINER),
-          Map.entry("dependentRequired", EMPTY_CONTAINER),
-          Map.entry("required", EMPTY_CONTAINER),
-          Map.entry("allOf", EMPTY_CONTAINER),
-          Map.entry("anyOf", EMPTY_CONTAINER),
-          Map.entry("oneOf", EMPTY_CONTAINER),
-          Map.entry("enum", EMPTY_CONTAINER),
-          Map.entry("prefixItems", EMPTY_CONTAINER),
-          Map.entry("minProperties", ZERO),
-          Map.entry("minLength", ZERO),
-          Map.entry("minItems", ZERO),
-          Map.entry("minContains", ZERO),
-          Map.entry("uniqueItems", value -> value.isBoolean() && !value.booleanValue()),
-          Map.entry("additionalProperties", PERMISSIVE),
-          Map.entry("unevaluatedProperties", PERMISSIVE),
-          Map.entry("unevaluatedItems", PERMISSIVE),
-          Map.entry("items", PERMISSIVE));
-
-  /**
-   * True when a keyword actually restricts the value, as opposed to merely being present.
+   * Does this node put ANY information about the object's KEYS into the published document?
    *
-   * <p>⚠️ <b>The default is NON-constraining, and that is the whole fails-safe property.</b> A
-   * keyword in neither table — an annotation ({@code title} / {@code description} / {@code default}
-   * / {@code example} / {@code deprecated} / bare {@code nullable}), or one nobody here anticipated
-   * — contributes nothing, so its schema reads OPEN and fails LOUDLY, resolved by a reviewed
-   * exemption or one more entry here. The inverse (enumerate the annotations, treat everything else
-   * as constraining) fails silently, and every hole this check has had was of that shape.
+   * <p>⚠️ <b>This asks DISCLOSURE, not validation, and the distinction is the whole design.</b> Four
+   * consecutive review rounds killed a keyword classifier that tried to decide "does keyword K with
+   * value V restrict the instance" by table lookup. That is re-implementing a JSON Schema validator
+   * badly — the spec has ~40 keywords with interactions a table cannot hold ({@code contains} +
+   * {@code minContains: 0}, a lone {@code if} with no branch, {@code maxContains} without {@code
+   * contains}, {@code not: false}) — and each round found more of them.
    *
-   * <p>{@code format} is deliberately in NEITHER table: OpenAPI 3.1 states that a format does not
-   * imply a type, and JSON Schema 2020-12 makes {@code format} an annotation by default, so
-   * {@code {"format": "uuid"}} with no {@code type} still permits an arbitrary object. Calling it a
-   * constraint was this check's fourth hole.
+   * <p>But the ratchet never needed validation semantics. It exists because a response that
+   * publishes no key information is invisible to ci-contracts' breaking-diff gate and generates an
+   * untyped client. That is a STRUCTURAL question about the document, and it has a short closed
+   * answer: only the keywords below put key information on the wire. Every numeric, string and
+   * array facet — {@code maximum}, {@code minLength}, {@code pattern}, {@code maxItems}, {@code
+   * multipleOf}, {@code contains}, {@code maxContains}, {@code uniqueItems} — is irrelevant by
+   * construction rather than by having been classified, and so are {@code format}, {@code
+   * discriminator} and {@code nullable}. All ten counterexamples that killed the previous cut fall
+   * out of this definition without being listed.
+   *
+   * <p>The default is NON-disclosing, so an unrecognised keyword can never close a schema: the
+   * failure direction is a loud false OPEN, resolved by a reviewed exemption.
+   *
+   * <p>DELIBERATE, and a divergence from a reviewer ruling worth seeing: {@code minProperties} /
+   * {@code maxProperties} do NOT disclose. They bound how MANY keys exist, never WHICH — a consumer
+   * still cannot type the response and the diff gate still cannot see a rename. They are genuinely
+   * constraining for VALIDATION, which is exactly why the reframing matters.
    */
-  private static boolean constrains(String keyword, JsonNode value) {
-    if (ALWAYS_CONSTRAINS.contains(keyword)) {
+  private static boolean disclosesKeyInformation(JsonNode node) {
+    if (node.has("$ref")) {
+      return true; // delegates disclosure to the target; resolved at the reference site
+    }
+    for (String keyword :
+        List.of(
+            "properties", // the key names themselves
+            "patternProperties",
+            "required", // names the keys that must be present
+            "dependentSchemas",
+            "dependentRequired",
+            "allOf",
+            "anyOf",
+            "oneOf",
+            "enum")) {
+      if (nonEmpty(node.get(keyword))) {
+        return true;
+      }
+    }
+    if (node.has("const")) {
       return true;
     }
-    Predicate<JsonNode> vacuous = VACUOUS_WHEN.get(keyword);
-    return vacuous != null && !vacuous.test(value);
+    for (String keyword : List.of("additionalProperties", "unevaluatedProperties", "propertyNames")) {
+      JsonNode value = node.get(keyword);
+      if (value != null && !saysNothing(value)) {
+        return true; // pins the value or key-name shape (including `false` = a closed object)
+      }
+    }
+    JsonNode not = node.get("not");
+    if (not != null && !(not.isBoolean() && !not.booleanValue())) {
+      return true; // `not: false` is the identity; anything else says something
+    }
+    return node.has("if") && (node.has("then") || node.has("else")); // a lone `if` has no effect
+  }
+
+  /** A schema that says nothing at all: boolean {@code true}, or the empty schema. */
+  private static boolean saysNothing(JsonNode schema) {
+    return (schema.isBoolean() && schema.booleanValue())
+        || (schema.isObject() && schema.isEmpty());
+  }
+
+  private static boolean nonEmpty(JsonNode node) {
+    return node != null && node.isContainerNode() && !node.isEmpty();
   }
 
   /**
-   * True when the schema constrains nothing about an object's contents — i.e. every keyword it
-   * carries is an annotation, unrecognised, or present with an inert value, and any declared type
-   * admits an object.
-   *
-   * <p>This is VALUE-aware, not presence-aware, and the difference is load-bearing: the previous
-   * cut asked only whether a constraining keyword was PRESENT, so {@code {"properties": {}}} read
-   * as constrained, and — fatally for the fails-safe claim — pairing an unknown keyword with any
-   * inert known one ({@code {"unknownFutureKeyword": 1, "properties": {}}}) went quiet. That was
-   * measured across 18 distinct no-op keywords, all of which the presence check closed.
-   *
-   * <p>Shapes this recognises: the empty schema <code>{}</code>; annotation-only such as
-   * {@code {"title": "x"}} (pydantic's rendering of a bare {@code Any}, and the miss that had the
-   * optimizer ratchet reporting 43 locations of 46); {@code type: object} with nothing pinning its
-   * contents; {@code additionalProperties} of {@code true} / <code>{}</code>; and any combination
-   * of inert keywords.
+   * True when the schema publishes nothing about the keys of the object it describes — the empty
+   * schema <code>{}</code>, the boolean {@code true} schema, annotation-only such as {@code
+   * {"title": "x"}}, {@code type: object} with nothing enumerated, or {@code additionalProperties}
+   * of {@code true} / <code>{}</code>.
    */
   private static boolean isOpenObject(JsonNode node) {
+    if (node == null) {
+      return false;
+    }
+    if (node.isBoolean()) {
+      return node.booleanValue(); // the boolean TRUE schema admits anything; FALSE admits nothing
+    }
     if (!node.isObject()) {
       return false;
     }
@@ -648,12 +675,7 @@ class SpecOpenObjectRatchetTest {
     if (!types.isEmpty() && !types.contains("object")) {
       return false;
     }
-    for (Map.Entry<String, JsonNode> field : node.properties()) {
-      if (!"type".equals(field.getKey()) && constrains(field.getKey(), field.getValue())) {
-        return false;
-      }
-    }
-    return true;
+    return !disclosesKeyInformation(node);
   }
 
   /** The declared type(s); empty when absent, so an untyped schema is judged on its keywords. */

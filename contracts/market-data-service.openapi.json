@@ -7270,16 +7270,16 @@
             "format" : "int32"
           },
           "totalReturnPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "cagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "maxDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sharpe" : {
-            "type" : "number"
+            "type" : "string"
           },
           "tradesTaken" : {
             "type" : "integer",
@@ -7290,23 +7290,23 @@
             "format" : "int32"
           },
           "avgExposurePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "months" : {
             "type" : "integer",
             "format" : "int32"
           },
           "positiveMonthsPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "bestMonthPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "worstMonthPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgMonthPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "annual" : {
             "type" : "array",
@@ -7393,31 +7393,31 @@
             "format" : "int32"
           },
           "winRatePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgWinPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgLossPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "payoffRatio" : {
-            "type" : "number"
+            "type" : "string"
           },
           "expectancyPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "profitFactor" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgBarsHeld" : {
-            "type" : "number"
+            "type" : "string"
           },
           "bestTradePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "worstTradePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "longestHoldBars" : {
             "type" : "integer",
@@ -7436,7 +7436,7 @@
             "format" : "int32"
           },
           "stopOutPct" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "avgBarsHeld", "avgLossPct", "avgWinPct", "bestTradePct", "expectancyPct", "longestHoldBars", "losses", "maxLossStreak", "maxWinStreak", "payoffRatio", "profitFactor", "setup", "shortestHoldBars", "stopOutPct", "trades", "winRatePct", "wins", "worstTradePct" ]
@@ -7449,7 +7449,7 @@
             "format" : "int32"
           },
           "returnPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "trades" : {
             "type" : "integer",
@@ -7468,40 +7468,40 @@
             "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sma50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma150" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma200" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pctFromHigh" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pctAboveLow" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgTurnover50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatMcapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "gates" : {
             "type" : "array",
@@ -7605,22 +7605,22 @@
             "format" : "int32"
           },
           "winRatePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "beatBenchmarkRatePct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "meanReturnPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "meanBenchmarkReturnPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "meanExcessReturnPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "medianReturnPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "beatBenchmarkRatePct", "horizonSessions", "meanBenchmarkReturnPct", "meanExcessReturnPct", "meanReturnPct", "medianReturnPct", "sampleCount", "winRatePct" ]
@@ -7633,16 +7633,16 @@
             "format" : "int32"
           },
           "totalReturnPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "cagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "maxDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sharpe" : {
-            "type" : "number"
+            "type" : "string"
           },
           "tradesTaken" : {
             "type" : "integer",
@@ -7653,23 +7653,23 @@
             "format" : "int32"
           },
           "avgExposurePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "months" : {
             "type" : "integer",
             "format" : "int32"
           },
           "positiveMonthsPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "bestMonthPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "worstMonthPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgMonthPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "annual" : {
             "type" : "array",
@@ -7756,31 +7756,31 @@
             "format" : "int32"
           },
           "winRatePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgWinPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgLossPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "payoffRatio" : {
-            "type" : "number"
+            "type" : "string"
           },
           "expectancyPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "profitFactor" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgBarsHeld" : {
-            "type" : "number"
+            "type" : "string"
           },
           "bestTradePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "worstTradePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "longestHoldBars" : {
             "type" : "integer",
@@ -7799,7 +7799,7 @@
             "format" : "int32"
           },
           "stopOutPct" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "avgBarsHeld", "avgLossPct", "avgWinPct", "bestTradePct", "expectancyPct", "longestHoldBars", "losses", "maxLossStreak", "maxWinStreak", "payoffRatio", "profitFactor", "setup", "shortestHoldBars", "stopOutPct", "trades", "winRatePct", "wins", "worstTradePct" ]
@@ -7812,7 +7812,7 @@
             "format" : "int32"
           },
           "returnPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "trades" : {
             "type" : "integer",
@@ -7831,34 +7831,34 @@
             "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sma50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma200" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgVol20" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgVol50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "turnover50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "withinHighPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "aboveLowPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "withinHigh" : {
             "type" : "boolean"
@@ -7876,10 +7876,10 @@
             "type" : "boolean"
           },
           "freeFloatMcapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "gates" : {
             "type" : "array",
@@ -7895,7 +7895,7 @@
             "type" : "boolean"
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "aboveLowPct", "aboveSma50", "avgVol20", "avgVol50", "close", "exchange", "freeFloatMcapCr", "freeFloatPct", "gates", "gatesPassed", "high52w", "liquidDepth", "liquidVolume", "low52w", "lowCap", "passesAll", "rsRank", "sma200", "sma50", "symbol", "turnover50", "withinHigh", "withinHighPct" ]
@@ -7979,19 +7979,19 @@
             "format" : "int32"
           },
           "capital" : {
-            "type" : "number"
+            "type" : "string"
           },
           "totalReturnPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "cagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "maxDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "sharpe" : {
-            "type" : "number"
+            "type" : "string"
           },
           "tradesTaken" : {
             "type" : "integer",
@@ -8002,10 +8002,10 @@
             "format" : "int32"
           },
           "winRatePct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "profitFactor" : {
-            "type" : "number"
+            "type" : "string"
           },
           "report" : {
             "$ref" : "#/components/schemas/JsonNode"
@@ -8033,17 +8033,17 @@
             "format" : "date"
           },
           "entryPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "exitDate" : {
             "type" : "string",
             "format" : "date"
           },
           "exitPrice" : {
-            "type" : "number"
+            "type" : "string"
           },
           "pnlPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "barsHeld" : {
             "type" : "integer",
@@ -8053,7 +8053,7 @@
             "type" : "string"
           },
           "rsRankAtEntry" : {
-            "type" : "number"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "barsHeld", "entryDate", "entryPrice", "exitDate", "exitPrice", "exitReason", "pnlPct", "rsRankAtEntry", "setup", "symbol" ]
@@ -8687,19 +8687,19 @@
             "type" : "string"
           },
           "latestClose" : {
-            "type" : "number"
+            "type" : "string"
           },
           "pastClose" : {
-            "type" : "number"
+            "type" : "string"
           },
           "value" : {
-            "type" : "number"
+            "type" : "string"
           },
           "avgVolume" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "distanceFromHigh52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "label" : {
             "type" : [ "string", "null" ]
@@ -8779,7 +8779,7 @@
             "format" : "int32"
           },
           "marginPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "rotations" : {
             "type" : "integer",
@@ -8807,16 +8807,16 @@
             "format" : "int32"
           },
           "grossCagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netCagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netSharpe" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "grossCagrPct", "netCagrPct", "netDrawdownPct", "netSharpe", "slots", "tradesSkipped", "tradesTaken" ]
@@ -8837,13 +8837,13 @@
             "format" : "int32"
           },
           "netCagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netSharpe" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "capital", "floorTurnover", "netCagrPct", "netDrawdownPct", "netSharpe", "trades" ]
@@ -8886,10 +8886,10 @@
             "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "stage" : {
             "type" : [ "integer", "null" ],
@@ -8899,10 +8899,10 @@
             "type" : "boolean"
           },
           "pivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "cheatPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "thrust" : {
             "type" : "boolean"
@@ -8911,7 +8911,7 @@
             "type" : [ "string", "null" ]
           },
           "pctToPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "cheatPivot", "close", "footprint", "isVcp", "pctToPivot", "pivot", "rsRank", "stage", "symbol", "thrust" ]
@@ -8923,7 +8923,7 @@
             "type" : "string"
           },
           "advanceRatio" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sessions" : {
             "type" : "integer",
@@ -8939,7 +8939,7 @@
             "type" : "string"
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "rsRank", "symbol" ]
@@ -9018,13 +9018,13 @@
             "type" : [ "string", "null" ]
           },
           "pivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "deepestPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "tightestPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "contractionCount" : {
             "type" : [ "integer", "null" ],
@@ -9049,7 +9049,7 @@
             "format" : "int32"
           },
           "cheatPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "thrust" : {
             "type" : "boolean"
@@ -9077,40 +9077,40 @@
             "type" : "boolean"
           },
           "close" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma150" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma200" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pctFromHigh" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "pctAboveLow" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgTurnover50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatMcapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "gates" : {
             "type" : "array",
@@ -9232,16 +9232,16 @@
             "format" : "int32"
           },
           "grossCagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netCagrPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netDrawdownPct" : {
-            "type" : "number"
+            "type" : "string"
           },
           "netSharpe" : {
-            "type" : "number"
+            "type" : "string"
           }
         },
         "required" : [ "grossCagrPct", "netCagrPct", "netDrawdownPct", "netSharpe", "slots", "tradesSkipped", "tradesTaken" ]
@@ -9284,31 +9284,31 @@
             "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "aboveLowPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "setupType" : {
             "type" : [ "string", "null" ]
           },
           "pivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "footprint" : {
             "type" : [ "string", "null" ]
           },
           "pctToPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "breakoutPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "vcpPivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "rsRank" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "aboveLowPct", "breakoutPivot", "close", "footprint", "pctToPivot", "pivot", "rsRank", "setupType", "symbol", "vcpPivot" ]
@@ -9330,34 +9330,34 @@
             "type" : "boolean"
           },
           "close" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "sma200" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "high52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "low52w" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "withinHighPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "aboveLowPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgVol20" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "avgVol50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "turnover50" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "withinHigh" : {
             "type" : "boolean"
@@ -9375,10 +9375,10 @@
             "type" : "boolean"
           },
           "freeFloatMcapCr" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "freeFloatPct" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "gates" : {
             "type" : "array",
@@ -9415,7 +9415,7 @@
             "type" : [ "string", "null" ]
           },
           "pivot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "baseWeeks" : {
             "type" : [ "integer", "null" ],

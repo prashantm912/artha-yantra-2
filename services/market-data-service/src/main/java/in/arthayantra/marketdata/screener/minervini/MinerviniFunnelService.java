@@ -39,15 +39,15 @@ public class MinerviniFunnelService {
   @Schema(name = "MinerviniFunnelRow")
   public record FunnelRow(
       String symbol,
-      BigDecimal close,
-      @Schema(types = {"number", "null"}) BigDecimal rsRank,
+      @Schema(type = "string") BigDecimal close,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal rsRank,
       @Schema(types = {"integer", "null"}) Integer stage,
       boolean isVcp,
-      @Schema(types = {"number", "null"}) BigDecimal pivot,
-      @Schema(types = {"number", "null"}) BigDecimal cheatPivot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pivot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal cheatPivot,
       boolean thrust,
       @Schema(types = {"string", "null"}) String footprint,
-      @Schema(types = {"number", "null"}) BigDecimal pctToPivot) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pctToPivot) {}
   // pctToPivot = (close - pivot) / pivot, null when no pivot
 
   /**

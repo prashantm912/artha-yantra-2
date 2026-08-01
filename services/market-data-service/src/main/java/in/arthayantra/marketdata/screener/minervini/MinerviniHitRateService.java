@@ -42,12 +42,12 @@ public class MinerviniHitRateService {
   public record HorizonStat(
       int horizonSessions,
       int sampleCount,
-      @Schema(types = {"number", "null"}) BigDecimal winRatePct, // % of samples with a positive forward return
-      @Schema(types = {"number", "null"}) BigDecimal beatBenchmarkRatePct, // % of samples that beat NIFTY over the same window
-      @Schema(types = {"number", "null"}) BigDecimal meanReturnPct,
-      @Schema(types = {"number", "null"}) BigDecimal meanBenchmarkReturnPct,
-      @Schema(types = {"number", "null"}) BigDecimal meanExcessReturnPct,
-      @Schema(types = {"number", "null"}) BigDecimal medianReturnPct) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal winRatePct, // % of samples with a positive forward return
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal beatBenchmarkRatePct, // % of samples that beat NIFTY over the same window
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal meanReturnPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal meanBenchmarkReturnPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal meanExcessReturnPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal medianReturnPct) {}
 
   /** The full harness result: the range/cadence meta + one {@link HorizonStat} per forward horizon. */
   public record HitRateReport(

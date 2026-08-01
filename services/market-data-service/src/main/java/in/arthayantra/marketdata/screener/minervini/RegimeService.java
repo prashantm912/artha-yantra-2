@@ -20,7 +20,7 @@ public class RegimeService {
 
   /** The regime verdict for a date + the trailing advance ratio it was derived from. */
   public record Regime(
-      String regime, @Schema(types = {"number", "null"}) BigDecimal advanceRatio, int sessions) {}
+      String regime, @Schema(type = "string", types = {"string", "null"}) BigDecimal advanceRatio, int sessions) {}
 
   private static final String SQL =
       """

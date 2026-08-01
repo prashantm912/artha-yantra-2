@@ -141,7 +141,7 @@ class ManasAroraSwingEngineTest {
     verify(r.signals()).stampManasAroraDetail(anyLong(), detail.capture());
     assertThat(detail.getValue())
         .isEqualTo("{\"setup\":\"manas-arora-breakout\",\"setupType\":\"breakout\",\"pivot\":\"150\",\"pyramidLot\":2}");
-    // A non-breaching add must never spuriously trip the M40 governor-coverage audit/alert.
+    // A non-breaching add must never spuriously trip the add-path observability fix's audit/alert.
     verify(r.guard(), never()).recordPyramidRiskCapBreach(any(), any(), any());
   }
 
@@ -151,11 +151,14 @@ class ManasAroraSwingEngineTest {
 
     assertThat(r.run().entries()).as("the risk cap blocks the add").isZero();
     verify(r.events(), never()).publishEvent(argThat((Object e) -> e instanceof SignalEmitted));
-    // M40 governor-coverage fix: every OTHER RiskService threshold rail (daily-loss / profit-target /
-    // deployment / heat-cap) writes a risk_audit row + ntfy alert on trip; before this fix the pyramid
-    // risk-cap block reached only SwingBatchEngine's own log.info line — this proves it now ALSO
-    // reaches the same EmissionGuard governor surface (RiskServicePyramidCapTest proves what the paper
-    // adapter does with the call from there: audits + alerts, deduped per IST day).
+    // Add-path observability fix only (E4 §2f — NOT the whole of M40; the aggregate-risk gap on
+    // FRESH entries is separate, live, and unfixed here — see
+    // docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md). Three of RiskService's four
+    // audited rails (daily-loss/profit-target/heat-cap) write a risk_audit row + push an ntfy alert on
+    // trip; deployment audits only. Before this fix the pyramid risk-cap block matched neither group —
+    // this proves it now reaches the same EmissionGuard governor surface (RiskServicePyramidCapTest
+    // proves what the paper adapter does with the call from there: audits + alerts, deduped per IST
+    // day, matching the audit+alert group).
     verify(r.guard()).recordPyramidRiskCapBreach(eq(Books.MANAS_ARORA), eq("TESTCO"), any());
   }
 

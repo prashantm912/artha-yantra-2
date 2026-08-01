@@ -133,10 +133,13 @@ public interface EmissionGuard {
       String side) {}
 
   /**
-   * M40 governor-coverage fix: records that a §3.4.3 pyramid ADD was blocked because it would have
-   * breached the family's portfolio open-risk cap. Every OTHER RiskService threshold rail (daily-loss
-   * / profit-target / deployment / heat-cap) writes a durable {@code risk_audit} row + pushes an ntfy
-   * alert on trip; before this method existed, a pyramid-cap block only reached the application log
+   * Add-path observability fix (E4 decision-sheet §2f — a narrow fix, NOT the whole of M40; see
+   * {@code docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md} for the residual,
+   * reachable-today gap this does NOT close): records that a §3.4.3 pyramid ADD was blocked because
+   * it would have breached the family's portfolio open-risk cap. Three of RiskService's four audited
+   * threshold rails — daily-loss, profit-target, heat-cap — write a durable {@code risk_audit} row AND
+   * push an ntfy alert on trip; the fourth, deployment, audits only (no alert). Before this method
+   * existed, a pyramid-cap block matched NEITHER group — it only reached the application log
    * (SwingBatchEngine's own {@code log.info}), so re-arming pyramiding ({@code
    * artha.manas-arora.pyramid.enabled}, currently default OFF — this call site is UNREACHABLE today,
    * since a disabled policy's {@code hasRoom} never lets an add reach the risk-cap check) would have

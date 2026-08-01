@@ -14,15 +14,17 @@ import org.junit.jupiter.api.Test;
  * not want the measurement fixed (it is correctly dormant); they want arming to fail loudly.
  *
  * <p>The guard lives in the constructor, not a config-validation annotation or a bare default-value
- * assertion, because it must fire at BOTH of the moments that matter: a {@code .env}/{@code
- * application.yml} arm takes effect only on the next restart, which is exactly when Spring
- * re-constructs this {@code @Component} bean; and a stray change to the compiled-in default (e.g.
- * editing the {@code @Value(...:0)} literal itself) fires immediately in any test — this one or any
- * of the many {@code @SpringBootTest}s in this service that load the full context — the moment that
- * bean is constructed. A CI-only test asserting "the default is 0" would stay green forever against
- * a runtime {@code .env} override (tests never read {@code .env}); a startup check alone would not
- * retroactively catch an already-armed default without a restart, but here the arm and the restart
- * are the same event, so that gap does not apply to THIS guard.
+ * assertion, because it must fire at every moment a positive value could reach it: any
+ * {@code @SpringBootTest} that loads the full context re-constructs this {@code @Component} bean,
+ * so a stray change to the compiled-in default (editing the {@code @Value(...:0)} literal itself, or
+ * adding an {@code application.yml} override) fails the FIRST test that boots, not just this one. A
+ * CI-only test asserting "the default is 0" would have missed exactly that case — it only reads the
+ * constant, it never constructs the bean. The mechanism does NOT currently cover a live {@code .env}
+ * arm: no docker-compose passthrough exists for any {@code artha.minervini.vcp.*} property today (a
+ * repo-wide grep of {@code deploy/} confirms it), so an {@code .env} edit alone is silently ignored,
+ * not tripped — a passthrough would need to be added first, and adding one is out of this task's
+ * scope (deploy config, not the tripwire itself). If a passthrough is ever added, this guard already
+ * covers it for free, since it fires on construction regardless of where the value came from.
  */
 class VcpMinBaseWeeksTripwireTest {
 

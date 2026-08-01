@@ -88,10 +88,13 @@ public class VcpDetector {
     // narrowing contraction, not the classical multi-week base the [min,max]-week window assumes —
     // a LATENT, self-documented mismeasure that is harmless ONLY because the live floor is 0
     // (disabled). Re-arming any positive floor without first fixing the measurement reproduces
-    // M39's ~99% VCP trade annihilation. Fail fast at construction (fires on every app boot AND
-    // every direct `new VcpDetector(...)` — a `.env`/application.yml arm needs a restart anyway,
-    // which is exactly when this fires; a compiled-default change fires immediately in any test that
-    // builds a Spring context) so the floor can never go live silently again.
+    // M39's ~99% VCP trade annihilation. Fail fast at construction so the floor can never go live
+    // silently again: fires on every app boot from WHATEVER source resolves this property (today,
+    // that's only the compiled `@Value(...:0)` default or a bundled application.yml override — no
+    // docker-compose/.env passthrough exists for any artha.minervini.vcp.* knob, so a live `.env`
+    // edit alone does nothing today; if one is ever added, the guard still holds, since it fires on
+    // construction regardless of property source) AND immediately in any test that builds a Spring
+    // context (a stray change to the compiled default).
     if (minBaseWeeks > 0) {
       throw new IllegalStateException(
           "artha.minervini.vcp.min-base-weeks=" + minBaseWeeks + " arms a base-duration FLOOR, but "

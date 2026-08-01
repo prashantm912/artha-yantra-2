@@ -649,8 +649,11 @@ restart services, or write during market hours.
   2026-07-30, §3.28; probe added 2026-08-01): a dead input (null — the canary sees it), a **frozen**
   input (one distinct value — #1111's probe sees it), or a **live, moving operand that never crosses
   its threshold** — now the `neverCrossing` NEAR-MISS state on `/api/v1/signal-rejections/dot-health`
-  (`DotHealthCanary.nearMiss`): strictly one-sided supports (~0% or ~100%) AND the session extremum
-  within epsilon of the dot's rule, judged only for fixed-global-threshold dots (breadth today).
+  (`DotHealthCanary.nearMiss`): supports one-sided within a 2% minority tolerance AND the operand's
+  extremum within epsilon of the dot's rule, judged only for fixed-global-threshold dots (breadth
+  today). ⚠ Its evidence is **session-wide, deduped per (bar, side)** — NOT the bounded newest-N
+  window the `alive`/`frozen` probes read, which under fan-out can cover a handful of bars and would
+  let an early crossing age out of a state that claims "session max".
   `breadth` on 2026-07-30 was the discovered case: 0/814 with 10 distinct values over 23–32, against
   a `> 32` rule whose session max was exactly 32. ⚠ The probe deliberately does NOT flag a 0% dot
   far from its line (the 07-31 `oi_spurt` conjunct-starved reading — regime, not telemetry), and it

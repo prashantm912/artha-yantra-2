@@ -168,10 +168,11 @@ export interface DotState {
   frozen: boolean;
   /**
    * True for the FOURTH input state (G16): live AND moving (so neither the liveness nor the frozen
-   * probe can see it) yet strictly one-sided on supports with the session extremum within a small
-   * distance of the dot's threshold — breadth on 2026-07-30: 0/814 supports, 10 distinct values,
-   * session max EXACTLY 32 against its `> 32` rule. Telemetry only, never pages; `detail` carries
-   * the numbers.
+   * probe can see it) yet effectively non-discriminating — supports one-sided within a small
+   * tolerance across the session's distinct (bar, side) verdicts, with the operand's extremum
+   * hugging the dot's threshold. breadth on 2026-07-30: 0/814 supports, 10 distinct values, session
+   * max EXACTLY 32 against its `> 32` rule. Judged SESSION-WIDE (not over the bounded window the
+   * `alive`/`frozen` probes read). Telemetry only, never pages; `detail` carries the numbers.
    */
   neverCrossing: boolean;
   /** Human liveness detail ("input live in the last N rejections" / "input dead across N" / "no rejections yet today"). */

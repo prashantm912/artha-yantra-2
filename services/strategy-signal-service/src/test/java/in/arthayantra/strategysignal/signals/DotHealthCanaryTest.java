@@ -568,10 +568,21 @@ class DotHealthCanaryTest {
         .allSatisfy(s -> assertThat(s.alive()).isTrue());
   }
 
-  /**
-   * G16 fixture: one CE row per 3m bar whose breadth dot was SCORED (the persisted confluence
-   * breakdown carries the side-resolved {@code supports} verdict the composite actually used).
-   */
+  /** A breadth-scoring diagnostic: the macro operand plus the persisted per-dot supports verdict. */
+  private static com.fasterxml.jackson.databind.JsonNode breadthDiagnostic(
+      int advances, boolean supports) {
+    try {
+      return MAPPER.readTree(
+          "{\"context\":{\"macro\":{\"advances\":" + advances
+              + ",\"declines\":20}},\"confluence\":{\"dots\":[{\"dot\":\"breadth\","
+              + "\"weight\":1.0,\"supports\":" + supports
+              + ",\"reason\":\"advances/declines > 32\"}]}}");
+    } catch (Exception e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  /** {@code count} CE rows on distinct 3m bars — the BOUNDED-window shape (liveness/freeze feed). */
   private static SignalRejectionRepository.RejectionRow[] breadthScoredRows(
       int count, java.util.function.IntUnaryOperator advancesForBar,
       java.util.function.IntPredicate supportsForBar) {
@@ -579,21 +590,34 @@ class DotHealthCanaryTest {
     SignalRejectionRepository.RejectionRow[] rows =
         new SignalRejectionRepository.RejectionRow[count];
     for (int i = 0; i < count; i++) {
-      String json =
-          "{\"context\":{\"macro\":{\"advances\":" + advancesForBar.applyAsInt(i)
-              + ",\"declines\":20}},\"confluence\":{\"dots\":[{\"dot\":\"breadth\","
-              + "\"weight\":1.0,\"supports\":" + supportsForBar.test(i)
-              + ",\"reason\":\"advances/declines > 32\"}]}}";
-      try {
-        rows[i] = new SignalRejectionRepository.RejectionRow(
-            1, null, "slug", "NFO", "FUT", "3m", "CE", "confluence-composite", null, null, null,
-            "r", null, null, MAPPER.readTree(json), base.plusMinutes(3L * i),
-            OffsetDateTime.now());
-      } catch (Exception e) {
-        throw new IllegalStateException(e);
-      }
+      rows[i] = new SignalRejectionRepository.RejectionRow(
+          1, null, "slug", "NFO", "FUT", "3m", "CE", "confluence-composite", null, null, null,
+          "r", null, null, breadthDiagnostic(advancesForBar.applyAsInt(i), supportsForBar.test(i)),
+          base.plusMinutes(3L * i), OffsetDateTime.now());
     }
     return rows;
+  }
+
+  /**
+   * {@code count} SESSION-WIDE (bar, side) verdicts — what
+   * {@code sessionBarSideDiagnostics} returns after the DB's DISTINCT ON has collapsed fan-out.
+   */
+  private static List<SignalRejectionRepository.BarSideDiagnostic> breadthVerdicts(
+      int count, java.util.function.IntUnaryOperator advancesForBar,
+      java.util.function.IntPredicate supportsForBar) {
+    OffsetDateTime base = OffsetDateTime.parse("2026-06-10T09:15:00+05:30");
+    List<SignalRejectionRepository.BarSideDiagnostic> out = new java.util.ArrayList<>(count);
+    for (int i = 0; i < count; i++) {
+      out.add(
+          new SignalRejectionRepository.BarSideDiagnostic(
+              base.plusMinutes(3L * i), "CE",
+              breadthDiagnostic(advancesForBar.applyAsInt(i), supportsForBar.test(i))));
+    }
+    return out;
+  }
+
+  private void stubSession(List<SignalRejectionRepository.BarSideDiagnostic> verdicts) {
+    when(rejections.sessionBarSideDiagnostics(any(), any())).thenReturn(verdicts);
   }
 
   private DotHealthCanary.DotState breadthState(DotHealthCanary canary) {
@@ -609,7 +633,8 @@ class DotHealthCanaryTest {
     // moving values (10 distinct), rule `advances > 32`, session max EXACTLY 32. The liveness probe
     // is right (alive), the G12 probe is right (not frozen) — and the dot still contributed a
     // constant all session. THIS is the state the near-miss probe exists for.
-    stubRows(breadthScoredRows(10, i -> 23 + i, i -> false)); // advances 23..32, never supported
+    stubRows(breadthScoredRows(10, i -> 23 + i, i -> false)); // window: moving + alive
+    stubSession(breadthVerdicts(10, i -> 23 + i, i -> false)); // session: advances 23..32, 0 support
     DotHealthCanary canary = canary("breadth");
 
     DotHealthCanary.DotState breadth = breadthState(canary);
@@ -618,7 +643,7 @@ class DotHealthCanaryTest {
     assertThat(breadth.neverCrossing()).isTrue();
     assertThat(breadth.detail())
         .contains("NEAR-MISS")
-        .contains("0/10")
+        .contains("0/10 distinct (bar,side) verdicts")
         .contains("session max 32")
         .contains("never crossing");
 
@@ -629,10 +654,51 @@ class DotHealthCanaryTest {
   }
 
   @Test
+  void theNearMissEvidenceIsSessionWideNotTheBoundedLivenessWindow() {
+    // Cross-vendor review Major 1, and the reason this probe does not reuse the bounded window: a
+    // crossing at 09:25 falls off the newest-FETCH_DEPTH tail under fan-out, so a window-fed probe
+    // would flag "session max 32, never crossed" hours after the operand demonstrably crossed at
+    // 40. The mock plays the DB's role exactly: `list` returns the truncated newest rows (no
+    // crossing), `sessionBarSideDiagnostics` returns the whole day (crossing included).
+    stubRows(breadthScoredRows(30, i -> 30 + (i % 3), i -> false)); // tail: advances 30..32, none
+    // Bar-ordered, exactly as the query returns it: the crossings sit on the EARLIEST three bars
+    // (09:15-09:21, advances 40) and every later bar hugs the line. A newest-N tail therefore sees
+    // a textbook near-miss; the session sees a dot that already crossed decisively.
+    stubSession(
+        breadthVerdicts(33, i -> i < 3 ? 40 : 30 + (i % 3), i -> i < 3));
+
+    DotHealthCanary.DotState breadth = breadthState(canary("breadth"));
+    assertThat(breadth.alive()).isTrue();
+    assertThat(breadth.frozen()).isFalse();
+    assertThat(breadth.neverCrossing())
+        .as("the dot crossed decisively earlier today — the tail simply cannot see it")
+        .isFalse();
+    assertThat(breadth.detail()).doesNotContain("NEAR-MISS");
+  }
+
+  @Test
+  void aLoneCrossingDoesNotVetoTheNearMissState() {
+    // Cross-vendor review Major 2: the tolerance exists so the DISCOVERED 0.2%-support session
+    // still flags. Strictness would preserve exactly the blindness G16 was filed to kill, and this
+    // never pages, so a false negative is the expensive direction. 2 of 200 verdicts cross (at 33,
+    // one point over the line) — 1% <= the 2% tolerance, and the extremum still hugs the line.
+    stubRows(breadthScoredRows(10, i -> 30 + (i % 3), i -> false));
+    stubSession(breadthVerdicts(200, i -> i < 2 ? 33 : 23 + (i % 10), i -> i < 2));
+
+    DotHealthCanary.DotState breadth = breadthState(canary("breadth"));
+    assertThat(breadth.neverCrossing()).isTrue();
+    assertThat(breadth.detail())
+        .contains("NEAR-MISS")
+        .contains("2/200 distinct (bar,side) verdicts")
+        .contains("session max 33");
+  }
+
+  @Test
   void aNormallyDiscriminatingDotIsNotNearMiss() {
-    // Mixed supports = the dot discriminated today. A single crossing proves the operand CAN cross,
-    // so the strictly-one-sided requirement reads false however close the extremum sits.
-    stubRows(breadthScoredRows(10, i -> 28 + i, i -> 28 + i > 32)); // advances 28..37, 5 crossings
+    // Mixed supports well past the tolerance = the dot discriminated today, however close the
+    // extremum sits to the line.
+    stubRows(breadthScoredRows(10, i -> 28 + i, i -> 28 + i > 32));
+    stubSession(breadthVerdicts(10, i -> 28 + i, i -> 28 + i > 32)); // advances 28..37, 5 crossings
     assertThat(breadthState(canary("breadth")).neverCrossing()).isFalse();
   }
 
@@ -640,12 +706,23 @@ class DotHealthCanaryTest {
   void aZeroSupportDayFarFromTheLineIsRegimeNotNearMiss() {
     // The 2026-07-31 oi_spurt shape (§3.28 check: "not never-crossing-by-threshold — conjunct-
     // starved, regime"): 0% support with the operand nowhere near the line is a market verdict,
-    // not a telemetry state. Max advances 14 against > 32 (gap 18 > epsilon 3) must NOT flag —
-    // this is what separates the detector from re-litigating the threshold.
-    stubRows(breadthScoredRows(10, i -> 5 + i, i -> false)); // advances 5..14
+    // not a telemetry state. Max advances 14 against > 32 (distance 18 > epsilon 3) must NOT flag
+    // — this is what separates the detector from re-litigating the threshold.
+    stubRows(breadthScoredRows(10, i -> 5 + i, i -> false));
+    stubSession(breadthVerdicts(10, i -> 5 + i, i -> false)); // advances 5..14
     DotHealthCanary.DotState breadth = breadthState(canary("breadth"));
     assertThat(breadth.neverCrossing()).isFalse();
     assertThat(breadth.detail()).doesNotContain("NEAR-MISS");
+  }
+
+  @Test
+  void aRareButDecisiveCrossingIsNotNearMiss() {
+    // The other half of the tolerance: a dot that fires rarely but DECISIVELY (operand 50 against
+    // a > 32 line) is discriminating, not hugging the line. Same 1% support rate as the flagging
+    // case above — only the extremum's distance separates them.
+    stubRows(breadthScoredRows(10, i -> 30 + (i % 3), i -> false));
+    stubSession(breadthVerdicts(200, i -> i < 2 ? 50 : 23 + (i % 10), i -> i < 2));
+    assertThat(breadthState(canary("breadth")).neverCrossing()).isFalse();
   }
 
   @Test
@@ -653,7 +730,8 @@ class DotHealthCanaryTest {
     // The states are disjoint by construction: one distinct value is the G12 freeze (already
     // reported and, for a required CONTINUOUS dot, already paged) — re-flagging it as a near miss
     // would double-report one defect under two names.
-    stubRows(breadthScoredRows(10, i -> 30, i -> false)); // one distinct value, at gap 2 (< epsilon)
+    stubRows(breadthScoredRows(10, i -> 30, i -> false)); // one distinct value, 2 under the line
+    stubSession(breadthVerdicts(10, i -> 30, i -> false));
     DotHealthCanary.DotState breadth = breadthState(canary("breadth"));
     assertThat(breadth.frozen()).isTrue();
     assertThat(breadth.neverCrossing()).isFalse();
@@ -662,19 +740,33 @@ class DotHealthCanaryTest {
 
   @Test
   void theAlwaysCrossingMirrorFlagsWithinEpsilonAboveTheLine() {
-    // The ~100% mirror: every row supported, session min just over the line — the dot never
+    // The ~100% mirror: every verdict supported, session min just over the line — the dot never
     // discriminates either, it adds a constant weight from the other side.
-    stubRows(breadthScoredRows(10, i -> 33 + (i % 3), i -> true)); // advances 33..35, min 33
+    stubRows(breadthScoredRows(10, i -> 33 + (i % 3), i -> true));
+    stubSession(breadthVerdicts(10, i -> 33 + (i % 3), i -> true)); // advances 33..35, min 33
     DotHealthCanary.DotState breadth = breadthState(canary("breadth"));
     assertThat(breadth.neverCrossing()).isTrue();
-    assertThat(breadth.detail()).contains("NEAR-MISS").contains("never discriminating");
+    assertThat(breadth.detail())
+        .contains("NEAR-MISS")
+        .contains("session min 33")
+        .contains("never discriminating");
   }
 
   @Test
-  void tooFewScoredBarsAbstainFromTheNearMissAssertion() {
+  void tooFewScoredVerdictsAbstainFromTheNearMissAssertion() {
     // Same discipline as MIN_FROZEN_BARS: the flag is an assertion, and an un-evidenced assertion
-    // must read false. A perfect near-miss signature on 5 bars is mid-session noise, not a state.
-    stubRows(breadthScoredRows(5, i -> 28 + i, i -> false)); // 5 bars < MIN_NEAR_MISS_BARS
+    // must read false. A perfect near-miss signature on 5 verdicts is noise, not a state.
+    stubRows(breadthScoredRows(10, i -> 28 + (i % 5), i -> false));
+    stubSession(breadthVerdicts(5, i -> 28 + i, i -> false)); // 5 < MIN_NEAR_MISS_VERDICTS
     assertThat(breadthState(canary("breadth")).neverCrossing()).isFalse();
+  }
+
+  @Test
+  void aDeadOrFrozenDotNeverPaysForTheSessionWideRead() {
+    // The session read is an EXTRA query on a 60s-polled endpoint, so it must not ride on every
+    // request. A dead breadth (0/0 sentinel) cannot reach the near-miss branch at all.
+    stubRows(row("{\"macro\":{\"advances\":0,\"declines\":0}}"));
+    canary("breadth").evaluate();
+    verify(rejections, org.mockito.Mockito.never()).sessionBarSideDiagnostics(any(), any());
   }
 }

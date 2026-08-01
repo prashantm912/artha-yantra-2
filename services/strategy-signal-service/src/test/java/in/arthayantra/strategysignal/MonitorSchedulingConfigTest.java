@@ -69,10 +69,45 @@ class MonitorSchedulingConfigTest {
 
   @Test
   void productionDetectorsTargetTheMonitorScheduler() throws NoSuchMethodException {
+    // PartialBucketCanary is deliberately absent — it left this pool at G9, see
+    // thePartialBucketCanaryOwnsItsOwnSchedulerBecauseItDoesExternalIo below.
     assertBoundToMonitorScheduler(SubscriberHealthCanary.class, "sweep");
-    assertBoundToMonitorScheduler(PartialBucketCanary.class, "sweep");
     assertBoundToMonitorScheduler(DotHealthCanary.class, "sweep");
     assertBoundToMonitorScheduler(StrategyCoverageWatchdog.class, "sweep");
+  }
+
+  /**
+   * G9: {@code PartialBucketCanary} gained two external dependencies — an instrument-master lot-size
+   * lookup and a Redis-backed store for the deferred straddle half — so it can no longer sit on the
+   * pool fenced for detectors that never make a blocking call. Catching the exception is NOT
+   * containment: a STALLED call starves every sibling detector for as long as it hangs.
+   */
+  @Test
+  void thePartialBucketCanaryOwnsItsOwnSchedulerBecauseItDoesExternalIo()
+      throws NoSuchMethodException {
+    Scheduled scheduled =
+        PartialBucketCanary.class.getDeclaredMethod("sweep").getAnnotation(Scheduled.class);
+    assertThat(scheduled).as("PartialBucketCanary.sweep is @Scheduled").isNotNull();
+    assertThat(scheduled.scheduler())
+        .as("it must NOT share the fenced monitor pool once it can block")
+        .isEqualTo("partialBucketTaskScheduler");
+  }
+
+  /** The dedicated partial-bucket pool is distinct from every other scheduler class. */
+  @Test
+  void thePartialBucketSchedulerBeanExistsAndIsIsolated() {
+    runner.run(
+        context -> {
+          ThreadPoolTaskScheduler scheduler =
+              context.getBean("partialBucketTaskScheduler", ThreadPoolTaskScheduler.class);
+          assertThat(scheduler).isNotNull();
+          assertThat(scheduler).isNotSameAs(context.getBean("taskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("monitorTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("swingDetectorTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("evalOutcomeTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("maintenanceTaskScheduler"));
+          assertThat(scheduler).isNotSameAs(context.getBean("telegramTaskScheduler"));
+        });
   }
 
   @Test

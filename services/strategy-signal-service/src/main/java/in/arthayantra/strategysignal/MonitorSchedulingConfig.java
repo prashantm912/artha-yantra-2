@@ -56,6 +56,10 @@ public class MonitorSchedulingConfig {
    * at most one bounded local-Postgres read (DotHealthCanary: today's newest 40 rejection rows, LIMIT
    * 40). None makes an external-broker HTTP call with multi-attempt retries the way market-data's
    * session/contract probes do, so no sweep holds this thread long enough to starve a sibling.
+   * {@code PartialBucketCanary} left this pool at G9 when it acquired external dependencies — see
+   * {@link #partialBucketTaskScheduler()}. <b>A detector that gains ANY blocking call must move off
+   * this pool too; catching the exception is not containment, because a STALLED call starves every
+   * sibling while it hangs.</b>
    * Detectors bind by qualifier/bean-name; their recovery triggers stay off-pool
    * ({@code SignalEngine.forceResubscribe} only enqueues on the recovery executor and returns).
    */
@@ -64,6 +68,25 @@ public class MonitorSchedulingConfig {
     ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
     scheduler.setPoolSize(1);
     scheduler.setThreadNamePrefix("monitor-sched-");
+    scheduler.setDaemon(true);
+    return scheduler;
+  }
+
+  /**
+   * A single daemon thread owned solely by {@code PartialBucketCanary}. It was a pure in-memory
+   * detector on {@code monitorTaskScheduler} until G9 gave it two external dependencies — an
+   * instrument-master lot-size lookup and a Redis-backed store for the at-most-one deferred
+   * straddle half — and the monitor pool is fenced for detectors that never make a blocking call.
+   * The lot lookup is already non-blocking (cache read + off-thread prefetch) and the Redis calls
+   * are individually time-bounded, so this pool exists to contain the residual: a slow or stalled
+   * Redis must delay only this canary's own next sweep, never {@code SubscriberHealthCanary} or
+   * {@code DotHealthCanary} sitting beside it.
+   */
+  @Bean
+  public ThreadPoolTaskScheduler partialBucketTaskScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("partial-bucket-sched-");
     scheduler.setDaemon(true);
     return scheduler;
   }
@@ -92,7 +115,7 @@ public class MonitorSchedulingConfig {
    *
    * <p><b>Why not {@code monitorTaskScheduler}.</b> That pool is fenced for pure liveness DETECTORS.
    * The catch-up has money effects and blocking I/O; putting it there could starve
-   * {@code SubscriberHealthCanary}, {@code PartialBucketCanary}, and {@code DotHealthCanary} exactly
+   * {@code SubscriberHealthCanary} and {@code DotHealthCanary} exactly
    * when the recovery path is slow. <b>Why not {@code swingDetectorTaskScheduler}.</b> Same fence
    * from the other side: a multi-minute replay parked on the detector thread would suppress the
    * next-morning missed-batch page — the detector must keep firing precisely while recovery runs.

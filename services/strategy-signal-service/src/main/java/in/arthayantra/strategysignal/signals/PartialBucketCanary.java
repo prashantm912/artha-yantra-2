@@ -39,11 +39,17 @@ import org.springframework.stereotype.Component;
  * edge and the edge itself is credited to the earlier bucket by the broker and the later one by
  * tick-agg, so consecutive buckets carry equal-and-opposite lot-multiple skews (measured ≤8 lots =
  * 520 on 35 of 37 events, 2026-07-24). A mismatch is treated as benign only when it clears BOTH
- * gates: at most the absolute tolerance (default 650 = 10 NIFTY lots) AND at most 10% of the
- * expected 1m sum — the relative gate keeps a frozen partial on a genuinely THIN bucket (e.g. 400
- * frozen of a true 1,000) firing even though its absolute shortfall is small. The frozen
+ * gates: at most the absolute tolerance — whose basis SCALES with bar size (G9/T23, 2026-07-29:
+ * the straddle residue is proportional to bucket volume, measured 2.4–3.7% of a thick opening
+ * bar's 1m sum across four sessions, so a fixed 650 alarmed on provably benign events; the arm is
+ * {@code max(volume-tolerance, volume-tolerance-pct% of the expected 1m sum)}, default floor 650 =
+ * 10 NIFTY lots, default pct 5) — AND at most 10% of the expected 1m sum. The relative gate keeps
+ * a frozen partial on a genuinely THIN bucket (e.g. 400 frozen of a true 1,000) firing even though
+ * its absolute shortfall is small, and the floor keeps thin-bar behavior identical to the fixed
+ * gate ({@code max} only exceeds 650 on sums above 13,000 at the default pct). The frozen
  * first-minute signature (~2/3 of the bucket missing) fails both gates on any bar. Override the
- * absolute gate live via {@code artha.signals.partial-bucket-canary.volume-tolerance}.
+ * absolute gate live via {@code artha.signals.partial-bucket-canary.volume-tolerance} (floor) +
+ * {@code ...volume-tolerance-pct} (scaling; 0 restores the fixed-absolute gate).
  *
  * <p>Depends ONLY on {@link LiveSeriesStore} (never {@link SignalEngine}) and shares the engine's
  * on/off gate ({@code artha.signals.engine-enabled}, default on): the 3m series only exist when the
@@ -66,19 +72,26 @@ public class PartialBucketCanary {
   private final Clock clock;
   private final Counter mismatches;
   private final long volumeTolerance;
+  private final double volumeTolerancePct;
   // Once per (series, bucket): the last completed 3m bucket already flagged for each 3m series.
   private final Map<SeriesKey, Instant> flagged = new ConcurrentHashMap<>();
 
-  /** Wires the shared series store, the clock, the meter and the (tunable) exact-sum tolerance. */
+  /**
+   * Wires the shared series store, the clock, the meter and the (tunable) absolute-arm basis: a
+   * fixed floor plus a percent-of-expected-sum scale (0 = the pre-G9 fixed-absolute gate).
+   */
   public PartialBucketCanary(
       LiveSeriesStore store,
       Clock clock,
       MeterRegistry meterRegistry,
-      @Value("${artha.signals.partial-bucket-canary.volume-tolerance:650}") long volumeTolerance) {
+      @Value("${artha.signals.partial-bucket-canary.volume-tolerance:650}") long volumeTolerance,
+      @Value("${artha.signals.partial-bucket-canary.volume-tolerance-pct:5.0}")
+          double volumeTolerancePct) {
     this.store = store;
     this.clock = clock;
     this.mismatches = meterRegistry.counter("ay_signal_partial_bucket_mismatch_total");
     this.volumeTolerance = volumeTolerance;
+    this.volumeTolerancePct = volumeTolerancePct;
   }
 
   /** Sweeps every warmed 3m series, comparing its last completed bar to the 1m sum. */
@@ -126,10 +139,15 @@ public class PartialBucketCanary {
     }
     long actual = last.volume();
     long diff = Math.abs(actual - expected);
-    // benign needs BOTH gates: ≤ the absolute lot tolerance AND ≤ 10% of the expected sum — the
-    // relative gate keeps a frozen partial on a thin bucket firing (its absolute shortfall is small
-    // but its relative one is ~2/3); a zero-volume expected sum tolerates only an exact match.
-    if (diff <= volumeTolerance && diff * 10L <= expected) {
+    // benign needs BOTH gates: ≤ the absolute arm — whose basis scales with bar size (G9/T23: the
+    // benign boundary-straddle residue is proportional to bucket volume, so the fixed 650 alarmed
+    // at 2.4–3.7% of every thick opening bar; the floor keeps thin-bar behavior identical and
+    // pct=0 restores the fixed gate) — AND ≤ 10% of the expected sum. The relative gate keeps a
+    // frozen partial on a thin bucket firing (its absolute shortfall is small but its relative one
+    // is ~2/3); a zero-volume expected sum tolerates only an exact match.
+    long absoluteTolerance =
+        Math.max(volumeTolerance, (long) (expected * volumeTolerancePct / 100.0));
+    if (diff <= absoluteTolerance && diff * 10L <= expected) {
       flagged.remove(threeMinKey); // healthy for this series — allow the next bucket to re-flag
       return;
     }

@@ -232,10 +232,12 @@ Run in order; each answers one question. Canned SQL in §6.
     docker logs ay-strategy-signal-service --since <today>T03:40:00Z --until <today>T10:00:00Z 2>&1 \
       | grep -oE "canary: [A-Z]+:[A-Z0-9]+@3m|shortfall -?[0-9]+" | paste - -
     ```
-    Post-B2, any WARN is signal: the benign ≤10-lot residue is absorbed by the default tolerance
-    (650 absolute AND ≤10% of the expected sum — a thin frozen bar still fires), so a surviving WARN
-    means either the frozen-partial regression (persistent one-directional ~⅔ shortfall) or a new
-    attribution defect. Investigate, don't tolerate-away.
+    Post-B2 (and post-G9, which made the absolute arm's basis scale with bar size — the straddle
+    residue is proportional, measured 2.4–3.7% of a thick opening bar), any WARN is signal: benign
+    is diff ≤ max(650, 5% of the expected sum) AND ≤10% of the expected sum — a thin frozen bar
+    still fires on the unchanged relative arm — so a surviving WARN means either the frozen-partial
+    regression (persistent one-directional ~⅔ shortfall) or a new attribution defect. Investigate,
+    don't tolerate-away.
 18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
     2026-07-27) — the live scalper signal series is the **dated front future**, and
     `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27

@@ -14,8 +14,20 @@
 # `worktree-agent-abb02bf43adbb895d` — the parked, genuinely-unmerged swing catch-up — survives on
 # every count.
 #
-# Regression test: tools/git-prune-merged-test.sh (see branch_work_is_in_main below for the bug it
-# pins — this section was INERT until 2026-07-30).
+# ⚠️ "Never pushed" is detected by branch.<b>.merge, NOT by "does branch.<b>.remote exist" (fixed
+# 2026-08-01 — the old check made this a false-DELETE hazard, the one failure direction this script
+# must never take). Every worktree this repo dispatches is cut with `git worktree add <path> -b
+# <branch> origin/main`, which sets branch.<branch>.remote=origin as a SIDE EFFECT of tracking the
+# BASE branch — a never-pushed branch already "has a remote configured" and slipped through the old
+# guard as if it had been pushed, clean, and ready to delete, sometimes before its agent had written a
+# single file. Pushing the branch itself sets branch.<branch>.merge=refs/heads/<branch>; tracking
+# origin/main at creation time sets it to refs/heads/main instead — any other value (including unset)
+# means never pushed. A worktree whose HEAD still equals origin/main (nothing committed in it yet) is
+# kept on that basis alone too, as a second, independent line of defense.
+#
+# Regression test: tools/git-prune-merged-test.sh (see branch_work_is_in_main below for the
+# squash-merge bug it pins — that section was INERT until 2026-07-30 — and the worktree loop above
+# for the never-pushed-worktree false-DELETE it pins, fixed 2026-08-01).
 #
 # Usage:  bash tools/git-prune-merged.sh          # report + prune
 #         bash tools/git-prune-merged.sh --dry    # report only
@@ -43,9 +55,19 @@ while read -r wt_path; do
     kept+=("$branch (remote branch still exists)")
     continue
   fi
-  # No upstream configured at all = never pushed = local WIP. Never auto-delete someone's WIP.
-  if ! git config --get "branch.$branch.remote" >/dev/null 2>&1; then
+  # "Never pushed" is branch.<b>.merge != refs/heads/<b> — NOT "no branch.<b>.remote configured".
+  # See the file header for why the remote-only check was wrong. Anything other than the branch's
+  # own ref (including unset) means never pushed = local WIP. Never auto-delete someone's WIP.
+  upstream_merge="$(git config --get "branch.$branch.merge" 2>/dev/null || true)"
+  if [ "$upstream_merge" != "refs/heads/$branch" ]; then
     kept+=("$branch (never pushed — local WIP)")
+    continue
+  fi
+  # Second, independent line of defense: a worktree whose HEAD is still exactly origin/main has had
+  # zero commits made in it — a freshly-cut worktree and an abandoned empty one are indistinguishable
+  # by content, so the safe reading is KEEP regardless of what the tracking config says.
+  if [ "$(git -C "$wt_path" rev-parse HEAD 2>/dev/null || true)" = "$(git rev-parse origin/main 2>/dev/null || true)" ]; then
+    kept+=("$branch (HEAD == origin/main — nothing has happened here yet)")
     continue
   fi
   if [ -n "$(git -C "$wt_path" status --porcelain)" ]; then

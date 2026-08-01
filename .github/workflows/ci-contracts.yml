@@ -116,6 +116,15 @@
 #   services/<svc>/target/contracts/<svc>.openapi.json for every Java inventory entry and fails
 #   loudly if it is absent. Note this is the BRANCH side only - it asserts the artifact exists,
 #   not that any particular gate compared it.
+#   STILL NOT CAUGHT, and left open DELIBERATELY: a brand-new service's FIRST PR gets no hard
+#   spec-vs-code comparison. Both merge-base gates correctly `continue` for it (there is no base
+#   spec, so there is genuinely no compatibility question to ask), the capture assertion only
+#   proves the artifact EXISTS, and the drift check that would compare it to the committed spec
+#   is warning-only. So a first-PR spec can disagree with its own code and nothing goes red. The
+#   fix is to give the gates a "new service" comparison path - committed vs captured, on the
+#   branch alone - which is a DESIGN CHANGE about what these gates are for, not a bug fix, and it
+#   deserves its own decision rather than riding in on one. Recorded here because this header is
+#   what a future session trusts.
 #   STILL POSSIBLE TO MISS, stated because a future session will trust this header: a service that
 #   never commits an OpenAPI spec at all gets no CONTRACT checking - the inventory forces it to be
 #   declared in EXEMPT_SERVICES, so it is visible and deliberate, but declaring it does not test

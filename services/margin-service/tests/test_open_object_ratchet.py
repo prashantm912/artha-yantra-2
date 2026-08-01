@@ -24,6 +24,8 @@ BLIND SPOTS: this sees only what ``app.openapi()`` enumerates, so a route exclud
 deliberately out, since the question is what we PUBLISH.
 """
 
+import json
+import pathlib
 from typing import Any
 
 from app.main import app
@@ -71,21 +73,39 @@ DESCENT = {
 
 # Subschema-bearing keywords deliberately NOT descended, each with the reason it publishes no wire
 # location.
+# Why these can stay PROSE while `$ref` needed asserted behaviour: an accidental descent into
+# propertyNames / not / if would invent a location that does not exist, and a wrong location fails
+# LOUDLY -- the exact-set assertion names it immediately. `$ref` failed the other way: skipping its
+# siblings reported one location too FEW, silently, which is indistinguishable from correctness. A
+# judgement whose failure mode is silent needs an assertion; one whose failure mode is loud can be
+# argued in a comment.
 NOT_DESCENDED = {
-    "$ref": "resolved at the reference site instead, and reported there as `-> Name`",
     "propertyNames": "constrains key NAMES, which are strings; no object is published there",
     "not": "describes what the value is NOT; nothing is published at that position",
     "if": "a condition that is tested, never itself published (`then`/`else` ARE descended)",
+    "$defs": "a REUSE container; its members are published only where something $refs them, and "
+             "that path is covered at the reference site",
+    "contentSchema": "describes the decoded content of a STRING instance, not an object published "
+                     "at this position (annotation-only at 2020-12)",
 }
 
-# Every keyword in JSON Schema 2020-12 / OpenAPI 3.1 whose value contains subschema(s). A closed
-# structural fact about the FORMAT, not a semantic judgement -- which is what makes it a defensible
-# list where the validation-semantics tables that preceded it were not.
-SUBSCHEMA_BEARING_KEYWORDS = frozenset({
-    "properties", "patternProperties", "additionalProperties", "unevaluatedProperties",
-    "propertyNames", "dependentSchemas", "items", "prefixItems", "contains", "unevaluatedItems",
-    "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "$ref",
-})
+# Every keyword in JSON Schema 2020-12 whose value contains subschema(s), READ from
+# contracts/json-schema-2020-12-keywords.json, which tools/derive-json-schema-keywords.py DERIVES
+# from the published vocabulary meta-schemas.
+#
+# It is read rather than typed because the hand-written version was CIRCULAR: it existed to prove no
+# keyword arrives unclassified, and compared the classification against another list maintained by
+# the same hand -- so a keyword could be missing from both and the equality still passed. It was:
+# `$defs` and `contentSchema` were absent and `$ref` was wrongly present ($ref takes a URI STRING,
+# not a subschema, which is why reference handling is a separate axis with its own assertions).
+#
+# BOUNDED CLAIM: the derivation's dependency is a dev-machine package, so this is not re-derived per
+# CI run. Guaranteed: mechanically derived from the normative meta-schemas, one command to redo. Not
+# guaranteed: freshness against a future dialect.
+_KEYWORD_ARTIFACT = (pathlib.Path(__file__).resolve().parents[3]
+                     / "contracts" / "json-schema-2020-12-keywords.json")
+SUBSCHEMA_BEARING_KEYWORDS = frozenset(
+    json.loads(_KEYWORD_ARTIFACT.read_text(encoding="utf-8"))["subschemaBearing"])
 
 
 def _nonempty(value):
@@ -215,7 +235,22 @@ def _is_open(node, schemas: dict = {}) -> bool:
     return not _discloses_key_information(node, schemas)
 
 
-def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: set) -> None:
+
+def _resolve_pointer(root, pointer: str):
+    """Resolve a local JSON pointer (``/components/schemas/X``, ``/$defs/X``) or return None."""
+    current = root
+    for raw in pointer.split("/"):
+        if not raw:
+            continue
+        token = raw.replace("~1", "/").replace("~0", "~")
+        if not isinstance(current, dict) or token not in current:
+            return None
+        current = current[token]
+    return current
+
+
+def _walk(root: dict, schemas: dict, node: Any, where: str, pointer: str,
+          found: set, refs: set) -> None:
     if node is None:
         return
     if not isinstance(node, dict):
@@ -227,17 +262,32 @@ def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: 
         return
     ref = node.get("$ref")
     if ref is not None:
-        if not ref.startswith(COMPONENT_PREFIX):
-            return
-        name = ref[len(COMPONENT_PREFIX) :]
         # A reference to a component that IS an open object makes THIS SITE the opacity, not the
         # component: freezing the name once would authorise unlimited further uses of it.
-        if _is_open(schemas.get(name), schemas):
-            found.add(f"{where}{pointer} -> {name}")
+        if ref.startswith(COMPONENT_PREFIX):
+            name = ref[len(COMPONENT_PREFIX) :]
+            component = schemas.get(name)
+            if component is None:
+                # A DANGLING reference publishes a shape nothing can verify: report it.
+                found.add(f"{where}{pointer} -> {ref}")
+            elif _is_open(component, schemas):
+                found.add(f"{where}{pointer} -> {name}")
+            else:
+                refs.add(name)
+        elif ref.startswith("#/"):
+            # Any other LOCAL pointer (#/$defs/X and the rest) is resolved rather than ignored.
+            resolved = _resolve_pointer(root, ref[1:])
+            if resolved is None or _is_open(resolved, schemas):
+                found.add(f"{where}{pointer} -> {ref}")
         else:
-            refs.add(name)
-        return
-    if _is_open(node, schemas):
+            # External URIs, $dynamicRef and $recursiveRef cannot be resolved from the captured
+            # document. FAIL LOUDLY rather than treating an unverifiable target as safe.
+            found.add(f"{where}{pointer} -> UNRESOLVABLE {ref}")
+        # DO NOT RETURN. At 2020-12 `$ref` is an applicator ALONGSIDE its siblings, not a
+        # replacement for them (that was draft-07). Returning here meant a frozen reference site
+        # absorbed any opaque sibling for free -- the reference-site allowance hole this test
+        # closed once already, re-entering through a different door.
+    elif _is_open(node, schemas):
         found.add(where + pointer)
         return
     # DESCENT IS DATA, NOT CODE -- iterate the table rather than restating it, so a keyword
@@ -248,12 +298,12 @@ def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: 
         value = node[keyword]
         if kind == "map" and isinstance(value, dict):
             for key, child in value.items():
-                _walk(schemas, child, where, pointer + template.format(k=key), found, refs)
+                _walk(root, schemas, child, where, pointer + template.format(k=key), found, refs)
         elif kind == "list" and isinstance(value, list):
             for index, child in enumerate(value):
-                _walk(schemas, child, where, pointer + template.format(i=index), found, refs)
+                _walk(root, schemas, child, where, pointer + template.format(i=index), found, refs)
         elif kind == "schema":
-            _walk(schemas, value, where, pointer + template, found, refs)
+            _walk(root, schemas, value, where, pointer + template, found, refs)
 
 
 def _open_objects() -> set:
@@ -279,7 +329,7 @@ def _scan(spec: dict) -> set:
                 where = f"{method.upper()} {path} {code}"
                 for media in (response.get("content") or {}).values():
                     if media.get("schema") is not None:
-                        _walk(schemas, media["schema"], where, "", found, roots)
+                        _walk(spec, schemas, media["schema"], where, "", found, roots)
 
     seen: set = set()
     queue = list(roots)
@@ -289,7 +339,7 @@ def _scan(spec: dict) -> set:
             continue
         seen.add(name)
         refs: set = set()
-        _walk(schemas, schemas.get(name), f"#{name}", "", found, refs)
+        _walk(spec, schemas, schemas.get(name), f"#{name}", "", found, refs)
         queue.extend(refs - seen)
     return found
 
@@ -555,3 +605,38 @@ def test_every_subschema_keyword_is_classified():
         "pointer, or to NOT_DESCENDED with the reason it publishes no wire location."
     )
     assert not (set(DESCENT) & set(NOT_DESCENDED))
+
+
+def test_a_reference_does_not_absorb_its_opaque_siblings():
+    """``$ref`` does NOT replace its siblings at 2020-12 -- it applies alongside them.
+
+    Skipping them meant a frozen reference site absorbed any opaque sibling for free, which is the
+    reference-site allowance hole this ratchet closed once already, re-entering by a different door.
+    """
+    spec = {
+        "paths": {
+            "/typed-target": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "$ref": "#/components/schemas/Typed", "properties": {"payload": True}}}}}}}},
+            "/open-target": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "$ref": "#/components/schemas/Open", "properties": {"payload": True}}}}}}}},
+            "/defs-ref": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "$ref": "#/$defs/Open"}}}}}}},
+            "/external": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "$ref": "https://example.test/x.json#/Foo"}}}}}}},
+            "/dangling": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "$ref": "#/components/schemas/Missing"}}}}}}},
+        },
+        "$defs": {"Open": True},
+        "components": {"schemas": {
+            "Typed": {"type": "object", "properties": {"a": {"type": "string"}}},
+            "Open": True,
+        }},
+    }
+    assert _scan(spec) == {
+        "GET /typed-target 200.payload",        # a TYPED target no longer hides an opaque sibling
+        "GET /open-target 200 -> Open",         # an OPEN target reports the site AND the sibling
+        "GET /open-target 200.payload",
+        "GET /defs-ref 200 -> #/$defs/Open",    # a local pointer outside components is resolved
+        "GET /external 200 -> UNRESOLVABLE https://example.test/x.json#/Foo",
+        "GET /dangling 200 -> #/components/schemas/Missing",
+    }

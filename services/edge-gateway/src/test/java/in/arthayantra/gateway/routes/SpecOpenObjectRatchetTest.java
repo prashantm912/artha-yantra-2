@@ -195,6 +195,15 @@ import org.junit.jupiter.api.Test;
  * three redden. <b>When the same defect shape recurs, stop fixing instances and assert the
  * property.</b>
  *
+ * <p>⚠️ And the round after THAT found the flaw one level up: the exhaustiveness assertion compared
+ * the classification against a HAND-WRITTEN inventory, so it inherited that list's blind spots —
+ * a keyword could be missing from BOTH and the equality still passed. It was: {@code $defs} and
+ * {@code contentSchema} were absent from both, and {@code $ref} was wrongly present. Measured, with
+ * the inventory as the only variable: the historical classification PASSES against the hand list
+ * and FAILS against the derived one. The inventory is now generated from the published 2020-12
+ * vocabulary meta-schemas. <b>An invariant asserted against a list someone wrote is only as good as
+ * the list; source it, or state the bound.</b>
+ *
  * <h2>⚠️ This test's OWN blind spot</h2>
  *
  * <p><b>It sees only what the capture produced, and only as of the last commit of it.</b> Three
@@ -669,7 +678,7 @@ class SpecOpenObjectRatchetTest {
    * test above only proves the keywords somebody remembered to list.
    */
   @Test
-  void everySubschemaKeywordIsClassified() {
+  void everySubschemaKeywordIsClassified() throws IOException {
     Set<String> classified = new TreeSet<>(DESCENT.keySet());
     classified.addAll(NOT_DESCENDED.keySet());
     assertThat(classified)
@@ -678,35 +687,128 @@ class SpecOpenObjectRatchetTest {
                 + " with its pointer, or to NOT_DESCENDED with the reason it publishes no wire"
                 + " location.",
             classified)
-        .containsExactlyInAnyOrderElementsOf(SUBSCHEMA_BEARING_KEYWORDS);
+        .containsExactlyInAnyOrderElementsOf(subschemaBearingKeywords());
     assertThat(DESCENT.keySet()).doesNotContainAnyElementsOf(NOT_DESCENDED.keySet());
   }
 
   /**
-   * Every keyword in JSON Schema 2020-12 / OpenAPI 3.1 whose value contains subschema(s). A closed
-   * structural fact about the FORMAT — not a semantic judgement — which is what makes it a
-   * defensible list where the validation-semantics tables that preceded it were not.
+   * Every keyword in JSON Schema 2020-12 whose value contains subschema(s) — read from {@code
+   * contracts/json-schema-2020-12-keywords.json}, which {@code tools/derive-json-schema-keywords.py}
+   * DERIVES from the published vocabulary meta-schemas.
+   *
+   * <p>⚠️ It is read rather than typed because the hand-written version of this constant was
+   * CIRCULAR: it existed to prove no keyword arrives unclassified, and compared the classification
+   * against another list maintained by the same hand — so a keyword could be missing from both and
+   * the equality still passed. It was: {@code $defs} and {@code contentSchema} were absent, and
+   * {@code $ref} was wrongly present ({@code $ref} takes a URI STRING, not a subschema, which is
+   * why reference handling is a separate axis with its own assertions below). An invariant asserted
+   * against a hand-list inherits the hand-list's blind spots.
+   *
+   * <p><b>Bounded claim:</b> the derivation's dependency is a dev-machine package, so this is NOT
+   * re-derived per CI run. Guaranteed: the list was mechanically derived from the normative
+   * meta-schemas, and re-deriving is one command. NOT guaranteed: freshness against a future
+   * dialect — which {@link #everyCommittedSpecUsesTheDialectTheInventoryWasDerivedFor} catches.
    */
-  private static final Set<String> SUBSCHEMA_BEARING_KEYWORDS =
-      Set.of(
-          "properties",
-          "patternProperties",
-          "additionalProperties",
-          "unevaluatedProperties",
-          "propertyNames",
-          "dependentSchemas",
-          "items",
-          "prefixItems",
-          "contains",
-          "unevaluatedItems",
-          "allOf",
-          "anyOf",
-          "oneOf",
-          "not",
-          "if",
-          "then",
-          "else",
-          "$ref");
+  private static Set<String> subschemaBearingKeywords() throws IOException {
+    JsonNode artifact =
+        new ObjectMapper()
+            .readTree(
+                Files.readString(
+                    findRepoRoot().resolve("contracts/json-schema-2020-12-keywords.json")));
+    Set<String> keywords = new TreeSet<>();
+    artifact.path("subschemaBearing").forEach(k -> keywords.add(k.asText()));
+    assertThat(keywords).as("derived keyword inventory").isNotEmpty();
+    return keywords;
+  }
+
+
+  /** Resolves a local JSON pointer ({@code /components/schemas/X}, {@code /$defs/X}) or null. */
+  private static JsonNode resolvePointer(JsonNode root, String pointer) {
+    JsonNode current = root;
+    for (String raw : pointer.split("/")) {
+      if (raw.isEmpty()) {
+        continue;
+      }
+      String token = raw.replace("~1", "/").replace("~0", "~");
+      current = current.get(token);
+      if (current == null) {
+        return null;
+      }
+    }
+    return current;
+  }
+
+  /**
+   * {@code $ref} does NOT replace its siblings at 2020-12 — it applies alongside them. Skipping
+   * them meant a frozen reference site absorbed any opaque sibling for free, which is the
+   * reference-site allowance hole this test closed once already, re-entering by a different door.
+   */
+  @Test
+  void aReferenceDoesNotAbsorbItsOpaqueSiblings() throws Exception {
+    String spec =
+        """
+        {
+          "paths": {
+            "/typed-target":  {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                                {"$ref": "#/components/schemas/Typed",
+                                 "properties": {"payload": true}}}}}}}},
+            "/open-target":   {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                                {"$ref": "#/components/schemas/Open",
+                                 "properties": {"payload": true}}}}}}}},
+            "/defs-ref":      {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                                {"$ref": "#/$defs/Open"}}}}}}},
+            "/external":      {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                                {"$ref": "https://example.test/x.json#/Foo"}}}}}}},
+            "/dangling":      {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                                {"$ref": "#/components/schemas/Missing"}}}}}}}
+          },
+          "$defs": {"Open": true},
+          "components": {"schemas": {
+            "Typed": {"type": "object", "properties": {"a": {"type": "string"}}},
+            "Open": true
+          }}
+        }
+        """;
+    assertThat(openObjectsIn(new ObjectMapper().readTree(spec)))
+        .containsExactlyInAnyOrder(
+            // a TYPED target no longer hides an opaque sibling
+            "GET /typed-target 200.payload",
+            // an OPEN target reports the site AND the sibling — two distinct locations
+            "GET /open-target 200 -> Open",
+            "GET /open-target 200.payload",
+            // a local pointer outside components/schemas is resolved, not ignored
+            "GET /defs-ref 200 -> #/$defs/Open",
+            // forms that cannot be resolved from the captured document fail LOUDLY
+            "GET /external 200 -> UNRESOLVABLE https://example.test/x.json#/Foo",
+            "GET /dangling 200 -> #/components/schemas/Missing");
+  }
+
+  /**
+   * The derived inventory is pinned to one dialect and is not re-derived per CI run, so this is the
+   * guard against it going stale: every committed spec must still declare an OpenAPI version whose
+   * default JSON Schema dialect is the 2020-12 one the artifact was derived for.
+   */
+  @Test
+  void everyCommittedSpecUsesTheDialectTheInventoryWasDerivedFor() throws IOException {
+    ObjectMapper mapper = new ObjectMapper();
+    Path contracts = findRepoRoot().resolve("contracts");
+    Set<String> services = new TreeSet<>(FROZEN_OPEN_OBJECTS.keySet());
+    services.addAll(OUT_OF_SCOPE.keySet());
+    for (String service : services) {
+      JsonNode spec = mapper.readTree(Files.readString(contracts.resolve(service + SPEC_SUFFIX)));
+      assertThat(spec.path("openapi").asText(""))
+          .withFailMessage(
+              "%s declares OpenAPI %s. The subschema-keyword inventory in"
+                  + " contracts/json-schema-2020-12-keywords.json was derived for the 2020-12"
+                  + " dialect that OpenAPI 3.1 implies; re-derive it with"
+                  + " tools/derive-json-schema-keywords.py before moving off 3.1.",
+              service, spec.path("openapi").asText(""))
+          .startsWith("3.1");
+      assertThat(spec.path("jsonSchemaDialect").asText("https://json-schema.org/draft/2020-12/schema"))
+          .as("%s jsonSchemaDialect", service)
+          .isEqualTo("https://json-schema.org/draft/2020-12/schema");
+    }
+  }
 
   @Test
   void noResponsePublishesAnUnfrozenOpenObject() throws IOException {
@@ -783,7 +885,7 @@ class SpecOpenObjectRatchetTest {
                   + " "
                   + response.getKey();
           for (JsonNode media : response.getValue().path("content")) {
-            walk(schemas, media.get("schema"), where, "", found, componentRoots);
+            walk(spec, schemas, media.get("schema"), where, "", found, componentRoots);
           }
         }
       }
@@ -797,13 +899,14 @@ class SpecOpenObjectRatchetTest {
         continue;
       }
       Set<String> refs = new TreeSet<>();
-      walk(schemas, schemas.get(name), "#" + name, "", found, refs);
+      walk(spec, schemas, schemas.get(name), "#" + name, "", found, refs);
       refs.stream().filter(r -> !visited.contains(r)).forEach(queue::push);
     }
     return found;
   }
 
   private static void walk(
+      JsonNode root,
       JsonNode schemas,
       JsonNode node,
       String where,
@@ -825,22 +928,40 @@ class SpecOpenObjectRatchetTest {
     }
     JsonNode ref = node.get("$ref");
     if (ref != null) {
-      if (!ref.asText().startsWith(COMPONENT_PREFIX)) {
-        return;
-      }
-      String name = ref.asText().substring(COMPONENT_PREFIX.length());
-      JsonNode target = schemas.get(name);
       // A reference to a component that IS an open object (JsonNode -> `{}`) makes THIS SITE the
       // opacity, not the component: freezing the component name once would authorise unlimited
       // further uses of it. Freezing the site means each new exposure is a new line.
-      if (isOpenObject(target, schemas)) {
-        found.add(where + pointer + " -> " + name);
+      String target = ref.asText();
+      if (target.startsWith(COMPONENT_PREFIX)) {
+        String name = target.substring(COMPONENT_PREFIX.length());
+        JsonNode component = schemas.get(name);
+        if (component == null) {
+          // A DANGLING component reference publishes a shape nothing can verify. Reporting it is
+          // the fails-safe reading; the previous code seeded a closure entry that resolved to
+          // nothing and moved on, which is the silent direction.
+          found.add(where + pointer + " -> " + target);
+        } else if (isOpenObject(component, schemas)) {
+          found.add(where + pointer + " -> " + name);
+        } else {
+          refs.add(name);
+        }
+      } else if (target.startsWith("#/")) {
+        // Any other LOCAL pointer (#/$defs/X, and anything else in-document) is resolved rather
+        // than ignored — silently skipping it published an unchecked shape.
+        JsonNode resolved = resolvePointer(root, target.substring(1));
+        if (resolved == null || isOpenObject(resolved, schemas)) {
+          found.add(where + pointer + " -> " + target);
+        }
       } else {
-        refs.add(name);
+        // External URIs, $dynamicRef and $recursiveRef cannot be resolved from the captured
+        // document. FAIL LOUDLY rather than treating an unverifiable target as safe.
+        found.add(where + pointer + " -> UNRESOLVABLE " + target);
       }
-      return;
-    }
-    if (isOpenObject(node, schemas)) {
+      // ⚠️ DO NOT RETURN. At 2020-12 `$ref` is an applicator ALONGSIDE its siblings, not a
+      // replacement for them (that was draft-07). Returning here meant a frozen reference site
+      // absorbed any opaque sibling for free — the reference-site allowance hole this test closed
+      // once already, re-entering through a different door.
+    } else if (isOpenObject(node, schemas)) {
       found.add(where + pointer);
       return;
     }
@@ -859,6 +980,7 @@ class SpecOpenObjectRatchetTest {
         case MAP -> {
           for (Map.Entry<String, JsonNode> child : value.properties()) {
             walk(
+                root,
                 schemas,
                 child.getValue(),
                 where,
@@ -870,6 +992,7 @@ class SpecOpenObjectRatchetTest {
         case LIST -> {
           for (int i = 0; i < value.size(); i++) {
             walk(
+                root,
                 schemas,
                 value.get(i),
                 where,
@@ -878,7 +1001,8 @@ class SpecOpenObjectRatchetTest {
                 refs);
           }
         }
-        case SCHEMA -> walk(schemas, value, where, pointer + descent.pointer(), found, refs);
+        case SCHEMA ->
+            walk(root, schemas, value, where, pointer + descent.pointer(), found, refs);
       }
     }
   }
@@ -915,14 +1039,28 @@ class SpecOpenObjectRatchetTest {
           Map.entry("oneOf", new Descent(Container.LIST, "/oneOf/{i}")),
           Map.entry("prefixItems", new Descent(Container.LIST, "/prefixItems/{i}")));
 
-  /** Subschema-bearing keywords deliberately NOT descended, each with the reason it publishes no
-   * wire location. */
+  /**
+   * Subschema-bearing keywords deliberately NOT descended, each with the reason it publishes no
+   * wire location.
+   *
+   * <p>⚠️ Why these can stay PROSE while {@code $ref} needed asserted behaviour. An accidental
+   * descent into {@code propertyNames} / {@code not} / {@code if} would invent a location that does
+   * not exist, and a wrong location fails LOUDLY — the exact-set assertion names it immediately.
+   * {@code $ref} failed the other way: skipping its siblings reported one location too FEW,
+   * silently, which is indistinguishable from correctness. <b>A judgement whose failure mode is
+   * silent needs an assertion; one whose failure mode is loud can be argued in a comment.</b>
+   */
   private static final Map<String, String> NOT_DESCENDED =
       Map.of(
-          "$ref", "resolved at the reference site instead, and reported there as `-> Name`",
           "propertyNames", "constrains key NAMES, which are strings; no object is published there",
           "not", "describes what the value is NOT; nothing is published at that position",
-          "if", "a condition that is tested, never itself published (`then`/`else` ARE descended)");
+          "if", "a condition that is tested, never itself published (`then`/`else` ARE descended)",
+          "$defs", "a REUSE container; its members are published only where something $refs them,"
+              + " and that path is covered at the reference site",
+          "contentSchema", "describes the decoded content of a STRING instance, not an object"
+              + " published at this position (annotation-only at 2020-12)");
+
+
 
   /**
    * Does this node put ANY information about the object's KEYS into the published document?

@@ -339,7 +339,10 @@ public class RejectionReader {
    * {@code ivRankNull || !ivRankDot} ({@code ConnectTheDotsScorer:231-234}) — the IV-history rank is
    * unavailable ({@code MarketOiClient:517-522} supplies one only past the 60-trading-day floor), OR
    * the {@code iv-rank-dot} tag is unarmed, which is the DEFAULT since #1179 deliberately stopped
-   * the maturing floor from self-arming the dot on a calendar trigger.
+   * the maturing floor from self-arming the dot on a calendar trigger. (F5 U4b: a strategy carrying
+   * the DEFAULT-OFF {@code dot-null-withheld} tag marks EVERY input-missing dot absent, so that "one
+   * dot" bound holds only while the tag is unarmed — which the loop above does not care about, since
+   * it keys off the serialized flag rather than a dot-name allowlist.)
    *
    * <p>{@code absentFlagged} says whether the row was written after the flag began being serialized.
    * A row written before it has no {@code absent} key at all, so {@code path("absent")} reads every

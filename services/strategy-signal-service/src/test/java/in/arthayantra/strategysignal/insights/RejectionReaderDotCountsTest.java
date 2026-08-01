@@ -18,9 +18,11 @@ import org.junit.jupiter.api.Test;
  * (:284-292) drops an {@code absent} dot from BOTH its numerator and its denominator precisely so a
  * data gap is never scored as evidence against the side — so on a session where {@code iv_rank} has
  * no data the reader reported 17/18 where the scorer's population was 17. Exactly one dot is
- * absent-capable today: {@code iv_rank} ({@code ConnectTheDotsScorer:233-234} is the only 6-arg
- * {@code add} call site, of 22 total). Its withholding condition is {@code ivRankNull ||
- * !ivRankDot} (:231-232) — the IV-history rank is unavailable ({@code MarketOiClient:517-522}
+ * absent-capable on the DEFAULT path: {@code iv_rank} (the one dot the scorer builds by a direct
+ * {@code dots.add(new DotScore(...))} rather than the shared {@code add} helper, whose {@code absent}
+ * is {@code withhold && inputMissing} — false for every other dot until the F5 U4b
+ * {@code dot-null-withheld} tag is armed). Its withholding condition is {@code ivRankNull ||
+ * !ivRankDot} — the IV-history rank is unavailable ({@code MarketOiClient:517-522}
  * supplies one only past the 60-trading-day floor), OR the {@code iv-rank-dot} tag is unarmed, the
  * DEFAULT since #1179 stopped the maturing floor from self-arming the dot. So the miscount bit
  * whenever the dot was withheld for EITHER reason, not on every row unconditionally.

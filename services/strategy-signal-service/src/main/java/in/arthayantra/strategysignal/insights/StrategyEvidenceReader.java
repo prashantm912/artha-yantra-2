@@ -271,10 +271,12 @@ public class StrategyEvidenceReader {
   /**
    * One blocking-rail count in the dossier rejection profile.
    *
-   * <p>⚠️ Shares its simple name with {@code SignalRejectionRepository.RailCount}, and springdoc
-   * collapses both into ONE {@code #/components/schemas/RailCount}. They are structurally identical
-   * today; diverging either one silently rewrites the other's published schema.
+   * <p>{@code @Schema(name)} is load-bearing: {@code SignalRejectionRepository.RailCount} shares
+   * this simple name, and springdoc would collapse both into ONE spec component (task_1c04803f);
+   * the ContractCaptureTest collision assertion fails without the distinct name. The rejections
+   * endpoint's twin keeps the plain {@code RailCount} name (the FE contracts bridge binds it).
    */
+  @Schema(name = "EvidenceRailCount")
   public record RailCount(String rail, long count) {}
 
   /** One open sell-decision row in the dossier. */

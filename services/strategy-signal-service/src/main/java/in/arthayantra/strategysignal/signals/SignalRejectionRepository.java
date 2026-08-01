@@ -127,6 +127,44 @@ public class SignalRejectionRepository {
     return jdbc.query(sql.toString(), this::row, args.toArray());
   }
 
+  /**
+   * One (bar, side) group's representative diagnostic — the G16 near-miss evidence unit.
+   *
+   * <p>A rejection row is per STRATEGY, but the near-miss operands are market-wide scalars scored
+   * per side, so 38 scalpers on one bar produce 38 rows carrying the same verdict. Counting rows
+   * would let fan-out swamp the tally; the (bar, side) pair is the independent observation.
+   */
+  public record BarSideDiagnostic(OffsetDateTime barTime, String side, JsonNode diagnostic) {}
+
+  /**
+   * ONE representative confluence-bearing diagnostic per DISTINCT {@code (bar_time, side)} over a
+   * bounded window — the session-wide evidence the G16 near-miss probe reads (the paged {@link
+   * #list} tail cannot answer a session-wide question: under fan-out its newest-N rows can cover a
+   * handful of bars, so an early crossing ages out and the dot reads never-crossing later the same
+   * session).
+   *
+   * <p>Callers pass an IST-day bound, so the {@code generated_at DESC} index prunes the scan to one
+   * session and the DISTINCT ON collapses fan-out IN THE DATABASE — the result is ~one row per bar
+   * per side, not per strategy. Rows with no {@code confluence} block carry no dot verdicts at all
+   * (early-rail blocks), so they are excluded here rather than fetched and discarded.
+   */
+  public List<BarSideDiagnostic> sessionBarSideDiagnostics(OffsetDateTime from, OffsetDateTime to) {
+    return jdbc.query(
+        """
+        SELECT DISTINCT ON (bar_time, side) bar_time, side, diagnostic
+          FROM signal_rejections
+         WHERE generated_at >= ? AND generated_at < ?
+           AND diagnostic -> 'confluence' IS NOT NULL
+         ORDER BY bar_time, side, id
+        """,
+        (rs, i) ->
+            new BarSideDiagnostic(
+                rs.getObject("bar_time", OffsetDateTime.class),
+                rs.getString("side"),
+                readTree(rs.getString("diagnostic"))),
+        from, to);
+  }
+
   /** Per-rail block counts over an optional window (the "which rail blocks most" rollup). */
   public List<RailCount> railCounts(UUID strategyVersionId, OffsetDateTime from, OffsetDateTime to) {
     StringBuilder sql =
@@ -155,13 +193,11 @@ public class SignalRejectionRepository {
   /**
    * One (rail, count) aggregate row.
    *
-   * <p>⚠️ A SECOND record with this simple name exists — {@code
-   * StrategyEvidenceReader.RailCount}, the dossier rejection profile — and springdoc collapses
-   * duplicate simple names into ONE {@code #/components/schemas/RailCount}. That is safe only while
-   * the two stay structurally identical, which they are today (same components, same order, same
-   * types, neither annotated). Change one and the other's published schema silently changes with it:
-   * rename a component, add a field, or add a {@code @Schema} here and the dossier endpoint starts
-   * publishing it too. Keep them in lockstep or give one a distinct name.
+   * <p>A SECOND record with this simple name exists — {@code StrategyEvidenceReader.RailCount},
+   * the dossier rejection profile. It publishes as {@code EvidenceRailCount} via {@code
+   * @Schema(name)} (task_1c04803f), so the two no longer collapse; this one keeps the plain
+   * {@code RailCount} name because the FE contracts bridge binds it. The ContractCaptureTest
+   * collision assertion now fails any new same-named twin.
    */
   public record RailCount(String rail, long count) {}
 

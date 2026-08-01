@@ -59,6 +59,9 @@ public class OptionsDigestService {
       @Schema(types = {"number", "null"}) BigDecimal drift) {}
 
   /** One top-mover strike (label {@code "57400 PE"}) with its ΔOI-since-open + 4-state read. */
+  // @Schema(name) is load-bearing: OptionsAnalyticsController.StrikeMove shares this simple name
+  // (fields identical TODAY, but identical twins drift — task_1c04803f).
+  @Schema(name = "OptionsDigestStrikeMove")
   public record StrikeMove(String strike, long oiChange, OiInterpretation interpretation) {}
 
   /**

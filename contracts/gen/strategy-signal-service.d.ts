@@ -1925,6 +1925,7 @@ export interface components {
             alive: boolean;
             required: boolean;
             frozen: boolean;
+            neverCrossing: boolean;
             detail: string;
         };
         ShadowVariantListResponse: {
@@ -2115,14 +2116,25 @@ export interface components {
             name: string | null;
             enabled: boolean;
             stage: string;
-            criteria: components["schemas"]["Criterion"][];
+            criteria: components["schemas"]["EvidenceCriterion"][];
             /** Format: date-time */
             graduatedAt: string | null;
             crossingTimeline: components["schemas"]["CrossingEntry"][];
-            rejectionProfile: components["schemas"]["RailCount"][];
+            rejectionProfile: components["schemas"]["EvidenceRailCount"][];
             openSellDecisions: components["schemas"]["OpenSell"][];
             asOf: string;
             notes: string[];
+        };
+        EvidenceCriterion: {
+            name: string;
+            required: string;
+            actual: string;
+            pass: boolean;
+        };
+        EvidenceRailCount: {
+            rail: string;
+            /** Format: int64 */
+            count: number;
         };
         OpenSell: {
             /** Format: int64 */

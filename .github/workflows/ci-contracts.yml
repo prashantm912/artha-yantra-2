@@ -66,6 +66,14 @@
 # so an ordinary new-endpoint PR is unaffected. Escape hatch is the breaking gate's, deliberately
 # ONE mechanism and not a second one: a `Contract break: APPROVED (<reason>)` line in the PR body,
 # `hotfix/*` exempt.
+# BOTH gates anchor that token to a COMPLETE, STANDALONE LINE. Unanchored - as both were until
+# #1183 - it matched anywhere in the body, so a PR that merely QUOTED the token inside a sentence
+# waived the gate. #1183's own body did that while documenting this mechanism. Trailing prose now
+# disqualifies a line; leading indentation does not, and the trailing whitespace class absorbs the
+# CR in GitHub's `\r\n` bodies (without it `$` would never match and the hatch would be dead).
+# Residual, accepted: a token sitting ALONE on its own line inside a fenced code block still
+# counts. That is indistinguishable from an approval without parsing Markdown, and writing the
+# line by itself is what an approver does anyway.
 #   COVERAGE ASYMMETRY - stated because a future session will trust this header. For the four Java
 #   services the branch side is the FRESHLY CAPTURED services/<svc>/target/contracts/*.json, so a
 #   rename is caught even if the author forgot to re-capture the committed spec. optimizer-service
@@ -265,15 +273,29 @@ jobs:
           # What optimizer-service DOES get: the TS-client loop below (which reads the COMMITTED
           # spec, so it transfers unchanged) plus the semantic staleness gate. docs/design/
           # ARTHAYANTRA_2_STAGE_D_BACKTEST_OPTIMIZER.md states exactly that and no more. The
-          # residual gap is real and named there: no merge-base comparison guards this service.
+          # residual gap is real and named there: no merge-base comparison of the DOCUMENT guards
+          # this service - EXCEPT its component NAMES, which the removed-component-name gate below
+          # does compare against the merge base (committed dump on both sides, since there is no
+          # capture artifact; see this file's header for that asymmetry). Everything else about
+          # this service's spec - operations, properties, types - is still unguarded across the
+          # merge base.
           for svc in edge-gateway market-data-service strategy-signal-service backtest-service; do
             echo "=== $svc ==="
             # A spec absent from the merge base = a NEW service. Nothing on main consumes it
             # yet, so there is no compatibility question to answer.
-            if ! git show "$BASE_SHA:contracts/$svc.openapi.json" > "/tmp/basespec/raw-$svc.json" 2>/dev/null; then
+            # EVIDENCE OF ABSENCE, NOT ABSENCE OF A SUCCESSFUL READ - this used to be
+            # `if ! git show … ; then continue`, which read a git error or a failed redirect as
+            # "new service" and silently skipped the spec, reporting green having compared
+            # nothing. Same fix, same shape, as the removed-component-name gate below: the two
+            # must not diverge. `present=$(…)` is a checked assignment, so a git failure aborts
+            # under `set -e`; the extraction is then UNGUARDED.
+            base_path="contracts/$svc.openapi.json"
+            present="$(git ls-tree -r --name-only "$BASE_SHA" -- "$base_path")"
+            if [ -z "$present" ]; then
               echo "::notice::$svc has no spec at the merge base (new service) - nothing to break."
               continue
             fi
+            git show "$BASE_SHA:$base_path" > "/tmp/basespec/raw-$svc.json"
             # task_ade97df8 - RELABEL BOTH SIDES TO 3.0.1 FOR THE DIFF STEP ONLY. openapi-diff
             # 2.1.7 does not diff 3.1 schemas: at 3.1.0 a RENAMED response property reports "No
             # differences. Specifications are equivalent". The same bytes at 3.0.1 report
@@ -323,11 +345,18 @@ jobs:
           # guidance below. An empty BODY simply finds no token, so this still fails CLOSED.
           BODY="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.body // ""' 2>/dev/null || true)"
           REASON='\([^)]*[^)[:space:]][^)]*\)'
-          PATTERN="Contract break:[[:space:]]*APPROVED[[:space:]]*$REASON"
+          # ANCHORED TO A COMPLETE, STANDALONE LINE. Unanchored, the token matched ANYWHERE in the
+          # body, so merely QUOTING it while discussing the mechanism waived the gate - that is not
+          # hypothetical, #1183's own body did exactly that and had to be reworded to avoid
+          # self-approving. Trailing prose now disqualifies the line. Leading indentation is
+          # tolerated (an indented example still counts - see the header), and the trailing
+          # `[[:space:]]*` absorbs the CR that GitHub stores in PR bodies (\r\n line endings), which
+          # would otherwise make `$` never match and disable the escape hatch entirely.
+          PATTERN="^[[:space:]]*Contract break:[[:space:]]*APPROVED[[:space:]]*${REASON}[[:space:]]*$"
 
           if printf '%s' "$BODY" | grep -qE "$PATTERN"; then
             echo "::warning::BREAKING contract change against main in:$broke - allowed by an explicit PR-body approval."
-            printf '%s' "$BODY" | grep -oE "$PATTERN" | head -1
+            printf '%s' "$BODY" | grep -E "$PATTERN" | head -1
             exit 0
           fi
 
@@ -395,12 +424,21 @@ jobs:
           for svc in edge-gateway market-data-service strategy-signal-service backtest-service optimizer-service; do
             echo "=== $svc ==="
             # BASE SIDE is the breaking gate's base side, off the SAME resolved merge base
-            # (steps.mergebase.outputs.sha). Absent there = a new service; nothing on main
-            # references its component names yet.
-            if ! git show "$BASE_SHA:contracts/$svc.openapi.json" > "/tmp/namegate/base-$svc.json" 2>/dev/null; then
+            # (steps.mergebase.outputs.sha).
+            # EVIDENCE OF ABSENCE, NOT ABSENCE OF A SUCCESSFUL READ. `if ! git show … ; then
+            # continue` reads every failure - a git error, an unreadable object, a full /tmp
+            # killing the redirect - as "new service", and silently skips that spec. All five
+            # could skip and the step would still report green: a false green inside the gate
+            # written to prevent false greens. So ASK whether the path exists (a checked
+            # assignment - `var=$(cmd)` takes the command's status, so `set -e` aborts on a git
+            # failure), then extract UNGUARDED so an extraction failure is a hard error.
+            base_path="contracts/$svc.openapi.json"
+            present="$(git ls-tree -r --name-only "$BASE_SHA" -- "$base_path")"
+            if [ -z "$present" ]; then
               echo "::notice::$svc has no spec at the merge base (new service) - no published name can have been dropped."
               continue
             fi
+            git show "$BASE_SHA:$base_path" > "/tmp/namegate/base-$svc.json"
             # BRANCH SIDE is the freshly captured Maven artifact for the Java services, so a
             # forgotten re-capture cannot hide a rename; optimizer-service has no such artifact
             # (Python) and uses its committed dump. NEITHER side is this branch's own committed
@@ -437,15 +475,17 @@ jobs:
           # ---- Escape hatch: THE SAME ONE as the breaking gate, deliberately ------------------
           # Same token, same live-body read (a re-run replays the ORIGINAL event payload, so
           # github.event.pull_request.body would never see a body edited to add it), same
-          # non-empty parenthesised reason. One approval sentence covers both gates; a second
-          # mechanism would just be another thing to forget.
+          # non-empty parenthesised reason, same COMPLETE-LINE anchoring (see the breaking gate's
+          # comment for why the unanchored form waived on a mere quotation). One approval sentence
+          # covers both gates; a second mechanism would just be another thing to forget - so these
+          # three lines must stay byte-identical to their twin above.
           BODY="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.body // ""' 2>/dev/null || true)"
           REASON='\([^)]*[^)[:space:]][^)]*\)'
-          PATTERN="Contract break:[[:space:]]*APPROVED[[:space:]]*$REASON"
+          PATTERN="^[[:space:]]*Contract break:[[:space:]]*APPROVED[[:space:]]*${REASON}[[:space:]]*$"
 
           if printf '%s' "$BODY" | grep -qE "$PATTERN"; then
             echo "::warning::component name(s) REMOVED against main in:$dropped - allowed by an explicit PR-body approval."
-            printf '%s' "$BODY" | grep -oE "$PATTERN" | head -1
+            printf '%s' "$BODY" | grep -E "$PATTERN" | head -1
             exit 0
           fi
 

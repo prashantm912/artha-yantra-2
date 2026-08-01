@@ -276,6 +276,17 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   SEPARATE path-filtered workflows** (`.github/workflows/ci-optimizer.yml`, trigger `paths:
   services/optimizer-service/**`) — NOT in the default `gh pr checks` rollup; a Python PR's ruff+pytest
   gate shows under `gh run list --workflow ci-optimizer.yml`, so don't read its absence as "skipped".
+  ⚠️ **The "Python 3.14 global, no venv" line above NO LONGER HOLDS for the CONTRACT tests** (#1209,
+  2026-08-02): `test_openapi_contract.py` in BOTH optimizer- and margin-service now asserts the running
+  interpreter matches `requirements-dev.lock`, so a plain `python -m pytest` on the ambient interpreter
+  **FAILS BY DESIGN** — measured: ambient fastapi 0.136.3 vs the lockfile's 0.115.6, 2 failed / 1 passed.
+  That is the guard working, not breakage: FastAPI's own generated `ValidationError` schema gains
+  `ctx`/`input` across versions, and the committed margin spec had in fact been captured under the
+  WRONG version before this landed. The failure prints the exact remedy — build a venv from the
+  lockfile (`uv venv --python 3.12 .venv-pinned`, `uv pip install --python .venv-pinned
+  --require-hashes -r requirements-dev.lock`) and run capture/tests through it, never the ambient
+  interpreter. Everything ELSE in those services (ruff, the non-contract tests) still runs fine on the
+  global interpreter, so only the contract tests need the venv.
 - **margin-service (Python SPAN appliance, `/api/v1/margin`) now carries the same two-artifact
   contract gate as optimizer-service** — it was the one service with no committed OpenAPI spec at
   all until closed. `services/margin-service/tests/test_openapi_contract.py` captures BOTH

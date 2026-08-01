@@ -19,9 +19,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * predicate — so a mock-repo unit test cannot pin either; they are asserted here against the real
  * lineage.
  *
- * <p>Shared singleton DB with no per-method cleanup, and every row this suite inserts lands with
- * {@code generated_at = now()} alongside whatever other suites wrote. Every assertion is therefore
- * scoped to THIS method's unique {@code bar_time} instants, never to the raw result size.
+ * <p>⚠️ Every row this suite writes is stamped into a FIXED 2031 window, never {@code now()}, and is
+ * read back through that same window. The shared singleton DB has no per-method cleanup, so a row
+ * left in "today" is visible to every other IT's context — including {@code DotHealthCanary}, whose
+ * sweep would then treat this suite's fixtures as live session evidence. Measured, not theorised:
+ * with these rows landing at {@code now()} the full reactor went red in an unrelated engine IT
+ * (twice, same assertion) and green with this class excluded. Fixed timestamps also make the
+ * assertions independent of the wall clock, which a {@code now()}-relative window is not.
  */
 @SpringBootTest(
     properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
@@ -29,6 +33,11 @@ class SessionBarSideVerdictsIntegrationTest extends StrategySignalIntegrationTes
 
   @Autowired private SignalRejectionRepository rejections;
   @Autowired private JdbcTemplate jdbc;
+
+  /** The isolated read window: a 2031 date no other suite writes into. */
+  private static final OffsetDateTime WINDOW_FROM =
+      OffsetDateTime.parse("2031-03-04T09:15:00+05:30");
+  private static final OffsetDateTime WINDOW_TO = WINDOW_FROM.plusDays(1);
 
   private static final String SCORED =
       "{\"context\":{\"macro\":{\"advances\":31,\"declines\":20}},\"confluence\":{\"dots\":"
@@ -39,73 +48,77 @@ class SessionBarSideVerdictsIntegrationTest extends StrategySignalIntegrationTes
     return jdbc.queryForObject("SELECT id FROM strategy_versions LIMIT 1", UUID.class);
   }
 
-  private long insert(String slug, String side, OffsetDateTime barTime, String diagnostic) {
-    return rejections.insert(
-        versionId(), slug, "NFO", "NIFTY26JULFUT", "3m", side, "confluence-composite",
-        new BigDecimal("31"), new BigDecimal("32"), new BigDecimal("-1"), "advances 31 <= 32",
-        new BigDecimal("0.55"), new BigDecimal("0.60"), diagnostic, barTime);
+  /**
+   * Inserts one rejection and stamps its {@code generated_at} into the fixed window — {@code insert}
+   * defaults that column to {@code now()}, which is exactly what must not be left behind.
+   */
+  private void insertAt(
+      String slug, String side, OffsetDateTime barTime, OffsetDateTime stamp, String diagnostic) {
+    long id =
+        rejections.insert(
+            versionId(), slug, "NFO", "NIFTY26JULFUT", "3m", side, "confluence-composite",
+            new BigDecimal("31"), new BigDecimal("32"), new BigDecimal("-1"), "advances 31 <= 32",
+            new BigDecimal("0.55"), new BigDecimal("0.60"), diagnostic, barTime);
+    jdbc.update("UPDATE signal_rejections SET generated_at = ? WHERE id = ?", stamp, id);
   }
 
-  /** Today's rows, read through a window that brackets `now()` (never a wall-clock IST day —
-   * generated_at is the real clock, so a fixed session window makes the test time-of-day dependent). */
-  private List<SignalRejectionRepository.BarSideDiagnostic> readAroundNow() {
-    OffsetDateTime now = OffsetDateTime.now();
-    return rejections.sessionBarSideDiagnostics(now.minusHours(1), now.plusHours(1));
+  private List<SignalRejectionRepository.BarSideDiagnostic> read() {
+    return rejections.sessionBarSideDiagnostics(WINDOW_FROM, WINDOW_TO);
   }
 
   @Test
   void fanOutAcrossStrategiesCollapsesToOneVerdictPerBarAndSide() {
     // THE reason this read exists as an aggregate: one 3m bar fans out across ~38 scalpers carrying
     // the same market-wide operand, so a row tally would be skewed by how many strategies happened
-    // to evaluate. Twelve rows here — 6 slugs x 2 bars on CE, plus both sides on one bar.
-    OffsetDateTime barOne = OffsetDateTime.parse("2031-03-04T09:18:00+05:30");
+    // to evaluate. Thirteen rows here — 6 slugs x 2 bars on CE, plus a PE row on the first bar.
+    OffsetDateTime barOne = WINDOW_FROM.plusMinutes(3);
     OffsetDateTime barTwo = barOne.plusMinutes(3);
     for (int i = 0; i < 6; i++) {
-      insert("g16-fanout-" + i, "CE", barOne, SCORED);
-      insert("g16-fanout-" + i, "CE", barTwo, SCORED);
+      insertAt("g16-fanout-" + i, "CE", barOne, barOne, SCORED);
+      insertAt("g16-fanout-" + i, "CE", barTwo, barTwo, SCORED);
     }
-    insert("g16-fanout-pe", "PE", barOne, SCORED);
+    insertAt("g16-fanout-pe", "PE", barOne, barOne, SCORED);
 
-    List<SignalRejectionRepository.BarSideDiagnostic> mine =
-        readAroundNow().stream()
+    List<SignalRejectionRepository.BarSideDiagnostic> verdicts =
+        read().stream()
             .filter(g -> g.barTime().isEqual(barOne) || g.barTime().isEqual(barTwo))
             .toList();
 
-    assertThat(mine)
+    assertThat(verdicts)
         .as("13 rows -> 3 verdicts: (barOne,CE), (barOne,PE), (barTwo,CE)")
         .hasSize(3);
-    assertThat(mine)
+    assertThat(verdicts)
         .extracting(g -> g.barTime().toInstant() + "/" + g.side())
         .containsExactlyInAnyOrder(
             barOne.toInstant() + "/CE", barOne.toInstant() + "/PE", barTwo.toInstant() + "/CE");
-    assertThat(mine)
+    assertThat(verdicts)
         .as("the representative row carries the scored breakdown the probe reads")
-        .allSatisfy(g -> assertThat(g.diagnostic().at("/confluence/dots/0/dot").asText())
-            .isEqualTo("breadth"));
+        .allSatisfy(
+            g ->
+                assertThat(g.diagnostic().at("/confluence/dots/0/dot").asText())
+                    .isEqualTo("breadth"));
   }
 
   @Test
   void rowsOutsideTheWindowAndEarlyRailRowsAreExcluded() {
-    OffsetDateTime inWindow = OffsetDateTime.parse("2031-03-05T09:18:00+05:30");
-    OffsetDateTime aged = OffsetDateTime.parse("2031-03-05T09:21:00+05:30");
-    OffsetDateTime contextless = OffsetDateTime.parse("2031-03-05T09:24:00+05:30");
-    insert("g16-window-in", "CE", inWindow, SCORED);
-    long agedId = insert("g16-window-aged", "CE", aged, SCORED);
-    insert("g16-window-early", "CE", contextless, EARLY_RAIL);
-    // Push one row's generated_at out of the read window — the bound is on generated_at, not on
-    // bar_time, so this is the only way to prove the predicate does any work.
-    jdbc.update(
-        "UPDATE signal_rejections SET generated_at = now() - interval '3 hours' WHERE id = ?",
-        agedId);
+    OffsetDateTime inWindow = WINDOW_FROM.plusMinutes(30);
+    OffsetDateTime aged = WINDOW_FROM.plusMinutes(33);
+    OffsetDateTime contextless = WINDOW_FROM.plusMinutes(36);
+    insertAt("g16-window-in", "CE", inWindow, inWindow, SCORED);
+    // same bar_time neighbourhood, but generated_at a day BEFORE the window — the predicate is on
+    // generated_at, so this is the only way to prove it does any work.
+    insertAt("g16-window-aged", "CE", aged, WINDOW_FROM.minusDays(1), SCORED);
+    insertAt("g16-window-early", "CE", contextless, contextless, EARLY_RAIL);
 
-    List<OffsetDateTime> bars = readAroundNow().stream()
-        .map(SignalRejectionRepository.BarSideDiagnostic::barTime)
-        .toList();
+    List<OffsetDateTime> bars =
+        read().stream().map(SignalRejectionRepository.BarSideDiagnostic::barTime).toList();
 
     assertThat(bars).as("inside the window").anySatisfy(b -> assertThat(b).isEqualTo(inWindow));
-    assertThat(bars).as("generated_at outside the window").noneSatisfy(
-        b -> assertThat(b).isEqualTo(aged));
-    assertThat(bars).as("early-rail block carries no dot verdicts at all").noneSatisfy(
-        b -> assertThat(b).isEqualTo(contextless));
+    assertThat(bars)
+        .as("generated_at before the window")
+        .noneSatisfy(b -> assertThat(b).isEqualTo(aged));
+    assertThat(bars)
+        .as("early-rail block carries no dot verdicts at all")
+        .noneSatisfy(b -> assertThat(b).isEqualTo(contextless));
   }
 }

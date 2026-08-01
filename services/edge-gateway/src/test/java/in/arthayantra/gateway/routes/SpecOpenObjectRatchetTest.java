@@ -101,6 +101,34 @@ import org.junit.jupiter.api.Test;
  * DECISION was made: the shape was settled when the field was written. A new opaque decision
  * always writes a new site, and that is what this catches.
  *
+ * <h2>What counts as "no constraint" — enumerated, not guessed</h2>
+ *
+ * <p>Three times now a check on this surface has been beaten by a shape nobody listed: the source
+ * regex could not see a {@code Map} field inside a typed record, this test's first cut aliased
+ * every use of a component to one name, and its second cut called {@code {"title": "x"}}
+ * constrained because it was not literally <code>{}</code>. Each fix enumerated what to CATCH and
+ * left the class open. So the population was censused rather than sampled — every
+ * response-reachable node across all five committed specs that declares no {@code type} and no
+ * {@code properties}, grouped by its exact key set:
+ *
+ * <pre>
+ *   121  ["anyOf", "title"]   constrained (anyOf pins it)
+ *    38  ["anyOf"]            constrained
+ *     4  {}                   OPEN — already caught
+ *     3  ["title"]            OPEN — the 2026-08-02 miss, all three in optimizer (pydantic `Any`)
+ * </pre>
+ *
+ * <p>That is the whole space: 166 candidate nodes, two unconstrained key sets, nothing else. And
+ * the predicate is now written in the fails-SAFE direction — {@link #CONSTRAINING} enumerates what
+ * constrains, so an unrecognised keyword reads as OPEN and fails loudly rather than passing
+ * silently. Shapes reasoned through and confirmed handled: annotation-only in any combination
+ * ({@code description} / {@code default} / {@code example} / {@code deprecated} / bare {@code
+ * nullable}), an empty {@code properties} map, {@code additionalProperties: true} with no type, an
+ * {@code allOf}/{@code anyOf} branch that is itself open (recursed, reported at the branch
+ * pointer), {@code items: {}} (reported at {@code []}), a {@code Map} whose VALUE schema is open
+ * (reported at <code>{}</code>), and a {@code $ref} to an annotation-only component (reported at
+ * the reference site — the same fix as {@code JsonNode}).
+ *
  * <h2>⚠️ This test's OWN blind spot</h2>
  *
  * <p><b>It sees only what the capture produced, and only as of the last commit of it.</b> Three
@@ -244,6 +272,59 @@ class SpecOpenObjectRatchetTest {
               + " read Python) and a HAND-DUMPED spec, so reading its committed file would leave a"
               + " new dict[str, Any] endpoint unguarded until someone re-dumps. Generating the"
               + " document from code in its own suite removes that window entirely.");
+
+  /**
+   * Regression cases for the predicate itself, pinned in the language that owns it (the Python half
+   * carries the mirror of this list). Every "constrains nothing" shape here was reachable from a
+   * real response at some point in this check's short history, and the annotation-only group is the
+   * third distinct way a schema turned out to be open after component-name aliasing and the source
+   * regex's inability to see a field inside a typed record.
+   */
+  @Test
+  void theOpenObjectPredicateRecognisesEveryUnconstrainedShape() throws IOException {
+    ObjectMapper mapper = new ObjectMapper();
+    List<String> open =
+        List.of(
+            "{}", // the empty schema — any JSON at all
+            "{\"title\": \"Response\"}", // ⚠️ annotation-only: pydantic's bare `Any`
+            "{\"description\": \"whatever the handler felt like\"}",
+            "{\"title\": \"X\", \"description\": \"Y\", \"default\": null}",
+            "{\"type\": \"object\"}",
+            "{\"type\": [\"object\", \"null\"]}",
+            "{\"type\": \"object\", \"additionalProperties\": {}}",
+            "{\"type\": \"object\", \"additionalProperties\": true}",
+            "{\"type\": \"object\", \"properties\": {}}", // an EMPTY properties map promises nothing
+            "{\"additionalProperties\": true}",
+            "{\"nullable\": true}", // 3.0 nullability alone constrains nothing
+            "{\"unknownFutureKeyword\": 1}"); // fails-safe: unrecognised ⇒ treated as open
+    for (String json : open) {
+      assertThat(isOpenObject(mapper.readTree(json)))
+          .withFailMessage("expected OPEN but the predicate said constrained: %s", json)
+          .isTrue();
+    }
+
+    List<String> constrained =
+        List.of(
+            "{\"type\": \"string\"}",
+            "{\"type\": [\"string\", \"null\"]}",
+            "{\"type\": \"array\", \"items\": {}}", // the ARRAY is not open; its item is, and the
+            // walk recurses to report it at the `[]` pointer
+            "{\"type\": \"object\", \"properties\": {\"a\": {\"type\": \"string\"}}}",
+            "{\"type\": \"object\", \"additionalProperties\": {\"type\": \"string\"}}",
+            "{\"$ref\": \"#/components/schemas/Foo\"}",
+            "{\"allOf\": [{\"type\": \"object\"}]}",
+            "{\"anyOf\": [{\"type\": \"string\"}]}",
+            "{\"enum\": [\"a\", \"b\"]}",
+            "{\"const\": 3}",
+            "{\"format\": \"uuid\"}",
+            "{\"title\": \"Bounded\", \"maxLength\": 5}",
+            "{\"type\": \"object\", \"required\": [\"a\"]}");
+    for (String json : constrained) {
+      assertThat(isOpenObject(mapper.readTree(json)))
+          .withFailMessage("expected CONSTRAINED but the predicate said open: %s", json)
+          .isFalse();
+    }
+  }
 
   @Test
   void noResponsePublishesAnUnfrozenOpenObject() throws IOException {
@@ -393,22 +474,94 @@ class SpecOpenObjectRatchetTest {
     }
   }
 
+  /** Keywords that pin what an object may CONTAIN. Any of them present ⇒ not an open object. */
+  private static final List<String> PINS_CONTENTS =
+      List.of(
+          "$ref",
+          "allOf",
+          "anyOf",
+          "oneOf",
+          "not",
+          "items",
+          "prefixItems",
+          "enum",
+          "const",
+          "discriminator",
+          "patternProperties",
+          "propertyNames",
+          "dependentSchemas",
+          "unevaluatedProperties",
+          "required",
+          "minProperties",
+          "maxProperties");
+
   /**
-   * True when the schema constrains nothing about an object's contents: no {@code properties}, no
-   * composition, and {@code additionalProperties} either absent (with {@code type: object}), {@code
-   * true}, or the empty schema. A 3.1 nullability union ({@code type: ["object","null"]}) still
-   * counts as declaring an object.
+   * Every keyword that says ANYTHING about a value, used only for the typeless case below.
+   *
+   * <p>⚠️ The list deliberately enumerates what CONSTRAINS, not what is decoration — so a keyword
+   * nobody here anticipated reads as "constrains nothing" and the schema is reported OPEN. That is
+   * a false POSITIVE, which fails loudly and is resolved by a reviewed exemption or one more entry
+   * here. The inverse list (enumerate the annotations, treat the rest as constraining) fails the
+   * other way, silently, and that is exactly how this check acquired its first three holes.
+   */
+  private static final List<String> CONSTRAINING =
+      Stream.concat(
+              PINS_CONTENTS.stream(),
+              Stream.of(
+                  "type",
+                  "properties",
+                  "additionalProperties",
+                  "unevaluatedItems",
+                  "contains",
+                  "dependentRequired",
+                  "if",
+                  "then",
+                  "else",
+                  "multipleOf",
+                  "maximum",
+                  "exclusiveMaximum",
+                  "minimum",
+                  "exclusiveMinimum",
+                  "maxLength",
+                  "minLength",
+                  "pattern",
+                  "format",
+                  "maxItems",
+                  "minItems",
+                  "uniqueItems",
+                  "maxContains",
+                  "minContains"))
+          .toList();
+
+  /**
+   * True when the schema constrains nothing about an object's contents.
+   *
+   * <p>Three shapes qualify, and the third is the one this check was blind to until 2026-08-02.
+   *
+   * <ol>
+   *   <li>{@code type: object} (or the 3.1 union {@code ["object","null"]}) with no {@code
+   *       properties} and no constraining {@code additionalProperties}.
+   *   <li>{@code additionalProperties} of {@code true} / <code>{}</code> with no type.
+   *   <li><b>ANNOTATION-ONLY</b>: no type at all and nothing but decoration — the empty schema
+   *       <code>{}</code>, but equally {@code {"title": "x"}} or {@code {"description": "x"}}. A
+   *       title is a label, not a constraint; such a schema permits literally any JSON, so it is
+   *       every bit as open as <code>{}</code> and reads as harmless in a diff. pydantic emits it
+   *       for a bare {@code Any}, which is how three of them ({@code SliceCell.x}/{@code y} and the
+   *       trial-folds response) sat unreported while the optimizer ratchet claimed 43 of 46.
+   * </ol>
    */
   private static boolean isOpenObject(JsonNode node) {
-    if (node.has("$ref")
-        || node.has("allOf")
-        || node.has("oneOf")
-        || node.has("anyOf")
-        || node.has("items")) {
+    if (PINS_CONTENTS.stream().anyMatch(node::has)) {
       return false;
     }
     JsonNode properties = node.get("properties");
     if (properties != null && !properties.isEmpty()) {
+      return false;
+    }
+    JsonNode additional = node.get("additionalProperties");
+    if (additional != null
+        && !((additional.isBoolean() && additional.booleanValue())
+            || (additional.isObject() && additional.isEmpty()))) {
       return false;
     }
     JsonNode type = node.get("type");
@@ -417,18 +570,13 @@ class SpecOpenObjectRatchetTest {
             && (type.isArray()
                 ? stream(type).anyMatch(t -> "object".equals(t.asText()))
                 : "object".equals(type.asText()));
-    if (type != null && !declaresObject) {
-      return false;
+    if (type != null) {
+      return declaresObject;
     }
-    JsonNode additional = node.get("additionalProperties");
-    boolean unconstrained =
-        additional == null
-            || (additional.isBoolean() && additional.booleanValue())
-            || (additional.isObject() && additional.isEmpty());
-    if (!unconstrained) {
-      return false;
+    if (additional != null) {
+      return true;
     }
-    return node.isEmpty() || additional != null || declaresObject;
+    return CONSTRAINING.stream().noneMatch(node::has);
   }
 
   private static Stream<JsonNode> stream(JsonNode array) {

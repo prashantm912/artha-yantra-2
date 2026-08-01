@@ -66,6 +66,14 @@ FROZEN_OPEN_OBJECTS = {
     # not ours, and typing it would mean patching a third-party mount).
     "POST /api/v1/evolution/proposals/{proposal_id}/execute 200",
     "GET /metrics 200",
+    # ⚠️ ANNOTATION-ONLY, invisible until the predicate was widened 2026-08-02. These three are
+    # `Any` — pydantic renders them as {"title": "..."}, which reads as a harmless label in a diff
+    # while permitting any JSON at all. Same debt class as the block above: `x`/`y` are SliceCell's
+    # axis values (heterogeneous across slice kinds — int, float or str) and the trial-folds handler
+    # is annotated `-> Any`. Typing them is a live-surface change, not a test change.
+    "#SliceCell.x",
+    "#SliceCell.y",
+    "GET /api/v1/optimizations/{sweep_id}/trials/{trial_id}/folds 200",
     # ── Genuinely free-form ───────────────────────────────────────────────────────────────────
     # Hyperparameter / search-space / provenance bags: a tuned parameter dict has no shape to
     # declare, because the keys ARE the strategy's parameter paths.
@@ -107,22 +115,58 @@ FROZEN_OPEN_OBJECTS = {
 }
 
 
+# Keywords that pin what an object may CONTAIN. Any of them present => not an open object.
+PINS_CONTENTS = (
+    "$ref", "allOf", "anyOf", "oneOf", "not", "items", "prefixItems", "enum", "const",
+    "discriminator", "patternProperties", "propertyNames", "dependentSchemas",
+    "unevaluatedProperties", "required", "minProperties", "maxProperties",
+)
+
+# Every keyword that says ANYTHING about a value, used only for the typeless case below.
+#
+# The list deliberately enumerates what CONSTRAINS, not what is decoration — so a keyword nobody
+# here anticipated reads as "constrains nothing" and the schema is reported OPEN. That is a false
+# POSITIVE, which fails loudly and is resolved by a reviewed exemption or one more entry here. The
+# inverse list (enumerate the annotations, treat the rest as constraining) fails the other way,
+# silently, and that is exactly how this check acquired its first three holes.
+CONSTRAINING = frozenset(PINS_CONTENTS) | {
+    "type", "properties", "additionalProperties", "unevaluatedItems", "contains",
+    "dependentRequired", "if", "then", "else",
+    "multipleOf", "maximum", "exclusiveMaximum", "minimum", "exclusiveMinimum",
+    "maxLength", "minLength", "pattern", "format",
+    "maxItems", "minItems", "uniqueItems", "maxContains", "minContains",
+}
+
+
 def _is_open(node: Any) -> bool:
-    """True when the schema constrains nothing about an object's contents."""
+    """True when the schema constrains nothing about an object's contents.
+
+    Three shapes qualify, and the third is the one this check was blind to until 2026-08-02:
+
+    1. ``type: object`` with no ``properties`` and no constraining ``additionalProperties``;
+    2. ``additionalProperties`` of ``true``/``{}`` with no type;
+    3. ANNOTATION-ONLY — no type at all and nothing but decoration. The empty schema ``{}``, but
+       equally ``{"title": "x"}``. A title is a label, not a constraint; such a schema permits
+       literally any JSON. pydantic emits exactly this for a bare ``Any``, which is how
+       ``SliceCell.x``/``y`` and the trial-folds response sat unreported while this file claimed
+       43 frozen locations when the truth was 46.
+    """
     if not isinstance(node, dict):
         return False
-    if any(k in node for k in ("$ref", "allOf", "oneOf", "anyOf", "items")):
+    if any(k in node for k in PINS_CONTENTS):
         return False
     if node.get("properties"):
-        return False
-    declared = node.get("type")
-    types = declared if isinstance(declared, list) else ([declared] if declared else [])
-    if types and "object" not in types:
         return False
     additional = node.get("additionalProperties")
     if additional is not None and additional is not True and additional != {}:
         return False
-    return not node or additional is not None or "object" in types
+    declared = node.get("type")
+    types = declared if isinstance(declared, list) else ([declared] if declared else [])
+    if types:
+        return "object" in types
+    if additional is not None:
+        return True
+    return all(k not in CONSTRAINING for k in node)
 
 
 def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: set) -> None:
@@ -187,6 +231,49 @@ def _open_objects() -> set:
         _walk(schemas, schemas.get(name), f"#{name}", "", found, refs)
         queue.extend(refs - seen)
     return found
+
+
+def test_the_open_object_predicate_recognises_every_unconstrained_shape():
+    """Regression cases for the predicate itself — the mirror of the Java half's list.
+
+    The annotation-only group is the third distinct way a schema turned out to be open, after
+    component-name aliasing and the source regex's inability to see a field inside a typed record.
+    """
+    open_shapes = [
+        {},                                                  # the empty schema — any JSON at all
+        {"title": "Response"},                               # annotation-only: pydantic's `Any`
+        {"description": "whatever the handler felt like"},
+        {"title": "X", "description": "Y", "default": None},
+        {"type": "object"},
+        {"type": ["object", "null"]},
+        {"type": "object", "additionalProperties": {}},
+        {"type": "object", "additionalProperties": True},
+        {"type": "object", "properties": {}},                # empty properties promises nothing
+        {"additionalProperties": True},
+        {"nullable": True},                                  # 3.0 nullability alone constrains none
+        {"unknownFutureKeyword": 1},                         # fails-safe: unrecognised => open
+    ]
+    for shape in open_shapes:
+        assert _is_open(shape), f"expected OPEN but the predicate said constrained: {shape}"
+
+    constrained_shapes = [
+        {"type": "string"},
+        {"type": ["string", "null"]},
+        # the ARRAY is not open; its item is, and the walk recurses to report it at the `[]` pointer
+        {"type": "array", "items": {}},
+        {"type": "object", "properties": {"a": {"type": "string"}}},
+        {"type": "object", "additionalProperties": {"type": "string"}},
+        {"$ref": "#/components/schemas/Foo"},
+        {"allOf": [{"type": "object"}]},
+        {"anyOf": [{"type": "string"}]},
+        {"enum": ["a", "b"]},
+        {"const": 3},
+        {"format": "uuid"},
+        {"title": "Bounded", "maxLength": 5},
+        {"type": "object", "required": ["a"]},
+    ]
+    for shape in constrained_shapes:
+        assert not _is_open(shape), f"expected CONSTRAINED but the predicate said open: {shape}"
 
 
 def test_no_response_publishes_an_unfrozen_open_object():

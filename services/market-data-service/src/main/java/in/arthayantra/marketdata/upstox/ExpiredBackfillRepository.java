@@ -44,7 +44,7 @@ public class ExpiredBackfillRepository {
   public record ExportContract(
       String exchange,
       String tradingsymbol,
-      @Schema(types = {"number", "null"}) BigDecimal strike,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal strike,
       String instrumentType) {}
 
   private static final String UPSERT =

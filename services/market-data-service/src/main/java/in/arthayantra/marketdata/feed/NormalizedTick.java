@@ -12,7 +12,7 @@ import java.time.OffsetDateTime;
 public record NormalizedTick(
     String exchange,
     String tradingsymbol,
-    BigDecimal lastPrice,
+    @Schema(type = "string") BigDecimal lastPrice,
     long cumulativeDayVolume,
     @Schema(types = {"integer", "null"}) Long openInterest,
     OffsetDateTime timestamp,

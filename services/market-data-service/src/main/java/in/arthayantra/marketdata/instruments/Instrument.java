@@ -15,7 +15,7 @@ public record Instrument(
     @Schema(types = {"string", "null"}) String underlyingExchange,
     @Schema(types = {"string", "null"}) String underlyingTradingsymbol,
     @Schema(types = {"string", "null"}) LocalDate expiry,
-    @Schema(types = {"number", "null"}) BigDecimal strike,
-    @Schema(types = {"number", "null"}) BigDecimal tickSize,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal strike,
+    @Schema(type = "string", types = {"string", "null"}) BigDecimal tickSize,
     @Schema(types = {"integer", "null"}) Integer lotSize,
     boolean active) {}

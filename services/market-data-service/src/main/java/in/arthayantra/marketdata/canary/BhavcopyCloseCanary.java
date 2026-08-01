@@ -40,7 +40,7 @@ public class BhavcopyCloseCanary {
 
   /** One symbol whose bhavcopy close diverges from its Kite 1d close beyond the threshold. */
   public record CloseMismatch(
-      String symbol, BigDecimal bhavClose, BigDecimal kiteClose, BigDecimal relDiffPct) {}
+      String symbol, @Schema(type = "string") BigDecimal bhavClose, @Schema(type = "string") BigDecimal kiteClose, @Schema(type = "string") BigDecimal relDiffPct) {}
 
   /** The report for a trade date: compared count, divergent count, and the worst offenders. */
   public record BhavcopyCloseReport(
@@ -48,7 +48,7 @@ public class BhavcopyCloseCanary {
       String status,
       int compared,
       int divergent,
-      BigDecimal thresholdPct,
+      @Schema(type = "string") BigDecimal thresholdPct,
       List<CloseMismatch> offenders) {}
 
   // Symbols whose 1d bar is genuinely Kite-captured (source='KITE'); a bhavcopy-projected bar

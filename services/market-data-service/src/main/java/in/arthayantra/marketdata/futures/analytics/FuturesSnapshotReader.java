@@ -33,19 +33,19 @@ public class FuturesSnapshotReader {
       OffsetDateTime bucket,
       String underlying,
       String tradingsymbol,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal ltp,
       @Schema(types = {"integer", "null"})
       Long oi,
       @Schema(types = {"integer", "null"})
       Long oiChange,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal dayOpen,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal dayHigh,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal dayLow,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal prevClose,
       @Schema(types = {"integer", "null"})
       Long volume,
@@ -62,13 +62,13 @@ public class FuturesSnapshotReader {
   public record EodRow(
       String tradingsymbol,
       LocalDate tradeDate,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal open,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal high,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal low,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal close,
       long oiClose,
       long oiChange,

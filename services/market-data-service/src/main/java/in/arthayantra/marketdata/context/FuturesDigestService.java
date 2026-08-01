@@ -56,11 +56,11 @@ public class FuturesDigestService {
       String underlying,
       String tradingsymbol,
       LocalDate expiry,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
-      @Schema(types = {"number", "null"}) BigDecimal pricePct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal pricePct,
       long oi,
       long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal oiPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal oiPct,
       @Schema(types = {"string", "null"}) String interpretation) {}
 
   /** The 17-bank subset rolled into interpretation counts + net ΔOI (the "banks summary" fold). */
@@ -75,10 +75,10 @@ public class FuturesDigestService {
   /** The primary-index live term-structure headline (basis vs spot + contango/backwardation). */
   public record TermStructureState(
       String underlying,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
       String state,
-      @Schema(types = {"number", "null"}) BigDecimal calendarSpread,
-      @Schema(types = {"number", "null"}) BigDecimal nearBasis,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal calendarSpread,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal nearBasis,
       boolean stale,
       OffsetDateTime asOf) {}
 

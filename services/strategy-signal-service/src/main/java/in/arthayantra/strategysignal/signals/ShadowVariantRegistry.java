@@ -247,6 +247,11 @@ public class ShadowVariantRegistry {
    *       champion behaviour on that rail, per strategy and per bar. Registration validates the
    *       override structurally (rail + threshold + GTE|LTE, via {@link
    *       ShadowVariants#validatedFromSpec}).
+   *   <li><b>nullPolicy</b> (F5 U4b) — relaxing-or-neutral BY CONSTRUCTION, enforced at evaluation
+   *       like the rail overrides: {@code ShadowVariants.accepts} scores it against
+   *       {@code max(championComposite, withheldAggregate)}, so the variant's book is the champion's
+   *       plus exactly the bars the unified null rule promoted, never minus one. Allowed
+   *       unconditionally.
    * </ul>
    */
   private void enforceRelaxingOrNeutral(ShadowVariants.Variant variant) {

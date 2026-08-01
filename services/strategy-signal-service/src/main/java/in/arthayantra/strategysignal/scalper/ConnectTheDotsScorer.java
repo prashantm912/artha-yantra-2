@@ -54,12 +54,28 @@ public final class ConnectTheDotsScorer {
    * inferred. This is a diagnostic key only: the aggregate arithmetic here is untouched, and none of
    * the three columns is on the golden/parity path ({@code GoldenSignalsJson.write} lives in
    * {@code libs/strategy-engine}, which never sees this class).
+   *
+   * <p><b>{@code inputMissing} (F5 U4b) is NOT {@code absent}.</b> It is the raw fact "this dot's
+   * INPUT was unavailable this bar", recorded for EVERY dot under BOTH {@link NullPolicy} values;
+   * {@code absent} is the SCORING consequence. Under {@link NullPolicy#LEGACY} only {@code iv_rank}
+   * turns one into the other — every other missing input still scores {@code supports=false} in the
+   * denominator, or (for {@code vix}/{@code basis}/{@code premium_skew}/{@code dow}) as a PASS — and
+   * that disagreement is exactly the inconsistency U4b measures. Deliberately NOT serialized: the
+   * unarmed side-channels must stay byte-identical, so it lives only in memory, for the aggregate
+   * arithmetic below and the {@code dot-null-withheld} shadow variant.
    */
-  public record DotScore(String dot, double weight, boolean supports, String reason, boolean absent) {
+  public record DotScore(
+      String dot, double weight, boolean supports, String reason, boolean absent,
+      boolean inputMissing) {
 
-    /** Present-dot form: {@code absent} defaults to false (keeps every existing call site intact). */
+    /** Present-dot form: {@code absent}/{@code inputMissing} default to false. */
     public DotScore(String dot, double weight, boolean supports, String reason) {
-      this(dot, weight, supports, reason, false);
+      this(dot, weight, supports, reason, false, false);
+    }
+
+    /** Pre-U4b 5-arg form: {@code inputMissing} defaults to false (keeps existing literals intact). */
+    public DotScore(String dot, double weight, boolean supports, String reason, boolean absent) {
+      this(dot, weight, supports, reason, absent, false);
     }
   }
 
@@ -67,10 +83,27 @@ public final class ConnectTheDotsScorer {
    * The aggregate confluence verdict for a side. {@code standAside} is the T2.8 40/40 both-IV-high
    * suppression: when set, the confluence is forced invalid regardless of the aggregate (the
    * iv-pair dot also withholds support), so a high-IV/low-edge chop never fires.
+   *
+   * <p>{@code withheldAggregate} (F5 U4b) is the SHADOW number: the same arithmetic with every
+   * {@code inputMissing} dot ALSO withheld. It is computed on every bar under BOTH {@link NullPolicy}
+   * values and read by NOTHING on the live path — {@code bullish}/{@code bearish} resolve from
+   * {@code aggregate} alone — so it is what the composite WOULD have been under the unified rule,
+   * available for the {@code dot-null-withheld} shadow variant to put a real PnL label on the
+   * proposal before anyone arms it. Under {@link NullPolicy#WITHHELD} it equals {@code aggregate} by
+   * construction.
    */
   public record Confluence(
       BigDecimal aggregate, OptionType side, boolean bullish, boolean bearish,
-      boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots) {}
+      boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots,
+      BigDecimal withheldAggregate) {
+
+    /** Pre-U4b 8-arg form: {@code withheldAggregate} mirrors {@code aggregate} (no shadow recorded). */
+    public Confluence(
+        BigDecimal aggregate, OptionType side, boolean bullish, boolean bearish,
+        boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots) {
+      this(aggregate, side, bullish, bearish, vwapAligned, biasAligned, standAside, dots, aggregate);
+    }
+  }
 
   /**
    * Score the confluence for {@code side}.
@@ -186,12 +219,53 @@ public final class ConnectTheDotsScorer {
       ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
       ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot,
       boolean dowDot, BigDecimal volumeFloor, boolean ivRankDot) {
+    return score(
+        ctx, side, bias60mDir, threshold, props, vwapHardGate, ivPerStrikeGate, premiumSkewDot,
+        dowDot, volumeFloor, ivRankDot, NullPolicy.LEGACY);
+  }
+
+  /**
+   * As the 11-arg form but with the missing-input {@link NullPolicy} selected, via the DEFAULT-OFF
+   * {@code dot-null-withheld} tag (F5 U4b).
+   *
+   * <p><b>The inconsistency this closes.</b> Three unreconciled missing-input rules coexist in the
+   * dot list — see {@link NullPolicy} for the full map. The same data gap therefore HELPS the side on
+   * {@code vix}/{@code basis}/{@code premium_skew}/{@code dow}, HURTS it on the other fifteen (the
+   * {@link OiQuadrant#NEUTRAL} "snapshot unavailable" sentinel included), and VANISHES on
+   * {@code iv_rank}. {@link NullPolicy#WITHHELD} makes all three the third rule: an input-missing dot
+   * leaves both the numerator and the denominator, so a data gap is never evidence either way.
+   *
+   * <p>{@link NullPolicy#LEGACY} (the default) is byte-identical to the 11-arg form: the dot list,
+   * every dot's {@code absent}/{@code supports}/{@code reason}, and the aggregate are unchanged, and
+   * only the never-read {@code withheldAggregate} side-channel is added. Arming CHANGES which signals
+   * fire — a scalper config change is a silent no-op until the strategy is RE-PUBLISHED.
+   *
+   * <p><b>This moves the confluence aggregate, NOT the frozen A1 {@code ScoreBreakdownDto} composite</b>
+   * ({@code composite = Σ(w·s)/Σw} + the optional-activation rule). The confluence is the §12.3
+   * side-channel number this class owns; the frozen breakdown lives in the engine and never sees it.
+   */
+  public static Confluence score(
+      ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
+      ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot,
+      boolean dowDot, BigDecimal volumeFloor, boolean ivRankDot, NullPolicy nullPolicy) {
     Chart c = ctx.chart();
     Oi oi = ctx.oi();
     Macro m = ctx.macro();
     boolean ce = side == OptionType.CE;
+    boolean withhold = nullPolicy.withholds();
 
     boolean vwapSide = ce ? gt(c.close(), c.vwap()) : gt(c.vwap(), c.close());
+
+    // U4b: the per-dot "its INPUT was unavailable" reads. Single-sourced as locals where two dots
+    // share an input, so the WITHHELD policy and the always-computed shadow aggregate below judge
+    // exactly the same fact, and a future dot cannot drift from its neighbours' definition.
+    // `supertrendDir == 0` and `OiQuadrant.NEUTRAL` are the documented no-data sentinels of an int /
+    // enum input (see OiQuadrant.NEUTRAL's javadoc and ScalperGates.supertrend15mAlign); breadth's
+    // int pair reads {0,0} exactly when the summary was absent (MarketOiClient#942).
+    boolean closeMissing = c.close() == null;
+    boolean oiDeltasMissing = oi.ceOiDelta() == null || oi.peOiDelta() == null;
+    boolean underlyingQuadrantMissing = oi.underlying() == OiQuadrant.NEUTRAL;
+    boolean ivPairMissing = m.ceIvAvg6() == null || m.peIvAvg6() == null;
 
     List<DotScore> dots = new ArrayList<>();
     // T6 (owner 2026-07-25): the DOT needs a real distance, not just the side — the entry gate
@@ -200,28 +274,46 @@ public final class ConnectTheDotsScorer {
     // leg below (`valid`, via vwapSide) is untouched.
     add(dots, "vwap", W_VWAP,
         vwapSide && vwapDistanceAtLeast(c.close(), c.vwap(), props.vwapMinDistanceBps()),
-        "price vs VWAP (side + >=" + props.vwapMinDistanceBps() + " bps)");
-    add(dots, "supertrend", W, ce ? c.supertrendDir() > 0 : c.supertrendDir() < 0, "supertrend direction");
-    add(dots, "vwma", W, ce ? gt(c.close(), c.vwma20()) : gt(c.vwma20(), c.close()), "price vs VWMA20");
-    add(dots, "psar", W, ce ? gt(c.close(), c.psar()) : gt(c.psar(), c.close()), "price vs PSAR");
-    add(dots, "rsi", W, ScalperGates.rsiBand(c.rsi14(), side).pass(), "RSI band");
+        "price vs VWAP (side + >=" + props.vwapMinDistanceBps() + " bps)",
+        closeMissing || c.vwap() == null, withhold);
+    add(dots, "supertrend", W, ce ? c.supertrendDir() > 0 : c.supertrendDir() < 0, "supertrend direction",
+        c.supertrendDir() == 0, withhold);
+    add(dots, "vwma", W, ce ? gt(c.close(), c.vwma20()) : gt(c.vwma20(), c.close()), "price vs VWMA20",
+        closeMissing || c.vwma20() == null, withhold);
+    add(dots, "psar", W, ce ? gt(c.close(), c.psar()) : gt(c.psar(), c.close()), "price vs PSAR",
+        closeMissing || c.psar() == null, withhold);
+    add(dots, "rsi", W, ScalperGates.rsiBand(c.rsi14(), side).pass(), "RSI band",
+        c.rsi14() == null, withhold);
     // T24: the RESOLVED floor — the same value the rail tested — not the static per-index default.
     add(dots, "volume", W,
-        ScalperGates.volume(ctx.signalIndex(), c.volume(), volumeFloor).pass(), "volume floor");
-    add(dots, "futures_oi", W_OI, ScalperGates.oiQuadrant(oi, side).pass(), "futures OI quadrant");
-    add(dots, "underlying_oi", W, ce ? oi.underlying().bullish() : oi.underlying().bearish(), "underlying OI quadrant");
+        ScalperGates.volume(ctx.signalIndex(), c.volume(), volumeFloor).pass(), "volume floor",
+        c.volume() == null, withhold);
+    add(dots, "futures_oi", W_OI, ScalperGates.oiQuadrant(oi, side).pass(), "futures OI quadrant",
+        oi.futures() == OiQuadrant.NEUTRAL, withhold);
+    add(dots, "underlying_oi", W, ce ? oi.underlying().bullish() : oi.underlying().bearish(),
+        "underlying OI quadrant", underlyingQuadrantMissing, withhold);
     // T2.2: the trending cross is a CHANGE (PE-OI rising while CE-OI falls), not a static PE-CE tilt.
-    add(dots, "trending_cross", W, trendingCross(oi, ce), "trending OI cross (dOI change)");
-    add(dots, "sentiment", W, sideSigned(oi.sentimentPct(), ce), "active-strike sentiment");
+    // (`crossedThisWindow`/`gapWidening` are real false readings, not gaps — only the deltas can be absent.)
+    add(dots, "trending_cross", W, trendingCross(oi, ce), "trending OI cross (dOI change)",
+        oiDeltasMissing, withhold);
+    add(dots, "sentiment", W, sideSigned(oi.sentimentPct(), ce), "active-strike sentiment",
+        oi.sentimentPct() == null, withhold);
     // T2.6: a DRASTIC dOI move on BOTH legs, imbalanced toward the side.
-    add(dots, "drastic_oi", W, drasticOi(oi, ce, props), "drastic dOI both legs, imbalance favors side");
+    add(dots, "drastic_oi", W, drasticOi(oi, ce, props), "drastic dOI both legs, imbalance favors side",
+        oiDeltasMissing, withhold);
     // T2.3: the sentiment is TRENDING the side's way (slope sign), alongside the level dot above.
-    add(dots, "sentiment_slope", W, sideSigned(oi.sentimentSlope(), ce), "sentiment slope direction");
-    // T2.7: an OI spurt matching the side's quadrant with both magnitudes past the floor.
-    add(dots, "oi_spurt", W, oiSpurt(oi, ce, props), "OI spurt quadrant + magnitude");
-    add(dots, "breadth", W, ScalperGates.breadth(m, side).pass(), "advances/declines > 32");
-    add(dots, "vix", W, ScalperGates.vix(m, side).pass(), "VIX direction");
-    add(dots, "basis", W, ScalperGates.futuresBasis(oi, side).pass(), "futures basis");
+    add(dots, "sentiment_slope", W, sideSigned(oi.sentimentSlope(), ce), "sentiment slope direction",
+        oi.sentimentSlope() == null, withhold);
+    // T2.7: an OI spurt matching the side's quadrant with both magnitudes past the floor. The QUADRANT
+    // is one of its inputs, so a NEUTRAL underlying leaves this dot input-missing too.
+    add(dots, "oi_spurt", W, oiSpurt(oi, ce, props), "OI spurt quadrant + magnitude",
+        oi.spurtOiPct() == null || oi.spurtPricePct() == null || underlyingQuadrantMissing, withhold);
+    add(dots, "breadth", W, ScalperGates.breadth(m, side).pass(), "advances/declines > 32",
+        m.advances() == 0 && m.declines() == 0, withhold);
+    add(dots, "vix", W, ScalperGates.vix(m, side).pass(), "VIX direction",
+        m.vixRising() == null, withhold);
+    add(dots, "basis", W, ScalperGates.futuresBasis(oi, side).pass(), "futures basis",
+        oi.futuresBasis() == null, withhold);
     // P3 (signal-analysis rollup §Proposals): ivRank is honest-NULL on every live row (the 60-trading-
     // day IvAnalyticsService history floor is not met yet). A null INPUT is WITHHELD from the
     // denominator (absent) — it neither supports nor opposes — rather than silently scoring
@@ -230,28 +322,35 @@ public final class ConnectTheDotsScorer {
     // self-arm it on a calendar trigger — the unarmed dot is withheld exactly as a null input is.
     boolean ivRankNull = m.ivRank() == null;
     boolean ivRankAbsent = ivRankNull || !ivRankDot;
-    add(dots, "iv_rank", W_IV, !ivRankAbsent && m.ivRank().compareTo(IV_RANK_LOW) < 0,
-        ivRankReason(ivRankNull, ivRankDot), ivRankAbsent);
+    // U4b: iv_rank is the ONE dot already on the unified rule, so its `absent` is untouched by the
+    // policy — a null input is withheld under both. The GATE absence (unarmed) is not an input gap,
+    // so `inputMissing` tracks only the null, keeping the shadow aggregate honest.
+    dots.add(
+        new DotScore(
+            "iv_rank", W_IV, !ivRankAbsent && m.ivRank().compareTo(IV_RANK_LOW) < 0,
+            ivRankReason(ivRankNull, ivRankDot), ivRankAbsent, ivRankNull));
     // T2.8: the side's IV richer than the other by >= the gap; 40/40-both-high forces a stand-aside.
     // E4 iv-per-strike: a UNILATERAL buy-side IV>=40 ("buyer stays away", §4.6) also forces the
     // stand-aside when armed — the existing symmetric ivBothHighStandAside misses the one-sided case.
     boolean buySideTooRich = ivPerStrikeGate && buySideRich(m, ce, props);
     boolean standAside = ivBothHighStandAside(m, props) || buySideTooRich;
     add(dots, "iv_pair", W_IV, !standAside && ivPair(m, ce, props),
-        standAside ? "iv pair 40/40 stand-aside" : "iv pair gap favors side");
+        standAside ? "iv pair 40/40 stand-aside" : "iv pair gap favors side", ivPairMissing, withhold);
     if (ivPerStrikeGate) {
       // E4 §4.6: the bought strike's IV DIRECTION — CE confirms when its strike IV is RISING (a buyer
       // paying up = demand), PE when the PE-leg IV rises. Null slope never confirms.
       boolean ivSlopeOk = ce
           ? m.ceIvSlope() != null && m.ceIvSlope().signum() > 0
           : m.peIvSlope() != null && m.peIvSlope().signum() > 0;
-      add(dots, "iv_slope", W_IV, ivSlopeOk, "per-strike IV rising on the buy side");
+      add(dots, "iv_slope", W_IV, ivSlopeOk, "per-strike IV rising on the buy side",
+          (ce ? m.ceIvSlope() : m.peIvSlope()) == null, withhold);
       // E4 §4.6: the absolute ATM IV sits in the 10-12 "trend-play" band (low IV = most of the move
       // still ahead). Null atmIv never confirms.
       boolean ivAbsOk = m.atmIv() != null
           && m.atmIv().compareTo(props.ivAbsBandLow()) >= 0
           && m.atmIv().compareTo(props.ivAbsBandHigh()) <= 0;
-      add(dots, "iv_abs_band", W_IV, ivAbsOk, "ATM IV in 10-12 trend-play band");
+      add(dots, "iv_abs_band", W_IV, ivAbsOk, "ATM IV in 10-12 trend-play band",
+          m.atmIv() == null, withhold);
     }
     if (premiumSkewDot) {
       // E7 §3.7/§6.7 (Hero-Zero): a WARNING dot. supports (good) when the traded side is NOT the richer
@@ -264,14 +363,15 @@ public final class ConnectTheDotsScorer {
               && (ce ? m.premiumSkewPct().signum() > 0 : m.premiumSkewPct().signum() < 0);
       boolean cued = corroboratingCue(dots, ce);
       add(dots, "premium_skew", W, m.premiumSkewPct() == null || !richerSide || cued,
-          "not chasing the richer side without cues");
+          "not chasing the richer side without cues", m.premiumSkewPct() == null, withhold);
     }
     if (dowDot) {
       // E3 Dow global cue: CE confirmed when Dow is UP, PE when DOWN; an unknown direction (null, e.g. a
       // history/off-hours/unconfigured feed) is NEUTRAL → supports, so a missing cue never blocks.
       boolean dowOk = m.dowUp() == null || (ce == m.dowUp());
       add(dots, "dow", W, dowOk,
-          "Dow global cue " + (m.dowUp() == null ? "unknown" : m.dowUp() ? "up" : "down"));
+          "Dow global cue " + (m.dowUp() == null ? "unknown" : m.dowUp() ? "up" : "down"),
+          m.dowUp() == null, withhold);
     }
 
     // P3: an ABSENT dot (null input, e.g. the honest-null iv_rank) is withheld from BOTH num and den —
@@ -281,17 +381,28 @@ public final class ConnectTheDotsScorer {
     // empty dot list hits. In practice the decisive VWAP dot is never absent, so den > 0 on the live path.
     double num = 0;
     double den = 0;
+    // U4b shadow: the SAME arithmetic with every input-missing dot ALSO withheld — what the composite
+    // WOULD have been under the unified rule. Computed on every bar under BOTH policies and read by
+    // nothing here (`valid` below uses `aggregate` alone), so it can never move live scoring; under
+    // WITHHELD the two loops coincide because `absent` already subsumes `inputMissing`.
+    double shadowNum = 0;
+    double shadowDen = 0;
     for (DotScore d : dots) {
-      if (d.absent()) {
-        continue;
+      if (!d.absent()) {
+        den += d.weight();
+        if (d.supports()) {
+          num += d.weight();
+        }
       }
-      den += d.weight();
-      if (d.supports()) {
-        num += d.weight();
+      if (!d.absent() && !d.inputMissing()) {
+        shadowDen += d.weight();
+        if (d.supports()) {
+          shadowNum += d.weight();
+        }
       }
     }
-    BigDecimal aggregate =
-        den == 0 ? BigDecimal.ZERO : BigDecimal.valueOf(num / den).setScale(4, RoundingMode.HALF_UP);
+    BigDecimal aggregate = ratio(num, den);
+    BigDecimal withheldAggregate = ratio(shadowNum, shadowDen);
 
     boolean biasAligned = bias60mDir == 0 || (ce ? bias60mDir > 0 : bias60mDir < 0);
     // VWAP is decisive by default; the #9 opening-tick-before-10:30 path drops it from the HARD gate
@@ -299,7 +410,13 @@ public final class ConnectTheDotsScorer {
     boolean valid =
         (!vwapHardGate || vwapSide) && biasAligned && !standAside && aggregate.compareTo(threshold) >= 0;
     return new Confluence(
-        aggregate, side, valid && ce, valid && !ce, vwapSide, biasAligned, standAside, dots);
+        aggregate, side, valid && ce, valid && !ce, vwapSide, biasAligned, standAside, dots,
+        withheldAggregate);
+  }
+
+  /** The confluence ratio at the frozen 4-dp scale; an empty denominator is ZERO (fail-closed). */
+  private static BigDecimal ratio(double num, double den) {
+    return den == 0 ? BigDecimal.ZERO : BigDecimal.valueOf(num / den).setScale(4, RoundingMode.HALF_UP);
   }
 
   /**
@@ -404,14 +521,16 @@ public final class ConnectTheDotsScorer {
     return ivRankDot ? "IV rank low (cheap premium)" : "IV rank dot unarmed (withheld)";
   }
 
-  private static void add(List<DotScore> dots, String name, double weight, boolean supports, String reason) {
-    dots.add(new DotScore(name, weight, supports, reason));
-  }
-
-  /** As {@link #add} but marks the dot {@code absent} (withheld from the aggregate) when its input is null. */
+  /**
+   * Adds one dot, recording whether its INPUT was unavailable and letting the resolved
+   * {@link NullPolicy} decide the consequence: under {@code withhold} an input-missing dot is marked
+   * {@code absent} (out of both the numerator and denominator); under LEGACY it keeps whatever
+   * {@code supports} its own rule produced, which is exactly today's behaviour.
+   */
   private static void add(
-      List<DotScore> dots, String name, double weight, boolean supports, String reason, boolean absent) {
-    dots.add(new DotScore(name, weight, supports, reason, absent));
+      List<DotScore> dots, String name, double weight, boolean supports, String reason,
+      boolean inputMissing, boolean withhold) {
+    dots.add(new DotScore(name, weight, supports, reason, withhold && inputMissing, inputMissing));
   }
 
   /**

@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.scalper;
 import static in.arthayantra.black76.Black76.OptionType.CE;
 import static in.arthayantra.black76.Black76.OptionType.PE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer.Confluence;
 import in.arthayantra.strategysignal.scalper.ConnectTheDotsScorer.DotScore;
@@ -582,7 +583,10 @@ class ConnectTheDotsScorerTest {
     DotScore ivRank =
         r.dots().stream().filter(d -> d.dot().equals("iv_rank")).findFirst().orElseThrow();
     assertThat(ivRank)
-        .isEqualTo(new DotScore("iv_rank", 0.8, false, "IV rank absent (no data — withheld)", true));
+        .isEqualTo(
+            // U4b: `inputMissing` (the 6th component) is TRUE here — the rank really is absent data.
+            // It is never serialized, so this widening does not touch the side-channel wording above.
+            new DotScore("iv_rank", 0.8, false, "IV rank absent (no data — withheld)", true, true));
     // The armed reading on the SAME null input is identical too — arming cannot conjure a rank.
     assertThat(armedIvRank(null).dots()).isEqualTo(r.dots());
     assertThat(armedIvRank(null).aggregate()).isEqualByComparingTo(r.aggregate());
@@ -645,5 +649,144 @@ class ConnectTheDotsScorerTest {
 
   private static Macro macroIv(BigDecimal ceIv, BigDecimal peIv) {
     return new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), ceIv, peIv);
+  }
+
+  // ------------------------------------------------------- F5 U4b: dot-null semantics unification
+  //
+  // One context, all THREE of the scorer's missing-input rules firing at once — the fixture the
+  // unification is judged on. Every present dot supports the CE, and exactly four inputs are absent:
+  //
+  //   futures_oi (w 1.5)  quadrant NEUTRAL = the "snapshot unavailable" sentinel  -> OPPOSES in den
+  //   vix        (w 1.0)  vixRising null                                          -> counts as SUPPORT
+  //   basis      (w 1.0)  futuresBasis null                                       -> counts as SUPPORT
+  //   iv_rank    (w 0.8)  ivRank null                                             -> WITHHELD (absent)
+  //
+  // LEGACY:   den 19.6 - 0.8 = 18.8, num 18.8 - 1.5 = 17.3  ->  17.3/18.8 = 0.9202
+  // WITHHELD: all four absent -> den = num = 19.6 - 4.3 = 15.3  ->  1.0
+  //
+  // Note the two directions cancelling inside one bar: withholding futures_oi RAISES the composite,
+  // withholding vix/basis LOWERS the numerator they were propping up. Net here is a loosening, which
+  // is the adverse-prior direction — hence default-OFF plus the shadow lane.
+
+  /** BULL_OI with a NEUTRAL futures quadrant (no snapshot) and a null basis; underlying still bullish. */
+  private static final Oi GAPPY_OI =
+      new Oi(
+          OiQuadrant.LONG_BUILDUP, OiQuadrant.NEUTRAL, bd("10"), bd("5"), null,
+          bd("-60000"), bd("70000"), bd("80"), true, false, bd("5"), bd("60"), bd("60"));
+
+  /** BULL_MACRO with a null IV rank (withheld) and an unknown VIX direction (counts as support). */
+  private static final Macro GAPPY_MACRO =
+      new Macro(bd("14"), null, bd("12"), null, 40, 10, bd("50"), bd("0.20"), bd("0.05"));
+
+  private static DotScore dotOf(Confluence r, String name) {
+    return r.dots().stream().filter(d -> d.dot().equals(name)).findFirst().orElseThrow();
+  }
+
+  @Test
+  void unarmedNullPolicyIsByteIdenticalAcrossAllThreeSemantics() {
+    // The U4b parity guard, called through the UNCHANGED 6-arg public overload — the surface every
+    // live caller used before the policy existed. All three missing-input rules are live in this one
+    // bar, and each must still behave exactly as it did: futures_oi scored AGAINST the side at its
+    // full 1.5 weight, vix + basis scored FOR it, iv_rank alone withheld.
+    Confluence r = ConnectTheDotsScorer.score(ctx(BULL_CHART, GAPPY_OI, GAPPY_MACRO), CE, 1, T, P, true);
+
+    assertThat(r.dots()).hasSize(18);
+    assertThat(r.dots())
+        .extracting(DotScore::dot, DotScore::weight, DotScore::supports, DotScore::absent)
+        .containsExactly(
+            tuple("vwap", 2.5, true, false),
+            tuple("supertrend", 1.0, true, false),
+            tuple("vwma", 1.0, true, false),
+            tuple("psar", 1.0, true, false),
+            tuple("rsi", 1.0, true, false),
+            tuple("volume", 1.0, true, false),
+            tuple("futures_oi", 1.5, false, false), // NEUTRAL = no data, yet scored against the side
+            tuple("underlying_oi", 1.0, true, false),
+            tuple("trending_cross", 1.0, true, false),
+            tuple("sentiment", 1.0, true, false),
+            tuple("drastic_oi", 1.0, true, false),
+            tuple("sentiment_slope", 1.0, true, false),
+            tuple("oi_spurt", 1.0, true, false),
+            tuple("breadth", 1.0, true, false),
+            tuple("vix", 1.0, true, false), // unknown direction still counts as a PASSING dot
+            tuple("basis", 1.0, true, false), // ditto: a missing basis props the numerator up
+            tuple("iv_rank", 0.8, false, true), // the one dot already on the unified rule
+            tuple("iv_pair", 0.8, true, false));
+    assertThat(r.aggregate()).isEqualByComparingTo("0.9202"); // 17.3 / 18.8
+    assertThat(r.bullish()).isTrue();
+    // The reason strings ride the two diagnostics + the scalper_detail side-channel, so the wording of
+    // the dots whose semantics U4b touches is pinned too.
+    assertThat(dotOf(r, "iv_rank").reason()).isEqualTo("IV rank absent (no data — withheld)");
+    assertThat(dotOf(r, "futures_oi").reason()).isEqualTo("futures OI quadrant");
+    assertThat(dotOf(r, "vix").reason()).isEqualTo("VIX direction");
+  }
+
+  @Test
+  void armedWithheldPolicyWithholdsEveryInputMissingDot() {
+    Confluence r = withheld(BULL_CHART, GAPPY_OI, GAPPY_MACRO);
+
+    // Class 3 (opposes-in-denominator): the NEUTRAL quadrant no longer counts 1.5 against the side.
+    assertThat(dotOf(r, "futures_oi").absent()).isTrue();
+    // Class 2 (counts as support): a dead VIX / basis feed no longer props the numerator up either —
+    // withholding is inert in BOTH directions, which is the whole point of one rule.
+    assertThat(dotOf(r, "vix").absent()).isTrue();
+    assertThat(dotOf(r, "basis").absent()).isTrue();
+    // Class 1 (already withheld): unchanged.
+    assertThat(dotOf(r, "iv_rank").absent()).isTrue();
+    // …and nothing whose input was PRESENT is withheld — arming is not a blanket amnesty.
+    assertThat(dotOf(r, "underlying_oi").absent()).isFalse();
+    assertThat(dotOf(r, "iv_pair").absent()).isFalse();
+
+    assertThat(r.aggregate()).isEqualByComparingTo("1.0"); // 15.3 / 15.3, vs 0.9202 unarmed
+    assertThat(r.dots()).hasSize(18); // withheld, not dropped — the side-channel keeps its shape
+  }
+
+  @Test
+  void withheldAggregateRecordsTheUnifiedRuleWithoutMovingLiveScoring() {
+    Confluence legacy = ConnectTheDotsScorer.score(ctx(BULL_CHART, GAPPY_OI, GAPPY_MACRO), CE, 1, T, P, true);
+
+    // The shadow is what the composite WOULD have been — recorded on every bar, read by nothing on
+    // the live path: the live aggregate and the CE/PE verdict are the unarmed ones.
+    assertThat(legacy.withheldAggregate()).isEqualByComparingTo("1.0");
+    assertThat(legacy.aggregate()).isEqualByComparingTo("0.9202");
+    assertThat(legacy.aggregate()).isNotEqualByComparingTo(legacy.withheldAggregate());
+
+    // Armed, the two coincide by construction (`absent` subsumes `inputMissing`).
+    Confluence armed = withheld(BULL_CHART, GAPPY_OI, GAPPY_MACRO);
+    assertThat(armed.withheldAggregate()).isEqualByComparingTo(armed.aggregate());
+
+    // With NO gaps at all the shadow is the aggregate under either policy — the number only diverges
+    // where data is actually missing, so a clean bar can never make the challenger look different.
+    Confluence clean = ConnectTheDotsScorer.score(ctx(BULL_CHART, BULL_OI, BULL_MACRO), CE, 1, T, P, true);
+    assertThat(clean.withheldAggregate()).isEqualByComparingTo(clean.aggregate());
+  }
+
+  @Test
+  void withholdingCanLowerTheCompositeToo() {
+    // The unification is NOT uniformly a loosening. Isolate class 2: every OI/chart input present and
+    // opposing nothing, but the VIX direction unknown — LEGACY counts that null as a supporting 1.0,
+    // WITHHELD removes it from both sides. With the rest of the bar imperfect, dropping a free
+    // "support" LOWERS the composite, so an armed strategy can lose entries as well as gain them.
+    Chart weakRsi = new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("50"), bd("130000"));
+    Macro noVix = new Macro(bd("14"), bd("30"), bd("12"), null, 40, 10, bd("50"), bd("0.20"), bd("0.05"));
+
+    Confluence legacy = ConnectTheDotsScorer.score(ctx(weakRsi, BULL_OI, noVix), CE, 1, T, P, true);
+    Confluence armed = withheld(weakRsi, BULL_OI, noVix);
+
+    assertThat(dotOf(legacy, "vix").supports()).isTrue(); // null read = a free passing dot today
+    assertThat(dotOf(armed, "vix").absent()).isTrue();
+    // rsi 50 is outside the CE 60-80 band, so 1.0 opposes under both policies. iv_rank (0.8) is
+    // withheld under both — its input is PRESENT here (rank 30) but the A3 tag is unarmed:
+    //   LEGACY   17.8 / 18.8 = 0.9468   (iv_rank the only withheld dot; vix a free support)
+    //   WITHHELD 16.8 / 17.8 = 0.9438   (vix leaves BOTH sides, taking its support with it)
+    assertThat(legacy.aggregate()).isEqualByComparingTo("0.9468");
+    assertThat(armed.aggregate()).isEqualByComparingTo("0.9438");
+    assertThat(armed.aggregate()).isLessThan(legacy.aggregate());
+  }
+
+  /** The all-defaults CE score with the U4b {@code dot-null-withheld} policy ARMED. */
+  private static Confluence withheld(Chart c, Oi oi, Macro m) {
+    return ConnectTheDotsScorer.score(
+        ctx(c, oi, m), CE, 1, T, P, true, false, false, false, null, false, NullPolicy.WITHHELD);
   }
 }

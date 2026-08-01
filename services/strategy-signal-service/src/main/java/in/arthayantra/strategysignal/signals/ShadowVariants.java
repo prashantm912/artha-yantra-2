@@ -30,7 +30,8 @@ import org.springframework.stereotype.Component;
  * <pre>{@code
  * [{"name":"vol-off","rails":[{"rail":"volume-floor","disable":true}]},
  *  {"name":"vol-12k5","rails":[{"rail":"volume-floor","threshold":12500,"passWhen":"GTE"}]},
- *  {"name":"composite-070","compositeThreshold":0.70}]
+ *  {"name":"composite-070","compositeThreshold":0.70},
+ *  {"name":"dot-null-withheld","nullPolicy":"withheld"}]
  * }</pre>
  *
  * <p>Empty (the code default) disables challengers entirely. A parse error logs and yields NO
@@ -43,13 +44,26 @@ public class ShadowVariants {
   private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,31}");
   static final String CHAMPION = "champion";
   static final String COMPOSITE_RAIL = "confluence-composite";
+  /** The one recognised {@code nullPolicy} value — F5 U4b's unified "input-missing ⇒ withheld" rule. */
+  static final String NULL_POLICY_WITHHELD = "withheld";
 
   /** One rail override: {@code disable} wins; otherwise operand-vs-threshold per {@code passWhen}. */
   public record RailOverride(String rail, boolean disable, BigDecimal threshold, String passWhen) {}
 
-  /** One challenger book definition. */
+  /**
+   * One challenger book definition. {@code nullWithheld} (F5 U4b, spec key {@code "nullPolicy":
+   * "withheld"}) scores against the confluence's {@code withheldAggregate} instead of the champion's
+   * composite — the evidence lane for the DEFAULT-OFF {@code dot-null-withheld} dot-null unification.
+   */
   public record Variant(
-      String name, Map<String, RailOverride> rails, BigDecimal compositeThreshold) {}
+      String name, Map<String, RailOverride> rails, BigDecimal compositeThreshold,
+      boolean nullWithheld) {
+
+    /** Pre-U4b 3-arg form: {@code nullWithheld} defaults to false (the champion composite rules). */
+    public Variant(String name, Map<String, RailOverride> rails, BigDecimal compositeThreshold) {
+      this(name, rails, compositeThreshold, false);
+    }
+  }
 
   private final List<Variant> variants;
 
@@ -100,7 +114,17 @@ public class ShadowVariants {
                       return new RailOverride(r.rail, r.disable, r.threshold, passWhen);
                     })
                 .collect(Collectors.toMap(RailOverride::rail, Function.identity()));
-    return new Variant(name, rails, raw.compositeThreshold);
+    boolean nullWithheld = false;
+    if (raw.nullPolicy != null) {
+      // ONE recognised value: the vocabulary names the policy it opts into rather than a boolean, so
+      // a future third policy is an added constant, not a second flag that can contradict this one.
+      if (!NULL_POLICY_WITHHELD.equals(raw.nullPolicy.toLowerCase(Locale.ROOT))) {
+        throw new IllegalArgumentException(
+            name + ": nullPolicy must be \"" + NULL_POLICY_WITHHELD + "\"");
+      }
+      nullWithheld = true;
+    }
+    return new Variant(name, rails, raw.compositeThreshold, nullWithheld);
   }
 
   /**
@@ -133,13 +157,14 @@ public class ShadowVariants {
     } catch (Exception e) {
       throw new IllegalArgumentException(
           "unrecognized shadow-variant spec (unknown knob kind — the vocabulary is rail"
-              + " disable / rail threshold+passWhen / compositeThreshold): "
+              + " disable / rail threshold+passWhen / compositeThreshold / nullPolicy): "
               + rootMessage(e));
     }
     RawVariant raw = new RawVariant();
     raw.name = name;
     raw.rails = spec == null ? null : spec.rails;
     raw.compositeThreshold = spec == null ? null : spec.compositeThreshold;
+    raw.nullPolicy = spec == null ? null : spec.nullPolicy;
     return validated(raw);
   }
 
@@ -208,7 +233,36 @@ public class ShadowVariants {
     }
     BigDecimal floor =
         v.compositeThreshold() != null ? v.compositeThreshold() : d.compositeThreshold();
-    return d.compositeScore() != null && floor != null && d.compositeScore().compareTo(floor) >= 0;
+    BigDecimal composite = compositeFor(d, v);
+    return composite != null && floor != null && composite.compareTo(floor) >= 0;
+  }
+
+  /**
+   * The composite this variant scores against: the champion's recorded score, or — for a
+   * {@code nullPolicy: withheld} variant (F5 U4b) — the MAX of it and the confluence's
+   * {@code withheldAggregate}, the number the composite WOULD have been had every input-missing dot
+   * been withheld rather than scored.
+   *
+   * <p>The {@code max} is the §3.3.3 relaxing-or-neutral clamp in its per-bar form, and it is load
+   * bearing: unifying the null rule moves the composite BOTH ways — withholding one of the fifteen
+   * opposes-in-denominator dots RAISES it, withholding one of the four that currently read a null as
+   * SUPPORT ({@code vix} / {@code basis} / {@code premium_skew} / {@code dow}) LOWERS it. The shadow
+   * writer only ever sees REJECTED entries, so an unclamped variant would silently drop
+   * champion-accepted rows (whose counterparts among the champion-ACCEPTED-and-FIRED signals are
+   * invisible here) and bias its own book upward. Clamped, the variant's book is the champion's PLUS
+   * exactly the rows the unified rule promoted — which is the measurement being asked for.
+   *
+   * <p>A pre-U4b diagnostic (or the direction-neutral straddle stand-in) carries no confluence, and
+   * one built before the shadow existed carries a null {@code withheldAggregate}: both degrade to the
+   * champion composite, i.e. to champion behaviour.
+   */
+  private static BigDecimal compositeFor(ScalperConfluenceGate.RejectionDiagnostic d, Variant v) {
+    BigDecimal champion = d.compositeScore();
+    if (!v.nullWithheld() || d.confluence() == null || d.confluence().withheldAggregate() == null) {
+      return champion;
+    }
+    BigDecimal withheld = d.confluence().withheldAggregate();
+    return champion == null ? withheld : champion.max(withheld);
   }
 
   /** The §3.3.3 clamp: floor overrides may only lower, cap overrides may only raise. */
@@ -226,12 +280,14 @@ public class ShadowVariants {
     public String name;
     public List<RawRail> rails;
     public BigDecimal compositeThreshold;
+    public String nullPolicy;
   }
 
   /** Jackson shape of a runtime-registration spec BODY (the variant minus its name). */
   static final class RawSpec {
     public List<RawRail> rails;
     public BigDecimal compositeThreshold;
+    public String nullPolicy;
   }
 
   /** Jackson shape of one rail override. */

@@ -1060,7 +1060,13 @@ public class ScalperConfluenceGate {
             // A3: `iv_rank` is default-OFF. Its input is suppressed below the 60-trading-day
             // IvAnalyticsService history floor and would start resolving on a CALENDAR trigger
             // (~late Sep 2026) — arming it stays an owner decision (tag ⇒ republish), never a date.
-            cfg.has("iv-rank-dot"));
+            cfg.has("iv-rank-dot"),
+            // F5 U4b: `dot-null-withheld` unifies the scorer's THREE missing-input rules (withheld /
+            // supports / opposes-in-denominator) to one — input-missing ⇒ withheld. DEFAULT-OFF: the
+            // unarmed LEGACY policy leaves the dot list and the aggregate byte-identical, and only the
+            // never-read `withheldAggregate` shadow rides along. Arming changes which signals fire and
+            // needs a REPUBLISH (the engine reads the PUBLISHED config).
+            cfg.has("dot-null-withheld") ? NullPolicy.WITHHELD : NullPolicy.LEGACY);
     diag.confluence = conf;
     diag.confluenceThreshold = cfg.confluenceThreshold();
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();

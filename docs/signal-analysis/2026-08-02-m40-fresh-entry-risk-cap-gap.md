@@ -8,12 +8,22 @@ from a cited doc).
 
 ## What PR #1214 actually fixed vs. what M40 asked for
 
-PR #1214 was scoped from `docs/signal-analysis/2026-08-01-e4-e8-decision-sheet.md §2f`, which itself
-was working from the premise that M40's residual gap was "narrow, paper-only, and low urgency" —
-specifically, that the Manas §3.4.3 portfolio-open-risk-cap check on a **pyramid ADD**
-(`ManasPyramidPolicy.wouldBreachRiskCap`) didn't get the same `risk_audit` + ntfy treatment every
-other `RiskService` threshold rail gets. That premise held, and PR #1214 fixes exactly that: a
-narrow, real, previously-uncovered **observability gap on the pyramid-add path**
+**[sourced]** The decision sheet's own premise (`2026-08-01-e4-e8-decision-sheet.md:405-412`) is
+narrower than either of us initially scoped from: *"Manas swing has no live circuit breaker… A real
+Manas circuit breaker would need a different metric entirely — e.g. % of book capital deployed, or a
+daily-loss-limit analog to the scalper's 3% — which is a small design-plus-build task, not a config
+change."* It is about the missing EQUITY-appropriate circuit-breaker mechanism in general (the
+existing `heat_cap_pct` rail is SPAN-margin-only and inert for cash-equity books) — it does **not**
+say anything about the pyramid-add path specifically, and it does **not** say the gap is an
+audit/ntfy coverage hole.
+
+**[computed]** PR #1214's narrower framing — "the Manas §3.4.3 portfolio-open-risk-cap check on a
+pyramid ADD doesn't get the same `risk_audit`/ntfy treatment three of `RiskService`'s four audited
+rails get (daily-loss/profit-target/heat-cap; deployment audits only, no alert —
+`RiskService.java:188`)" — was **my own scoping choice** when translating that decision-sheet
+premise into a buildable, clean-tier task, not a claim the decision sheet itself makes. Under that
+(self-chosen) framing, PR #1214 does fix a real, previously-uncovered **observability gap on the
+pyramid-add path**
 (`EmissionGuard.recordPyramidRiskCapBreach` → `RiskService.recordPyramidRiskCapBreach`), unreachable
 in production today because `artha.manas-arora.pyramid.enabled=false` (default).
 
@@ -46,8 +56,8 @@ guarded by `isAdd`).
   to stop at the cap, not just pyramid adds.
 
 **[computed]** Both live Manas strategies size at 1% risk per position:
-- `manas-arora-breakout.yaml`: `position_sizing: { … risk_pct_equity: 1.0 }` (line 54), `max_positions: 7` (line 56).
-- `manas-arora-vcp.yaml`: `position_sizing: { … risk_pct_equity: 1.0 }` (line 52), `max_positions: 7` (line 54).
+- `manas-arora-breakout.yaml`: `position_sizing: { … risk_pct_equity: 1.0 }` (line 54), `max_positions: 7` (line 55).
+- `manas-arora-vcp.yaml`: `position_sizing: { … risk_pct_equity: 1.0 }` (line 52), `max_positions: 7` (line 53).
 
 Each YAML's own `max_positions: 7` is a per-strategy config field of uncertain enforcement (a
 repo-wide grep for `max_positions` in `strategy-signal-service`'s Java found no consumer). The

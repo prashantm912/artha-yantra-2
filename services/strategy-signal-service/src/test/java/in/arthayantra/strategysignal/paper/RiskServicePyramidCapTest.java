@@ -26,7 +26,9 @@ import org.junit.jupiter.api.Test;
  * the 6% (or any other) pyramid-risk-cap THRESHOLD, and pyramiding itself stays disabled by default
  * ({@code artha.manas-arora.pyramid.enabled=false}) — this call site is unreachable in production
  * until that flag is re-armed (see {@code ManasAroraSwingEngineTest}'s
- * {@code aPyramidAddIsBlockedWhenItWouldBreachTheOpenRiskCap} for the end-to-end wiring proof).
+ * {@code aPyramidAddIsBlockedWhenItWouldBreachTheOpenRiskCap} for the engine-to-port wiring proof —
+ * that test mocks {@code EmissionGuard}, proving {@code SwingBatchEngine} calls the port correctly,
+ * not the complete paper-adapter path; this test covers the {@code RiskService} half directly).
  */
 class RiskServicePyramidCapTest {
 

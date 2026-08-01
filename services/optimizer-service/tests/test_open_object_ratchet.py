@@ -120,11 +120,6 @@ FROZEN_OPEN_OBJECTS = {
 }
 
 
-def _says_nothing(value):
-    """A schema that says nothing at all: boolean true, or the empty schema."""
-    return value is True or (isinstance(value, dict) and not value)
-
-
 def _nonempty(value):
     return bool(value) if isinstance(value, (dict, list)) else value is not None
 
@@ -154,6 +149,8 @@ def _discloses_key_information(node: dict) -> bool:
     still cannot type the response and the diff gate still cannot see a rename. They are genuinely
     constraining for VALIDATION, which is exactly why the reframing matters.
     """
+    if not isinstance(node, dict):
+        return False        # a missing branch, or a boolean schema: publishes no key names either
     if "$ref" in node:
         return True                                     # delegates disclosure to the target
     for keyword in ("properties", "patternProperties", "required", "dependentSchemas",
@@ -162,13 +159,61 @@ def _discloses_key_information(node: dict) -> bool:
             return True
     if "const" in node:
         return True
-    for keyword in ("additionalProperties", "unevaluatedProperties", "propertyNames"):
-        value = node.get(keyword)
-        if value is not None and not _says_nothing(value):
-            return True                                 # pins the value or key-name shape
-    if "not" in node and node["not"] is not False:
-        return True                                     # `not: false` is the identity
-    return "if" in node and ("then" in node or "else" in node)   # a lone `if` has no effect
+    for keyword in ("additionalProperties", "unevaluatedProperties"):
+        if keyword in node and _value_schema_says_something(node[keyword]):
+            return True
+    if "propertyNames" in node and _narrows_names(node["propertyNames"]):
+        return True
+    # RECURSE, do not merely detect PRESENCE. These three carried the old validation model:
+    # `not: {"type":"string"}` and `if`/`then` over scalar facets restrict the instance but publish
+    # no key names, so a client is still untyped and the diff gate still blind. Ask the SUBSCHEMA
+    # the same disclosure question, defaulting to non-disclosing when it answers no.
+    if "not" in node and _discloses_key_information(node["not"]):
+        return True
+    if "if" in node and ("then" in node or "else" in node):      # a lone `if` has no effect
+        return (_discloses_key_information(node.get("then"))
+                or _discloses_key_information(node.get("else")))
+    return False
+
+
+def _value_schema_says_something(schema) -> bool:
+    """Does an additionalProperties / unevaluatedProperties subschema pin the VALUE shape?
+
+    ``true`` and ``{}`` say nothing; ``false`` says "no further keys", which is a closed object and
+    very much something.
+    """
+    if schema is True:
+        return False
+    if schema is False:
+        return True
+    if not isinstance(schema, dict) or not schema:
+        return False
+    return "type" in schema or "$ref" in schema or _discloses_key_information(schema)
+
+
+def _narrows_names(schema) -> bool:
+    """Does a propertyNames subschema narrow WHICH names are legal?
+
+    Object keys are already strings, so ``{"type": "string"}`` -- like ``{}`` or ``true`` -- narrows
+    nothing, and ``pattern: ""`` is the empty regex which matches every name. Only something a
+    codegen could turn into a key type counts.
+    """
+    if schema is True:
+        return False
+    if schema is False:
+        return True                                     # no legal names at all
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("pattern") or schema.get("enum") or "const" in schema or "$ref" in schema:
+        return True
+    for keyword in ("allOf", "anyOf", "oneOf"):
+        if any(_narrows_names(branch) for branch in (schema.get(keyword) or [])):
+            return True
+    if "not" in schema:
+        return _narrows_names(schema["not"])
+    if "if" in schema and ("then" in schema or "else" in schema):
+        return _narrows_names(schema.get("then")) or _narrows_names(schema.get("else"))
+    return False                                        # type:string, annotations, unknowns
 
 
 def _is_open(node) -> bool:
@@ -189,7 +234,14 @@ def _is_open(node) -> bool:
 
 
 def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: set) -> None:
+    if node is None:
+        return
     if not isinstance(node, dict):
+        # PREDICATE-CORRECT IS NOT WALKER-CORRECT. _is_open already judged the boolean `true`
+        # schema correctly and its unit case passed, while this branch dropped it before
+        # publication ever saw it. Evaluate here rather than bailing on "not a dict".
+        if _is_open(node):
+            found.add(where + pointer)
         return
     ref = node.get("$ref")
     if ref is not None:
@@ -208,7 +260,7 @@ def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: 
         return
     for key, value in (node.get("properties") or {}).items():
         _walk(schemas, value, where, f"{pointer}.{key}", found, refs)
-    if isinstance(node.get("items"), dict):
+    if "items" in node:                                  # dict OR boolean `true`
         _walk(schemas, node["items"], where, f"{pointer}[]", found, refs)
     additional = node.get("additionalProperties")
     if isinstance(additional, dict) and additional:
@@ -219,12 +271,16 @@ def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: 
 
 
 def _open_objects() -> set:
+    """Every open object the LIVE app publishes — generated from code, never a dump."""
+    return _scan(app.openapi())
+
+
+def _scan(spec: dict) -> set:
     """Every unconstrained open object reachable from a RESPONSE, as location strings.
 
     Two passes: response schemas inline, then the transitive closure of the components those
     responses ``$ref``. Request-only components are never seeded, so they never appear.
     """
-    spec = app.openapi()
     schemas = spec.get("components", {}).get("schemas", {})
     found: set = set()
     roots: set = set()
@@ -299,6 +355,14 @@ def test_the_open_object_predicate_recognises_every_unconstrained_shape():
         {"pattern": ""},
         {"maxContains": 2},
         {"contains": {"type": "string"}, "minContains": 0},
+        # ROUND-7: these still answered VALIDATION semantics. Each restricts the instance while
+        # publishing no key names, so a client stays untyped and the diff gate stays blind -- and
+        # object keys are already strings, so a string `propertyNames` narrows nothing at all.
+        {"not": {"type": "string"}},
+        {"if": {"type": "string"}, "then": {"maxLength": 5}},
+        {"if": {"type": "string"}, "else": {"maximum": 10}},
+        {"propertyNames": {"type": "string"}},
+        {"propertyNames": {"pattern": ""}},
         # Facets bound the SIZE of the object, never which keys it has, so a consumer still cannot
         # type the response — see the divergence note on _discloses_key_information.
         {"type": "object", "minProperties": 1},
@@ -376,3 +440,53 @@ def test_no_response_publishes_an_unfrozen_open_object():
         f"app.openapi(): {stale}. Progress — delete those lines from FROZEN_OPEN_OBJECTS. Leaving "
         "them would silently re-authorise the same location later."
     )
+
+
+def test_the_walker_reports_open_objects_at_every_location_form():
+    """End-to-end through the WALKER, over a synthetic spec.
+
+    Predicate-correct and walker-correct are separate properties, and this check has already
+    shipped a case where only the first held: ``_is_open`` judged the boolean ``true`` schema
+    correctly from the day it was added and its unit case passed, but ``_walk`` bailed on "not a
+    dict" before publication was ever consulted -- so a ``true`` at a response root, under
+    ``items``, as a property or in a composition branch was reported nowhere. A predicate case
+    cannot catch that.
+    """
+    spec = {
+        "paths": {
+            "/direct": {"get": {"responses": {"200": {"content": {"*/*": {"schema": True}}}}}},
+            "/array": {"get": {"responses": {"200": {"content": {"*/*": {
+                "schema": {"type": "array", "items": True}}}}}}},
+            "/property": {"get": {"responses": {"200": {"content": {"*/*": {
+                "schema": {"type": "object", "properties": {"payload": True}}}}}}}},
+            "/composed": {"get": {"responses": {"200": {"content": {"*/*": {
+                "schema": {"allOf": [True]}}}}}}},
+            "/notstring": {"get": {"responses": {"200": {"content": {"*/*": {
+                "schema": {"not": {"type": "string"}}}}}}}},
+            "/cond": {"get": {"responses": {"200": {"content": {"*/*": {
+                "schema": {"if": {"type": "string"}, "then": {"maxLength": 5}}}}}}}},
+            "/names": {"get": {"responses": {"200": {"content": {"*/*": {
+                "schema": {"propertyNames": {"type": "string"}}}}}}}},
+            "/refopen": {"get": {"responses": {"200": {"content": {"*/*": {
+                "schema": {"$ref": "#/components/schemas/NotString"}}}}}}},
+            "/typed": {"get": {"responses": {"200": {"content": {"*/*": {
+                "schema": {"$ref": "#/components/schemas/Typed"}}}}}}},
+            "/closed": {"get": {"responses": {"200": {"content": {"*/*": {
+                "schema": {"type": "object", "additionalProperties": False}}}}}}},
+            "/never": {"get": {"responses": {"200": {"content": {"*/*": {"schema": False}}}}}},
+        },
+        "components": {"schemas": {
+            "NotString": {"not": {"type": "string"}},
+            "Typed": {"type": "object", "properties": {"a": {"type": "string"}}},
+        }},
+    }
+    assert _scan(spec) == {
+        "GET /direct 200",                  # a bare `true` as the response schema
+        "GET /array 200[]",                 # items: true
+        "GET /property 200.payload",        # a `true`-valued property
+        "GET /composed 200/allOf/0",        # a `true` composition branch
+        "GET /notstring 200",               # `not` over a scalar type discloses no keys
+        "GET /cond 200",                    # conditional over scalar facets discloses no keys
+        "GET /names 200",                   # object keys are already strings
+        "GET /refopen 200 -> NotString",    # and the same through a $ref
+    }

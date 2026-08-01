@@ -148,6 +148,25 @@ import org.junit.jupiter.api.Test;
  * inert neighbour — is ASSERTED by {@link #anUnknownKeywordIsNeverSilencedByAnInertKnownOne}, not
  * claimed in prose. It was claimed in prose once and was false in 18 combinations.
  *
+ * <h2>⚠️ Predicate-correct is not walker-correct</h2>
+ *
+ * <p>They are SEPARATE properties, and this check shipped a version where only the first held. The
+ * boolean {@code true} schema was judged correctly by {@link #isOpenObject} from the day it was
+ * added and its unit case passed — while {@link #walk} bailed on "not an object" before publication
+ * was ever consulted, so a {@code true} at a response root, under {@code items}, as a property or in
+ * a composition branch was reported NOWHERE. No predicate case can catch that.
+ * {@link #theWalkerReportsOpenObjectsAtEveryLocationForm} exists for exactly this class and asserts
+ * every location form end-to-end.
+ *
+ * <p>The same round found the reframe had not propagated into three branches that still answered the
+ * OLD validation question by PRESENCE: {@code not}, the {@code if}/{@code then}/{@code else}
+ * conditional, and {@code propertyNames}. {@code not: {"type":"string"}} restricts the instance but
+ * publishes no key names; a conditional over scalar facets likewise; and object keys are already
+ * strings, so {@code propertyNames: {"type":"string"}} narrows nothing at all. Each now asks its
+ * SUBSCHEMA the same disclosure question recursively, defaulting to non-disclosing. <b>When the
+ * question changes, sweep every branch that answered the old one — a new definition does not
+ * propagate by itself.</b>
+ *
  * <h2>⚠️ This test's OWN blind spot</h2>
  *
  * <p><b>It sees only what the capture produced, and only as of the last commit of it.</b> Three
@@ -351,6 +370,15 @@ class SpecOpenObjectRatchetTest {
             "{\"pattern\": \"\"}",
             "{\"maxContains\": 2}",
             "{\"contains\": {\"type\": \"string\"}, \"minContains\": 0}",
+            // ⚠️ ROUND-7: these four still answered VALIDATION semantics. Each restricts the
+            // instance while publishing no key names, so a client stays untyped and the diff gate
+            // stays blind — and object keys are already strings, so a string `propertyNames`
+            // narrows nothing at all.
+            "{\"not\": {\"type\": \"string\"}}",
+            "{\"if\": {\"type\": \"string\"}, \"then\": {\"maxLength\": 5}}",
+            "{\"if\": {\"type\": \"string\"}, \"else\": {\"maximum\": 10}}",
+            "{\"propertyNames\": {\"type\": \"string\"}}",
+            "{\"propertyNames\": {\"pattern\": \"\"}}",
             // Facets bound the SIZE of the object, never which keys it has, so a consumer still
             // cannot type the response — see the divergence note on disclosesKeyInformation.
             "{\"type\": \"object\", \"minProperties\": 1}",
@@ -438,6 +466,69 @@ class SpecOpenObjectRatchetTest {
               noop.getKey(), json)
           .isTrue();
     }
+  }
+
+  /**
+   * End-to-end through the WALKER, over a synthetic spec — because predicate-correct and
+   * walker-correct are separate properties and this check has already shipped a case where only
+   * the first held.
+   *
+   * <p>{@link #isOpenObject} judged the boolean {@code true} schema correctly from the day it was
+   * added, and its unit case passed; but {@link #walk} bailed on "not an object" before publication
+   * was ever consulted, so a {@code true} at a response root, under {@code items}, as a property or
+   * in a composition branch was reported nowhere. A predicate case cannot catch that. Every
+   * location form below is asserted at its exact pointer.
+   */
+  @Test
+  void theWalkerReportsOpenObjectsAtEveryLocationForm() throws Exception {
+    String spec =
+        """
+        {
+          "paths": {
+            "/direct":    {"get": {"responses": {"200": {"content": {"*/*": {"schema": true}}}}}},
+            "/array":     {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"type": "array", "items": true}}}}}}},
+            "/property":  {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"type": "object", "properties": {"payload": true}}}}}}}},
+            "/composed":  {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"allOf": [true]}}}}}}},
+            "/notstring": {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"not": {"type": "string"}}}}}}}},
+            "/cond":      {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"if": {"type": "string"}, "then": {"maxLength": 5}}}}}}}},
+            "/names":     {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"propertyNames": {"type": "string"}}}}}}}},
+            "/refopen":   {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"$ref": "#/components/schemas/NotString"}}}}}}},
+            "/typed":     {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"$ref": "#/components/schemas/Typed"}}}}}}},
+            "/closed":    {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"type": "object", "additionalProperties": false}}}}}}},
+            "/never":     {"get": {"responses": {"200": {"content": {"*/*": {"schema": false}}}}}}
+          },
+          "components": {"schemas": {
+            "NotString": {"not": {"type": "string"}},
+            "Typed": {"type": "object", "properties": {"a": {"type": "string"}}}
+          }}
+        }
+        """;
+    Set<String> found = openObjectsIn(new ObjectMapper().readTree(spec));
+
+    assertThat(found)
+        .containsExactlyInAnyOrder(
+            "GET /direct 200", // a bare `true` as the response schema
+            "GET /array 200[]", // `items: true`
+            "GET /property 200.payload", // a `true`-valued property
+            "GET /composed 200/allOf/0", // a `true` composition branch
+            "GET /notstring 200", // `not` over a scalar type discloses no keys
+            "GET /cond 200", // conditional over scalar facets discloses no keys
+            "GET /names 200", // object keys are already strings
+            "GET /refopen 200 -> NotString"); // and the same through a $ref
+
+    // negative controls: these must be reported NOWHERE
+    assertThat(found).noneMatch(location -> location.contains("/typed"));
+    assertThat(found).noneMatch(location -> location.contains("/closed"));
+    assertThat(found).noneMatch(location -> location.contains("/never"));
   }
 
   @Test
@@ -542,7 +633,17 @@ class SpecOpenObjectRatchetTest {
       String pointer,
       Set<String> found,
       Set<String> refs) {
-    if (node == null || !node.isObject()) {
+    if (node == null) {
+      return;
+    }
+    if (!node.isObject()) {
+      // ⚠️ PREDICATE-CORRECT IS NOT WALKER-CORRECT. isOpenObject already judged the boolean `true`
+      // schema correctly and its unit case passed, while this branch dropped it before publication
+      // ever saw it — so a `true` sitting at a response root, under `items`, as a property or in a
+      // composition branch was invisible. Evaluate here rather than bailing on "not an object".
+      if (isOpenObject(node)) {
+        found.add(where + pointer);
+      }
       return;
     }
     JsonNode ref = node.get("$ref");
@@ -617,6 +718,9 @@ class SpecOpenObjectRatchetTest {
    * constraining for VALIDATION, which is exactly why the reframing matters.
    */
   private static boolean disclosesKeyInformation(JsonNode node) {
+    if (!node.isObject()) {
+      return false; // a missing branch, or a boolean schema: publishes no key names either way
+    }
     if (node.has("$ref")) {
       return true; // delegates disclosure to the target; resolved at the reference site
     }
@@ -638,23 +742,76 @@ class SpecOpenObjectRatchetTest {
     if (node.has("const")) {
       return true;
     }
-    for (String keyword : List.of("additionalProperties", "unevaluatedProperties", "propertyNames")) {
-      JsonNode value = node.get(keyword);
-      if (value != null && !saysNothing(value)) {
-        return true; // pins the value or key-name shape (including `false` = a closed object)
+    for (String keyword : List.of("additionalProperties", "unevaluatedProperties")) {
+      if (node.has(keyword) && valueSchemaSaysSomething(node.get(keyword))) {
+        return true;
       }
     }
-    JsonNode not = node.get("not");
-    if (not != null && !(not.isBoolean() && !not.booleanValue())) {
-      return true; // `not: false` is the identity; anything else says something
+    if (node.has("propertyNames") && narrowsNames(node.get("propertyNames"))) {
+      return true;
     }
-    return node.has("if") && (node.has("then") || node.has("else")); // a lone `if` has no effect
+    // ⚠️ RECURSE, do not merely detect PRESENCE. These three carried the old validation model:
+    // `not: {"type":"string"}` and `if/then` over scalar facets restrict the instance but publish
+    // no key names, so a client is still untyped and the diff gate still blind. Ask the SUBSCHEMA
+    // the same disclosure question, defaulting to non-disclosing when it answers no.
+    if (node.has("not") && disclosesKeyInformation(node.path("not"))) {
+      return true;
+    }
+    if (node.has("if") && (node.has("then") || node.has("else"))) { // a lone `if` has no effect
+      return disclosesKeyInformation(node.path("then"))
+          || disclosesKeyInformation(node.path("else"));
+    }
+    return false;
   }
 
-  /** A schema that says nothing at all: boolean {@code true}, or the empty schema. */
-  private static boolean saysNothing(JsonNode schema) {
-    return (schema.isBoolean() && schema.booleanValue())
-        || (schema.isObject() && schema.isEmpty());
+  /**
+   * Does an {@code additionalProperties} / {@code unevaluatedProperties} subschema pin the VALUE
+   * shape? {@code true} and <code>{}</code> say nothing; {@code false} says "no further keys", which
+   * is a closed object and very much something.
+   */
+  private static boolean valueSchemaSaysSomething(JsonNode schema) {
+    if (schema.isBoolean()) {
+      return !schema.booleanValue();
+    }
+    if (!schema.isObject() || schema.isEmpty()) {
+      return false;
+    }
+    return schema.has("type") || schema.has("$ref") || disclosesKeyInformation(schema);
+  }
+
+  /**
+   * Does a {@code propertyNames} subschema narrow WHICH names are legal? Object keys are already
+   * strings, so {@code {"type": "string"}} — like <code>{}</code> or {@code true} — narrows nothing.
+   * Only something a codegen could turn into a key type counts.
+   */
+  private static boolean narrowsNames(JsonNode schema) {
+    if (schema.isBoolean()) {
+      return !schema.booleanValue(); // `false` = no legal names at all
+    }
+    if (!schema.isObject()) {
+      return false;
+    }
+    // `pattern: ""` is the empty regex — it matches every name, so it narrows nothing.
+    if (!schema.path("pattern").asText("").isEmpty()
+        || nonEmpty(schema.get("enum"))
+        || schema.has("const")
+        || schema.has("$ref")) {
+      return true;
+    }
+    for (String keyword : List.of("allOf", "anyOf", "oneOf")) {
+      for (JsonNode branch : schema.path(keyword)) {
+        if (narrowsNames(branch)) {
+          return true;
+        }
+      }
+    }
+    if (schema.has("not")) {
+      return narrowsNames(schema.get("not"));
+    }
+    if (schema.has("if") && (schema.has("then") || schema.has("else"))) {
+      return narrowsNames(schema.path("then")) || narrowsNames(schema.path("else"));
+    }
+    return false; // type:string, annotations, unknowns
   }
 
   private static boolean nonEmpty(JsonNode node) {

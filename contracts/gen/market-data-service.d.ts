@@ -2679,7 +2679,7 @@ export interface components {
             /** Format: int32 */
             barsHeld: number;
             exitReason: string;
-            rsRankAtEntry: string;
+            rsRankAtEntry: string | null;
         };
         JsonNode: unknown;
         WarmStatus: {

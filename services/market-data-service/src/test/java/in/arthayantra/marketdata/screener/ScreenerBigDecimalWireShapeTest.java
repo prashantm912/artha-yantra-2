@@ -61,6 +61,14 @@ class ScreenerBigDecimalWireShapeTest {
     }
   }
 
+  /** Present-and-null (the {@code types = {"string", "null"}} shape), never an OMITTED key. */
+  private static void assertPresentAndNull(JsonNode owner, String... fields) {
+    for (String field : fields) {
+      assertThat(owner.has(field)).as("%s must be present, not omitted", field).isTrue();
+      assertThat(owner.get(field).isNull()).as("%s must serialize as JSON null", field).isTrue();
+    }
+  }
+
   @Test
   void deepSwingRunResultDecimalsAreTextual() throws Exception {
     var instance = new DeepSwingRunResult(
@@ -74,6 +82,17 @@ class ScreenerBigDecimalWireShapeTest {
   void deepSwingTradeDecimalsAreTextual() throws Exception {
     var instance = new DeepSwingTrade(null, null, null, D, null, D, D, 1, null, D);
     assertTextual(json(instance), "entryPrice", "exitPrice", "pnlPct", "rsRankAtEntry");
+  }
+
+  /**
+   * Self-review correction (prompted by sibling PR #1203's finding): {@code rsRankAtEntry} was
+   * first cut as non-null, but both {@code toDeepSwingTrade} mappers (Manas + Minervini) ride a
+   * NaN raw RS-rank in as {@code null} — genuinely reachable, not merely defensive.
+   */
+  @Test
+  void deepSwingTradeRsRankAtEntryCanBeNull() throws Exception {
+    var instance = new DeepSwingTrade(null, null, null, D, null, D, D, 1, null, null);
+    assertPresentAndNull(json(instance), "rsRankAtEntry");
   }
 
   @Test

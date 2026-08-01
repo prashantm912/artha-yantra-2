@@ -8053,7 +8053,7 @@
             "type" : "string"
           },
           "rsRankAtEntry" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "barsHeld", "entryDate", "entryPrice", "exitDate", "exitPrice", "exitReason", "pnlPct", "rsRankAtEntry", "setup", "symbol" ]

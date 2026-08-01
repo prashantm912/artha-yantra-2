@@ -145,6 +145,16 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   3.1 type array; the breaking gate's relabel step downgrades exactly that shape to 3.0's
   `nullable: true` for the diff (genuine unions still refuse), and openapi-typescript renders it
   `number | null`.
+  ⚠️ **`types` UNIONS with the inferred type, it does NOT replace it** (found 2026-08-01). The bare
+  form above is correct ONLY when the declared base already matches what springdoc inferred —
+  `{"number","null"}` on a `BigDecimal` field, `{"integer","null"}` on a `Long` — which is why it has
+  always looked right. **To CHANGE the base type you must declare both:**
+  `@Schema(type = "string", types = {"string", "null"})`. Bare `types = {"string","null"}` on a
+  `BigDecimal` captures as **`["number","string","null"]`**, still advertising the impossible type.
+  This bites hardest on decimals: `ArthaJacksonAutoConfiguration` registers `ToStringSerializer` for
+  `BigDecimal` platform-wide, so **every decimal is a JSON string on the wire while springdoc infers
+  `number`** — a repo-wide pre-existing lie that existing `{"number","null"}` annotations encode
+  rather than fix. Verify by reading the CAPTURED SPEC, never by trusting the annotation.
 - **EVERY new endpoint returns a typed record, never `Map<String,Object>`** — edge-gateway's
   `MapReturnRatchetTest` freezes the Map-returning handler COUNT per service (Maps are invisible
   to the contract gate); a new Map endpoint fails the strategy-gateway CI shard. Cost 2 CI cycles

@@ -24,8 +24,9 @@ thrust at a **weekly** cadence (the live-screen rhythm) and applies the **same**
 **same** exit doctrine the live strategies use, so the trade-level stats reflect the real strategy.
 
 **The 4 setups.** `vcp` (breakout over the VCP pivot), `primary-base` (fresh 52-week-high breakout),
-`cheat-3c` (low-cheat entry), `power-play` (thrust-confirmed pivot). Each runs an independent
-single-position book per variant.
+`cheat-3c` (VCP early-pivot proxy — not doctrine Low Cheat; **CORRECTED 2026-08-02, was mislabelled
+"low-cheat entry"** — see `docs/signal-analysis/2026-08-01-e4-e8-decision-sheet.md` §2a), `power-play`
+(thrust-confirmed pivot). Each runs an independent single-position book per variant.
 
 **Entry gate.** The 7 price-structure Trend-Template gates (close > 50 > 150 > 200-day MA, 200-day
 rising, within 25% of the 52-week high, ≥30% above the 52-week low) + the setup-specific trigger

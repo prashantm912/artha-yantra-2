@@ -304,6 +304,13 @@ def _walk(root: dict, schemas: dict, node: Any, where: str, pointer: str,
             resolved = _resolve_pointer(root, ref[1:])
             if resolved is None or _is_open(resolved, schemas):
                 found.add(f"{where}{pointer} -> {ref}")
+            else:
+                # RESOLVE THEN KEEP WALKING. Classifying the target's ROOT and stopping meant a
+                # TYPED `$defs` record containing an open field reported nothing -- the third place
+                # "resolve the reference" shipped without "and then traverse it" (after component
+                # siblings and the dynamic forms). Local pointers ride the SAME closure the
+                # component refs use, so its seen-set gives cycle protection for free.
+                refs.add(ref)
         else:
             # External URIs, $dynamicRef and $recursiveRef cannot be resolved from the captured
             # document. FAIL LOUDLY rather than treating an unverifiable target as safe.
@@ -364,7 +371,11 @@ def _scan(spec: dict) -> set:
             continue
         seen.add(name)
         refs: set = set()
-        _walk(spec, schemas, schemas.get(name), f"#{name}", "", found, refs)
+        # A closure entry is either a component NAME (walked as `#Name`, the frozen location form)
+        # or a raw local POINTER such as `#/$defs/X`, which is its own location.
+        is_pointer = name.startswith("#/")
+        target = _resolve_pointer(spec, name[1:]) if is_pointer else schemas.get(name)
+        _walk(spec, schemas, target, name if is_pointer else f"#{name}", "", found, refs)
         queue.extend(refs - seen)
     return found
 
@@ -646,12 +657,17 @@ def test_a_reference_does_not_absorb_its_opaque_siblings():
                 "$ref": "#/components/schemas/Open", "properties": {"payload": True}}}}}}}},
             "/defs-ref": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
                 "$ref": "#/$defs/Open"}}}}}}},
+            "/defs-typed": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "$ref": "#/$defs/TypedWithOpenChild"}}}}}}},
             "/external": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
                 "$ref": "https://example.test/x.json#/Foo"}}}}}}},
             "/dangling": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
                 "$ref": "#/components/schemas/Missing"}}}}}}},
         },
-        "$defs": {"Open": True},
+        "$defs": {
+            "Open": True,
+            "TypedWithOpenChild": {"type": "object", "properties": {"payload": True}},
+        },
         "components": {"schemas": {
             "Typed": {"type": "object", "properties": {"a": {"type": "string"}}},
             "Open": True,
@@ -662,6 +678,8 @@ def test_a_reference_does_not_absorb_its_opaque_siblings():
         "GET /open-target 200 -> Open",         # an OPEN target reports the site AND the sibling
         "GET /open-target 200.payload",
         "GET /defs-ref 200 -> #/$defs/Open",    # a local pointer outside components is resolved
+        # and a TYPED $defs target is TRAVERSED, not just classified at its root
+        "#/$defs/TypedWithOpenChild.payload",
         "GET /external 200 -> UNRESOLVABLE https://example.test/x.json#/Foo",
         "GET /dangling 200 -> #/components/schemas/Missing",
     }
@@ -706,17 +724,16 @@ def test_the_live_schema_uses_the_dialect_the_inventory_was_derived_for():
     spec = app.openapi()
     artifact = json.loads(_KEYWORD_ARTIFACT.read_text(encoding="utf-8"))
     assert spec.get("openapi", "").startswith("3.1"), (
-        f"live schema declares OpenAPI {spec.get('openapi')!r}. The subschema-keyword inventory "
-        f"was derived for {artifact['dialect']}, which OpenAPI 3.1 implies; re-derive it with "
-        "tools/derive-json-schema-keywords.py before moving off 3.1."
+        f"live schema declares OpenAPI {spec.get('openapi')!r}, but the keyword inventory's "
+        f"omitted-dialect default ({artifact['omittedJsonSchemaDialectMeans']}) is the OpenAPI 3.1 "
+        "rule. Re-derive with tools/derive-json-schema-keywords.py before moving off 3.1."
     )
-    # Default to what OpenAPI 3.1 IMPLIES, never to the artifact's own value: defaulting to
-    # artifact["dialect"] made this comparison self-satisfying, since FastAPI emits no
-    # jsonSchemaDialect at all. Caught by mutating the artifact and watching this still pass --
-    # a guard that cannot fail is the same defect class as a guard on the wrong artifact.
-    implied_by_openapi_31 = "https://json-schema.org/draft/2020-12/schema"
-    assert spec.get("jsonSchemaDialect", implied_by_openapi_31) == artifact["dialect"], (
-        f"live schema uses dialect "
-        f"{spec.get('jsonSchemaDialect', implied_by_openapi_31)!r} but the inventory was derived "
-        f"for {artifact['dialect']!r}."
+    # An omitted `jsonSchemaDialect` does NOT mean raw 2020-12 -- OAS 3.1.1 §4.8.24.1 says it means
+    # the OAS BASE dialect, and FastAPI emits no such field, so asserting equality with the raw
+    # 2020-12 URI asserted something the document never said. Take the default FROM the artifact
+    # and require the EFFECTIVE dialect to be one the inventory covers.
+    effective = spec.get("jsonSchemaDialect", artifact["omittedJsonSchemaDialectMeans"])
+    assert effective in artifact["applicableDialects"], (
+        f"live schema effectively uses dialect {effective!r}, which the keyword inventory does not "
+        f"cover ({artifact['applicableDialects']})."
     )

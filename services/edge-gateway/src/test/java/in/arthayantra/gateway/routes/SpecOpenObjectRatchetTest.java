@@ -195,6 +195,17 @@ import org.junit.jupiter.api.Test;
  * three redden. <b>When the same defect shape recurs, stop fixing instances and assert the
  * property.</b>
  *
+ * <p>⚠️ THE RECURRING SHAPE, named because it has now cost more rounds than any actual logic bug:
+ * <b>a guard's existence keeps being mistaken for its efficacy.</b> Five instances so far — a
+ * predicate the walker never called (×3), an invariant asserted against its own hand-list, a
+ * comparison that defaulted to the value it was checking, a {@code --check} that enumerated which
+ * fields to compare and named one of seven, and two reference forms documented as loud failures
+ * and read by nothing. The countermeasure that works is mechanical and is now applied to every
+ * claim here: <b>construct the state the guard says it catches, and watch it redden.</b> Three
+ * separate fixes in this file were themselves found that way, by red-proofing rather than by
+ * review. The related habit: prefer DEFAULT-COMPARE with declared exclusions over
+ * default-ignore with declared inclusions — enumerating what to check has lost every time.
+ *
  * <p>⚠️ And then the SOURCING itself was drawn one layer too shallow: the derivation scanned the
  * dialect's VOCABULARIES but not the dialect's own default metaschema, so the compatibility layer
  * ({@code definitions}, schema-valued {@code dependencies}, {@code $recursiveRef}) was missing and a
@@ -721,23 +732,17 @@ class SpecOpenObjectRatchetTest {
    * meta-schemas, and re-deriving is one command. NOT guaranteed: freshness against a future
    * dialect — which {@link #everyCommittedSpecUsesTheDialectTheInventoryWasDerivedFor} catches.
    */
-  /** The dialect the committed keyword artifact was derived for. */
-  private static String derivedDialect() throws IOException {
+  /** The committed, derived keyword artifact. */
+  private static JsonNode keywordArtifact() throws IOException {
     return new ObjectMapper()
         .readTree(
-            Files.readString(findRepoRoot().resolve("contracts/json-schema-2020-12-keywords.json")))
-        .path("dialect")
-        .asText();
+            Files.readString(
+                findRepoRoot().resolve("contracts/json-schema-2020-12-keywords.json")));
   }
 
   private static Set<String> derivedKeywords(String field) throws IOException {
-    JsonNode artifact =
-        new ObjectMapper()
-            .readTree(
-                Files.readString(
-                    findRepoRoot().resolve("contracts/json-schema-2020-12-keywords.json")));
     Set<String> keywords = new TreeSet<>();
-    artifact.path(field).forEach(k -> keywords.add(k.asText()));
+    keywordArtifact().path(field).forEach(k -> keywords.add(k.asText()));
     assertThat(keywords).as("derived %s", field).isNotEmpty();
     return keywords;
   }
@@ -819,12 +824,17 @@ class SpecOpenObjectRatchetTest {
                                  "properties": {"payload": true}}}}}}}},
             "/defs-ref":      {"get": {"responses": {"200": {"content": {"*/*": {"schema":
                                 {"$ref": "#/$defs/Open"}}}}}}},
+            "/defs-typed":    {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                                {"$ref": "#/$defs/TypedWithOpenChild"}}}}}}},
             "/external":      {"get": {"responses": {"200": {"content": {"*/*": {"schema":
                                 {"$ref": "https://example.test/x.json#/Foo"}}}}}}},
             "/dangling":      {"get": {"responses": {"200": {"content": {"*/*": {"schema":
                                 {"$ref": "#/components/schemas/Missing"}}}}}}}
           },
-          "$defs": {"Open": true},
+          "$defs": {
+            "Open": true,
+            "TypedWithOpenChild": {"type": "object", "properties": {"payload": true}}
+          },
           "components": {"schemas": {
             "Typed": {"type": "object", "properties": {"a": {"type": "string"}}},
             "Open": true
@@ -840,6 +850,9 @@ class SpecOpenObjectRatchetTest {
             "GET /open-target 200.payload",
             // a local pointer outside components/schemas is resolved, not ignored
             "GET /defs-ref 200 -> #/$defs/Open",
+            // ⚠️ and a TYPED $defs target is TRAVERSED, not just classified at its root:
+            // the open child is reported at its own location inside the target
+            "#/$defs/TypedWithOpenChild.payload",
             // forms that cannot be resolved from the captured document fail LOUDLY
             "GET /external 200 -> UNRESOLVABLE https://example.test/x.json#/Foo",
             "GET /dangling 200 -> #/components/schemas/Missing");
@@ -866,13 +879,22 @@ class SpecOpenObjectRatchetTest {
                   + " tools/derive-json-schema-keywords.py before moving off 3.1.",
               service, spec.path("openapi").asText(""))
           .startsWith("3.1");
-      // Default to what OpenAPI 3.1 IMPLIES and compare against the ARTIFACT's declared dialect,
-      // so artifact drift fails here too. Defaulting to the artifact's own value (as the Python
-      // halves briefly did) makes the comparison self-satisfying whenever the field is absent.
-      String impliedByOpenApi31 = "https://json-schema.org/draft/2020-12/schema";
-      assertThat(spec.path("jsonSchemaDialect").asText(impliedByOpenApi31))
-          .as("%s dialect vs the inventory's", service)
-          .isEqualTo(derivedDialect());
+      // ⚠️ An omitted `jsonSchemaDialect` does NOT mean raw 2020-12 — OAS 3.1.1 §4.8.24.1 says it
+      // means the OAS BASE dialect, and all six contracts omit the field, so asserting they
+      // declared 2020-12 asserted something the documents never said. Take the default FROM the
+      // artifact and require the EFFECTIVE dialect to be one the inventory covers.
+      JsonNode artifact = keywordArtifact();
+      String effective =
+          spec.path("jsonSchemaDialect")
+              .asText(artifact.path("omittedJsonSchemaDialectMeans").asText());
+      Set<String> applicable = new TreeSet<>();
+      artifact.path("applicableDialects").forEach(d -> applicable.add(d.asText()));
+      assertThat(applicable)
+          .withFailMessage(
+              "%s effectively uses dialect %s, which the keyword inventory does not cover (%s)."
+                  + " Re-derive with tools/derive-json-schema-keywords.py.",
+              service, effective, applicable)
+          .contains(effective);
     }
   }
 
@@ -965,7 +987,11 @@ class SpecOpenObjectRatchetTest {
         continue;
       }
       Set<String> refs = new TreeSet<>();
-      walk(spec, schemas, schemas.get(name), "#" + name, "", found, refs);
+      // A closure entry is either a component NAME (walked as `#Name`, the frozen location form)
+      // or a raw local POINTER such as `#/$defs/X`, which is its own location.
+      boolean isPointer = name.startsWith("#/");
+      JsonNode resolvedTarget = isPointer ? resolvePointer(spec, name.substring(1)) : schemas.get(name);
+      walk(spec, schemas, resolvedTarget, isPointer ? name : "#" + name, "", found, refs);
       refs.stream().filter(r -> !visited.contains(r)).forEach(queue::push);
     }
     return found;
@@ -1025,6 +1051,13 @@ class SpecOpenObjectRatchetTest {
         JsonNode resolved = resolvePointer(root, target.substring(1));
         if (resolved == null || isOpenObject(resolved, schemas)) {
           found.add(where + pointer + " -> " + target);
+        } else {
+          // ⚠️ RESOLVE THEN KEEP WALKING. Classifying the target's ROOT and stopping meant a
+          // TYPED `$defs` record containing an open field reported nothing — the third place
+          // "resolve the reference" shipped without "and then traverse it" (after component
+          // siblings and the dynamic forms). Local pointers ride the SAME closure the component
+          // refs use, so its visited-set gives cycle protection for free.
+          refs.add(target);
         }
       } else {
         // External URIs cannot be resolved from the captured document. FAIL LOUDLY rather than

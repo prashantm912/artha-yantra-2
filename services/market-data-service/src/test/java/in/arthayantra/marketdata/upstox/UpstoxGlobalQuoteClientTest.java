@@ -215,6 +215,27 @@ class UpstoxGlobalQuoteClientTest {
     assertWarned("reason=no-prev-close");
   }
 
+  /**
+   * A server that ACCEPTS the connection and then stops responding must not park the evaluation
+   * thread for the page's 45 s read window. WireMock's fixed delay reproduces exactly that shape:
+   * TCP connect succeeds, then silence. The signal client's 4 s read budget must cut it loose.
+   */
+  @Test
+  void aSilentAfterConnectServerFailsFastRatherThanParkingTheEvaluationThread() {
+    wireMock.stubFor(
+        get(urlPathEqualTo(QUOTES_PATH))
+            .willReturn(aResponse().withFixedDelay(30_000).withBody(DJI_BODY)));
+
+    long startedAt = System.nanoTime();
+    assertThat(client().latest(DOW)).isEmpty();
+    long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+    assertThat(elapsedMs)
+        .as("the eval thread must be released on the signal budget, not the page's 45s read window")
+        .isLessThan(15_000);
+    assertThat(degradations("error")).isEqualTo(1.0);
+  }
+
   /** The signal path must not inherit the page's 429 backoff ladder — a 429 fails fast. */
   @Test
   void aRateLimitFailsFastRatherThanSleepingOnTheEvaluationThread() {

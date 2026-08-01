@@ -51,7 +51,7 @@ def _nonempty(value):
     return bool(value) if isinstance(value, (dict, list)) else value is not None
 
 
-def _discloses_key_information(node: dict) -> bool:
+def _discloses_key_information(node, schemas: dict) -> bool:
     """Does this node put ANY information about the object's KEYS into the published document?
 
     This asks DISCLOSURE, not validation, and the distinction is the whole design. Four consecutive
@@ -87,7 +87,7 @@ def _discloses_key_information(node: dict) -> bool:
     if "const" in node:
         return True
     for keyword in ("additionalProperties", "unevaluatedProperties"):
-        if keyword in node and _value_schema_says_something(node[keyword]):
+        if keyword in node and _value_schema_says_something(node[keyword], schemas):
             return True
     if "propertyNames" in node and _narrows_names(node["propertyNames"]):
         return True
@@ -95,19 +95,24 @@ def _discloses_key_information(node: dict) -> bool:
     # `not: {"type":"string"}` and `if`/`then` over scalar facets restrict the instance but publish
     # no key names, so a client is still untyped and the diff gate still blind. Ask the SUBSCHEMA
     # the same disclosure question, defaulting to non-disclosing when it answers no.
-    if "not" in node and _discloses_key_information(node["not"]):
+    if "not" in node and _discloses_key_information(node["not"], schemas):
         return True
     if "if" in node and ("then" in node or "else" in node):      # a lone `if` has no effect
-        return (_discloses_key_information(node.get("then"))
-                or _discloses_key_information(node.get("else")))
+        return (_discloses_key_information(node.get("then"), schemas)
+                or _discloses_key_information(node.get("else"), schemas))
     return False
 
 
-def _value_schema_says_something(schema) -> bool:
+def _value_schema_says_something(schema, schemas: dict, seen=()) -> bool:
     """Does an additionalProperties / unevaluatedProperties subschema pin the VALUE shape?
 
     ``true`` and ``{}`` say nothing; ``false`` says "no further keys", which is a closed object and
     very much something.
+
+    A ``$ref`` is RESOLVED rather than counted as disclosure on sight -- the same
+    unresolved-reference flaw ``_narrows_names`` carried, swept from this sibling in the same pass.
+    ``additionalProperties: {"$ref": X}`` discloses iff X does, so a reference to the boolean
+    ``true`` schema is correctly nothing while ``Map[str, SomeRecord]`` stays disclosed.
     """
     if schema is True:
         return False
@@ -115,35 +120,44 @@ def _value_schema_says_something(schema) -> bool:
         return True
     if not isinstance(schema, dict) or not schema:
         return False
-    return "type" in schema or "$ref" in schema or _discloses_key_information(schema)
+    ref = schema.get("$ref")
+    if ref is not None:
+        if not ref.startswith(COMPONENT_PREFIX):
+            return False
+        name = ref[len(COMPONENT_PREFIX):]
+        if name in seen or name not in schemas:
+            return False                                # unresolvable, or a reference cycle
+        return _value_schema_says_something(schemas[name], schemas, seen + (name,))
+    return "type" in schema or _discloses_key_information(schema, schemas)
 
 
 def _narrows_names(schema) -> bool:
     """Does a propertyNames subschema narrow WHICH names are legal?
 
-    Object keys are already strings, so ``{"type": "string"}`` -- like ``{}`` or ``true`` -- narrows
-    nothing, and ``pattern: ""`` is the empty regex which matches every name. Only something a
-    codegen could turn into a key type counts.
+    ONLY directly provable narrowing counts. This helper is where the disclosure reframe leaked: it
+    replaced the global validation-semantics table and then rebuilt a small one locally, and six of
+    its nine members were wrong in the false-CLOSED direction -- ``pattern`` (universal patterns
+    like ``.*`` narrow nothing), ``$ref`` (unresolved; a reference to ``true`` narrows nothing),
+    ``anyOf`` and ``oneOf`` (DISJUNCTIONS -- one permissive branch such as
+    ``[true, {"pattern": "^x"}]`` accepts every name), ``not`` (``not: false`` is ``true``), and the
+    conditional (``if: false`` makes a narrowing ``then`` unreachable). Each needed an evaluation
+    this helper could not do, so each was a guess.
+
+    What survives is unconditional regardless of value, which is what makes it not a classifier:
+    ``false`` permits no name at all, ``const`` permits exactly one (or none, for a non-string
+    constant), a non-empty ``enum`` permits a finite set, and ``allOf`` is a CONJUNCTION so any
+    provably-narrowing branch narrows the whole. Everything else defaults to non-narrowing -- the
+    fails-safe direction, since the cost is a loud false OPEN.
     """
-    if schema is True:
-        return False
     if schema is False:
         return True                                     # no legal names at all
     if not isinstance(schema, dict):
-        return False
-    if schema.get("pattern") or schema.get("enum") or "const" in schema or "$ref" in schema:
+        return False                                    # `true`, and anything non-schema
+    if "const" in schema or _nonempty(schema.get("enum")):
         return True
-    for keyword in ("allOf", "anyOf", "oneOf"):
-        if any(_narrows_names(branch) for branch in (schema.get(keyword) or [])):
-            return True
-    if "not" in schema:
-        return _narrows_names(schema["not"])
-    if "if" in schema and ("then" in schema or "else" in schema):
-        return _narrows_names(schema.get("then")) or _narrows_names(schema.get("else"))
-    return False                                        # type:string, annotations, unknowns
+    return any(_narrows_names(b) for b in (schema.get("allOf") or []))
 
-
-def _is_open(node) -> bool:
+def _is_open(node, schemas: dict = {}) -> bool:
     """True when the schema publishes nothing about the keys of the object it describes.
 
     The empty schema ``{}``, the boolean ``true`` schema, annotation-only such as ``{"title":
@@ -157,7 +171,7 @@ def _is_open(node) -> bool:
     types = declared if isinstance(declared, list) else ([declared] if declared else [])
     if types and "object" not in types:
         return False
-    return not _discloses_key_information(node)
+    return not _discloses_key_information(node, schemas)
 
 
 def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: set) -> None:
@@ -167,7 +181,7 @@ def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: 
         # PREDICATE-CORRECT IS NOT WALKER-CORRECT. _is_open already judged the boolean `true`
         # schema correctly and its unit case passed, while this branch dropped it before
         # publication ever saw it. Evaluate here rather than bailing on "not a dict".
-        if _is_open(node):
+        if _is_open(node, schemas):
             found.add(where + pointer)
         return
     ref = node.get("$ref")
@@ -177,12 +191,12 @@ def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: 
         name = ref[len(COMPONENT_PREFIX) :]
         # A reference to a component that IS an open object makes THIS SITE the opacity, not the
         # component: freezing the name once would authorise unlimited further uses of it.
-        if _is_open(schemas.get(name)):
+        if _is_open(schemas.get(name), schemas):
             found.add(f"{where}{pointer} -> {name}")
         else:
             refs.add(name)
         return
-    if _is_open(node):
+    if _is_open(node, schemas):
         found.add(where + pointer)
         return
     for key, value in (node.get("properties") or {}).items():
@@ -289,7 +303,20 @@ def test_the_open_object_predicate_recognises_every_unconstrained_shape():
         {"if": {"type": "string"}, "then": {"maxLength": 5}},
         {"if": {"type": "string"}, "else": {"maximum": 10}},
         {"propertyNames": {"type": "string"}},
+        # ROUND-9: _narrows_names had rebuilt the very classifier the disclosure reframe removed,
+        # and six of its nine members were wrong in the false-CLOSED direction. Each of these
+        # needed an evaluation the helper could not do, so each was a guess: a regex may be
+        # universal; an unresolved $ref may point at `true`; anyOf/oneOf are DISJUNCTIONS so one
+        # permissive branch admits every name; `not: false` is `true`; and `if: false` makes a
+        # narrowing `then` unreachable.
         {"propertyNames": {"pattern": ""}},
+        {"propertyNames": {"pattern": ".*"}},
+        {"propertyNames": {"pattern": "^x"}},
+        {"propertyNames": {"$ref": "#/components/schemas/AlwaysTrue"}},
+        {"propertyNames": {"anyOf": [True, {"pattern": "^x"}]}},
+        {"propertyNames": {"oneOf": [False, True]}},
+        {"propertyNames": {"not": False}},
+        {"propertyNames": {"if": False, "then": {"pattern": "^x"}}},
         # Facets bound the SIZE of the object, never which keys it has, so a consumer still cannot
         # type the response — see the divergence note on _discloses_key_information.
         {"type": "object", "minProperties": 1},
@@ -315,7 +342,12 @@ def test_the_open_object_predicate_recognises_every_unconstrained_shape():
         {"const": 3},
         {"type": "object", "required": ["a"]},
         {"patternProperties": {"^x": {"type": "string"}}},
-        {"propertyNames": {"pattern": "^x"}},
+        # PROVABLE narrowing, unconditional whatever the value.
+        {"propertyNames": False},
+        {"propertyNames": {"const": "a"}},
+        {"propertyNames": {"enum": ["a", "b"]}},
+        {"propertyNames": {"allOf": [{"enum": ["a"]}]}},
+        {"propertyNames": {"allOf": [True, {"const": "a"}]}},
         {"type": "object", "additionalProperties": False},      # a CLOSED object
         {"not": {"required": ["a"]}},
         {"if": {"required": ["a"]}, "then": {"required": ["b"]}},
@@ -401,9 +433,16 @@ def test_the_walker_reports_open_objects_at_every_location_form():
             "/closed": {"get": {"responses": {"200": {"content": {"*/*": {
                 "schema": {"type": "object", "additionalProperties": False}}}}}}},
             "/never": {"get": {"responses": {"200": {"content": {"*/*": {"schema": False}}}}}},
+            "/maptrue": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "type": "object",
+                "additionalProperties": {"$ref": "#/components/schemas/AlwaysTrue"}}}}}}}},
+            "/maptyped": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+                "type": "object",
+                "additionalProperties": {"$ref": "#/components/schemas/Typed"}}}}}}}},
         },
         "components": {"schemas": {
             "NotString": {"not": {"type": "string"}},
+            "AlwaysTrue": True,
             "Typed": {"type": "object", "properties": {"a": {"type": "string"}}},
         }},
     }
@@ -416,4 +455,7 @@ def test_the_walker_reports_open_objects_at_every_location_form():
         "GET /cond 200",                    # conditional over scalar facets discloses no keys
         "GET /names 200",                   # object keys are already strings
         "GET /refopen 200 -> NotString",    # and the same through a $ref
+        # the sibling sweep: a Map whose VALUE schema $refs the boolean `true` discloses nothing.
+        # /maptyped is absent, which proves the $ref is RESOLVED rather than blanket-ignored.
+        "GET /maptrue 200",
     }

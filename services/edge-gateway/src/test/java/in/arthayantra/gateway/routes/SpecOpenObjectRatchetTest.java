@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -125,11 +126,21 @@ import org.junit.jupiter.api.Test;
  * definition without being listed; see {@link #disclosesKeyInformation}.
  *
  * <p>Measured before adoption: the disclosure predicate produces the IDENTICAL location set to the
- * keyword one on all five committed specs (13 / 3 / 4 / 46 / 11), so this is a change of reasoning,
- * not of verdict. A JSON Schema VALIDATOR was also prototyped and rejected — it answers
- * "accepts any object", which is a different question: {@code ErrorResponse} enumerates three keys
- * but declares no {@code required}, so a validator calls it open while the diff gate and the
- * generated client both see its shape perfectly well.
+ * keyword one on all committed specs, so this is a change of reasoning, not of verdict. A JSON
+ * Schema VALIDATOR was also prototyped and rejected — it answers "accepts any object", which is a
+ * different question: {@code ErrorResponse} enumerates three keys but declares no {@code required},
+ * so a validator calls it open while the diff gate and the generated client both see its shape
+ * perfectly well.
+ *
+ * <p>⚠️ <b>WHAT THE UNCHANGED COUNTS DO AND DO NOT PROVE.</b> Four successive rounds have reported
+ * "identical location sets on all six specs" and that streak reads as more reassuring than it is.
+ * It is REGRESSION evidence — no shape these six specs actually contain changed verdict — and
+ * nothing more. <b>None of the frozen data exercises the adversarial forms these rounds were
+ * about</b>: no committed spec contains a boolean schema, a {@code not}, a conditional, a
+ * {@code propertyNames}, or a universal {@code pattern}. Every genuine defect since round 3 was
+ * found by review or by a hand-built case, never by the counts moving. Treat the regression cases
+ * and {@link #theWalkerReportsOpenObjectsAtEveryLocationForm} as the evidence that the classifier is
+ * right; treat the counts only as evidence that nothing already-frozen broke.
  *
  * <p>Population census, stated because the count depends on the rule: every distinct schema node
  * this check EVALUATES, deduplicated by (spec, location), a component body counted ONCE per spec
@@ -166,6 +177,12 @@ import org.junit.jupiter.api.Test;
  * SUBSCHEMA the same disclosure question recursively, defaulting to non-disclosing. <b>When the
  * question changes, sweep every branch that answered the old one — a new definition does not
  * propagate by itself.</b>
+ *
+ * <p>The round after that made the same point from the other side: {@link #narrowsNames} had
+ * REBUILT LOCALLY the very validation-semantics classifier the reframe removed globally, and six of
+ * its nine members were wrong. The reframe did not fail — a corner of the old model survived inside
+ * it. <b>Removing a bad abstraction is not finished until you check you have not re-created a small
+ * one in the gap it left.</b>
  *
  * <h2>⚠️ This test's OWN blind spot</h2>
  *
@@ -378,7 +395,20 @@ class SpecOpenObjectRatchetTest {
             "{\"if\": {\"type\": \"string\"}, \"then\": {\"maxLength\": 5}}",
             "{\"if\": {\"type\": \"string\"}, \"else\": {\"maximum\": 10}}",
             "{\"propertyNames\": {\"type\": \"string\"}}",
+            // ⚠️ ROUND-9: narrowsNames had rebuilt the very classifier the disclosure reframe
+            // removed, and six of its nine members were wrong in the false-CLOSED direction. Each
+            // of these needed an evaluation the helper could not do, so each was a guess: a regex
+            // may be universal; an unresolved $ref may point at `true`; anyOf/oneOf are
+            // DISJUNCTIONS so one permissive branch admits every name; `not: false` is `true`; and
+            // `if: false` makes a narrowing `then` unreachable.
             "{\"propertyNames\": {\"pattern\": \"\"}}",
+            "{\"propertyNames\": {\"pattern\": \".*\"}}",
+            "{\"propertyNames\": {\"pattern\": \"^x\"}}",
+            "{\"propertyNames\": {\"$ref\": \"#/components/schemas/AlwaysTrue\"}}",
+            "{\"propertyNames\": {\"anyOf\": [true, {\"pattern\": \"^x\"}]}}",
+            "{\"propertyNames\": {\"oneOf\": [false, true]}}",
+            "{\"propertyNames\": {\"not\": false}}",
+            "{\"propertyNames\": {\"if\": false, \"then\": {\"pattern\": \"^x\"}}}",
             // Facets bound the SIZE of the object, never which keys it has, so a consumer still
             // cannot type the response — see the divergence note on disclosesKeyInformation.
             "{\"type\": \"object\", \"minProperties\": 1}",
@@ -406,7 +436,13 @@ class SpecOpenObjectRatchetTest {
             "{\"const\": 3}",
             "{\"type\": \"object\", \"required\": [\"a\"]}",
             "{\"patternProperties\": {\"^x\": {\"type\": \"string\"}}}",
-            "{\"propertyNames\": {\"pattern\": \"^x\"}}",
+            // PROVABLE narrowing, unconditional whatever the value: no legal name, exactly one,
+            // a finite set, or an allOf CONJUNCTION containing one of those.
+            "{\"propertyNames\": false}",
+            "{\"propertyNames\": {\"const\": \"a\"}}",
+            "{\"propertyNames\": {\"enum\": [\"a\", \"b\"]}}",
+            "{\"propertyNames\": {\"allOf\": [{\"enum\": [\"a\"]}]}}",
+            "{\"propertyNames\": {\"allOf\": [true, {\"const\": \"a\"}]}}",
             "{\"type\": \"object\", \"additionalProperties\": false}", // a CLOSED object
             "{\"not\": {\"required\": [\"a\"]}}",
             "{\"if\": {\"required\": [\"a\"]}, \"then\": {\"required\": [\"b\"]}}");
@@ -504,10 +540,17 @@ class SpecOpenObjectRatchetTest {
                             {"$ref": "#/components/schemas/Typed"}}}}}}},
             "/closed":    {"get": {"responses": {"200": {"content": {"*/*": {"schema":
                             {"type": "object", "additionalProperties": false}}}}}}},
-            "/never":     {"get": {"responses": {"200": {"content": {"*/*": {"schema": false}}}}}}
+            "/never":     {"get": {"responses": {"200": {"content": {"*/*": {"schema": false}}}}}},
+            "/maptrue":   {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"type": "object", "additionalProperties":
+                              {"$ref": "#/components/schemas/AlwaysTrue"}}}}}}}},
+            "/maptyped":  {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+                            {"type": "object", "additionalProperties":
+                              {"$ref": "#/components/schemas/Typed"}}}}}}}}
           },
           "components": {"schemas": {
             "NotString": {"not": {"type": "string"}},
+            "AlwaysTrue": true,
             "Typed": {"type": "object", "properties": {"a": {"type": "string"}}}
           }}
         }
@@ -523,12 +566,17 @@ class SpecOpenObjectRatchetTest {
             "GET /notstring 200", // `not` over a scalar type discloses no keys
             "GET /cond 200", // conditional over scalar facets discloses no keys
             "GET /names 200", // object keys are already strings
-            "GET /refopen 200 -> NotString"); // and the same through a $ref
+            "GET /refopen 200 -> NotString", // and the same through a $ref
+            // the sibling sweep: a Map whose VALUE schema $refs the boolean `true` discloses
+            // nothing, and counting the $ref on sight was the same unresolved-reference flaw
+            "GET /maptrue 200");
 
-    // negative controls: these must be reported NOWHERE
+    // negative controls: these must be reported NOWHERE. /maptyped is the one that proves the
+    // $ref is RESOLVED rather than blanket-ignored — Map<String, SomeRecord> stays disclosed.
     assertThat(found).noneMatch(location -> location.contains("/typed"));
     assertThat(found).noneMatch(location -> location.contains("/closed"));
     assertThat(found).noneMatch(location -> location.contains("/never"));
+    assertThat(found).noneMatch(location -> location.contains("/maptyped"));
   }
 
   @Test
@@ -641,7 +689,7 @@ class SpecOpenObjectRatchetTest {
       // schema correctly and its unit case passed, while this branch dropped it before publication
       // ever saw it — so a `true` sitting at a response root, under `items`, as a property or in a
       // composition branch was invisible. Evaluate here rather than bailing on "not an object".
-      if (isOpenObject(node)) {
+      if (isOpenObject(node, schemas)) {
         found.add(where + pointer);
       }
       return;
@@ -656,14 +704,14 @@ class SpecOpenObjectRatchetTest {
       // A reference to a component that IS an open object (JsonNode -> `{}`) makes THIS SITE the
       // opacity, not the component: freezing the component name once would authorise unlimited
       // further uses of it. Freezing the site means each new exposure is a new line.
-      if (isOpenObject(target)) {
+      if (isOpenObject(target, schemas)) {
         found.add(where + pointer + " -> " + name);
       } else {
         refs.add(name);
       }
       return;
     }
-    if (isOpenObject(node)) {
+    if (isOpenObject(node, schemas)) {
       found.add(where + pointer);
       return;
     }
@@ -717,7 +765,7 @@ class SpecOpenObjectRatchetTest {
    * still cannot type the response and the diff gate still cannot see a rename. They are genuinely
    * constraining for VALIDATION, which is exactly why the reframing matters.
    */
-  private static boolean disclosesKeyInformation(JsonNode node) {
+  private static boolean disclosesKeyInformation(JsonNode node, JsonNode schemas) {
     if (!node.isObject()) {
       return false; // a missing branch, or a boolean schema: publishes no key names either way
     }
@@ -743,7 +791,8 @@ class SpecOpenObjectRatchetTest {
       return true;
     }
     for (String keyword : List.of("additionalProperties", "unevaluatedProperties")) {
-      if (node.has(keyword) && valueSchemaSaysSomething(node.get(keyword))) {
+      if (node.has(keyword)
+          && valueSchemaSaysSomething(node.get(keyword), schemas, new HashSet<>())) {
         return true;
       }
     }
@@ -754,12 +803,12 @@ class SpecOpenObjectRatchetTest {
     // `not: {"type":"string"}` and `if/then` over scalar facets restrict the instance but publish
     // no key names, so a client is still untyped and the diff gate still blind. Ask the SUBSCHEMA
     // the same disclosure question, defaulting to non-disclosing when it answers no.
-    if (node.has("not") && disclosesKeyInformation(node.path("not"))) {
+    if (node.has("not") && disclosesKeyInformation(node.path("not"), schemas)) {
       return true;
     }
     if (node.has("if") && (node.has("then") || node.has("else"))) { // a lone `if` has no effect
-      return disclosesKeyInformation(node.path("then"))
-          || disclosesKeyInformation(node.path("else"));
+      return disclosesKeyInformation(node.path("then"), schemas)
+          || disclosesKeyInformation(node.path("else"), schemas);
     }
     return false;
   }
@@ -768,21 +817,53 @@ class SpecOpenObjectRatchetTest {
    * Does an {@code additionalProperties} / {@code unevaluatedProperties} subschema pin the VALUE
    * shape? {@code true} and <code>{}</code> say nothing; {@code false} says "no further keys", which
    * is a closed object and very much something.
+   *
+   * <p>A {@code $ref} is RESOLVED rather than counted as disclosure on sight — the same
+   * unresolved-reference flaw {@link #narrowsNames} carried, swept from this sibling in the same
+   * pass. {@code additionalProperties: {"$ref": X}} discloses iff X does, so a reference to the
+   * boolean {@code true} schema is correctly nothing while {@code Map<String, SomeRecord>} stays
+   * disclosed.
    */
-  private static boolean valueSchemaSaysSomething(JsonNode schema) {
+  private static boolean valueSchemaSaysSomething(
+      JsonNode schema, JsonNode schemas, Set<String> seen) {
     if (schema.isBoolean()) {
       return !schema.booleanValue();
     }
     if (!schema.isObject() || schema.isEmpty()) {
       return false;
     }
-    return schema.has("type") || schema.has("$ref") || disclosesKeyInformation(schema);
+    JsonNode ref = schema.get("$ref");
+    if (ref != null) {
+      if (!ref.asText().startsWith(COMPONENT_PREFIX)) {
+        return false;
+      }
+      String name = ref.asText().substring(COMPONENT_PREFIX.length());
+      JsonNode target = schemas.get(name);
+      if (target == null || !seen.add(name)) {
+        return false; // unresolvable, or a reference cycle
+      }
+      return valueSchemaSaysSomething(target, schemas, seen);
+    }
+    return schema.has("type") || disclosesKeyInformation(schema, schemas);
   }
 
   /**
-   * Does a {@code propertyNames} subschema narrow WHICH names are legal? Object keys are already
-   * strings, so {@code {"type": "string"}} — like <code>{}</code> or {@code true} — narrows nothing.
-   * Only something a codegen could turn into a key type counts.
+   * Does a {@code propertyNames} subschema narrow WHICH names are legal?
+   *
+   * <p>⚠️ <b>ONLY directly provable narrowing counts.</b> This helper is where the disclosure
+   * reframe leaked: it replaced the global validation-semantics table and then rebuilt a small one
+   * locally, and six of its nine members were wrong in the false-CLOSED direction — {@code pattern}
+   * (universal patterns like {@code .*} narrow nothing), {@code $ref} (unresolved; a reference to
+   * {@code true} narrows nothing), {@code anyOf} and {@code oneOf} (DISJUNCTIONS — one permissive
+   * branch such as {@code [true, {"pattern":"^x"}]} accepts every name), {@code not} ({@code not:
+   * false} ≡ {@code true}), and the conditional ({@code if: false} makes a narrowing {@code then}
+   * unreachable). Each needed evaluation this helper could not do, so each was a guess.
+   *
+   * <p>What survives is unconditional regardless of value, which is what makes it not a classifier:
+   * {@code false} permits no name at all, {@code const} permits exactly one (or none, for a
+   * non-string constant), a non-empty {@code enum} permits a finite set, and {@code allOf} is a
+   * CONJUNCTION so any provably-narrowing branch narrows the whole. Everything else defaults to
+   * non-narrowing — the fails-safe direction, since the cost is a loud false OPEN.
    */
   private static boolean narrowsNames(JsonNode schema) {
     if (schema.isBoolean()) {
@@ -791,27 +872,15 @@ class SpecOpenObjectRatchetTest {
     if (!schema.isObject()) {
       return false;
     }
-    // `pattern: ""` is the empty regex — it matches every name, so it narrows nothing.
-    if (!schema.path("pattern").asText("").isEmpty()
-        || nonEmpty(schema.get("enum"))
-        || schema.has("const")
-        || schema.has("$ref")) {
+    if (schema.has("const") || nonEmpty(schema.get("enum"))) {
       return true;
     }
-    for (String keyword : List.of("allOf", "anyOf", "oneOf")) {
-      for (JsonNode branch : schema.path(keyword)) {
-        if (narrowsNames(branch)) {
-          return true;
-        }
+    for (JsonNode branch : schema.path("allOf")) {
+      if (narrowsNames(branch)) {
+        return true;
       }
     }
-    if (schema.has("not")) {
-      return narrowsNames(schema.get("not"));
-    }
-    if (schema.has("if") && (schema.has("then") || schema.has("else"))) {
-      return narrowsNames(schema.path("then")) || narrowsNames(schema.path("else"));
-    }
-    return false; // type:string, annotations, unknowns
+    return false;
   }
 
   private static boolean nonEmpty(JsonNode node) {
@@ -824,7 +893,12 @@ class SpecOpenObjectRatchetTest {
    * {"title": "x"}}, {@code type: object} with nothing enumerated, or {@code additionalProperties}
    * of {@code true} / <code>{}</code>.
    */
+  /** Standalone schemas (the regression cases) carry no components to resolve against. */
   private static boolean isOpenObject(JsonNode node) {
+    return isOpenObject(node, JsonNodeFactory.instance.objectNode());
+  }
+
+  private static boolean isOpenObject(JsonNode node, JsonNode schemas) {
     if (node == null) {
       return false;
     }
@@ -838,7 +912,7 @@ class SpecOpenObjectRatchetTest {
     if (!types.isEmpty() && !types.contains("object")) {
       return false;
     }
-    return !disclosesKeyInformation(node);
+    return !disclosesKeyInformation(node, schemas);
   }
 
   /** The declared type(s); empty when absent, so an untyped schema is judged on its keywords. */

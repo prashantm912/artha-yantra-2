@@ -71,6 +71,36 @@ import org.junit.jupiter.api.Test;
  * {@code isLessThanOrEqualTo} over-statement hole recorded against the count-based instrument
  * cannot exist here). Deleting the regex would trade a leak we can see for a window we cannot.
  *
+ * <h2>Granularity: why a REFERENCE SITE, not a component name (and not a full expansion)</h2>
+ *
+ * <p>The first cut of this test froze component NAMES — one {@code #JsonNode} line per service —
+ * and that reproduced the exact over-stated-allowance hole it was built to remove. Cross-vendor
+ * review MEASURED it: adding a handler that returns {@code JsonNode} directly, and separately
+ * adding a {@code JsonNode} field to an existing typed record, both re-captured with ZERO set
+ * delta. One frozen line was silently authorising 40 response locations and every future one.
+ * {@link MapReturnRatchetTest} cannot see a {@code JsonNode} either, so nothing else caught it.
+ *
+ * <p>The obvious repair — resolve every {@code $ref} per response and freeze every EXPOSED
+ * location — closes it but does not survive contact with this spec set. Measured over the five
+ * committed specs: <b>414 lines</b> (market-data alone 160, backtest 46, strategy-signal 112),
+ * almost all of them {@code #ErrorResponse.details} re-reached through the {@code default} error
+ * envelope of every single operation. Every new endpoint would add a line to the allowlist. That
+ * is not a ratchet anybody maintains, and an unmaintained one gets bulk-edited green.
+ *
+ * <p>So the unit is <b>where opacity is WRITTEN INTO the schema graph</b>, not where it is
+ * transitively reachable: an inline open object is frozen at the spot it is written, and a
+ * {@code $ref} to a component that is itself open is frozen at the REFERENCING SITE. Same five
+ * specs: <b>31 lines</b> for the four Java services. Both reviewer mutations now produce a delta —
+ * a direct {@code JsonNode} response is a new site, and a new {@code JsonNode} field on a record is
+ * a new site — while a new endpoint returning EXISTING types adds nothing.
+ *
+ * <p>RESIDUAL, stated because the boundary is a choice: exposing an already-frozen component's
+ * already-frozen internal opacity through a NEW endpoint produces no delta. Adding an endpoint
+ * that returns {@code RunResult} does not re-freeze {@code #RunResult.metrics}. That is deliberate
+ * — it is the whole difference between 31 lines and 414 — and it is sound because no new opaque
+ * DECISION was made: the shape was settled when the field was written. A new opaque decision
+ * always writes a new site, and that is what this catches.
+ *
  * <h2>⚠️ This test's OWN blind spot</h2>
  *
  * <p><b>It sees only what the capture produced, and only as of the last commit of it.</b> Three
@@ -104,9 +134,17 @@ class SpecOpenObjectRatchetTest {
    * a NEW open object fails, and an exemption that no longer exists ALSO fails, so converting a
    * handler forces its line to be deleted here.
    *
-   * <p>Location grammar: {@code METHOD /path <status>} for an open object at a response schema's
-   * root, suffixed by {@code .field} / {@code []} / <code>{}</code> for one nested inside it;
-   * {@code #ComponentName.field} for one inside a component schema reachable from some response.
+   * <p>Location grammar, three forms:
+   *
+   * <ul>
+   *   <li>{@code METHOD /path <status>} — an open object written INLINE at a response schema's
+   *       root, suffixed {@code .field} / {@code []} / <code>{}</code> when nested inside it.
+   *   <li>{@code #ComponentName.field} — one written inline inside a component schema that some
+   *       response reaches.
+   *   <li>{@code <site> -> ComponentName} — a REFERENCE to a component that is itself an open
+   *       object ({@code JsonNode} → the empty schema). The site is the location, never the
+   *       component name; see the granularity note in the class javadoc for why.
+   * </ul>
    */
   private static final Map<String, Set<String>> FROZEN_OPEN_OBJECTS =
       Map.of(
@@ -126,32 +164,39 @@ class SpecOpenObjectRatchetTest {
                   "#ErrorResponse.details"),
           "market-data-service",
               Set.of(
-                  // The six OptionsAnalytics handlers + WatchlistController.create are the
-                  // MapReturnRatchetTest floor of 7, mirrored here. #1190 (OPEN at the time of
-                  // writing) converts five of them; when it lands, the stale-exemption assertion
-                  // will name those five and they get deleted from this list. The two that remain
-                  // are DELIBERATE STOPS of the HeroZeroPremium kind — oiExpiry emits 3 keys empty
-                  // / 4 populated and openHighStrategy 3 / 5, so a record would add the missing
-                  // keys as nulls to the empty response: a wire change on a live OI page, not a
-                  // refactor.
-                  "GET /api/v1/market/options/multiple-oi 200",
-                  "GET /api/v1/market/options/oi-analysis 200",
-                  "GET /api/v1/market/options/oi-analysis/strike-series 200",
+                  // DELIBERATE STOPS of the HeroZeroPremium kind, and the documented floor #1190
+                  // drove this service down to: oiExpiry emits 3 keys empty / 4 populated and
+                  // openHighStrategy 3 / 5, so a record would add the missing keys as nulls to the
+                  // empty response — a wire change on a live OI page, not a refactor.
                   "GET /api/v1/market/options/oi-expiry 200",
                   "GET /api/v1/market/options/open-high-strategy 200",
-                  "GET /api/v1/market/options/options-chart 200",
-                  "POST /api/v1/watchlists 200",
-                  // Reachable from responses via DeepSwingRunResult. See #JsonNode below.
-                  "#JsonNode",
+                  // The deep-swing report blob. See the JsonNode note in backtest-service below.
+                  "#DeepSwingRunResult.report -> JsonNode",
                   "#ErrorResponse.details"),
           "strategy-signal-service",
               Set.of(
                   // Its four response-level open objects were converted by #1191 and their
                   // exemptions deleted here — the stale-exemption assertion named all four the
                   // moment this branch rebased onto that merge, which is the mechanism working.
-                  // Reachable from responses via SignalDto / StrategyDetail / RejectionRow /
-                  // OpeningSignal / Insight. See #JsonNode below.
-                  "#JsonNode",
+                  //
+                  // What remains is ten JsonNode SITES, each its own line rather than one blanket
+                  // `#JsonNode`. They are the persisted-JSONB passthroughs: score breakdowns, the
+                  // per-family scalper/Minervini/ManasArora detail side-channels, the strategy
+                  // config a user authored, and the rejection diagnostic.
+                  "#Insight.evidence -> JsonNode",
+                  "#Insight.priorityDetail/anyOf/0 -> JsonNode",
+                  "#OpeningSignal.manasAroraDetail/anyOf/0 -> JsonNode",
+                  "#OpeningSignal.minerviniDetail/anyOf/0 -> JsonNode",
+                  "#OpeningSignal.scalperDetail/anyOf/0 -> JsonNode",
+                  "#RejectionRow.diagnostic -> JsonNode",
+                  // ⚠️ ARRIVED WITH #1191's conversion: RiskController's opaque Map became the
+                  // typed RiskSettingRow, but its `value` stayed a JsonNode — the response is
+                  // narrower, not closed. Under a blanket `#JsonNode` exemption this would have
+                  // been absorbed silently; naming the site is what makes it visible.
+                  "#RiskSettingRow.value -> JsonNode",
+                  "#SignalDto.scalperDetail/anyOf/0 -> JsonNode",
+                  "#SignalDto.scoreBreakdown -> JsonNode",
+                  "#StrategyDetail.config -> JsonNode",
                   "#ErrorResponse.details"),
           "backtest-service",
               Set.of(
@@ -163,12 +208,19 @@ class SpecOpenObjectRatchetTest {
                   // keys than its populated path.
                   "GET /api/v1/backtests/{backtestId}/oi-attribution 200",
                   // springdoc renders a Jackson JsonNode as the EMPTY schema {} — "any JSON at
-                  // all", strictly looser than additionalProperties:{}. It is the wire form of
-                  // user-authored strategy config, saved-view filters and score breakdowns, which
-                  // have no fixed shape by construction; it is also returned directly by
-                  // MonteCarloController.montecarlo and the folds endpoint. A THIRD class
+                  // all", strictly looser than additionalProperties:{}. These are the persisted
+                  // JSONB passthroughs (curves, metrics, saved-view filters, trade contributions)
+                  // plus two handlers that return a JsonNode directly. A class
                   // MapReturnRatchetTest cannot see: there is no `Map` in the source text at all.
-                  "#JsonNode",
+                  "GET /api/v1/backtests/{backtestId}/folds 200 -> JsonNode",
+                  "GET /api/v1/backtests/{backtestId}/montecarlo 200 -> JsonNode",
+                  "#BacktestTradeItem.contributions/anyOf/0 -> JsonNode",
+                  "#RunResult.benchmarkCurve -> JsonNode",
+                  "#RunResult.drawdownCurve -> JsonNode",
+                  "#RunResult.equityCurve -> JsonNode",
+                  "#RunResult.metrics -> JsonNode",
+                  "#SavedView.filter -> JsonNode",
+                  "#Trace.sampleBreakdown -> JsonNode",
                   // `Object defaultValue` (IndicatorSeriesService:85) — an indicator parameter
                   // default that is legitimately any scalar type.
                   "#ParamMeta.defaultValue",
@@ -182,12 +234,16 @@ class SpecOpenObjectRatchetTest {
   private static final Map<String, String> OUT_OF_SCOPE =
       Map.of(
           "optimizer-service",
-          "Python/FastAPI, outside the Java build. Its ~40 open objects are pydantic `dict`"
-              + " parameter bags (searchSpace / objectiveSpec / params / scorecard) that are"
-              + " inherently free-form — a hyperparameter dict has no shape to declare — so an"
-              + " allowlist would be maintenance tax with no signal. Its spec is also hand-dumped"
-              + " (no target/ capture artifact, per ci-contracts.yml), so it would churn on"
-              + " somebody else's PR. Ratchet it only if the models stop being free-form.");
+          "Ratcheted in its OWN suite instead — services/optimizer-service/tests/"
+              + "test_open_object_ratchet.py, same rules, against a live app.openapi(). NOT"
+              + " unratcheted, and NOT because its responses are inherently free-form: that was"
+              + " this constant's original claim and cross-vendor review falsified it (api.py:55"
+              + " `run` promises exactly {jobId, status}, api.py:79 `cancel` exactly {status} —"
+              + " fixed shapes declared as open dicts). It moved rather than being listed here"
+              + " because it is the one service with NO source-side instrument (the regex cannot"
+              + " read Python) and a HAND-DUMPED spec, so reading its committed file would leave a"
+              + " new dict[str, Any] endpoint unguarded until someone re-dumps. Generating the"
+              + " document from code in its own suite removes that window entirely.");
 
   @Test
   void noResponsePublishesAnUnfrozenOpenObject() throws IOException {
@@ -249,6 +305,7 @@ class SpecOpenObjectRatchetTest {
    * Request-only components are never seeded, so they never appear.
    */
   private static Set<String> openObjectsIn(JsonNode spec) {
+    JsonNode schemas = spec.path("components").path("schemas");
     Set<String> found = new TreeSet<>();
     Set<String> componentRoots = new TreeSet<>();
 
@@ -263,13 +320,12 @@ class SpecOpenObjectRatchetTest {
                   + " "
                   + response.getKey();
           for (JsonNode media : response.getValue().path("content")) {
-            walk(media.get("schema"), where, "", found, componentRoots);
+            walk(schemas, media.get("schema"), where, "", found, componentRoots);
           }
         }
       }
     }
 
-    JsonNode schemas = spec.path("components").path("schemas");
     Set<String> visited = new HashSet<>();
     Deque<String> queue = new ArrayDeque<>(componentRoots);
     while (!queue.isEmpty()) {
@@ -278,21 +334,36 @@ class SpecOpenObjectRatchetTest {
         continue;
       }
       Set<String> refs = new TreeSet<>();
-      walk(schemas.get(name), "#" + name, "", found, refs);
+      walk(schemas, schemas.get(name), "#" + name, "", found, refs);
       refs.stream().filter(r -> !visited.contains(r)).forEach(queue::push);
     }
     return found;
   }
 
   private static void walk(
-      JsonNode node, String where, String pointer, Set<String> found, Set<String> refs) {
+      JsonNode schemas,
+      JsonNode node,
+      String where,
+      String pointer,
+      Set<String> found,
+      Set<String> refs) {
     if (node == null || !node.isObject()) {
       return;
     }
     JsonNode ref = node.get("$ref");
     if (ref != null) {
-      if (ref.asText().startsWith(COMPONENT_PREFIX)) {
-        refs.add(ref.asText().substring(COMPONENT_PREFIX.length()));
+      if (!ref.asText().startsWith(COMPONENT_PREFIX)) {
+        return;
+      }
+      String name = ref.asText().substring(COMPONENT_PREFIX.length());
+      JsonNode target = schemas.get(name);
+      // A reference to a component that IS an open object (JsonNode -> `{}`) makes THIS SITE the
+      // opacity, not the component: freezing the component name once would authorise unlimited
+      // further uses of it. Freezing the site means each new exposure is a new line.
+      if (target != null && isOpenObject(target)) {
+        found.add(where + pointer + " -> " + name);
+      } else {
+        refs.add(name);
       }
       return;
     }
@@ -303,13 +374,13 @@ class SpecOpenObjectRatchetTest {
     JsonNode properties = node.get("properties");
     if (properties != null) {
       for (Map.Entry<String, JsonNode> property : properties.properties()) {
-        walk(property.getValue(), where, pointer + "." + property.getKey(), found, refs);
+        walk(schemas, property.getValue(), where, pointer + "." + property.getKey(), found, refs);
       }
     }
-    walk(node.get("items"), where, pointer + "[]", found, refs);
+    walk(schemas, node.get("items"), where, pointer + "[]", found, refs);
     JsonNode additional = node.get("additionalProperties");
     if (additional != null && additional.isObject() && !additional.isEmpty()) {
-      walk(additional, where, pointer + "{}", found, refs);
+      walk(schemas, additional, where, pointer + "{}", found, refs);
     }
     for (String keyword : List.of("allOf", "oneOf", "anyOf")) {
       JsonNode composed = node.get(keyword);
@@ -317,7 +388,7 @@ class SpecOpenObjectRatchetTest {
         continue;
       }
       for (int i = 0; i < composed.size(); i++) {
-        walk(composed.get(i), where, pointer + "/" + keyword + "/" + i, found, refs);
+        walk(schemas, composed.get(i), where, pointer + "/" + keyword + "/" + i, found, refs);
       }
     }
   }

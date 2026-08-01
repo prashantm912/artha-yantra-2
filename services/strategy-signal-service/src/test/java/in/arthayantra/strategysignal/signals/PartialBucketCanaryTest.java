@@ -11,6 +11,10 @@ import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 
 /**
  * The audit B1 / FID P0-1 live done-check as a unit test: the canary compares each completed 3m
@@ -135,8 +139,10 @@ class PartialBucketCanaryTest {
 
   @Test
   void pctZeroRestoresTheFixedAbsoluteGateAndTheThickBarStraddleFiresAgain() {
-    // The escape hatch pin: volume-tolerance-pct 0 must reproduce the pre-G9 decision function
-    // exactly — the same 07-29 opening-bucket shape that the scaled basis absorbs fires again.
+    // THE SHIPPED-DEFAULT PATH (G9 review, 2026-07-29): pct defaults to 0, so the live decision
+    // function is byte-identical to the pre-G9 fixed-absolute gate and the same 07-29 opening
+    // bucket that pct=5 would absorb still fires. The scaling mechanism ships DORMANT because any
+    // pct>0 quiets only the thick half of a benign ± pair, manufacturing a false-unpaired event.
     LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
     store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 153_335));
     store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 153_335));
@@ -147,6 +153,70 @@ class PartialBucketCanaryTest {
     new PartialBucketCanary(store, CLOCK, registry, 650L, 0.0).sweep();
 
     assertThat(registry.counter(COUNTER).count()).as("pct=0 = fixed gate").isEqualTo(1.0);
+  }
+
+  @Test
+  void theSpringWiredDefaultIsDormantSoLiveBehaviourIsUnchanged() {
+    // The explicit-argument tests above cannot see the @Value default, which is what actually
+    // ships. Bind the real bean with NO property set: the 07-29 opening bucket must still WARN,
+    // proving the shipped default reproduces pre-G9 behaviour rather than silently scaling.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 153_335));
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 476_840));
+    MeterRegistry registry = new SimpleMeterRegistry();
+
+    canaryContext(store, registry)
+        .run(
+            context -> {
+              context.getBean(PartialBucketCanary.class).sweep();
+              assertThat(registry.counter(COUNTER).count())
+                  .as("no property set: the shipped default is the pre-G9 fixed gate")
+                  .isEqualTo(1.0);
+            });
+  }
+
+  @Test
+  void theScalingKnobBindsFromItsDocumentedPropertyName() {
+    // #653-class guard: a knob whose property name does not match its compose/.env passthrough is
+    // a silent no-op. Setting the documented key to 5.0 must actually change the decision (the
+    // same bucket goes quiet), proving the name in application config reaches this constructor.
+    LiveSeriesStore store = new LiveSeriesStore(null, CLOCK);
+    store.append(ONE_MIN, bar("2026-07-03T09:15:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:16:00+05:30", 153_335));
+    store.append(ONE_MIN, bar("2026-07-03T09:17:00+05:30", 153_335));
+    store.append(THREE_MIN, bar("2026-07-03T09:15:00+05:30", 476_840));
+    MeterRegistry registry = new SimpleMeterRegistry();
+
+    canaryContext(store, registry)
+        .withPropertyValues("artha.signals.partial-bucket-canary.volume-tolerance-pct=5.0")
+        .run(
+            context -> {
+              context.getBean(PartialBucketCanary.class).sweep();
+              assertThat(registry.counter(COUNTER).count())
+                  .as("the documented property name reaches the constructor")
+                  .isZero();
+            });
+  }
+
+  private static ApplicationContextRunner canaryContext(
+      LiveSeriesStore store, MeterRegistry registry) {
+    return new ApplicationContextRunner()
+        .withUserConfiguration(PlaceholderConfig.class)
+        .withBean(LiveSeriesStore.class, () -> store)
+        .withBean(Clock.class, () -> CLOCK)
+        .withBean(MeterRegistry.class, () -> registry)
+        .withBean(PartialBucketCanary.class);
+  }
+
+  /** Resolves the constructor's {@code @Value} placeholders (and their defaults) in the runner. */
+  @Configuration
+  static class PlaceholderConfig {
+    @Bean
+    static PropertySourcesPlaceholderConfigurer placeholders() {
+      return new PropertySourcesPlaceholderConfigurer();
+    }
   }
 
   @Test

@@ -487,11 +487,15 @@ services:
       ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_BAR_GAP_MS: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_BAR_GAP_MS:-180000}
       ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_FEED_FRESH_MS: ${ARTHA_SIGNALS_SUBSCRIBER_WATCHDOG_FEED_FRESH_MS:-90000}
       # G9/T23 partial-bucket canary tolerance: benign is diff <= max(absolute, pct% of the
-      # expected 1m sum) AND diff <= 10% of the sum. The pct arm exists because the benign
-      # boundary-straddle residue SCALES with bar size (measured 2.4-3.7% of a thick opening bar);
-      # the 650 floor keeps thin-bar behavior identical, and pct=0 restores the fixed-absolute gate.
+      # expected 1m sum) AND diff <= 10% of the sum. The absolute knob had NO passthrough before
+      # (its documented live override was unreachable from .env); the pct knob ships DORMANT at 0,
+      # which is byte-identical to the pre-G9 fixed gate. ⚠ Do NOT raise pct until pair-aware
+      # suppression exists: the benign straddle is a ± PAIR whose halves are very different
+      # fractions of their own buckets (07-29: 3.7% vs 11.9%), so any pct that quiets the thick
+      # half leaves the thin half WARNing — manufacturing the "unpaired = real defect" signature
+      # the runbook teaches operators to escalate.
       ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE: ${ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE:-650}
-      ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE_PCT: ${ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE_PCT:-5.0}
+      ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE_PCT: ${ARTHA_SIGNALS_PARTIAL_BUCKET_CANARY_VOLUME_TOLERANCE_PCT:-0.0}
       # T9 load-coverage watchdog: ship dormant; owner arms OBSERVE_ONLY, then ARMED.
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE:-DISABLED}
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS:-180000}

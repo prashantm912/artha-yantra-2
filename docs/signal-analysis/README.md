@@ -235,7 +235,15 @@ Run in order; each answers one question. Canned SQL in §6.
     Post-B2, any WARN is signal: the benign ≤10-lot residue is absorbed by the default tolerance
     (650 absolute AND ≤10% of the expected sum — a thin frozen bar still fires), so a surviving WARN
     means either the frozen-partial regression (persistent one-directional ~⅔ shortfall) or a new
-    attribution defect. Investigate, don't tolerate-away.
+    attribution defect. Investigate, don't tolerate-away. **The ± PAIR is the benign fingerprint —
+    keep reading unpaired as the alarming shape.** ⚠ G9 (2026-07-29) proposed scaling the absolute
+    arm with bar size, since the residue is proportional (2.4–3.7% of a thick opening bar), and the
+    mechanism now EXISTS (`...volume-tolerance-pct`) but **ships dormant at 0 — today's gate is
+    unchanged**. It stays dormant because the pair's halves are wildly different fractions of their
+    OWN buckets (07-29's ±16,835 pair: 3.7% of the 460,005 opening bucket, 11.9% of the 141,245 next
+    one), so any pct that quiets the thick half leaves the thin half WARNing — turning a benign
+    paired event into an unpaired one and destroying exactly the corroboration this check relies on.
+    Raising it needs pair-aware suppression first (keyed on the ± partner, not bucket size).
 18. **Identify the SIGNAL CONTRACT from the data before running any ground-truth query** (added
     2026-07-27) — the live scalper signal series is the **dated front future**, and
     `FuturesUniverseResolver` rolls it at the ~08:40 IST re-resolve near monthly expiry. On 2026-07-27

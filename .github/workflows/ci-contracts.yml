@@ -42,10 +42,41 @@
 # With both, a renamed response key reports "Missing property: items[n].tradingsymbol (string)"
 # and exits 1. Adding a response field stays green (required INCREASED on a response = the
 # server promising more).
-# STILL NOT CAUGHT, deliberately: a rename inside a RECORD reachable from BOTH a request and a
-# response (no such record exists today — ItemRequest is request-only, and JsonNode, which does
-# appear in both, is not a record so it never carries `required` anyway), and any request-body
-# property rename. Do not broaden this comment past what is measured.
+# STILL NOT CAUGHT by openapi-diff, deliberately: a rename inside a RECORD reachable from BOTH a
+# request and a response (no such record exists today — ItemRequest is request-only, and JsonNode,
+# which does appear in both, is not a record so it never carries `required` anyway), and any
+# request-body property rename. Do not broaden this comment past what is measured.
+#
+# A REMOVED OR RENAMED COMPONENT NAME IS CAUGHT BY A SECOND, SEPARATE GATE - openapi-diff is
+# structurally blind to it. openapi-diff compares STRUCTURE, not the component dictionary: rename a
+# schema component and update every `$ref` to it, and the two documents describe the same requests
+# and responses, so it reports "backward compatible" and exits 0. MEASURED on the real specs, not
+# assumed: PR #1173's round-1 tree (f2c633e4) vs its merge base (1f6186a7) DELETED SEVEN published
+# market-data component keys - Heatmap, StrikeMove, Report, PortfolioStat, SetupStat, SlotCell,
+# YearReturn - by renaming BOTH twins of each springdoc simple-name collision, and openapi-diff
+# printed "API changes are backward compatible", exit 0. Only a human review caught it.
+# Component names are not decoration: contracts/gen/*.d.ts indexes them
+# (`components["schemas"]["Heatmap"]`), as does every other generated client, so deleting one breaks
+# consumers whose wire bytes never changed.
+# The "Removed-component-name gate" step below therefore compares the COMPONENT KEY SETS of the same
+# two sides the breaking gate uses - the MERGE BASE's committed spec vs THIS branch's code spec -
+# and fails on any key that main publishes and this branch does not. A rename is a removal plus an
+# addition and is deliberately NOT special-cased: the additive fix (rename only the NEWCOMER twin,
+# the incumbent keeps the name it already published) is exactly what passes. Additions are ignored,
+# so an ordinary new-endpoint PR is unaffected. Escape hatch is the breaking gate's, deliberately
+# ONE mechanism and not a second one: a `Contract break: APPROVED (<reason>)` line in the PR body,
+# `hotfix/*` exempt.
+#   COVERAGE ASYMMETRY - stated because a future session will trust this header. For the four Java
+#   services the branch side is the FRESHLY CAPTURED services/<svc>/target/contracts/*.json, so a
+#   rename is caught even if the author forgot to re-capture the committed spec. optimizer-service
+#   has no such artifact (it is Python - see the loop-1 comment in the breaking-gate step), so its
+#   branch side is the COMMITTED contracts/optimizer-service.openapi.json. That is still merge base
+#   vs branch - two different commits, never branch-vs-itself - but it only sees a rename once the
+#   author re-dumps, and nothing else looks at that service's component names either:
+#   optimizer_spec_staleness.py projects OPERATIONS only (method+path, parameter names, requestBody
+#   presence, response-code set), never components.
+#   STILL NOT CAUGHT by either gate: a component RETYPE or field-level change that openapi-diff
+#   judges compatible, plus everything already listed above.
 # task_db8bdf1e - `contracts` is a REQUIRED status check, so it must never be skipped at the
 # WORKFLOW level. GitHub reports a job skipped by an `if:` as Success, but a workflow skipped
 # by `paths:` stays Pending forever and blocks the PR ("You should not use path or branch
@@ -318,6 +349,119 @@ jobs:
 
           The reason is mandatory and must be non-empty - "why" is the whole point.
           Exempt: hotfix/* branches. Bypass: an --admin merge (deliberately possible).
+          MSG
+          exit 1
+
+      - name: Removed-component-name gate (merge base vs this branch's code)
+        # A SECOND gate beside openapi-diff, not a refinement of it: openapi-diff compares
+        # structure and is blind to the component dictionary, so a removed-and-replaced component
+        # name reads "backward compatible". See this file's header for the measured proof.
+        # Skipped on push:main for the same reason as the gate above - the PR already merged.
+        if: needs.changes.outputs.contracts == 'true' && github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ steps.mergebase.outputs.sha }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          case "$PR_BRANCH" in
+            hotfix/*)
+              echo "::notice::hotfix branch - removed-component-name gate exempt by design, the same carve-out the breaking gate takes."
+              exit 0
+              ;;
+          esac
+
+          # Every component key, qualified by its section ("schemas/Heatmap"). Only
+          # components.schemas exists in all five specs today; qualifying costs one jq clause and
+          # means a components.responses / securitySchemes entry cannot slip out unseen later.
+          # Looking only where we already thought to look is how the openapi-diff blind spot
+          # survived in the first place. Names are compared, never bytes, so `*.json eol=lf` and a
+          # CRLF checkout are irrelevant here.
+          component_names() {
+            jq -r '(.components // {}) | to_entries[] | .key as $sec
+                   | ((.value // {}) | keys[]) | "\($sec)/\(.)"' "$1" | LC_ALL=C sort
+          }
+
+          mkdir -p /tmp/namegate
+          dropped=""
+          for svc in edge-gateway market-data-service strategy-signal-service backtest-service optimizer-service; do
+            echo "=== $svc ==="
+            # BASE SIDE is the breaking gate's base side, off the SAME resolved merge base
+            # (steps.mergebase.outputs.sha). Absent there = a new service; nothing on main
+            # references its component names yet.
+            if ! git show "$BASE_SHA:contracts/$svc.openapi.json" > "/tmp/namegate/base-$svc.json" 2>/dev/null; then
+              echo "::notice::$svc has no spec at the merge base (new service) - no published name can have been dropped."
+              continue
+            fi
+            # BRANCH SIDE is the freshly captured Maven artifact for the Java services, so a
+            # forgotten re-capture cannot hide a rename; optimizer-service has no such artifact
+            # (Python) and uses its committed dump. NEITHER side is this branch's own committed
+            # spec compared against itself - that self-comparison is the blindness this workflow's
+            # header opens with, and re-capturing must never be able to silence a gate.
+            case "$svc" in
+              optimizer-service) fresh="contracts/$svc.openapi.json" ;;
+              *)                 fresh="services/$svc/target/contracts/$svc.openapi.json" ;;
+            esac
+            if [ ! -f "$fresh" ]; then
+              echo "::error::$svc: the branch-side spec $fresh does not exist. The gate cannot answer its question, so it fails rather than reporting green."
+              exit 1
+            fi
+            # Materialised to files, not process substitution: `set -o pipefail` then makes a jq
+            # failure abort the step. Inside <(...) it would produce an empty list, and empty vs
+            # empty is "nothing removed" - a false green in a step written to prevent one.
+            component_names "/tmp/namegate/base-$svc.json" > "/tmp/namegate/base-$svc.names"
+            component_names "$fresh" > "/tmp/namegate/fresh-$svc.names"
+            gone="$(comm -23 "/tmp/namegate/base-$svc.names" "/tmp/namegate/fresh-$svc.names")"
+            if [ -n "$gone" ]; then
+              echo "::error::$svc drops component name(s) that main publishes:"
+              echo "$gone" | sed 's/^/    /'
+              dropped="$dropped $svc"
+            else
+              echo "no published component name dropped ($(wc -l < "/tmp/namegate/base-$svc.names") on main, $(wc -l < "/tmp/namegate/fresh-$svc.names") here)"
+            fi
+          done
+
+          if [ -z "$dropped" ]; then
+            echo "No component name removed against the merge base."
+            exit 0
+          fi
+
+          # ---- Escape hatch: THE SAME ONE as the breaking gate, deliberately ------------------
+          # Same token, same live-body read (a re-run replays the ORIGINAL event payload, so
+          # github.event.pull_request.body would never see a body edited to add it), same
+          # non-empty parenthesised reason. One approval sentence covers both gates; a second
+          # mechanism would just be another thing to forget.
+          BODY="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.body // ""' 2>/dev/null || true)"
+          REASON='\([^)]*[^)[:space:]][^)]*\)'
+          PATTERN="Contract break:[[:space:]]*APPROVED[[:space:]]*$REASON"
+
+          if printf '%s' "$BODY" | grep -qE "$PATTERN"; then
+            echo "::warning::component name(s) REMOVED against main in:$dropped - allowed by an explicit PR-body approval."
+            printf '%s' "$BODY" | grep -oE "$PATTERN" | head -1
+            exit 0
+          fi
+
+          cat >&2 <<MSG
+          COMPONENT NAME(S) REMOVED vs the merge base ($BASE_SHA) in:$dropped
+
+          openapi-diff above is GREEN and that means nothing here: it compares structure, not the
+          component dictionary, so a removed-and-replaced name reads "backward compatible". The
+          names are the API for every generated client - contracts/gen/*.d.ts indexes them as
+          components["schemas"]["<Name>"].
+
+          The usual cause is a springdoc simple-name collision being split by renaming BOTH twins.
+          Fix it ADDITIVELY: rename only the NEWCOMER with @Schema(name = "..."), and let the
+          incumbent keep the name it already published. Wire keys and Java names do not change.
+
+          If the removal is INTENTIONAL and consumers are being updated with it, add ONE line to
+          the PR body, then re-run this job:
+
+            Contract break: APPROVED (Heatmap split; contracts/gen + the OI page updated here)
+
+          The reason is mandatory and must be non-empty. Exempt: hotfix/* branches.
           MSG
           exit 1
 

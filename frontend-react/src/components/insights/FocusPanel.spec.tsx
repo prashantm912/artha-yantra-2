@@ -21,7 +21,7 @@ const SIGNAL: Insight = {
   title: 'NIFTY 25200 CE scalp',
   explanation: 'Composite 0.81 vs threshold 0.72.',
   evidence: [{ label: 'PCR shift', value: '0.87→1.14 since open' }],
-  priority: 82.75,
+  priority: '82.75',
   priorityDetail: { score: 82.75, band: 'A', trustCap: 1, components: [] },
   dataTrust: 'OK',
   suppressed: false,

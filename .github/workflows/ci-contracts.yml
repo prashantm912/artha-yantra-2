@@ -366,6 +366,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # `comm` compares in the CURRENT locale's collation and only pairs lines correctly if its
+          # inputs were sorted in that SAME collation. Pin one locale for the whole step so `sort`
+          # and `comm` cannot disagree - a mismatch would mis-pair lines and silently under-report
+          # removals, i.e. fail green.
+          export LC_ALL=C
 
           case "$PR_BRANCH" in
             hotfix/*)
@@ -382,7 +387,7 @@ jobs:
           # CRLF checkout are irrelevant here.
           component_names() {
             jq -r '(.components // {}) | to_entries[] | .key as $sec
-                   | ((.value // {}) | keys[]) | "\($sec)/\(.)"' "$1" | LC_ALL=C sort
+                   | ((.value // {}) | keys[]) | "\($sec)/\(.)"' "$1" | sort
           }
 
           mkdir -p /tmp/namegate

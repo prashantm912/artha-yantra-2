@@ -131,6 +131,10 @@ DESCENT = {
     "properties":            ("map",    ".{k}"),
     "patternProperties":     ("map",    ".~{k}"),
     "dependentSchemas":      ("map",    "?{k}"),
+    # 2020-12 still declares the legacy `dependencies`, whose map values are EITHER a schema or a
+    # string array. Array values are skipped by _walk's own node guard, so the plain map descent is
+    # correct and the schema-valued entries are reached.
+    "dependencies":          ("map",    "?{k}"),
     "additionalProperties":  ("schema", "{}"),
     "unevaluatedProperties": ("schema", "{*}"),
     "items":                 ("schema", "[]"),
@@ -142,6 +146,16 @@ DESCENT = {
     "anyOf":                 ("list",   "/anyOf/{i}"),
     "oneOf":                 ("list",   "/oneOf/{i}"),
     "prefixItems":           ("list",   "/prefixItems/{i}"),
+}
+
+# Reference keywords whose target this check FOLLOWS. The derived candidate set is
+# `referenceCandidates` in the keyword artifact; `$id` is the fourth and is deliberately absent
+# because it ESTABLISHES a base URI rather than pointing at a schema to inspect.
+FOLLOWED_REFERENCE_FORMS = ("$ref", "$dynamicRef", "$recursiveRef")
+
+# Reference candidates that are NOT pointers to follow, with the reason.
+NON_FOLLOWED_REFERENCE_FORMS = {
+    "$id": "establishes a base URI for the schema; it does not point at another schema",
 }
 
 # Subschema-bearing keywords deliberately NOT descended, each with the reason it publishes no wire
@@ -158,6 +172,8 @@ NOT_DESCENDED = {
     "if": "a condition that is tested, never itself published (`then`/`else` ARE descended)",
     "$defs": "a REUSE container; its members are published only where something $refs them, and "
              "that path is covered at the reference site",
+    "definitions": "the pre-2019 spelling of $defs, still declared by the 2020-12 compatibility "
+                   "layer; a reuse container for the same reason",
     "contentSchema": "describes the decoded content of a STRING instance, not an object published "
                      "at this position (annotation-only at 2020-12)",
 }
@@ -212,7 +228,7 @@ def _discloses_key_information(node, schemas: dict) -> bool:
     """
     if not isinstance(node, dict):
         return False        # a missing branch, or a boolean schema: publishes no key names either
-    if "$ref" in node:
+    if any(k in node for k in FOLLOWED_REFERENCE_FORMS):
         return True                                     # delegates disclosure to the target
     for keyword in ("properties", "patternProperties", "required", "dependentSchemas",
                     "dependentRequired", "allOf", "anyOf", "oneOf", "enum"):
@@ -333,11 +349,20 @@ def _walk(root: dict, schemas: dict, node: Any, where: str, pointer: str,
         if _is_open(node, schemas):
             found.add(where + pointer)
         return
-    ref = node.get("$ref")
+    reference_keyword = next((k for k in FOLLOWED_REFERENCE_FORMS if k in node), None)
+    ref = node.get(reference_keyword) if reference_keyword else None
     if ref is not None:
         # A reference to a component that IS an open object makes THIS SITE the opacity, not the
         # component: freezing the name once would authorise unlimited further uses of it.
-        if ref.startswith(COMPONENT_PREFIX):
+        if reference_keyword != "$ref":
+            # $dynamicRef / $recursiveRef resolve against a RUNTIME dynamic scope, so a captured
+            # document cannot say what they point at. Previously NEITHER was read at all -- both
+            # were named only in a comment inside the `$ref` branch. A BARE one still read open
+            # through the unknown-keyword default, which is what made the gap invisible: add any
+            # disclosing sibling and the parent closes, the walker descends, and the reference
+            # disappears with no report. "It happens to read open" is not "it is read".
+            found.add(f"{where}{pointer} -> UNRESOLVABLE {reference_keyword} {ref}")
+        elif ref.startswith(COMPONENT_PREFIX):
             name = ref[len(COMPONENT_PREFIX) :]
             component = schemas.get(name)
             if component is None:
@@ -713,3 +738,58 @@ def test_a_reference_does_not_absorb_its_opaque_siblings():
         "GET /external 200 -> UNRESOLVABLE https://example.test/x.json#/Foo",
         "GET /dangling 200 -> #/components/schemas/Missing",
     }
+
+
+def test_every_reference_candidate_is_classified():
+    """Every reference form the dialect declares is either FOLLOWED or explicitly excused."""
+    classified = set(FOLLOWED_REFERENCE_FORMS) | set(NON_FOLLOWED_REFERENCE_FORMS)
+    derived = set(json.loads(_KEYWORD_ARTIFACT.read_text(encoding="utf-8"))["referenceCandidates"])
+    assert classified == derived, (
+        "a reference form the dialect declares is neither followed nor excused: "
+        f"{sorted(classified ^ derived)}"
+    )
+
+
+def test_every_reference_form_survives_a_closing_sibling():
+    """Each reference form paired with a CLOSING sibling.
+
+    The sibling is the whole point: a bare ``$dynamicRef`` read open by accident through the
+    unknown-keyword default, so only a disclosing sibling -- which closes the parent and sends the
+    walker into descent -- exposes whether the reference is read at all.
+    """
+    for form in FOLLOWED_REFERENCE_FORMS:
+        spec = {"paths": {"/p": {"get": {"responses": {"200": {"content": {"*/*": {"schema": {
+            form: "#/components/schemas/Missing", "required": ["x"]}}}}}}}},
+            "components": {"schemas": {}}}
+        assert _scan(spec), (
+            f"`{form}` beside a closing sibling was reported NOWHERE -- the reference form is not "
+            "read at all, which is what a comment claiming a loud failure hid."
+        )
+
+
+def test_the_live_schema_uses_the_dialect_the_inventory_was_derived_for():
+    """MAJOR 3: the guard belongs on the artifact that CAN drift.
+
+    The Java half asserts the dialect of the COMMITTED specs -- but this suite scans the LIVE
+    ``app.openapi()``, and nothing asserted its dialect. A FastAPI/Pydantic upgrade can move the
+    live schema's dialect while the committed dump stays 3.1, leaving the only ratchet that runs
+    against the live document using an inventory derived for the old one, silently. A guard on the
+    wrong artifact is the same shape as a predicate the walker never calls.
+    """
+    spec = app.openapi()
+    artifact = json.loads(_KEYWORD_ARTIFACT.read_text(encoding="utf-8"))
+    assert spec.get("openapi", "").startswith("3.1"), (
+        f"live schema declares OpenAPI {spec.get('openapi')!r}. The subschema-keyword inventory "
+        f"was derived for {artifact['dialect']}, which OpenAPI 3.1 implies; re-derive it with "
+        "tools/derive-json-schema-keywords.py before moving off 3.1."
+    )
+    # Default to what OpenAPI 3.1 IMPLIES, never to the artifact's own value: defaulting to
+    # artifact["dialect"] made this comparison self-satisfying, since FastAPI emits no
+    # jsonSchemaDialect at all. Caught by mutating the artifact and watching this still pass --
+    # a guard that cannot fail is the same defect class as a guard on the wrong artifact.
+    implied_by_openapi_31 = "https://json-schema.org/draft/2020-12/schema"
+    assert spec.get("jsonSchemaDialect", implied_by_openapi_31) == artifact["dialect"], (
+        f"live schema uses dialect "
+        f"{spec.get('jsonSchemaDialect', implied_by_openapi_31)!r} but the inventory was derived "
+        f"for {artifact['dialect']!r}."
+    )

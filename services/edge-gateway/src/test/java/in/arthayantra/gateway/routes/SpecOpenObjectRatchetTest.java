@@ -195,7 +195,19 @@ import org.junit.jupiter.api.Test;
  * three redden. <b>When the same defect shape recurs, stop fixing instances and assert the
  * property.</b>
  *
- * <p>⚠️ And the round after THAT found the flaw one level up: the exhaustiveness assertion compared
+ * <p>⚠️ And then the SOURCING itself was drawn one layer too shallow: the derivation scanned the
+ * dialect's VOCABULARIES but not the dialect's own default metaschema, so the compatibility layer
+ * ({@code definitions}, schema-valued {@code dependencies}, {@code $recursiveRef}) was missing and a
+ * schema using {@code required} plus a legacy {@code dependencies} entry reported NOTHING. The
+ * bounded claim written alongside it described a FUTURE-dialect freshness risk while the artifact
+ * was incomplete for the CURRENT one — <b>a bound is only honest if it names the risk that is
+ * actually live.</b> In the same round: {@code $dynamicRef} and {@code $recursiveRef} were named in
+ * a comment inside the {@code $ref} branch and read by nothing (a bare one read open by accident,
+ * so only a CLOSING SIBLING exposed it), and the dialect guard was asserted on the committed specs
+ * — the artifact that cannot drift — while the Python halves scan a LIVE {@code app.openapi()} that
+ * can. A guard on the wrong artifact is the same shape as a predicate the walker never calls.
+ *
+ * <p>⚠️ And the round before THAT found the flaw one level up: the exhaustiveness assertion compared
  * the classification against a HAND-WRITTEN inventory, so it inherited that list's blind spots —
  * a keyword could be missing from BOTH and the equality still passed. It was: {@code $defs} and
  * {@code contentSchema} were absent from both, and {@code $ref} was wrongly present. Measured, with
@@ -687,7 +699,7 @@ class SpecOpenObjectRatchetTest {
                 + " with its pointer, or to NOT_DESCENDED with the reason it publishes no wire"
                 + " location.",
             classified)
-        .containsExactlyInAnyOrderElementsOf(subschemaBearingKeywords());
+        .containsExactlyInAnyOrderElementsOf(derivedKeywords("subschemaBearing"));
     assertThat(DESCENT.keySet()).doesNotContainAnyElementsOf(NOT_DESCENDED.keySet());
   }
 
@@ -709,16 +721,66 @@ class SpecOpenObjectRatchetTest {
    * meta-schemas, and re-deriving is one command. NOT guaranteed: freshness against a future
    * dialect — which {@link #everyCommittedSpecUsesTheDialectTheInventoryWasDerivedFor} catches.
    */
-  private static Set<String> subschemaBearingKeywords() throws IOException {
+  /** The dialect the committed keyword artifact was derived for. */
+  private static String derivedDialect() throws IOException {
+    return new ObjectMapper()
+        .readTree(
+            Files.readString(findRepoRoot().resolve("contracts/json-schema-2020-12-keywords.json")))
+        .path("dialect")
+        .asText();
+  }
+
+  private static Set<String> derivedKeywords(String field) throws IOException {
     JsonNode artifact =
         new ObjectMapper()
             .readTree(
                 Files.readString(
                     findRepoRoot().resolve("contracts/json-schema-2020-12-keywords.json")));
     Set<String> keywords = new TreeSet<>();
-    artifact.path("subschemaBearing").forEach(k -> keywords.add(k.asText()));
-    assertThat(keywords).as("derived keyword inventory").isNotEmpty();
+    artifact.path(field).forEach(k -> keywords.add(k.asText()));
+    assertThat(keywords).as("derived %s", field).isNotEmpty();
     return keywords;
+  }
+
+  /**
+   * Every reference form the dialect declares is either FOLLOWED or explicitly excused. Without
+   * this, {@code $dynamicRef} and {@code $recursiveRef} were mentioned in a comment inside the
+   * {@code $ref} branch and read by nothing — a claimed loud failure that never fired.
+   */
+  @Test
+  void everyReferenceCandidateIsClassified() throws IOException {
+    Set<String> classified = new TreeSet<>(FOLLOWED_REFERENCE_FORMS);
+    classified.addAll(NON_FOLLOWED_REFERENCE_FORMS.keySet());
+    assertThat(classified)
+        .withFailMessage(
+            "a reference form the dialect declares is neither followed nor excused: %s", classified)
+        .containsExactlyInAnyOrderElementsOf(derivedKeywords("referenceCandidates"));
+  }
+
+  /**
+   * Each reference form paired with a CLOSING sibling. The sibling is the whole point: a bare
+   * {@code $dynamicRef} read open by accident through the unknown-keyword default, so only a
+   * disclosing sibling — which closes the parent and sends the walker into descent — exposes
+   * whether the reference is read at all.
+   */
+  @Test
+  void everyReferenceFormSurvivesAClosingSibling() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    for (String form : new TreeSet<>(FOLLOWED_REFERENCE_FORMS)) {
+      String spec =
+          ("""
+           {"paths": {"/p": {"get": {"responses": {"200": {"content": {"*/*": {"schema":
+             {"KEYWORD": "#/components/schemas/Missing", "required": ["x"]}}}}}}}},
+            "components": {"schemas": {}}}
+           """)
+              .replace("KEYWORD", form);
+      assertThat(openObjectsIn(mapper.readTree(spec)))
+          .withFailMessage(
+              "`%s` beside a closing sibling was reported NOWHERE — the reference form is not"
+                  + " read at all, which is what a comment claiming a loud failure hid.",
+              form)
+          .isNotEmpty();
+    }
   }
 
 
@@ -804,9 +866,13 @@ class SpecOpenObjectRatchetTest {
                   + " tools/derive-json-schema-keywords.py before moving off 3.1.",
               service, spec.path("openapi").asText(""))
           .startsWith("3.1");
-      assertThat(spec.path("jsonSchemaDialect").asText("https://json-schema.org/draft/2020-12/schema"))
-          .as("%s jsonSchemaDialect", service)
-          .isEqualTo("https://json-schema.org/draft/2020-12/schema");
+      // Default to what OpenAPI 3.1 IMPLIES and compare against the ARTIFACT's declared dialect,
+      // so artifact drift fails here too. Defaulting to the artifact's own value (as the Python
+      // halves briefly did) makes the comparison self-satisfying whenever the field is absent.
+      String impliedByOpenApi31 = "https://json-schema.org/draft/2020-12/schema";
+      assertThat(spec.path("jsonSchemaDialect").asText(impliedByOpenApi31))
+          .as("%s dialect vs the inventory's", service)
+          .isEqualTo(derivedDialect());
     }
   }
 
@@ -926,13 +992,21 @@ class SpecOpenObjectRatchetTest {
       }
       return;
     }
-    JsonNode ref = node.get("$ref");
+    String referenceKeyword =
+        FOLLOWED_REFERENCE_FORMS.stream().filter(node::has).findFirst().orElse(null);
+    JsonNode ref = referenceKeyword == null ? null : node.get(referenceKeyword);
     if (ref != null) {
       // A reference to a component that IS an open object (JsonNode -> `{}`) makes THIS SITE the
       // opacity, not the component: freezing the component name once would authorise unlimited
       // further uses of it. Freezing the site means each new exposure is a new line.
       String target = ref.asText();
-      if (target.startsWith(COMPONENT_PREFIX)) {
+      boolean dynamic = !referenceKeyword.equals("$ref");
+      if (dynamic) {
+        // $dynamicRef / $recursiveRef resolve against a RUNTIME dynamic scope, so a captured
+        // document cannot say what they point at. Report unconditionally — see below for why
+        // "it reads open anyway" was not good enough.
+        found.add(where + pointer + " -> UNRESOLVABLE " + referenceKeyword + " " + target);
+      } else if (target.startsWith(COMPONENT_PREFIX)) {
         String name = target.substring(COMPONENT_PREFIX.length());
         JsonNode component = schemas.get(name);
         if (component == null) {
@@ -953,10 +1027,16 @@ class SpecOpenObjectRatchetTest {
           found.add(where + pointer + " -> " + target);
         }
       } else {
-        // External URIs, $dynamicRef and $recursiveRef cannot be resolved from the captured
-        // document. FAIL LOUDLY rather than treating an unverifiable target as safe.
+        // External URIs cannot be resolved from the captured document. FAIL LOUDLY rather than
+        // treating an unverifiable target as safe.
         found.add(where + pointer + " -> UNRESOLVABLE " + target);
       }
+      // ⚠️ $dynamicRef / $recursiveRef were previously read by NOTHING — both were named only in a
+      // comment inside this branch, which tested `$ref` alone. A BARE one still read open through
+      // the unknown-keyword default, which is exactly what made the gap invisible: add any
+      // disclosing sibling (`required`), the parent closes, the walker descends, and the reference
+      // disappears with no report at all. "It happens to read open" is not the same as "it is read".
+      //
       // ⚠️ DO NOT RETURN. At 2020-12 `$ref` is an applicator ALONGSIDE its siblings, not a
       // replacement for them (that was draft-07). Returning here meant a frozen reference site
       // absorbed any opaque sibling for free — the reference-site allowance hole this test closed
@@ -1027,6 +1107,10 @@ class SpecOpenObjectRatchetTest {
           Map.entry("properties", new Descent(Container.MAP, ".{k}")),
           Map.entry("patternProperties", new Descent(Container.MAP, ".~{k}")),
           Map.entry("dependentSchemas", new Descent(Container.MAP, "?{k}")),
+          // 2020-12 still declares the legacy `dependencies`, whose map values are EITHER a
+          // schema or a string array. The array values are skipped by walk()'s own node guard, so
+          // the plain MAP descent is correct and the schema-valued entries are reached.
+          Map.entry("dependencies", new Descent(Container.MAP, "?{k}")),
           Map.entry("additionalProperties", new Descent(Container.SCHEMA, "{}")),
           Map.entry("unevaluatedProperties", new Descent(Container.SCHEMA, "{*}")),
           Map.entry("items", new Descent(Container.SCHEMA, "[]")),
@@ -1038,6 +1122,21 @@ class SpecOpenObjectRatchetTest {
           Map.entry("anyOf", new Descent(Container.LIST, "/anyOf/{i}")),
           Map.entry("oneOf", new Descent(Container.LIST, "/oneOf/{i}")),
           Map.entry("prefixItems", new Descent(Container.LIST, "/prefixItems/{i}")));
+
+  /**
+   * Reference keywords whose target this check FOLLOWS. The derived candidate set is {@code
+   * referenceCandidates} in the keyword artifact; {@code $id} is the fourth and is deliberately
+   * absent because it ESTABLISHES a base URI rather than pointing at a schema to inspect.
+   * {@link #everyReferenceCandidateIsClassified} keeps that split honest, and
+   * {@link #everyReferenceFormSurvivesAClosingSibling} proves each one is actually READ — which
+   * {@code $dynamicRef} and {@code $recursiveRef} were not, despite a comment claiming they were.
+   */
+  private static final Set<String> FOLLOWED_REFERENCE_FORMS =
+      Set.of("$ref", "$dynamicRef", "$recursiveRef");
+
+  /** Reference candidates that are NOT pointers to follow, with the reason. */
+  private static final Map<String, String> NON_FOLLOWED_REFERENCE_FORMS =
+      Map.of("$id", "establishes a base URI for the schema; it does not point at another schema");
 
   /**
    * Subschema-bearing keywords deliberately NOT descended, each with the reason it publishes no
@@ -1057,6 +1156,8 @@ class SpecOpenObjectRatchetTest {
           "if", "a condition that is tested, never itself published (`then`/`else` ARE descended)",
           "$defs", "a REUSE container; its members are published only where something $refs them,"
               + " and that path is covered at the reference site",
+          "definitions", "the pre-2019 spelling of $defs, still declared by the 2020-12"
+              + " compatibility layer; a reuse container for the same reason",
           "contentSchema", "describes the decoded content of a STRING instance, not an object"
               + " published at this position (annotation-only at 2020-12)");
 
@@ -1094,7 +1195,7 @@ class SpecOpenObjectRatchetTest {
     if (!node.isObject()) {
       return false; // a missing branch, or a boolean schema: publishes no key names either way
     }
-    if (node.has("$ref")) {
+    if (FOLLOWED_REFERENCE_FORMS.stream().anyMatch(node::has)) {
       return true; // delegates disclosure to the target; resolved at the reference site
     }
     for (String keyword :

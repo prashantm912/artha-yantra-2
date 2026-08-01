@@ -17,8 +17,10 @@
 # ci-contracts.yml's own opening line says "the committed OpenAPI 3.1 specs are the
 # contract", so the set of committed specs IS the set of services with a published
 # contract - definitional, not a heuristic. Two candidates were rejected:
-#   - services/*/            over-enumerates. margin-service is a real FastAPI service
-#                            with no committed OpenAPI spec (see EXEMPT_SERVICES).
+#   - services/*/            over-enumerates: a services/<svc>/ directory need not carry a
+#                            committed OpenAPI spec at all - that's exactly what
+#                            EXEMPT_SERVICES exists to declare (empty today, but not
+#                            guaranteed to stay that way).
 #   - services/<svc>/target/contracts/<svc>.openapi.json
 #                            only exists AFTER the Maven capture run, so it cannot
 #                            drive the capture step that produces it, and an empty
@@ -62,18 +64,34 @@ cd "$REPO"
 #     independent and measured reason as well (openapi_relabel_30.py refuses the pydantic
 #     `anyOf: [{...}, {"type":"null"}]` form, 134 occurrences); see the long loop-1 comment
 #     in ci-contracts.yml's breaking-gate step. It gets the semantic staleness gate instead.
-NON_JAVA_SERVICES="optimizer-service"
+#   margin-service - Python/FastAPI SPAN appliance, gated into ci-contracts alongside
+#     optimizer-service (previously EXEMPT_SERVICES - see below). THIS declaration (NON_JAVA_
+#     SERVICES membership) is what excludes it from the breaking gate: that loop iterates
+#     AY_CONTRACT_SERVICES_JAVA only, categorically, regardless of spec content.
+#     openapi_relabel_30.py refusing its spec is a SEPARATE, independent reason it could not
+#     ride that gate even if it were added to the loop: 6 of its pydantic `Optional` fields
+#     (LegIn/PositionIn.expiry+strike, SizeResponse.limitingRail, SizeRequest.stop) carry a
+#     primitive `anyOf: [{type: X}, {type: "null"}, ...]` WITH a `title` sibling, and its
+#     plain-dict /health response carries the SAME primitive nullable-anyOf shape but BARE -
+#     no `title` on the anyOf node itself (the title sits on the parent object schema wrapping
+#     it). Measured: openapi_relabel_30.py exits 2 on contracts/margin-service.openapi.json,
+#     first at paths./health.get.responses.200. Closing this for real needs BOTH a converter
+#     fix (today's converters handle only a bare $ref+null anyOf or a type-ARRAY nullable,
+#     never a primitive anyOf, titled or not) AND including non-Java specs in the breaking
+#     loop - a separate, higher-risk redesign. margin-service gets the semantic staleness gate
+#     instead (margin_spec_staleness.py mirrors optimizer_spec_staleness.py) - which, like its
+#     sibling, projects route surface only (method/path/params/requestBody/response-codes),
+#     never component properties or types: a response-field rename (e.g. SizeResponse.target
+#     -> targetPrice) changes neither the surface nor any component KEY, so it is caught by NO
+#     current gate, permanently - not a first-PR artifact that a later PR closes.
+NON_JAVA_SERVICES="optimizer-service margin-service"
 
 # Directories under services/ that are NOT contract services at all - no committed
-# OpenAPI spec, therefore in none of ci-contracts' gates.
-#   margin-service - Python/FastAPI SPAN appliance. It publishes four routes and a
-#     hand-maintained contracts/margin-service.api-surface.json, but no OpenAPI document
-#     was ever dumped for it, so ci-contracts has never covered it. Its only CI is
-#     ci-margin.yml, which is `paths:`-filtered and not a required context - the same
-#     shape as ci-optimizer. RECORDED HERE RATHER THAN FIXED: giving it a spec is a real
-#     change with its own relabel/diff questions, not a rename. This entry exists so the
-#     gap is a declaration somebody chose, not an absence nobody noticed.
-EXEMPT_SERVICES="margin-service"
+# OpenAPI spec, therefore in none of ci-contracts' gates. Currently empty: margin-service
+# was the last resident (Python/FastAPI SPAN appliance with only a hand-maintained
+# api-surface.json and no OpenAPI document) and has since been given one - see
+# NON_JAVA_SERVICES above.
+EXEMPT_SERVICES=""
 # -----------------------------------------------------------------------------------
 
 die() { printf 'contract-service inventory: %s\n' "$*" >&2; exit 1; }

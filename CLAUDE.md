@@ -294,6 +294,36 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   SEPARATE path-filtered workflows** (`.github/workflows/ci-optimizer.yml`, trigger `paths:
   services/optimizer-service/**`) — NOT in the default `gh pr checks` rollup; a Python PR's ruff+pytest
   gate shows under `gh run list --workflow ci-optimizer.yml`, so don't read its absence as "skipped".
+- **margin-service (Python SPAN appliance, `/api/v1/margin`) now carries the same two-artifact
+  contract gate as optimizer-service** — it was the one service with no committed OpenAPI spec at
+  all until closed. `services/margin-service/tests/test_openapi_contract.py` captures BOTH
+  `contracts/margin-service.api-surface.json` (asserted every run) and the FastAPI-native
+  `contracts/margin-service.openapi.json` (asserted by `.github/scripts/margin_spec_staleness.py`,
+  a required, unconditional ci-contracts step — same `app routes -> api-surface.json -> openapi.json`
+  chain as optimizer-service). **Re-capture:** `cd services/margin-service && CONTRACTS_CAPTURE=1
+  python -m pytest tests/test_openapi_contract.py` writes both files, then regenerate the TS client
+  with `npm run gen:api` (frontend-react) or directly `npx openapi-typescript@7
+  contracts/margin-service.openapi.json -o contracts/gen/margin-service.d.ts`. Classified NON_JAVA
+  in `.github/scripts/contract_service_inventory.sh` (no `pom.xml`) — that membership is what
+  CATEGORICALLY excludes it from the openapi-diff breaking gate (that loop iterates the JAVA list
+  only, regardless of spec content) and the Java-only warn-vs-code step. `openapi_relabel_30.py`
+  refusing its spec (exit 2, first at `paths./health.get.responses.200`) is a SEPARATE, additional
+  reason it could not ride the breaking gate even if it were added to that loop: 6 of its pydantic
+  `Optional` fields (`LegIn`/`PositionIn.expiry`+`strike`, `SizeResponse.limitingRail`,
+  `SizeRequest.stop`) carry a primitive `anyOf: [{type: X}, {type: "null"}, ...]` WITH a `title`
+  sibling, and its plain-dict `/health` response carries the SAME primitive nullable-`anyOf` shape
+  but BARE — no `title` on the `anyOf` node itself (the title sits on the parent object schema
+  wrapping it). Closing this gap for real needs BOTH a converter fix (today's converters handle
+  only a bare `$ref`+null `anyOf` or a `type` ARRAY nullable, never a primitive `anyOf`, titled or
+  not) AND including non-Java specs in the breaking loop — a separate, higher-risk redesign, not
+  attempted here. margin-service gets the semantic staleness gate instead — which, like
+  optimizer-service's, projects route surface only (method/path/params/requestBody/response-codes),
+  never component properties or types. **Coverage gap, permanent, not a first-PR artifact:** a
+  response-field rename (e.g. `SizeResponse.target` → `targetPrice`) changes neither the route
+  surface nor any component KEY, so it passes every margin-service gate silently — measured, not
+  assumed. ⚠️ Its 422 responses still use FastAPI's stock `HTTPValidationError` shape, not the
+  shared `{code,message,details}` envelope other services converged on (§8.3) — a pre-existing
+  runtime inconsistency, not a spec/CI defect, left unfixed by this gating change.
 - **Backtest/optimizer submission identity + precedence (2b):** `strategyId` is the registry **UUID**
   (NOT the slug); omit `strategyVersion` → the optimizer/runner pins the latest published, else latest
   draft. Terminal job status string is `completed`; results are keyed by `resultRef` (the run id), read

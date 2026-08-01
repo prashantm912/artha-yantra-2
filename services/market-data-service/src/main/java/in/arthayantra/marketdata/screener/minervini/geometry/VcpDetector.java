@@ -84,6 +84,25 @@ public class VcpDetector {
     this.maxBaseDepthPct = maxBaseDepthPct;
     this.minBaseWeeks = minBaseWeeks;
     this.maxBaseWeeks = maxBaseWeeks;
+    // TRIPWIRE (2026-08-02, E4 decision-sheet §2g): baseWeeks (below) measures only the trailing
+    // narrowing contraction, not the classical multi-week base the [min,max]-week window assumes —
+    // a LATENT, self-documented mismeasure that is harmless ONLY because the live floor is 0
+    // (disabled). Re-arming any positive floor without first fixing the measurement reproduces
+    // M39's ~99% VCP trade annihilation. Fail fast at construction (fires on every app boot AND
+    // every direct `new VcpDetector(...)` — a `.env`/application.yml arm needs a restart anyway,
+    // which is exactly when this fires; a compiled-default change fires immediately in any test that
+    // builds a Spring context) so the floor can never go live silently again.
+    if (minBaseWeeks > 0) {
+      throw new IllegalStateException(
+          "artha.minervini.vcp.min-base-weeks=" + minBaseWeeks + " arms a base-duration FLOOR, but "
+              + "VcpDetector.baseWeeks (= round(durationDays/5)) measures only the trailing "
+              + "narrowing contraction (observed live avg ~0.7 weeks), NOT the classical multi-week "
+              + "base the [min,max]-week window assumes. Arming this floor without first fixing that "
+              + "measurement reproduces M39's ~99% VCP trade annihilation "
+              + "(docs/strategies/m39-vcp-caps-backtest-2026-07-06.md §4 \"option 2\"). Fix "
+              + "baseWeeks to span the FULL base before arming this floor — see "
+              + "docs/signal-analysis/2026-08-01-e4-e8-decision-sheet.md §2g.");
+    }
   }
 
   /** Detects the most recent VCP base in {@code bars} (oldest→newest). */

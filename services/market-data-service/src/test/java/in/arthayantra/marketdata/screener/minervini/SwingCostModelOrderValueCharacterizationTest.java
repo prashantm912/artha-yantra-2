@@ -58,8 +58,12 @@ class SwingCostModelOrderValueCharacterizationTest {
             t("X", "2020-03-01", "2020-04-01", 5),
             t("X", "2020-05-01", "2020-06-01", 100));
 
-    SwingPortfolio.Result winnerFirst = SwingPortfolio.simulate(bigWinnerFirst, 1, false, COSTS);
-    SwingPortfolio.Result winnerLast = SwingPortfolio.simulate(bigWinnerLast, 1, false, COSTS);
+    // rsPriority=true matches production's reported portfolioRsPriorityNet
+    // (ManasAroraBacktestService.java:576 / MinerviniBacktestService.java:559) — inert here since the
+    // 3 trades are non-overlapping (never compete for the single slot), but matching it removes any
+    // doubt this exercises a variant nobody actually reports (the M27 golden-variant lesson).
+    SwingPortfolio.Result winnerFirst = SwingPortfolio.simulate(bigWinnerFirst, 1, true, COSTS);
+    SwingPortfolio.Result winnerLast = SwingPortfolio.simulate(bigWinnerLast, 1, true, COSTS);
 
     assertThat(winnerFirst.tradesTaken()).isEqualTo(3);
     assertThat(winnerLast.tradesTaken()).isEqualTo(3);

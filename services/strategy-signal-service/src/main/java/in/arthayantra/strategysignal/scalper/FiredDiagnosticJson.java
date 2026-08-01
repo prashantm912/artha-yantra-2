@@ -19,6 +19,15 @@ import java.math.BigDecimal;
  * ({@code blockingRail/operand/threshold/margin/reason}) are serialized as JSON {@code null} (key present,
  * value null) to keep the top-level shape identical; the vetoed {@code wouldBeLeg} becomes the actually
  * traded {@code firedLeg}. If the rejection shape ever changes, change this in lockstep.
+ *
+ * <p><b>ONE deliberate exception to that lockstep (F5 U4b Part 1):</b> {@code confluence.withheldAggregate}
+ * + {@code confluence.decisiveLegsHeld} are FIRED-SIDE ONLY. They exist to expose the TIGHTENING half of
+ * the {@code dot-null-withheld} proposal — champion-FIRED entries the unified null rule would have removed
+ * — which by construction has no counterpart on the rejection side. The top level, {@code checks[]} and
+ * {@code dots[]} stay field-for-field, so the §4.2 Stage-2 contrast still joins; these two simply read
+ * NULL if selected from {@code signal_rejections.diagnostic}. Do NOT "complete" the symmetry by adding
+ * them there, and do NOT add them to {@code signals.scalper_detail} — that is the light order/paper
+ * carrier, not a forensics surface.
  */
 public final class FiredDiagnosticJson {
 
@@ -71,6 +80,21 @@ public final class FiredDiagnosticJson {
       c.put("vwapAligned", conf.vwapAligned());
       c.put("biasAligned", conf.biasAligned());
       c.put("standAside", conf.standAside());
+      // F5 U4b Part 1 — the ARMED-policy counterfactual, recorded on the FIRED side. Together these
+      // two answer "would the `dot-null-withheld` policy have fired this bar?" —
+      // `decisiveLegsHeld && withheldAggregate >= threshold` — which is the ONLY way to see the
+      // TIGHTENING half of the change: a champion-FIRED entry the unified null rule would have
+      // removed. The shadow book covers the loosening half (champion-rejected / armed-fires) but is
+      // structurally blind here, because its writer fires on the rejection path only.
+      //
+      // Deliberately FIRED-SIDE ONLY, so the field-for-field lockstep above holds at the top level
+      // and for checks[]/dots[] but NOT inside confluence{}: selecting these two from
+      // signal_rejections.diagnostic yields NULL, which is the correct reading — the rejected side's
+      // counterfactual is the shadow book's acceptance, not a column. The tightening cell needs no
+      // simulation: those trades really happened and already carry realized PnL, so the measurement
+      // is a subtraction over signals joined on this key, not a second virtual book.
+      c.put("withheldAggregate", conf.withheldAggregate());
+      c.put("decisiveLegsHeld", conf.decisiveLegsHeld());
       ArrayNode dots = c.putArray("dots");
       for (ConnectTheDotsScorer.DotScore ds : conf.dots()) {
         ObjectNode n = dots.addObject();

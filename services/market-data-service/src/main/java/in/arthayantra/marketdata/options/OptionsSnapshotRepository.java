@@ -24,14 +24,14 @@ public class OptionsSnapshotRepository {
       OffsetDateTime ts,
       String underlying,
       LocalDate expiry,
-      BigDecimal strike,
+      @Schema(type = "string") BigDecimal strike,
       String optionType,
       String tradingsymbol,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal ltp,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal bid,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal ask,
       @Schema(types = {"integer", "null"})
       Long volume,
@@ -39,27 +39,27 @@ public class OptionsSnapshotRepository {
       Long oi,
       @Schema(types = {"integer", "null"})
       Long oiChange,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal spotPrice,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal iv,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal delta,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal gamma,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal theta,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal vega,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal rho,
       @Schema(types = {"string", "null"})
       String ivReason,
       @Schema(types = {"string", "null"})
       String priceSource,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal forwardPrice,
-      @Schema(types = {"number", "null"})
+      @Schema(type = "string", types = {"string", "null"})
       BigDecimal riskFreeRate) {}
 
   private final JdbcTemplate jdbc;

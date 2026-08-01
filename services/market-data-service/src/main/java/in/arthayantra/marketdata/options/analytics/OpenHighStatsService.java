@@ -30,28 +30,28 @@ public class OpenHighStatsService {
   }
 
   public record StrikeSessionStat(
-      BigDecimal strike,
+      @Schema(type = "string") BigDecimal strike,
       String optionType,
-      @Schema(types = {"number", "null"}) BigDecimal open,
-      @Schema(types = {"number", "null"}) BigDecimal high,
-      @Schema(types = {"number", "null"}) BigDecimal low,
-      @Schema(types = {"number", "null"}) BigDecimal last,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal open,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal high,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal low,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal last,
       @Schema(types = {"integer", "null"}) Long dayVolume,
       @Schema(types = {"integer", "null"}) Long declineVolume,
-      @Schema(types = {"number", "null"}) BigDecimal prevClose,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal prevClose,
       boolean ohMark,
       boolean olMark,
-      @Schema(types = {"number", "null"}) BigDecimal fallPctFromOpen,
-      @Schema(types = {"number", "null"}) BigDecimal fallPctFromPrevClose,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal fallPctFromOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal fallPctFromPrevClose,
       // W3 PR-6: per-strike session change-in-OI % (for the Day-14 p20 AVOID veto).
-      @Schema(types = {"number", "null"}) BigDecimal oiChangePct) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal oiChangePct) {}
 
   public record StrikeSessionStats(
       OffsetDateTime asOf,
       String underlying,
       LocalDate expiry,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
-      @Schema(types = {"number", "null"}) BigDecimal atmStrike,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal atmStrike,
       int interval,
       List<StrikeSessionStat> items) {}
 

@@ -40,10 +40,10 @@ public class OiTrendingService {
       long totalOi,
       long ceOi,
       long peOi,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
       Trend trend,
-      @Schema(types = {"number", "null"}) BigDecimal ceLtp,
-      @Schema(types = {"number", "null"}) BigDecimal peLtp) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ceLtp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal peLtp) {}
 
   public record TrendSeries(
       List<TrendPoint> items,

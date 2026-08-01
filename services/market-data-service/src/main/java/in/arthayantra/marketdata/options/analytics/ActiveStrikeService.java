@@ -37,8 +37,8 @@ public class ActiveStrikeService {
    */
   public record SentimentPoint(
       OffsetDateTime bucket,
-      @Schema(types = {"number", "null"}) BigDecimal sentimentPct,
-      @Schema(types = {"number", "null"}) BigDecimal levelPct) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal sentimentPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal levelPct) {}
 
   /** One active-strike Call/Put OI point per snapshot bucket (newest-last) — the LEFT chart series. */
   public record ActiveStrikeOiPoint(OffsetDateTime bucket, long ceOi, long peOi) {}
@@ -50,9 +50,9 @@ public class ActiveStrikeService {
    */
   public record ActiveStrikeIvPoint(
       OffsetDateTime bucket,
-      @Schema(types = {"number", "null"}) BigDecimal ceIv,
-      @Schema(types = {"number", "null"}) BigDecimal peIv,
-      @Schema(types = {"number", "null"}) BigDecimal price) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ceIv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal peIv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal price) {}
 
   public List<StrikeOiSnap> activeStrikes(List<StrikeOiSnap> chain) {
     return chain.stream()

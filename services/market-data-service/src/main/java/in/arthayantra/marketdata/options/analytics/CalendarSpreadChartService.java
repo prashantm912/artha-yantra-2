@@ -52,12 +52,12 @@ public class CalendarSpreadChartService {
   /** One interval's spread candle: (near − far) OHLC + each leg's close + summed volume. */
   public record SpreadCandle(
       OffsetDateTime time,
-      BigDecimal open,
-      BigDecimal high,
-      BigDecimal low,
-      BigDecimal close,
-      BigDecimal nearClose,
-      BigDecimal farClose,
+      @Schema(type = "string") BigDecimal open,
+      @Schema(type = "string") BigDecimal high,
+      @Schema(type = "string") BigDecimal low,
+      @Schema(type = "string") BigDecimal close,
+      @Schema(type = "string") BigDecimal nearClose,
+      @Schema(type = "string") BigDecimal farClose,
       long volume) {}
 
   /**
@@ -66,13 +66,13 @@ public class CalendarSpreadChartService {
    */
   public record CalendarSpreadChart(
       String underlying,
-      BigDecimal strike,
+      @Schema(type = "string") BigDecimal strike,
       String optionType,
       LocalDate nearExpiry,
       LocalDate farExpiry,
       String interval,
-      @Schema(types = {"number", "null"}) BigDecimal underlyingLtp,
-      @Schema(types = {"number", "null"}) BigDecimal underlyingDayOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal underlyingLtp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal underlyingDayOpen,
       OffsetDateTime asOf,
       List<SpreadCandle> items) {}
 

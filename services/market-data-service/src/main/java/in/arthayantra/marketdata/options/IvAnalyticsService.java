@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.options;
 
 import in.arthayantra.marketdata.options.IvDailySummaryRepository.RollupRow;
 import in.arthayantra.marketdata.options.IvDailySummaryRepository.Summary;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -41,14 +42,14 @@ public class IvAnalyticsService {
 
   /** One day in the history series. */
   public record HistoryPoint(
-      LocalDate date, BigDecimal iv, BigDecimal atmIv, BigDecimal iv30d, BigDecimal spot) {}
+      LocalDate date, @Schema(type = "string") BigDecimal iv, @Schema(type = "string") BigDecimal atmIv, @Schema(type = "string") BigDecimal iv30d, @Schema(type = "string") BigDecimal spot) {}
 
   /** The iv-history read DTO. */
   public record IvHistory(
       String underlying,
       List<HistoryPoint> series,
-      BigDecimal currentIv,
-      BigDecimal rank,
+      @Schema(type = "string") BigDecimal currentIv,
+      @Schema(type = "string") BigDecimal rank,
       Integer percentile,
       int windowDays,
       int floorDays,

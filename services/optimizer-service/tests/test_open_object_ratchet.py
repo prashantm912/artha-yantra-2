@@ -120,6 +120,47 @@ FROZEN_OPEN_OBJECTS = {
 }
 
 
+# Every subschema-bearing keyword whose children can appear ON THE WIRE, and therefore MUST be
+# descended: (container kind, pointer suffix for its children). The walker READS this rather than
+# restating it -- three rounds running, the predicate consulted a subschema the walker never
+# descended (boolean schemas, the $ref location, then unevaluatedProperties, classified in the
+# predicate and walked nowhere), and two point fixes each produced the next instance.
+DESCENT = {
+    "properties":            ("map",    ".{k}"),
+    "patternProperties":     ("map",    ".~{k}"),
+    "dependentSchemas":      ("map",    "?{k}"),
+    "additionalProperties":  ("schema", "{}"),
+    "unevaluatedProperties": ("schema", "{*}"),
+    "items":                 ("schema", "[]"),
+    "contains":              ("schema", "[?]"),
+    "unevaluatedItems":      ("schema", "[*]"),
+    "then":                  ("schema", "/then"),
+    "else":                  ("schema", "/else"),
+    "allOf":                 ("list",   "/allOf/{i}"),
+    "anyOf":                 ("list",   "/anyOf/{i}"),
+    "oneOf":                 ("list",   "/oneOf/{i}"),
+    "prefixItems":           ("list",   "/prefixItems/{i}"),
+}
+
+# Subschema-bearing keywords deliberately NOT descended, each with the reason it publishes no wire
+# location.
+NOT_DESCENDED = {
+    "$ref": "resolved at the reference site instead, and reported there as `-> Name`",
+    "propertyNames": "constrains key NAMES, which are strings; no object is published there",
+    "not": "describes what the value is NOT; nothing is published at that position",
+    "if": "a condition that is tested, never itself published (`then`/`else` ARE descended)",
+}
+
+# Every keyword in JSON Schema 2020-12 / OpenAPI 3.1 whose value contains subschema(s). A closed
+# structural fact about the FORMAT, not a semantic judgement -- which is what makes it a defensible
+# list where the validation-semantics tables that preceded it were not.
+SUBSCHEMA_BEARING_KEYWORDS = frozenset({
+    "properties", "patternProperties", "additionalProperties", "unevaluatedProperties",
+    "propertyNames", "dependentSchemas", "items", "prefixItems", "contains", "unevaluatedItems",
+    "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "$ref",
+})
+
+
 def _nonempty(value):
     return bool(value) if isinstance(value, (dict, list)) else value is not None
 
@@ -272,16 +313,20 @@ def _walk(schemas: dict, node: Any, where: str, pointer: str, found: set, refs: 
     if _is_open(node, schemas):
         found.add(where + pointer)
         return
-    for key, value in (node.get("properties") or {}).items():
-        _walk(schemas, value, where, f"{pointer}.{key}", found, refs)
-    if "items" in node:                                  # dict OR boolean `true`
-        _walk(schemas, node["items"], where, f"{pointer}[]", found, refs)
-    additional = node.get("additionalProperties")
-    if isinstance(additional, dict) and additional:
-        _walk(schemas, additional, where, pointer + "{}", found, refs)
-    for keyword in ("allOf", "oneOf", "anyOf"):
-        for index, value in enumerate(node.get(keyword) or []):
-            _walk(schemas, value, where, f"{pointer}/{keyword}/{index}", found, refs)
+    # DESCENT IS DATA, NOT CODE -- iterate the table rather than restating it, so a keyword
+    # declared descended cannot be missed by a branch nobody wrote.
+    for keyword, (kind, template) in DESCENT.items():
+        if keyword not in node:
+            continue
+        value = node[keyword]
+        if kind == "map" and isinstance(value, dict):
+            for key, child in value.items():
+                _walk(schemas, child, where, pointer + template.format(k=key), found, refs)
+        elif kind == "list" and isinstance(value, list):
+            for index, child in enumerate(value):
+                _walk(schemas, child, where, pointer + template.format(i=index), found, refs)
+        elif kind == "schema":
+            _walk(schemas, value, where, pointer + template, found, refs)
 
 
 def _open_objects() -> set:
@@ -532,3 +577,54 @@ def test_the_walker_reports_open_objects_at_every_location_form():
         # /maptyped is absent, which proves the $ref is RESOLVED rather than blanket-ignored.
         "GET /maptrue 200",
     }
+
+
+def _spec_with(schema: dict) -> dict:
+    return {"paths": {"/p": {"get": {"responses": {"200": {"content": {"*/*": {
+        "schema": schema}}}}}}}, "components": {"schemas": {}}}
+
+
+def test_the_walker_descends_every_schema_bearing_keyword():
+    """THE STRUCTURAL AGREEMENT ASSERTION -- the fix for a CLASS, not an instance.
+
+    Three separate rounds found the same defect: the predicate consulted a subschema the walker
+    never descended, so the schema was classified correctly and then reported nowhere. Round 7 was
+    the boolean ``true`` schema, round 8 the ``$ref`` location, round 9 ``unevaluatedProperties`` --
+    which the predicate had handled since the round it was added while every walker descended only
+    ``additionalProperties``. Two point fixes each produced the next instance, so this asserts the
+    property directly: plant a KNOWN-OPEN schema (the boolean ``true``, which also exercises the
+    round-7 path) under every keyword declared descendable and require the walker to report it at
+    exactly the declared pointer.
+    """
+    for keyword, (kind, template) in DESCENT.items():
+        # `required` forces the parent CLOSED, so the walker must descend to find anything.
+        schema = {"required": ["x"]}
+        if kind == "map":
+            schema[keyword] = {"k": True}
+            expected = template.format(k="k")
+        elif kind == "list":
+            schema[keyword] = [True]
+            expected = template.format(i=0)
+        else:
+            schema[keyword] = True
+            if keyword in ("then", "else"):
+                schema["if"] = {"type": "string"}        # inert without its condition
+            expected = template
+        assert _scan(_spec_with(schema)) == {f"GET /p 200{expected}"}, (
+            f"the predicate classifies `{keyword}` but the walker never descends it, so an open "
+            f"schema under it is reported NOWHERE -- the exact defect that shipped three times. "
+            f"Expected [GET /p 200{expected}], got {sorted(_scan(_spec_with(schema)))}"
+        )
+
+
+def test_every_subschema_keyword_is_classified():
+    """The classification must be EXHAUSTIVE, so a subschema-bearing keyword cannot arrive
+    unnoticed. Without this, the agreement test above only proves the keywords somebody remembered
+    to list."""
+    classified = set(DESCENT) | set(NOT_DESCENDED)
+    assert classified == set(SUBSCHEMA_BEARING_KEYWORDS), (
+        "a subschema-bearing keyword is neither descended nor excused: "
+        f"{sorted(classified ^ set(SUBSCHEMA_BEARING_KEYWORDS))}. Add it to DESCENT with its "
+        "pointer, or to NOT_DESCENDED with the reason it publishes no wire location."
+    )
+    assert not (set(DESCENT) & set(NOT_DESCENDED))

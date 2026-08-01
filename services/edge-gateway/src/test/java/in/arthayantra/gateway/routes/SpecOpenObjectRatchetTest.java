@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -184,6 +185,16 @@ import org.junit.jupiter.api.Test;
  * it. <b>Removing a bad abstraction is not finished until you check you have not re-created a small
  * one in the gap it left.</b>
  *
+ * <p>And the round after THAT found the predicate/walker split a THIRD time, in {@code
+ * unevaluatedProperties} — classified since the day it was added, descended by nothing. Two point
+ * fixes had each produced the next instance, so the answer stopped being a fix and became a
+ * STRUCTURE: descent is now DATA ({@link #DESCENT}) that the walker iterates, the classification is
+ * asserted EXHAUSTIVE against the format's subschema-bearing keywords, and
+ * {@link #theWalkerDescendsEverySchemaBearingKeyword} plants an open schema under every declared
+ * keyword and demands it be reported. All three historical defects were replayed against it and all
+ * three redden. <b>When the same defect shape recurs, stop fixing instances and assert the
+ * property.</b>
+ *
  * <h2>⚠️ This test's OWN blind spot</h2>
  *
  * <p><b>It sees only what the capture produced, and only as of the last commit of it.</b> Three
@@ -262,7 +273,7 @@ class SpecOpenObjectRatchetTest {
                   // exemptions deleted here — the stale-exemption assertion named all four the
                   // moment this branch rebased onto that merge, which is the mechanism working.
                   //
-                  // What remains is ten JsonNode SITES, each its own line rather than one blanket
+                  // What remains is eleven JsonNode SITES, each its own line rather than a blanket
                   // `#JsonNode`. They are the persisted-JSONB passthroughs: score breakdowns, the
                   // per-family scalper/Minervini/ManasArora detail side-channels, the strategy
                   // config a user authored, and the rejection diagnostic.
@@ -588,6 +599,115 @@ class SpecOpenObjectRatchetTest {
     assertThat(found).noneMatch(location -> location.contains("/maptyped"));
   }
 
+  /**
+   * ⚠️ THE STRUCTURAL AGREEMENT ASSERTION — the fix for a CLASS, not an instance.
+   *
+   * <p>Three separate rounds found the same defect: the predicate consulted a subschema the walker
+   * never descended, so the schema was classified correctly and then reported nowhere. Round 7 was
+   * the boolean {@code true} schema, round 8 the {@code $ref} location, round 9 {@code
+   * unevaluatedProperties} — which the predicate had handled since the round it was added while
+   * every walker descended only {@code additionalProperties}. The {@code type} clause looked sound
+   * purely because the additional-properties descent happened to find the nested open object
+   * afterwards; the unevaluated path was silently blind.
+   *
+   * <p>Two point fixes each produced the next instance, so this asserts the property directly:
+   * plant a KNOWN-OPEN schema (the boolean {@code true}, which also exercises the round-7 path)
+   * under every keyword declared descendable, and require the walker to report it at exactly the
+   * declared pointer. A keyword the walker fails to descend fails here by construction.
+   */
+  @Test
+  void theWalkerDescendsEverySchemaBearingKeyword() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    for (Map.Entry<String, Descent> entry : DESCENT.entrySet()) {
+      String keyword = entry.getKey();
+      Descent descent = entry.getValue();
+      ObjectNode schema = mapper.createObjectNode();
+      // `required` forces the parent CLOSED, so the walker must actually descend to find anything.
+      schema.putArray("required").add("x");
+      String expected =
+          switch (descent.container()) {
+            case MAP -> {
+              schema.putObject(keyword).put("k", true);
+              yield descent.pointer().replace("{k}", "k");
+            }
+            case LIST -> {
+              schema.putArray(keyword).add(true);
+              yield descent.pointer().replace("{i}", "0");
+            }
+            case SCHEMA -> {
+              schema.put(keyword, true);
+              if (keyword.equals("then") || keyword.equals("else")) {
+                schema.putObject("if").put("type", "string"); // inert without its condition
+              }
+              yield descent.pointer();
+            }
+          };
+      ObjectNode spec = mapper.createObjectNode();
+      spec.putObject("paths")
+          .putObject("/p")
+          .putObject("get")
+          .putObject("responses")
+          .putObject("200")
+          .putObject("content")
+          .putObject("*/*")
+          .set("schema", schema);
+      spec.putObject("components").putObject("schemas");
+
+      assertThat(openObjectsIn(spec))
+          .withFailMessage(
+              "the predicate classifies `%s` but the walker never descends it, so an open schema"
+                  + " under it is reported NOWHERE — the exact defect that shipped three times."
+                  + " Expected [GET /p 200%s], got %s",
+              keyword, expected, openObjectsIn(spec))
+          .containsExactly("GET /p 200" + expected);
+    }
+  }
+
+  /**
+   * The classification must be EXHAUSTIVE, so a subschema-bearing keyword cannot arrive unnoticed:
+   * every one is either descended or explicitly excused with a reason. Without this, the agreement
+   * test above only proves the keywords somebody remembered to list.
+   */
+  @Test
+  void everySubschemaKeywordIsClassified() {
+    Set<String> classified = new TreeSet<>(DESCENT.keySet());
+    classified.addAll(NOT_DESCENDED.keySet());
+    assertThat(classified)
+        .withFailMessage(
+            "a subschema-bearing keyword is neither descended nor excused: %s. Add it to DESCENT"
+                + " with its pointer, or to NOT_DESCENDED with the reason it publishes no wire"
+                + " location.",
+            classified)
+        .containsExactlyInAnyOrderElementsOf(SUBSCHEMA_BEARING_KEYWORDS);
+    assertThat(DESCENT.keySet()).doesNotContainAnyElementsOf(NOT_DESCENDED.keySet());
+  }
+
+  /**
+   * Every keyword in JSON Schema 2020-12 / OpenAPI 3.1 whose value contains subschema(s). A closed
+   * structural fact about the FORMAT — not a semantic judgement — which is what makes it a
+   * defensible list where the validation-semantics tables that preceded it were not.
+   */
+  private static final Set<String> SUBSCHEMA_BEARING_KEYWORDS =
+      Set.of(
+          "properties",
+          "patternProperties",
+          "additionalProperties",
+          "unevaluatedProperties",
+          "propertyNames",
+          "dependentSchemas",
+          "items",
+          "prefixItems",
+          "contains",
+          "unevaluatedItems",
+          "allOf",
+          "anyOf",
+          "oneOf",
+          "not",
+          "if",
+          "then",
+          "else",
+          "$ref");
+
   @Test
   void noResponsePublishesAnUnfrozenOpenObject() throws IOException {
     Path contracts = findRepoRoot().resolve("contracts");
@@ -724,27 +844,85 @@ class SpecOpenObjectRatchetTest {
       found.add(where + pointer);
       return;
     }
-    JsonNode properties = node.get("properties");
-    if (properties != null) {
-      for (Map.Entry<String, JsonNode> property : properties.properties()) {
-        walk(schemas, property.getValue(), where, pointer + "." + property.getKey(), found, refs);
-      }
-    }
-    walk(schemas, node.get("items"), where, pointer + "[]", found, refs);
-    JsonNode additional = node.get("additionalProperties");
-    if (additional != null && additional.isObject() && !additional.isEmpty()) {
-      walk(schemas, additional, where, pointer + "{}", found, refs);
-    }
-    for (String keyword : List.of("allOf", "oneOf", "anyOf")) {
-      JsonNode composed = node.get(keyword);
-      if (composed == null) {
+    // ⚠️ DESCENT IS DATA, NOT CODE — the walker ITERATES {@link #DESCENT} rather than restating it.
+    // Three rounds running, the predicate consulted a subschema this method never descended
+    // (boolean schemas, the $ref location, then unevaluatedProperties, which was classified at
+    // :802 and walked nowhere). Two point fixes each produced the next instance. A keyword declared
+    // descended can no longer be missed, because no branch hand-writes it.
+    for (Map.Entry<String, Descent> entry : DESCENT.entrySet()) {
+      JsonNode value = node.get(entry.getKey());
+      if (value == null) {
         continue;
       }
-      for (int i = 0; i < composed.size(); i++) {
-        walk(schemas, composed.get(i), where, pointer + "/" + keyword + "/" + i, found, refs);
+      Descent descent = entry.getValue();
+      switch (descent.container()) {
+        case MAP -> {
+          for (Map.Entry<String, JsonNode> child : value.properties()) {
+            walk(
+                schemas,
+                child.getValue(),
+                where,
+                pointer + descent.pointer().replace("{k}", child.getKey()),
+                found,
+                refs);
+          }
+        }
+        case LIST -> {
+          for (int i = 0; i < value.size(); i++) {
+            walk(
+                schemas,
+                value.get(i),
+                where,
+                pointer + descent.pointer().replace("{i}", String.valueOf(i)),
+                found,
+                refs);
+          }
+        }
+        case SCHEMA -> walk(schemas, value, where, pointer + descent.pointer(), found, refs);
       }
     }
   }
+
+  private enum Container {
+    MAP,
+    LIST,
+    SCHEMA
+  }
+
+  /** How a subschema-bearing keyword is carried, and the pointer suffix its children get. */
+  private record Descent(Container container, String pointer) {}
+
+  /**
+   * Every subschema-bearing keyword whose children can appear ON THE WIRE, and therefore MUST be
+   * descended. The walker reads this; {@link #theWalkerDescendsEverySchemaBearingKeyword} proves
+   * each entry actually reports, and {@link #everySubschemaKeywordIsClassified} proves the
+   * classification is exhaustive so a new one cannot be quietly forgotten.
+   */
+  private static final Map<String, Descent> DESCENT =
+      Map.ofEntries(
+          Map.entry("properties", new Descent(Container.MAP, ".{k}")),
+          Map.entry("patternProperties", new Descent(Container.MAP, ".~{k}")),
+          Map.entry("dependentSchemas", new Descent(Container.MAP, "?{k}")),
+          Map.entry("additionalProperties", new Descent(Container.SCHEMA, "{}")),
+          Map.entry("unevaluatedProperties", new Descent(Container.SCHEMA, "{*}")),
+          Map.entry("items", new Descent(Container.SCHEMA, "[]")),
+          Map.entry("contains", new Descent(Container.SCHEMA, "[?]")),
+          Map.entry("unevaluatedItems", new Descent(Container.SCHEMA, "[*]")),
+          Map.entry("then", new Descent(Container.SCHEMA, "/then")),
+          Map.entry("else", new Descent(Container.SCHEMA, "/else")),
+          Map.entry("allOf", new Descent(Container.LIST, "/allOf/{i}")),
+          Map.entry("anyOf", new Descent(Container.LIST, "/anyOf/{i}")),
+          Map.entry("oneOf", new Descent(Container.LIST, "/oneOf/{i}")),
+          Map.entry("prefixItems", new Descent(Container.LIST, "/prefixItems/{i}")));
+
+  /** Subschema-bearing keywords deliberately NOT descended, each with the reason it publishes no
+   * wire location. */
+  private static final Map<String, String> NOT_DESCENDED =
+      Map.of(
+          "$ref", "resolved at the reference site instead, and reported there as `-> Name`",
+          "propertyNames", "constrains key NAMES, which are strings; no object is published there",
+          "not", "describes what the value is NOT; nothing is published at that position",
+          "if", "a condition that is tested, never itself published (`then`/`else` ARE descended)");
 
   /**
    * Does this node put ANY information about the object's KEYS into the published document?
@@ -832,6 +1010,12 @@ class SpecOpenObjectRatchetTest {
    * pass. {@code additionalProperties: {"$ref": X}} discloses iff X does, so a reference to the
    * boolean {@code true} schema is correctly nothing while {@code Map<String, SomeRecord>} stays
    * disclosed.
+   *
+   * <p>⚠️ Scope of that change, stated precisely because the first telling undersold it: for a
+   * VALID RESOLVABLE reference it is location ACCURACY, not blindness — the old rule still reported
+   * the opacity, at {@code …{} -> Name} rather than at the node root. But a MISSING, EXTERNAL or
+   * directly-CYCLIC reference now fails LOUDLY where the old rule reported nothing at all, because
+   * an unresolvable target says nothing and the node therefore reads open.
    */
   private static boolean valueSchemaSaysSomething(
       JsonNode schema, JsonNode schemas, Set<String> seen) {

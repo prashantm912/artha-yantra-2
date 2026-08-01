@@ -152,12 +152,18 @@ public class RejectionReader {
     }
   }
 
-  /** The Stage-1 fired-vs-rejected contrast for a (version, IST-day): composite + dot-supports. */
+  /**
+   * The Stage-1 fired-vs-rejected contrast for a (version, IST-day): composite + dot-supports.
+   *
+   * <p>The per-row dot counts are the SCOREABLE population — see {@link DotCounts} for why a dot the
+   * scorer withheld is excluded, and why a row written before the {@code absent} flag was serialized
+   * is kept out of the aggregate ratios rather than blended into them.
+   */
   public FiredVsRejected firedVsRejected(UUID strategyVersionId, LocalDate istDay) {
     OffsetDateTime from = istDay.atStartOfDay(Ist.ZONE).toOffsetDateTime();
     OffsetDateTime to = istDay.plusDays(1).atStartOfDay(Ist.ZONE).toOffsetDateTime();
 
-    List<FiredRow> fired =
+    List<Scored<FiredRow>> fired =
         jdbc.query(
             """
             SELECT id, tradingsymbol, side, composite_score, scalper_detail::text AS detail, generated_at
@@ -166,15 +172,17 @@ public class RejectionReader {
             ORDER BY generated_at DESC, id DESC
             """,
             (rs, i) -> {
-              int[] dots = dotSupports(rs.getString("detail"), "dots");
-              return new FiredRow(
-                  rs.getLong("id"), rs.getString("tradingsymbol"), rs.getString("side"),
-                  rs.getBigDecimal("composite_score"), dots[0], dots[1],
-                  rs.getObject("generated_at", OffsetDateTime.class));
+              DotCounts dots = dotSupports(rs.getString("detail"), "dots");
+              return new Scored<>(
+                  new FiredRow(
+                      rs.getLong("id"), rs.getString("tradingsymbol"), rs.getString("side"),
+                      rs.getBigDecimal("composite_score"), dots.supporting(), dots.total(),
+                      rs.getObject("generated_at", OffsetDateTime.class)),
+                  dots);
             },
             strategyVersionId, from, to);
 
-    List<RejectedRow> rejected =
+    List<Scored<RejectedRow>> rejected =
         jdbc.query(
             """
             SELECT id, tradingsymbol, side, composite_score, composite_threshold, blocking_rail,
@@ -184,24 +192,28 @@ public class RejectionReader {
             ORDER BY generated_at DESC, id DESC
             """,
             (rs, i) -> {
-              int[] dots = confluenceDotSupports(rs.getString("diagnostic"));
-              return new RejectedRow(
-                  rs.getLong("id"), rs.getString("tradingsymbol"), rs.getString("side"),
-                  rs.getBigDecimal("composite_score"), rs.getBigDecimal("composite_threshold"),
-                  rs.getString("blocking_rail"), dots[0], dots[1],
-                  rs.getObject("generated_at", OffsetDateTime.class));
+              DotCounts dots = confluenceDotSupports(rs.getString("diagnostic"));
+              return new Scored<>(
+                  new RejectedRow(
+                      rs.getLong("id"), rs.getString("tradingsymbol"), rs.getString("side"),
+                      rs.getBigDecimal("composite_score"), rs.getBigDecimal("composite_threshold"),
+                      rs.getString("blocking_rail"), dots.supporting(), dots.total(),
+                      rs.getObject("generated_at", OffsetDateTime.class)),
+                  dots);
             },
             strategyVersionId, from, to);
 
-    return new FiredVsRejected(fired, rejected, contrast(fired, rejected));
+    return new FiredVsRejected(
+        fired.stream().map(Scored::row).toList(),
+        rejected.stream().map(Scored::row).toList(),
+        contrast(fired, rejected));
   }
 
-  private static Contrast contrast(List<FiredRow> fired, List<RejectedRow> rejected) {
-    BigDecimal meanFired = meanComposite(fired.stream().map(FiredRow::composite).toList());
-    BigDecimal meanRejected = meanComposite(rejected.stream().map(RejectedRow::composite).toList());
-    BigDecimal ratioFired = meanSupportRatio(fired.stream().map(f -> new int[] {f.dotSupports(), f.dotTotal()}).toList());
-    BigDecimal ratioRejected =
-        meanSupportRatio(rejected.stream().map(r -> new int[] {r.dotSupports(), r.dotTotal()}).toList());
+  private static Contrast contrast(List<Scored<FiredRow>> fired, List<Scored<RejectedRow>> rejected) {
+    BigDecimal meanFired = meanComposite(fired.stream().map(f -> f.row().composite()).toList());
+    BigDecimal meanRejected = meanComposite(rejected.stream().map(r -> r.row().composite()).toList());
+    BigDecimal ratioFired = meanSupportRatio(fired.stream().map(Scored::counts).toList());
+    BigDecimal ratioRejected = meanSupportRatio(rejected.stream().map(Scored::counts).toList());
     return new Contrast(
         fired.size(), rejected.size(), meanFired, meanRejected, ratioFired, ratioRejected);
   }
@@ -215,11 +227,25 @@ public class RejectionReader {
         .divide(BigDecimal.valueOf(present.size()), 4, RoundingMode.HALF_UP);
   }
 
-  private static BigDecimal meanSupportRatio(List<int[]> dots) {
+  /**
+   * The mean per-row support ratio over the rows whose dots CARRY the {@code absent} flag.
+   *
+   * <p>Legacy rows are dropped, not blended. Their {@code total} still counts withheld dots (the
+   * superseded definition) and cannot be corrected after the fact, so averaging them together with
+   * corrected rows would step this series at the deploy boundary for no market reason — and the step
+   * is NOT invertible from the aggregate, because the mean runs over rows with DIFFERENT dot counts
+   * (the optional {@code iv_slope} / {@code iv_abs_band} / {@code premium_skew} / {@code dow} dots
+   * are conditionally added, {@code ConnectTheDotsScorer:210-243}). A day with only legacy rows
+   * therefore yields {@code null} — "not computable on the current definition" — which is the same
+   * already-reachable nullable an empty day returns, and a far louder signal than a quietly shifted
+   * number. The raw per-row {@code dotSupports}/{@code dotTotal} stay on the response either way.
+   */
+  static BigDecimal meanSupportRatio(List<DotCounts> counts) {
     List<BigDecimal> ratios = new ArrayList<>();
-    for (int[] d : dots) {
-      if (d[1] > 0) {
-        ratios.add(BigDecimal.valueOf(d[0]).divide(BigDecimal.valueOf(d[1]), 4, RoundingMode.HALF_UP));
+    for (DotCounts c : counts) {
+      if (c.absentFlagged() && c.total() > 0) {
+        ratios.add(
+            BigDecimal.valueOf(c.supporting()).divide(BigDecimal.valueOf(c.total()), 4, RoundingMode.HALF_UP));
       }
     }
     if (ratios.isEmpty()) {
@@ -229,56 +255,100 @@ public class RejectionReader {
         .divide(BigDecimal.valueOf(ratios.size()), 4, RoundingMode.HALF_UP);
   }
 
-  /** [supporting, total] dot counts under a top-level array field ({@code scalper_detail.dots}). */
-  private int[] dotSupports(String json, String arrayField) {
+  /** Dot counts under a top-level array field ({@code scalper_detail.dots}). */
+  private DotCounts dotSupports(String json, String arrayField) {
     if (json == null) {
-      return new int[] {0, 0};
+      return DotCounts.EMPTY;
     }
     try {
       JsonNode node = objectMapper.readTree(json).path(arrayField);
       return countSupports(node);
     } catch (Exception e) {
-      return new int[] {0, 0};
+      return DotCounts.EMPTY;
     }
   }
 
-  /** [supporting, total] dot counts under {@code diagnostic.confluence.dots}. */
-  private int[] confluenceDotSupports(String json) {
+  /** Dot counts under {@code diagnostic.confluence.dots}. */
+  private DotCounts confluenceDotSupports(String json) {
     if (json == null) {
-      return new int[] {0, 0};
+      return DotCounts.EMPTY;
     }
     try {
       JsonNode node = objectMapper.readTree(json).path("confluence").path("dots");
       return countSupports(node);
     } catch (Exception e) {
-      return new int[] {0, 0};
+      return DotCounts.EMPTY;
     }
   }
 
-  private static int[] countSupports(JsonNode dots) {
+  /** Package-private + static (no instance state) so the counting rule is directly testable. */
+  static DotCounts countSupports(JsonNode dots) {
     if (dots == null || !dots.isArray()) {
-      return new int[] {0, 0};
+      return DotCounts.EMPTY;
     }
     int supporting = 0;
     int total = 0;
+    boolean flagged = false;
     for (JsonNode d : dots) {
+      // All three serializers write `absent` unconditionally on EVERY dot, so the key is on every
+      // dot of a modern row and on none of a legacy one — one dot carrying it settles the row.
+      flagged |= d.has("absent");
+      if (d.path("absent").asBoolean(false)) {
+        // Withheld: out of BOTH counts, mirroring ConnectTheDotsScorer.score (:252-260). Skipping it
+        // from the numerator too is a no-op today (the one absent-capable dot, `iv_rank`, is built
+        // `!ivRankAbsent && ...` so absent always reads supports=false) but it is the rule, not a
+        // coincidence, and it holds if a future absent dot is ever constructed differently.
+        continue;
+      }
       total++;
       if (d.path("supports").asBoolean(false)) {
         supporting++;
       }
     }
-    return new int[] {supporting, total};
+    return new DotCounts(supporting, total, flagged);
   }
+
+  /**
+   * One row's dot counts plus the PROVENANCE the response row cannot carry.
+   *
+   * <p>{@code total} is the SCOREABLE dot population: dots flagged {@code absent:true} are excluded,
+   * matching {@code ConnectTheDotsScorer.score} (:252-260), which withholds a missing-input dot from
+   * BOTH its numerator and its denominator so a data gap is never scored as evidence against the
+   * side. Counting them — the behaviour this replaces — reported e.g. 17/18 where the scorer's
+   * population was 17, i.e. the reader charged the side for a dot the scorer had refused to charge
+   * it for. Today exactly one dot can be absent ({@code iv_rank}, {@code ConnectTheDotsScorer:200}),
+   * and it is honest-NULL on every live row, so essentially every row was off by that one dot.
+   *
+   * <p>{@code absentFlagged} says whether the row was written after the flag began being serialized.
+   * A row written before it has no {@code absent} key at all, so {@code path("absent")} reads every
+   * dot as present and the count silently keeps the OLD meaning — absentness is simply unknowable
+   * there. Recovering it from the {@code reason} prose was considered and rejected: {@code reason} is
+   * serialized on the two DIAGNOSTIC shapes only, never on {@code scalper_detail}, which is what the
+   * FIRED side of this contrast reads — it would have corrected half the comparison.
+   */
+  record DotCounts(int supporting, int total, boolean absentFlagged) {
+    static final DotCounts EMPTY = new DotCounts(0, 0, false);
+  }
+
+  /** A response row paired with the counts behind it — the counts carry provenance the row does not. */
+  private record Scored<T>(T row, DotCounts counts) {}
 
   /** The Stage-1 contrast bundle (INT design §4.2 — composite + dot-supports, per §13 row 19 Stage 1). */
   public record FiredVsRejected(List<FiredRow> fired, List<RejectedRow> rejected, Contrast contrast) {}
 
-  /** One fired signal's Stage-1 row. */
+  /**
+   * One fired signal's Stage-1 row. {@code dotTotal} is the SCOREABLE dot population (withheld dots
+   * excluded), which on a row predating the {@code absent} flag falls back to the full dot count —
+   * see {@link DotCounts}.
+   */
   public record FiredRow(
       long signalId, String tradingsymbol, String side, BigDecimal composite,
       int dotSupports, int dotTotal, OffsetDateTime generatedAt) {}
 
-  /** One rejected signal's Stage-1 row (adds the blocking rail + composite threshold). */
+  /**
+   * One rejected signal's Stage-1 row (adds the blocking rail + composite threshold). {@code
+   * dotTotal} carries the same scoreable-population meaning as {@link FiredRow#dotTotal()}.
+   */
   public record RejectedRow(
       long rejectionId, String tradingsymbol,
       @Schema(types = {"string", "null"}) String side,
@@ -286,7 +356,12 @@ public class RejectionReader {
       @Schema(types = {"number", "null"}) BigDecimal threshold,
       String blockingRail, int dotSupports, int dotTotal, OffsetDateTime generatedAt) {}
 
-  /** The fired-vs-rejected summary contrast. */
+  /**
+   * The fired-vs-rejected summary contrast. The two {@code meanSupportRatio*} fields are computed
+   * over the rows whose dots carry the {@code absent} flag ONLY — see {@link #meanSupportRatio} —
+   * so a day whose rows all predate the flag reports {@code null} rather than a number on the
+   * superseded definition.
+   */
   public record Contrast(
       int firedCount, int rejectedCount,
       @Schema(types = {"number", "null"}) BigDecimal meanCompositeFired,

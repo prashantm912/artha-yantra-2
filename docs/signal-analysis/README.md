@@ -1160,8 +1160,23 @@ Proposed 2026-07-03 from the first pass — each is small and parity-safe (rejec
    and "only X failed" needs no caveat. Costs a few extra reads per bar.
 4. **Data-health flags on the row** — precomputed booleans (ivRank-null, breadth-zero, dow-null…) so
    the health query is an index scan and the FE can badge degraded rows.
-5. **Per-session eval-denominator row** — bars-evaluated per strategy per day (rejections + fires +
-   skips), so rates have a denominator (today it's inferred from the 3m grid).
+5. ~~Per-session eval-denominator row~~ — **SHIPPED (F5 unit U2, V053 `strategy_eval_denominator`)**:
+   the engine's `Outcome` counters now carry a per-strategy dimension, flushed on the EXISTING V045
+   3m rollup tick to a day-keyed table — one row per `(session_date, boot_id, strategy_slug,
+   outcome)`, ≤ 441/day/boot. Cumulative values REPLACED on conflict (not deltas added), so a double
+   flush or a mid-day restart cannot double count; `boot_id` in the key means a restart adds rows
+   rather than overwriting, and a day's true total is the SUM across boots. Rates now have a real
+   denominator instead of one inferred from the 3m grid:
+   ```sql
+   SELECT strategy_slug,
+          SUM(eval_count)                                  AS evaluations,
+          SUM(eval_count) FILTER (WHERE outcome = 'fired') AS fired,
+          COUNT(DISTINCT boot_id)                          AS boots
+     FROM strategy.strategy_eval_denominator
+    WHERE session_date = DATE '2026-08-01'
+    GROUP BY strategy_slug ORDER BY evaluations DESC;
+   ```
+   Full protocol + guarantee boundary: the `V053__strategy_eval_denominator.sql` header.
 6. **Dot-null semantics unification** — decide null = NEUTRAL-supports vs null = withhold vs
    exclude-from-denominator, ONCE, for all dots (today: dow null→supports, ivRank/fii null→against).
    Analysis keeps mis-reading dead-data dots as bearish evidence until this is uniform.

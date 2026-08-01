@@ -44,7 +44,19 @@ public final class OpenAlgoGlobalQuoteClient implements GlobalQuoteSource {
     } catch (RuntimeException unavailable) {
       return degraded(key, "error", unavailable);
     }
-    return quote == null ? degraded(key, "absent", null) : Optional.of(quote);
+    if (quote == null) {
+      return degraded(key, "absent", null);
+    }
+    // OpenAlgoMappers.toQuote maps a MISSING ltp to BigDecimal.ZERO. Passing that through would not
+    // read as "no data" downstream — zero against a real prev close manufactures a violently BEARISH
+    // Dow, a fabricated input to a live scoring dot. Reject it here, loudly.
+    if (quote.lastPrice() == null || quote.lastPrice().signum() <= 0) {
+      return degraded(key, "no-ltp", null);
+    }
+    if (quote.ohlc() == null || quote.ohlc().close() == null) {
+      return degraded(key, "no-prev-close", null);
+    }
+    return Optional.of(quote);
   }
 
   /** Counts + logs one degradation-to-Neutral, then returns the fail-soft empty. */

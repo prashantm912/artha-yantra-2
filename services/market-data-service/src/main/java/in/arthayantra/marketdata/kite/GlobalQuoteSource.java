@@ -31,10 +31,25 @@ public interface GlobalQuoteSource {
   /**
    * Counter for every fail-soft degradation to "no global quote" — tagged {@code source}
    * ({@code openalgo}/{@code upstox}) and {@code reason} ({@code error}/{@code absent}/{@code
-   * unmapped}). A Dow factor reading Neutral WITHOUT this counter advancing is a real Neutral.
+   * no-ltp}/{@code no-prev-close}/{@code unmapped}). A Dow factor reading Neutral WITHOUT this
+   * counter advancing is a real Neutral.
    */
   String DEGRADED_METRIC = "ay_global_quote_degraded_total";
 
-  /** Latest quote (LTP + prev close in the OHLC close slot) for {@code key}; empty if unavailable. */
+  /**
+   * Latest quote for {@code key}, or empty when no USABLE one exists.
+   *
+   * <p><b>Implementations must return a quote only when it can actually produce a factor</b> — a
+   * strictly positive {@code lastPrice} AND a non-null {@code ohlc().close()} (the prev close;
+   * globals are LTP-only, so direction is LTP vs that slot). Anything short of both is empty, WARN,
+   * and a {@link #DEGRADED_METRIC} increment. Returning a partial quote instead would hand the
+   * consumer a value it silently turns into Neutral one level down — reopening, inside the scorer,
+   * exactly the invisible degradation this counter exists to expose.
+   *
+   * <p>The positivity requirement is not pedantry: {@code OpenAlgoMappers.toQuote} maps a MISSING
+   * {@code ltp} to {@code BigDecimal.ZERO}, and a zero LTP against a real prev close does not read
+   * as "no data" — it reads as a violently BEARISH Dow. A fabricated input to a live scoring dot is
+   * worse than a dark one.
+   */
   Optional<Quote> latest(InstrumentKey key);
 }

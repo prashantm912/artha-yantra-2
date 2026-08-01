@@ -11,15 +11,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import in.arthayantra.marketdata.kite.GlobalQuoteSource;
+import in.arthayantra.marketdata.kite.InstrumentKey;
+import in.arthayantra.marketdata.kite.QuoteGateway;
+import in.arthayantra.marketdata.openalgo.live.OpenAlgoGlobalQuoteClient;
 import in.arthayantra.marketdata.upstox.UpstoxAnalyticsProperties;
 import in.arthayantra.marketdata.upstox.UpstoxGlobalInstrumentsClient;
 import in.arthayantra.marketdata.upstox.UpstoxGlobalQuoteClient;
 import in.arthayantra.marketdata.upstox.UpstoxRateLimiter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Map;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +49,7 @@ class ConnectingDotsDowFactorTest {
 
   private static final LocalDate TODAY = LocalDate.of(2026, 8, 1);
   private static final String QUOTES_PATH = "/v2/market-quote/quotes";
+  private static final InstrumentKey DOW = new InstrumentKey("GLOBAL_INDEX", "DOWJONES");
 
   private static WireMockServer wireMock;
 
@@ -83,6 +90,60 @@ class ConnectingDotsDowFactorTest {
     assertThat(service(null).dowFactor(TODAY)).isEqualTo(ConnectingDotsService.NEUTRAL);
   }
 
+  /**
+   * The fabricated-input guard, end to end. {@code OpenAlgoMappers.toQuote} maps a MISSING {@code ltp}
+   * to {@code BigDecimal.ZERO}, so an appliance that does not serve DOWJONES yields "price 0" against
+   * a real prev close. Unguarded, {@code dowFactor} computes {@code 0 − 52229.06 < 0} and scores a
+   * violently BEARISH Dow on every row — strictly worse than a dark dot, because it is invented data
+   * feeding a live scoring input. It must land on NEUTRAL.
+   */
+  @Test
+  void aZeroLtpOpenAlgoQuoteDoesNotManufactureABearishDot() {
+    QuoteGateway zeroLtp =
+        keys ->
+            Map.of(
+                DOW,
+                new QuoteGateway.Quote(
+                    DOW,
+                    BigDecimal.ZERO, // exactly what OpenAlgoMappers produces for a missing ltp
+                    null,
+                    null,
+                    null,
+                    null,
+                    new QuoteGateway.Quote.Ohlc(null, null, null, new BigDecimal("52229.06")),
+                    OffsetDateTime.now(ZoneOffset.UTC)));
+
+    ConnectingDotsService svc =
+        service(new OpenAlgoGlobalQuoteClient(zeroLtp, new SimpleMeterRegistry()));
+
+    assertThat(svc.dowFactor(TODAY))
+        .as("a zero LTP must read as NO DATA, never as a bearish Dow")
+        .isEqualTo(ConnectingDotsService.NEUTRAL);
+  }
+
+  /**
+   * An LTP with no prev close lands on Neutral — but Neutral alone proves nothing here, since the
+   * unguarded path reaches Neutral too. The load-bearing assertion is that it is COUNTED: that is
+   * the difference between a dark dot and a genuine one.
+   */
+  @Test
+  void aQuoteWithNoPrevCloseLandsOnNeutralAndIsCounted() {
+    stubQuotes("""
+        {"status":"success","data":{"GLOBAL_INDEX:^DJI":{"last_price":52548.91}}}
+        """);
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+
+    assertThat(service(upstoxSource(meters)).dowFactor(TODAY))
+        .isEqualTo(ConnectingDotsService.NEUTRAL);
+    assertThat(
+            meters
+                .counter(
+                    GlobalQuoteSource.DEGRADED_METRIC, "source", "upstox", "reason", "no-prev-close")
+                .count())
+        .as("an unusable quote must be visible, not silently Neutral")
+        .isEqualTo(1.0);
+  }
+
   @Test
   void aBrokenGlobalFeedDegradesToNeutralRatherThanFailing() {
     wireMock.stubFor(
@@ -108,25 +169,30 @@ class ConnectingDotsDowFactorTest {
   }
 
   private static GlobalQuoteSource upstoxSource() {
+    return upstoxSource(new SimpleMeterRegistry());
+  }
+
+  private static GlobalQuoteSource upstoxSource(SimpleMeterRegistry meters) {
     return new UpstoxGlobalQuoteClient(
         new UpstoxGlobalInstrumentsClient(
             RestClient.builder(),
             new ObjectMapper(),
             new UpstoxAnalyticsProperties(wireMock.baseUrl(), null, "test-token", wireMock.baseUrl()),
             new UpstoxRateLimiter()),
-        new SimpleMeterRegistry());
+        meters);
   }
 
   private static void stubDji(String lastPrice, String netChange) {
+    stubQuotes(
+        "{\"status\":\"success\",\"data\":{\"GLOBAL_INDEX:^DJI\":{"
+            + "\"last_price\":" + lastPrice + ",\"net_change\":" + netChange + ","
+            + "\"ohlc\":{\"open\":52256.03,\"high\":52566.85,\"low\":52017.32,"
+            + "\"close\":52229.06}}}}");
+  }
+
+  private static void stubQuotes(String body) {
     wireMock.stubFor(
         get(urlPathEqualTo(QUOTES_PATH))
-            .willReturn(
-                aResponse()
-                    .withHeader("Content-Type", "application/json")
-                    .withBody(
-                        "{\"status\":\"success\",\"data\":{\"GLOBAL_INDEX:^DJI\":{"
-                            + "\"last_price\":" + lastPrice + ",\"net_change\":" + netChange + ","
-                            + "\"ohlc\":{\"open\":52256.03,\"high\":52566.85,\"low\":52017.32,"
-                            + "\"close\":52229.06}}}}")));
+            .willReturn(aResponse().withHeader("Content-Type", "application/json").withBody(body)));
   }
 }

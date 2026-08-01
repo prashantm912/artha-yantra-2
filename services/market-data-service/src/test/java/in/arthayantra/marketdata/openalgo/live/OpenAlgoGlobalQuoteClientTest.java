@@ -55,16 +55,54 @@ class OpenAlgoGlobalQuoteClientTest {
         .count();
   }
 
+  /** A USABLE quote: positive LTP AND a prev close in the OHLC close slot. */
+  private static Quote quote(String ltp, String prevClose) {
+    return new Quote(
+        DOW,
+        ltp == null ? null : new BigDecimal(ltp),
+        null,
+        null,
+        null,
+        null,
+        prevClose == null ? null : new Quote.Ohlc(null, null, null, new BigDecimal(prevClose)),
+        OffsetDateTime.now(ZoneOffset.UTC));
+  }
+
   @Test
   void aResolvedQuotePassesThroughUntouchedAndDegradesNothing() {
-    Quote quote =
-        new Quote(DOW, new BigDecimal("52548.91"), OffsetDateTime.now(ZoneOffset.UTC));
+    Quote quote = quote("52548.91", "52229.06");
     GlobalQuoteSource source =
         new OpenAlgoGlobalQuoteClient(keys -> Map.of(DOW, quote), meters);
 
     assertThat(source.latest(DOW)).contains(quote);
     assertThat(meters.find(GlobalQuoteSource.DEGRADED_METRIC).counters()).isEmpty();
     assertThat(logs.list).isEmpty();
+  }
+
+  /**
+   * The one that matters: {@code OpenAlgoMappers.toQuote} maps a MISSING {@code ltp} to
+   * {@code BigDecimal.ZERO}, so an unserved DOWJONES arrives as "price 0" against a real prev close.
+   * Passed through, {@code dowFactor} computes {@code 0 − 52229.06 < 0} and scores a violently
+   * BEARISH Dow out of thin air. It must be refused and counted, never forwarded.
+   */
+  @Test
+  void aZeroLtpIsRefusedRatherThanManufacturingABearishDow() {
+    GlobalQuoteSource source =
+        new OpenAlgoGlobalQuoteClient(keys -> Map.of(DOW, quote("0", "52229.06")), meters);
+
+    assertThat(source.latest(DOW)).isEmpty();
+    assertThat(degradations("no-ltp")).isEqualTo(1.0);
+    assertWarned("reason=no-ltp");
+  }
+
+  @Test
+  void anLtpOnlyQuoteWithNoPrevCloseIsRefusedInsteadOfLookingHealthy() {
+    GlobalQuoteSource source =
+        new OpenAlgoGlobalQuoteClient(keys -> Map.of(DOW, quote("52548.91", null)), meters);
+
+    assertThat(source.latest(DOW)).isEmpty();
+    assertThat(degradations("no-prev-close")).isEqualTo(1.0);
+    assertWarned("reason=no-prev-close");
   }
 
   @Test

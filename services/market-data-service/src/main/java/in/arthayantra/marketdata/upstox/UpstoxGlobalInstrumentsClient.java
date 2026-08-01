@@ -183,22 +183,40 @@ public final class UpstoxGlobalInstrumentsClient {
    * The raw {@code /v2/market-quote/quotes} batch for a list of global {@code instrument_key}s, re-keyed
    * back to the request {@code |} form (Upstox keys the response map with a {@code :} variant). An empty
    * request short-circuits; transport / HTTP errors propagate to {@link #quoteAll} (per-batch skip).
+   * Retries a 429 with backoff — correct for the page, WRONG for the signal path (see
+   * {@link #quoteWithoutRetry}).
    */
   Map<String, UpstoxMarketQuote.Tick> quote(List<String> instrumentKeys) {
+    return quote(instrumentKeys, true);
+  }
+
+  /**
+   * Same batch, but a 429 propagates IMMEDIATELY instead of sleeping through the 1→16 s backoff ladder
+   * (and an uncapped {@code Retry-After}). The Dow global-quote read runs inside the scalper's
+   * sequential single-evaluation-thread fan-out, where a page-oriented retry can stall the live engine
+   * for 30+ seconds — or unboundedly, if Upstox names a long {@code Retry-After}. There, failing fast
+   * to a counted Neutral is strictly better than blocking the tape. The shared token budget is still
+   * consumed and still refuses when exhausted; only the SLEEPING is dropped.
+   */
+  Map<String, UpstoxMarketQuote.Tick> quoteWithoutRetry(List<String> instrumentKeys) {
+    return quote(instrumentKeys, false);
+  }
+
+  private Map<String, UpstoxMarketQuote.Tick> quote(List<String> instrumentKeys, boolean retryOn429) {
     if (instrumentKeys == null || instrumentKeys.isEmpty()) {
       return Map.of();
     }
     String csv = String.join(",", instrumentKeys);
-    UpstoxMarketQuote response =
-        withRetry(
-            () ->
-                quoteClient
-                    .get()
-                    .uri(b -> b.path("/v2/market-quote/quotes").queryParam("instrument_key", csv).build())
-                    .header("Authorization", "Bearer " + properties.resolveToken())
-                    .header("Accept", "application/json")
-                    .retrieve()
-                    .body(UpstoxMarketQuote.class));
+    Supplier<UpstoxMarketQuote> call =
+        () ->
+            quoteClient
+                .get()
+                .uri(b -> b.path("/v2/market-quote/quotes").queryParam("instrument_key", csv).build())
+                .header("Authorization", "Bearer " + properties.resolveToken())
+                .header("Accept", "application/json")
+                .retrieve()
+                .body(UpstoxMarketQuote.class);
+    UpstoxMarketQuote response = retryOn429 ? withRetry(call) : metered(call);
     if (response == null || response.data() == null || response.data().isEmpty()) {
       return Map.of();
     }
@@ -269,13 +287,8 @@ public final class UpstoxGlobalInstrumentsClient {
   private <T> T withRetry(Supplier<T> call) {
     int attempt = 0;
     while (true) {
-      // Live page read: BOUNDED wait for the shared token budget; a saturated budget throws (the
-      // per-batch caller degrades to price-less rows) rather than parking the request thread ~30 min.
-      if (!limiter.tryAcquire()) {
-        throw new IllegalStateException("Upstox rate budget exhausted");
-      }
       try {
-        return call.get();
+        return metered(call);
       } catch (HttpClientErrorException.TooManyRequests e) {
         if (++attempt > MAX_429_RETRIES) {
           throw e;
@@ -283,6 +296,18 @@ public final class UpstoxGlobalInstrumentsClient {
         sleep(backoffMillis(attempt, e));
       }
     }
+  }
+
+  /**
+   * One attempt against the shared token budget, no retry. Live page read: BOUNDED wait for the
+   * budget; a saturated budget throws (the per-batch caller degrades to price-less rows) rather than
+   * parking the request thread ~30 min.
+   */
+  private <T> T metered(Supplier<T> call) {
+    if (!limiter.tryAcquire()) {
+      throw new IllegalStateException("Upstox rate budget exhausted");
+    }
+    return call.get();
   }
 
   private static long backoffMillis(int attempt, HttpClientErrorException e) {

@@ -175,14 +175,62 @@ class UpstoxGlobalQuoteClientTest {
   }
 
   @Test
-  void aPricelessTickCountsAsAbsentRatherThanAQuoteWithNoLtp() {
+  void aPricelessTickIsRefusedAndCounted() {
     stubQuotes(
         """
         {"status":"success","data":{"GLOBAL_INDEX:^DJI":{"net_change":319.85}}}
         """);
 
     assertThat(client().latest(DOW)).isEmpty();
-    assertThat(degradations("absent")).isEqualTo(1.0);
+    assertThat(degradations("no-ltp")).isEqualTo(1.0);
+    assertWarned("reason=no-ltp");
+  }
+
+  @Test
+  void aZeroLtpIsRefusedRatherThanManufacturingABearishDow() {
+    stubQuotes(
+        """
+        {"status":"success","data":{"GLOBAL_INDEX:^DJI":{"last_price":0,
+          "ohlc":{"open":52256.03,"high":52566.85,"low":52017.32,"close":52229.06}}}}
+        """);
+
+    assertThat(client().latest(DOW)).isEmpty();
+    assertThat(degradations("no-ltp")).isEqualTo(1.0);
+    assertWarned("reason=no-ltp");
+  }
+
+  /**
+   * An LTP with no derivable prev close cannot produce a direction. Returning it would make
+   * {@code dowFactor} read Neutral SILENTLY, one level below this counter — the same invisible
+   * degradation this PR exists to close, reopened inside the scorer.
+   */
+  @Test
+  void aTickWithNoDerivablePrevCloseIsRefusedInsteadOfDegradingSilently() {
+    stubQuotes("""
+        {"status":"success","data":{"GLOBAL_INDEX:^DJI":{"last_price":52548.91}}}
+        """);
+
+    assertThat(client().latest(DOW)).isEmpty();
+    assertThat(degradations("no-prev-close")).isEqualTo(1.0);
+    assertWarned("reason=no-prev-close");
+  }
+
+  /** The signal path must not inherit the page's 429 backoff ladder — a 429 fails fast. */
+  @Test
+  void aRateLimitFailsFastRatherThanSleepingOnTheEvaluationThread() {
+    wireMock.stubFor(
+        get(urlPathEqualTo(QUOTES_PATH)).willReturn(aResponse().withStatus(429).withHeader("Retry-After", "600")));
+
+    long startedAt = System.nanoTime();
+    assertThat(client().latest(DOW)).isEmpty();
+    long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+    assertThat(elapsedMs)
+        .as("a 429 must not sleep through the 1..16s ladder, nor honour a 600s Retry-After")
+        .isLessThan(2_000);
+    assertThat(degradations("error")).isEqualTo(1.0);
+    // ONE attempt only — no retry storm against a rate-limited upstream.
+    assertThat(wireMock.findAll(getRequestedFor(urlPathEqualTo(QUOTES_PATH)))).hasSize(1);
   }
 
   private void assertWarned(String fragment) {

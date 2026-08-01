@@ -57,23 +57,39 @@ public final class UpstoxGlobalQuoteClient implements GlobalQuoteSource {
     }
     UpstoxMarketQuote.Tick tick;
     try {
-      tick = delegate.quote(List.of(upstoxKey)).get(upstoxKey);
+      // NO-RETRY variant: this runs on the scalper's single evaluation thread, where the page's
+      // 1→16 s (+ uncapped Retry-After) 429 ladder would stall the live tape.
+      tick = delegate.quoteWithoutRetry(List.of(upstoxKey)).get(upstoxKey);
     } catch (RuntimeException unavailable) {
       return degraded(key, "error", unavailable);
     }
-    if (tick == null || tick.lastPrice() == null) {
+    if (tick == null) {
       return degraded(key, "absent", null);
     }
-    return Optional.of(toQuote(key, tick));
+    BigDecimal ltp = tick.lastPrice();
+    if (ltp == null || ltp.signum() <= 0) {
+      return degraded(key, "no-ltp", null);
+    }
+    BigDecimal prevClose = prevCloseOf(tick, ltp);
+    if (prevClose == null) {
+      // An LTP with no prev close cannot produce a direction; returning it would degrade to Neutral
+      // silently inside dowFactor, one level below this counter.
+      return degraded(key, "no-prev-close", null);
+    }
+    return Optional.of(toQuote(key, tick, prevClose));
+  }
+
+  /** {@code ltp − net_change} (as the World Indices page derives it), else the quote's own close. */
+  private static BigDecimal prevCloseOf(UpstoxMarketQuote.Tick tick, BigDecimal ltp) {
+    BigDecimal netChange = tick.netChange();
+    UpstoxMarketQuote.Ohlc ohlc = tick.ohlc();
+    return netChange != null ? ltp.subtract(netChange) : (ohlc == null ? null : ohlc.close());
   }
 
   /** Maps an Upstox tick onto the domain quote, prev close in the OHLC close slot (LTP-only globals). */
-  private static Quote toQuote(InstrumentKey key, UpstoxMarketQuote.Tick tick) {
+  private static Quote toQuote(InstrumentKey key, UpstoxMarketQuote.Tick tick, BigDecimal prevClose) {
     UpstoxMarketQuote.Ohlc ohlc = tick.ohlc();
     BigDecimal ltp = tick.lastPrice();
-    BigDecimal netChange = tick.netChange();
-    BigDecimal prevClose =
-        netChange != null ? ltp.subtract(netChange) : (ohlc == null ? null : ohlc.close());
     return new Quote(
         key,
         ltp,

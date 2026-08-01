@@ -13,12 +13,17 @@ import org.junit.jupiter.api.Test;
 
 /**
  * M8 (#128 batch scoping): "Manas live volume gate 20-day vs backtest 50-day — different trade
- * populations." Confirmed still true — the live and backtest paths are not merely different
- * WINDOWS of the same doctrine rule, they enforce two DIFFERENT §4 concepts entirely: live's {@code
- * ManasGates.liquidVolume} is the §4.3 ABSOLUTE liquidity veto (20-day average volume must clear a
- * fixed floor), while the backtest's own {@code volumeRatio(volume, 50)} vs {@code VOL_MIN} is the
- * §4.7 expanding-volume-on-breakout RATIO gate (today's volume vs its own 50-day trailing average).
- * {@code ManasAroraSwingBacktest.selectionGates} never calls {@code ManasGates.liquidVolume} at all.
+ * populations." Confirmed still true — the live and backtest paths enforce two DIFFERENT volume
+ * concepts entirely: live's {@code ManasGates.liquidVolume} is the doctrine's §4.3 ABSOLUTE
+ * liquidity veto (20-day average volume must clear a fixed floor,
+ * {@code MomentumTradingManasArora_Consolidated_Strategy.md:234-236}), while the backtest's own
+ * {@code volumeRatio(volume, 50)} vs {@code VOL_MIN} is a BACKTEST-ONLY expanding-volume-on-breakout
+ * RATIO filter (today's volume vs its own 50-day trailing average) with UNVERIFIED DOCTRINE
+ * PROVENANCE — {@code ManasAroraSwingBacktest.java} previously labelled it "§4.7", which is WRONG:
+ * the doctrine's own §4.7 is "EOD Workflow & Timeframes" ({@code :259}), and its only volume rule
+ * (§4.3) has no breakout-expansion ratio at all. Corrected here (cross-vendor review, 2026-08-02) so
+ * this test never repeats that confident-but-wrong citation. {@code
+ * ManasAroraSwingBacktest.selectionGates} never calls {@code ManasGates.liquidVolume} at all.
  *
  * <p>This is a CHARACTERIZATION, not a fix — like M6/M9, reconciling the two gates is a
  * live-population / backtest-methodology change (HOLD-tier, the same class as M36/M37) and is
@@ -32,19 +37,20 @@ import org.junit.jupiter.api.Test;
  * what these tests compute. {@link #theRealEntryPipelineTakesTheBreakoutOnAVolumeSpikeButSkipsItWithoutOne}
  * and {@link #theRealEntryPipelineTakesAThinNameThatWouldFailLiveButClearsTheRatioGate} go one step
  * further and drive the divergence through the PRODUCTION entry point itself
- * ({@link ManasAroraSwingBacktest#simulate}), not a leaf formula in isolation — proving the §4.7 gate
- * is a real, live wire in the entry funnel, not merely a comparison this test happens to reproduce.
+ * ({@link ManasAroraSwingBacktest#simulate}), not a leaf formula in isolation — proving the
+ * backtest-only filter is a real, live wire in the entry funnel, not merely a comparison this test
+ * happens to reproduce.
  */
 class ManasVolumeGateDivergenceTest {
 
   private static final BigDecimal MIN_AVG_VOLUME = new BigDecimal("5000"); // live default (§4.3)
-  private static final int LOOKBACK = 50; // backtest's §4.7 window
+  private static final int LOOKBACK = 50; // the backtest-only filter's window (no doctrine citation)
 
   @Test
   void aThinNameWithATodaySpikePassesTheBacktestRatioGateButFailsTheLiveAbsoluteFloor() {
     // 50 quiet days at 2,500 shares/day (a small/illiquid name), then a one-day spike to 4,200 —
-    // ~1.68x its own 50-day average, comfortably above VOL_MIN (1.2) so the backtest's §4.7
-    // expanding-volume check passes it. But the live 20-day AVERAGE volume (dominated by the same
+    // ~1.68x its own 50-day average, comfortably above VOL_MIN (1.2) so the backtest-only
+    // expanding-volume filter passes it. But the live 20-day AVERAGE volume (dominated by the same
     // 49 quiet days plus one spike) is still only ~2,585 shares — well under the live §4.3 floor.
     double[] volume = new double[LOOKBACK + 1];
     for (int i = 0; i < LOOKBACK; i++) {
@@ -59,7 +65,7 @@ class ManasVolumeGateDivergenceTest {
     boolean livePasses = ManasGates.liquidVolume(avgVolume20, MIN_AVG_VOLUME);
 
     assertThat(ratio[LOOKBACK]).as("today's spike ratio").isCloseTo(1.68, org.assertj.core.data.Offset.offset(0.01));
-    assertThat(backtestPasses).as("backtest's §4.7 expanding-volume gate").isTrue();
+    assertThat(backtestPasses).as("the backtest-only expanding-volume filter").isTrue();
     assertThat(avgVolume20).as("live 20-day average volume").isEqualByComparingTo("2585");
     assertThat(livePasses).as("live's §4.3 absolute liquidity floor").isFalse();
   }
@@ -67,7 +73,7 @@ class ManasVolumeGateDivergenceTest {
   @Test
   void aLiquidSteadyNameWithNoExpansionPassesTheLiveFloorButFailsTheBacktestRatioGate() {
     // 51 days flat at 50,000 shares/day — comfortably liquid by the live 20-day absolute floor, but
-    // NO expansion at all (ratio == 1.0), so the backtest's §4.7 gate (which needs > VOL_MIN = 1.2)
+    // NO expansion at all (ratio == 1.0), so the backtest-only filter (which needs > VOL_MIN = 1.2)
     // rejects the exact same day as a non-entry.
     double[] volume = new double[LOOKBACK + 1];
     for (int i = 0; i <= LOOKBACK; i++) {
@@ -81,7 +87,7 @@ class ManasVolumeGateDivergenceTest {
     boolean livePasses = ManasGates.liquidVolume(avgVolume20, MIN_AVG_VOLUME);
 
     assertThat(ratio[LOOKBACK]).as("steady-volume ratio").isCloseTo(1.0, org.assertj.core.data.Offset.offset(1e-9));
-    assertThat(backtestPasses).as("backtest's §4.7 expanding-volume gate").isFalse();
+    assertThat(backtestPasses).as("the backtest-only expanding-volume filter").isFalse();
     assertThat(avgVolume20).as("live 20-day average volume").isEqualByComparingTo("50000");
     assertThat(livePasses).as("live's §4.3 absolute liquidity floor").isTrue();
   }
@@ -108,8 +114,8 @@ class ManasVolumeGateDivergenceTest {
         sim.simulate("TESTCO", breakoutPanel(1_000, 1_000), vcp, breakout, entryFrom);
     assertThat(noSpike.stream().filter(t -> t.setup().equals("breakout")))
         .as("identical geometry, but NO volume expansion (ratio ~1.0) — the real pipeline takes"
-            + " NO breakout trade at all, proving the §4.7 gate genuinely blocks entries here, not"
-            + " just in a standalone formula call")
+            + " NO breakout trade at all, proving the backtest-only filter genuinely blocks entries"
+            + " here, not just in a standalone formula call")
         .isEmpty();
   }
 

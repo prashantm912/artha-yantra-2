@@ -34,7 +34,7 @@ import org.junit.jupiter.api.Test;
  */
 class SwingCostModelOrderValueCharacterizationTest {
 
-  // ₹1L capital / 1 slot -> orderValue = ₹10L. avgTurnoverAtEntry = ₹5 Cr/day keeps participation
+  // ₹10L capital / 1 slot -> orderValue = ₹10L. avgTurnoverAtEntry = ₹5 Cr/day keeps participation
   // (orderValue/adv = 0.02) well BELOW where impactCoeff·participation would hit the 100% cap — a
   // first draft of this test used a turnover low enough that impact saturated the cap on EVERY
   // trade regardless of orderValue, which made the whole comparison degenerate (every trade wiped
@@ -71,8 +71,9 @@ class SwingCostModelOrderValueCharacterizationTest {
         .as("order-invariant total return is the fingerprint of a cost model blind to the sleeve's"
             + " actual compounded size (SwingPortfolio.java:82)")
         .isCloseTo(winnerLast.totalReturnPct(), within(1e-9));
-    // Non-degenerate sanity: costs bite (not ~105% gross) but do not wipe the book (not ~-100%) —
-    // proves the impact model is genuinely engaged, not saturated at its cap either way.
+    // Non-degenerate sanity: the GROSS compounding of +100%,+5%,+5% is (2.00)(1.05)(1.05)-1 =
+    // +120.5%, so landing in [90,105] proves costs genuinely bit (pulled it down from 120.5%)
+    // without saturating the impact cap and wiping the book to -100% either.
     assertThat(winnerFirst.totalReturnPct()).isBetween(90.0, 105.0);
   }
 

@@ -9,7 +9,6 @@ import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
 import in.arthayantra.strategysignal.signals.SignalRepository;
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -24,6 +23,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -248,17 +249,24 @@ public class PaperService {
   private final Duration signalTakeMaxAge;
   private final TransactionTemplate txTemplate;
   /**
-   * M4 (#128): incremented whenever an OPEN position's live MTM cannot be computed because no tick
-   * has ever arrived for it (structurally the case for non-ticking swing/funnel equities — the live
-   * feed is index/options only). VISIBILITY only: {@code mark}/{@code unrealized} stay {@code null}
-   * exactly as before, unchanged for every consumer — this counter exists so the owner has real
-   * numbers on how often/how many positions are "MTM blind" before deciding whether a daily-close
-   * fallback should stay display-only or feed risk sizing
-   * (docs/signal-analysis/2026-08-02-e4-128-batch-scoping.md, M4).
+   * M4 (#128): the ids of OPEN positions CURRENTLY observed with no live tick — i.e. structurally
+   * "MTM blind" (mark/unrealized left {@code null}), most often non-ticking swing/funnel equities
+   * (the live feed is index/options only). VISIBILITY only: {@code mark}/{@code unrealized} stay
+   * {@code null} exactly as before, unchanged for every consumer.
+   *
+   * <p>A {@code Set}, not a monotonic counter (cross-vendor review, 2026-08-02): {@code
+   * positionDetail}/{@code openPositions} are read paths the UI polls every
+   * {@code MTM_REFETCH_MS = 5000} (frontend-react/src/api/paper.ts), so a naive per-read counter
+   * measures poll frequency, not the thing being observed — one blind position produces ~720
+   * increments/hour with the tab open and zero with it closed. This set is mutated ONLY on a
+   * TRANSITION (newly blind / resolves a tick / the position closes, see {@code doSettle}), so its
+   * SIZE is a gauge of "how many positions are blind right now" (the {@code
+   * PaperReconciliationService#deadAnchorOrphanGauge} idiom for persistent paper-ledger state,
+   * applied here), and the log fires only once per blind episode, not once per poll.
    */
-  private final Counter mtmBlindCounter;
+  private final Set<Long> mtmBlindPositionIds;
 
-  /** Wires the ledger collaborators, registering the M4 MTM-blind visibility counter. */
+  /** Wires the ledger collaborators, registering the M4 MTM-blind visibility gauge. */
   @Autowired
   public PaperService(
       PaperOrderRepository orders,
@@ -300,7 +308,9 @@ public class PaperService {
     this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
     this.signalTakeMaxAge = Duration.ofMinutes(signalTakeMaxAgeMinutes);
     this.txTemplate = new TransactionTemplate(transactionManager);
-    this.mtmBlindCounter = meterRegistry.counter("ay_paper_mtm_blind_total");
+    this.mtmBlindPositionIds =
+        meterRegistry.gauge(
+            "ay_paper_mtm_blind_positions", ConcurrentHashMap.<Long>newKeySet(), Set::size);
   }
 
   /**
@@ -1082,6 +1092,10 @@ public class PaperService {
       // not close this position, or it reports someone else's exit as its own (§9-05).
       return Optional.empty();
     }
+    // M4 (#128): a CLOSED position is never read by positionDetail/toPositionDto's OPEN-only branch
+    // again, so nothing would otherwise clear it from mtmBlindPositionIds — remove it here, the one
+    // place every close (this is the sole positions.close() call site) actually happens.
+    mtmBlindPositionIds.remove(pos.id());
     if (staleAge != null) {
       staleTicks.staleSettleUsed(pos, closeReason, staleAge);
     }
@@ -1122,6 +1136,7 @@ public class PaperService {
                 ? mark.subtract(row.avgEntryPrice())
                 : row.avgEntryPrice().subtract(mark);
         unrealized = move.multiply(BigDecimal.valueOf(row.qty())).setScale(2, RoundingMode.HALF_UP);
+        mtmBlindPositionIds.remove(id);
       } else {
         recordMtmBlind(id, row.exchange(), row.tradingsymbol());
       }
@@ -1367,6 +1382,7 @@ public class PaperService {
               ? mark.subtract(row.avgEntryPrice())
               : row.avgEntryPrice().subtract(mark);
       unrealized = move.multiply(BigDecimal.valueOf(row.qty())).setScale(2, RoundingMode.HALF_UP);
+      mtmBlindPositionIds.remove(row.id());
     } else {
       recordMtmBlind(row.id(), row.exchange(), row.tradingsymbol());
     }
@@ -1385,13 +1401,17 @@ public class PaperService {
   /**
    * M4 (#128) visibility: an OPEN position with no live tick — {@code mark}/{@code unrealized} stay
    * {@code null} to every caller of {@link #positionDetail} / {@link #openPositions}, exactly as
-   * before this counter existed. Never a refusal, never a value change — see {@link #mtmBlindCounter}.
+   * before this gauge existed. Never a refusal, never a value change. Logs + adds to {@link
+   * #mtmBlindPositionIds} only on the TRANSITION into blind ({@code Set.add} returns {@code false}
+   * — a silent no-op — on every subsequent 5-second poll of an already-known-blind position), so
+   * polling frequency can never inflate either the gauge or the log volume.
    */
   private void recordMtmBlind(long id, String exchange, String tradingsymbol) {
-    mtmBlindCounter.increment();
-    log.warn(
-        "MTM blind: no live tick for OPEN position {} {}:{} — mark/unrealized left null"
-            + " (visibility only, #128 M4)",
-        id, exchange, tradingsymbol);
+    if (mtmBlindPositionIds.add(id)) {
+      log.warn(
+          "MTM blind: no live tick for OPEN position {} {}:{} — mark/unrealized left null"
+              + " (visibility only, #128 M4)",
+          id, exchange, tradingsymbol);
+    }
   }
 }

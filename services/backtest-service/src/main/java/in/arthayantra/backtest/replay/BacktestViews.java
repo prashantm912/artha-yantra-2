@@ -13,25 +13,33 @@ public final class BacktestViews {
   /** The paged trade envelope for a completed run. */
   public record BacktestTradePage(List<BacktestTradeItem> items, int limit, int offset) {}
 
-  /** One trade row as emitted by the results endpoint. */
+  /**
+   * One trade row as emitted by the results endpoint.
+   *
+   * <p>Every {@code BigDecimal} carries an explicit {@code type = "string"}: the platform mapper
+   * ({@code ArthaJacksonAutoConfiguration}) routes BigDecimal through {@code ToStringSerializer}, so
+   * these are decimal STRINGS on the wire while springdoc would otherwise infer {@code number}.
+   * {@code types} alone would not fix it — it UNIONS with the inferred type, so a nullable decimal
+   * needs BOTH {@code type = "string"} (replaces) and {@code types = {"string", "null"}} (widens).
+   */
   public record BacktestTradeItem(
       int seq,
       String side,
       long qty,
       String entryTs,
-      BigDecimal entryPrice,
+      @Schema(type = "string") BigDecimal entryPrice,
       @Schema(types = {"string", "null"}) String exitTs,
-      @Schema(types = {"number", "null"}) BigDecimal exitPrice,
-      BigDecimal pnl,
-      BigDecimal pnlPct,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal exitPrice,
+      @Schema(type = "string") BigDecimal pnl,
+      @Schema(type = "string") BigDecimal pnlPct,
       @Schema(types = {"string", "null"}) String exitReason,
       int barsHeld,
       @Schema(types = {"string", "null"}) String touchBasis,
       @Schema(types = {"object", "null"}) JsonNode contributions,
       @Schema(types = {"string", "null"}) String exchange,
       @Schema(types = {"string", "null"}) String tradingsymbol,
-      @Schema(types = {"number", "null"}) BigDecimal stopLoss,
-      @Schema(types = {"number", "null"}) BigDecimal takeProfit) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal stopLoss,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal takeProfit) {}
 
   /** The latest-run summary envelope for requested strategy versions. */
   public record BacktestSummaryPage(List<BacktestSummaryItem> items) {}

@@ -228,25 +228,44 @@ public class RejectionReader {
   }
 
   /**
-   * The mean per-row support ratio over the rows whose dots CARRY the {@code absent} flag.
+   * The mean per-row support ratio — reported ONLY when EVERY scoreable row on this side is on the
+   * current definition, and {@code null} otherwise.
    *
-   * <p>Legacy rows are dropped, not blended. Their {@code total} still counts withheld dots (the
-   * superseded definition) and cannot be corrected after the fact, so averaging them together with
-   * corrected rows would step this series at the deploy boundary for no market reason — and the step
-   * is NOT invertible from the aggregate, because the mean runs over rows with DIFFERENT dot counts
-   * (the optional {@code iv_slope} / {@code iv_abs_band} / {@code premium_skew} / {@code dow} dots
-   * are conditionally added, {@code ConnectTheDotsScorer:210-243}). A day with only legacy rows
-   * therefore yields {@code null} — "not computable on the current definition" — which is the same
-   * already-reachable nullable an empty day returns, and a far louder signal than a quietly shifted
-   * number. The raw per-row {@code dotSupports}/{@code dotTotal} stay on the response either way.
+   * <p>A legacy row's {@code total} still counts withheld dots (the superseded definition) and cannot
+   * be corrected after the fact: an old {@code supports:false} {@code iv_rank} dot is genuinely
+   * indistinguishable between "withheld" and "present and unsupporting". Blending such a row into
+   * this mean would step the series at the deploy boundary for no market reason, and the step is NOT
+   * invertible from the aggregate, because the mean runs over rows with DIFFERENT dot counts (the
+   * optional {@code iv_slope} / {@code iv_abs_band} / {@code premium_skew} / {@code dow} dots are
+   * conditionally added, {@code ConnectTheDotsScorer:210-243}).
+   *
+   * <p><b>Why a MIXED day returns null rather than a mean of just its modern rows.</b> The row lists
+   * and {@code firedCount}/{@code rejectedCount} beside this figure cover EVERY row, so a mean over
+   * the flag-bearing subset would present a partial sample as the full-day contrast with nothing
+   * marking it partial. Worse, that subset is not a random one: on the boundary day the legacy/modern
+   * split is exactly "before vs after the restart", a contiguous session-phase slice, so its mean is
+   * time-biased rather than merely thin. The invariant is therefore total — <b>if this is non-null it
+   * describes exactly the rows returned for that side</b> — and the cost is bounded to a single day,
+   * since rows are append-only and every row written after the deploy carries the flag.
+   *
+   * <p>A row with NO scoreable dots ({@code total == 0} — a null {@code scalper_detail}, a
+   * non-scalper strategy, an all-withheld degenerate) is skipped rather than treated as legacy: it
+   * carries no ratio to contaminate, and such rows occur on modern days too.
+   *
+   * <p>The raw per-row {@code dotSupports}/{@code dotTotal} stay on the response either way, so
+   * nothing is hidden — only the aggregate refuses to average across two definitions.
    */
   static BigDecimal meanSupportRatio(List<DotCounts> counts) {
     List<BigDecimal> ratios = new ArrayList<>();
     for (DotCounts c : counts) {
-      if (c.absentFlagged() && c.total() > 0) {
-        ratios.add(
-            BigDecimal.valueOf(c.supporting()).divide(BigDecimal.valueOf(c.total()), 4, RoundingMode.HALF_UP));
+      if (c.total() == 0) {
+        continue;
       }
+      if (!c.absentFlagged()) {
+        return null;
+      }
+      ratios.add(
+          BigDecimal.valueOf(c.supporting()).divide(BigDecimal.valueOf(c.total()), 4, RoundingMode.HALF_UP));
     }
     if (ratios.isEmpty()) {
       return null;
@@ -316,8 +335,10 @@ public class RejectionReader {
    * BOTH its numerator and its denominator so a data gap is never scored as evidence against the
    * side. Counting them — the behaviour this replaces — reported e.g. 17/18 where the scorer's
    * population was 17, i.e. the reader charged the side for a dot the scorer had refused to charge
-   * it for. Today exactly one dot can be absent ({@code iv_rank}, {@code ConnectTheDotsScorer:200}),
-   * and it is honest-NULL on every live row, so essentially every row was off by that one dot.
+   * it for. Today exactly one dot can be absent ({@code iv_rank}, {@code ConnectTheDotsScorer:200}):
+   * it is withheld on the bars where the IV-history rank is unavailable — {@code
+   * MarketOiClient:517-522} supplies a rank only once the 60-trading-day history floor is met, so
+   * the dot is withheld until that history matures, NOT on every row unconditionally.
    *
    * <p>{@code absentFlagged} says whether the row was written after the flag began being serialized.
    * A row written before it has no {@code absent} key at all, so {@code path("absent")} reads every
@@ -357,10 +378,11 @@ public class RejectionReader {
       String blockingRail, int dotSupports, int dotTotal, OffsetDateTime generatedAt) {}
 
   /**
-   * The fired-vs-rejected summary contrast. The two {@code meanSupportRatio*} fields are computed
-   * over the rows whose dots carry the {@code absent} flag ONLY — see {@link #meanSupportRatio} —
-   * so a day whose rows all predate the flag reports {@code null} rather than a number on the
-   * superseded definition.
+   * The fired-vs-rejected summary contrast. A {@code meanSupportRatio*} field is non-null only when
+   * EVERY scoreable row on that side is on the current dot-counting definition — see {@link
+   * #meanSupportRatio}. A day containing any row that predates the {@code absent} flag reports
+   * {@code null} for that side rather than a number on the superseded definition or a mean over
+   * only part of the day. The {@code *Count} fields and the row lists always cover every row.
    */
   public record Contrast(
       int firedCount, int rejectedCount,

@@ -18,17 +18,19 @@ import org.junit.jupiter.api.Test;
  * (:252-260) drops an {@code absent} dot from BOTH its numerator and its denominator precisely so a
  * data gap is never scored as evidence against the side — so on a session where {@code iv_rank} has
  * no data the reader reported 17/18 where the scorer's population was 17. Exactly one dot is
- * absent-capable today ({@code iv_rank}, {@code ConnectTheDotsScorer:200-202} is the only 6-arg
- * {@code add} call site) and it is honest-NULL on every live row, so essentially every row was off
- * by that one dot — a systematic depression, not an edge case.
+ * absent-capable today: {@code iv_rank} ({@code ConnectTheDotsScorer:200-202} is the only 6-arg
+ * {@code add} call site, of 22 total). It is withheld on the bars where the IV-history rank is
+ * unavailable — {@code MarketOiClient:517-522} supplies a rank once the 60-trading-day history floor
+ * is met — so the miscount bit whenever that history was short, NOT on every row unconditionally.
  *
  * <p><b>The discontinuity this pins.</b> The fix is only possible because the flag is now serialized;
  * rows written before that carry NO {@code absent} key, so {@code path("absent").asBoolean(false)}
  * reads them as present and their ratio silently keeps the OLD meaning. {@code has("absent")} tells
- * the two apart, and legacy rows are kept OUT of the aggregate rather than averaged in with
- * corrected ones — otherwise a series spanning the deploy would step for no market reason, and the
- * step is not invertible after the fact (the mean runs over rows with differing dot counts, since
- * the optional dots are conditionally added).
+ * the two apart. An aggregate is then reported ONLY when every scoreable row on that side is on the
+ * current definition: blending would step the series at the deploy for no market reason (and the
+ * step is not invertible, since the mean runs over rows with differing dot counts), while averaging
+ * just the modern subset of a MIXED day would present a partial — and time-biased, since the split
+ * is "before vs after the restart" — sample beside counts that cover every row.
  */
 class RejectionReaderDotCountsTest {
 
@@ -130,18 +132,46 @@ class RejectionReaderDotCountsTest {
   }
 
   @Test
-  void theAggregateAveragesOnlyFlagBearingRowsOnTheDeployBoundaryDay() {
+  void theAggregateIsNullOnMixedDayRatherThanReportingPartialSample() {
     // The one day that genuinely mixes shapes: rows before the restart carry no flag, rows after do.
-    // Only the corrected rows are averaged — mean(0.5, 1.0) = 0.75 — so the series stays one
-    // definition even on the boundary day. Blending would have averaged four rows instead.
+    // Averaging just the flag-bearing pair would yield 0.7500 — but the counts and row lists beside
+    // it cover ALL FOUR rows, so that number would present a partial sample as the full-day
+    // contrast. It is also time-biased, not merely thin: the legacy/modern split IS "before vs after
+    // the restart", a contiguous session-phase slice. Null keeps the invariant total — a non-null
+    // ratio describes exactly the rows returned for that side.
     List<DotCounts> mixed =
         List.of(
-            new DotCounts(12, 18, false), // legacy: excluded
-            new DotCounts(1, 2, true), // 0.5
-            new DotCounts(2, 2, true), // 1.0
-            new DotCounts(3, 18, false)); // legacy: excluded
+            new DotCounts(12, 18, false), // legacy
+            new DotCounts(1, 2, true),
+            new DotCounts(2, 2, true),
+            new DotCounts(3, 18, false)); // legacy
 
-    assertThat(RejectionReader.meanSupportRatio(mixed)).isEqualByComparingTo(new BigDecimal("0.7500"));
+    assertThat(RejectionReader.meanSupportRatio(mixed)).isNull();
+  }
+
+  @Test
+  void theAggregateAveragesModernOnlyDay() {
+    // The steady state after the deploy: every row flag-bearing, so the mean is reported. Same two
+    // scoreable rows as the mixed case above — mean(0.5, 1.0) = 0.75 — proving it is the legacy
+    // CONTAMINATION that nulls it, not the arithmetic failing.
+    List<DotCounts> modernOnly = List.of(new DotCounts(1, 2, true), new DotCounts(2, 2, true));
+
+    assertThat(RejectionReader.meanSupportRatio(modernOnly)).isEqualByComparingTo(new BigDecimal("0.7500"));
+  }
+
+  @Test
+  void rowsWithNoScoreableDotsNeverPoisonTheAggregate() {
+    // Load-bearing: DotCounts.EMPTY is unflagged (a null scalper_detail, a non-scalper strategy, an
+    // unparseable payload) and those rows occur on MODERN days too. They carry no ratio, so they are
+    // skipped — treating them as legacy contamination would null the aggregate on ordinary days.
+    List<DotCounts> withEmpties =
+        List.of(
+            DotCounts.EMPTY,
+            new DotCounts(1, 2, true),
+            new DotCounts(0, 0, false),
+            new DotCounts(2, 2, true));
+
+    assertThat(RejectionReader.meanSupportRatio(withEmpties)).isEqualByComparingTo(new BigDecimal("0.7500"));
   }
 
   @Test

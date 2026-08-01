@@ -74,13 +74,20 @@ class DotAbsentSerializationTest {
           false, ScalperConfig.StructuralStop.NONE, false, false, false, false, false, false, false,
           false, false);
 
-  /** {@code ivRank} null exercises the absent/withheld path; a value exercises the present path. */
+  /**
+   * {@code ivRank} null exercises the absent/withheld path; a value exercises the present path.
+   *
+   * <p>Scored with the A3 {@code iv-rank-dot} tag ARMED (the trailing {@code true}). The dot is
+   * default-OFF — unarmed it is withheld whatever the input says, so a present rank could not reach
+   * the present path at all and this fixture would lose its discriminating pair. Arming here keeps
+   * this test's subject exactly what it was: how {@code absent} SERIALIZES, not when it is set.
+   */
   private static Confluence confluence(BigDecimal ivRank) {
     Macro macro =
         new Macro(bd("14"), ivRank, bd("12"), Boolean.FALSE, 40, 10, bd("50"), bd("0.20"), bd("0.05"));
     ScalperGateContext ctx =
         new ScalperGateContext("NIFTY 50", "NIFTY 50", LocalTime.of(10, 30), BULL_CHART, BULL_OI, macro);
-    return ConnectTheDotsScorer.score(ctx, CE, 1, T, P, true);
+    return ConnectTheDotsScorer.score(ctx, CE, 1, T, P, true, false, false, false, null, true);
   }
 
   private static ScalperGateContext context(BigDecimal ivRank) {

@@ -107,6 +107,15 @@
 #   Every consuming loop asserts its list is non-empty before running (`${VAR:?}`). That guard is
 #   load-bearing, not decoration: `for svc in ; do` iterates zero times and exits 0, so a skipped
 #   or broken inventory step would otherwise turn every gate below into a silent green.
+#   ENUMERATED IS NOT EXAMINED, and the difference needed its own step. A Java service with a
+#   pom.xml and a committed spec but no working ContractCaptureTest used to pass the whole job
+#   green with its spec never compared against code: the capture step cannot fail for a missing
+#   test (`failIfNoSpecifiedTests=false` is required for the upstream libs in the reactor), BOTH
+#   hard gates `continue` on "new service" before they read the branch-side artifact, and the
+#   drift check only warns. The "Every Java service actually captured a spec" step now demands
+#   services/<svc>/target/contracts/<svc>.openapi.json for every Java inventory entry and fails
+#   loudly if it is absent. Note this is the BRANCH side only - it asserts the artifact exists,
+#   not that any particular gate compared it.
 #   STILL POSSIBLE TO MISS, stated because a future session will trust this header: a service that
 #   never commits an OpenAPI spec at all gets no CONTRACT checking - the inventory forces it to be
 #   declared in EXEMPT_SERVICES, so it is visible and deliberate, but declaring it does not test
@@ -272,6 +281,46 @@ jobs:
           echo "reactor: -pl $pl"
           ./mvnw -ntp -pl "$pl" -am test \
             -Dtest=ContractCaptureTest -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Every Java service actually captured a spec (enumerated is not examined)
+        if: needs.changes.outputs.contracts == 'true'
+        # ENUMERATING A SERVICE IS NOT THE SAME AS EXAMINING IT. Without this step a Java service
+        # with a pom.xml AND a committed spec but NO working ContractCaptureTest passes the whole
+        # job green, its committed spec never once compared against its code. Three things have to
+        # be true at the same time, and all three are load-bearing design decisions elsewhere:
+        #   1. the capture step CANNOT fail for a missing test - `-Dsurefire.failIfNoSpecifiedTests
+        #      =false` is required, because every upstream lib in the `-am` reactor legitimately
+        #      has no ContractCaptureTest. So an absent, misnamed, or wrong-output-path capture
+        #      test produces no artifact and Maven still exits 0.
+        #   2. BOTH hard gates `continue` on "absent from the merge base = a new service" BEFORE
+        #      they ever look at the branch-side artifact - which is correct for the question they
+        #      ask (nothing on main consumes it yet), but it means a NEW service's artifact is
+        #      never demanded by either of them.
+        #   3. the drift check below is warning-only, by design.
+        # Net: the checks do not fail, they simply never look - the exact shape the inventory
+        # above exists to end, one level in. The inventory guarantees a service is ENUMERATED;
+        # this step is what makes it EXAMINED.
+        # Deliberately NOT folded into the capture step: a separate step is independently visible
+        # as success/skipped in the job's step list, and this is precisely the kind of check whose
+        # having-run must be readable rather than inferred.
+        run: |
+          set -euo pipefail
+          : "${AY_CONTRACT_SERVICES_JAVA:?the inventory step did not run - refusing to assert capture over an empty service list.}"
+          missing=""
+          for svc in $AY_CONTRACT_SERVICES_JAVA; do
+            art="services/$svc/target/contracts/$svc.openapi.json"
+            if [ -f "$art" ]; then
+              echo "  captured: $art"
+            else
+              missing="${missing:+$missing }$svc"
+              echo "::error::$svc has services/$svc/pom.xml and a committed contracts/$svc.openapi.json, but the capture run produced no $art. Its committed spec would never be compared against its code: both merge-base gates skip a service that is new on this branch before they read the branch-side artifact, and the drift check only warns. Add a working ContractCaptureTest for this service, or fix its name / output path."
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::no captured spec for: $missing"
+            exit 1
+          fi
+          echo "every Java contract service captured a spec."
 
       - name: Breaking-change gate (merge base vs this branch's code)
         # Skipped on push:main - the PR already merged; there is nothing left to gate.

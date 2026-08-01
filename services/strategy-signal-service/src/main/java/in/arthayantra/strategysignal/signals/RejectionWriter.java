@@ -1,5 +1,8 @@
 package in.arthayantra.strategysignal.signals;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.strategysignal.scalper.RailMarginSign;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
 import io.micrometer.core.instrument.Counter;
@@ -45,6 +48,7 @@ public class RejectionWriter {
 
   private final SignalRejectionRepository repository;
   private final ShadowBookService shadowBook;
+  private final ObjectMapper objectMapper;
   private final BoundedAsyncWriter queue;
   private final Counter signContradictions;
 
@@ -52,9 +56,11 @@ public class RejectionWriter {
   public RejectionWriter(
       SignalRejectionRepository repository,
       ShadowBookService shadowBook,
+      ObjectMapper objectMapper,
       MeterRegistry meterRegistry) {
     this.repository = repository;
     this.shadowBook = shadowBook;
+    this.objectMapper = objectMapper;
     this.queue =
         new BoundedAsyncWriter(
             "signal-rejection",
@@ -107,11 +113,23 @@ public class RejectionWriter {
                   strategySlug, exchange, tradingsymbol, blockingRail, blockingOperand,
                   blockingThreshold, blockingMargin, barTime, diagnostic.marginSign());
             }
+            // F5 U3 data-health: a PURE in-memory read of the same context the diagnostic was built
+            // from, so the flags cannot disagree with the row they annotate. Computed HERE on the
+            // writer thread rather than on the caller — unlike the sign counter above it is only
+            // ever consumed by this INSERT, so a dropped record needs no verdict and the sole
+            // `signal-eval` thread does none of the work. The session date is the BAR's own IST
+            // date, never now(): a bar recorded either side of IST midnight must be judged against
+            // the calendar day it belongs to.
+            DataHealthFlags health =
+                DataHealthFlags.of(
+                    diagnostic == null ? null : diagnostic.context(),
+                    barTime == null ? null : barTime.atZoneSameInstant(Ist.ZONE).toLocalDate());
             long rejectionId =
                 repository.insert(
                     strategyVersionId, strategySlug, exchange, tradingsymbol, interval, side,
                     blockingRail, blockingOperand, blockingThreshold, blockingMargin, blockingReason,
-                    compositeScore, compositeThreshold, diagnosticJson, barTime);
+                    compositeScore, compositeThreshold, diagnosticJson, barTime,
+                    objectMapper.writeValueAsString(health), health.degraded());
             // Shadow book (default-OFF): an eligible rejection opens as a virtual 1-lot position so
             // the exit sweep labels it with a real PnL. maybeOpen never throws (diagnostics never
             // break live) — the guard here is belt-and-braces for the shared writer thread.
@@ -119,7 +137,10 @@ public class RejectionWriter {
                 rejectionId, strategyVersionId, strategySlug, exchange, tradingsymbol, barTime,
                 diagnostic);
             return true;
-          } catch (RuntimeException e) {
+          } catch (RuntimeException | JsonProcessingException e) {
+            // JsonProcessingException joins the fail-soft catch for the data-health serialization:
+            // a diagnostic about a diagnostic must never break the live signal path, and this
+            // already runs off the eval thread.
             log.warn(
                 "failed to persist scalper rejection {} {}:{}: {}",
                 strategySlug, exchange, tradingsymbol, e.toString());

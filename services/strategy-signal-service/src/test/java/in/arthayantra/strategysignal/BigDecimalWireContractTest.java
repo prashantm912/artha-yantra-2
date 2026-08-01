@@ -17,6 +17,7 @@ import in.arthayantra.strategysignal.paper.PaperController;
 import in.arthayantra.strategysignal.paper.PaperMarginController;
 import in.arthayantra.strategysignal.paper.PaperService;
 import in.arthayantra.strategysignal.paper.PaperViews;
+import in.arthayantra.strategysignal.signals.DataHealthFlags;
 import in.arthayantra.strategysignal.signals.ShadowPositionRepository;
 import in.arthayantra.strategysignal.signals.ShadowVariantsController;
 import in.arthayantra.strategysignal.signals.SignalRejectionRepository;
@@ -68,6 +69,23 @@ class BigDecimalWireContractTest {
 
   private static BigDecimal bd(String v) {
     return new BigDecimal(v);
+  }
+
+  /**
+   * A realistic {@code data_health} node for a SCORED rejection row (V054). Built from the real
+   * {@link DataHealthFlags} record rather than hand-rolled JSON, so this fixture cannot drift from
+   * the shape production writes.
+   *
+   * <p>Not {@code null}: the row below is a {@code confluence-blocked} block that reached the
+   * composite stage, so it is context-bearing and production always computes a verdict for it. The
+   * flags are the two that live rows actually carry today — {@code ivRank} and {@code dowUp} were
+   * absent on 100% of 3,700 measured context-bearing rows (IV-history floor unmet; Dow feed un-armed
+   * by design), which is why {@code degraded} is true. Contributes no decimals, so it neither helps
+   * nor weakens this class's assertions — it is here to keep the fixture faithful.
+   */
+  private JsonNode dataHealth() {
+    return mapper.valueToTree(
+        new DataHealthFlags(true, true, false, List.of("iv-rank-absent", "dow-absent")));
   }
 
   // ---- paper/PaperService -------------------------------------------------------------------
@@ -254,7 +272,8 @@ class BigDecimalWireContractTest {
             new SignalRejectionRepository.RejectionRow(
                 1L, UUID.randomUUID(), "scalp-gap-theory-nifty", "NFO", "NIFTY26JUL24500CE", "3m",
                 "BUY", "confluence-blocked", bd("0.55"), bd("0.65"), bd("0.10"), "below rail",
-                bd("0.61"), bd("0.65"), null, OffsetDateTime.now(), OffsetDateTime.now()));
+                bd("0.61"), bd("0.65"), null, dataHealth(), true, OffsetDateTime.now(),
+                OffsetDateTime.now()));
     for (String field :
         List.of(
             "blockingOperand", "blockingThreshold", "blockingMargin", "compositeScore",

@@ -2443,6 +2443,13 @@
             "format" : "date-time"
           }
         }, {
+          "name" : "degraded",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean"
+          }
+        }, {
           "name" : "limit",
           "in" : "query",
           "required" : false,
@@ -5563,6 +5570,16 @@
           "diagnostic" : {
             "$ref" : "#/components/schemas/JsonNode"
           },
+          "dataHealth" : {
+            "anyOf" : [ {
+              "$ref" : "#/components/schemas/JsonNode"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "degraded" : {
+            "type" : "boolean"
+          },
           "barTime" : {
             "type" : "string",
             "format" : "date-time"
@@ -5572,7 +5589,7 @@
             "format" : "date-time"
           }
         },
-        "required" : [ "barTime", "blockingMargin", "blockingOperand", "blockingRail", "blockingReason", "blockingThreshold", "compositeScore", "compositeThreshold", "diagnostic", "exchange", "generatedAt", "id", "interval", "side", "strategySlug", "strategyVersionId", "tradingsymbol" ]
+        "required" : [ "barTime", "blockingMargin", "blockingOperand", "blockingRail", "blockingReason", "blockingThreshold", "compositeScore", "compositeThreshold", "dataHealth", "degraded", "diagnostic", "exchange", "generatedAt", "id", "interval", "side", "strategySlug", "strategyVersionId", "tradingsymbol" ]
       },
       "ShadowSummaryResponse" : {
         "type" : "object",

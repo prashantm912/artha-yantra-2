@@ -1,0 +1,78 @@
+{
+  "comment": "Swing exit-equivalence CHARACTERIZATION fixture (#128 M7, 2026-08-02 scoping). Unlike the scalper's contracts/fixtures/exit-equivalence.json (which PINS an already-aligned semantics across live+backtest), this fixture DESCRIBES current behaviour, including a known divergence — it must never be read as a claim that live and the deep sims are fully reconciled. Two things are pinned: (1) families.minervini / families.manas — the STOP-LOSS level formulas the live in.arthayantra.strategyengine.eval.ExitEvaluator and each deep sim's own hand-rolled helper (MinerviniSwingBacktest.exitFires's percent branch; ManasAroraSwingBacktest.initialStop's atr_multiple+cap_pct branch) compute IDENTICAL levels and IDENTICAL hit/no-hit outcomes for the same inputs — consumed by MinerviniSwingExitEquivalenceTest and ManasSwingExitEquivalenceTest in services/market-data-service. (2) entryBarDivergence — the M6 finding (docs/signal-analysis/2026-08-02-e4-128-batch-scoping.md): the live SwingBatchEngine.exitPass can evaluate ExitEvaluator on the SAME bar a lot was opened this run (lotsAsOf admits a same-day lot, then evaluates it at series.size()-1, which for a same-day entry IS the entry bar); both deep sims structurally CANNOT observe this (ManasAroraSwingBacktest.simulateSetup adds the lot then `continue`s before any exit check runs the same iteration; MinerviniSwingBacktest.simulateSetup's entry `if` and exit `else` branches are mutually exclusive within one iteration). This is NOT a fix — M6 is HOLD-tier (a live-timing or backtest-methodology change either way) — this fixture only turns the divergence into a named, asserted fact instead of prose. consumed by ManasSwingExitEquivalenceTest.entryBarDivergenceLiveCanExitOnTheEntryBarButTheDeepSimStructurallyCannot.",
+  "families": {
+    "minervini": {
+      "comment": "MV-7.2 protective stop: entry - 8% (MinerviniSwingBacktest.STOP_PCT, basis=percent). entrySignalClose == entryPrice here because the AT_CLOSE fill timing (the tested default) fills at the signal bar's own close, exactly like SwingBatchEngine.emitEntry's entryPrice = bar.close().",
+      "entryPrice": "100.00",
+      "config": {
+        "exit_rules": [
+          { "type": "stop_loss", "params": { "basis": "percent", "value": 8 } }
+        ]
+      },
+      "expectedLevels": { "stopLoss": "92.00" },
+      "scenarios": [
+        {
+          "name": "stop-hit",
+          "closes": ["100.00", "95.00", "92.00", "90.00"],
+          "expect": { "reason": "stop_loss", "barOffset": 2 }
+        },
+        {
+          "name": "stop-exact-touch",
+          "closes": ["100.00", "94.00", "92.00", "93.00"],
+          "expect": { "reason": "stop_loss", "barOffset": 2 }
+        },
+        {
+          "name": "no-hit",
+          "closes": ["100.00", "95.00", "93.00", "94.00"],
+          "expect": { "reason": null, "barOffset": null }
+        }
+      ]
+    },
+    "manas": {
+      "comment": "Manas 3.5A initial stop: entry - min(atrMultiple*ATR, capPct%*entry) (ManasAroraSwingBacktest.initialStop; ExitEvaluator's atr_multiple basis with an optional cap_pct, per the ExitEvaluator class javadoc). atrMultiple=2.0/capPct=10% are ManasAroraSwingBacktest's own defaults (ATR_MULT/STOP_CAP_PCT) mirrored into the live exit_rules config. Each scenario's bars carry a CONSTANT true range (flat close, high=close+range/2, low=close-range/2) so ATR(atrPeriod) converges to exactly that constant range regardless of Wilder-smoothing seed details — the fixture pins the STOP FORMULA, not a specific ATR-warm-up trajectory.",
+      "atrPeriod": 20,
+      "scenarios": [
+        {
+          "name": "atr-distance-not-capped",
+          "comment": "atr=2.00, mult=2 -> raw distance 4.00; cap 10%*100=10.00 does not bind -> stop 96.00.",
+          "entryPrice": "100.00",
+          "trueRange": "2.00",
+          "config": {
+            "exit_rules": [
+              { "type": "stop_loss", "params": { "basis": "atr_multiple", "value": 2, "cap_pct": 10, "atr_period": 20 } }
+            ]
+          },
+          "expectedLevels": { "stopLoss": "96.00" },
+          "closes": ["100.00", "97.00", "96.00", "95.00"],
+          "expect": { "reason": "stop_loss", "barOffset": 2 }
+        },
+        {
+          "name": "cap-binds",
+          "comment": "atr=8.00, mult=2 -> raw distance 16.00; cap 10%*100=10.00 DOES bind -> stop 90.00 (the tighter of the two).",
+          "entryPrice": "100.00",
+          "trueRange": "8.00",
+          "config": {
+            "exit_rules": [
+              { "type": "stop_loss", "params": { "basis": "atr_multiple", "value": 2, "cap_pct": 10, "atr_period": 20 } }
+            ]
+          },
+          "expectedLevels": { "stopLoss": "90.00" },
+          "closes": ["100.00", "95.00", "90.00", "88.00"],
+          "expect": { "reason": "stop_loss", "barOffset": 2 }
+        }
+      ]
+    }
+  },
+  "entryBarDivergence": {
+    "comment": "M6 characterization (see the top-level comment). fastPct/fastBars match ManasAroraSwingBacktest's own defaults (FAST_MOVE_PCT=0.35, FAST_MOVE_BARS=3), mirrored into the live exit_rules config as square_off. entryIndex is the LAST close (index 3); it is both the entry bar and the evaluation bar, matching SwingBatchEngine.exitPass's same-day-lot shape.",
+    "config": {
+      "exit_rules": [
+        { "type": "square_off", "params": { "fast_pct": 35, "fast_bars": 3 } }
+      ]
+    },
+    "fastBars": 3,
+    "closes": ["100.00", "100.00", "100.00", "140.00"],
+    "entryIndex": 3,
+    "expect": { "liveFiresOnEntryBar": true, "reason": "square_off" }
+  }
+}

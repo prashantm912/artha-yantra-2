@@ -363,8 +363,13 @@ public final class ManasAroraSwingBacktest {
     // open-at-end lots are intentionally dropped (unrealized — not a closed trade).
   }
 
-  /** The initial protective stop for a lot: {@code entry − atrMult×ATR}, never worse than stopCapPct. */
-  private double initialStop(double entry, double atr) {
+  /**
+   * The initial protective stop for a lot: {@code entry − atrMult×ATR}, never worse than
+   * stopCapPct. Package-private (M7, #128) so the swing exit-equivalence characterization
+   * fixture ({@code ManasSwingExitEquivalenceTest}) can drive this SAME production formula
+   * directly.
+   */
+  double initialStop(double entry, double atr) {
     double atrStop = Double.isNaN(atr) ? entry * (1.0 - stopCapPct) : entry - atrMult * atr;
     double cap = entry * (1.0 - stopCapPct);
     return Math.max(atrStop, cap); // the tighter (higher) of the ATR stop and the cap
@@ -406,7 +411,11 @@ public final class ManasAroraSwingBacktest {
    * too-fast move (a fastMovePct spike in ≤fastMoveBars sessions), then a parabolic extension
    * (parabolicPct above the 10-day MA). Returns the reason, or null to hold.
    */
-  private String positionExit(
+  // Package-private (M7, #128): the swing exit-equivalence characterization fixture
+  // (ManasSwingExitEquivalenceTest) drives this SAME production formula directly to
+  // characterize the M6 entry-bar divergence (the formula agrees; only WHEN it is called
+  // during simulateSetup's per-bar loop differs).
+  String positionExit(
       int i, double[] close, double[] sma10, boolean trailArmed, double trailStop) {
     if (trailArmed && close[i] <= trailStop) {
       return "TRAILING_STOP";

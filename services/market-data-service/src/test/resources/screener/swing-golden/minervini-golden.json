@@ -1,0 +1,8 @@
+{
+  "comment": "M7/M27 (#128 batch scoping) frozen-output golden for MinerviniBacktestService, PRIMARY_VARIANT=technical, portfolio (FIFO gross). Captured by MinerviniBacktestGoldenIntegrationTest.headlineStatsMatchTheFrozenGolden over a fixed, seeded 60-symbol/600-day panel (FixtureShape.variedUptrend, prefix M27MVGOLD). Re-capture ONLY on a deliberate doctrine/formula change: run the test, copy the printed M27-GOLDEN[Minervini] line's values here, and note WHY in a commit message.",
+  "totalTrades": 24,
+  "tradesTaken": 24,
+  "cagrPct": "-11.95",
+  "maxDrawdownPct": "6.50",
+  "sharpe": "-6.50"
+}

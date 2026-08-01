@@ -1,0 +1,8 @@
+{
+  "comment": "M7/M27 (#128 batch scoping) frozen-output golden for ManasAroraBacktestService, PRIMARY_VARIANT=rs-turnover-nopyramid, portfolio (FIFO gross). Captured by ManasBacktestGoldenIntegrationTest.headlineStatsMatchTheFrozenGolden over a fixed, seeded 15-symbol/500-day panel (FixtureShape.variedUptrend, prefix M27MANASGOLD). Re-capture ONLY on a deliberate doctrine/formula change: run the test, copy the printed M27-GOLDEN[Manas] line's values here, and note WHY in a commit message.",
+  "totalTrades": 5,
+  "tradesTaken": 5,
+  "cagrPct": "-94.77",
+  "maxDrawdownPct": "1.60",
+  "sharpe": "0.00"
+}

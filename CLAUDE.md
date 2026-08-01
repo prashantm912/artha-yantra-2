@@ -117,7 +117,13 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   `avgEntryPrice` breakeven fallback on a close path.
 - **Contract spec drift (springdoc):** `ContractCaptureTest` snapshots `/v3/api-docs`;
   re-capture with `-Dcontracts.capture=true`, regen TS via `npx openapi-typescript@7` →
-  `contracts/gen/*.d.ts`. Generic `Map<String,Object>` returns are NOT enumerated, so adding
+  `contracts/gen/*.d.ts`. ⚠️ **CAPTURE WITH `-Dtest=ContractCaptureTest` ONLY — NEVER during a full
+  `verify`** (found 2026-08-01): `RecordRequiredModelConverter` is STATEFUL and springdoc caches the
+  document, so a capture that rides a whole-suite run emits a spec with `required` **stripped from
+  schemas the change never touched** (~10 of them, incl. `MinerviniRow`/`Report`, in the measured
+  case). Committing that ships a `required.decreased` BREAK the author never made. CI captures the
+  narrow way, so `main` is unaffected — the hazard is purely local, and it looks like a legitimate
+  diff. Generic `Map<String,Object>` returns are NOT enumerated, so adding
   response keys does NOT drift the spec; new query params + new `@*Mapping` paths DO.
   ci-contracts warns on gen drift and requires `tsc --strict`. Its breaking gate diffs the
   **MERGE BASE**'s committed spec vs THIS branch's code spec (task_b3b59719 — it used to diff the

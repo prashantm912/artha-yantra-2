@@ -12,7 +12,7 @@
     "test": "vitest",
     "test:ci": "vitest run --coverage",
     "e2e": "playwright test",
-    "gen:api": "openapi-typescript ../contracts/strategy-signal-service.openapi.json -o ../contracts/gen/strategy-signal-service.d.ts && openapi-typescript ../contracts/market-data-service.openapi.json -o ../contracts/gen/market-data-service.d.ts && openapi-typescript ../contracts/edge-gateway.openapi.json -o ../contracts/gen/edge-gateway.d.ts && openapi-typescript ../contracts/backtest-service.openapi.json -o ../contracts/gen/backtest-service.d.ts && openapi-typescript ../contracts/optimizer-service.openapi.json -o ../contracts/gen/optimizer-service.d.ts"
+    "gen:api": "openapi-typescript ../contracts/strategy-signal-service.openapi.json -o ../contracts/gen/strategy-signal-service.d.ts && openapi-typescript ../contracts/market-data-service.openapi.json -o ../contracts/gen/market-data-service.d.ts && openapi-typescript ../contracts/edge-gateway.openapi.json -o ../contracts/gen/edge-gateway.d.ts && openapi-typescript ../contracts/backtest-service.openapi.json -o ../contracts/gen/backtest-service.d.ts && openapi-typescript ../contracts/optimizer-service.openapi.json -o ../contracts/gen/optimizer-service.d.ts && openapi-typescript ../contracts/margin-service.openapi.json -o ../contracts/gen/margin-service.d.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

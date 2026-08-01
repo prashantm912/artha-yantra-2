@@ -7,15 +7,15 @@
 // types (C-2.25) now agree on THOSE fields. #1203 did not sweep the whole service, though —
 // `Insight.priority` was a BigDecimal-as-string field it never reached (fixed below). It stays
 // key-presence-only because other divergences remain, measured 2026-08-02 by assigning each
-// generated schema into (and out of) its hand-written counterpart under `tsc --strict` and reading
-// the errors.
+// generated schema into its hand-written counterpart (WIRE→HAND only) under `tsc --strict` and
+// reading the errors.
 //
 // Caveat on the method itself: a WIRE→HAND assignment failure is a real type incompatibility, but
-// assignability is NOT exact-key equality — an optional hand-written field that the wire always
-// sends passes silently in that direction too, so this catches type mismatches, not presence
+// WIRE→HAND assignability is NOT exact-key equality — an optional hand-written field that the wire
+// always sends passes silently in that direction, so this catches type mismatches, not presence
 // mismatches. Example: `SignalDto`'s `scalperDetail`/`expiresAt`/`suggestedQty`/
 // `tradeableExchange`/`tradeableTradingsymbol`/`strategyVersionId` are optional in signals.ts but
-// always-present on the generated REST RESPONSE — invisible to this check either way, not proof
+// always-present on the generated REST RESPONSE — invisible to this (WIRE→HAND) check, not proof
 // of exact equality. That "always-present" claim is scoped to the REST response, not "the wire"
 // generally: `SignalDto` also models the live STOMP frame (signals.ts:11), and per
 // signals.ts:155-158 the STOMP frame MAY omit `scalperDetail` — so that one field's optionality on

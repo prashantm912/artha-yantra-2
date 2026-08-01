@@ -1,14 +1,20 @@
-# Minervini Cheat (3-C) — live swing long (Phase-9 MV-9.1). Enters EARLY, as the daily close breaks
-# out above the cheat-area pause high (the C of the A-B-C-D turn), a lower/earlier trigger than the
-# final VCP pivot. CHEAT_PIVOT is seeded per-symbol from Phase-5 geometry. Universe = the SEPA funnel;
-# exit doctrine = 8% stop then the 50-day-MA trail. Paper-only (auto-paper) until the reliability bar.
+# Minervini VCP Early-Pivot (3-C) — live swing long (Phase-9 MV-9.1). Enters EARLY, as the daily close
+# breaks out above the cheat-area pause high (the C of the A-B-C-D turn), a lower/earlier trigger than
+# the final VCP pivot — WITHIN a base that has already cleared the full 8-gate Trend-Template screen
+# (incl. close > 50-day MA). This is NOT the doctrine's "Low Cheat" (an entry below the 50-day MA in
+# the lower third of the base), which this funnel structurally cannot reach (audit H8, renamed
+# 2026-08-02; was "Minervini Cheat (3-C)" — see docs/signal-analysis/2026-08-01-e4-e8-decision-sheet.md
+# §2a). CHEAT_PIVOT is seeded per-symbol from Phase-5 geometry. Universe = the SEPA funnel; exit
+# doctrine = 8% stop then the 50-day-MA trail. Paper-only (auto-paper) until the reliability bar.
 schema: strategy-schema/v1
 id: minervini-cheat-3c
-name: "Minervini Cheat (3-C)"
+name: "Minervini VCP Early-Pivot (3-C)"
 version: 1.0.0
 description: >-
-  SEPA swing long: buy the earlier cheat-pause breakout on expanding volume; protect with an
-  8% stop then trail the 50-day MA. Universe = the daily SEPA funnel.
+  SEPA swing long: buy the earlier cheat-pause breakout on expanding volume, within a base that has
+  already cleared the full Trend-Template screen — an earlier trigger inside a standard VCP, NOT the
+  doctrine's below-50-day-MA "Low Cheat" (structurally unreachable here). Protect with an 8% stop
+  then trail the 50-day MA. Universe = the daily SEPA funnel.
 author: owner
 tags: [minervini, swing, equity, cheat]
 universe:

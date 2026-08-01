@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
@@ -342,18 +343,22 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
           .until(() -> engine.loadedSlugs().contains("engine-it-momentum"));
 
       // ORDER/STATE INDEPENDENCE. Every meter this method asserts on lives on the CONTEXT-WIDE
-      // MeterRegistry, so each is measured as a DELTA from here, and the one precondition those
-      // deltas depend on is asserted rather than assumed:
+      // MeterRegistry, so each is measured as a DELTA from here rather than as an absolute:
       //
-      //   * `ay_signal_eval_outcome_total{outcome=fired}` increments ONLY inside the
-      //     `activeEntry.isEmpty()` branch (SignalEngine:1469-1476). With an ACTIVE/TAKEN ENTRY
-      //     already anchoring this (version, exchange, tradingsymbol), every bar below would take
-      //     the EXIT branch instead — which still calls stampEmissionLatency, so the bar-to-emit
-      //     timer still moves and every earlier assertion still passes, but NO outcome is counted.
-      //     `fired` then reads 0 permanently and no await can rescue it; that is the one failure
-      //     mode the #1179 await is structurally unable to cover, so it is asserted, not awaited.
-      //   * an absolute `>= 1` / `== 1` also answers for emits made by anything else sharing this
-      //     registry, which is what makes the assertion order-sensitive in the first place.
+      //   * an absolute `>= 1` / `== 1` answers for emits made by anything else sharing this
+      //     registry, not only for this method's own bar. That is what makes the assertions
+      //     order-sensitive, and the delta is the whole fix for it.
+      //   * the fired counter is REACHED only on the `activeEntry.isEmpty()` branch
+      //     (SignalEngine:1469-1476), so the precondition below is asserted rather than assumed.
+      //
+      // The precondition assertion is a defensive sanity check, nothing more: a version created in
+      // this very method cannot already own an anchor, so it should always hold. It is here so that
+      // if it ever stops holding, the method says so instead of quietly measuring something other
+      // than what the assertions below claim to measure. It is deliberately NOT offered as an
+      // explanation of any observed failure — exit EMISSION on that branch is conditional
+      // (SignalEngine:1427-1468), and an EXIT that does emit expires its anchor in the same
+      // transaction (:2431-2442), which would empty `active()` and strand the await below rather
+      // than produce a green timer next to a zero counter.
       assertThat(signals.activeEntry(publishedVersionId, "NSE", "SIGTEST"))
           .as("no ENTRY may already anchor this (version, instrument) — see above")
           .isEmpty();
@@ -381,8 +386,8 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       // no per-method cleanup (CLAUDE.md IT contract) and `signals.active()` is unscoped across every
       // strategy in it (SignalRepository:165-170), while SIGTEST is the instrument of a dozen further
       // fixtures in this class. An instrument-only filter can therefore hand this method a FOREIGN
-      // row — one whose emit never touched the counters asserted below, which is exactly how the
-      // counter assertion reads 0 with everything before it green.
+      // row — one this method's own evaluation never produced — and every assertion below would
+      // then be describing someone else's signal.
       await()
           .atMost(Duration.ofSeconds(20))
           .until(
@@ -469,12 +474,11 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       // the shared-registry read (some other emit in this context already put it above 1, so an
       // absolute floor would pass without this method's bar ever being counted). Neither weakens
       // the other — a counter that never increments still fails, now after 10s instead of at once.
-      // The failure message carries the whole outcome map plus ay_signal_eval_failures_total,
-      // because a `fired` that never moves is only ever one of three things: the entry branch was
-      // never taken (some other outcome tag moved instead), the evaluation threw between the emit
-      // and the increment (SignalEngine:1394-1401 counts that as an eval failure), or the engine
-      // never evaluated this bar at all (nothing moved anywhere). Printing all three tells them
-      // apart from the surefire report alone.
+      // The failure message carries the whole outcome map plus ay_signal_eval_failures_total so the
+      // three states behind a flat `fired` are distinguishable from the surefire report alone: a
+      // DIFFERENT outcome tag moved (the bar evaluated and did not fire), evalFailures moved (the
+      // evaluation threw — SignalEngine:1394-1401), or nothing moved anywhere (the counter was never
+      // reached). The bare number said none of that.
       await()
           .atMost(Duration.ofSeconds(10))
           .untilAsserted(
@@ -501,9 +505,16 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
               .subtract(reconstructed).abs())
           .isLessThan(new BigDecimal("0.0000001"));
 
-      // the channel payload carries the SAME breakdown (divergence = FAIL criterion)
-      await().atMost(Duration.ofSeconds(10)).until(() -> !channelPayloads.isEmpty());
-      var payload = objectMapper.readTree(channelPayloads.get(0));
+      // the channel payload carries the SAME breakdown (divergence = FAIL criterion). Selected BY
+      // SIGNAL ID, never by index 0: SignalPublisher.CHANNEL is one fixed channel name
+      // (SignalPublisher:24) on the SINGLETON Redis shared by every IT Spring context in the fork
+      // (StrategySignalIntegrationTestBase:31), and cached contexts keep publishing after their own
+      // class finishes — so the first frame this listener sees need not be ours. Same order
+      // dependency the counter assertions above were just hardened against.
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .until(() -> publishedFrame(channelPayloads, row.id()).isPresent());
+      JsonNode payload = publishedFrame(channelPayloads, row.id()).orElseThrow();
       assertThat(payload.path("scoreBreakdown")).isEqualTo(row.scoreBreakdown());
       assertThat(payload.path("strategyId").asText()).isEqualTo("engine-it-momentum");
       assertThat(payload.path("version").asText()).isEqualTo("1.0.0");
@@ -1530,6 +1541,26 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
     } finally {
       risk.update(Books.OTHER, "kill_switch", "{\"enabled\":false}");
     }
+  }
+
+  /**
+   * The {@code signals}-channel frame for ONE signal id. The channel is fork-wide (one fixed name on
+   * the singleton Redis), so a collected frame may belong to another context entirely — match on the
+   * {@code id} SignalPublisher stamps (SignalPublisher:69) instead of taking whichever arrived first.
+   */
+  private Optional<JsonNode> publishedFrame(List<String> frames, long signalId) {
+    for (String frame : frames) {
+      JsonNode node;
+      try {
+        node = objectMapper.readTree(frame);
+      } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        throw new IllegalStateException("unparseable signals frame: " + frame, e);
+      }
+      if (node.path("id").asLong() == signalId) {
+        return Optional.of(node);
+      }
+    }
+    return Optional.empty();
   }
 
   private double outcomeSum() {

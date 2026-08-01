@@ -77,16 +77,35 @@
 #   COVERAGE ASYMMETRY - stated because a future session will trust this header. For the four Java
 #   services the branch side is the FRESHLY CAPTURED services/<svc>/target/contracts/*.json, so a
 #   rename is caught even if the author forgot to re-capture the committed spec. The two NON_JAVA
-#   services (optimizer-service, margin-service) have no such artifact (both Python - see the
-#   loop-1 comment in the breaking-gate step, which margin-service now shares), so their branch
-#   side is each one's own COMMITTED contracts/<svc>.openapi.json. That is still merge base vs
-#   branch - two different commits, never branch-vs-itself - but it only sees a rename once the
-#   author re-dumps, and nothing else looks at either service's component PROPERTIES either:
-#   optimizer_spec_staleness.py and margin_spec_staleness.py both project OPERATIONS only
-#   (method+path, parameter names, requestBody presence, response-code set), never a component's
-#   internals - so a response-field rename inside either service (e.g. margin-service's
-#   SizeResponse.target) is caught by NO gate at all, permanently, not merely delayed until a
-#   re-dump.
+#   services (optimizer-service, margin-service) have no such artifact (both Python), so their
+#   branch side is each one's own COMMITTED contracts/<svc>.openapi.json - same merge base vs
+#   branch shape, two different commits, never branch-vs-itself, but it only sees a rename once
+#   the author re-dumps. ⚠️ The SEPARATE optimizer_spec_staleness.py / margin_spec_staleness.py
+#   gates do NOT keep that dump honest at the property level - they diff two COMMITTED artifacts
+#   against each other (api-surface.json vs openapi.json), never against the live app, and their
+#   OWN live-app comparison (test_openapi_contract.py's route/param/response-code surface) also
+#   projects OPERATIONS only. A rename inside a component (e.g. margin-service's SizeResponse.target)
+#   changes neither, so nothing forced a re-dump - measured: reproduced both services' red-proof
+#   renames in CODE ONLY (committed spec untouched) and confirmed every existing gate stayed green.
+#   Closed by `test_component_property_names_match_committed_spec` in each service's
+#   test_openapi_contract.py: LIVE app vs the COMMITTED full spec, projected to property NAMES per
+#   component (version-stable across Python/fastapi/pydantic, unlike the full serialized schema -
+#   see that file's module docstring) - it fails LOUD the moment code and committed spec disagree,
+#   which is what makes relying on the committed spec as this branch's "code state" sound.
+#   BOTH non-Java services NOW RIDE THE SAME BREAKING LOOP AS THE FOUR JAVA SERVICES (previously
+#   they did not - the loop iterated AY_CONTRACT_SERVICES_JAVA only, and openapi_relabel_30.py
+#   separately refused both specs outright, so a response-field rename inside either service was
+#   caught by NO gate at all, permanently, not merely delayed until a re-dump). Fixed by THREE
+#   independent changes: the loop below now iterates AY_CONTRACT_SERVICES_ALL (branching on
+#   AY_CONTRACT_SERVICES_NON_JAVA only to pick the branch-side artifact path, exactly as the
+#   removed-component-name gate already did); openapi_relabel_30.py gained
+#   downgrade_nullable_primitive_anyof - pydantic spells `Optional[X]` as `anyOf: [<schema>,
+#   {"type":"null"}]`, bare or with a `title` sibling, which neither existing converter matched
+#   (one wants a bare node, the other wants a `$ref` branch) - the four Java specs relabel
+#   BYTE-IDENTICAL to before (none of them uses this shape - verified, not assumed; see
+#   .github/scripts/test_openapi_relabel_30.py for the fixture-pinned shapes); and the new
+#   property-name staleness test above, without which the first two changes would compare two
+#   identical stale documents whenever an author forgot to re-dump.
 #   STILL NOT CAUGHT by either gate: a component RETYPE or field-level change that openapi-diff
 #   judges compatible, plus everything already listed above.
 #
@@ -349,6 +368,19 @@ jobs:
           fi
           echo "every Java contract service captured a spec."
 
+      - name: openapi_relabel_30.py unit tests (fixture-pinned shapes)
+        # Runs on EVERY contract-relevant PR, not just ones touching the relabel script:
+        # this is the regression guard for the invariant the breaking gate below depends on
+        # (the four Java specs must relabel byte-identical to before) and for the two
+        # non-Java specs actually relabeling now - a future edit to the converter that
+        # silently regresses either must fail loudly here, not surface as an unexplained
+        # breaking-gate refusal three steps down.
+        if: needs.changes.outputs.contracts == 'true'
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --break-system-packages openapi-spec-validator pytest
+          python3 -m pytest .github/scripts/test_openapi_relabel_30.py -q
+
       - name: Breaking-change gate (merge base vs this branch's code)
         # Skipped on push:main - the PR already merged; there is nothing left to gate.
         if: needs.changes.outputs.contracts == 'true' && github.event_name == 'pull_request'
@@ -377,45 +409,41 @@ jobs:
 
           mkdir -p /tmp/basespec /tmp/freshspec
           broke=""
-          # task_e2d15c21 - optimizer-service is DELIBERATELY ABSENT from this loop, and from the
-          # staleness loop below, for two independent reasons. MEASURED, not assumed:
-          #   1. It is Python, so there is no services/<svc>/target/contracts/*.json to read - the
-          #      spec only exists after `pip install` + a capture run. (Steps A/B further down DO
-          #      pay that cost, but only when the narrow `optimizer` classification fires. This
-          #      loop has no such gate: it runs on every contract-relevant PR, most of them
-          #      pure-Java, and would have to build the optimizer's environment for all of them.)
-          #   2. Far more decisive: openapi_relabel_30.py REFUSES the FastAPI document (exit 2).
-          #      pydantic spells an optional field `anyOf: [{...}, {"type": "null"}]` - 134
-          #      occurrences in the committed spec, 132 of them carrying a `title` sibling. Note
-          #      what is and is not the problem: 3.0 CAN express nullability (`type: X,
-          #      nullable: true`), and springdoc's 3.1 type-array spelling already converts. What
-          #      fails is that the relabel's anyOf converter matches only a BARE
-          #      `{anyOf: [{$ref}, {type: null}]}` - pydantic's form has a `title` sibling and
-          #      wraps a PRIMITIVE, not a $ref - so nothing converts it and the 3.0 validator
-          #      correctly rejects the leftover `type: "null"`. Since exit 2 is a TOOL failure and
-          #      this step is `set -e`, adding the name today would turn the required `contracts`
-          #      check RED on every PR.
-          #      TEACHING the converter that form is tractable and is the real fix, but it edits
-          #      the invariant guarding all four Java specs, so it is a separate change with its
-          #      own fixtures: primitive anyOf, $ref anyOf, a GENUINE union (must still refuse),
-          #      3.0 validation of the result, and byte-unchanged output for all four Java specs.
-          # What optimizer-service DOES get: the TS-client loop below (which reads the COMMITTED
-          # spec, so it transfers unchanged) plus the semantic staleness gate. docs/design/
-          # ARTHAYANTRA_2_STAGE_D_BACKTEST_OPTIMIZER.md states exactly that and no more. The
-          # residual gap is real and named there: no merge-base comparison of the DOCUMENT guards
-          # this service - EXCEPT its component NAMES, which the removed-component-name gate below
-          # does compare against the merge base (committed dump on both sides, since there is no
-          # capture artifact; see this file's header for that asymmetry). Everything else about
-          # this service's spec - operations, properties, types - is still unguarded across the
-          # merge base.
+          # task_e2d15c21 (ORIGINAL) / NON-JAVA BREAKING-GATE FIX (this change) - optimizer-service
+          # WAS deliberately absent from this loop, and margin-service joined it in the same
+          # exclusion (task_ms-spec): both are Python, so neither has a
+          # services/<svc>/target/contracts/*.json capture artifact, and openapi_relabel_30.py
+          # REFUSED both documents outright (exit 2) - pydantic spells an optional field `anyOf:
+          # [{...}, {"type": "null"}]`, bare or with a `title` sibling, which neither existing
+          # converter matched (one wants a bare node, the other wants a `$ref` branch, see
+          # openapi_relabel_30.py's module docstring). Since exit 2 is a TOOL failure under this
+          # step's `set -e`, adding either name to this loop while that held would have turned the
+          # required `contracts` check RED on every PR - so BOTH services rode the semantic
+          # staleness gate only (optimizer_spec_staleness.py / margin_spec_staleness.py, OPERATIONS
+          # only - method+path, parameter names, requestBody presence, response-code set, never a
+          # component's internals), meaning a response-field rename inside either service (e.g.
+          # margin-service's SizeResponse.target) was caught by NO gate at all, permanently.
           #
-          # The name is no longer typed out here. _JAVA is the inventory's derived list; the
-          # exclusion is now a DECLARATION in contract_service_inventory.sh, and a future
-          # non-Maven contract service cannot join optimizer-service in this carve-out without
-          # someone editing that declaration - which is the point. margin-service later did
-          # exactly that, via the SAME NON_JAVA_SERVICES declaration.
-          : "${AY_CONTRACT_SERVICES_JAVA:?the inventory step did not run - refusing to report the breaking gate green over an empty service list.}"
-          for svc in $AY_CONTRACT_SERVICES_JAVA; do
+          # The name is no longer typed out here. _JAVA WAS the inventory's derived list for this
+          # loop; margin-service later joined optimizer-service in the SAME NON_JAVA_SERVICES
+          # declaration, via the SAME excluded-for-two-independent-reasons shape.
+          #
+          # FIXED: openapi_relabel_30.py gained downgrade_nullable_primitive_anyof (handles the
+          # non-$ref shape) and downgrade_nullable_ref_anyof now tolerates a `title` sibling (the
+          # requestBody-wrapper shape) - both confirmed to relabel the four Java specs
+          # BYTE-IDENTICAL to before (none of them uses either shape; see
+          # .github/scripts/test_openapi_relabel_30.py) and to make optimizer-service's and
+          # margin-service's specs relabel cleanly for the first time. So this loop now iterates
+          # AY_CONTRACT_SERVICES_ALL - both Java AND non-Java - branching only on
+          # AY_CONTRACT_SERVICES_NON_JAVA to pick the branch-side artifact path, exactly as the
+          # removed-component-name gate below already does: a Java service's branch side is its
+          # FRESH capture (a forgotten re-capture cannot hide a rename), a non-Java service's is
+          # its own COMMITTED contracts/<svc>.openapi.json (there is no capture artifact - a rename
+          # is caught once the author re-dumps, which the staleness gates keep honest against code
+          # between re-dumps). Component RETYPEs openapi-diff judges compatible, and everything
+          # else already listed in this file's header, are still not caught.
+          : "${AY_CONTRACT_SERVICES_ALL:?the inventory step did not run - refusing to report the breaking gate green over an empty service list.}"
+          for svc in $AY_CONTRACT_SERVICES_ALL; do
             echo "=== $svc ==="
             # A spec absent from the merge base = a NEW service. Nothing on main consumes it
             # yet, so there is no compatibility question to answer.
@@ -432,6 +460,14 @@ jobs:
               continue
             fi
             git show "$BASE_SHA:$base_path" > "/tmp/basespec/raw-$svc.json"
+            # Branch-side artifact: fresh Maven capture for Java, the branch's own COMMITTED spec
+            # for non-Java (no capture artifact exists - see this file's header COVERAGE
+            # ASYMMETRY note). Keyed off the inventory's derived non-Java set, same as the
+            # removed-component-name gate's `fresh` selection below - the two must not diverge.
+            case " ${AY_CONTRACT_SERVICES_NON_JAVA-} " in
+              *" $svc "*) fresh_path="contracts/$svc.openapi.json" ;;
+              *)          fresh_path="services/$svc/target/contracts/$svc.openapi.json" ;;
+            esac
             # task_ade97df8 - RELABEL BOTH SIDES TO 3.0.1 FOR THE DIFF STEP ONLY. openapi-diff
             # 2.1.7 does not diff 3.1 schemas: at 3.1.0 a RENAMED response property reports "No
             # differences. Specifications are equivalent". The same bytes at 3.0.1 report
@@ -441,7 +477,7 @@ jobs:
             python3 .github/scripts/openapi_relabel_30.py \
               "/tmp/basespec/raw-$svc.json" "/tmp/basespec/$svc.openapi.json" 3.0.1
             python3 .github/scripts/openapi_relabel_30.py \
-              "services/$svc/target/contracts/$svc.openapi.json" "/tmp/freshspec/$svc.openapi.json" 3.0.1
+              "$fresh_path" "/tmp/freshspec/$svc.openapi.json" 3.0.1
             # No pipe, no `||`: the exit code must survive. `set +e`/`set -e` around the call so we
             # can read the STATUS rather than only "nonzero", which `if !` would flatten.
             set +e
@@ -710,19 +746,21 @@ jobs:
         # on every contract-relevant PR, unlike step A. The dump had rotted to 7 paths while the
         # service served 36; nothing looked, for as long as it existed.
         # HARD, unlike the warn above, for two reasons in the script's docstring: it is fully
-        # deterministic (two committed files, no toolchain), and the breaking gate refuses this
-        # service, so it is the only structural check the dump gets.
+        # deterministic (two committed files, no toolchain), and it is the only gate that reads
+        # this branch's actual RUNTIME app (step A). The breaking gate below now ALSO covers this
+        # service's committed spec (route + component level), but only once the committed dump is
+        # itself honest against code - which is exactly what this pair of steps keeps true.
         run: python3 .github/scripts/optimizer_spec_staleness.py
 
       # ---- margin-service, both halves of the SAME chain (task_ms-spec) --------------------
       # margin-service joined the inventory alongside optimizer-service, riding the identical
       # two-step shape for the identical reason: it is Python, so it has no Maven capture
-      # artifact and openapi_relabel_30.py refuses its spec too (measured: exit 2 on
-      # contracts/margin-service.openapi.json - see contract_service_inventory.sh's
-      # NON_JAVA_SERVICES comment for the exact refused shapes, titled and bare). Both halves
-      # independently required for the same reason as optimizer's: delegating step A to
-      # ci-margin alone would not be sufficient, since that workflow is `paths:`-filtered and
-      # not a required context.
+      # artifact (openapi_relabel_30.py USED to also refuse its spec outright - exit 2, same
+      # anyOf-nullable-with-title shape as optimizer's - but that is now fixed, see
+      # contract_service_inventory.sh's NON_JAVA_SERVICES comment; margin-service's spec rides
+      # the breaking gate below same as any other service). Both halves independently required
+      # for the same reason as optimizer's: delegating step A to ci-margin alone would not be
+      # sufficient, since that workflow is `paths:`-filtered and not a required context.
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         if: needs.changes.outputs.contracts == 'true' && needs.changes.outputs.margin == 'true'
         with:
@@ -748,8 +786,10 @@ jobs:
         # false-fail on pydantic serialization churn - which is why it can run unconditionally, on
         # every contract-relevant PR, unlike step A. HARD, unlike the warn above, for the same two
         # reasons as optimizer's sibling step: it is fully deterministic (two committed files, no
-        # toolchain), and the breaking gate refuses this service, so it is the only structural
-        # check the dump gets.
+        # toolchain), and it is the only gate that reads this branch's actual RUNTIME app (step
+        # A). The breaking gate below now ALSO covers this service's committed spec (route +
+        # component level), but only once the committed dump is itself honest against code - which
+        # is exactly what this pair of steps keeps true.
         run: python3 .github/scripts/margin_spec_staleness.py
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0

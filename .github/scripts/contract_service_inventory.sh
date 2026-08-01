@@ -35,9 +35,13 @@
 #   - new JAVA service + committed spec  -> picked up by every gate automatically.
 #   - new NON-JAVA service + spec        -> this script FAILS until someone adds it to
 #                                           NON_JAVA_SERVICES below, which is also the
-#                                           act of accepting that it skips the breaking
-#                                           gate and the warn step. Deliberate, reviewed,
-#                                           never silent.
+#                                           act of accepting that it skips the warn
+#                                           step (no Maven capture artifact to drift
+#                                           against) and that its breaking-gate branch
+#                                           side is its own committed spec rather than a
+#                                           fresh capture (see NON_JAVA_SERVICES below -
+#                                           the breaking gate itself is NOT skipped).
+#                                           Deliberate, reviewed, never silent.
 #   - new service with NO spec at all    -> this script FAILS until someone either
 #                                           commits a spec or adds it to EXEMPT_SERVICES
 #                                           with a reason.
@@ -58,32 +62,41 @@ cd "$REPO"
 
 # Services WITH a committed spec but WITHOUT a Maven module. Consequence of being here,
 # stated so nobody adds a name without accepting it: this service is excluded from the
-# breaking gate and from the warn-vs-code step, and its removed-component-name check
-# reads the COMMITTED spec instead of a freshly captured artifact.
-#   optimizer-service - Python/FastAPI. Excluded from the breaking gate for a second,
-#     independent and measured reason as well (openapi_relabel_30.py refuses the pydantic
-#     `anyOf: [{...}, {"type":"null"}]` form, 134 occurrences); see the long loop-1 comment
-#     in ci-contracts.yml's breaking-gate step. It gets the semantic staleness gate instead.
+# warn-vs-code step (there is no Maven-captured artifact to compare its committed spec
+# against for drift), and its removed-component-name check AND the breaking gate both read
+# its own COMMITTED spec as the branch side instead of a freshly captured artifact.
+#
+# HISTORY, kept because it explains why this declaration exists at all: both services were
+# ALSO excluded from the breaking gate LOOP ITSELF until this fix (that loop iterated
+# AY_CONTRACT_SERVICES_JAVA only, categorically, regardless of spec content), and
+# openapi_relabel_30.py separately REFUSED both documents outright (exit 2) - a SECOND,
+# independent cause, since fixing only the loop membership would have turned the required
+# `contracts` check red on every PR the moment either service joined it. Neither fix alone
+# closed the hole: a response-field rename (e.g. margin-service's SizeResponse.target ->
+# targetPrice) changed neither service's route surface nor any component KEY, so it was
+# caught by NO gate at all, permanently - not a first-PR artifact a later PR would close.
+#   optimizer-service - Python/FastAPI. 134 nullable anyOf nodes measured in its committed
+#     spec: 96 titled primitive (`{type: X}` vs `{type: "null"}`), 33 titled
+#     object+additionalProperties, 2 bare $ref, 2 titled $ref, 1 titled empty-schema
+#     (`Optional[Any]`). It gets the semantic staleness gate ADDITIONALLY (not instead -
+#     see below), same as margin-service.
 #   margin-service - Python/FastAPI SPAN appliance, gated into ci-contracts alongside
-#     optimizer-service (previously EXEMPT_SERVICES - see below). THIS declaration (NON_JAVA_
-#     SERVICES membership) is what excludes it from the breaking gate: that loop iterates
-#     AY_CONTRACT_SERVICES_JAVA only, categorically, regardless of spec content.
-#     openapi_relabel_30.py refusing its spec is a SEPARATE, independent reason it could not
-#     ride that gate even if it were added to the loop: 6 of its pydantic `Optional` fields
-#     (LegIn/PositionIn.expiry+strike, SizeResponse.limitingRail, SizeRequest.stop) carry a
-#     primitive `anyOf: [{type: X}, {type: "null"}, ...]` WITH a `title` sibling, and its
-#     plain-dict /health response carries the SAME primitive nullable-anyOf shape but BARE -
-#     no `title` on the anyOf node itself (the title sits on the parent object schema wrapping
-#     it). Measured: openapi_relabel_30.py exits 2 on contracts/margin-service.openapi.json,
-#     first at paths./health.get.responses.200. Closing this for real needs BOTH a converter
-#     fix (today's converters handle only a bare $ref+null anyOf or a type-ARRAY nullable,
-#     never a primitive anyOf, titled or not) AND including non-Java specs in the breaking
-#     loop - a separate, higher-risk redesign. margin-service gets the semantic staleness gate
-#     instead (margin_spec_staleness.py mirrors optimizer_spec_staleness.py) - which, like its
-#     sibling, projects route surface only (method/path/params/requestBody/response-codes),
-#     never component properties or types: a response-field rename (e.g. SizeResponse.target
-#     -> targetPrice) changes neither the surface nor any component KEY, so it is caught by NO
-#     current gate, permanently - not a first-PR artifact that a later PR closes.
+#     optimizer-service (previously EXEMPT_SERVICES - see below). 7 nullable anyOf nodes
+#     measured: 6 titled primitive (LegIn/PositionIn.expiry+strike, SizeResponse.limitingRail,
+#     SizeRequest.stop - the last a 3-branch genuine union alongside nullability, not a bare
+#     pair) and 1 bare on `/health`'s plain-dict response (the title sits on the PARENT object
+#     schema, not the anyOf node itself).
+# FIXED: openapi_relabel_30.py gained downgrade_nullable_primitive_anyof (handles a non-$ref
+# branch, titled or not, including the >1-remaining-branch genuine-union case) and
+# downgrade_nullable_ref_anyof now tolerates a `title` sibling (optimizer's requestBody-wrapper
+# shape) - both confirmed to relabel the four Java specs BYTE-IDENTICAL to before (none of them
+# uses either shape) via .github/scripts/test_openapi_relabel_30.py's fixtures. ci-contracts.yml's
+# breaking-gate loop now iterates AY_CONTRACT_SERVICES_ALL, branching on this declaration only to
+# pick the branch-side artifact (committed spec here, fresh capture for Java) - see its
+# breaking-gate step comment. Both services KEEP the semantic staleness gate too
+# (margin_spec_staleness.py / optimizer_spec_staleness.py project route surface only - method,
+# path, params, requestBody presence, response-code set - never component internals, so it is
+# not redundant with the breaking gate's component-level comparison).
 NON_JAVA_SERVICES="optimizer-service margin-service"
 
 # Directories under services/ that are NOT contract services at all - no committed
@@ -119,7 +132,7 @@ for svc in $ALL; do
     JAVA="${JAVA:+$JAVA }$svc"
   else
     if ! has "$svc" "$NON_JAVA_SERVICES"; then
-      die "$svc publishes contracts/$svc.openapi.json but has no services/$svc/pom.xml, and is not declared in NON_JAVA_SERVICES. A non-Maven service produces no target/contracts artifact, so it cannot ride the breaking gate or the warn step - and silently omitting it is exactly the hole this script exists to close. Add it to NON_JAVA_SERVICES in $0 WITH the reason, which is also the act of accepting that reduced coverage."
+      die "$svc publishes contracts/$svc.openapi.json but has no services/$svc/pom.xml, and is not declared in NON_JAVA_SERVICES. A non-Maven service produces no target/contracts artifact, so it cannot ride the warn-vs-code drift step and must use its own committed spec as the breaking gate's branch side instead of a fresh capture - and silently omitting it is exactly the hole this script exists to close. Add it to NON_JAVA_SERVICES in $0 WITH the reason, which is also the act of accepting that reduced coverage."
     fi
     NON_JAVA="${NON_JAVA:+$NON_JAVA }$svc"
   fi
@@ -155,13 +168,13 @@ done
   printf '%-26s %-8s %-9s %-13s %-15s %s\n' service capture breaking removed-name warn-recapture tsc-strict
   for svc in $ALL; do
     if has "$svc" "$NON_JAVA"; then
-      printf '%-26s %-8s %-9s %-13s %-15s %s\n' "$svc" -- -- yes -- yes
+      printf '%-26s %-8s %-9s %-13s %-15s %s\n' "$svc" -- yes yes -- yes
     else
       printf '%-26s %-8s %-9s %-13s %-15s %s\n' "$svc" yes yes yes yes yes
     fi
   done
   printf '\n'
-  printf 'non-Java (no Maven capture artifact; skips the breaking gate + the warn step): %s\n' "${NON_JAVA:-<none>}"
+  printf 'non-Java (no Maven capture artifact; rides the breaking + removed-name gates off its own committed spec; skips only the warn-recapture step): %s\n' "${NON_JAVA:-<none>}"
   printf 'services/ dirs with no committed spec, in NO gate by declaration: %s\n' "${EXEMPT_SERVICES:-<none>}"
   printf '\n'
 } >&2

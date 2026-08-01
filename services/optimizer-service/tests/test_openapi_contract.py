@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 
+import fastapi
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -25,6 +26,39 @@ CONTRACT = CONTRACTS / "optimizer-service.api-surface.json"
 # exists — but it IS refreshed by the same CONTRACTS_CAPTURE run, so re-capturing can no longer
 # update one artifact and silently leave the other stale.
 FULL_SPEC = CONTRACTS / "optimizer-service.openapi.json"
+LOCKFILE = Path(__file__).resolve().parents[1] / "requirements-dev.lock"
+
+
+def _pinned_fastapi_version() -> str:
+    """The exact fastapi version requirements-dev.lock hash-pins for CI, parsed directly from the
+    lockfile - never hand-copied here, so this check can never itself drift from the pin it
+    verifies. Mirrors margin-service's identical guard (task_ms-spec's sibling chain)."""
+    for line in LOCKFILE.read_text(encoding="utf-8").splitlines():
+        if line.startswith("fastapi=="):
+            return line[len("fastapi==") :].split()[0].rstrip("\\")
+    raise AssertionError(f"no fastapi== pin found in {LOCKFILE}")
+
+
+def test_running_under_the_pinned_fastapi_version():
+    """Runs FIRST (file order) because `test_component_property_names_match_committed_spec` below
+    depends on it: LIVE and COMMITTED are only comparable at the property level if both were
+    generated under the SAME fastapi version, or fastapi's OWN generated schemas (this service does
+    not use the stock HTTPValidationError/ValidationError shape today - see
+    test_every_documented_422_is_the_shared_error_envelope below - but a future dependency could
+    reintroduce one) can disagree between environments for reasons that have nothing to do with
+    application code. margin-service hit exactly this (fastapi 0.115.6 CI-pinned vs 0.136.3 local
+    ambient); mirrored here defensively rather than assuming this service is permanently immune."""
+    assert fastapi.__version__ == _pinned_fastapi_version(), (
+        f"running fastapi {fastapi.__version__}, but requirements-dev.lock pins "
+        f"{_pinned_fastapi_version()} (the version CI installs). "
+        "test_component_property_names_match_committed_spec below - and any CONTRACTS_CAPTURE=1 "
+        "re-dump - are only trustworthy under the PINNED version. Run tests and re-capture "
+        "through a venv built from the lockfile, never the ambient interpreter:\n"
+        "  uv venv --python 3.12 .venv-pinned\n"
+        "  uv pip install --python .venv-pinned --require-hashes -r requirements-dev.lock\n"
+        "  CONTRACTS_CAPTURE=1 .venv-pinned/Scripts/python.exe -m pytest "
+        "tests/test_openapi_contract.py"
+    )
 
 
 def _surface() -> str:
@@ -58,6 +92,39 @@ def test_openapi_surface_matches_committed_contract():
         "optimizer-service API surface (method/path, params, response codes) drifted from the "
         "committed contract. If intended, re-capture with:  CONTRACTS_CAPTURE=1 python -m pytest "
         "tests/test_openapi_contract.py  and commit contracts/optimizer-service.api-surface.json"
+    )
+
+
+def _component_property_keys(spec: dict) -> dict:
+    """Property-NAME projection per schema component - deliberately narrower than a raw-spec pin
+    (see the module docstring on why that churns across Python/fastapi/pydantic versions), but a
+    property's NAME is stable across all of them; only the JSON-Schema keyword spelling of its
+    TYPE varies (e.g. anyOf branch shape/ordering/title casing). This catches precisely the class
+    of break the route surface above and ci-contracts' removed-component-name gate cannot: a
+    response-field RENAME that changes no route and no component KEY (e.g. ExpireResult.expired ->
+    expiredCount) - measured to pass every other optimizer-service gate silently before this test
+    existed."""
+    schemas = spec.get("components", {}).get("schemas", {})
+    return {name: sorted(schema.get("properties", {}).keys()) for name, schema in schemas.items()}
+
+
+def test_component_property_names_match_committed_spec():
+    """LIVE app vs the COMMITTED contracts/optimizer-service.openapi.json - the artifact
+    ci-contracts.yml's breaking gate uses as this service's branch-side comparison input (it has no
+    Maven-style fresh-capture artifact of its own). If code renames a field and this test is not
+    re-run with CONTRACTS_CAPTURE=1, the committed spec goes stale and the breaking gate would
+    silently compare two identical (stale) documents across the merge base - this test is what
+    forces the re-capture BEFORE that can happen. Only trustworthy under the pinned fastapi
+    version - see test_running_under_the_pinned_fastapi_version above, which runs first."""
+    assert FULL_SPEC.exists(), f"missing committed spec: {FULL_SPEC}"
+    committed = json.loads(FULL_SPEC.read_text(encoding="utf-8"))
+    assert _component_property_keys(app.openapi()) == _component_property_keys(committed), (
+        "optimizer-service's LIVE component property names differ from the committed "
+        f"{FULL_SPEC.name} - a field was added, removed, or renamed in code without "
+        "re-capturing the spec. Re-capture with:  CONTRACTS_CAPTURE=1 python -m pytest "
+        "tests/test_openapi_contract.py  and commit the result. If this fails with NO code "
+        "change, first check test_running_under_the_pinned_fastapi_version - a version mismatch "
+        "is the far more likely cause."
     )
 
 

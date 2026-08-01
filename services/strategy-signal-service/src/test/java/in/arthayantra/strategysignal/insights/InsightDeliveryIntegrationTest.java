@@ -228,9 +228,39 @@ class InsightDeliveryIntegrationTest extends StrategySignalIntegrationTestBase {
     engine.runTrustSweep(); // WARN→CRITICAL refresh inside the cooldown → push 2
 
     verify(events, times(2)).publishEvent(any(InsightDeliveryAlert.class));
-    Insight open = repository.findOpen(key).orElseThrow();
+    Insight open = repository.findLatest(key).orElseThrow();
     assertThat(open.severity()).isEqualTo("CRITICAL");
     assertThat(open.suppressed()).isFalse();
+  }
+
+  @Test
+  void ackedWarnEscalatingToCriticalInsideTheCooldownDelivers() {
+    // Pre-arm review round 3 (the mandated case): ACK removes the OPEN row, so the escalation
+    // compare must read the latest occurrence of ANY status — with an OPEN-only compare the owner
+    // ACKs a WARN, the condition worsens to CRITICAL minutes later inside the cooldown, and
+    // NOTHING pages (the fresh insert lands cooldown-suppressed). The mirror — an ACKed WARN
+    // re-occurring at the SAME severity stays silent — is pinned by
+    // ackInsideTheCooldownWindowDoesNotRedeliverOnTheNextSweep above.
+    String key = "I4_ACK_ESCALATE:" + UUID.randomUUID();
+    InsightGenerator generator = mock(InsightGenerator.class);
+    when(generator.type()).thenReturn(InsightType.DATA_TRUST);
+    when(generator.generate(any()))
+        .thenReturn(
+            List.of(candidate(key, Severity.WARN, 45)), List.of(candidate(key, Severity.CRITICAL, 45)));
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    InsightEngine engine = engineDeliveringTo(generator, events);
+
+    engine.runTrustSweep(); // WARN insert → push 1, cooldown armed
+    UUID openId =
+        jdbc.queryForObject("SELECT id FROM insights WHERE dedupe_key = ?", UUID.class, key);
+    repository.updateStatus(openId, "ACKED"); // the owner acknowledges the WARN
+    engine.runTrustSweep(); // CRITICAL re-occurrence inside the cooldown → must page
+
+    verify(events, times(2)).publishEvent(any(InsightDeliveryAlert.class));
+    Insight latest = repository.findLatest(key).orElseThrow();
+    assertThat(latest.severity()).isEqualTo("CRITICAL");
+    assertThat(latest.suppressed()).isFalse();
+    assertThat(latest.status()).isEqualTo("OPEN");
   }
 
   @Test

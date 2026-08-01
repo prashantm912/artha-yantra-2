@@ -130,12 +130,19 @@ public class InsightRepository {
   }
 
   /**
-   * The OPEN row a regeneration of this dedupe key would refresh, if one exists (the engine's
-   * delivery decision reads the PRIOR severity + cooldown stamp before the upsert overwrites them).
+   * The most recent occurrence of this dedupe key REGARDLESS of status (the engine's delivery
+   * decision reads the PRIOR severity + cooldown stamp before the upsert overwrites/replaces it).
+   * Status-blind on purpose (pre-arm review round 3, mirroring {@link #isCooling}): ACK/DISMISS
+   * removes the OPEN row, and an escalation arriving inside the cooldown must still be judged
+   * against the ACKed occurrence — an OPEN-only compare would cooldown-suppress a WARN→CRITICAL
+   * worsening right after the owner acknowledged the WARN, and nothing would page.
    */
-  public Optional<Insight> findOpen(String dedupeKey) {
+  public Optional<Insight> findLatest(String dedupeKey) {
     return jdbc
-        .query("SELECT * FROM insights WHERE dedupe_key = ? AND status = 'OPEN'", this::map, dedupeKey)
+        .query(
+            "SELECT * FROM insights WHERE dedupe_key = ? ORDER BY generated_at DESC, id DESC LIMIT 1",
+            this::map,
+            dedupeKey)
         .stream()
         .findFirst();
   }

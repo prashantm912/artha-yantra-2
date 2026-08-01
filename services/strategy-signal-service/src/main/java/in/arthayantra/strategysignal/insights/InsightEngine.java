@@ -197,13 +197,19 @@ public class InsightEngine {
   private void persist(InsightCandidate c, OffsetDateTime now) {
     try {
       OffsetDateTime cooldownUntil = c.cooldownMinutes() == null ? null : now.plusMinutes(c.cooldownMinutes());
-      // The delivery decision needs the refresh target BEFORE the upsert overwrites it: severity
-      // escalation and cooldown-cycle expiry are judged against the prior OPEN occurrence.
-      Insight prior = repository.findOpen(c.dedupeKey()).orElse(null);
+      // The delivery decision needs the prior occurrence BEFORE the upsert overwrites/replaces it.
+      // Severity escalation is judged against the LATEST row of ANY status (round 3): ACK/DISMISS
+      // removes the OPEN row, and a worsening condition must page even against an ACKed prior.
+      // Cooldown-cycle expiry only matters for an OPEN prior — a non-OPEN latest means the upsert
+      // INSERTS, and the insert branch below already delivers (suppression permitting).
+      Insight prior = repository.findLatest(c.dedupeKey()).orElse(null);
       boolean escalated =
           prior != null && c.severity().compareTo(Severity.valueOf(prior.severity())) > 0;
       boolean cooldownExpired =
-          prior != null && prior.cooldownUntil() != null && !prior.cooldownUntil().isAfter(now);
+          prior != null
+              && Insight.Status.OPEN.name().equals(prior.status())
+              && prior.cooldownUntil() != null
+              && !prior.cooldownUntil().isAfter(now);
       // An escalating refresh is never cooldown-suppressed: a condition getting WORSE must page
       // even inside the pacing window (pre-arm review round 2 — WARN→CRITICAL / floor crossing).
       boolean suppressed = c.suppressed() || (repository.isCooling(c.dedupeKey(), now) && !escalated);

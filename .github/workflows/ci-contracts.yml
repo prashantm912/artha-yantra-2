@@ -412,7 +412,8 @@ jobs:
           # The name is no longer typed out here. _JAVA is the inventory's derived list; the
           # exclusion is now a DECLARATION in contract_service_inventory.sh, and a future
           # non-Maven contract service cannot join optimizer-service in this carve-out without
-          # someone editing that declaration - which is the point. Membership is unchanged.
+          # someone editing that declaration - which is the point. margin-service later did
+          # exactly that, via the SAME NON_JAVA_SERVICES declaration.
           : "${AY_CONTRACT_SERVICES_JAVA:?the inventory step did not run - refusing to report the breaking gate green over an empty service list.}"
           for svc in $AY_CONTRACT_SERVICES_JAVA; do
             echo "=== $svc ==="
@@ -717,10 +718,11 @@ jobs:
       # margin-service joined the inventory alongside optimizer-service, riding the identical
       # two-step shape for the identical reason: it is Python, so it has no Maven capture
       # artifact and openapi_relabel_30.py refuses its spec too (measured: exit 2 on
-      # contracts/margin-service.openapi.json, same anyOf-nullable-with-title shape - see
-      # contract_service_inventory.sh's NON_JAVA_SERVICES comment). Both halves independently
-      # required for the same reason as optimizer's: delegating step A to ci-margin alone would
-      # not be sufficient, since that workflow is `paths:`-filtered and not a required context.
+      # contracts/margin-service.openapi.json - see contract_service_inventory.sh's
+      # NON_JAVA_SERVICES comment for the exact refused shapes, titled and bare). Both halves
+      # independently required for the same reason as optimizer's: delegating step A to
+      # ci-margin alone would not be sufficient, since that workflow is `paths:`-filtered and
+      # not a required context.
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         if: needs.changes.outputs.contracts == 'true' && needs.changes.outputs.margin == 'true'
         with:

@@ -17,8 +17,10 @@
 # ci-contracts.yml's own opening line says "the committed OpenAPI 3.1 specs are the
 # contract", so the set of committed specs IS the set of services with a published
 # contract - definitional, not a heuristic. Two candidates were rejected:
-#   - services/*/            over-enumerates. margin-service is a real FastAPI service
-#                            with no committed OpenAPI spec (see EXEMPT_SERVICES).
+#   - services/*/            over-enumerates: a services/<svc>/ directory need not carry a
+#                            committed OpenAPI spec at all - that's exactly what
+#                            EXEMPT_SERVICES exists to declare (empty today, but not
+#                            guaranteed to stay that way).
 #   - services/<svc>/target/contracts/<svc>.openapi.json
 #                            only exists AFTER the Maven capture run, so it cannot
 #                            drive the capture step that produces it, and an empty

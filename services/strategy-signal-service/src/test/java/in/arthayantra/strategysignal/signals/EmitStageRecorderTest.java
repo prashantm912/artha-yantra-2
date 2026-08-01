@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -159,6 +162,51 @@ class EmitStageRecorderTest {
       assertThat(stage(s, "entry").count()).isEqualTo(1L);
       assertThat(stage(s, "entry").totalTime(TimeUnit.MILLISECONDS)).isZero();
     }
+  }
+
+  /**
+   * Review round 1 (Major): the trace used to open INSIDE the evaluation, so
+   * {@code evaluateCoarsePrimary}'s synchronous {@code refreshFromRest} calls — that strategy's OWN
+   * REST latency — landed in {@code pre_eval}, the bucket documented as queue-drain plus EARLIER
+   * strategies. A slow refresh would have been read as queueing: exactly the misdiagnosis T26
+   * exists to prevent. The scope now opens in {@code onClosedBar}'s per-strategy loop, ahead of all
+   * per-strategy work. This pins the placement structurally so a later refactor cannot quietly push
+   * it back down (source scan, the {@code RailPolicyTableTest} pattern).
+   */
+  @Test
+  void theTraceScopeOpensInOnClosedBarAheadOfAnyPerStrategyWork() throws IOException {
+    String src = Files.readString(engineSource());
+
+    assertThat(src.split("emitStages\\.beginEvaluation\\(", -1).length - 1)
+        .as("exactly ONE trace scope exists — a second would reset evalStart and hide refresh cost")
+        .isEqualTo(1);
+
+    int onClosedBar = src.indexOf("private void onClosedBar(");
+    int nextMethod = src.indexOf("private void evaluateAtBarClose(", onClosedBar);
+    int begin = src.indexOf("emitStages.beginEvaluation(");
+    assertThat(onClosedBar).as("onClosedBar located").isGreaterThan(-1);
+    assertThat(nextMethod).as("the method after onClosedBar located").isGreaterThan(onClosedBar);
+    assertThat(begin)
+        .as("beginEvaluation must sit INSIDE onClosedBar, not inside the evaluation methods")
+        .isBetween(onClosedBar, nextMethod);
+
+    // ...and specifically ahead of the coarse dispatch, which is what performs the REST refreshes.
+    assertThat(begin)
+        .as("the scope opens BEFORE the evaluateCoarsePrimary dispatch (its refreshes must bill to"
+            + " gate_eval, never to pre_eval)")
+        .isLessThan(src.indexOf("evaluateCoarsePrimary(strategy", onClosedBar));
+  }
+
+  private static Path engineSource() {
+    Path cwd = Path.of("").toAbsolutePath();
+    Path relative =
+        Path.of("src/main/java/in/arthayantra/strategysignal/signals/SignalEngine.java");
+    if (Files.exists(cwd.resolve(relative))) {
+      return cwd.resolve(relative);
+    }
+    Path fromRepoRoot = cwd.resolve("services/strategy-signal-service").resolve(relative);
+    assertThat(fromRepoRoot).as("engine source locatable").exists();
+    return fromRepoRoot;
   }
 
   @Test

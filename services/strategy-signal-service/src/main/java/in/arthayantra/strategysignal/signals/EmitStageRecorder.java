@@ -16,13 +16,19 @@ import org.slf4j.LoggerFactory;
  * next session's scrape names the stage instead of the total:
  *
  * <ol>
- *   <li>{@code pre_eval} — bar receipt (the causal Redis receipt stamp) → THIS strategy's
- *       evaluation start. Contains the pending-queue drain wait, the series append, and every
- *       EARLIER strategy's evaluation of the same bar — the serial-eval-thread suspect.
- *   <li>{@code gate_eval} — evaluation start → emit-method entry. Entry: series REST refresh (a
- *       coarse-primary boundary), indicator bank, chart gate, confluence gate INCLUDING the chain
- *       read and strike/leg pick. Exit: the active-entry read + structural-stop / confluence-flip
- *       / exit-rule evaluation.
+ *   <li>{@code pre_eval} — bar receipt (the causal Redis receipt stamp) → THIS strategy's dispatch.
+ *       Contains ONLY work that is not this strategy's own: the pending-queue drain wait, the 1m
+ *       series append, and every EARLIER strategy's evaluation of the same bar — the
+ *       serial-eval-thread suspect. The scope opens in {@code onClosedBar}'s per-strategy loop
+ *       (review round 1), NOT inside the evaluation: {@code evaluateCoarsePrimary} runs synchronous
+ *       {@code seriesStore.refreshFromRest} calls for the primary and every declared higher
+ *       timeframe BEFORE evaluating, so a scope opened deeper billed that strategy's own REST
+ *       latency to this bucket and it would have read as queueing.
+ *   <li>{@code gate_eval} — dispatch → emit-method entry. Covers this strategy's OWN pre-evaluation
+ *       work and the evaluation itself. Entry: the coarse-primary series REST refreshes (primary +
+ *       higher timeframes), indicator bank, chart gate, confluence gate INCLUDING the chain read
+ *       and strike/leg pick. Exit: the active-entry read + structural-stop / confluence-flip /
+ *       exit-rule evaluation.
  *   <li>{@code leg_resolve} — emit-method entry → transaction start. Entry: risk-gate veto check,
  *       instrument-master leg-exchange resolution, suggested-qty sizing (a REST call), diagnostic
  *       JSON build. Exit: only the closing-side derivation (~0 by construction — a fat exit
@@ -105,8 +111,11 @@ final class EmitStageRecorder {
   }
 
   /**
-   * Opens a trace for one strategy's evaluation of one bar. {@code barReceivedAtMs <= 0} means no
-   * causal receipt stamp exists (a clock-driven path) — no trace, every later hook a no-op.
+   * Opens a trace for one strategy's evaluation of one bar. Called from {@code onClosedBar}'s
+   * per-strategy loop BEFORE any of that strategy's own work (including the coarse-primary REST
+   * refreshes), so {@code pre_eval} measures only queue-drain + earlier strategies.
+   * {@code barReceivedAtMs <= 0} means no causal receipt stamp exists (a clock-driven path) — no
+   * trace, every later hook a no-op.
    */
   void beginEvaluation(long barReceivedAtMs, long nowMs) {
     trace.set(barReceivedAtMs > 0 ? new Trace(barReceivedAtMs, nowMs) : null);

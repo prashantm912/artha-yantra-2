@@ -1392,12 +1392,25 @@ public class SignalEngine {
         continue;
       }
       try {
-        if (strategy.definition().primaryTimeframe().equals("1m")) {
-          evaluateAtBarClose(strategy, exchange, tradingsymbol, bar, "1m");
-        } else if (!"btst".equals(strategy.definition().session().style())) {
-          evaluateCoarsePrimary(strategy, exchange, tradingsymbol, bar);
+        // G8/T26: THE bar-driven trace scope, opened here rather than inside the evaluation so it
+        // starts BEFORE any per-strategy work. evaluateCoarsePrimary does synchronous
+        // seriesStore.refreshFromRest calls (primary + every declared higher timeframe) ahead of
+        // the evaluation, so a scope opened deeper would bill that strategy's OWN REST latency to
+        // pre_eval — the bucket that means "queue drain + EARLIER strategies", i.e. it would read
+        // as queueing. That is precisely the misattribution T26 exists to prevent. One scope here
+        // covers all six bar-driven emit sites (1m primary, coarse boundary, intrabar exit); the
+        // clock-driven BTST pre-close path never passes through here and stays untraced by design.
+        emitStages.beginEvaluation(currentBarReceivedAtMs.get(), clock.millis());
+        try {
+          if (strategy.definition().primaryTimeframe().equals("1m")) {
+            evaluateAtBarClose(strategy, exchange, tradingsymbol, bar, "1m");
+          } else if (!"btst".equals(strategy.definition().session().style())) {
+            evaluateCoarsePrimary(strategy, exchange, tradingsymbol, bar);
+          }
+          // btst primaries evaluate ONLY at the pre-close clock (scheduled below)
+        } finally {
+          emitStages.endEvaluation();
         }
-        // btst primaries evaluate ONLY at the pre-close clock (scheduled below)
       } catch (RuntimeException e) {
         // The bar is already consumed off the queue — a failed ENTRY decision for it is gone for
         // good (the next qualifying bar re-fires; EXIT anchors stay ACTIVE and self-heal). The
@@ -1410,23 +1423,7 @@ public class SignalEngine {
     }
   }
 
-  /**
-   * G8/T26 trace scope for the BAR-DRIVEN evaluation path (both the 1m primary and the coarse
-   * boundary). Opens the stage trace against THIS bar's causal Redis receipt stamp and closes it in
-   * a finally, so a strategy that evaluates without emitting leaks no stamps into the next one.
-   * INSTRUMENTATION ONLY — the delegate below is the unchanged evaluation.
-   */
   private void evaluateAtBarClose(
-      Loaded strategy, String exchange, String tradingsymbol, EngineCandle bar, String interval) {
-    emitStages.beginEvaluation(currentBarReceivedAtMs.get(), clock.millis());
-    try {
-      evaluateAtBarCloseTraced(strategy, exchange, tradingsymbol, bar, interval);
-    } finally {
-      emitStages.endEvaluation();
-    }
-  }
-
-  private void evaluateAtBarCloseTraced(
       Loaded strategy, String exchange, String tradingsymbol, EngineCandle bar, String interval) {
     // Long-lived bank per (version, instrument) — the D17 lesson applied live (audit P1-12):
     // rebuilding per bar gave every evaluation a COLD ta4j cache, recomputing recursive
@@ -1713,44 +1710,29 @@ public class SignalEngine {
     }
     // A9 [FP-5]: 1m exit-level pass while a position-anchoring entry is active
     if (strategy.definition().session().exitIntrabar()) {
-      // G8/T26: the SIXTH bar-driven emit site — a coarse-primary strategy exiting on a 1m bar
-      // NEVER passes through evaluateAtBarClose, so it needs its own trace scope or its emits
-      // would silently record nothing (finally-closed, same as the boundary path above).
-      emitStages.beginEvaluation(currentBarReceivedAtMs.get(), clock.millis());
-      try {
-        evaluateIntrabarExit(strategy, exchange, tradingsymbol, bar, primaryInterval, primaryKey);
-      } finally {
-        emitStages.endEvaluation();
-      }
-    }
-  }
-
-  /** The A9 [FP-5] intrabar exit body — unchanged logic, lifted so the trace scope can wrap it. */
-  private void evaluateIntrabarExit(
-      Loaded strategy, String exchange, String tradingsymbol, EngineCandle bar,
-      String primaryInterval, SeriesKey primaryKey) {
-    Optional<SignalRepository.SignalRow> activeEntry =
-        signals.activeEntry(strategy.versionId(), exchange, tradingsymbol);
-    if (activeEntry.isPresent()) {
-      EngineSeries primary = seriesStore.series(primaryKey);
-      EngineSeries oneMinute = seriesStore.series(new SeriesKey(exchange, tradingsymbol, "1m"));
-      if (primary == null || oneMinute == null) {
-        return;
-      }
-      int entryPrimaryIndex =
-          entryAnchorIndex(primary, primaryInterval, activeEntry.get().generatedAt().toInstant());
-      // the 1m anchor stays generatedAt itself: the 1m TRIGGER bar exists in the 1m series and
-      // is the correct 1m-scan start (no coarse off-by-one applies on the 1m axis)
-      int entryOneMinuteIndex =
-          Math.max(oneMinute.indexAtOrBefore(activeEntry.get().generatedAt().toInstant()), 0);
-      Optional<ExitEvaluator.ExitDecision> exit =
-          ExitEvaluator.evaluateIntrabarLevels(
-              strategy.definition(), primary, entryPrimaryIndex, oneMinute,
-              scalperPositionDirection(strategy, activeEntry.get()), activeEntry.get().entryPrice(),
-              entryOneMinuteIndex, oneMinute.size() - 1);
-      if (exit.isPresent()) {
-        emit(strategy, exchange, tradingsymbol, "1m", "EXIT", bar, activeEntry.get(),
-            exit.get().type().toUpperCase(java.util.Locale.ROOT));
+      Optional<SignalRepository.SignalRow> activeEntry =
+          signals.activeEntry(strategy.versionId(), exchange, tradingsymbol);
+      if (activeEntry.isPresent()) {
+        EngineSeries primary = seriesStore.series(primaryKey);
+        EngineSeries oneMinute = seriesStore.series(new SeriesKey(exchange, tradingsymbol, "1m"));
+        if (primary == null || oneMinute == null) {
+          return;
+        }
+        int entryPrimaryIndex =
+            entryAnchorIndex(primary, primaryInterval, activeEntry.get().generatedAt().toInstant());
+        // the 1m anchor stays generatedAt itself: the 1m TRIGGER bar exists in the 1m series and
+        // is the correct 1m-scan start (no coarse off-by-one applies on the 1m axis)
+        int entryOneMinuteIndex =
+            Math.max(oneMinute.indexAtOrBefore(activeEntry.get().generatedAt().toInstant()), 0);
+        Optional<ExitEvaluator.ExitDecision> exit =
+            ExitEvaluator.evaluateIntrabarLevels(
+                strategy.definition(), primary, entryPrimaryIndex, oneMinute,
+                scalperPositionDirection(strategy, activeEntry.get()), activeEntry.get().entryPrice(),
+                entryOneMinuteIndex, oneMinute.size() - 1);
+        if (exit.isPresent()) {
+          emit(strategy, exchange, tradingsymbol, "1m", "EXIT", bar, activeEntry.get(),
+              exit.get().type().toUpperCase(java.util.Locale.ROOT));
+        }
       }
     }
   }

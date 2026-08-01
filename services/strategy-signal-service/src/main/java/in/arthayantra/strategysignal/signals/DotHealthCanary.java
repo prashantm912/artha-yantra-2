@@ -16,6 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import org.slf4j.Logger;
@@ -41,6 +42,26 @@ import org.springframework.stereotype.Component;
  * operand frozen across the window PAGES, a daily one only reports, and booleans/enums are not
  * judged at all — one uniform rule would be both noise and blindness at once.
  *
+ * <p>And there is a FOURTH state neither dimension can see (G16/T30, findings-README §3.28): the
+ * input alive AND moving — distinct values, so the G12 probe is right to call it not-frozen — yet
+ * the operand never crosses the dot's threshold, so the dot supports ~0% (or ~100%) of rows and
+ * contributes a constant exactly as silently as a dead or frozen input would. {@code breadth} on
+ * 2026-07-30 is the discovered case: 0/814 supports off a perfectly healthy input (10 distinct
+ * values spanning 23–32) against its {@code > 32} rule, whose session max was EXACTLY 32. The
+ * NEAR-MISS probe mechanizes §3.28's EOD instruction ("place the dot's own threshold on the
+ * operand's session min/max before reaching for a data explanation"): it flags only when the
+ * support rate is effectively one-sided AND the session extremum sits within a small distance of
+ * the threshold — an operand far below the line at 0% is a market regime (the 07-31 {@code
+ * oi_spurt} conjunct-starved reading), not telemetry, and stays unflagged. Telemetry ONLY: it never
+ * pages (surfaced on the endpoint + UI badge), and the threshold itself is doctrine — this class
+ * observes the {@code > 32}, it must never move it.
+ *
+ * <p>⚠️ The near-miss verdict reads a DIFFERENT population from the other two probes: session-wide
+ * and deduped per (bar, side), not the bounded newest-N window. That is not symmetry for its own
+ * sake — a state asserting "session max" off a 200-row tail would be false under fan-out (an early
+ * crossing ages out), while liveness and freeze are honest questions about the recent window. Two
+ * questions, two horizons; see {@link #nearMiss}.
+ *
  * <p>Dot registry mirrors the findings-doc §3.7 checks. {@code required-dots} (config) lists the
  * dots expected alive TODAY — grows as fixes land (breadth after #486; iv_rank once the IV-history
  * floor is met; dow stays off the list while un-armed by design). Read surface:
@@ -65,6 +86,19 @@ public class DotHealthCanary {
   // bars is ~24 minutes on the 3m primary. Below it the dot reports not-frozen, never "unknown" —
   // the flag is an assertion, and an un-evidenced assertion must read false.
   static final int MIN_FROZEN_BARS = 8;
+  // G16: how many DISTINCT (bar, side) VERDICTS the near-miss assertion needs — same rationale and
+  // value as MIN_FROZEN_BARS (an un-evidenced assertion must read false), a separate name because
+  // the two states are separate assertions over different units and may diverge. Below it the dot
+  // reads not-near-miss.
+  static final int MIN_NEAR_MISS_VERDICTS = 8;
+  // G16: what fraction of the session's (bar, side) verdicts may sit on the MINORITY side and the
+  // dot still count as effectively non-discriminating. Derived, not picked: the one-sided sessions
+  // in the evidence base read 0% and 0.2%, while the nearest genuinely-firing-but-rare dot in the
+  // same base (`oi_spurt`) read 4.9% and 8.5% — 2% sits in that gap with 10x headroom over the
+  // 0.2% shape and clear daylight under a dot that is merely rare. The max(1, ...) floor below is
+  // what makes the 0.2% session flag at all: two lone crossings must not veto the state, which is
+  // the whole finding (a strict rule would re-open exactly the blindness G16 was filed to kill).
+  static final double NEAR_MISS_MINORITY_TOLERANCE = 0.02;
 
   /** A context-bearing rejection reduced to what the probes read: its diagnostic and its bar. */
   private record ContextRow(JsonNode diagnostic, OffsetDateTime barTime) {}
@@ -85,21 +119,52 @@ public class DotHealthCanary {
   }
 
   /**
+   * G16/T30: the near-miss judgment for a dot whose gate tests a FIXED global scalar threshold.
+   * Only such dots can carry one — a per-strategy-tunable floor (oi_spurt, iv_abs_band) would make
+   * the canary assert against a threshold the row may not have been tested with. {@code operand}
+   * takes the group's {@code (side, diagnostic)} and returns the value the gate actually tested,
+   * or null when it cannot be resolved — a null contributes no evidence, mirroring {@link #text}.
+   * {@code threshold} is a doctrine number OBSERVED here, never owned here; {@code epsilon} is the
+   * detector's sensitivity ("within a small distance of the line"), not a tuning knob on the rule.
+   */
+  private record NearMissSpec(
+      double threshold, double epsilon, String rule,
+      BiFunction<String, JsonNode, Double> operand) {}
+
+  /**
    * One dot's probes over a rejection's diagnostic JSON: {@code alive} is the per-row liveness test
    * (OR-folded across the window), {@code operand} renders the value the dot actually scores from so
-   * the window can be tested for FREEZE (G12 — see {@link #MIN_FROZEN_BARS}), and {@code freeze}
-   * says what a freeze would MEAN for that operand.
+   * the window can be tested for FREEZE (G12 — see {@link #MIN_FROZEN_BARS}), {@code freeze}
+   * says what a freeze would MEAN for that operand, and {@code nearMiss} (nullable — most probes
+   * have no fixed global threshold to judge against) carries the G16 fourth-state spec.
    */
   private record Probe(
       String dot, Predicate<JsonNode> alive, Function<JsonNode, String> operand,
-      FreezeClass freeze) {}
+      FreezeClass freeze, NearMissSpec nearMiss) {
+    Probe(String dot, Predicate<JsonNode> alive, Function<JsonNode, String> operand,
+        FreezeClass freeze) {
+      this(dot, alive, operand, freeze, null);
+    }
+  }
 
   private static final List<Probe> PROBES =
       List.of(
           // advances/declines come off /breadth/live and move all session — a stuck pair is the
           // wedged-read outage class, so this one is CONTINUOUS and pages when required.
+          // G16: breadth is also the only probe with a FIXED global scalar rule (ScalperGates
+          // .breadth — advances > 32 for CE, declines > 32 for PE, a NIFTY-50-universe doctrine
+          // number), so it carries the near-miss spec. Epsilon 3 ≈ 6% of the 50-name universe: the
+          // 2026-07-30 discovered case (session max EXACTLY 32, gap 0) sits well inside it, while
+          // a decisively one-sided tape (max advances ~20 on a down day, gap 12) stays a market
+          // regime, not a telemetry state.
           new Probe("breadth", d -> macroInt(d, "advances") + macroInt(d, "declines") > 0,
-              d -> macroInt(d, "advances") + "/" + macroInt(d, "declines"), FreezeClass.CONTINUOUS),
+              d -> macroInt(d, "advances") + "/" + macroInt(d, "declines"), FreezeClass.CONTINUOUS,
+              new NearMissSpec(32, 3, "advances/declines > 32",
+                  (side, d) -> switch (String.valueOf(side)) {
+                    case "CE" -> (double) macroInt(d, "advances");
+                    case "PE" -> (double) macroInt(d, "declines");
+                    default -> null; // side unknown — the tested operand cannot be resolved
+                  })),
           // ivRank and fiiLongPct are both EOD reads (MarketOiClient.macro asks /iv-history for a
           // daily series and /fii-dii/long-short for the last SETTLED session), so one value per
           // session is their correct behaviour, exactly as for atmIv below.
@@ -151,13 +216,108 @@ public class DotHealthCanary {
   }
 
   /**
+   * The dot's scored {@code supports} flag on this row (from the persisted confluence breakdown —
+   * the SAME side-resolved verdict the composite actually used), or null when the row did not score
+   * the dot. Joining on the breakdown instead of re-deriving pass/fail keeps the canary from ever
+   * disagreeing with the scorer about what "supported" meant.
+   */
+  private static Boolean scoredSupports(JsonNode diagnostic, String dot) {
+    JsonNode dots = diagnostic.at("/confluence/dots");
+    if (!dots.isArray()) {
+      return null;
+    }
+    for (JsonNode n : dots) {
+      if (dot.equals(n.path("dot").asText())) {
+        return n.path("supports").asBoolean(false);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * G16/T30: the near-miss verdict for a spec-carrying probe over the SESSION-WIDE, per-(bar, side)
+   * deduped verdicts ({@link SignalRejectionRepository#sessionBarSideDiagnostics}). Returns the
+   * detail note when the dot reads effectively non-discriminating SO FAR TODAY, else null.
+   *
+   * <p>The evidence unit is deliberately the (bar, side) VERDICT, not the row: one bar fans out
+   * across ~38 scalpers carrying the same market-wide operand, so a row tally is skewed by how many
+   * strategies happened to evaluate. And it is deliberately SESSION-WIDE, not the bounded liveness
+   * window: under that fan-out the newest 200 rows can cover a handful of bars, so a 09:25 crossing
+   * ages out and the dot would read never-crossing later the same session — both a false positive
+   * and a false negative, and a badge claiming "session max" off a 20-minute tail is simply untrue.
+   *
+   * <p>Flags iff: (1) at least {@link #MIN_NEAR_MISS_VERDICTS} verdicts carry a resolvable operand
+   * — below that the assertion is un-evidenced and must read false; (2) the MINORITY side is within
+   * {@link #NEAR_MISS_MINORITY_TOLERANCE} (with a floor of one, so the discovered 0.2% session is
+   * not vetoed by its two lone crossings); and (3) the extremum on the majority's side of the line
+   * sits within {@code epsilon} of the threshold — max at ~0% (the 2026-07-30 breadth case), min at
+   * ~100% (the mirror: always crossing, never discriminating). An operand far from the line at 0%
+   * is a REGIME (the 07-31 oi_spurt conjunct-starved reading), not telemetry, and does not flag.
+   */
+  private static String nearMiss(Probe p, List<SignalRejectionRepository.BarSideDiagnostic> day) {
+    NearMissSpec spec = p.nearMiss();
+    int supported = 0;
+    int opposed = 0;
+    double max = Double.NEGATIVE_INFINITY;
+    double min = Double.POSITIVE_INFINITY;
+    for (SignalRejectionRepository.BarSideDiagnostic g : day) {
+      Boolean s = scoredSupports(g.diagnostic(), p.dot());
+      Double v = s == null ? null : spec.operand().apply(g.side(), g.diagnostic());
+      if (v == null) {
+        continue; // the dot was not scored here, or the tested operand is unresolvable
+      }
+      if (s) {
+        supported++;
+      } else {
+        opposed++;
+      }
+      max = Math.max(max, v);
+      min = Math.min(min, v);
+    }
+    int verdicts = supported + opposed;
+    if (verdicts < MIN_NEAR_MISS_VERDICTS) {
+      return null;
+    }
+    int minority = Math.min(supported, opposed);
+    if (minority > Math.max(1, (int) (verdicts * NEAR_MISS_MINORITY_TOLERANCE))) {
+      return null; // the dot discriminated often enough to be doing its job
+    }
+    // The majority side fixes which extremum matters: at ~0% supports it is how CLOSE the best
+    // attempt came to the line, at ~100% how close the worst came to falling under it. Absolute
+    // distance, because a tolerated crossing puts the extremum just PAST the threshold — and a
+    // far-past extremum means the dot fired decisively when it fired, which is not this state.
+    boolean nearZero = supported <= opposed;
+    double extremum = nearZero ? max : min;
+    if (Math.abs(extremum - spec.threshold()) > spec.epsilon()) {
+      return null;
+    }
+    return " · NEAR-MISS — live and moving, yet supported " + supported + "/" + verdicts
+        + " distinct (bar,side) verdicts so far today; session " + (nearZero ? "max " : "min ")
+        + trim(extremum) + " hugs the line " + spec.rule() + " (distance "
+        + trim(Math.abs(extremum - spec.threshold())) + " <= " + trim(spec.epsilon()) + ") — "
+        + (nearZero
+            ? "§3.28's third state: not dead, not frozen, never crossing"
+            : "always crossing, never discriminating");
+  }
+
+  /** Renders a double without a spurious {@code .0} (breadth counts are integers on the wire). */
+  private static String trim(double v) {
+    return java.math.BigDecimal.valueOf(v).stripTrailingZeros().toPlainString();
+  }
+
+  /**
    * One dot's current verdict. {@code frozen} is the G12 dimension: the input is present on every row
    * (so {@code alive} is true) but carries exactly ONE distinct value across the window — a state no
    * null-rate probe can see. It never pages on its own; {@code detail} says whether the freeze is
-   * by design.
+   * by design. {@code neverCrossing} is the G16 fourth state: input alive AND moving (so neither
+   * the liveness nor the G12 probe can see it) yet effectively non-discriminating — supports
+   * one-sided within {@link #NEAR_MISS_MINORITY_TOLERANCE} across the SESSION's distinct
+   * (bar, side) verdicts, with the operand's extremum hugging the dot's threshold. Telemetry only;
+   * it never pages.
    */
   public record DotState(
-      String dot, boolean alive, boolean required, boolean frozen, String detail) {}
+      String dot, boolean alive, boolean required, boolean frozen, boolean neverCrossing,
+      String detail) {}
 
   /**
    * The endpoint payload. {@code rowsInspected} counts the CONTEXT-BEARING rows the probes actually
@@ -214,11 +374,12 @@ public class DotHealthCanary {
   public DotHealth evaluate() {
     ZonedDateTime now = clock.instant().atZone(Ist.ZONE);
     boolean session = inSession(now);
+    // The IST session-open bound, shared by BOTH reads. Explicitly zoned, never `::date` — an
+    // in-container UTC day boundary is off-by-one against IST.
+    OffsetDateTime sessionStart =
+        now.toLocalDate().atTime(LocalTime.of(9, 15)).atZone(Ist.ZONE).toOffsetDateTime();
     List<SignalRejectionRepository.RejectionRow> scanned =
-        rejections.list(
-            null, null, null, null,
-            now.toLocalDate().atTime(LocalTime.of(9, 15)).atZone(Ist.ZONE).toOffsetDateTime(),
-            null, FETCH_DEPTH, 0);
+        rejections.list(null, null, null, null, sessionStart, null, FETCH_DEPTH, 0);
     List<ContextRow> contextRows = new ArrayList<>(WINDOW);
     // G12 / cross-vendor review 2026-07-29: the FREEZE pass reads EVERY context-bearing row in the
     // scan, not the 40-row liveness window. The two need different depths, and the 40-row cap made
@@ -257,6 +418,11 @@ public class DotHealthCanary {
         !contextRows.isEmpty()
             && contextRows.stream().allMatch(r -> rootSuppressedToday(r.diagnostic(), today));
     List<DotState> dots = new ArrayList<>(PROBES.size());
+    // G16: the session-wide near-miss evidence, fetched AT MOST ONCE per evaluate() and only if a
+    // probe actually reaches the near-miss branch — a dead or frozen breadth needs no second read,
+    // and this endpoint is polled every 60s by the UI. One-element list as the memo (an empty memo
+    // means "not fetched yet"; the query itself may legitimately return an empty list).
+    List<List<SignalRejectionRepository.BarSideDiagnostic>> sessionMemo = new ArrayList<>(1);
     for (Probe p : PROBES) {
       boolean alive = false;
       for (ContextRow r : contextRows) {
@@ -313,6 +479,21 @@ public class DotHealthCanary {
       } else {
         detail = "input dead across " + contextRows.size() + " context-bearing rejections";
       }
+      // G16 fourth state: only judged when the dot is alive, MOVING (distinct values — a frozen or
+      // freeze-abstained single value is the G12 state's territory, never double-reported here),
+      // carries a fixed-threshold spec, and is not S24-suppressed today (an inert read is by-design
+      // inertness, not a near miss). The MOVING test reads the bounded window while the verdict
+      // reads the session: a dot moving in the last 200 rows is moving, and widening that test
+      // would only ever make the near-miss branch easier to enter.
+      String nearMissNote = null;
+      if (p.nearMiss() != null && alive && !frozen && distinct.size() > 1 && !suppressedToday) {
+        if (sessionMemo.isEmpty()) {
+          sessionMemo.add(
+              rejections.sessionBarSideDiagnostics(sessionStart, sessionStart.plusDays(1)));
+        }
+        nearMissNote = nearMiss(p, sessionMemo.get(0));
+      }
+      boolean neverCrossing = nearMissNote != null;
       // APPENDED, never substituted: a dot can be dead AND frozen (an all-NEUTRAL quadrant window
       // is both), and the liveness half is the half that pages — it must not be overwritten.
       if (frozen) {
@@ -330,9 +511,13 @@ public class DotHealthCanary {
                 : " · FROZEN — ONE distinct value (" + distinct.iterator().next() + ") across "
                     + carrying + " bars; a null-rate probe cannot see this";
       }
+      if (neverCrossing) {
+        detail += nearMissNote;
+      }
       dots.add(
           new DotState(
-              p.dot(), alive, required.contains(p.dot()) && !suppressedToday, frozen, detail));
+              p.dot(), alive, required.contains(p.dot()) && !suppressedToday, frozen,
+              neverCrossing, detail));
     }
     return new DotHealth(
         now.toOffsetDateTime().toString(), session, scanned.size(), contextRows.size(),

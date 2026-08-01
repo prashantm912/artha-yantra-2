@@ -127,6 +127,44 @@ public class SignalRejectionRepository {
     return jdbc.query(sql.toString(), this::row, args.toArray());
   }
 
+  /**
+   * One (bar, side) group's representative diagnostic — the G16 near-miss evidence unit.
+   *
+   * <p>A rejection row is per STRATEGY, but the near-miss operands are market-wide scalars scored
+   * per side, so 38 scalpers on one bar produce 38 rows carrying the same verdict. Counting rows
+   * would let fan-out swamp the tally; the (bar, side) pair is the independent observation.
+   */
+  public record BarSideDiagnostic(OffsetDateTime barTime, String side, JsonNode diagnostic) {}
+
+  /**
+   * ONE representative confluence-bearing diagnostic per DISTINCT {@code (bar_time, side)} over a
+   * bounded window — the session-wide evidence the G16 near-miss probe reads (the paged {@link
+   * #list} tail cannot answer a session-wide question: under fan-out its newest-N rows can cover a
+   * handful of bars, so an early crossing ages out and the dot reads never-crossing later the same
+   * session).
+   *
+   * <p>Callers pass an IST-day bound, so the {@code generated_at DESC} index prunes the scan to one
+   * session and the DISTINCT ON collapses fan-out IN THE DATABASE — the result is ~one row per bar
+   * per side, not per strategy. Rows with no {@code confluence} block carry no dot verdicts at all
+   * (early-rail blocks), so they are excluded here rather than fetched and discarded.
+   */
+  public List<BarSideDiagnostic> sessionBarSideDiagnostics(OffsetDateTime from, OffsetDateTime to) {
+    return jdbc.query(
+        """
+        SELECT DISTINCT ON (bar_time, side) bar_time, side, diagnostic
+          FROM signal_rejections
+         WHERE generated_at >= ? AND generated_at < ?
+           AND diagnostic -> 'confluence' IS NOT NULL
+         ORDER BY bar_time, side, id
+        """,
+        (rs, i) ->
+            new BarSideDiagnostic(
+                rs.getObject("bar_time", OffsetDateTime.class),
+                rs.getString("side"),
+                readTree(rs.getString("diagnostic"))),
+        from, to);
+  }
+
   /** Per-rail block counts over an optional window (the "which rail blocks most" rollup). */
   public List<RailCount> railCounts(UUID strategyVersionId, OffsetDateTime from, OffsetDateTime to) {
     StringBuilder sql =

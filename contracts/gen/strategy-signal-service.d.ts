@@ -1925,6 +1925,7 @@ export interface components {
             alive: boolean;
             required: boolean;
             frozen: boolean;
+            neverCrossing: boolean;
             detail: string;
         };
         ShadowVariantListResponse: {

@@ -1,9 +1,24 @@
 // Compile-time drift alarms binding the hand-written wire types to contracts/gen (audit
 // handwritten-dtos-unbound-to-contracts): every field the app READS must still exist on the
 // springdoc-generated schema. A backend rename/remove on a typed endpoint now fails `tsc -b`
-// instead of rendering "—" at runtime. Key-presence only, deliberately: springdoc types
-// BigDecimal money as number while the wire (and our types, C-2.25) carries JSON strings, so a
-// full structural assignability check would be red on every money field by design.
+// instead of rendering "—" at runtime. Key-presence only, deliberately — but NOT for the money
+// reason this comment used to give: PR #1203 retyped every response-reachable BigDecimal in
+// strategy-signal to `string`, so springdoc and our hand-written types (C-2.25) now agree on every
+// money field; a full structural check would no longer be red there. It stays key-presence-only
+// because OTHER divergences remain, measured 2026-08-02 by assigning each generated schema
+// directly into its hand-written counterpart under `tsc --strict` and reading the errors: (1)
+// several fields the app narrows to a TS string-literal union (`side`, `signalType`, `status`,
+// `severity`, `dataTrust`, `op`, …) while springdoc emits a plain `string` — the backend DTOs
+// aren't annotated as enums; (2) JSON fields springdoc can only type as an opaque `JsonNode`
+// (`scoreBreakdown`, `scalperDetail`, `diagnostic`, `evidence`, `priorityDetail`) where the app
+// gives a real shape it knows from the Java DTO but the spec can't express; (3) a few hand-written
+// optional fields (`Entry.signalId` & 3 siblings, `StrategySummary.currentVersion`) are typed
+// `T | undefined` where the wire is `T | null` (always present, nullable) — a narrower staleness
+// bug in the hand types, not a wire-shape gap; and (4) `Insight.priority` is hand-typed
+// `number | null` while the wire is `string | null` — the same BigDecimal-as-string fact #1203
+// fixed elsewhere, just not caught here since key-presence never checked field types. Full findings
+// + file:line evidence for every case: the `chore/contracts-bridge-tightening` PR description
+// (2026-08-02 investigation) — tightening AssertKeys itself is a separate, follow-up change.
 //
 // The Map-returning endpoints are being retyped to records (ledger D3 slice 1), and each one that
 // lands moves out of "runtime-verified only" and into this file. Crossed over on 2026-07-29: the

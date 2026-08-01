@@ -58,6 +58,14 @@ class OptionsBigDecimalWireShapeTest {
     }
   }
 
+  /** Present-and-null (the {@code types = {"string", "null"}} shape), never an OMITTED key. */
+  private static void assertPresentAndNull(JsonNode owner, String... fields) {
+    for (String field : fields) {
+      assertThat(owner.has(field)).as("%s must be present, not omitted", field).isTrue();
+      assertThat(owner.get(field).isNull()).as("%s must serialize as JSON null", field).isTrue();
+    }
+  }
+
   @Test
   void activeStrikeIvPointDecimalsAreTextual() throws Exception {
     var instance = new ActiveStrikeService.ActiveStrikeIvPoint(null, D, D, D);
@@ -110,6 +118,17 @@ class OptionsBigDecimalWireShapeTest {
     assertTextual(json(instance), "spot", "forward", "riskFreeRate", "pcr");
   }
 
+  /**
+   * {@code riskFreeRate} is null in HISTORY mode: {@code historicalChainTable} passes a literal
+   * {@code null} (no live rate context to project from) — reachable on every historical chain read.
+   */
+  @Test
+  void chainTableRiskFreeRateCanBeNull() throws Exception {
+    var instance = new OptionsAnalyticsController.ChainTable(
+        null, null, null, null, null, null, null, true, true, null, null, null, null);
+    assertPresentAndNull(json(instance), "riskFreeRate");
+  }
+
   @Test
   void chainTableRowDecimalsAreTextual() throws Exception {
     var instance = new OptionsAnalyticsController.ChainTableRow(D, null, null);
@@ -128,10 +147,35 @@ class OptionsBigDecimalWireShapeTest {
     assertTextual(json(instance), "iv", "atmIv", "iv30d", "spot");
   }
 
+  /**
+   * {@code iv}/{@code atmIv}/{@code iv30d}/{@code spot} are genuinely nullable: {@code
+   * IvAnalyticsService.ivHistory} falls {@code iv} back from {@code iv30d} to {@code atmIv}, both
+   * null when the day's rollup never resolved a spot ({@code compute()} short-circuits to all-null
+   * fields), and {@code spotPrice}/{@code atm_iv}/{@code iv_30d} are nullable columns
+   * (`iv_daily_summary`, V009). A bare {@code type = "string"} annotation (this PR's original,
+   * WRONG cut) would have forbidden a null this service genuinely emits.
+   */
+  @Test
+  void historyPointDecimalsCanBeNull() throws Exception {
+    var instance = new IvAnalyticsService.HistoryPoint(null, null, null, null, null);
+    assertPresentAndNull(json(instance), "iv", "atmIv", "iv30d", "spot");
+  }
+
   @Test
   void ivHistoryDecimalsAreTextual() throws Exception {
     var instance = new IvAnalyticsService.IvHistory(null, null, D, D, null, 1, 1, true);
     assertTextual(json(instance), "currentIv", "rank");
+  }
+
+  /**
+   * {@code currentIv}/{@code rank} are null on an empty series (`ivHistory`'s early return) and
+   * {@code rank} is independently null below the history floor (`rankStat`'s insufficient-history
+   * branch) — both real, reachable states, not merely defensive.
+   */
+  @Test
+  void ivHistoryDecimalsCanBeNull() throws Exception {
+    var instance = new IvAnalyticsService.IvHistory(null, null, null, null, null, 0, 60, true);
+    assertPresentAndNull(json(instance), "currentIv", "rank");
   }
 
   @Test
@@ -159,6 +203,17 @@ class OptionsBigDecimalWireShapeTest {
   void maxPainDecimalsAreTextual() throws Exception {
     var instance = new OptionsDigestService.MaxPain(D, D, D);
     assertTextual(json(instance), "now", "atOpen", "drift");
+  }
+
+  /**
+   * {@code now} is null when the fold's strike chain is empty ({@code fold()}: {@code
+   * chain.isEmpty() ? null : MaxPainCalculator.maxPain(chain)}) — reachable whenever a snapshot
+   * bucket carries zero rows.
+   */
+  @Test
+  void maxPainNowCanBeNull() throws Exception {
+    var instance = new OptionsDigestService.MaxPain(null, null, null);
+    assertPresentAndNull(json(instance), "now");
   }
 
   @Test

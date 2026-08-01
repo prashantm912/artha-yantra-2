@@ -10219,16 +10219,16 @@
             "format" : "date"
           },
           "iv" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "atmIv" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "iv30d" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "spot" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "atmIv", "date", "iv", "iv30d", "spot" ]
@@ -10246,10 +10246,10 @@
             }
           },
           "currentIv" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "rank" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "percentile" : {
             "type" : "integer",
@@ -10589,7 +10589,7 @@
             "type" : "string"
           },
           "riskFreeRate" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "pcr" : {
             "type" : [ "string", "null" ]
@@ -12947,7 +12947,7 @@
         "type" : "object",
         "properties" : {
           "now" : {
-            "type" : "string"
+            "type" : [ "string", "null" ]
           },
           "atOpen" : {
             "type" : [ "string", "null" ]

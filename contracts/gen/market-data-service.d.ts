@@ -3455,16 +3455,16 @@ export interface components {
         HistoryPoint: {
             /** Format: date */
             date: string;
-            iv: string;
-            atmIv: string;
-            iv30d: string;
-            spot: string;
+            iv: string | null;
+            atmIv: string | null;
+            iv30d: string | null;
+            spot: string | null;
         };
         IvHistory: {
             underlying: string;
             series: components["schemas"]["HistoryPoint"][];
-            currentIv: string;
-            rank: string;
+            currentIv: string | null;
+            rank: string | null;
             /** Format: int32 */
             percentile: number;
             /** Format: int32 */
@@ -3582,7 +3582,7 @@ export interface components {
             spot: string | null;
             forward: string | null;
             forwardSource: string;
-            riskFreeRate: string;
+            riskFreeRate: string | null;
             pcr: string | null;
             stale: boolean;
             lastCaptured: boolean;
@@ -4399,7 +4399,7 @@ export interface components {
             insufficientHistory: boolean;
         };
         MaxPain: {
-            now: string;
+            now: string | null;
             atOpen: string | null;
             drift: string | null;
         };

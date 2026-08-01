@@ -52,9 +52,13 @@ public class OptionsDigestService {
       @Schema(type = "string", types = {"string", "null"}) BigDecimal deltaVsOpen,
       @Schema(type = "string", types = {"string", "null"}) BigDecimal deltaVsPriorEod) {}
 
-  /** Max-pain now, at session-open, and the intraday drift (now − at-open, in index points). */
+  /**
+   * Max-pain now, at session-open, and the intraday drift (now − at-open, in index points). {@code
+   * now} is null when the fold's strike chain is empty ({@code fold()}: {@code chain.isEmpty() ?
+   * null : MaxPainCalculator.maxPain(chain)}).
+   */
   public record MaxPain(
-      @Schema(type = "string") BigDecimal now,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal now,
       @Schema(type = "string", types = {"string", "null"}) BigDecimal atOpen,
       @Schema(type = "string", types = {"string", "null"}) BigDecimal drift) {}
 

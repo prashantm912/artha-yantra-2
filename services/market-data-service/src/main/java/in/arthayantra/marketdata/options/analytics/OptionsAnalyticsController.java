@@ -191,6 +191,10 @@ public class OptionsAnalyticsController {
    * render it as an explicit staleness badge. It is orthogonal to {@code stale} (market not open),
    * and always false in HISTORY mode, which is an explicit request for a past session rather than a
    * degraded live read.
+   *
+   * <p>{@code riskFreeRate} is null in HISTORY mode ({@code historicalChainTable} has no live
+   * forward/rate context to project from, so {@code forward}/{@code riskFreeRate} both ride null) —
+   * only the LIVE path resolves it from the configured {@code artha.options.risk-free-rate}.
    */
   public record ChainTable(
       String underlying,
@@ -198,7 +202,7 @@ public class OptionsAnalyticsController {
       @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
       @Schema(type = "string", types = {"string", "null"}) BigDecimal forward,
       String forwardSource,
-      @Schema(type = "string") BigDecimal riskFreeRate,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal riskFreeRate,
       @Schema(type = "string", types = {"string", "null"}) BigDecimal pcr,
       boolean stale,
       boolean lastCaptured,

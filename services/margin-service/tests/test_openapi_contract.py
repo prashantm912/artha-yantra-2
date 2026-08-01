@@ -10,10 +10,15 @@ response-code set. Runs in the pytest CI (no new workflow).
 
 margin-service now ALSO commits the full OpenAPI document (mirrors optimizer-service,
 task_e2d15c21's pattern): this file captures both artifacts together so they can never drift
-apart from each other, ci-contracts.yml's breaking-change + removed-component-name gates diff the
-full document across the merge base (margin-service rides the NON_JAVA path — see
-contract_service_inventory.sh), and contracts/gen/margin-service.d.ts + tsc --strict are generated
-from it."""
+apart from each other. Coverage is PARTIAL, the same shape as optimizer-service's (see
+contract_service_inventory.sh's NON_JAVA_SERVICES comment): the openapi-diff breaking-change gate
+NEVER runs on margin-service — it loops over the JAVA service list only, categorically, regardless
+of spec content. Only ci-contracts.yml's removed-component-name gate diffs this document across
+the merge base, and only the COMPONENT KEY SET (e.g. whether "SizeResponse" exists at all) — never
+a property or type inside it. Concretely: renaming SizeResponse.target to targetPrice changes
+neither the route surface below nor any component key, so it passes every margin-service gate
+silently — measured, not assumed, and permanent (not a gap a later PR closes on its own).
+contracts/gen/margin-service.d.ts + tsc --strict are generated from this document too."""
 
 import json
 import os

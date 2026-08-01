@@ -63,14 +63,25 @@ cd "$REPO"
 #     `anyOf: [{...}, {"type":"null"}]` form, 134 occurrences); see the long loop-1 comment
 #     in ci-contracts.yml's breaking-gate step. It gets the semantic staleness gate instead.
 #   margin-service - Python/FastAPI SPAN appliance, gated into ci-contracts alongside
-#     optimizer-service (previously EXEMPT_SERVICES - see below). Excluded from the breaking
-#     gate for the SAME measured reason as optimizer-service: even its four routes' pydantic
-#     Optional fields (e.g. PositionIn.expiry, SizeResponse.limitingRail) and its plain-dict
-#     /health response serialize as `anyOf: [{type: X}, {type: "null"}]` with a `title`
-#     sibling, and openapi_relabel_30.py refuses that shape (measured: exit 2 on
-#     contracts/margin-service.openapi.json, at paths./health.get.responses.200 first). It
-#     gets the semantic staleness gate instead (margin_spec_staleness.py mirrors
-#     optimizer_spec_staleness.py).
+#     optimizer-service (previously EXEMPT_SERVICES - see below). THIS declaration (NON_JAVA_
+#     SERVICES membership) is what excludes it from the breaking gate: that loop iterates
+#     AY_CONTRACT_SERVICES_JAVA only, categorically, regardless of spec content.
+#     openapi_relabel_30.py refusing its spec is a SEPARATE, independent reason it could not
+#     ride that gate even if it were added to the loop: 6 of its pydantic `Optional` fields
+#     (LegIn/PositionIn.expiry+strike, SizeResponse.limitingRail, SizeRequest.stop) carry a
+#     primitive `anyOf: [{type: X}, {type: "null"}, ...]` WITH a `title` sibling, and its
+#     plain-dict /health response carries the SAME primitive nullable-anyOf shape but BARE -
+#     no `title` on the anyOf node itself (the title sits on the parent object schema wrapping
+#     it). Measured: openapi_relabel_30.py exits 2 on contracts/margin-service.openapi.json,
+#     first at paths./health.get.responses.200. Closing this for real needs BOTH a converter
+#     fix (today's converters handle only a bare $ref+null anyOf or a type-ARRAY nullable,
+#     never a primitive anyOf, titled or not) AND including non-Java specs in the breaking
+#     loop - a separate, higher-risk redesign. margin-service gets the semantic staleness gate
+#     instead (margin_spec_staleness.py mirrors optimizer_spec_staleness.py) - which, like its
+#     sibling, projects route surface only (method/path/params/requestBody/response-codes),
+#     never component properties or types: a response-field rename (e.g. SizeResponse.target
+#     -> targetPrice) changes neither the surface nor any component KEY, so it is caught by NO
+#     current gate, permanently - not a first-PR artifact that a later PR closes.
 NON_JAVA_SERVICES="optimizer-service margin-service"
 
 # Directories under services/ that are NOT contract services at all - no committed

@@ -76,13 +76,17 @@
 # line by itself is what an approver does anyway.
 #   COVERAGE ASYMMETRY - stated because a future session will trust this header. For the four Java
 #   services the branch side is the FRESHLY CAPTURED services/<svc>/target/contracts/*.json, so a
-#   rename is caught even if the author forgot to re-capture the committed spec. optimizer-service
-#   has no such artifact (it is Python - see the loop-1 comment in the breaking-gate step), so its
-#   branch side is the COMMITTED contracts/optimizer-service.openapi.json. That is still merge base
-#   vs branch - two different commits, never branch-vs-itself - but it only sees a rename once the
-#   author re-dumps, and nothing else looks at that service's component names either:
-#   optimizer_spec_staleness.py projects OPERATIONS only (method+path, parameter names, requestBody
-#   presence, response-code set), never components.
+#   rename is caught even if the author forgot to re-capture the committed spec. The two NON_JAVA
+#   services (optimizer-service, margin-service) have no such artifact (both Python - see the
+#   loop-1 comment in the breaking-gate step, which margin-service now shares), so their branch
+#   side is each one's own COMMITTED contracts/<svc>.openapi.json. That is still merge base vs
+#   branch - two different commits, never branch-vs-itself - but it only sees a rename once the
+#   author re-dumps, and nothing else looks at either service's component PROPERTIES either:
+#   optimizer_spec_staleness.py and margin_spec_staleness.py both project OPERATIONS only
+#   (method+path, parameter names, requestBody presence, response-code set), never a component's
+#   internals - so a response-field rename inside either service (e.g. margin-service's
+#   SizeResponse.target) is caught by NO gate at all, permanently, not merely delayed until a
+#   re-dump.
 #   STILL NOT CAUGHT by either gate: a component RETYPE or field-level change that openapi-diff
 #   judges compatible, plus everything already listed above.
 #
@@ -540,7 +544,7 @@ jobs:
           esac
 
           # Every component key, qualified by its section ("schemas/Heatmap"). Only
-          # components.schemas exists in all five specs today; qualifying costs one jq clause and
+          # components.schemas exists in all six specs today; qualifying costs one jq clause and
           # means a components.responses / securitySchemes entry cannot slip out unseen later.
           # Looking only where we already thought to look is how the openapi-diff blind spot
           # survived in the first place. Names are compared, never bytes, so `*.json eol=lf` and a
@@ -559,7 +563,7 @@ jobs:
             # (steps.mergebase.outputs.sha).
             # EVIDENCE OF ABSENCE, NOT ABSENCE OF A SUCCESSFUL READ. `if ! git show … ; then
             # continue` reads every failure - a git error, an unreadable object, a full /tmp
-            # killing the redirect - as "new service", and silently skips that spec. All five
+            # killing the redirect - as "new service", and silently skips that spec. All six
             # could skip and the step would still report green: a false green inside the gate
             # written to prevent false greens. So ASK whether the path exists (a checked
             # assignment - `var=$(cmd)` takes the command's status, so `set -e` aborts on a git

@@ -398,7 +398,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/MinerviniReport"
+                  "$ref" : "#/components/schemas/Report"
                 }
               }
             }
@@ -433,7 +433,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/MinerviniReport"
+                  "$ref" : "#/components/schemas/Report"
                 }
               }
             }
@@ -3320,7 +3320,7 @@
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/OiHeatmap"
+                  "$ref" : "#/components/schemas/Heatmap"
                 }
               }
             }
@@ -7254,7 +7254,7 @@
         },
         "required" : [ "effectiveMode", "exchange", "tradingsymbol" ]
       },
-      "MinerviniPortfolioStat" : {
+      "PortfolioStat" : {
         "type" : "object",
         "properties" : {
           "slots" : {
@@ -7303,13 +7303,13 @@
           "annual" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/MinerviniYearReturn"
+              "$ref" : "#/components/schemas/YearReturn"
             }
           }
         },
         "required" : [ "annual", "avgExposurePct", "avgMonthPct", "bestMonthPct", "cagrPct", "maxDrawdownPct", "months", "positiveMonthsPct", "sharpe", "slots", "totalReturnPct", "tradesSkipped", "tradesTaken", "worstMonthPct" ]
       },
-      "MinerviniReport" : {
+      "Report" : {
         "type" : "object",
         "properties" : {
           "status" : {
@@ -7336,26 +7336,26 @@
           "setups" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/MinerviniSetupStat"
+              "$ref" : "#/components/schemas/SetupStat"
             }
           },
           "portfolio" : {
             "anyOf" : [ {
-              "$ref" : "#/components/schemas/MinerviniPortfolioStat"
+              "$ref" : "#/components/schemas/PortfolioStat"
             }, {
               "type" : "null"
             } ]
           },
           "portfolioRsPriority" : {
             "anyOf" : [ {
-              "$ref" : "#/components/schemas/MinerviniPortfolioStat"
+              "$ref" : "#/components/schemas/PortfolioStat"
             }, {
               "type" : "null"
             } ]
           },
           "portfolioRsPriorityNet" : {
             "anyOf" : [ {
-              "$ref" : "#/components/schemas/MinerviniPortfolioStat"
+              "$ref" : "#/components/schemas/PortfolioStat"
             }, {
               "type" : "null"
             } ]
@@ -7366,7 +7366,7 @@
         },
         "required" : [ "fromDate", "note", "portfolio", "portfolioRsPriority", "portfolioRsPriorityNet", "runAt", "setups", "status", "symbolsScanned", "totalTrades", "variant" ]
       },
-      "MinerviniSetupStat" : {
+      "SetupStat" : {
         "type" : "object",
         "properties" : {
           "setup" : {
@@ -7433,7 +7433,7 @@
         },
         "required" : [ "avgBarsHeld", "avgLossPct", "avgWinPct", "bestTradePct", "expectancyPct", "longestHoldBars", "losses", "maxLossStreak", "maxWinStreak", "payoffRatio", "profitFactor", "setup", "shortestHoldBars", "stopOutPct", "trades", "winRatePct", "wins", "worstTradePct" ]
       },
-      "MinerviniYearReturn" : {
+      "YearReturn" : {
         "type" : "object",
         "properties" : {
           "year" : {
@@ -8735,7 +8735,7 @@
           "variants" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/MinerviniReport"
+              "$ref" : "#/components/schemas/Report"
             }
           },
           "sweep" : {
@@ -8747,7 +8747,7 @@
           "slotSweep" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/MinerviniSlotCell"
+              "$ref" : "#/components/schemas/SlotCell"
             }
           },
           "rotation" : {
@@ -8763,7 +8763,27 @@
         },
         "required" : [ "fromDate", "note", "rotation", "runAt", "slotSweep", "status", "sweep", "variants" ]
       },
-      "MinerviniSlotCell" : {
+      "RotationResult" : {
+        "type" : "object",
+        "properties" : {
+          "slots" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "marginPct" : {
+            "type" : "number"
+          },
+          "rotations" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "net" : {
+            "$ref" : "#/components/schemas/PortfolioStat"
+          }
+        },
+        "required" : [ "marginPct", "net", "rotations", "slots" ]
+      },
+      "SlotCell" : {
         "type" : "object",
         "properties" : {
           "slots" : {
@@ -8792,26 +8812,6 @@
           }
         },
         "required" : [ "grossCagrPct", "netCagrPct", "netDrawdownPct", "netSharpe", "slots", "tradesSkipped", "tradesTaken" ]
-      },
-      "RotationResult" : {
-        "type" : "object",
-        "properties" : {
-          "slots" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "marginPct" : {
-            "type" : "number"
-          },
-          "rotations" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "net" : {
-            "$ref" : "#/components/schemas/MinerviniPortfolioStat"
-          }
-        },
-        "required" : [ "marginPct", "net", "rotations", "slots" ]
       },
       "SweepCell" : {
         "type" : "object",
@@ -9930,7 +9930,7 @@
         },
         "required" : [ "value", "x", "y" ]
       },
-      "OiHeatmap" : {
+      "Heatmap" : {
         "type" : "object",
         "properties" : {
           "buckets" : {
@@ -10035,37 +10035,37 @@
           "gainers15" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/IntervalWiseOiStrikeMove"
+              "$ref" : "#/components/schemas/StrikeMove"
             }
           },
           "losers15" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/IntervalWiseOiStrikeMove"
+              "$ref" : "#/components/schemas/StrikeMove"
             }
           },
           "gainers60" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/IntervalWiseOiStrikeMove"
+              "$ref" : "#/components/schemas/StrikeMove"
             }
           },
           "losers60" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/IntervalWiseOiStrikeMove"
+              "$ref" : "#/components/schemas/StrikeMove"
             }
           },
           "gainersDaily" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/IntervalWiseOiStrikeMove"
+              "$ref" : "#/components/schemas/StrikeMove"
             }
           },
           "losersDaily" : {
             "type" : "array",
             "items" : {
-              "$ref" : "#/components/schemas/IntervalWiseOiStrikeMove"
+              "$ref" : "#/components/schemas/StrikeMove"
             }
           },
           "asOf" : {
@@ -10075,7 +10075,7 @@
         },
         "required" : [ "asOf", "gainers15", "gainers60", "gainersDaily", "losers15", "losers60", "losersDaily" ]
       },
-      "IntervalWiseOiStrikeMove" : {
+      "StrikeMove" : {
         "type" : "object",
         "properties" : {
           "strike" : {

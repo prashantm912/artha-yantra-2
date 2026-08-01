@@ -2389,7 +2389,7 @@ export interface components {
             tradingsymbol: string;
             effectiveMode: string;
         };
-        MinerviniPortfolioStat: {
+        PortfolioStat: {
             /** Format: int32 */
             slots: number;
             totalReturnPct: number;
@@ -2407,9 +2407,9 @@ export interface components {
             bestMonthPct: number;
             worstMonthPct: number;
             avgMonthPct: number;
-            annual: components["schemas"]["MinerviniYearReturn"][];
+            annual: components["schemas"]["YearReturn"][];
         };
-        MinerviniReport: {
+        Report: {
             status: string;
             variant: string | null;
             /** Format: date */
@@ -2419,13 +2419,13 @@ export interface components {
             symbolsScanned: number;
             /** Format: int32 */
             totalTrades: number;
-            setups: components["schemas"]["MinerviniSetupStat"][];
-            portfolio: components["schemas"]["MinerviniPortfolioStat"] | null;
-            portfolioRsPriority: components["schemas"]["MinerviniPortfolioStat"] | null;
-            portfolioRsPriorityNet: components["schemas"]["MinerviniPortfolioStat"] | null;
+            setups: components["schemas"]["SetupStat"][];
+            portfolio: components["schemas"]["PortfolioStat"] | null;
+            portfolioRsPriority: components["schemas"]["PortfolioStat"] | null;
+            portfolioRsPriorityNet: components["schemas"]["PortfolioStat"] | null;
             note: string | null;
         };
-        MinerviniSetupStat: {
+        SetupStat: {
             setup: string;
             /** Format: int32 */
             trades: number;
@@ -2452,7 +2452,7 @@ export interface components {
             maxLossStreak: number;
             stopOutPct: number;
         };
-        MinerviniYearReturn: {
+        YearReturn: {
             /** Format: int32 */
             year: number;
             returnPct: number;
@@ -2931,13 +2931,21 @@ export interface components {
             /** Format: date */
             fromDate: string | null;
             runAt: string | null;
-            variants: components["schemas"]["MinerviniReport"][];
+            variants: components["schemas"]["Report"][];
             sweep: components["schemas"]["SweepCell"][];
-            slotSweep: components["schemas"]["MinerviniSlotCell"][];
+            slotSweep: components["schemas"]["SlotCell"][];
             rotation: components["schemas"]["RotationResult"] | null;
             note: string;
         };
-        MinerviniSlotCell: {
+        RotationResult: {
+            /** Format: int32 */
+            slots: number;
+            marginPct: number;
+            /** Format: int32 */
+            rotations: number;
+            net: components["schemas"]["PortfolioStat"];
+        };
+        SlotCell: {
             /** Format: int32 */
             slots: number;
             /** Format: int32 */
@@ -2948,14 +2956,6 @@ export interface components {
             netCagrPct: number;
             netDrawdownPct: number;
             netSharpe: number;
-        };
-        RotationResult: {
-            /** Format: int32 */
-            slots: number;
-            marginPct: number;
-            /** Format: int32 */
-            rotations: number;
-            net: components["schemas"]["MinerviniPortfolioStat"];
         };
         SweepCell: {
             /** Format: int64 */
@@ -3355,7 +3355,7 @@ export interface components {
             /** Format: int64 */
             value: number | null;
         };
-        OiHeatmap: {
+        Heatmap: {
             buckets: string[];
             strikes: string[];
             ce: components["schemas"]["Cell"][];
@@ -3388,16 +3388,16 @@ export interface components {
             insufficientHistory: boolean;
         };
         IntervalWiseOi: {
-            gainers15: components["schemas"]["IntervalWiseOiStrikeMove"][];
-            losers15: components["schemas"]["IntervalWiseOiStrikeMove"][];
-            gainers60: components["schemas"]["IntervalWiseOiStrikeMove"][];
-            losers60: components["schemas"]["IntervalWiseOiStrikeMove"][];
-            gainersDaily: components["schemas"]["IntervalWiseOiStrikeMove"][];
-            losersDaily: components["schemas"]["IntervalWiseOiStrikeMove"][];
+            gainers15: components["schemas"]["StrikeMove"][];
+            losers15: components["schemas"]["StrikeMove"][];
+            gainers60: components["schemas"]["StrikeMove"][];
+            losers60: components["schemas"]["StrikeMove"][];
+            gainersDaily: components["schemas"]["StrikeMove"][];
+            losersDaily: components["schemas"]["StrikeMove"][];
             /** Format: date-time */
             asOf: string;
         };
-        IntervalWiseOiStrikeMove: {
+        StrikeMove: {
             strike: string;
             /** Format: int64 */
             oiChange: number;
@@ -5340,7 +5340,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["MinerviniReport"];
+                    "*/*": components["schemas"]["Report"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -5371,7 +5371,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["MinerviniReport"];
+                    "*/*": components["schemas"]["Report"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -7382,7 +7382,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["OiHeatmap"];
+                    "*/*": components["schemas"]["Heatmap"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

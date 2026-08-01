@@ -74,13 +74,13 @@ public class MinerviniBacktestService {
   // v7 slot sweep: does adding concurrent positions capture more of the signal flood?
   private static final int[] SLOT_SWEEP = {8, 12, 16, 20, 24};
 
-  // @Schema(name) is load-bearing on the five records below: ManasAroraBacktestService declares
-  // same-simple-name twins of each, and springdoc keys components by simple name — twins collapse
-  // to ONE spec schema on scan order (task_1c04803f; fields identical TODAY, but identical twins
-  // drift, and post-rename their nested $refs diverge anyway).
+  // The five records below keep their PLAIN component names: they are the INCUMBENT owners of
+  // SetupStat / YearReturn / PortfolioStat / Report / SlotCell in the published spec, and the
+  // ManasAroraBacktestService twins that used to collapse into them are the ones that got renamed
+  // (task_1c04803f). Removing a published component name breaks generated clients even when the
+  // JSON is byte-identical, and openapi-diff cannot see it — so the split is additive by design.
 
   /** Per-setup aggregate over the backtest window. Decimals ride as JSON strings. */
-  @Schema(name = "MinerviniSetupStat")
   public record SetupStat(
       String setup,
       int trades,
@@ -102,11 +102,9 @@ public class MinerviniBacktestService {
       BigDecimal stopOutPct) {}
 
   /** One calendar year's realised portfolio return + the trades that closed in it. */
-  @Schema(name = "MinerviniYearReturn")
   public record YearReturn(int year, BigDecimal returnPct, int trades) {}
 
   /** Portfolio-level stats for one variant (all setups combined through the slot-limited book). */
-  @Schema(name = "MinerviniPortfolioStat")
   public record PortfolioStat(
       int slots,
       BigDecimal totalReturnPct,
@@ -129,7 +127,6 @@ public class MinerviniBacktestService {
    * {@code portfolioRsPriorityNet} (RS-priority, NET of turnover-scaled transaction costs — the
    * realistic-live estimate).
    */
-  @Schema(name = "MinerviniReport")
   public record Report(
       String status,
       @Schema(types = {"string", "null"}) String variant,
@@ -157,7 +154,6 @@ public class MinerviniBacktestService {
       BigDecimal netSharpe) {}
 
   /** One slot-sweep row: the RS-priority portfolio at {@code slots} concurrent positions (v7). */
-  @Schema(name = "MinerviniSlotCell")
   public record SlotCell(
       int slots,
       int tradesTaken,

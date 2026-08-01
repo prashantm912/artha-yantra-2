@@ -32,9 +32,10 @@ public class OiHeatmapService {
   /** One heatmap cell: column index {@code x} (bucket), row index {@code y} (strike), {@code value} = ΔOI. */
   public record Cell(int x, int y, @Schema(types = {"integer", "null"}) Long value) {}
 
-  // @Schema(name) is load-bearing: OiBuzzService.Heatmap shares this simple name with a DISJOINT
-  // field set, and springdoc keys components by simple name (task_1c04803f).
-  @Schema(name = "OiHeatmap")
+  // Keeps the plain `Heatmap` component name: this record is the INCUMBENT owner of it, and the
+  // twin that used to collapse into it (OiBuzzService.Heatmap, a DISJOINT field set) is the one
+  // that got renamed — removing a published component name breaks generated clients even when the
+  // JSON is unchanged, and openapi-diff cannot see it (task_1c04803f).
   public record Heatmap(
       List<String> buckets,
       List<String> strikes,

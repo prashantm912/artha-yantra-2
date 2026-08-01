@@ -53,16 +53,34 @@ public class OptionsSnapshotReader {
    *
    * <p>Spelled as the 3.1 type union, NOT {@code @Schema(nullable = true)} — the latter is a silent
    * no-op at OpenAPI 3.1 and would publish these as non-nullable, a lie in the generated TS.
+   *
+   * <p>⚠️ Every {@link BigDecimal} here is declared {@code string}, not {@code number}, because
+   * {@code ArthaJacksonAutoConfiguration} registers {@code ToStringSerializer} for {@code
+   * BigDecimal} platform-wide (money is never a float on our wire). Bare springdoc infers {@code
+   * number} from the Java type and would publish a type the service never emits — which is worse
+   * than the opaque Map this record replaced, since a generated client would now confidently parse
+   * the wrong thing. The {@code Long} columns are genuinely JSON numbers and stay {@code integer}.
+   *
+   * <p>⚠️ <b>SPELLING TRAP, measured here 2026-08-01.</b> {@code types} does NOT replace the
+   * inferred type, it UNIONS with it: {@code @Schema(types = {"string", "null"})} on a {@code
+   * BigDecimal} captures as {@code ["number","string","null"]}, a three-type union that still
+   * advertises the impossible {@code number}. To RETYPE a nullable field you must set the base type
+   * as well — {@code @Schema(type = "string", types = {"string", "null"})} — which captures cleanly
+   * as {@code ["string","null"]}. The bare {@code types}-only form documented in CLAUDE.md is only
+   * correct when the declared base MATCHES what springdoc already inferred (e.g. {@code
+   * {"number","null"}} on a {@code BigDecimal}, or {@code {"integer","null"}} on a {@code Long} —
+   * which is why it has always looked right). Verify any retype by reading the captured spec, not
+   * by trusting the annotation.
    */
   public record StrikePoint(
       OffsetDateTime bucket,
-      BigDecimal strike,
+      @Schema(type = "string") BigDecimal strike,
       String optionType,
-      @Schema(types = {"number", "null"}) BigDecimal ltp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal ltp,
       @Schema(types = {"integer", "null"}) Long oi,
       @Schema(types = {"integer", "null"}) Long oiChange,
-      @Schema(types = {"number", "null"}) BigDecimal iv,
-      @Schema(types = {"number", "null"}) BigDecimal spot,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal iv,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal spot,
       @Schema(types = {"integer", "null"}) Long volume) {}
 
   /**

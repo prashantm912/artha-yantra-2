@@ -9901,16 +9901,16 @@
             "format" : "date-time"
           },
           "open" : {
-            "type" : "number"
+            "type" : "string"
           },
           "high" : {
-            "type" : "number"
+            "type" : "string"
           },
           "low" : {
-            "type" : "number"
+            "type" : "string"
           },
           "close" : {
-            "type" : "number"
+            "type" : "string"
           },
           "volume" : {
             "type" : "integer",
@@ -9921,7 +9921,7 @@
             "format" : "int64"
           },
           "iv" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "close", "high", "iv", "low", "oi", "open", "time", "volume" ]
@@ -9949,7 +9949,7 @@
             "format" : "date"
           },
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "ceTradingsymbol" : {
             "type" : "string"
@@ -9961,10 +9961,10 @@
             "type" : "string"
           },
           "underlyingLtp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "underlyingDayOpen" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "asOf" : {
             "type" : "string",
@@ -10079,13 +10079,13 @@
             "format" : "date-time"
           },
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "optionType" : {
             "type" : "string"
           },
           "ltp" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "oi" : {
             "type" : [ "integer", "null" ],
@@ -10096,10 +10096,10 @@
             "format" : "int64"
           },
           "iv" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           },
           "volume" : {
             "type" : [ "integer", "null" ],
@@ -10125,7 +10125,7 @@
             "format" : "date"
           },
           "strike" : {
-            "type" : "number"
+            "type" : "string"
           },
           "interval" : {
             "type" : "string"
@@ -10206,7 +10206,7 @@
             "format" : "date-time"
           },
           "spot" : {
-            "type" : [ "number", "null" ]
+            "type" : [ "string", "null" ]
           }
         },
         "required" : [ "bucket", "spot" ]

@@ -118,6 +118,7 @@ class OptionsAnalyticsWireShapeIntegrationTest extends MarketDataIntegrationTest
     assertThat(body.get("underlying").asText()).isEqualTo(U);
     assertThat(body.get("expiry").asText()).isEqualTo(EXP.toString());
     assertThat(body.get("interval").asText()).isEqualTo("5m");
+    assertTextual(body, "strike");
     assertThat(new BigDecimal(body.get("strike").asText())).isEqualByComparingTo("57200");
   }
 
@@ -159,9 +160,7 @@ class OptionsAnalyticsWireShapeIntegrationTest extends MarketDataIntegrationTest
   @Test
   void optionsChartPreservesItsLinkedHashMapKeyOrderAndCandleShape() throws Exception {
     syncService.runSync();
-    List<BigDecimal> strikes = instruments.strikes(CHART_UNDERLYING, CHART_EXPIRY);
-    assertThat(strikes).isNotEmpty();
-    BigDecimal strike = strikes.get(strikes.size() / 2);
+    BigDecimal strike = midChartStrike();
     OptionsSnapshotReaderIntegrationTest.insertRow(
         jdbc,
         OffsetDateTime.parse(CHART_SESSION + "T09:16:40+05:30"),
@@ -175,19 +174,7 @@ class OptionsAnalyticsWireShapeIntegrationTest extends MarketDataIntegrationTest
         1000L,
         "13.03");
 
-    MvcResult result =
-        mockMvc
-            .perform(
-                get("/api/v1/market/options/options-chart")
-                    .param("name", CHART_UNDERLYING)
-                    .param("mode", "history")
-                    .param("date", CHART_SESSION)
-                    .param("expiry", CHART_EXPIRY.toString())
-                    .param("strike", strike.toPlainString())
-                    .param("interval", "5"))
-            .andExpect(status().isOk())
-            .andReturn();
-    JsonNode body = mapper.readTree(result.getResponse().getContentAsString());
+    JsonNode body = chartJson(strike);
 
     // Source was a LinkedHashMap listing ce/pe FIRST — deliberately NOT the declaration order of
     // the service record, whose components were reordered to match this emitted order.
@@ -209,6 +196,98 @@ class OptionsAnalyticsWireShapeIntegrationTest extends MarketDataIntegrationTest
         .containsExactly("time", "open", "high", "low", "close", "volume", "oi", "iv");
   }
 
+  // ── scalar wire TYPES (cross-vendor review, D3) ─────────────────────────────────────────────
+
+  /**
+   * Pins the JSON SCALAR TYPE of every decimal these newly-enumerated schemas publish.
+   *
+   * <p>{@code ArthaJacksonAutoConfiguration} registers {@code ToStringSerializer} for {@code
+   * BigDecimal} platform-wide, so every decimal is a JSON STRING. Bare springdoc infers {@code
+   * number} from the Java type, so the first cut of this conversion published {@code number} for
+   * all of them — the spec asserted a type the service never emits, and the generated TS client
+   * inherited it. Making an opaque Map visible has to make the claim TRUE, not merely present.
+   *
+   * <p>The key-set tests above CANNOT catch that: {@code asText()} returns {@code "57200"} for a
+   * textual node AND for a numeric one, so a silent retype passes them. These assertions use
+   * {@code isTextual()}/{@code isNumber()}, which do not.
+   */
+  @Test
+  void everyPublishedDecimalIsTextualAndEveryCountIsNumeric() throws Exception {
+    seed();
+
+    JsonNode point = getJson("/api/v1/market/options/oi-analysis", r -> r).get("items").get(0);
+    assertTextual(point, "strike");
+    assertTextual(point, "ltp");
+    assertTextual(point, "spot"); // insertRow hardcodes spot_price = 22480.00
+    assertNumeric(point, "oi");
+    assertNumeric(point, "oiChange");
+
+    JsonNode series =
+        getJson("/api/v1/market/options/oi-analysis/strike-series", r -> r.param("strike", "57200"));
+    assertTextual(series, "strike");
+    assertTextual(series.get("items").get(0), "strike");
+
+    JsonNode multi =
+        getJson("/api/v1/market/options/multiple-oi", r -> r.param("leg", "57200 CE"));
+    assertTextual(multi.get("spot").get(0), "spot");
+    assertNumeric(multi.get("items").get(0).get("points").get(0), "oi");
+  }
+
+  /** The same pin for the options-chart candle series, which needs the synced instrument chain. */
+  @Test
+  void optionsChartPublishesPremiumOhlcAndIvAsTextualNodes() throws Exception {
+    syncService.runSync();
+    BigDecimal strike = midChartStrike();
+    OptionsSnapshotReaderIntegrationTest.insertRow(
+        jdbc,
+        OffsetDateTime.parse(CHART_SESSION + "T09:16:40+05:30"),
+        CHART_UNDERLYING,
+        CHART_EXPIRY,
+        strike.toPlainString(),
+        "CE",
+        "100.00",
+        137250L,
+        0L,
+        1000L,
+        "13.03");
+
+    JsonNode body = chartJson(strike);
+    assertTextual(body, "strike");
+    // Null off-hours when the mock quote does not resolve — but never a NUMBER either way.
+    assertTextualOrNull(body, "underlyingLtp");
+    assertTextualOrNull(body, "underlyingDayOpen");
+
+    JsonNode candle = body.get("ce").get(0);
+    for (String ohlc : List.of("open", "high", "low", "close")) {
+      assertTextual(candle, ohlc);
+    }
+    assertNumeric(candle, "volume"); // primitive long — a genuine JSON number
+    assertNumeric(candle, "oi"); // Long — also genuinely numeric
+    assertTextual(candle, "iv");
+  }
+
+  private static void assertTextual(JsonNode owner, String field) {
+    JsonNode n = owner.get(field);
+    assertThat(n).as("%s present", field).isNotNull();
+    assertThat(n.isTextual())
+        .as("%s must be a JSON string (BigDecimal rides ToStringSerializer), was %s", field, n)
+        .isTrue();
+  }
+
+  private static void assertTextualOrNull(JsonNode owner, String field) {
+    JsonNode n = owner.get(field);
+    assertThat(n).as("%s present", field).isNotNull();
+    assertThat(n.isTextual() || n.isNull())
+        .as("%s must be a JSON string or null, never a number, was %s", field, n)
+        .isTrue();
+  }
+
+  private static void assertNumeric(JsonNode owner, String field) {
+    JsonNode n = owner.get(field);
+    assertThat(n).as("%s present", field).isNotNull();
+    assertThat(n.isNumber()).as("%s must be a JSON number, was %s", field, n).isTrue();
+  }
+
   // ── helpers ─────────────────────────────────────────────────────────────────────────────────
 
   /** Ordered field names of a JSON object — the emitted key list this test exists to pin. */
@@ -218,6 +297,30 @@ class OptionsAnalyticsWireShapeIntegrationTest extends MarketDataIntegrationTest
     List<String> out = new ArrayList<>();
     node.fieldNames().forEachRemaining(out::add);
     return out;
+  }
+
+  /** A listed strike near mid-ladder of the synced chain (CE+PE both present). */
+  private BigDecimal midChartStrike() {
+    List<BigDecimal> strikes = instruments.strikes(CHART_UNDERLYING, CHART_EXPIRY);
+    assertThat(strikes).isNotEmpty();
+    return strikes.get(strikes.size() / 2);
+  }
+
+  /** Reads {@code /options-chart} for {@code strike} over the synced chain's session. */
+  private JsonNode chartJson(BigDecimal strike) throws Exception {
+    MvcResult result =
+        mockMvc
+            .perform(
+                get("/api/v1/market/options/options-chart")
+                    .param("name", CHART_UNDERLYING)
+                    .param("mode", "history")
+                    .param("date", CHART_SESSION)
+                    .param("expiry", CHART_EXPIRY.toString())
+                    .param("strike", strike.toPlainString())
+                    .param("interval", "5"))
+            .andExpect(status().isOk())
+            .andReturn();
+    return mapper.readTree(result.getResponse().getContentAsString());
   }
 
   /** Performs a history-mode read of {@code path} against the seeded synthetic chain. */

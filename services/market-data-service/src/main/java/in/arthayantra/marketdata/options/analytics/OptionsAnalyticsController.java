@@ -216,9 +216,13 @@ public class OptionsAnalyticsController {
   /** One selected leg ("57200 CE") and its per-bucket OI series. */
   public record OiLeg(String leg, List<OiLinePoint> points) {}
 
-  /** One bucket of the underlying price (spot) reference line (null where no bucket carried one). */
+  /**
+   * One bucket of the underlying price (spot) reference line (null where no bucket carried one).
+   * {@code spot} is a decimal STRING on the wire — {@code ArthaJacksonAutoConfiguration} serializes
+   * every {@code BigDecimal} via {@code ToStringSerializer}, so {@code number} would be a lie.
+   */
   public record SpotPoint(
-      OffsetDateTime bucket, @Schema(types = {"number", "null"}) BigDecimal spot) {}
+      OffsetDateTime bucket, @Schema(type = "string", types = {"string", "null"}) BigDecimal spot) {}
 
   /**
    * {@code /oi-analysis}: the {@code {items}} envelope of raw per-strike chain points (D3 — was an
@@ -234,12 +238,15 @@ public class OptionsAnalyticsController {
    * stable emitted order to preserve); the key SET and every value are unchanged. Every component is
    * non-null by construction — {@code Map.of} rejects nulls, so the pre-D3 handler would have thrown
    * on any of them, and the only empty path throws a 422 before reaching here.
+   *
+   * <p>{@code strike} echoes the request's {@code BigDecimal} and so is a decimal STRING on the
+   * wire, not a number — see {@code ArthaJacksonAutoConfiguration}.
    */
   public record StrikeSeries(
       List<OptionsSnapshotReader.StrikePoint> items,
       String underlying,
       LocalDate expiry,
-      BigDecimal strike,
+      @Schema(type = "string") BigDecimal strike,
       String interval,
       OffsetDateTime asOf) {}
 

@@ -59,16 +59,20 @@ public class OptionsOiChartService {
    * <p>OHLC + volume always exist (a bucket is only created by folding at least one 1m bar into it),
    * but {@code oi}/{@code iv} ride a LEFT JOIN from the snapshot series — null on every candle whose
    * bucket had no snapshot, which is the documented behaviour of this chart, not an edge case.
+   *
+   * <p>The premium OHLC and {@code iv} are {@code string} on the wire, not {@code number} —
+   * {@code ArthaJacksonAutoConfiguration} serializes every {@code BigDecimal} via {@code
+   * ToStringSerializer}. {@code volume} is a primitive {@code long} and is a real JSON number.
    */
   public record OptCandle(
       OffsetDateTime time,
-      BigDecimal open,
-      BigDecimal high,
-      BigDecimal low,
-      BigDecimal close,
+      @Schema(type = "string") BigDecimal open,
+      @Schema(type = "string") BigDecimal high,
+      @Schema(type = "string") BigDecimal low,
+      @Schema(type = "string") BigDecimal close,
       long volume,
       @Schema(types = {"integer", "null"}) Long oi,
-      @Schema(types = {"number", "null"}) BigDecimal iv) {}
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal iv) {}
 
   /**
    * The options-chart payload: the header strip + the CE and PE per-interval candle+OI/IV series.
@@ -80,19 +84,21 @@ public class OptionsOiChartService {
    * reshuffling a live OI page's payload. Do not "tidy" this back into header-first order.
    *
    * <p>{@code underlyingLtp}/{@code underlyingDayOpen} are null whenever the underlying quote does
-   * not resolve (off-hours, or a quote-gateway failure the chart deliberately survives).
+   * not resolve (off-hours, or a quote-gateway failure the chart deliberately survives), and like
+   * every {@code BigDecimal} on this platform they are {@code string} on the wire, not {@code
+   * number} — see {@code ArthaJacksonAutoConfiguration}.
    */
   public record OptOiChart(
       List<OptCandle> ce,
       List<OptCandle> pe,
       String underlying,
       LocalDate expiry,
-      BigDecimal strike,
+      @Schema(type = "string") BigDecimal strike,
       String ceTradingsymbol,
       String peTradingsymbol,
       String interval,
-      @Schema(types = {"number", "null"}) BigDecimal underlyingLtp,
-      @Schema(types = {"number", "null"}) BigDecimal underlyingDayOpen,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal underlyingLtp,
+      @Schema(type = "string", types = {"string", "null"}) BigDecimal underlyingDayOpen,
       OffsetDateTime asOf) {}
 
   private final InstrumentRepository instruments;

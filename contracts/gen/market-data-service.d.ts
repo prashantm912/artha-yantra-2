@@ -3344,15 +3344,15 @@ export interface components {
         OptCandle: {
             /** Format: date-time */
             time: string;
-            open: number;
-            high: number;
-            low: number;
-            close: number;
+            open: string;
+            high: string;
+            low: string;
+            close: string;
             /** Format: int64 */
             volume: number;
             /** Format: int64 */
             oi: number | null;
-            iv: number | null;
+            iv: string | null;
         };
         OptOiChart: {
             ce: components["schemas"]["OptCandle"][];
@@ -3360,12 +3360,12 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            strike: number;
+            strike: string;
             ceTradingsymbol: string;
             peTradingsymbol: string;
             interval: string;
-            underlyingLtp: number | null;
-            underlyingDayOpen: number | null;
+            underlyingLtp: string | null;
+            underlyingDayOpen: string | null;
             /** Format: date-time */
             asOf: string;
         };
@@ -3405,15 +3405,15 @@ export interface components {
         StrikePoint: {
             /** Format: date-time */
             bucket: string;
-            strike: number;
+            strike: string;
             optionType: string;
-            ltp: number | null;
+            ltp: string | null;
             /** Format: int64 */
             oi: number | null;
             /** Format: int64 */
             oiChange: number | null;
-            iv: number | null;
-            spot: number | null;
+            iv: string | null;
+            spot: string | null;
             /** Format: int64 */
             volume: number | null;
         };
@@ -3422,7 +3422,7 @@ export interface components {
             underlying: string;
             /** Format: date */
             expiry: string;
-            strike: number;
+            strike: string;
             interval: string;
             /** Format: date-time */
             asOf: string;
@@ -3450,7 +3450,7 @@ export interface components {
         SpotPoint: {
             /** Format: date-time */
             bucket: string;
-            spot: number | null;
+            spot: string | null;
         };
         HistoryPoint: {
             /** Format: date */

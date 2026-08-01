@@ -3,6 +3,9 @@ package in.arthayantra.strategysignal.signals;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.series.EngineCandle;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -11,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -28,13 +32,21 @@ public class MarketDataCandlesClient {
 
   private final RestClient restClient;
   private final ObjectMapper objectMapper;
+  /**
+   * M14: candles endpoint responses carrying {@code stale:true} (CandlesController's B-3
+   * fallback) — every caller of {@link #fetch} still gets the data unchanged, this is
+   * VISIBILITY-only. See {@code ay_candle_fetch_stale_total} on {@code /actuator/prometheus}.
+   */
+  private final Counter staleResponses;
 
-  /** Wires the configured base URL. */
+  /** Wires the configured base URL, registering the M14 stale-response counter. */
+  @Autowired
   public MarketDataCandlesClient(
       RestClient.Builder builder,
       ObjectMapper objectMapper,
       @Value("${artha.marketdata.base-url}") String baseUrl,
-      @Value("${artha.marketdata.candles-fetch-timeout-ms:10000}") long fetchTimeoutMs) {
+      @Value("${artha.marketdata.candles-fetch-timeout-ms:10000}") long fetchTimeoutMs,
+      MeterRegistry meterRegistry) {
     // Fail fast — this client runs on the SINGLE-THREADED signal-eval loop
     // (refreshFromRest fetches at every coarse bucket boundary). Without a bounded
     // TOTAL timeout, one slow-but-alive market-data parks the whole eval loop for the
@@ -47,6 +59,19 @@ public class MarketDataCandlesClient {
     factory.setReadTimeout(Duration.ofMillis(fetchTimeoutMs));
     this.restClient = builder.baseUrl(baseUrl).requestFactory(factory).build();
     this.objectMapper = objectMapper;
+    this.staleResponses = meterRegistry.counter("ay_candle_fetch_stale_total");
+  }
+
+  /**
+   * Test-only convenience (pre-M14 signature): a private, unshared registry absorbs the stale
+   * counter, so every existing direct-construction call site keeps compiling byte-identical.
+   */
+  public MarketDataCandlesClient(
+      RestClient.Builder builder,
+      ObjectMapper objectMapper,
+      String baseUrl,
+      long fetchTimeoutMs) {
+    this(builder, objectMapper, baseUrl, fetchTimeoutMs, new SimpleMeterRegistry());
   }
 
   /** Candles for an instrument+interval in {@code [from, to)}; empty on upstream failure. */
@@ -73,7 +98,8 @@ public class MarketDataCandlesClient {
                           .build())
               .retrieve()
               .body(String.class);
-      JsonNode items = objectMapper.readTree(body).path("items");
+      JsonNode root = objectMapper.readTree(body);
+      JsonNode items = root.path("items");
       List<EngineCandle> candles = new ArrayList<>(items.size());
       for (JsonNode item : items) {
         candles.add(
@@ -85,6 +111,17 @@ public class MarketDataCandlesClient {
                 new BigDecimal(item.path("close").asText()),
                 item.path("volume").asLong(),
                 item.hasNonNull("oi") ? new BigDecimal(item.path("oi").asText()) : null));
+      }
+      // M14: the envelope's `stale` flag (CandlesController's B-3 fallback marker) used to be
+      // parsed by nobody — silently discarded at this HTTP boundary. Surfacing it here (a loud
+      // log line + a counter) covers every caller of fetch() uniformly; the returned candles are
+      // unchanged, so this is visibility-only, never a refusal gate.
+      if (root.path("stale").asBoolean(false)) {
+        staleResponses.increment();
+        log.warn(
+            "candle response STALE for {}:{} {} (asOf={}) — data used unchanged; visibility only",
+            exchange, tradingsymbol, interval,
+            root.hasNonNull("asOf") ? root.path("asOf").asText() : "unknown");
       }
       return candles;
     } catch (RestClientException | java.io.IOException e) {

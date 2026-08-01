@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import in.arthayantra.strategyengine.series.EngineCandle;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.OffsetDateTime;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -63,6 +64,60 @@ class MarketDataCandlesClientTest {
         getRequestedFor(urlPathEqualTo("/api/v1/market/candles"))
             .withQueryParam("from", equalTo("2026-06-09T03:41:17.871210208Z"))
             .withQueryParam("to", equalTo("2026-06-09T04:41:17Z")));
+  }
+
+  @Test
+  void staleResponseIsSilentlyDroppedByDefault() {
+    // M14 red-proof, part 1: BEFORE the fix, a stale:true envelope produced no observable signal
+    // at all from this client — the flag was parsed by nobody. A response with no `stale` key at
+    // all (every pre-M14 stub in this file) must keep behaving exactly the same way.
+    wireMock.stubFor(
+        get(urlPathEqualTo("/api/v1/market/candles"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody("{\"items\":[]}")));
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    MarketDataCandlesClient client =
+        new MarketDataCandlesClient(
+            RestClient.builder(), new ObjectMapper(), wireMock.baseUrl(), 10_000, meters);
+
+    client.fetch(
+        "NSE", "RELIANCE", "1d",
+        OffsetDateTime.parse("2026-06-09T09:11:17+05:30"),
+        OffsetDateTime.parse("2026-06-09T10:11:17+05:30"));
+
+    assertThat(meters.counter("ay_candle_fetch_stale_total").count()).isZero();
+  }
+
+  @Test
+  void staleResponseIsCountedAndTheCandlesStillReturn() {
+    // M14 red-proof, part 2: a stale:true envelope now increments the visibility counter — but
+    // the candles it carries are STILL returned unchanged (visibility only, never a refusal
+    // gate — this must never turn into an entries/exits behaviour change).
+    wireMock.stubFor(
+        get(urlPathEqualTo("/api/v1/market/candles"))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(
+                        "{\"items\":[{\"bucket\":\"2026-06-09T09:15:00+05:30\",\"open\":\"1\","
+                            + "\"high\":\"1\",\"low\":\"1\",\"close\":\"1\",\"volume\":1,"
+                            + "\"oi\":null}],\"stale\":true,"
+                            + "\"asOf\":\"2026-06-08T15:30:00+05:30\"}")));
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    MarketDataCandlesClient client =
+        new MarketDataCandlesClient(
+            RestClient.builder(), new ObjectMapper(), wireMock.baseUrl(), 10_000, meters);
+
+    List<EngineCandle> result =
+        client.fetch(
+            "NSE", "RELIANCE", "1d",
+            OffsetDateTime.parse("2026-06-09T09:11:17+05:30"),
+            OffsetDateTime.parse("2026-06-09T10:11:17+05:30"));
+
+    assertThat(result).hasSize(1);
+    assertThat(meters.counter("ay_candle_fetch_stale_total").count()).isEqualTo(1.0);
   }
 
   @Test

@@ -47,7 +47,7 @@ class ShadowVariantsIntegrationTest extends in.arthayantra.strategysignal.testsu
     return rejections.insert(
         versionId, slug, "NFO", "SHVFUT", "3m", "CE", "volume-floor", new BigDecimal("7865"),
         new BigDecimal("125000"), new BigDecimal("-117135"), "volume < 125000",
-        new BigDecimal("0.70"), new BigDecimal("0.60"), "{}", OffsetDateTime.now());
+        new BigDecimal("0.70"), new BigDecimal("0.60"), "{}", OffsetDateTime.now(), null, false);
   }
 
   private static RailCheck rail(String name, boolean pass, String operand, String threshold) {

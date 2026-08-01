@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.signals;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
@@ -12,6 +13,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategysignal.scalper.RailMarginSign;
 import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -51,7 +53,7 @@ class RejectionSignInvariantTest {
     meters = new SimpleMeterRegistry();
     repo = mock(SignalRejectionRepository.class);
     shadow = mock(ShadowBookService.class);
-    writer = new RejectionWriter(repo, shadow, meters);
+    writer = new RejectionWriter(repo, shadow, new ObjectMapper(), meters);
     writerLog = (Logger) LoggerFactory.getLogger(RejectionWriter.class);
     logs = new ListAppender<>();
     logs.start();
@@ -135,7 +137,7 @@ class RejectionSignInvariantTest {
     verify(repo, timeout(2_000))
         .insert(
             any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-            any(), any(), any());
+            any(), any(), any(), any(), anyBoolean());
   }
 
   @Test

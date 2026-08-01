@@ -171,7 +171,9 @@ class MinerviniSwingExitEquivalenceTest {
 
   /** Same shape as MinerviniSwingBacktestTest.primaryBaseTakesABreakoutTradeAndStopsOutOnTheRollover. */
   private static List<BtTrade> realGatedPrimaryBaseTrades() {
-    VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 3, 65);
+    // minBaseWeeks=0 (matches MinerviniSwingBacktestTest's own fixture, #1214): VcpDetector.<init>
+    // now throws for any positive floor (M40 tripwire — the measurement is latent, not fixed).
+    VcpDetector detector = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 0, 65);
     List<DailyBar> bars = new ArrayList<>();
     for (int i = 0; i < 256; i++) {
       bars.add(dailyBar(i, 100.0 + 80.0 * i / 255.0, 1_000));

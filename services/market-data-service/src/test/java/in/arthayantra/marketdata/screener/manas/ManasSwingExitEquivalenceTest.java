@@ -179,7 +179,9 @@ class ManasSwingExitEquivalenceTest {
    * the unmutated sim still closes one bar later (269, a crash to 197 trips the ATR stop).
    */
   private static List<BtTrade> realGatedBreakoutTrades() {
-    VcpDetector vcp = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 3, 65);
+    // minBaseWeeks=0 (matches ManasAroraSwingBacktestTest's own fixture, #1214): VcpDetector.<init>
+    // now throws for any positive floor (M40 tripwire — the measurement is latent, not fixed).
+    VcpDetector vcp = new VcpDetector(2.5, 2, 6, 0.2, 0.9, 0.5, 0.5, 100, 40, 60, 0, 65);
     ConsolidationBreakout breakout = new ConsolidationBreakout(2.5, 10, 40, 25);
     ManasAroraSwingBacktest sim = new ManasAroraSwingBacktest();
     LocalDate entryFrom = LocalDate.of(2020, 1, 1).plusDays(264);

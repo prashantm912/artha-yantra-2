@@ -514,6 +514,11 @@ services:
       # mock profile, live values come from .env.
       ARTHA_NOTIFIER_NTFY_URL: ${ARTHA_NOTIFIER_NTFY_URL:-}
       ARTHA_NOTIFIER_NTFY_TOPIC: ${ARTHA_NOTIFIER_NTFY_TOPIC:-}
+      # INT-I4 insight delivery: all channels default off; the common floor defaults to NOTICE.
+      ARTHA_INSIGHTS_DELIVERY_WS: ${ARTHA_INSIGHTS_DELIVERY_WS:-false}
+      ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED: ${ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED:-false}
+      ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED: ${ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED:-false}
+      ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR: ${ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR:-NOTICE}
       # §18.4: app origin for the scalp alert's /orders deep link. Blank = no link (default); set to the
       # reachable app host (e.g. Tailscale) to arm it. Arm-able via .env without an image rebuild.
       ARTHA_NOTIFIER_APP_BASE_URL: ${ARTHA_NOTIFIER_APP_BASE_URL:-}

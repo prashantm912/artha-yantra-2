@@ -13,9 +13,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * row it produced (§3.2 last line). Constructor-bound record with in-place defaults so a stack that
  * sets none still runs.
  *
- * <p>These are YAML-only knobs in I1 (no compose passthrough) — shadow mode arms nothing, so there is
- * no {@code .env} override to wire yet (the #653 placeholder trap does not apply until I4 delivery
- * flags land with their passthroughs).
+ * <p>Priority and generator knobs remain YAML-only; I4 delivery flags are env-tunable and fail-closed.
  */
 @ConfigurationProperties("artha.insights")
 public record InsightProperties(
@@ -223,14 +221,22 @@ public record InsightProperties(
     }
   }
 
-  /**
-   * Staged-rollout delivery flags (§10.3). {@code ws} arms the {@code insights} WS channel (Stage 1);
-   * DEFAULT FALSE — I3 ships in SHADOW mode (rows + read APIs only), so nothing pushes until the owner
-   * flips it. ntfy/Telegram floors are I4 (owner-gated) and land under this same subtree then.
-   */
-  public record Delivery(@DefaultValue("false") boolean ws) {
+  /** I4 delivery flags and the common severity floor for phone channels. */
+  public record Delivery(
+      @DefaultValue("false") boolean ws,
+      @DefaultValue("false") boolean ntfyEnabled,
+      @DefaultValue("false") boolean telegramEnabled,
+      @DefaultValue("NOTICE") Severity severityFloor) {
+
+    public Delivery {
+      severityFloor =
+          severityFloor == null || severityFloor.compareTo(Severity.NOTICE) < 0
+              ? Severity.NOTICE
+              : severityFloor;
+    }
+
     static Delivery defaults() {
-      return new Delivery(false);
+      return new Delivery(false, false, false, Severity.NOTICE);
     }
   }
 }

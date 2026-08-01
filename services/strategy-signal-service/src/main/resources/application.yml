@@ -264,14 +264,15 @@ artha:
       act-rate-target: 0.60             # A-band act-rate target (report escalates to WARN below it)
       dismiss-rate-threshold: 0.40      # per-type NOT_USEFUL share above which a type is a retirement candidate
       top-suppressed-keys: 5            # suppression-audit: top-N most-suppressed dedupe keys
-    # I3 — actions + strategy evidence (INT §5). Still YAML-only knobs (shadow mode); every value is
-    # hashed into config_hash. Delivery.ws is the Stage-1 WS-channel flag — DEFAULT FALSE, so NOTHING
-    # pushes; arming is I4 and the compose passthrough (ARTHA_INSIGHTS_DELIVERY_WS) lands THEN with its
-    # #653 exact-name check (I1/I2 precedent: no passthrough until the delivery flag actually arms).
+    # I3/I4 — actions + strategy evidence + delivery. Priority weights remain deliberately YAML-only;
+    # the delivery flags are env-tunable and default OFF. The floor defaults to the owner-decided NOTICE.
     sell-decision:
       escalate-sessions: 1              # sessions a SELL stays un-acked before NOTICE escalates to WARN
     delivery:
-      ws: false                         # Stage-1 insights WS channel — OFF in shadow mode
+      ws: ${ARTHA_INSIGHTS_DELIVERY_WS:false}
+      ntfy-enabled: ${ARTHA_INSIGHTS_DELIVERY_NTFY_ENABLED:false}
+      telegram-enabled: ${ARTHA_INSIGHTS_DELIVERY_TELEGRAM_ENABLED:false}
+      severity-floor: ${ARTHA_INSIGHTS_DELIVERY_SEVERITY_FLOOR:NOTICE}
     # I2 sweep crons (IST). Market-hours context sweep + the calendar-driven EOD/T-1/weekly jobs.
     context-cron: ${ARTHA_INSIGHTS_CONTEXT_CRON:0 */15 9-15 * * MON-FRI}
     eod-cron: ${ARTHA_INSIGHTS_EOD_CRON:0 5 16 * * MON-FRI}

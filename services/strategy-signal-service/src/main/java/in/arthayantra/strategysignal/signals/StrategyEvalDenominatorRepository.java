@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.signals;
 
 import in.arthayantra.strategysignal.signals.SignalEngine.StrategyEvalKey;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -95,18 +96,26 @@ public class StrategyEvalDenominatorRepository {
   }
 
   /**
-   * Bounded-retention prune: deletes sessions older than {@code days} days. The cutoff is computed
-   * SERVER-SIDE on a DATE column, so there is no timestamptz rendering to get wrong.
+   * Bounded-retention prune: deletes every session strictly before {@code cutoff}.
+   *
+   * <p><b>The cutoff is an IST {@link LocalDate} computed by the CALLER, deliberately not derived
+   * server-side.</b> The first revision read {@code (now() - make_interval(days => ?))::date}, which
+   * is wrong for exactly the reason the repo's standing trap states: in-container {@code now()} /
+   * {@code ::date} are UTC, and this prune fires at 02:30 IST — 21:00 UTC on the PREVIOUS date — so
+   * the cast landed a day early and retained one extra session every run. The practical effect here
+   * is conservative (over-retention loses nothing), but the identical shape silently corrupts
+   * anything that FILTERS rather than prunes, so it does not get to live in the codebase.
+   * {@code session_date} holds an IST session date, so the cutoff must be an IST date too; passing a
+   * {@code LocalDate} makes the comparison offset-free and lets a test drive it off the injected
+   * clock.
    *
    * <p>Unlike V045 this cannot orphan anything a live boot depends on: the writer keeps no checkpoint
    * in the table, so deleting a row can only ever cost history.
    *
+   * @param cutoff the oldest IST session date to KEEP; everything strictly before it is deleted
    * @return the number of rows deleted
    */
-  public int deleteOlderThanDays(int days) {
-    return jdbc.update(
-        "DELETE FROM strategy_eval_denominator"
-            + " WHERE session_date < (now() - make_interval(days => ?))::date",
-        days);
+  public int deleteSessionsBefore(LocalDate cutoff) {
+    return jdbc.update("DELETE FROM strategy_eval_denominator WHERE session_date < ?", cutoff);
   }
 }

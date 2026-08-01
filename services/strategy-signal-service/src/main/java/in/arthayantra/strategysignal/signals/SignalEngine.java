@@ -553,6 +553,19 @@ public class SignalEngine {
   // eval thread can contend on.
   private final ConcurrentHashMap<StrategyEvalKey, java.util.concurrent.atomic.LongAdder>
       strategyEvalCounts = new ConcurrentHashMap<>();
+  // The two session dates strategyEvalCounts retains, advanced ONLY by countEvaluation — i.e. by the
+  // eval thread, which is the sole creator and incrementer of those adders. That is the whole point:
+  // an earlier revision pruned the map from the ROLLUP thread using the FLUSH CLOCK, which cross-vendor
+  // review showed is reachable-unsafe (the single eval FIFO can still hold prior-session bars after a
+  // JDBC or eval stall; such a bar recreates the pruned key FROM ZERO and the next REPLACE upsert
+  // overwrites the larger durable total with the smaller fresh one — losing the session AND regressing
+  // the row). Pruning here removes the cross-thread window entirely: a key can only be dropped by the
+  // very thread that would recreate it, and only once THAT thread has itself counted a bar from a newer
+  // session. `volatile` is belt-and-braces — the eval executor is single-threaded, so these are
+  // effectively thread-confined, but the field is cheap and a future second consumer must not silently
+  // read a stale date.
+  private volatile LocalDate newestCountedSession;
+  private volatile LocalDate previousCountedSession;
   // Identifies THIS generation of the counters above. Born with them and never reassigned, so a
   // restart necessarily yields both zeroed counters and a fresh epoch — the invariant that lets
   // SignalEvalOutcomeRollupJob keep its delta checkpoint in the DB instead of in memory (V045).
@@ -1319,23 +1332,20 @@ public class SignalEngine {
   }
 
   /**
-   * Drops per-strategy counters for sessions strictly before {@code sessionDate}, bounding the map to
-   * the current session (plus, for one tick each morning, the previous session's tail).
-   *
-   * <p><b>Call this only AFTER the snapshot has been persisted</b> — {@link
-   * SignalEvalOutcomeRollupJob} does, and that ordering is what makes eviction lossless: the row
-   * carrying an evicted key's final value is already committed. Without eviction the map would grow
-   * by up to 441 entries per day of uptime and the flush would rewrite every past day's rows on every
-   * tick.
-   *
-   * <p><b>Why a re-created adder cannot under-report.</b> Only a bar whose IST date is before
-   * {@code sessionDate} could re-create an evicted key, and no such bar can be evaluated:
-   * {@code LiveSeriesStore.append} rejects any candle that is not strictly after the series' last bar
-   * ({@code onClosedBar} returns immediately on a false append), and the series has already advanced
-   * past that date. The bound is a property of the intake path, not an assumption about timing.
+   * The two session dates whose per-strategy counters are retained, for tests and for the field
+   * comments below. {@code previous} is null until a second session has been counted.
    */
-  void evictStrategyEvalCountsBefore(LocalDate sessionDate) {
-    strategyEvalCounts.keySet().removeIf(key -> key.sessionDate().isBefore(sessionDate));
+  record RetainedSessions(LocalDate newest, LocalDate previous) {
+
+    /** True iff counters for {@code sessionDate} are kept — i.e. it is one of the two. */
+    boolean retains(LocalDate sessionDate) {
+      return sessionDate.equals(newest) || sessionDate.equals(previous);
+    }
+  }
+
+  /** What {@link #countEvaluation} currently retains. Test seam; not used by production code. */
+  RetainedSessions retainedSessions() {
+    return new RetainedSessions(newestCountedSession, previousCountedSession);
   }
 
   /**
@@ -1571,15 +1581,40 @@ public class SignalEngine {
    * mis-attribute it — this is precisely what V045 cannot do, since a Micrometer counter carries a
    * total and no timing. Normalized through {@link Ist#OFFSET} first: reading {@code toLocalDate()}
    * off a UTC-offset value is the repo's standing off-by-one trap.
+   *
+   * <p><b>This method also bounds the map, and it must be the one that does.</b> The per-strategy
+   * adders are dropped for every session except the two most recently COUNTED ones, and the advance
+   * happens right here — on the eval thread, driven by a bar the eval thread has actually processed.
+   * The rejected alternative was pruning from the rollup thread against the flush clock; cross-vendor
+   * review showed that is reachable-unsafe, because the eval FIFO can still hold prior-session bars
+   * after a stall. Such a bar arrives AFTER the prune, is accepted as strictly increasing (it is the
+   * first bar of a freshly recreated series key), recreates the key from ZERO, and the next
+   * {@code SET eval_count = EXCLUDED.eval_count} overwrites the larger durable total with the smaller
+   * fresh one — the session's counts lost and the row regressed. A {@code GREATEST} clamp would not
+   * have fixed it either: it stops the regression while silently dropping the late evaluations.
+   *
+   * <p>Advancing here removes the race rather than narrowing it. A key can only be dropped by the one
+   * thread that could recreate it, and only after that thread has itself counted a bar from a strictly
+   * newer session — so a straggler for the session that just ended still finds its key alive and lands
+   * on its own row. Keeping TWO sessions rather than one is what buys that: at 09:15 the new session
+   * becomes {@code newest} and yesterday becomes {@code previous}, and yesterday's adders survive the
+   * whole day. <b>Not guaranteed</b> (stated plainly, as V045 does): a bar arriving after the eval
+   * thread has advanced through TWO later sessions is dropped from the retained window — which also
+   * requires the FIFO to have delivered bars out of session order across two days, and the stack to
+   * have survived a multi-session eval stall that every canary would have paged for.
    */
   void countEvaluation(Loaded strategy, EngineCandle bar, Outcome outcome) {
     outcomeCounters.get(outcome).increment();
+    LocalDate session = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET).toLocalDate();
+    if (newestCountedSession == null || session.isAfter(newestCountedSession)) {
+      previousCountedSession = newestCountedSession; // null on the first bar of a boot
+      newestCountedSession = session;
+      RetainedSessions retained = retainedSessions();
+      strategyEvalCounts.keySet().removeIf(key -> !retained.retains(key.sessionDate()));
+    }
     strategyEvalCounts
         .computeIfAbsent(
-            new StrategyEvalKey(
-                bar.bucketStart().withOffsetSameInstant(Ist.OFFSET).toLocalDate(),
-                strategy.slug(),
-                outcome),
+            new StrategyEvalKey(session, strategy.slug(), outcome),
             key -> new java.util.concurrent.atomic.LongAdder())
         .increment();
   }

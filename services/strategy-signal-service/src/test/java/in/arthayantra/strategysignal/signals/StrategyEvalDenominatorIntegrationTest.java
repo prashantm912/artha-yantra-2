@@ -5,9 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import in.arthayantra.common.web.time.Ist;
@@ -17,8 +15,10 @@ import in.arthayantra.strategysignal.signals.SignalEngine.StrategyEvalKey;
 import in.arthayantra.strategysignal.signals.SignalEngine.StrategyEvalSnapshot;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -46,6 +46,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
  *   <li>{@link #countsLandOnTheBarsSessionDateEvenWhenFlushedTheNextDay()} — the session date travels
  *       in the key, so a late flush cannot mis-attribute a session (V045's cross-date ambiguity has
  *       no analogue here).
+ *   <li>{@link #aPriorSessionBarEvaluatedAfterTheRolloverDoesNotRegressTheDurableTotal()} — the case
+ *       cross-vendor review found reachable (Critical 1): a stalled FIFO draining a prior-session bar
+ *       after the counters rolled over. Driven through the REAL engine, because the property under
+ *       test is WHERE the in-memory prune happens.
+ *   <li>{@link #theRetentionCutoffIsTheIstSessionDateNotAUtcCastOfNow()} — Critical 2: the 02:30 IST
+ *       prune runs at 21:00 UTC on the previous date, so a server-side {@code ::date} cutoff spared
+ *       one extra session.
  * </ul>
  *
  * <p>Shared singleton DB with NO per-method cleanup: every method uses its OWN random {@code boot_id}
@@ -180,14 +187,105 @@ class StrategyEvalDenominatorIntegrationTest extends StrategySignalIntegrationTe
     SignalEvalOutcomeRollupJob job = job(engineAt(boot, unchanged, unchanged), denominators, 180);
 
     assertThat(job.flushStrategyDenominators()).as("first flush writes the row").isEqualTo(1);
-    assertThat(job.flushStrategyDenominators())
-        .as("second flush touches the same single row")
-        .isEqualTo(1);
+    job.flushStrategyDenominators();
 
     assertThat(storedCount(session, boot, slug, Outcome.COMPOSITE_BELOW_THRESHOLD))
         .as("unchanged — an ADD-on-conflict protocol would read 500 here")
         .isEqualTo(250L);
     assertThat(denominatorFor(session, slug)).isEqualTo(250L);
+  }
+
+  @Test
+  void repeatedUpsertsOfTheSameValueLeaveTheRowUnchanged() {
+    // The SQL-level guarantee, driven straight at the repository so the write-avoidance filter
+    // cannot mask it. This is what makes a retry, a lost acknowledgement, or a duplicated flush
+    // safe: DO UPDATE SET eval_count = EXCLUDED.eval_count ASSIGNS, it does not ADD.
+    LocalDate session = istToday().minusDays(5);
+    UUID boot = UUID.randomUUID();
+    String slug = uniqueSlug("scalp-sql-idempotent");
+    Map<StrategyEvalKey, Long> value = counts(key(session, slug, Outcome.FIRED), 250L);
+
+    denominators.upsertCounts(boot, value);
+    denominators.upsertCounts(boot, value);
+    denominators.upsertCounts(boot, value);
+
+    assertThat(storedCount(session, boot, slug, Outcome.FIRED))
+        .as("three identical upserts, still 250 — an ADD protocol would read 750")
+        .isEqualTo(250L);
+  }
+
+  @Test
+  void anUnchangedKeyIsNotRewritten() {
+    // Write-avoidance: the map holds two sessions, so writing every key every 3m tick would be
+    // ~124k row-upserts/day against <= 441 distinct live rows — mostly rewriting yesterday's
+    // unchanged rows 140 times. Only CHANGED keys are sent. The row must still read correctly.
+    LocalDate session = istToday();
+    UUID boot = UUID.randomUUID();
+    String slug = uniqueSlug("scalp-unchanged");
+    Map<StrategyEvalKey, Long> unchanged = counts(key(session, slug, Outcome.FIRED), 11L);
+
+    SignalEvalOutcomeRollupJob job = job(engineAt(boot, unchanged, unchanged), denominators, 180);
+
+    assertThat(job.flushStrategyDenominators()).as("first flush writes it").isEqualTo(1);
+    assertThat(job.flushStrategyDenominators())
+        .as("second flush sends NOTHING — the value did not move")
+        .isZero();
+    assertThat(storedCount(session, boot, slug, Outcome.FIRED))
+        .as("skipping the write did not cost the row")
+        .isEqualTo(11L);
+  }
+
+  @Test
+  void onlyTheKeysThatMovedAreSent() {
+    LocalDate session = istToday();
+    UUID boot = UUID.randomUUID();
+    String slug = uniqueSlug("scalp-partial");
+    Map<StrategyEvalKey, Long> first =
+        counts(
+            key(session, slug, Outcome.FIRED), 1L,
+            key(session, slug, Outcome.CHART_GATE_FAILED), 50L);
+    Map<StrategyEvalKey, Long> second =
+        counts(
+            key(session, slug, Outcome.FIRED), 1L, // unchanged
+            key(session, slug, Outcome.CHART_GATE_FAILED), 63L); // moved
+
+    SignalEvalOutcomeRollupJob job = job(engineAt(boot, first, second), denominators, 180);
+    assertThat(job.flushStrategyDenominators()).isEqualTo(2);
+
+    assertThat(job.flushStrategyDenominators()).as("one row, not two").isEqualTo(1);
+    assertThat(storedCount(session, boot, slug, Outcome.CHART_GATE_FAILED)).isEqualTo(63L);
+    assertThat(storedCount(session, boot, slug, Outcome.FIRED)).isEqualTo(1L);
+  }
+
+  @Test
+  void aFailedWriteDoesNotAdvanceTheWriteAvoidanceCache() {
+    // THE HAZARD the filter could introduce: if the cache advanced on a FAILED write, the skipped
+    // key would never be re-sent and the row would be permanently missing. It is advanced only
+    // after upsertCounts returns normally, so a failure leaves it behind and the next flush
+    // re-sends the full absolute total.
+    LocalDate session = istToday();
+    UUID boot = UUID.randomUUID();
+    String slug = uniqueSlug("scalp-cache-retry");
+    Map<StrategyEvalKey, Long> value = counts(key(session, slug, Outcome.FIRED), 8L);
+
+    StrategyEvalDenominatorRepository flaky = spy(unproxiedDenominators());
+    doThrow(new RuntimeException("write failed"))
+        .doCallRealMethod()
+        .when(flaky)
+        .upsertCounts(any(), any());
+    // The SAME job object across both flushes — had the cache advanced on the failure, it would now
+    // suppress the retry and the row would be permanently missing.
+    SignalEvalOutcomeRollupJob job = job(engineAt(boot, value, value), flaky, 180);
+
+    assertThat(job.flushStrategyDenominators()).as("fail-soft: reported as 0").isZero();
+    assertThat(denominatorFor(session, slug)).as("nothing committed").isZero();
+
+    assertThat(job.flushStrategyDenominators())
+        .as("the retry is NOT filtered away — the key is still considered unwritten")
+        .isEqualTo(1);
+    assertThat(denominatorFor(session, slug))
+        .as("the next flush re-sends the whole absolute total")
+        .isEqualTo(8L);
   }
 
   @Test
@@ -270,20 +368,37 @@ class StrategyEvalDenominatorIntegrationTest extends StrategySignalIntegrationTe
   }
 
   @Test
-  void theSnapshotIsPersistedBeforeStaleSessionsAreEvicted() {
-    // Ordering is the correctness argument for eviction: the row carrying an evicted key's FINAL
-    // value must already be committed. Verified against the real engine seam, not a mock.
-    LocalDate stale = istToday().minusDays(2);
-    UUID boot = UUID.randomUUID();
-    String slug = uniqueSlug("scalp-evict-order");
-    SignalEngine engine = engineAt(boot, counts(key(stale, slug, Outcome.FIRED), 9L));
+  void aPriorSessionBarEvaluatedAfterTheRolloverDoesNotRegressTheDurableTotal() {
+    // CRITICAL 1, end to end against the REAL engine and the REAL table. The eval FIFO can still
+    // hold prior-session bars after a stall. Under the REJECTED design — the rollup thread pruning
+    // against the FLUSH CLOCK — the straggler recreated the key from ZERO and the next
+    // `SET eval_count = EXCLUDED.eval_count` overwrote the durable 2 with a 1: the row regressed AND
+    // the late evaluation was lost. (GREATEST would have stopped the regression while still losing
+    // the count, which is why the fix is where the prune happens, not what the upsert does.)
+    LocalDate yesterday = istToday().minusDays(1);
+    String slug = uniqueSlug("scalp-straggler");
+    try (SignalEngineStrategyEvalCountTest.Fixture fixture =
+        SignalEngineStrategyEvalCountTest.Fixture.create()) {
+      SignalEngine engine = fixture.engine();
+      SignalEngine.Loaded strategy = SignalEngineStrategyEvalCountTest.strategy(slug);
+      UUID boot = engine.strategyEvalSnapshot().epoch();
+      SignalEvalOutcomeRollupJob job = job(engine, denominators, 180);
 
-    job(engine, denominators, 180).flushStrategyDenominators();
+      engine.countEvaluation(strategy, SignalEngineStrategyEvalCountTest.bar(yesterday, "15:57"), Outcome.FIRED);
+      engine.countEvaluation(strategy, SignalEngineStrategyEvalCountTest.bar(yesterday, "15:58"), Outcome.FIRED);
+      job.flushStrategyDenominators();
+      assertThat(storedCount(yesterday, boot, slug, Outcome.FIRED)).isEqualTo(2L);
 
-    assertThat(denominatorFor(stale, slug))
-        .as("the stale session's final value is durable before its key is dropped")
-        .isEqualTo(9L);
-    verify(engine).evictStrategyEvalCountsBefore(istToday());
+      // The eval thread rolls over to today, then the stalled 15:59 bar finally drains.
+      engine.countEvaluation(strategy, SignalEngineStrategyEvalCountTest.bar(istToday(), "09:15"), Outcome.FIRED);
+      engine.countEvaluation(strategy, SignalEngineStrategyEvalCountTest.bar(yesterday, "15:59"), Outcome.FIRED);
+      job.flushStrategyDenominators();
+
+      assertThat(storedCount(yesterday, boot, slug, Outcome.FIRED))
+          .as("3, never back down to 1 — no regression, and the late evaluation IS counted")
+          .isEqualTo(3L);
+      assertThat(storedCount(istToday(), boot, slug, Outcome.FIRED)).isEqualTo(1L);
+    }
   }
 
   @Test
@@ -291,13 +406,13 @@ class StrategyEvalDenominatorIntegrationTest extends StrategySignalIntegrationTe
     // Additive means additive: the new record must never be able to break or delay the fleet-level
     // one. scheduledRollup() runs V045 FIRST, then this — and this cannot throw.
     UUID boot = UUID.randomUUID();
-    SignalEngine engine =
-        engineAt(boot, counts(key(istToday(), uniqueSlug("scalp-failsoft"), Outcome.FIRED), 1L));
+    String slug = uniqueSlug("scalp-failsoft");
+    Map<StrategyEvalKey, Long> unchanged = counts(key(istToday(), slug, Outcome.FIRED), 4L);
+    SignalEngine engine = engineAt(boot, unchanged, unchanged);
     StrategyEvalDenominatorRepository broken = spy(unproxiedDenominators());
     doThrow(new RuntimeException("denominator write failed")).when(broken).upsertCounts(any(), any());
 
-    SignalEvalOutcomeRollupJob job = job(engine, broken, 180);
-    assertThatCode(job::scheduledRollup).doesNotThrowAnyException();
+    assertThatCode(job(engine, broken, 180)::scheduledRollup).doesNotThrowAnyException();
 
     // The V045 tick still wrote its seven rows for this boot.
     Long v045Rows =
@@ -306,8 +421,14 @@ class StrategyEvalDenominatorIntegrationTest extends StrategySignalIntegrationTe
     assertThat(v045Rows)
         .as("the fleet record is unaffected by a failing denominator flush")
         .isEqualTo((long) Outcome.values().length);
-    // Nothing was evicted, so the next flush still carries the full absolute totals.
-    verify(engine, never()).evictStrategyEvalCountsBefore(any());
+    assertThat(denominatorFor(istToday(), slug)).as("the failed write committed nothing").isZero();
+
+    // Nothing to compensate: the counters are absolute, so the next successful flush carries the
+    // WHOLE total rather than a delta that had to be remembered.
+    job(engine, denominators, 180).flushStrategyDenominators();
+    assertThat(denominatorFor(istToday(), slug))
+        .as("a failed flush costs freshness, never counts")
+        .isEqualTo(4L);
   }
 
   @Test
@@ -326,6 +447,47 @@ class StrategyEvalDenominatorIntegrationTest extends StrategySignalIntegrationTe
 
     assertThat(denominatorFor(aged, slug)).as("aged session pruned").isZero();
     assertThat(denominatorFor(recent, slug)).as("recent session retained").isEqualTo(1L);
+  }
+
+  @Test
+  void theRetentionCutoffIsTheIstSessionDateNotAUtcCastOfNow() {
+    // CRITICAL 2. This prune fires at 02:30 IST — 21:00 UTC on the PREVIOUS date — and in-container
+    // now()/::date are UTC, so the original `(now() - make_interval(days => ?))::date` landed a day
+    // early and retained one extra session on every run. The clock here is pinned to exactly that
+    // instant: 2026-08-01T02:30 IST == 2026-07-31T21:00Z. With a 180-day horizon the correct cutoff
+    // is 2026-08-01 minus 180 = 2026-02-02; the UTC cast would have produced 2026-02-01 and spared
+    // the boundary session.
+    Clock pruneTime = Clock.fixed(Instant.parse("2026-07-31T21:00:00Z"), ZoneOffset.UTC);
+    LocalDate boundary = LocalDate.of(2026, 2, 1); // exactly one day older than the IST cutoff
+    UUID boot = UUID.randomUUID();
+    String slug = uniqueSlug("scalp-prune-ist");
+    denominators.upsertCounts(boot, counts(key(boundary, slug, Outcome.FIRED), 1L));
+
+    new SignalEvalOutcomeRollupJob(
+            mock(SignalEngine.class), outcomes, denominators, events, pruneTime, environment, 180)
+        .prune();
+
+    assertThat(denominatorFor(boundary, slug))
+        .as("the boundary session is deleted — a UTC ::date cutoff would have kept it")
+        .isZero();
+  }
+
+  @Test
+  void pruneReturnsRowsDeletedAcrossBothTables() {
+    // The javadoc promises "rows deleted"; it deletes from two tables, so the count has to cover
+    // both or it is a lie about what the method did.
+    LocalDate aged = istToday().minusDays(300);
+    UUID boot = UUID.randomUUID();
+    String slug = uniqueSlug("scalp-prune-sum");
+    denominators.upsertCounts(
+        boot,
+        counts(
+            key(aged, slug, Outcome.FIRED), 1L,
+            key(aged, slug, Outcome.CHART_GATE_FAILED), 1L));
+
+    assertThat(job(mock(SignalEngine.class), denominators, 180).prune())
+        .as("both denominator rows are included in the reported total")
+        .isGreaterThanOrEqualTo(2);
   }
 
   @Test

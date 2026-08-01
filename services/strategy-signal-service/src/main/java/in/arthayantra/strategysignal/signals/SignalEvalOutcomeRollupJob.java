@@ -112,6 +112,16 @@ public class SignalEvalOutcomeRollupJob {
    */
   static final int BUCKET_SECONDS = 180;
 
+  /**
+   * The last value successfully written per V053 key — a write-avoidance cache, never a correctness
+   * dependency. See {@link #flushStrategyDenominators()} for why it cannot cost a count: it is
+   * advanced only after a successful upsert, so any failure (or a restart, which empties it) makes
+   * the next flush re-send. Concurrent because {@code @PreDestroy} may run it off the scheduler
+   * thread; bounded because it is intersected with the engine's two-session key set every flush.
+   */
+  private final java.util.Map<SignalEngine.StrategyEvalKey, Long> lastWrittenDenominators =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
   private final SignalEngine engine;
   private final SignalEvalOutcomeRepository repository;
   private final StrategyEvalDenominatorRepository denominators;
@@ -240,26 +250,50 @@ public class SignalEvalOutcomeRollupJob {
    * unlike {@link #rollup()}, it is safe to run twice in a row (as {@link #flushOnShutdown()} may,
    * moments after a scheduled tick).
    *
-   * <p><b>Eviction is last, and only after a successful write.</b> The snapshot is persisted first,
-   * so the row carrying an evicted key's final value is already committed; a failure skips the
-   * eviction entirely and the next flush retries the whole map. Sessions strictly before today are
-   * then dropped, which is what keeps the map — and the statement — at one session's worth (≤ 63
-   * slugs × 7 outcomes = 441 keys) instead of growing by a day's worth for every day of uptime. The
-   * first tick of each trading morning legitimately carries the previous session's tail as well: bars
-   * closing after the 15:57 tick are still counted, and they land on THEIR OWN session_date because
-   * the date travels in the key.
+   * <p><b>This flush is a pure reader — it does NOT prune the map.</b> An earlier revision evicted
+   * stale sessions here, from THIS thread, using the flush clock; cross-vendor review showed that is
+   * reachable-unsafe, because the eval FIFO can still hold prior-session bars after a stall and such a
+   * bar recreates the pruned key from ZERO, so the next REPLACE upsert overwrites the larger durable
+   * total with the smaller fresh one. Bounding the map is now {@code SignalEngine.countEvaluation}'s
+   * job, done on the EVAL thread against the newest session that thread has actually counted — the
+   * one place where the prune and the recreate cannot race. See that method's javadoc.
+   *
+   * <p>The map holds at most TWO sessions (≤ 2 × 63 slugs × 7 outcomes = 882 keys). Writing all of
+   * them every tick would be ~124k row-upserts/day against ≤ 441 distinct live rows — mostly
+   * rewriting yesterday's unchanged rows 140 times — so this flush sends only the keys whose value
+   * CHANGED since the last successful write ({@link #lastWrittenDenominators}). In steady state that
+   * is roughly one key per loaded strategy per tick (each evaluates ~1 bar per 3m primary bar), i.e.
+   * tens of rows rather than hundreds, and it keeps dead-tuple churn off a live trading database.
+   *
+   * <p><b>The filter cannot cost correctness, by construction.</b> It is a write-avoidance cache over
+   * an idempotent absolute-REPLACE write, and it is advanced ONLY after {@code upsertCounts} returns
+   * normally. A throw, a lost acknowledgement, or a whole JVM restart therefore leaves it behind or
+   * empty, and the next flush re-sends — it can only ever cause MORE writes than necessary, never
+   * fewer than correctness requires. Nothing else writes this table, and the prune cannot delete a
+   * row the filter believes is current: the engine retains two sessions while the prune deletes
+   * strictly before {@code today − retentionDays}, and {@code retentionDays ≤ 0} is refused, so even
+   * a horizon of 1 keeps both retained sessions.
+   *
+   * <p>Yesterday's rows are still rewritten whenever they change, which is what lets a bar closing
+   * after the 15:57 tick reach its own {@code session_date} — the date travels in the key.
    *
    * <p>Fail-soft in its own right: a failure here is logged and ops-alerted but never propagates, and
    * — deliberately called AFTER {@link #rollup()} — it can neither delay nor fail the V045 record.
    *
-   * @return rows upserted (0 on an idle map or a failure)
+   * @return rows upserted (0 when nothing changed, on an idle map, or on a failure)
    */
   int flushStrategyDenominators() {
     try {
       SignalEngine.StrategyEvalSnapshot snapshot = engine.strategyEvalSnapshot();
-      int rows = denominators.upsertCounts(snapshot.epoch(), snapshot.counts());
-      engine.evictStrategyEvalCountsBefore(istDate(clock.instant().atOffset(Ist.OFFSET)));
-      log.debug("strategy_eval_denominator flush: boot={} rows={}", snapshot.epoch(), rows);
+      Map<SignalEngine.StrategyEvalKey, Long> changed = changedSince(snapshot.counts());
+      int rows = changed.isEmpty() ? 0 : denominators.upsertCounts(snapshot.epoch(), changed);
+      // Advance the cache ONLY after a successful write, and drop keys the engine no longer holds so
+      // it stays bounded by the engine's own two-session window.
+      lastWrittenDenominators.keySet().retainAll(snapshot.counts().keySet());
+      lastWrittenDenominators.putAll(changed);
+      log.debug(
+          "strategy_eval_denominator flush: boot={} rows={} of {} retained key(s)",
+          snapshot.epoch(), rows, snapshot.counts().size());
       return rows;
     } catch (RuntimeException e) {
       // Nothing to compensate: the adders are untouched by a failed write, so the next flush writes
@@ -273,6 +307,27 @@ public class SignalEvalOutcomeRollupJob {
               + e.getMessage());
       return 0;
     }
+  }
+
+  /**
+   * The subset of {@code counts} whose value differs from the last successfully written one — new
+   * keys included, since {@code null != value}.
+   *
+   * <p>Package-visible and dependent only on the cache field so the filter's semantics are unit
+   * testable. It never REMOVES a key from the write: a key present in {@code counts} with an
+   * unchanged value is already durable at exactly that value, because the cache is advanced only
+   * after a successful absolute-REPLACE upsert of that same number.
+   */
+  Map<SignalEngine.StrategyEvalKey, Long> changedSince(
+      Map<SignalEngine.StrategyEvalKey, Long> counts) {
+    Map<SignalEngine.StrategyEvalKey, Long> changed = new LinkedHashMap<>();
+    counts.forEach(
+        (key, count) -> {
+          if (!count.equals(lastWrittenDenominators.get(key))) {
+            changed.put(key, count);
+          }
+        });
+    return changed;
   }
 
   /**
@@ -403,10 +458,13 @@ public class SignalEvalOutcomeRollupJob {
   }
 
   /**
-   * One retention pass. Package-visible so the IT drives it directly, bypassing the live gate.
-   * Fail-soft.
+   * One retention pass over BOTH observability records — {@code signal_eval_outcomes} (V045) and
+   * {@code strategy_eval_denominator} (V053). Package-visible so the IT drives it directly, bypassing
+   * the live gate. Fail-soft.
    *
-   * @return rows deleted (0 on a no-op day, a guarded non-positive horizon, or a failure)
+   * @return rows deleted ACROSS BOTH tables (0 on a no-op day, a guarded non-positive horizon, or a
+   *     failure). The sum rather than V045's count alone: this method deletes from two tables, so a
+   *     count that described only one would be a lie about what it did.
    */
   int prune() {
     try {
@@ -430,12 +488,20 @@ public class SignalEvalOutcomeRollupJob {
       // resolution, so a second knob would only create a way for the two to disagree. Safe to prune
       // on the same pass and safer than V045's: the denominator writer keeps no checkpoint in its
       // table, so a deleted row can only ever cost history, never a live boot's correctness.
-      int denominatorRows = denominators.deleteOlderThanDays(retentionDays);
+      //
+      // The cutoff is an IST LocalDate computed HERE, not `(now() - interval)::date` in Postgres.
+      // This cron fires 02:30 IST = 21:00 UTC on the PREVIOUS date, and in-container now()/::date are
+      // UTC, so the server-side cast landed a day early and retained one extra session every run.
+      // session_date holds an IST session date, so its cutoff has to be an IST date too. (V045's
+      // sibling call above is NOT affected: it does interval arithmetic on an absolute timestamptz,
+      // where there is no date truncation to get wrong.)
+      LocalDate cutoff = istDate(clock.instant().atOffset(Ist.OFFSET)).minusDays(retentionDays);
+      int denominatorRows = denominators.deleteSessionsBefore(cutoff);
       log.info(
-          "signal_eval_outcomes prune: deleted {} row(s) (+ {} strategy_eval_denominator) older"
-              + " than {}d",
-          deleted, denominatorRows, retentionDays);
-      return deleted;
+          "signal_eval_outcomes prune: deleted {} row(s) (+ {} strategy_eval_denominator before IST"
+              + " {}) older than {}d",
+          deleted, denominatorRows, cutoff, retentionDays);
+      return deleted + denominatorRows;
     } catch (RuntimeException e) {
       log.error(
           "signal_eval_outcomes prune FAILED (retention={}d): {}", retentionDays, e.getMessage(), e);

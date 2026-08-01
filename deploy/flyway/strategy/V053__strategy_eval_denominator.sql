@@ -55,6 +55,23 @@
 -- timestamptz. In-container now()/::date is UTC, so a cast would be off by one across IST midnight
 -- for exactly the rows an operator cares about; storing the session date directly means the consuming
 -- query is a plain `WHERE session_date = DATE '2026-08-01'` with no offset arithmetic to get wrong.
+-- The SAME rule binds every writer of a cutoff against this column: the retention prune passes an IST
+-- LocalDate computed in Java, because it runs at 02:30 IST = 21:00 UTC the previous date and a
+-- server-side `(now() - interval)::date` therefore lands a day early. Over-retention is harmless; the
+-- identical shape in anything that FILTERS is not.
+--
+-- THE IN-MEMORY COUNTERS ARE BOUNDED BY THE EVAL THREAD, NOT BY THE FLUSH. SignalEngine keeps adders
+-- for the two most recently COUNTED sessions and drops the rest inside countEvaluation -- i.e. on the
+-- single eval thread, advanced only by a bar that thread has actually processed. Pruning them from the
+-- ROLLUP thread against the flush clock was tried and is reachable-unsafe: the eval FIFO can still hold
+-- prior-session bars after a JDBC or eval stall, and such a bar arrives after the prune, is accepted as
+-- strictly increasing (it is the first bar of a freshly recreated series key), recreates the key FROM
+-- ZERO, and the next REPLACE upsert then overwrites the larger durable total with the smaller fresh one
+-- -- losing the session AND regressing the row. A GREATEST clamp is NOT the fix either: it stops the
+-- regression while silently dropping the late evaluations. Pruning on the eval thread removes the race
+-- instead of narrowing it -- a key can only be dropped by the one thread that could recreate it, and
+-- only once that thread has counted a bar from a strictly newer session, so a straggler for the session
+-- that just ended still finds its key alive.
 --
 -- WHAT IS AND IS NOT GUARANTEED:
 --   GUARANTEED  -- no double count, on any failure path, with no checkpoint and no coordination.
@@ -62,9 +79,16 @@
 --                  day total is their SUM.
 --   GUARANTEED  -- counts are attributed to the SESSION DATE OF THE BAR, never to the flush time.
 --   GUARANTEED  -- a failed or delayed flush loses nothing; the next one carries the full total.
+--   GUARANTEED  -- a bar for the session that just ended, evaluated late (a stalled FIFO draining
+--                  the next morning), still lands on ITS OWN session_date and cannot regress the
+--                  row: its adder is retained until the eval thread has moved on TWO sessions.
 --   NOT GUARANTEED -- evaluations since the last successful flush are lost if the process is HARD
 --                  killed (they exist only in JVM memory, exactly as for V045). A graceful stop
 --                  flushes via @PreDestroy.
+--   NOT GUARANTEED -- a bar evaluated after the eval thread has advanced through TWO later sessions
+--                  falls outside the retained window and would restart that key from zero. Reaching
+--                  it needs the FIFO to deliver bars out of session order across two days AND the
+--                  stack to have survived a multi-session eval stall that every canary pages for.
 --   NOT GUARANTEED -- the ABSENCE of a row does not prove the strategy evaluated nothing; it proves
 --                  no (date, boot, slug, outcome) combination was ever observed. Process liveness is
 --                  V045's job, and it still answers it — this table deliberately does not write
@@ -101,8 +125,9 @@
 -- RETENTION: shares V045's horizon and its 02:30-IST daily prune knob
 -- (artha.signals.eval-outcome-retention-days / ARTHA_SIGNALS_EVAL_OUTCOME_RETENTION_DAYS; <= 0
 -- DISABLES the prune rather than wiping the table). 441 rows/day * 180d ~= 79k rows -- a few MB. The
--- prune deletes by session_date and cannot orphan anything: unlike V045 there is no checkpoint to
--- read back, so a deleted row can only ever cost history, never correctness of a live boot.
+-- prune deletes by session_date against an IST LocalDate cutoff computed in Java (see above) and
+-- cannot orphan anything: unlike V045 there is no checkpoint to read back, so a deleted row can only
+-- ever cost history, never correctness of a live boot.
 
 CREATE TABLE strategy_eval_denominator (
   session_date   DATE   NOT NULL, -- IST session date OF THE EVALUATED BAR (computed in Java from the

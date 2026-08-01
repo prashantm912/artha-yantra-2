@@ -54,9 +54,12 @@ class SignalEngineStrategyEvalCountTest {
   /**
    * A real engine wired with mocks — the same construction {@code SignalEngineLatencyTest} uses, and
    * closed the same way (the engine owns daemon executors; the registry owns meters).
+   *
+   * <p>Package-visible rather than private because {@link StrategyEvalDenominatorIntegrationTest}
+   * reuses it to drive the REAL engine against the REAL table for the late-bar case; duplicating a
+   * 20-line constructor in two files invites them to drift apart.
    */
-  private record Fixture(SignalEngine engine, PrometheusMeterRegistry meters)
-      implements AutoCloseable {
+  record Fixture(SignalEngine engine, PrometheusMeterRegistry meters) implements AutoCloseable {
 
     static Fixture create() {
       PrometheusMeterRegistry meters = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
@@ -110,14 +113,14 @@ class SignalEngineStrategyEvalCountTest {
   }
 
   /** Only {@code slug()} is read by the counter path; the rest of the record is inert here. */
-  private static SignalEngine.Loaded strategy(String slug) {
+  static SignalEngine.Loaded strategy(String slug) {
     return new SignalEngine.Loaded(
         UUID.randomUUID(), UUID.randomUUID(), slug, slug, "1", "checksum",
         null, List.of(), Set.of(), null, null);
   }
 
   /** A bar at {@code istTime} on {@code session}, carrying the IST offset like every live bar. */
-  private static EngineCandle bar(LocalDate session, String istTime) {
+  static EngineCandle bar(LocalDate session, String istTime) {
     return new EngineCandle(
         OffsetDateTime.of(session, LocalTime.parse(istTime), Ist.OFFSET),
         BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, 0L);
@@ -208,22 +211,77 @@ class SignalEngineStrategyEvalCountTest {
   }
 
   @Test
-  void evictionDropsOnlyStrictlyOlderSessionsSoTheMapStaysBoundedByOneDay() {
-    // Without eviction the map grows by up to 441 entries per day of uptime and the flush rewrites
-    // every past day's rows on every 3m tick. The boundary matters: the CURRENT session must
-    // survive, or the first tick of a morning would drop counts it had just written.
+  void aPriorSessionBarEvaluatedAfterTheRolloverStillLandsOnItsOwnKey() {
+    // THE FALSIFYING CASE cross-vendor review named (Critical 1). The single eval FIFO can still
+    // hold prior-session bars after a JDBC or eval-thread stall. Under the REJECTED design — the
+    // rollup thread pruning against the FLUSH CLOCK — such a bar arrives after the prune, is
+    // accepted as strictly increasing (first bar of a freshly recreated series key), recreates the
+    // key FROM ZERO, and the next `SET eval_count = EXCLUDED.eval_count` overwrites the larger
+    // durable total with the smaller fresh one: the session's counts lost AND the row regressed.
+    // (A GREATEST clamp would not have saved it — it stops the regression while still dropping the
+    // late evaluations, which is why it was never the fix.)
     try (Fixture fixture = Fixture.create()) {
-      SignalEngine.Loaded a = strategy("scalp-evict");
+      SignalEngine.Loaded a = strategy("scalp-straggler");
+      StrategyEvalKey yesterday = new StrategyEvalKey(SESSION, "scalp-straggler", Outcome.FIRED);
 
-      fixture.engine().countEvaluation(a, bar(SESSION, "09:15"), Outcome.FIRED);
-      fixture.engine().countEvaluation(a, bar(SESSION.plusDays(1), "12:00"), Outcome.FIRED);
+      fixture.engine().countEvaluation(a, bar(SESSION, "15:57"), Outcome.FIRED);
+      fixture.engine().countEvaluation(a, bar(SESSION, "15:58"), Outcome.FIRED);
+      // The eval thread advances to the next session — this is what now triggers the prune.
+      fixture.engine().countEvaluation(a, bar(SESSION.plusDays(1), "09:15"), Outcome.FIRED);
+      assertThat(fixture.perStrategy()).containsEntry(yesterday, 2L);
 
-      fixture.engine().evictStrategyEvalCountsBefore(SESSION.plusDays(1));
+      // ...and NOW the stalled 15:59 bar finally drains.
+      fixture.engine().countEvaluation(a, bar(SESSION, "15:59"), Outcome.FIRED);
 
       assertThat(fixture.perStrategy())
-          .containsOnlyKeys(new StrategyEvalKey(SESSION.plusDays(1), "scalp-evict", Outcome.FIRED));
-      // The fleet counters are NOT evicted — V045's record is independent of this bound.
-      assertThat(fixture.fleetTotal(Outcome.FIRED)).isEqualTo(2L);
+          .as("the straggler is counted (3, not a fresh key at 1) — nothing regresses, nothing lost")
+          .containsEntry(yesterday, 3L)
+          .containsEntry(new StrategyEvalKey(SESSION.plusDays(1), "scalp-straggler", Outcome.FIRED), 1L);
+      assertThat(fixture.fleetTotal(Outcome.FIRED)).isEqualTo(4L);
+    }
+  }
+
+  @Test
+  void theMapIsBoundedToTheTwoMostRecentlyCountedSessions() {
+    // The bound the prune exists for: without it the map grows by up to 441 entries per day of
+    // uptime and every past day's rows are rewritten on every 3m tick. Two sessions rather than one
+    // is what buys the straggler window above.
+    try (Fixture fixture = Fixture.create()) {
+      SignalEngine.Loaded a = strategy("scalp-bounded");
+
+      fixture.engine().countEvaluation(a, bar(SESSION, "09:15"), Outcome.FIRED);
+      fixture.engine().countEvaluation(a, bar(SESSION.plusDays(1), "09:15"), Outcome.FIRED);
+      assertThat(fixture.perStrategy()).as("two sessions are retained").hasSize(2);
+
+      fixture.engine().countEvaluation(a, bar(SESSION.plusDays(2), "09:15"), Outcome.FIRED);
+
+      assertThat(fixture.perStrategy())
+          .containsOnlyKeys(
+              new StrategyEvalKey(SESSION.plusDays(1), "scalp-bounded", Outcome.FIRED),
+              new StrategyEvalKey(SESSION.plusDays(2), "scalp-bounded", Outcome.FIRED));
+      assertThat(fixture.engine().retainedSessions())
+          .isEqualTo(new SignalEngine.RetainedSessions(SESSION.plusDays(2), SESSION.plusDays(1)));
+      // The fleet counters are NOT pruned — V045's record is independent of this bound.
+      assertThat(fixture.fleetTotal(Outcome.FIRED)).isEqualTo(3L);
+    }
+  }
+
+  @Test
+  void aWeekendGapRetainsFridayThroughMonday() {
+    // The retention is "the two most recently COUNTED sessions", not calendar arithmetic — so a
+    // Friday→Monday gap keeps Friday alive all Monday, exactly like any consecutive pair.
+    try (Fixture fixture = Fixture.create()) {
+      SignalEngine.Loaded a = strategy("scalp-weekend");
+      LocalDate friday = LocalDate.of(2026, 7, 24);
+      LocalDate monday = LocalDate.of(2026, 7, 27);
+
+      fixture.engine().countEvaluation(a, bar(friday, "15:57"), Outcome.FIRED);
+      fixture.engine().countEvaluation(a, bar(monday, "09:15"), Outcome.FIRED);
+      fixture.engine().countEvaluation(a, bar(friday, "15:59"), Outcome.FIRED); // weekend straggler
+
+      assertThat(fixture.perStrategy())
+          .containsEntry(new StrategyEvalKey(friday, "scalp-weekend", Outcome.FIRED), 2L)
+          .containsEntry(new StrategyEvalKey(monday, "scalp-weekend", Outcome.FIRED), 1L);
     }
   }
 }

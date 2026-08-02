@@ -492,34 +492,46 @@ public class SwingBatchEngine {
                 doctrine.batchName(), doctrine.book(), fired);
             return new EntryResult(candidates.size(), fired, refusalReasons, false);
           }
-          // §3.4.3: an ADD only goes on if the book's aggregate open risk stays within the portfolio
-          // cap. A fresh (first) entry is NOT bounded by this cap: the deployment/daily-loss governor
-          // rails bound CAPITAL (or day P&L), not aggregate open RISK, so concurrent fresh entries can
-          // exceed doctrine's 5-6% open-risk cap today even with pyramiding OFF — reachable at current
-          // config (multiple names each risking 1% of equity). That gap is real, live, and NOT fixed
-          // here (enforcing it would refuse currently-accepted entries, a HOLD-tier owner decision) —
-          // see docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md.
-          if (isAdd
-              && pyramid.wouldBreachRiskCap(
-                  strat.definition(), EX, c.symbol(), bank, series.size() - 1, bar.close(),
-                  emissionGuard.orElse(null))) {
+          // §3.4.3 / M40 (owner-directed 2026-08-02, HOLD-tier — see
+          // docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md for the gap this closes):
+          // the book's aggregate open risk must stay within the portfolio cap for BOTH a pyramid ADD
+          // and a FRESH (first) entry — the deployment/daily-loss governor rails bound CAPITAL (or day
+          // P&L), never aggregate open RISK, so concurrent fresh entries could otherwise exceed
+          // doctrine's 5-6% cap even with pyramiding OFF (multiple names each risking 1% of equity is
+          // reachable at current config, since max_open_paper_positions=7 is shared by both Manas
+          // strategies through the one Books.MANAS_ARORA key). wouldBreachRiskCap is an EMISSION-TIME
+          // PREVIEW off the candle close, not the authority (round 4, cross-vendor review,
+          // 2026-08-02) — for a fresh entry with no existing lot on THIS symbol its own risk
+          // contribution is newQty × stopDistance, but the preview cannot see a dead-anchor paper row
+          // (this pass classifies "held" purely from active signal anchors — openLotsBySymbol above —
+          // so a symbol with an open position but no live anchor reads as fresh here), a delayed
+          // swing-effect retry, or the real slippage-adjusted fill.
+          // RiskService#manasAggregateRiskCheck is the AUTHORITATIVE write-time check that can
+          // still refuse what this preview passed.
+          if (pyramid.wouldBreachRiskCap(
+              strat.definition(), EX, c.symbol(), bank, series.size() - 1, bar.close(),
+              emissionGuard.orElse(null))) {
+            String kind = isAdd ? "pyramid add" : "fresh entry";
             log.info(
-                "{} swing: pyramid add for {} would breach the open-risk cap — skipped",
-                doctrine.batchName(), c.symbol());
-            // Add-path observability fix only (E4 §2f): three of RiskService's four audited rails
+                "{} swing: {} for {} would breach the open-risk cap — skipped",
+                doctrine.batchName(), kind, c.symbol());
+            // Audit + alert on refusal (E4 §2f pattern; M40 extends the SAME call site to the
+            // fresh-entry path rather than duplicating it): three of RiskService's four audited rails
             // (daily-loss/profit-target/heat-cap) write a risk_audit row + push an ntfy alert on trip;
-            // deployment audits only. This pyramid-add block previously matched neither group — now it
-            // joins the audit+alert group, so a future re-arm of pyramiding cannot silently omit this
-            // one trip type from the owner's audit/alert surface.
+            // deployment audits only. Both kinds share one EmissionGuard port call + one RiskService
+            // audit key (PYRAMID_RISK_CAP, per-IST-day-per-book deduped) — the free-text detail records
+            // which kind fired; a same-day add-breach and fresh-entry-breach on the same book dedupe
+            // against each other (only the first of the day is audited/alerted), see the receipt's
+            // open-doubts.
             emissionGuard.ifPresent(
                 g ->
                     g.recordPyramidRiskCapBreach(
                         doctrine.book(),
                         c.symbol(),
-                        "pyramid add for " + c.symbol() + " blocked by the "
+                        kind + " for " + c.symbol() + " blocked by the "
                             + pyramid.describe().getOrDefault("maxPortfolioRiskPct", "?")
                             + "% portfolio open-risk cap"));
-            break; // no setup may add more risk for this symbol this run
+            break; // no setup may open/add more risk for this symbol this run
           }
           if (deadline.expired()) {
             return new EntryResult(candidates.size(), fired, refusalReasons, true);
@@ -818,12 +830,10 @@ public class SwingBatchEngine {
         skipped++;
         continue;
       }
+      ExitEvaluator.Position position =
+          new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex);
       Optional<ExitEvaluator.ExitDecision> exit =
-          ExitEvaluator.evaluate(
-              strat.definition(), bank,
-              new ExitEvaluator.Position(
-                  ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex),
-              series.size() - 1);
+          ExitEvaluator.evaluate(strat.definition(), bank, position, series.size() - 1);
       if (exit.isPresent()) {
         if (deadline.expired()) {
           return new ExitResult(closed, skipped, refusalReasons, true);
@@ -838,9 +848,60 @@ public class SwingBatchEngine {
             effectSession(requiredBarDate))) {
           closed++;
         }
+      } else {
+        cacheGoverningStop(
+            doctrine, primary, strat.definition(), bank, position, series.size() - 1, entryIndex);
       }
     }
     return new ExitResult(closed, skipped, refusalReasons, false);
+  }
+
+  /**
+   * M40 cross-vendor review Critical 3 fix, round 3 (owner ruling, 2026-08-02 — supersedes round 1's
+   * {@code stop_loss} write and round 2's dedicated column, both reverted): on a bar where the
+   * position did NOT exit, CACHES a tighter (never looser — enforced in the cache itself, see {@code
+   * EmissionGuard#cacheManasGoverningStop}) governing stop for aggregate-risk accounting, IN MEMORY
+   * ONLY — never a database write, never {@code paper_positions.stop_loss}, never any new column.
+   * {@code stop_loss} is ALSO the intraday disaster-stop the paper module's 15-second bracket poller
+   * reads with no book filter; both earlier drafts of this fix risked or would have coupled the risk
+   * figure to that intraday-exit surface, so M40 ships EXIT-NEUTRAL — this call cannot change what
+   * {@code PaperBracketEvaluator} (or anything else reading {@code stop_loss}) ever sees. {@link
+   * SwingDoctrine#governingStop}'s default is {@code null} (a safe no-op) for every family except
+   * Manas, whose trail rule IS its exit_rules trailing_stop (see that method's javadoc). Fail-soft,
+   * mirroring the Major-4 fix for the risk-cap audit: this batch is the position's ONLY exit
+   * evaluator, so an accounting failure here must never propagate and skip a later position's stop
+   * evaluation this run.
+   *
+   * <p>Passes {@code primary.id()} — the anchor THIS trail was computed from — as the expected
+   * opening-signal identity (round 5, cross-vendor review Critical 1, 2026-08-02): the paper
+   * adapter validates it against the currently-open row's own {@code opening_signal_id} before
+   * caching, so a stale-anchor-treated-as-fresh position, or a close+reopen racing this write, can
+   * never have this anchor's trail attached to it under the shared symbol/side key.
+   */
+  private void cacheGoverningStop(
+      SwingDoctrine doctrine,
+      SignalRepository.SignalRow primary,
+      StrategyDefinition definition,
+      IndicatorBank bank,
+      ExitEvaluator.Position position,
+      int lastIndex,
+      int entryIndex) {
+    if (emissionGuard.isEmpty()) {
+      return;
+    }
+    try {
+      BigDecimal governingStop = doctrine.governingStop(definition, bank, position, lastIndex, entryIndex);
+      if (governingStop != null) {
+        emissionGuard
+            .get()
+            .cacheManasGoverningStop(
+                doctrine.book(), EX, primary.tradingsymbol(), "BUY", primary.id(), governingStop);
+      }
+    } catch (RuntimeException e) {
+      log.warn(
+          "{} swing: governing-stop cache failed for {} (accounting only, exit unaffected): {}",
+          doctrine.batchName(), primary.tradingsymbol(), e.getMessage());
+    }
   }
 
   private void recordMixedLotRefusal(

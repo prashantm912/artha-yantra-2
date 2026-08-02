@@ -186,7 +186,28 @@ Run in order; each answers one question. Canned SQL in §6.
     `time_stop max_bars 10`, so the correct §4.2 model **from 2026-07-25 forward** is a UNIFORM
     **+35% TP / −25% SL / 10-bar (30-minute) time stop / 15:12 square-off** — the time stop matters most
     (on 2026-07-29 not one of 41 counterfactual legs touched either bracket; every one resolved at the
-    time stop). ⚠️ The shadow book replicates brackets + structural + square-off but **NOT** the time stop
+    time stop).
+    ⚠️⚠️ **CORRECTION 2026-08-02 (task_2735acfb) — the `time_stop max_bars 10` half of that "shipped shape"
+    is FALSE, and this is the doc every future counterfactual reads, so fix the model here before running
+    one.** The brackets ARE uniform (T21/#990 put `premium_pct` 35/25 on 63/63). The **time stop is not**:
+    every scalper runs a `3m` primary, so `max_bars` is wall-clock, and the fleet spans FIVE horizons —
+    **10 = 30 min on 18 configs (12 enabled), 12 = 36 min on 12 (8), 16 = 48 min on 3 (2), 20 = 60 min on
+    18 (12), 30 = 90 min on 9 (4)**, plus 3 BTST on `max_holding_days: 1`. Only 18 of 63 configs (12 of 38
+    live) run 30 min, and #990 did not set any of them (`max_bars` in its merge diff `64f9caaa`: 0 added,
+    0 removed, 30 context). **The engine honours each strategy's own value** — verified in code
+    (`ExitEvaluator.java:692-700`, `SignalEngine.java:1672-1684`) and live (8/8 `TIME_STOP` exits held
+    exactly `max_bars × 3` min; on 07-29 14:03 two strategies entered the same bar on the same instrument
+    and exited 6 minutes apart). **And note what the counterfactual's time stop actually is:** the harness
+    (`CounterfactualService`) pins variants with **no strategy version**, and `ExitKnobs.timeStopBars`
+    counts **wall-MINUTES on the option's own 1m premium series** — a different rule, instrument and
+    resolution from the engine's per-strategy 3m index-future `max_bars`. So a uniform 30-min model is
+    still a legitimate MODELLING choice, but **it is a harness parameter and must never be described as
+    "the armed fleet-wide stop"** — that conflation is what wrongly promoted T1/T7/G13/G10 to FINAL
+    (ledger G11). **When you run a §4.2 counterfactual: state the modelled horizon as a choice, and note
+    that after the §3.24 `(bar_time, tradingsymbol)` dedupe 86.2% of legs are claimed by strategies at 2+
+    horizons — so a deduped leg has no single owning horizon to match the model to.** Full working:
+    `docs/signal-analysis/2026-08-02-tune-verdicts-vs-time-stop-spread.md`.
+    ⚠️ The shadow book replicates brackets + structural + square-off but **NOT** the time stop
     or `signal_exit`, so shadow P&L and a §4.2 counterfactual on the same legs legitimately disagree — on
     2026-07-29 they disagreed **in sign** (+₹15,260.87 vs −538.50 pts). Say which model produced which
     number. Findings files written **between 07-23 and 07-25** carry the downward-scope bias the original

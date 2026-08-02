@@ -123,6 +123,66 @@ subset is CI-enforced).
 > **need no deploy**: they alter the published OpenAPI shape and the generated TS client, not
 > runtime behaviour. New chip task_7f57c0d5 (`OpeningSignal`'s three nullable `JsonNode` fields).
 
+> **CURRENCY UPDATE 2026-08-02 (15 PRs #1220–#1235, 2 deploy rounds; main = `aa610b04`; `gh` reports 17
+> merges on the calendar day, the extra two being #1218/#1219, the tail of the preceding E4 session).**
+> Three things changed the live stack, and one thing changed what the ledger can be trusted to say.
+>
+> **LIVE NOW.** **V055 `ck_paper_positions_closed_at_matches_status`**
+> ([#1222](https://github.com/prashantm912/artha-yantra-2/pull/1222) @ `28f95e20`) — a **BICONDITIONAL**
+> (owner-directed), `CHECK (((status = 'CLOSED') = (closed_at IS NOT NULL)))`, so it also forbids a
+> non-CLOSED row carrying a `closed_at`. Applied via `up -d --force-recreate flyway-init` and probed
+> **twice**, per the standing rule that a healthy container proves nothing: by name in `pg_constraint`
+> AND by behaviour (a rollback-only INSERT of a CLOSED row with no `closed_at` was rejected). The
+> invariant had held only by convention — one writer — while `closed_at` is load-bearing for
+> `listClosed`, `PortfolioReader`, `PaperReconciliationRepository`, `GraduationService` and
+> `PaperService.equity()`'s IST-date buckets.
+>
+> **M40 — the 6% aggregate open-risk cap on FRESH Manas entries — is MERGED + DEPLOYED + LIVE**
+> ([#1221](https://github.com/prashantm912/artha-yantra-2/pull/1221) @ `70911904`; ledger row E4). Fresh
+> entries had been unbounded by the doctrine's 5–6% aggregate cap because the existing calculator was
+> wired only to the `isAdd` branch, and `max_open_paper_positions=7` is shared by BOTH Manas strategies
+> through one `Books.MANAS_ARORA` key — so 7 × 1% was reachable **with pyramiding OFF**. ⚠️ **It merged
+> as a DRAWDOWN-control change with the CAGR cost disclosed, NOT on a CAGR argument.** Current numbers
+> are #1228's re-measurement against the semantics that actually shipped: **CAGR −0.88pp (a COST, and
+> its sign FAILS drop-one robustness), maxDD −11.62pp shallower (SURVIVES 8 of 8 cap arms), Sharpe
+> +0.07.** The earlier +4.08pp "benefit" is **WITHDRAWN** — it described a ceiling case production almost
+> never reaches. The correlated-shock question the cap exists for is untouched: maxDD over a historical
+> replay is a realised-path statistic, not a tail bound. Deploy confirmed by jar fingerprint
+> (`ManasGoverningStopCache.class`, a file #1221 added).
+>
+> **The bank-cache eviction is now SELECTIVE** ([#1226](https://github.com/prashantm912/artha-yantra-2/pull/1226)
+> @ `e5e9616b`, owner-directed HOLD — it touches the LIVE signal-eval path). `SignalEngine.reload()` no
+> longer calls `bankCache.clear()`; it retains any bank whose key is still derivable from the freshly
+> loaded set. That closes chip `task_f10a03` in full and **UNBLOCKS the cheap level-triggered 20 s
+> reconcile design for F10**, which had been rejected purely over bank thrash — one strategy's flapping
+> universe used to cold-start all ~38 strategies' warm ta4j banks. **The design is not built and nothing
+> was armed by this;** what changed is that its blocking objection is gone.
+>
+> **DEPLOY STATE — do not read the above as "everything is deployed."** optimizer-service and
+> margin-service are **up to date** (0 runtime-source commits since their images). strategy-signal,
+> market-data, backtest and edge-gateway are **stale by [#1234](https://github.com/prashantm912/artha-yantra-2/pull/1234)**
+> (backtest also by #1197, edge-gateway also by `cec369ab`) — **spec-generation drift, runtime money
+> behaviour unaffected**, evidenced by the committed backtest spec saying
+> `BacktestTradeItem.entryPrice: {"type":"string"}` while the deployed service serves `{"type":"number"}`.
+> **frontend-react is the materially stale one: 4 runtime commits**, including a real type-bug fix
+> (#1212 `Insight.priority`) and two features (#1193 F5 U3 data-health flags, #1169 G16 near-miss dot
+> probe). Per-service table with image build times: ledger §0, the 2026-08-02 closeout block.
+>
+> **AND THE THING THAT CHANGED WHAT THE LEDGER MEANS.** Three audit shards (#1230/#1231/#1232) read the
+> ledger against git/gh/code and found a fabricated-justification row, five stale rows, and **8
+> genuinely-open items invisible to the enumeration recipe** — now promoted to ledger **group H**. Two
+> corrections are load-bearing platform-wide: **(1)** #941's `SessionLivenessHeartbeat` had been
+> **UNARMED for 14 days** and read as armed because the sibling BATCH var is set — it is now
+> **ARMED-UNVERIFIED**, not armed, and a scheduled task proves it Monday; **(2)** T1/T7/G13/G10 revert
+> from FINAL to **CONDITIONAL** — "measured under the 30-minute `time_stop`" was a HARNESS parameter
+> silently upgraded into a claim about armed config, and only 18 of 63 configs (12 of 38 live) actually
+> run 30 min. **No knob was reopened and no verdict was overturned.** The near-term dated gates are
+> **H1** (prove the heartbeat pings — `verify-session-heartbeat-armed-20260803`, 08-03 10:00 IST),
+> **H4** (`zombie-paper-position-audit-20260804`, 08-04 08:30 IST),
+> `verify-ca-repair-and-canaries-20260804` (08-04 17:00 IST), and the `budget_inr` revisit
+> (`revisit-scalper-budget-inr-2026-08-12`). **H2** (18 live `-pe` strategies, 0 signals since 07-21
+> against 69 non-PE) needs no new data — only someone to read the query it already has.
+
 **Re-platformed 2026-06-19 to the OpenAlgo + React master plan.**
 `docs/superpowers/plans/2026-06-19-openalgo-react-integration-master-plan.md` §16.1 is now the
 forward-work authority (Phases 0–6). The legacy **Stage A–G** system in the sections below is the

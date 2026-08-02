@@ -115,8 +115,10 @@ public interface EmissionGuard {
    * intentionally NOT implemented here; see {@code RiskService#manasAggregateRiskWouldCross}'s
    * javadoc for why a non-BUY row fails the aggregate CLOSED rather than being silently mispriced).
    * Empty on a fresh boot / before the trail arms — callers then fall back to {@code stopLoss}, the
-   * SAME conservative reading as before this whole M40 effort, not a regression. Default no-op keeps
-   * non-paper and test adapters permissive.
+   * SAME reading as before this whole M40 effort, not a regression, but NOT a rare edge case either
+   * (#1228, 2026-08-02): the trail arms at +9% gain and zero of the six live Manas positions
+   * qualified on the day measured, so this is the normal operating regime, not a fallback branch.
+   * Default no-op keeps non-paper and test adapters permissive.
    *
    * <p><b>{@code openingSignalId} (round 5, cross-vendor review Critical 1, 2026-08-02): the identity
    * this stop was computed FOR, not merely the key it should be cached under.</b> {@code

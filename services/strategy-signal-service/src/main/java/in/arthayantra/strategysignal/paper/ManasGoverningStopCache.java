@@ -37,10 +37,15 @@ import org.springframework.stereotype.Component;
  * {@link PaperEmissionGuard#openRiskInr(java.util.List, ManasGoverningStopCache)} and {@code
  * RiskService#manasAggregateRiskWouldCross}, the ONLY consumers.
  *
- * <p>Empty on a fresh boot, or for any position the daily batch has not yet evaluated since the
- * last restart — callers fall back to the persisted (stale) {@code stopLoss} in that gap, the SAME
- * conservative behaviour the aggregate cap already had before this whole M40 effort. Not a
- * regression: a cache miss can only make the risk figure MORE conservative (wider), never less.
+ * <p>Empty on a fresh boot, or for any position whose trail has not yet ARMED — callers fall back
+ * to the persisted (stale) {@code stopLoss}, the SAME behaviour the aggregate cap already had
+ * before this whole M40 effort. Correctness-wise this is safe: a cache miss can only make the risk
+ * figure MORE conservative (wider), never less. <b>But it is NOT a rare edge case — measured
+ * 2026-08-02 (#1228), it is the NORMAL operating regime.</b> {@code SwingDoctrine#governingStop}
+ * only populates this cache once a position's trail arms at {@code arm_pct: 9} (+9% gain); zero of
+ * the six open Manas positions qualified that day (peak gains 0.50–8.19%), so the cache is cold for
+ * the WHOLE book independent of restarts, and stays cold for any position that never reaches +9%.
+ * Treat "cold" as the default case to design and reason about, not the fallback branch.
  *
  * <p>Never loosens: {@link #put} keeps the tighter of the new value and whatever is already
  * cached for that id, mirroring the "tighten-only" guarantee a persisted ratchet would have

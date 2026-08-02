@@ -214,7 +214,11 @@ public class RiskService {
    * {@code stop_loss} itself, and whether Manas should ever become intraday-trail-managed, are
    * explicitly OUT of scope here (a separate, later, owner decision — see the PR receipt). The cache
    * is empty on a fresh boot / before the trail arms, falling back to the persisted {@code stopLoss}
-   * — the SAME conservative reading this rail had before any of M40, not a regression.
+   * — the SAME reading this rail had before any of M40, not a regression. <b>This fallback is the
+   * NORMAL case, not a rare edge one</b> (#1228, 2026-08-02): the trail only arms at +9% gain, zero
+   * of the six live Manas positions qualified that day, so this cap runs on the persisted-stop basis
+   * most of the time in practice — closer to a ~6-position rail than a true trailing-risk one until
+   * the arm rate is actually observed.
    *
    * <p>Manas-only ({@code BookResolver.MANAS_ARORA}) and deliberately PURE like {@link
    * #deploymentWouldCross} — no audit row, no ntfy, safe to call from the fill path; the caller emits

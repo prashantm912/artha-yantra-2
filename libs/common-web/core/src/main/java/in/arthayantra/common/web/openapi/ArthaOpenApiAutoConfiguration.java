@@ -27,6 +27,19 @@ public class ArthaOpenApiAutoConfiguration {
     return new SchemaNameCollisionDetector();
   }
 
+  /** Observes which record components are {@link java.math.BigDecimal}-backed. */
+  @Bean
+  public BigDecimalStringModelConverter bigDecimalStringModelConverter() {
+    return new BigDecimalStringModelConverter();
+  }
+
+  /** Retypes response-side decimals to {@code string}, matching {@code ToStringSerializer}. */
+  @Bean
+  public BigDecimalStringCustomizer bigDecimalStringCustomizer(
+      BigDecimalStringModelConverter bigDecimalStringModelConverter) {
+    return new BigDecimalStringCustomizer(bigDecimalStringModelConverter);
+  }
+
   /** Rewrites nullable record references into an honest OpenAPI 3.1 {@code anyOf}. */
   @Bean
   public NullableRefCustomizer nullableRefCustomizer() {

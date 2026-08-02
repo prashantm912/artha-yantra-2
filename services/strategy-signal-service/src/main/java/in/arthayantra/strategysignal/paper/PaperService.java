@@ -793,41 +793,42 @@ public class PaperService {
     // outcome, not a boolean — only CALCULATED_BREACH may be audited via recordPyramidRiskCapBreach
     // (which consumes the per-day dedup key); every other refusal reason gets its own message and
     // NEVER touches that audit/dedup, so an accidental unsupported-side/uncomputable refusal can
-    // never suppress a later, genuine breach the same day.
+    // never suppress a later, genuine breach the same day. Round 7 hardening (Codex, owner-approved,
+    // 2026-08-02): a switch EXPRESSION, not an if/else-if — every ManasRiskOutcome constant must
+    // yield a value here, so adding a 6th outcome later without a matching case is a COMPILE ERROR,
+    // not a silent fall-through into a branch that was never meant to carry it (the exact shape of
+    // the round-6 Critical this whole method exists to prevent, one level out). Deliberately no
+    // `default` — if that error ever fires, the fix is to add a real case, not to silence it.
     RiskService.ManasRiskOutcome riskOutcome =
         risk.manasAggregateRiskCheck(
             book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(), request.stopLoss());
-    if (riskOutcome == RiskService.ManasRiskOutcome.CALCULATED_BREACH) {
-      String detail =
-          "fill-time aggregate risk for " + tradingsymbol + " would breach the "
-              + risk.manasAggregateRiskCapPct().toPlainString()
-              + "% portfolio open-risk cap (fill " + fill.fillPrice().toPlainString() + ")";
-      risk.recordPyramidRiskCapBreach(book, tradingsymbol, detail);
-      throw new ApiException(
-          422,
-          ErrorCodes.RISK_ENTRY_BLOCKED,
-          "entry blocked by risk governor (" + RiskService.PYRAMID_RISK_CAP + ") on book " + book
-              + " — " + detail,
-          Map.of("book", book, "rail", RiskService.PYRAMID_RISK_CAP));
-    } else if (riskOutcome != RiskService.ManasRiskOutcome.ADMIT) {
-      String reason =
-          switch (riskOutcome) {
-            case UNSUPPORTED_SIDE -> "an unsupported side (Manas is long-only; no live SELL row"
-                + " exists to verify short-risk arithmetic against)";
-            case UNDEFINED_GOVERNING_STOP -> "an undefined governing stop somewhere in the book"
-                + " (neither a cached trail nor a persisted stop_loss)";
-            case NON_POSITIVE_EQUITY -> "non-positive book equity (a percentage of it is undefined)";
-            default -> "an uncomputable aggregate risk";
-          };
-      String detail =
-          "fill-time aggregate risk for " + tradingsymbol + " could not be safely calculated: "
-              + reason + " — refusing rather than admitting an unverifiable fill";
-      throw new ApiException(
-          422,
-          ErrorCodes.RISK_ENTRY_BLOCKED,
-          "entry blocked by risk governor (" + RiskService.MANAS_RISK_UNCOMPUTABLE + ") on book "
-              + book + " — " + detail,
-          Map.of("book", book, "rail", RiskService.MANAS_RISK_UNCOMPUTABLE));
+    ApiException riskRefusal =
+        switch (riskOutcome) {
+          case ADMIT -> null;
+          case CALCULATED_BREACH -> {
+            String detail =
+                "fill-time aggregate risk for " + tradingsymbol + " would breach the "
+                    + risk.manasAggregateRiskCapPct().toPlainString()
+                    + "% portfolio open-risk cap (fill " + fill.fillPrice().toPlainString() + ")";
+            risk.recordPyramidRiskCapBreach(book, tradingsymbol, detail);
+            yield new ApiException(
+                422,
+                ErrorCodes.RISK_ENTRY_BLOCKED,
+                "entry blocked by risk governor (" + RiskService.PYRAMID_RISK_CAP + ") on book "
+                    + book + " — " + detail,
+                Map.of("book", book, "rail", RiskService.PYRAMID_RISK_CAP));
+          }
+          case UNSUPPORTED_SIDE -> uncomputableRiskRefusal(
+              book, tradingsymbol, "an unsupported side (Manas is long-only; no live SELL row"
+                  + " exists to verify short-risk arithmetic against)");
+          case UNDEFINED_GOVERNING_STOP -> uncomputableRiskRefusal(
+              book, tradingsymbol, "an undefined governing stop somewhere in the book (neither a"
+                  + " cached trail nor a persisted stop_loss)");
+          case NON_POSITIVE_EQUITY -> uncomputableRiskRefusal(
+              book, tradingsymbol, "non-positive book equity (a percentage of it is undefined)");
+        };
+    if (riskRefusal != null) {
+      throw riskRefusal;
     }
     if (risk.deploymentWouldCross(book, projectedCost)) {
       String detail =
@@ -977,6 +978,26 @@ public class PaperService {
     BigDecimal riskBudget = equity.multiply(riskPct).divide(BigDecimal.valueOf(100));
     // longValue (not longValueExact): advisory only — it must never throw and roll back a real fill.
     return riskBudget.divide(stopDistance, 0, RoundingMode.DOWN).longValue();
+  }
+
+  /**
+   * Round 7 (owner-approved, 2026-08-02): builds the refusal for a Manas
+   * {@link RiskService.ManasRiskOutcome} value that means "could not be safely calculated" —
+   * {@code UNSUPPORTED_SIDE} / {@code UNDEFINED_GOVERNING_STOP} / {@code NON_POSITIVE_EQUITY}.
+   * Deliberately NEVER calls {@link RiskService#recordPyramidRiskCapBreach} — that rail, and its
+   * per-day dedup key, are reserved for a genuine {@code CALCULATED_BREACH} (see that method's
+   * javadoc for why conflating the two silently suppressed a later, real breach the same day).
+   */
+  private ApiException uncomputableRiskRefusal(String book, String tradingsymbol, String reason) {
+    String detail =
+        "fill-time aggregate risk for " + tradingsymbol + " could not be safely calculated: "
+            + reason + " — refusing rather than admitting an unverifiable fill";
+    return new ApiException(
+        422,
+        ErrorCodes.RISK_ENTRY_BLOCKED,
+        "entry blocked by risk governor (" + RiskService.MANAS_RISK_UNCOMPUTABLE + ") on book "
+            + book + " — " + detail,
+        Map.of("book", book, "rail", RiskService.MANAS_RISK_UNCOMPUTABLE));
   }
 
   /**

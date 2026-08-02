@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.signals;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -31,6 +32,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -1353,6 +1355,148 @@ class SignalEngineIntegrationTest extends StrategySignalIntegrationTestBase {
       isolatedEngine.reload();
 
       assertThat(banks).containsKey("warm-sentinel");
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * Chip task_f10a03, residual half — THE WIN. A FLAPPING universe (one strategy resolving
+   * differently on the next attempt) carries a DIFFERENT identity, so the {@code @Order(19)}
+   * equality early-return does not fire and the install path runs. Under the old unconditional
+   * {@code bankCache.clear()} that ONE strategy's flip cold-started EVERY other strategy's warm
+   * ta4j banks — the residual thrash #892 could not reach, since {@code retainLastGood} only makes
+   * a STABLE outage identity-equal.
+   *
+   * <p>Asserts both directions inside ONE reload, which is what makes it discriminating: the
+   * untouched strategy's bank is RETAINED (red against {@code clear()} — the key is gone) and the
+   * flipper's own now-unmintable bank is EVICTED (red against a retain-everything predicate).
+   */
+  @Test
+  @Order(23)
+  @SuppressWarnings("unchecked")
+  void aFlappingUniverseNoLongerColdStartsEveryOtherStrategysBanks() {
+    StrategyRepository.StrategyRow stable =
+        uniquePublishedRow(KEEP_BEST_A_YAML, "engine-it-flap-stable", "Flap Stable");
+    StrategyRepository.StrategyRow flapping =
+        uniquePublishedRow(KEEP_BEST_B_YAML, "engine-it-flap-flip", "Flap Flip");
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenReturn(List.of(stable, flapping));
+    when(isolatedRegistry.findVersionById(stable.publishedVersionId()))
+        .thenReturn(repository.findVersionById(stable.publishedVersionId()));
+    when(isolatedRegistry.findVersionById(flapping.publishedVersionId()))
+        .thenReturn(repository.findVersionById(flapping.publishedVersionId()));
+
+    AtomicBoolean flipped = new AtomicBoolean(false);
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation -> {
+              boolean isFlapper = KEEP_BEST_B_UNDERLYING.equals(invocation.<String>getArgument(1));
+              String symbol = isFlapper && flipped.get() ? "SIGFLAP" : "SIGTEST";
+              return Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", symbol)));
+            });
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(stable.slug(), flapping.slug());
+
+      Map<String, Object> banks =
+          (Map<String, Object>) ReflectionTestUtils.getField(isolatedEngine, "bankCache");
+      // Keys built through the PRODUCTION helper, so this can never assert against a shape the
+      // engine does not actually mint (SignalEngine.evaluateAtBarClose uses the same method).
+      String stableKey = SignalEngine.bankKey(stable.publishedVersionId(), "NSE", "SIGTEST");
+      String flapperKeyBeforeFlip =
+          SignalEngine.bankKey(flapping.publishedVersionId(), "NSE", "SIGTEST");
+      banks.put(stableKey, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+      banks.put(flapperKeyBeforeFlip, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+
+      flipped.set(true);
+      isolatedEngine.reload();
+
+      // Both still loaded — this is a UNIVERSE flip, not a drop; the reload installed.
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(stable.slug(), flapping.slug());
+      // THE WIN: the strategy that did not change keeps its warm bank.
+      assertThat(banks).containsKey(stableKey);
+      // ...and the one that DID change still has its stale bank evicted.
+      assertThat(banks).doesNotContainKey(flapperKeyBeforeFlip);
+    } finally {
+      isolatedEngine.stop();
+    }
+  }
+
+  /**
+   * Chip task_f10a03, residual half — THE HAZARD SIDE, and the one worth more effort. UNDER-eviction
+   * serves a stale warm indicator bank to live signal evaluation: wrong values, silently, with every
+   * test green and the engine reporting healthy. So eviction is pinned for BOTH shapes that must
+   * still invalidate — a universe member LEAVING, and a real published-VERSION bump — each paired in
+   * the same reload with a key that MUST survive, so neither half can pass under a
+   * clear-everything or a retain-everything predicate.
+   */
+  @Test
+  @Order(24)
+  @SuppressWarnings("unchecked")
+  void aVersionBumpAndADepartedUniverseMemberStillEvictTheirBanks() {
+    StrategyRepository.StrategyRow booted =
+        uniquePublishedRow(COLD_START_YAML, "engine-it-evict", "Evict");
+    AtomicReference<StrategyRepository.StrategyRow> currentRow = new AtomicReference<>(booted);
+    StrategyRepository isolatedRegistry = mock(StrategyRepository.class);
+    when(isolatedRegistry.listAll()).thenAnswer(invocation -> List.of(currentRow.get()));
+    when(isolatedRegistry.findVersionById(any(UUID.class)))
+        .thenAnswer(invocation -> repository.findVersionById(invocation.getArgument(0)));
+
+    AtomicBoolean memberLeft = new AtomicBoolean(false);
+    FuturesUniverseResolver isolatedResolver = mock(FuturesUniverseResolver.class);
+    when(isolatedResolver.resolve(anyString(), anyString(), anyString(), anyInt()))
+        .thenAnswer(
+            invocation ->
+                memberLeft.get()
+                    ? Optional.of(List.of(new StrategyDefinition.InstrumentRef("NSE", "SIGTEST")))
+                    : Optional.of(
+                        List.of(
+                            new StrategyDefinition.InstrumentRef("NSE", "SIGTEST"),
+                            new StrategyDefinition.InstrumentRef("NSE", "SIGLEAVE"))));
+
+    SignalEngine isolatedEngine = isolatedEngine(isolatedRegistry, isolatedResolver);
+    try {
+      isolatedEngine.start();
+      assertThat(isolatedEngine.loadedSlugs()).containsExactly(booted.slug());
+
+      Map<String, Object> banks =
+          (Map<String, Object>) ReflectionTestUtils.getField(isolatedEngine, "bankCache");
+      String v1Stay = SignalEngine.bankKey(booted.publishedVersionId(), "NSE", "SIGTEST");
+      String v1Leave = SignalEngine.bankKey(booted.publishedVersionId(), "NSE", "SIGLEAVE");
+      banks.put(v1Stay, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+      banks.put(v1Leave, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+
+      // (a) A universe member leaves — same version, one instrument fewer.
+      memberLeft.set(true);
+      isolatedEngine.reload();
+      assertThat(banks).doesNotContainKey(v1Leave);
+      assertThat(banks).containsKey(v1Stay);
+
+      // (b) A REAL published-version bump: new draft + publish moves published_version_id, so the
+      // v1-keyed bank can never be minted again. max_positions is deliberately inert w.r.t. the
+      // universe and the indicators — only the versionId is meant to move.
+      String bumpedYaml =
+          repository
+              .findVersionById(booted.publishedVersionId())
+              .orElseThrow()
+              .configYaml()
+              .replace("max_positions: 1", "max_positions: 2");
+      registryService.update(booted.id(), bumpedYaml, "patch", null);
+      registryService.publish(booted.id(), null, null);
+      StrategyRepository.StrategyRow bumped = repository.findById(booted.id()).orElseThrow();
+      assertThat(bumped.publishedVersionId()).isNotEqualTo(booted.publishedVersionId());
+      currentRow.set(bumped);
+
+      String v2Stay = SignalEngine.bankKey(bumped.publishedVersionId(), "NSE", "SIGTEST");
+      banks.put(v2Stay, mock(in.arthayantra.strategyengine.eval.IndicatorBank.class));
+      isolatedEngine.reload();
+
+      assertThat(banks).doesNotContainKey(v1Stay);
+      assertThat(banks).containsKey(v2Stay);
     } finally {
       isolatedEngine.stop();
     }

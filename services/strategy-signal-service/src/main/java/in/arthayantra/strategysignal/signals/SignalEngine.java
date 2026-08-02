@@ -465,7 +465,8 @@ public class SignalEngine {
   private volatile int lastReloadUnresolvedDrops;
   // Package-visible so tests can shorten it; ONE source of truth (no @Value default to drift from).
   long kiteConnectedReloadDelayMillis = KITE_CONNECTED_RELOAD_DELAY_MILLIS;
-  // Warm ta4j banks per (version|instrument) — cleared on reload/hot-swap (P1-12, D17 live).
+  // Warm ta4j banks per (version|instrument) — swept on reload/hot-swap, keeping only the keys the
+  // freshly loaded set can still mint (P1-12, D17 live; see the sweep in reload()).
   private final Map<String, IndicatorBank> bankCache = new ConcurrentHashMap<>();
   private final Map<String, LocalDate> preCloseDone = new ConcurrentHashMap<>();
   private final ExecutorService evalExecutor =
@@ -944,8 +945,11 @@ public class SignalEngine {
     // whole design. `container != null` keeps BOOT on the install path — it MUST resubscribe, since
     // that is what registers the kite.status listener the retry chain depends on. Telemetry still
     // refreshes: the published-set snapshot must stay current or the 20s reconcile would see
-    // phantom drift. (The cheap half of chip task_f10a03; its broader unconditional-clear question
-    // is untouched.)
+    // phantom drift. (The cheap half of chip task_f10a03.) NOTE: the selective sweep below now makes
+    // this branch redundant FOR BANK RETENTION specifically — identical identities imply identical
+    // versionIds and universes, so the sweep would evict nothing anyway. It is still what skips the
+    // resubscribe and the reinstall, so it stays; it is simply no longer the only thing standing
+    // between an equal reload and a cold indicator cache.
     if (container != null && freshIdentities.equals(installedIdentities)) {
       this.lastReloadUnresolvedDrops = unresolvedDrops;
       this.lastReloadedPublishedSet = publishedVersionSetOf(all);
@@ -961,7 +965,34 @@ public class SignalEngine {
       }
       return outcome;
     }
-    bankCache.clear(); // definitions/universes may have changed — banks rebuild on next bar (P1-12)
+    // Chip task_f10a03, residual half. The equality early-return above covers an IDENTICAL reload;
+    // what it cannot cover is a FLAPPING universe — one strategy that resolves on attempt N and
+    // differently (or, off the keep-best chain, not at all) on N+1. Its identity differs, so the
+    // early-return does not fire, and the old unconditional clear() then cold-started ALL ~38
+    // strategies' banks because ONE of them flipped.
+    // Evict SELECTIVELY instead: a bank stays valid iff its cache key is still derivable from the
+    // fresh set, and the key IS the whole invalidation surface — IndicatorBank.build(definition,
+    // signal, provider) takes exactly three inputs, each keyed or immutable:
+    //   * definition — keyed by versionId. strategy_versions is structurally immutable: the only two
+    //     UPDATEs anywhere in the repo touch status/published_at (StrategyRepository:255,258, D18),
+    //     and the definition is a pure function of that row's config (StrategyCompiler.compile,
+    //     :796). Same versionId ⇒ same definition, always.
+    //   * signal InstrumentRef — keyed by exchange:tradingsymbol; evaluateAtBarClose constructs the
+    //     ref from those same two key components (:1579).
+    //   * provider — the single injected LiveSeriesStore, never reassigned. Its map is mutated ONLY
+    //     by computeIfAbsent (LiveSeriesStore:48,71,115 — no put/remove/clear/replace), so an
+    //     EngineSeries instance is never SWAPPED for a key: a retained bank's captured series are
+    //     the same objects a rebuilt bank would resolve, and they keep receiving appends.
+    // `book` and `scalper` ride in LoadedIdentity for the INSTALL decision but are NOT bank inputs.
+    // Under-eviction is the dangerous direction (a stale warm bank silently feeding live evaluation,
+    // every test green), so the predicate retains ONLY what the fresh set proves still valid — a
+    // version bump, a universe member leaving, or a strategy dropped all evict exactly as before.
+    // Second line of defence for anything that slips through: the ONLY read is evaluateAtBarClose,
+    // reached only for a strategy in `loaded` and a symbol in ITS universe (:1521-1529), so a key
+    // can be read back only while it is in bankKeysOf(loaded) — an over-retained entry is
+    // unreachable, not mis-served.
+    Set<String> freshBankKeys = bankKeysOf(fresh);
+    bankCache.keySet().removeIf(key -> !freshBankKeys.contains(key));
     this.loaded = List.copyOf(fresh);
     this.lastReloadUnresolvedDrops = unresolvedDrops;
     // Snapshot the published set THIS reload was based on (from the same registry read), so the 20s
@@ -1037,6 +1068,32 @@ public class SignalEngine {
                 ? StrategyCoverageSnapshot.TerminalState.DEGRADED_TERMINAL
                 : StrategyCoverageSnapshot.TerminalState.HEALTHY,
             classifications);
+  }
+
+  /**
+   * The warm-bank cache key. ONE definition, shared by the mint site ({@link #evaluateAtBarClose})
+   * and the reload sweep — if those two ever built the string differently the sweep would either
+   * evict every bank (pointless but harmless) or retain one the fresh set never proved valid, which
+   * is the failure that serves stale indicator values to live evaluation.
+   */
+  static String bankKey(UUID versionId, String exchange, String tradingsymbol) {
+    return versionId + "|" + exchange + ":" + tradingsymbol;
+  }
+
+  /**
+   * Every bank key {@code entries} could legitimately mint — the retention set for the reload sweep.
+   * Built from the universe because that is exactly what the mint site is gated on: a context symbol
+   * feeds series only and is {@code continue}d before any evaluation ({@link #onClosedBar}), so no
+   * key outside this set is reachable.
+   */
+  private static Set<String> bankKeysOf(List<Loaded> entries) {
+    Set<String> out = new java.util.HashSet<>();
+    for (Loaded entry : entries) {
+      for (StrategyDefinition.InstrumentRef instrument : entry.universe()) {
+        out.add(bankKey(entry.versionId(), instrument.exchange(), instrument.tradingsymbol()));
+      }
+    }
+    return out;
   }
 
   /** The {@link LoadedIdentity} of every entry — what the engine would LOSE by not installing. */
@@ -1569,10 +1626,11 @@ public class SignalEngine {
     // indicators (EMA/RSI/SUPERTREND) from bar 0 in BigDecimal math — O(n²) over the session on
     // the single eval thread. The underlying EngineSeries instances are mutated in place (never
     // replaced) by LiveSeriesStore, and indicators are pure functions of (series, index), so a
-    // warm bank stays correct as bars append; reload()/hot-swap clears the cache.
+    // warm bank stays correct as bars append; reload()/hot-swap sweeps the cache down to the keys
+    // the newly loaded set can still mint (the key IS the invalidation surface — see reload()).
     IndicatorBank bank =
         bankCache.computeIfAbsent(
-            strategy.versionId() + "|" + exchange + ":" + tradingsymbol,
+            bankKey(strategy.versionId(), exchange, tradingsymbol),
             key ->
                 IndicatorBank.build(
                     strategy.definition(),

@@ -1,5 +1,24 @@
 # 2026-08-02 — M40: how often would the 6% aggregate open-risk cap have bound? (v3, corrected)
 
+> ## ⚠️ SUPERSEDED FOR THE ENFORCEMENT DECISION — read the successor first
+>
+> **[`2026-08-02-m40-remeasure-shipped-semantics.md`](2026-08-02-m40-remeasure-shipped-semantics.md)**
+> re-measures this question against the semantics **PR #1221 actually ships**, and that doc — not this
+> one — is what the `#1221` merge decision rests on.
+>
+> This document's candidate arm charges every held position its **current trailing stop**. That equals
+> production's behaviour only when `ManasGoverningStopCache` is POPULATED for the position. Verified in
+> the successor: the cache is in-memory (empty after every `strategy-signal-service` restart) **and** is
+> only ever written for a position whose Chandelier trail has **armed at +9%** — so in current live
+> conditions it is empty or near-empty, and production charges the persisted, never-ratcheted **initial**
+> stop instead. This doc never ran that arm. Its headline (**139 refusals; CAGR +4.08pp, maxDD −6.99pp,
+> Sharpe +0.13**) therefore describes a *ceiling case* of #1221, not its expected behaviour.
+>
+> Everything else here stands and is reused unchanged by the successor: the committed harness, the
+> 2,491/2,491 production-fidelity check, the portfolio symbol-coverage assertion, the population-bug
+> correction history, and the standing caveat that **an average-return backtest cannot evaluate what a
+> risk cap exists for**. The v3 figures below remain valid *as labelled* — as the cache-warm bracket.
+
 Owner-commissioned measurement, per the ledger's M40 reframe (`docs/superpowers/plans/2026-07-02-remaining-items.md`
 row E4, landed via [#1216](https://github.com/prashantm912/artha-yantra-2/pull/1216) @ `878e86f4`): fresh Manas
 entries are unbounded by the doctrine's 5–6% aggregate open-risk cap

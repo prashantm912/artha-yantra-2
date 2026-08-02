@@ -781,6 +781,25 @@ public class PaperService {
     // straddle is not a limit (cross-vendor round 3). Transaction-scoped, so for a straddle (whose
     // legs share one transaction) it is held across BOTH legs.
     positions.lockBookCapital(book);
+    // M40 cross-vendor review Critical 1+2 fix (2026-08-02): the AUTHORITATIVE aggregate open-risk
+    // check, under the same lock, against the ACTUAL fill/stop this write is about to persist — not
+    // SwingBatchEngine's emission-time estimate off the candle close (see RiskService
+    // #manasAggregateRiskWouldCross's javadoc for exactly which two gaps this closes and the one it
+    // deliberately does not). Manas-only; a no-op read for every other book.
+    if (risk.manasAggregateRiskWouldCross(
+        book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(), request.stopLoss())) {
+      String detail =
+          "fill-time aggregate risk for " + tradingsymbol + " would breach the "
+              + risk.manasAggregateRiskCapPct().toPlainString()
+              + "% portfolio open-risk cap (fill " + fill.fillPrice().toPlainString() + ")";
+      risk.recordPyramidRiskCapBreach(book, tradingsymbol, detail);
+      throw new ApiException(
+          422,
+          ErrorCodes.RISK_ENTRY_BLOCKED,
+          "entry blocked by risk governor (" + RiskService.PYRAMID_RISK_CAP + ") on book " + book
+              + " — " + detail,
+          Map.of("book", book, "rail", RiskService.PYRAMID_RISK_CAP));
+    }
     if (risk.deploymentWouldCross(book, projectedCost)) {
       String detail =
           "projected " + projectedCost.toPlainString()

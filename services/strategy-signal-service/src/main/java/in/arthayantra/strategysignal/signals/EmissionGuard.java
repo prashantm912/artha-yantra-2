@@ -80,14 +80,33 @@ public interface EmissionGuard {
   /**
    * The book's current aggregate OPEN risk in ₹: {@code Σ qty × max(0, avgEntry − stopLoss)} over its
    * open positions (a position whose stop has trailed above its entry contributes 0 — "trailing reduces
-   * open risk", §2.2/§3.5.B). The persisted stop is the position's ORIGINAL bracket, so this is a
-   * conservative (never-understated) read. The Manas pyramiding gate adds the prospective new lot's risk
-   * to this and blocks the add if the total would breach the ≤5–6% portfolio cap (§3.4.3). Default 0 ⇒
+   * open risk", §2.2/§3.5.B). The Manas pyramiding gate adds the prospective new lot's risk to this and
+   * blocks the add/fresh-entry if the total would breach the ≤5–6% portfolio cap (§3.4.3). Default 0 ⇒
    * paper disabled / no open positions (the gate then never blocks on risk).
+   *
+   * <p>The persisted {@code stopLoss} this reads was, before the M40 Critical 3 fix (2026-08-02), ALWAYS
+   * the position's ORIGINAL bracket — Manas's daily Chandelier trail was computed fresh every batch run
+   * but never written back, so "trailing reduces open risk" was true in doctrine but not in this figure.
+   * {@link #ratchetStopLoss} now keeps the persisted value in sync with the trail (tighten-only), so this
+   * read is CURRENT for Manas, not merely conservative. Still conservative for any family/position where
+   * nothing ratchets it (Minervini; a Manas position before its trail arms).
    */
   default BigDecimal openRiskInr(String book) {
     return BigDecimal.ZERO;
   }
+
+  /**
+   * M40 Critical 3 fix (2026-08-02): ratchets a held position's persisted {@code stop_loss} UP to
+   * {@code newStop} when it is tighter than the currently stored value — so {@link #openRiskInr} (and
+   * the Manas aggregate open-risk cap it feeds) reads the position's LIVE governing stop instead of the
+   * one frozen at open. Pure accounting: this never itself closes a position or otherwise changes what
+   * the engine's own {@code ExitEvaluator} decides. The paper adapter enforces "never loosens" at the
+   * SQL layer (a no-op write when {@code newStop} is not strictly tighter), so a caller can never
+   * accidentally widen a stop by calling this with a stale/late value. Default no-op keeps non-paper and
+   * test adapters permissive.
+   */
+  default void ratchetStopLoss(
+      String book, String exchange, String tradingsymbol, String side, BigDecimal newStop) {}
 
   /**
    * §3.7 hero-zero profit-funded sizing — the lot-rounded qty for an expiry-day hero-zero leg sized to

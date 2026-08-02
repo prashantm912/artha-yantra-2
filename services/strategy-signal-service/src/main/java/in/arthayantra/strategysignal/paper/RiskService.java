@@ -15,6 +15,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Global paper-risk limits (A12 / FP-42). Tripping the daily loss pauses ENTRY emission for the IST
@@ -64,6 +66,14 @@ public class RiskService {
    */
   private final boolean enforcementEnabled;
 
+  /**
+   * M40 cross-vendor review Critical 1/2 fix (2026-08-02): the SAME property key + default {@code
+   * in.arthayantra.strategysignal.manas.ManasPyramidPolicy} reads, so the two never drift — the
+   * authoritative write-time check ({@link #manasAggregateRiskWouldCross}) and the emission-time
+   * estimate share one knob.
+   */
+  private final BigDecimal manasAggregateRiskCapPct;
+
   /** Per-day, per-cap trip dedup (key -> IST day it last tripped); re-armed on an {@code update}. */
   private final java.util.Map<String, LocalDate> trippedOn = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -87,7 +97,9 @@ public class RiskService {
       PaperMarginClient marginClient,
       NotifierClient notifier,
       Clock clock,
-      @Value("${artha.paper.risk.enabled:false}") boolean enforcementEnabled) {
+      @Value("${artha.paper.risk.enabled:false}") boolean enforcementEnabled,
+      @Value("${artha.manas-arora.pyramid.max-portfolio-risk-pct:6.0}")
+          BigDecimal manasAggregateRiskCapPct) {
     this.settings = settings;
     this.positions = positions;
     this.account = account;
@@ -95,6 +107,7 @@ public class RiskService {
     this.notifier = notifier;
     this.clock = clock;
     this.enforcementEnabled = enforcementEnabled;
+    this.manasAggregateRiskCapPct = manasAggregateRiskCapPct;
   }
 
   /** Whether a book's emitted ENTRY signals should auto-open a paper position (the auto-paper toggle). */
@@ -149,6 +162,109 @@ public class RiskService {
     }
     BigDecimal value = deployment.get().value().path("value").decimalValue();
     return Optional.of(account.equity(book).multiply(value).divide(BigDecimal.valueOf(100)));
+  }
+
+  /** The Manas aggregate open-risk cap (%), for a refusal-detail message. */
+  public BigDecimal manasAggregateRiskCapPct() {
+    return manasAggregateRiskCapPct;
+  }
+
+  /**
+   * M40 cross-vendor review Critical 1+2 fix (2026-08-02): the aggregate open-risk rail, projected
+   * against the ACTUAL fill {@code PaperService#openOrder} is about to persist — the authoritative
+   * check at the paper-position WRITE, under the same book lock {@link #deploymentWouldCross} is
+   * called from. This is deliberately NOT a replacement for {@code
+   * ManasPyramidPolicy#wouldBreachRiskCap}'s emission-time estimate (off the candle close, before the
+   * leg/qty/slippage exist) — it is the closer-to-truth backstop the review found missing, mirroring
+   * why {@link #deploymentWouldCross} itself exists only here and not at emission.
+   *
+   * <p>Two defects this closes together (both apply from the SAME read of {@link
+   * PaperPositionRepository#listOpen}, the paper ledger's own truth — not "is this symbol currently
+   * held" derived from active signal anchors, which a reconciled-but-orphaned paper row can disagree
+   * with):
+   *
+   * <ul>
+   *   <li><b>Slippage.</b> The emission-time estimate uses the bar close; the real fill adds the
+   *       equity BUY slippage ({@code ltp_slippage/v1}, 5 bps fallback), so a preview that lands
+   *       exactly ON the cap can have its ACTUAL persisted risk land fractionally over it.
+   *   <li><b>Averaging onto an existing row.</b> {@code PaperService#upsertPosition} averages a 2nd
+   *       fill for the same {@code (book,exchange,tradingsymbol,side)} key into ONE row and KEEPS the
+   *       row's ORIGINAL stop. A naive "existing total + this fill's own qty×stopDistance" therefore
+   *       undercounts: the true post-fill risk for that symbol is {@code (newAvg − originalStop) ×
+   *       newQty}, computed against the SAME stop the row will actually retain, not the request's own
+   *       stop. This method looks up the existing row (if any) for the exact key, replaces its OLD
+   *       contribution with the PROJECTED post-fill one, and only then compares the total to equity.
+   * </ul>
+   *
+   * <p>⚠️ Known residual gap (Critical 3, not fixed here — a materially larger, separately-scoped
+   * change): {@code paper_positions.stop_loss} is set ONCE at open and never updated by Manas's daily
+   * Chandelier trail ({@code updateBrackets}'s one production caller is the MANUAL {@code
+   * editBrackets} path) — so every OTHER open position's contribution to {@code existingTotal} below
+   * reads a STALE, wider (never tighter) stop than the position's true current governing one. Since a
+   * trail only ever tightens a long's stop, this bias is CONSERVATIVE (over-states existing risk, so
+   * this gate can refuse a fresh entry the true tighter-stop risk would actually have allowed) — it
+   * cannot let true aggregate risk secretly exceed the cap, unlike the two defects this method fixes.
+   *
+   * <p>Manas-only ({@code BookResolver.MANAS_ARORA}) and deliberately PURE like {@link
+   * #deploymentWouldCross} — no audit row, no ntfy, safe to call from the fill path; the caller emits
+   * the refusal audit via {@link #recordPyramidRiskCapBreach}, mirroring the deployment rail's split.
+   */
+  public boolean manasAggregateRiskWouldCross(
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal fillPrice,
+      BigDecimal requestStopLoss) {
+    if (!BookResolver.MANAS_ARORA.equals(book) || fillPrice == null || qty <= 0) {
+      return false;
+    }
+    BigDecimal equity = account.equity(book);
+    if (equity.signum() <= 0) {
+      return false;
+    }
+    List<PositionRow> open = positions.listOpen(book);
+    BigDecimal existingTotal = PaperEmissionGuard.openRiskInr(open);
+    PositionRow existing =
+        open.stream()
+            .filter(
+                p ->
+                    p.exchange().equals(exchange)
+                        && p.tradingsymbol().equals(tradingsymbol)
+                        && p.side().equals(side))
+            .findFirst()
+            .orElse(null);
+    BigDecimal oldSymbolRisk =
+        existing == null ? BigDecimal.ZERO : PaperEmissionGuard.openRiskInr(List.of(existing));
+    BigDecimal projectedSymbolRisk;
+    if (existing != null) {
+      // Mirrors PaperService#upsertPosition's averaging math exactly: the row's qty/avg move, its
+      // stop does NOT (an add never re-brackets the original lot).
+      long newQty = existing.qty() + qty;
+      BigDecimal newAvg =
+          existing
+              .avgEntryPrice()
+              .multiply(BigDecimal.valueOf(existing.qty()))
+              .add(fillPrice.multiply(BigDecimal.valueOf(qty)))
+              .divide(BigDecimal.valueOf(newQty), 4, RoundingMode.HALF_UP);
+      BigDecimal governingStop = existing.stopLoss();
+      projectedSymbolRisk =
+          governingStop == null
+              ? BigDecimal.ZERO
+              : newAvg.subtract(governingStop).max(BigDecimal.ZERO)
+                  .multiply(BigDecimal.valueOf(newQty));
+    } else {
+      projectedSymbolRisk =
+          requestStopLoss == null
+              ? BigDecimal.ZERO
+              : fillPrice.subtract(requestStopLoss).max(BigDecimal.ZERO)
+                  .multiply(BigDecimal.valueOf(qty));
+    }
+    BigDecimal projectedTotal = existingTotal.subtract(oldSymbolRisk).add(projectedSymbolRisk);
+    BigDecimal totalPct =
+        projectedTotal.divide(equity, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
+    return totalPct.compareTo(manasAggregateRiskCapPct) > 0;
   }
 
   /**
@@ -289,17 +405,39 @@ public class RiskService {
    * kind it was). Called via the {@code EmissionGuard} port so {@code swing}/{@code manas} — which must
    * never import this module (the acyclic module-graph rule that already forced the port pattern for
    * every other paper↔swing signal) — never need to know this class exists.
+   *
+   * <p>{@link Propagation#REQUIRES_NEW} (cross-vendor review, 2026-08-02): {@code PaperService
+   * #openOrder}'s own write-time call to this method sits INSIDE that method's {@code @Transactional}
+   * boundary, immediately before it throws the 422 that refuses the fill — the same "throw rolls back
+   * everything in this transaction" hazard {@link PaperOrderRejectionRecorder}'s javadoc documents for
+   * the sibling rejection ledger. Without its own fresh transaction the {@code risk_audit} row this
+   * method writes would roll back with the refused fill, silently discarding the very audit trail the
+   * refusal is supposed to leave. A no-op-equivalent change for the OTHER call site
+   * (SwingBatchEngine's entry pass, which runs outside any enclosing transaction) — REQUIRES_NEW just
+   * starts a fresh transaction there too, byte-behaviour-identical to before.
    */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void recordPyramidRiskCapBreach(String book, String symbol, String detail) {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
     String dedupKey = tripKey(book, PYRAMID_RISK_CAP);
     if (today.equals(trippedOn.get(dedupKey))) {
       return;
     }
-    trippedOn.put(dedupKey, today);
-    settings.audit(book, PYRAMID_RISK_CAP, "TRIP", detail);
-    log.warn("risk pyramid-cap {} tripped for {} ({})", book, symbol, detail);
-    pushAlert("ArthaYantra Risk — pyramid open-risk cap (" + book + ")", detail);
+    // Major 4 fix (cross-vendor review, 2026-08-02): this is now reachable from SwingBatchEngine's
+    // entry pass BEFORE its exit pass runs (the batch's ONLY exit evaluator for open positions), so an
+    // uncaught audit-write failure here would abort the whole run and skip every stop evaluation for
+    // the day — the exact "an observability write must never break the run" rule SwingBatchRecorder's
+    // flag-snapshot capture() documents and follows. Mirror that fail-soft shape: never let the JDBC
+    // write escape, and never consume the per-day dedup key on a write that did not durably land (a
+    // retry later the same day should still get one real audit row).
+    try {
+      settings.audit(book, PYRAMID_RISK_CAP, "TRIP", detail);
+      trippedOn.put(dedupKey, today);
+      log.warn("risk pyramid-cap {} tripped for {} ({})", book, symbol, detail);
+      pushAlert("ArthaYantra Risk — pyramid open-risk cap (" + book + ")", detail);
+    } catch (Exception e) {
+      log.warn("risk_audit not written for pyramid-cap trip {}/{}: {}", book, symbol, e.getMessage());
+    }
   }
 
   /** One fail-soft ntfy push for a governor trip (skipped silently when ntfy is unconfigured). */

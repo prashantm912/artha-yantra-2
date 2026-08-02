@@ -242,6 +242,21 @@ public class ManasDoctrine implements SwingDoctrine {
         : null;
   }
 
+  @Override
+  public BigDecimal governingStop(
+      StrategyDefinition definition,
+      IndicatorBank bank,
+      ExitEvaluator.Position position,
+      int lastIndex,
+      int entryIndex) {
+    // M40 Critical 3 fix (2026-08-02): safe to equate to trailLevel ONLY for Manas — its trail rule IS
+    // the family's declared exit_rules trailing_stop, so ExitEvaluator#trailStop's javadoc guarantee
+    // ("equals the price the live exit check uses") holds here. See SwingDoctrine#governingStop's
+    // javadoc for why the interface default is null and why Minervini must not override this the same
+    // way (its trailLevel is the advisory 50-day-MA, not its real exit trigger).
+    return trailLevel(definition, bank, position, lastIndex, entryIndex);
+  }
+
   private static BigDecimal decimal(JsonNode node, String field) {
     return node != null && node.hasNonNull(field) ? new BigDecimal(node.path(field).asText()) : null;
   }

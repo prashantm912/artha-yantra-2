@@ -63,7 +63,9 @@ class RiskServiceHeatCapTest {
     when(account.equity(BOOK)).thenReturn(new BigDecimal("150000"));
     when(notifier.configured("NTFY")).thenReturn(true);
     RiskService risk =
-        new RiskService(settings, positions, account, margin, notifier, CLOCK, enforcementEnabled);
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, enforcementEnabled,
+            new BigDecimal("6.0"));
     return new Harness(risk, settings, margin, notifier);
   }
 

@@ -139,4 +139,32 @@ public interface SwingDoctrine {
       ExitEvaluator.Position position,
       int lastIndex,
       int entryIndex);
+
+  /**
+   * M40 cross-vendor review Critical 3 fix (2026-08-02): the position's CURRENT effective governing
+   * stop, for persisting into {@code paper_positions.stop_loss} so the Manas aggregate open-risk cap
+   * (which reads that persisted column) sees LIVE risk instead of the value frozen at open. Called by
+   * {@link SwingBatchEngine}'s exit pass on a bar where the position did NOT exit; it never affects
+   * the exit DECISION itself (that stays exactly {@link ExitEvaluator#evaluate}, unchanged).
+   *
+   * <p><b>Deliberately DISTINCT from {@link #trailLevel}</b>, which is a family-specific ADVISORY
+   * display figure that need NOT equal the family's actual enforced exit trigger — Minervini's is the
+   * 50-day-MA, a commonly-watched reference level, NOT its real exit rule (percent/ATR-based per its
+   * own {@code exit_rules}). Persisting {@code trailLevel}'s value here for every family would corrupt
+   * Minervini's {@code stop_loss} with an unrelated number. The default returns {@code null} (a safe
+   * no-op — nothing is persisted) so only a family whose OWN governing exit rule this figure actually
+   * mirrors byte-for-byte need override it; today that is Manas alone, via {@code
+   * ExitEvaluator#trailStop} — see that method's javadoc for the "equals the price the live exit
+   * check uses" guarantee that makes it safe to write into the risk-accounting column. The write side
+   * ({@code EmissionGuard#ratchetStopLoss}) separately enforces "never loosens", so a stale/late read
+   * of this value can only be a costless no-op, never a wrong tighten OR a silent loosen.
+   */
+  default BigDecimal governingStop(
+      StrategyDefinition definition,
+      IndicatorBank bank,
+      ExitEvaluator.Position position,
+      int lastIndex,
+      int entryIndex) {
+    return null;
+  }
 }

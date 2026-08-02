@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategysignal.notifier.NotifierClient;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -46,7 +47,9 @@ class RiskServicePyramidCapTest {
     PaperMarginClient margin = mock(PaperMarginClient.class);
     NotifierClient notifier = mock(NotifierClient.class);
     when(notifier.configured("NTFY")).thenReturn(true);
-    RiskService risk = new RiskService(settings, positions, account, margin, notifier, CLOCK, false);
+    RiskService risk =
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, false, new BigDecimal("6.0"));
     return new Harness(risk, settings, notifier);
   }
 

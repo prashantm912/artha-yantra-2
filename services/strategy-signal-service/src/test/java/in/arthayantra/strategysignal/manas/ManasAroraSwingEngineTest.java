@@ -79,6 +79,54 @@ class ManasAroraSwingEngineTest {
   }
 
   @Test
+  void anArmedTrailRatchetsTheGoverningStopWithoutFiringAnExit() throws IOException {
+    // M40 Critical 3 fix (2026-08-02): proves SwingBatchEngine's exit pass — with the REAL ATR/
+    // Chandelier arithmetic (ExitEvaluator, unmodified) — calls the NEW ratchet port when a held
+    // position's trail has armed but nothing exits, and that it does NOT fire an exit in the same run
+    // (the two are mutually exclusive branches of the same evaluation). See
+    // PaperServiceManasAggregateRiskIntegrationTest for the "reaches the column and lowers computed
+    // risk" half of this proof.
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    JsonNode config = breakoutConfig();
+    StrategyRepository registry = mock(StrategyRepository.class);
+    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+    when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, config)));
+
+    List<EngineCandle> series = craftArmedTrail();
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries())
+        .thenReturn(
+            List.of(anchor(42L, publishedVersion, new BigDecimal("152"), series.get(0).bucketStart())));
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(series);
+    ManasFunnelClient funnel = mock(ManasFunnelClient.class);
+    when(funnel.buyableAndOnDeck()).thenReturn(List.of());
+
+    EmissionGuard guard = mock(EmissionGuard.class);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, mock(SignalPublisher.class), events, Optional.of(guard),
+            passthroughTx(), new ObjectMapper(), Clock.systemUTC());
+    ManasDoctrine doctrine =
+        new ManasDoctrine(
+            funnel, signals, new ManasPyramidPolicy(false, new BigDecimal("5.0"), 3, new BigDecimal("6.0")),
+            new ObjectMapper(), true, 520, 10, 1440);
+
+    SwingBatchEngine.SwingRun run = engine.runDaily(doctrine);
+
+    assertThat(run.exits()).as("the armed trail has not been BREACHED — nothing exits").isZero();
+    ArgumentCaptor<BigDecimal> stop = ArgumentCaptor.forClass(BigDecimal.class);
+    verify(guard).ratchetStopLoss(eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), stop.capture());
+    assertThat(stop.getValue())
+        .as("the armed (breakeven-floored) trail ratchets to AT LEAST entry price — strictly tighter"
+            + " than the persisted initial stop (entry − 2×ATR, well below entry)")
+        .isGreaterThanOrEqualTo(new BigDecimal("152"));
+  }
+
+  @Test
   void aPyramidedSymbolExitsAllLotsAtOnceAndExpiresEverySibling() throws IOException {
     ExitHarness h = new ExitHarness();
     h.stubAnchors(
@@ -509,6 +557,24 @@ class ManasAroraSwingEngineTest {
     }
     bars.add(bar(26, 140.0));
     bars.add(bar(27, 120.0));
+    return bars;
+  }
+
+  /**
+   * Entry at ₹152 (day 0), flat through day 19 (ATR(20) warmup), then a gradual, controlled rise to
+   * ~₹170 by day 35 (+11.8% off entry) — well past the §3.5B +9% arm threshold, but slow enough
+   * (~1.1/day) to stay under BOTH square-off triggers (35% in ≤3 sessions; 40% over the 10-day MA) and
+   * leave the armed Chandelier trail (peak − 2×rolling-ATR) comfortably below the current close (no
+   * trailing_stop fire either). Used by {@code anArmedTrailRatchetsTheGoverningStopWithoutFiringAnExit}.
+   */
+  private static List<EngineCandle> craftArmedTrail() {
+    List<EngineCandle> bars = new ArrayList<>();
+    for (int d = 0; d <= 19; d++) {
+      bars.add(bar(d, 152.0));
+    }
+    for (int d = 20; d <= 35; d++) {
+      bars.add(bar(d, 152.0 + 1.125 * (d - 19)));
+    }
     return bars;
   }
 

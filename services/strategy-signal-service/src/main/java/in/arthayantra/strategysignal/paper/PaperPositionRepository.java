@@ -174,6 +174,28 @@ public class PaperPositionRepository {
   }
 
   /**
+   * M40 Critical 3 fix (2026-08-02): ratchets an OPEN position's {@code stop_loss} UP to {@code
+   * newStop} — a no-op (0 rows, returned) unless {@code newStop} is STRICTLY tighter than the
+   * currently stored value (or none is stored yet). Unlike {@link #updateBrackets} (the MANUAL
+   * bracket-edit path, which sets an operator-supplied value unconditionally), this is the automatic
+   * daily-trail write and must never be able to LOOSEN a stop regardless of what the caller passes —
+   * enforced here at the SQL layer, not by caller discipline, so a stale/late trail read can only be a
+   * costless no-op.
+   */
+  public int ratchetStopLoss(
+      String book, String exchange, String tradingsymbol, String side, BigDecimal newStop) {
+    return jdbc.update(
+        "UPDATE paper_positions SET stop_loss=? WHERE book=? AND exchange=? AND tradingsymbol=?"
+            + " AND side=? AND status='OPEN' AND (stop_loss IS NULL OR ? > stop_loss)",
+        newStop,
+        book,
+        exchange,
+        tradingsymbol,
+        side,
+        newStop);
+  }
+
+  /**
    * The most recent position for a book+key regardless of status (newest opened first) — the V2
    * idempotency read-back: a duplicate submission within the retry window resolves to the still-OPEN
    * position it created; a late replay resolves to that position's row even after it closed. (A key

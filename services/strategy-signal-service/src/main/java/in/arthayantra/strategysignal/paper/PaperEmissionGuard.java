@@ -191,6 +191,12 @@ public class PaperEmissionGuard implements EmissionGuard {
   }
 
   @Override
+  public void ratchetStopLoss(
+      String book, String exchange, String tradingsymbol, String side, BigDecimal newStop) {
+    positions.ratchetStopLoss(book, exchange, tradingsymbol, side, newStop);
+  }
+
+  @Override
   public void recordZeroSizedEntry(
       long signalId,
       String strategySlug,

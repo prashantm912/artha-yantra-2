@@ -825,12 +825,10 @@ public class SwingBatchEngine {
         skipped++;
         continue;
       }
+      ExitEvaluator.Position position =
+          new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex);
       Optional<ExitEvaluator.ExitDecision> exit =
-          ExitEvaluator.evaluate(
-              strat.definition(), bank,
-              new ExitEvaluator.Position(
-                  ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex),
-              series.size() - 1);
+          ExitEvaluator.evaluate(strat.definition(), bank, position, series.size() - 1);
       if (exit.isPresent()) {
         if (deadline.expired()) {
           return new ExitResult(closed, skipped, refusalReasons, true);
@@ -845,9 +843,47 @@ public class SwingBatchEngine {
             effectSession(requiredBarDate))) {
           closed++;
         }
+      } else {
+        ratchetGoverningStop(
+            doctrine, primary, strat.definition(), bank, position, series.size() - 1, entryIndex);
       }
     }
     return new ExitResult(closed, skipped, refusalReasons, false);
+  }
+
+  /**
+   * M40 cross-vendor review Critical 3 fix (2026-08-02): on a bar where the position did NOT exit,
+   * persists a tighter (never looser — enforced at the write, see {@code
+   * EmissionGuard#ratchetStopLoss}) governing stop for aggregate-risk accounting. {@link
+   * SwingDoctrine#governingStop}'s default is {@code null} (a safe no-op) for every family except
+   * Manas, whose trail rule IS its exit_rules trailing_stop (see that method's javadoc). Fail-soft,
+   * mirroring the Major-4 fix for the risk-cap audit: this batch is the position's ONLY exit
+   * evaluator, so an accounting-write failure here must never propagate and skip a later position's
+   * stop evaluation this run.
+   */
+  private void ratchetGoverningStop(
+      SwingDoctrine doctrine,
+      SignalRepository.SignalRow primary,
+      StrategyDefinition definition,
+      IndicatorBank bank,
+      ExitEvaluator.Position position,
+      int lastIndex,
+      int entryIndex) {
+    if (emissionGuard.isEmpty()) {
+      return;
+    }
+    try {
+      BigDecimal governingStop = doctrine.governingStop(definition, bank, position, lastIndex, entryIndex);
+      if (governingStop != null) {
+        emissionGuard
+            .get()
+            .ratchetStopLoss(doctrine.book(), EX, primary.tradingsymbol(), "BUY", governingStop);
+      }
+    } catch (RuntimeException e) {
+      log.warn(
+          "{} swing: governing-stop ratchet failed for {} (accounting only, exit unaffected): {}",
+          doctrine.batchName(), primary.tradingsymbol(), e.getMessage());
+    }
   }
 
   private void recordMixedLotRefusal(

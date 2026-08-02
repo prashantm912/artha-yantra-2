@@ -129,6 +129,12 @@ class ManasRiskCapReplayTest {
   private static final BigDecimal RISK_PCT_EQUITY = new BigDecimal("1.0"); // both YAMLs' risk_pct_equity
   private static final int MAX_OPEN = 7; // V021 max_open_paper_positions
   private static final double AGGREGATE_CAP_PCT = 6.0; // doctrine §2.2, the candidate arm's new rail
+  /**
+   * M40 re-measurement (2026-08-02): the equity-BUY slippage {@code LtpSlippageV1} adds to the
+   * reference price. PR #1221's authoritative cap check runs against that FILL, not the candle close
+   * v3 projected against.
+   */
+  private static final double ENTRY_SLIPPAGE_BPS = 5.0;
 
   /**
    * All external inputs are system properties with defaults matching this repo's own dev-stack
@@ -204,8 +210,30 @@ class ManasRiskCapReplayTest {
     // ---- Main replay: two independent arms (baseline = MAX_OPEN=7 only; candidate = + the real
     // 6% aggregate open-risk cap), one symbol-shared book each, entries-then-exits pass ordering ----
     LocalDate[] allDates = allTradingDates(jdbc, from);
-    ArmResult baseline = runArm(data, allDates, sim, false, from);
-    ArmResult candidate = runArm(data, allDates, sim, true, from);
+    java.util.Set<String> noExempt = java.util.Set.of();
+    ArmSpec baselineSpec =
+        new ArmSpec("baseline (MAX_OPEN=7 only)", false, StopBasis.TRAILED, 0, 0.0, noExempt);
+    // v3's candidate, reproduced EXACTLY (trailed basis, close-priced) — the harness-validation gate:
+    // if this no longer prints #1218's figures, the harness changed under us and nothing else here is
+    // trustworthy.
+    ArmSpec v3Spec =
+        new ArmSpec("v3 candidate (trailed basis, close-priced)", true, StopBasis.TRAILED, 0, 0.0, noExempt);
+    // What PR #1221 actually ships, at the realistic end: ManasGoverningStopCache is empty at the entry
+    // pass of the first nightly batch after any strategy-signal-service restart, and the fallback is the
+    // persisted, never-ratcheted stop_loss. Plus the fill-priced projection.
+    ArmSpec shippedColdSpec =
+        new ArmSpec("SHIPPED, cache cold (initial-stop basis, fill-priced)", true, StopBasis.INITIAL,
+            0, ENTRY_SLIPPAGE_BPS, noExempt);
+    // The other bracket: cache warm on every session (no restart ever) — the ceiling #1221 can reach.
+    ArmSpec shippedWarmSpec =
+        new ArmSpec("SHIPPED, cache warm (trailed basis, fill-priced)", true, StopBasis.TRAILED,
+            0, ENTRY_SLIPPAGE_BPS, noExempt);
+
+    ArmResult baseline = runArm(data, allDates, sim, baselineSpec, from);
+    ArmResult v3Candidate = runArm(data, allDates, sim, v3Spec, from);
+    ArmResult shippedCold = runArm(data, allDates, sim, shippedColdSpec, from);
+    ArmResult shippedWarm = runArm(data, allDates, sim, shippedWarmSpec, from);
+    ArmResult candidate = v3Candidate; // the v3 reporting blocks below keep their original meaning
 
     // Cross-vendor review round 2 (Critical): "2,491/2,491 symbols pass identity" (the fidelity check
     // above) says NOTHING about whether the portfolio replay's own pointer-advance loop actually reaches
@@ -235,11 +263,77 @@ class ManasRiskCapReplayTest {
         expectedParticipating, candidate.participatingSymbols.size(),
         "candidate arm's portfolio-replay symbol coverage must match the independently expected"
             + " population");
+    // M40 re-measurement: the SAME independent coverage assertion for every added arm. A shipped-
+    // semantics arm that silently replayed a different population would look exactly like a finding.
+    out.append("shippedCold.participatingSymbols=").append(shippedCold.participatingSymbols.size()).append("\n");
+    out.append("shippedWarm.participatingSymbols=").append(shippedWarm.participatingSymbols.size()).append("\n");
+    assertEquals(
+        expectedParticipating, shippedCold.participatingSymbols.size(),
+        "shipped-cold arm's symbol coverage must match the expected population");
+    assertEquals(
+        expectedParticipating, shippedWarm.participatingSymbols.size(),
+        "shipped-warm arm's symbol coverage must match the expected population");
+    assertEquals(
+        baseline.participatingSymbols, shippedCold.participatingSymbols,
+        "baseline and shipped-cold must replay the IDENTICAL symbol set, not merely the same count");
 
     out.append("\n--- baseline (today's live rail: MAX_OPEN=7 only) ---\n");
     out.append(armSummary(baseline));
     out.append("\n--- candidate (baseline + real 6% aggregate open-risk cap) ---\n");
     out.append(armSummary(candidate));
+    out.append("\n=== M40 RE-MEASUREMENT: arms under the semantics PR #1221 actually ships ===\n");
+    out.append("entrySlippageBps=").append(ENTRY_SLIPPAGE_BPS).append("\n");
+    out.append("\n--- ").append(shippedColdSpec.name()).append(" ---\n");
+    out.append(armSummary(shippedCold));
+    out.append("\n--- ").append(shippedWarmSpec.name()).append(" ---\n");
+    out.append(armSummary(shippedWarm));
+
+    // ---- Hybrid sweep: cache cold on 1 session in N (N=1 == always cold; large N -> always warm) ----
+    out.append("\n--- hybrid sweep (cache cold on 1 session in N; deploy cadence sets N) ---\n");
+    for (int n : new int[] {1, 2, 3, 5, 10, 20}) {
+      ArmResult h =
+          runArm(
+              data, allDates, sim,
+              new ArmSpec("hybrid N=" + n, true, StopBasis.HYBRID, n, ENTRY_SLIPPAGE_BPS, noExempt),
+              from);
+      assertEquals(
+          expectedParticipating, h.participatingSymbols.size(),
+          "hybrid N=" + n + " arm's symbol coverage must match the expected population");
+      out.append("N=").append(n).append(" coldShare=")
+          .append(String.format(Locale.ROOT, "%.0f%%", 100.0 / n)).append("  ")
+          .append(armSummary(h).replace("\n", " | "));
+      out.append("\n");
+    }
+
+    // ---- Per-calendar-year return delta (sign-robustness: is one year carrying the whole result?) ---
+    out.append("\n--- per-calendar-year return %, baseline vs SHIPPED-cold (sign robustness) ---\n");
+    out.append(perYearDelta(baseline, shippedCold));
+
+    // ---- Drop-k: waive the cap for the k biggest marginal-refused winners and re-run -----------------
+    List<String> shippedRefused = marginalRefusedKeys(baseline, shippedCold);
+    out.append("\n--- drop-k sensitivity (cap waived for the k largest |PnL%| marginal refusals) ---\n");
+    Map<String, ClosedOrOpenEntry> baseEntries = baseline.allEntriesByKey();
+    List<String> byAbsPnl = new ArrayList<>(shippedRefused);
+    byAbsPnl.sort(
+        Comparator.comparingDouble(
+                (String k) -> {
+                  Double p = baseEntries.get(k).pnlPct;
+                  return p == null ? 0.0 : Math.abs(p);
+                })
+            .reversed());
+    for (int k : new int[] {1, 3, 5, 10}) {
+      if (k > byAbsPnl.size()) {
+        continue;
+      }
+      java.util.Set<String> exempt = new java.util.HashSet<>(byAbsPnl.subList(0, k));
+      ArmResult dk =
+          runArm(
+              data, allDates, sim,
+              new ArmSpec("drop-" + k, true, StopBasis.INITIAL, 0, ENTRY_SLIPPAGE_BPS, exempt),
+              from);
+      out.append("k=").append(k).append(" exempt=").append(exempt).append("  ")
+          .append(armSummary(dk).replace("\n", " | ")).append("\n");
+    }
 
     // ---- Marginal-refused set: admitted in baseline, refused ONLY by the aggregate cap in candidate
     Map<String, ClosedOrOpenEntry> baselineEntries = baseline.allEntriesByKey();
@@ -283,6 +377,26 @@ class ManasRiskCapReplayTest {
     // ---- Real aggregate-risk-% distribution (baseline arm, sampled at every entry decision) -------
     out.append("\n--- real aggregate open-risk % distribution (baseline arm, at every entry decision) ---\n");
     out.append(riskDistribution(baseline));
+
+    // ---- M40 re-measurement: the same marginal-refused analysis under SHIPPED semantics ------------
+    out.append("\n--- marginal-refused under SHIPPED-cold semantics (full list) ---\n");
+    out.append(refusedStats(baseline, shippedRefused, true));
+    out.append("\n--- marginal-refused under SHIPPED-warm semantics (summary only) ---\n");
+    out.append(refusedStats(baseline, marginalRefusedKeys(baseline, shippedWarm), false));
+    out.append("\n--- marginal-refused under v3 semantics, recomputed in-harness (summary only) ---\n");
+    out.append(refusedStats(baseline, marginalRefusedKeys(baseline, v3Candidate), false));
+    // The risk-% distribution the SHIPPED (cold-cache, initial-stop) basis actually sees. v3's table
+    // was sampled on the trailed basis; on the persisted-stop basis every trailed-up winner keeps
+    // charging its full initial risk, so this distribution sits materially higher — which is the whole
+    // mechanism by which the cap binds more often than v3 modelled.
+    ArmResult baselineOnInitialBasis =
+        runArm(
+            data, allDates, sim,
+            new ArmSpec("baseline, risk sampled on the initial-stop basis", false, StopBasis.INITIAL,
+                0, ENTRY_SLIPPAGE_BPS, noExempt),
+            from);
+    out.append("\n--- aggregate open-risk % distribution on the SHIPPED (initial-stop) basis ---\n");
+    out.append(riskDistribution(baselineOnInitialBasis));
 
     System.out.println(out);
     Path outFile =
@@ -873,7 +987,52 @@ class ManasRiskCapReplayTest {
     double currentStop() {
       return trailArmed ? Math.max(initialStop, trailStop) : initialStop;
     }
+
+    /**
+     * M40 re-measurement (2026-08-02): the stop the aggregate-risk sum should charge this lot under a
+     * given modelled basis. {@code TRAILED} is v3's model (and equals production's WARM-cache value);
+     * {@code INITIAL} is production on a COLD cache — {@code PaperEmissionGuard.effectiveStop} falling
+     * back to the persisted, never-ratcheted {@code paper_positions.stop_loss}.
+     */
+    double stopFor(StopBasis basis, boolean cacheCold) {
+      return switch (basis) {
+        case TRAILED -> currentStop();
+        case INITIAL -> initialStop;
+        case HYBRID -> cacheCold ? initialStop : currentStop();
+      };
+    }
   }
+
+  /**
+   * Which stop the modelled aggregate open-risk sum charges each held lot. Production
+   * ({@code PaperEmissionGuard.effectiveStop}, PR #1221) reads {@code ManasGoverningStopCache} when
+   * populated and the persisted {@code paper_positions.stop_loss} otherwise, so these three bracket it:
+   * {@code TRAILED} = cache always warm (v3's model), {@code INITIAL} = cache always cold,
+   * {@code HYBRID} = cold on one session in {@code restartEverySessions}.
+   */
+  private enum StopBasis {
+    TRAILED,
+    INITIAL,
+    HYBRID
+  }
+
+  /**
+   * One replay arm's configuration. The v3 pair is {@code arm(name, false/true, TRAILED, 0, 0, set())}
+   * — every added field defaults to a no-op so the two original arms stay byte-identical.
+   *
+   * @param entrySlippageBps the new lot's risk is projected against the FILL, not the candle close —
+   *     production's authoritative check runs inside {@code PaperService.openOrder} against
+   *     {@code fill.fillPrice()}. Affects ONLY the cap projection, never recorded P&L (both arms stay
+   *     gross, so the DELTA is not confounded by a one-sided cost model).
+   * @param capExemptKeys {@code symbol@entryDate} keys the cap is waived for — the drop-k lever.
+   */
+  private record ArmSpec(
+      String name,
+      boolean enforceAggregateCap,
+      StopBasis stopBasis,
+      int restartEverySessions,
+      double entrySlippageBps,
+      java.util.Set<String> capExemptKeys) {}
 
   private record Refusal(String symbol, String setup, LocalDate date, String reason) {
     String key() {
@@ -920,7 +1079,8 @@ class ManasRiskCapReplayTest {
    */
   private static ArmResult runArm(
       Map<String, SymbolData> data, LocalDate[] allDates, ManasAroraSwingBacktest sim,
-      boolean enforceAggregateCap, LocalDate from) {
+      ArmSpec spec, LocalDate from) {
+    boolean enforceAggregateCap = spec.enforceAggregateCap();
     ArmResult r = new ArmResult();
     // BUGFIX (cross-vendor review round 2, Critical): each symbol's bar array starts at `warmStart`
     // (~600 days before `from`, for indicator warmup), but `allDates` starts AT `from`. Initializing
@@ -947,7 +1107,16 @@ class ManasRiskCapReplayTest {
     StrategyDefinition.SizingSpec sizing =
         new StrategyDefinition.SizingSpec("atr_risk", Map.of("risk_pct_equity", RISK_PCT_EQUITY));
 
-    for (LocalDate date : allDates) {
+    for (int sessionIdx = 0; sessionIdx < allDates.length; sessionIdx++) {
+      LocalDate date = allDates[sessionIdx];
+      // M40 re-measurement: was strategy-signal-service restarted since the previous nightly batch?
+      // If so ManasGoverningStopCache is EMPTY at this batch's entry pass and every held lot falls back
+      // to its persisted (never-ratcheted) initial stop. Deterministic (index-modulo, not RNG) so the
+      // run stays byte-reproducible; N=1 means "cold every session".
+      boolean cacheCold =
+          spec.stopBasis() == StopBasis.HYBRID
+              && spec.restartEverySessions() > 0
+              && sessionIdx % spec.restartEverySessions() == 0;
       // advance pointers; find today's active bar index per symbol
       Map<String, Integer> todayIdx = new HashMap<>();
       for (Map.Entry<String, SymbolData> e : data.entrySet()) {
@@ -1017,13 +1186,23 @@ class ManasRiskCapReplayTest {
         if (qty <= 0) {
           continue; // ZERO_SIZE — no entry in either arm, not a cap-driven refusal
         }
-        double riskBeforePct = 100.0 * aggregateRiskInr(open) / equity;
+        double existingRisk = aggregateRiskInr(open, spec.stopBasis(), cacheCold);
+        double riskBeforePct = 100.0 * existingRisk / equity;
         if (open.size() >= MAX_OPEN) {
           r.refusals.add(new Refusal(symbol, setup, date, "MAX_OPEN"));
           continue;
         }
+        // The new lot's own contribution is projected against the FILL, not the candle close: PR
+        // #1221's authoritative check runs under PaperService.openOrder's book lock against
+        // fill.fillPrice(), which for an equity BUY carries the LtpSlippageV1 bps fallback. The
+        // request's stop is unchanged (it was computed at emission off the close), so the projected
+        // distance widens by exactly the slippage. 0 bps reproduces v3.
+        double fillPrice = entryPrice * (1.0 + spec.entrySlippageBps() / 10_000.0);
+        double capStopDistance = fillPrice - initStop;
         if (enforceAggregateCap
-            && wouldBreachAggregateCap(aggregateRiskInr(open), qty, stopDistance, equity, AGGREGATE_CAP_PCT)) {
+            && !spec.capExemptKeys().contains(symbol + "@" + date)
+            && wouldBreachAggregateCap(
+                existingRisk, qty, capStopDistance, equity, AGGREGATE_CAP_PCT)) {
           r.refusals.add(new Refusal(symbol, setup, date, "AGG_CAP"));
           continue;
         }
@@ -1110,10 +1289,11 @@ class ManasRiskCapReplayTest {
     return STARTING_CAPITAL + realized + unrealized;
   }
 
-  private static double aggregateRiskInr(Map<String, OpenLot> open) {
+  private static double aggregateRiskInr(
+      Map<String, OpenLot> open, StopBasis basis, boolean cacheCold) {
     double risk = 0;
     for (OpenLot lot : open.values()) {
-      risk += Math.max(0, lot.entryPrice - lot.currentStop()) * lot.qty;
+      risk += Math.max(0, lot.entryPrice - lot.stopFor(basis, cacheCold)) * lot.qty;
     }
     return risk;
   }
@@ -1202,6 +1382,117 @@ class ManasRiskCapReplayTest {
     var /= (monthly.size() - 1);
     double sd = Math.sqrt(var);
     return sd == 0 ? 0 : mean / sd * Math.sqrt(12.0);
+  }
+
+  /**
+   * M40 re-measurement: the {@code symbol@date} keys admitted in {@code baseline} but refused by the
+   * aggregate cap in {@code arm} — the directly-comparable marginal set (same extraction the v3 doc
+   * used inline, lifted to a method so every arm can be reported the same way).
+   */
+  private static List<String> marginalRefusedKeys(ArmResult baseline, ArmResult arm) {
+    Map<String, ClosedOrOpenEntry> baselineEntries = baseline.allEntriesByKey();
+    List<String> keys = new ArrayList<>();
+    for (Refusal r : arm.refusals) {
+      if (r.reason.equals("AGG_CAP") && baselineEntries.containsKey(r.key())) {
+        keys.add(r.key());
+      }
+    }
+    return keys;
+  }
+
+  /**
+   * M40 re-measurement: mean / median / win-rate / best / worst over a marginal-refused key set, plus
+   * the full per-trade list. v3 reported the mean and win rate but computed the median in a separate
+   * {@code awk} pass; doing it in-harness removes that hand step.
+   */
+  private static String refusedStats(ArmResult baseline, List<String> keys, boolean listTrades) {
+    StringBuilder sb = new StringBuilder();
+    Map<String, ClosedOrOpenEntry> be = baseline.allEntriesByKey();
+    java.util.Set<LocalDate> sessions = new java.util.TreeSet<>();
+    List<Double> pnls = new ArrayList<>();
+    for (String key : keys) {
+      ClosedOrOpenEntry e = be.get(key);
+      sessions.add(e.entryDate);
+      if (e.pnlPct != null) {
+        pnls.add(e.pnlPct);
+      }
+      if (listTrades) {
+        sb.append(
+            String.format(
+                Locale.ROOT, "%s %s entry=%s exit=%s pnlPct=%s exitReason=%s%n",
+                e.setup, e.symbol, e.entryDate, e.exitDate,
+                e.pnlPct == null ? "OPEN-AT-END" : String.format(Locale.ROOT, "%.2f", e.pnlPct),
+                e.exitReason == null ? "-" : e.exitReason));
+      }
+    }
+    sb.append("count=").append(keys.size()).append(" distinctSessions=").append(sessions.size())
+        .append(" closed=").append(pnls.size()).append("\n");
+    if (pnls.isEmpty()) {
+      return sb.toString();
+    }
+    List<Double> sorted = new ArrayList<>(pnls);
+    java.util.Collections.sort(sorted);
+    int n = sorted.size();
+    double median =
+        n % 2 == 1 ? sorted.get(n / 2) : (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
+    double mean = sorted.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+    long wins = sorted.stream().filter(v -> v > 0).count();
+    long losses = sorted.stream().filter(v -> v < 0).count();
+    sb.append(
+        String.format(
+            Locale.ROOT,
+            "meanPnlPct=%.3f medianPnlPct=%.3f winRate=%.2f%% (%d W / %d L / %d flat)"
+                + " best=%.2f worst=%.2f%n",
+            mean, median, 100.0 * wins / n, wins, losses, n - wins - losses,
+            sorted.get(n - 1), sorted.get(0)));
+    return sb.toString();
+  }
+
+  /**
+   * M40 re-measurement (sign robustness): each calendar year's return % for both arms, from their own
+   * equity curves, plus the delta. If the whole-portfolio result rests on one year this shows it —
+   * v3 reported only the 11-year aggregate, which cannot distinguish "a persistent effect" from
+   * "2020 happened".
+   */
+  private static String perYearDelta(ArmResult baseline, ArmResult arm) {
+    Map<Integer, Double> baseLast = lastEquityByYear(baseline);
+    Map<Integer, Double> armLast = lastEquityByYear(arm);
+    StringBuilder sb = new StringBuilder("year  baselineRet%  shippedRet%   delta(pp)  sign\n");
+    double basePrev = STARTING_CAPITAL;
+    double armPrev = STARTING_CAPITAL;
+    int positive = 0;
+    int total = 0;
+    for (Integer y : new TreeMap<>(baseLast).keySet()) {
+      Double b = baseLast.get(y);
+      Double a = armLast.get(y);
+      if (b == null || a == null) {
+        continue;
+      }
+      double bRet = (b / basePrev - 1.0) * 100.0;
+      double aRet = (a / armPrev - 1.0) * 100.0;
+      double d = aRet - bRet;
+      total++;
+      if (d > 0) {
+        positive++;
+      }
+      sb.append(
+          String.format(
+              Locale.ROOT, "%d  %11.2f  %11.2f  %10.2f  %s%n", y, bRet, aRet, d, d > 0 ? "+" : "-"));
+      basePrev = b;
+      armPrev = a;
+    }
+    sb.append(
+        String.format(
+            Locale.ROOT, "years favouring the cap: %d / %d%n", positive, total));
+    return sb.toString();
+  }
+
+  private static Map<Integer, Double> lastEquityByYear(ArmResult r) {
+    Map<Integer, Double> out = new TreeMap<>();
+    for (int i = 0; i < r.curveDate.size(); i++) {
+      out.put(r.curveDate.get(i).getYear(), r.curveEquity.get(i));
+    }
+    return out;
   }
 
   private static String riskDistribution(ArmResult r) {

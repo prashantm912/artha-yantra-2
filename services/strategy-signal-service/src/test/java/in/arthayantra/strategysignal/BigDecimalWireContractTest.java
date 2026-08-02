@@ -393,19 +393,32 @@ class BigDecimalWireContractTest {
 
   // ---- paper/PaperMarginController -------------------------------------------------------------
 
+  /**
+   * The ONE {@code new MarginHeat(...)} site. Both shapes below delegate here, so this record obeys
+   * the same one-constructor-site guarantee as every other in this file — cross-vendor review caught
+   * it as the single record that still had two, which would have left a widening needing two edits
+   * and quietly falsified the promise documented at the top of this class.
+   */
+  private static PaperMarginController.MarginHeat marginHeat(
+      boolean priced, String reason, BigDecimal spanMargin, BigDecimal exposureMargin,
+      BigDecimal totalMargin, BigDecimal requiredMargin, BigDecimal finalMargin, int openPositions,
+      int pricedLegs) {
+    return new PaperMarginController.MarginHeat(
+        priced, reason, spanMargin, exposureMargin, totalMargin, requiredMargin, finalMargin,
+        openPositions, pricedLegs, OffsetDateTime.now());
+  }
+
   private static PaperMarginController.MarginHeat marginHeatPriced(
       BigDecimal spanMargin, BigDecimal exposureMargin, BigDecimal totalMargin,
       BigDecimal requiredMargin, BigDecimal finalMargin) {
-    return new PaperMarginController.MarginHeat(
-        true, null, spanMargin, exposureMargin, totalMargin, requiredMargin, finalMargin, 3, 3,
-        OffsetDateTime.now());
+    return marginHeat(
+        true, null, spanMargin, exposureMargin, totalMargin, requiredMargin, finalMargin, 3, 3);
   }
 
   private static PaperMarginController.MarginHeat marginHeatUnpriced(String reason) {
     // MarginHeat.unpriced(...) is package-private (paper-package only); construct the same
-    // all-null shape directly via the public canonical constructor instead.
-    return new PaperMarginController.MarginHeat(
-        false, reason, null, null, null, null, null, 0, 0, OffsetDateTime.now());
+    // all-null shape through the canonical helper above instead.
+    return marginHeat(false, reason, null, null, null, null, null, 0, 0);
   }
 
   @Test

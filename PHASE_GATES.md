@@ -123,7 +123,7 @@ subset is CI-enforced).
 > **need no deploy**: they alter the published OpenAPI shape and the generated TS client, not
 > runtime behaviour. New chip task_7f57c0d5 (`OpeningSignal`'s three nullable `JsonNode` fields).
 
-> **CURRENCY UPDATE 2026-08-02 (15 PRs #1220–#1235, 2 deploy rounds; main = `aa610b04`; `gh` reports 17
+> **CURRENCY UPDATE 2026-08-02 (15 PRs #1220–#1235, 3 deploy rounds; main = `aa610b04`; `gh` reports 17
 > merges on the calendar day, the extra two being #1218/#1219, the tail of the preceding E4 session).**
 > Three things changed the live stack, and one thing changed what the ledger can be trusted to say.
 >
@@ -158,15 +158,31 @@ subset is CI-enforced).
 > universe used to cold-start all ~38 strategies' warm ta4j banks. **The design is not built and nothing
 > was armed by this;** what changed is that its blocking objection is gone.
 >
-> **DEPLOY STATE — do not read the above as "everything is deployed."** optimizer-service and
-> margin-service are **up to date** (0 runtime-source commits since their images). strategy-signal,
-> market-data, backtest and edge-gateway are **stale by [#1234](https://github.com/prashantm912/artha-yantra-2/pull/1234)**
-> (backtest also by #1197, edge-gateway also by `cec369ab`) — **spec-generation drift, runtime money
-> behaviour unaffected**, evidenced by the committed backtest spec saying
-> `BacktestTradeItem.entryPrice: {"type":"string"}` while the deployed service serves `{"type":"number"}`.
-> **frontend-react is the materially stale one: 4 runtime commits**, including a real type-bug fix
-> (#1212 `Insight.priority`) and two features (#1193 F5 U3 data-health flags, #1169 G16 near-miss dot
-> probe). Per-service table with image build times: ledger §0, the 2026-08-02 closeout block.
+> **DEPLOY STATE — ALL SEVEN SERVICES CURRENT on `aa610b04` as of ~19:40 IST, 13/13 healthy.** A third
+> round rebuilt strategy-signal, market-data, backtest, edge-gateway and frontend-react at ~19:37 IST.
+> ⚠️ **The interesting part is that this line said "five services STALE" forty minutes earlier and was
+> correct at the time** — worth keeping, because the drift was caught by asking the running service
+> what it serves, not by comparing image timestamps. **The same probe failed and then passed:**
+>
+> ```
+> committed      BacktestTradeItem.entryPrice → {"type": "string"}
+> live @ ~19:20                              → {"type": "number"}   FAILED (four Java services stale)
+> live @ ~19:40                              → {"type": "string"}   PASSES after the aa610b04 round
+> ```
+>
+> Runtime money behaviour was never affected — the drift was purely spec-generation — but the live
+> `/v3/api-docs` did genuinely disagree with the committed contract, and only this probe showed it.
+> ⚠️ **Nested-jar trap, hit for real here and it cost a false negative:** #1234's
+> `BigDecimalStringModelConverter`/`Customizer` live in `common-web-core`, so
+> `unzip -l /app/*.jar | grep -c BigDecimalString` returns **0** on all four Java services; extracting
+> `BOOT-INF/lib/common-web-core-*.jar` first returns **3** (two classes + one nested record). A 0 from
+> the outer fat jar is not evidence of absence. Also re-verified after the recreate: M40 classes still
+> present, V055 still enforcing, frontend serving `index-D0wPA9GI.js` — hash-identical to the built
+> `dist/`, an identity check rather than an mtime. ⚠️ **`installed=f` on the newest engine-reload row
+> is NORMAL:** reloads pair up after every deploy and alternate (97→98, 99→100, 101→102, each `t`→`f`,
+> ~38 s apart) — the first installs, the second is the reconcile finding no drift. Judge health on
+> `unresolved == 0` (current row: **38 loaded / 0 unresolved / 0 load_errors**), never on `installed`.
+> Per-service table: ledger §0, the 2026-08-02 closeout block.
 >
 > **AND THE THING THAT CHANGED WHAT THE LEDGER MEANS.** Three audit shards (#1230/#1231/#1232) read the
 > ledger against git/gh/code and found a fabricated-justification row, five stale rows, and **8

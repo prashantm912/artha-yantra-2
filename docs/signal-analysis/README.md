@@ -181,12 +181,17 @@ Run in order; each answers one question. Canned SQL in §6.
 16. **Check whether the slug actually configures a premium exit BEFORE resolving any counterfactual**
     (added 2026-07-23) — ⚠️ **AMENDED 2026-07-29: the 21-of-63 statement below is HISTORICAL and no longer
     describes the fleet.** T21 (owner-approved 2026-07-25, #990) added the block to every scalper YAML;
-    verified 2026-07-29 by direct count, **63 of 63**. The shipped shape is `take_profit premium_pct 35` +
+    verified 2026-07-29 by direct count, **63 of 63**.
+    ⚠️⚠️ **STOP — READ THE 2026-08-02 CORRECTION BELOW BEFORE USING THE NEXT SENTENCE. Its time-stop
+    half is FALSE, and this is the doc every future counterfactual inherits.** The BRACKETS are uniform;
+    the TIME STOP is not — the fleet spans FIVE horizons and only 18 of 63 configs (12 of 38 live) run
+    30 minutes. The struck text is kept only so the correction has something to point at:
+    ~~The shipped shape is `take_profit premium_pct 35` +
     `stop_loss premium_pct 25` + `signal_exit (close < vwap)` + `trailing_stop (supertrend_line)` +
     `time_stop max_bars 10`, so the correct §4.2 model **from 2026-07-25 forward** is a UNIFORM
-    **+35% TP / −25% SL / 10-bar (30-minute) time stop / 15:12 square-off** — the time stop matters most
+    +35% TP / −25% SL / 10-bar (30-minute) time stop / 15:12 square-off — the time stop matters most
     (on 2026-07-29 not one of 41 counterfactual legs touched either bracket; every one resolved at the
-    time stop).
+    time stop).~~
     ⚠️⚠️ **CORRECTION 2026-08-02 (task_2735acfb) — the `time_stop max_bars 10` half of that "shipped shape"
     is FALSE, and this is the doc every future counterfactual reads, so fix the model here before running
     one.** The brackets ARE uniform (T21/#990 put `premium_pct` 35/25 on 63/63). The **time stop is not**:

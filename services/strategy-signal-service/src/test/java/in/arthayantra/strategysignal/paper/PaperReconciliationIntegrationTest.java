@@ -294,11 +294,19 @@ class PaperReconciliationIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   /**
-   * Pins the ENTRY-TYPE condition — <b>live {@code paper_positions} id=28's exact shape</b> (an OPEN SELL
-   * in {@code manas-arora} linked to signals id=46, an <b>ACTIVE EXIT</b>, whose symbol's only ENTRY is
-   * EXPIRED). The anchor's status IS 'ACTIVE', so a status-only predicate reads it healthy and is blind to
-   * the ONE real live instance of this bug; {@code activeEntry} filters {@code signal_type='ENTRY'}, so an
-   * ACTIVE EXIT can never be returned as an anchor. The ACTIVE-ENTRY control keeps the assertion honest.
+   * Pins the ENTRY-TYPE condition. The shape is an OPEN SELL in {@code manas-arora} linked to an
+   * <b>ACTIVE EXIT</b> signal whose symbol's only ENTRY is EXPIRED: the anchor's status IS 'ACTIVE', so a
+   * status-only predicate reads it healthy, while {@code activeEntry} filters {@code signal_type='ENTRY'}
+   * and can never return an ACTIVE EXIT as an anchor. The ACTIVE-ENTRY control keeps the assertion honest.
+   *
+   * <p><b>HISTORICAL PROVENANCE — verify before citing as current.</b> This reproduced a real live row,
+   * {@code paper_positions} id=28 with signal id=46, and was written when that row was open. <b>Both facts
+   * have since changed and the instance is gone (re-verified 2026-08-02):</b> id=28 is CLOSED
+   * ({@code close_reason=MANUAL}, closed 2026-07-17 13:04 IST), signal 46 is now <b>EXPIRED</b> rather than
+   * ACTIVE, and <b>zero</b> currently-open positions match this shape. The scenario is still worth pinning —
+   * nothing prevents it recurring, and the detector exists precisely because a status-only test is blind to
+   * it — but it is no longer "the ONE real live instance", which is what the earlier wording claimed.
+   * The fixture below constructs the shape itself and does not depend on any live row.
    */
   @Test
   void activeExitAnchorIsFlaggedBecauseActiveEntryOnlyAnchorsEntries() {

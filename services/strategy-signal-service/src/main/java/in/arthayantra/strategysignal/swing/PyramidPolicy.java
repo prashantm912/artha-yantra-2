@@ -36,9 +36,10 @@ public interface PyramidPolicy {
 
   /**
    * §3.4.3: would opening the prospective new lot push the book's aggregate open risk over the family's
-   * portfolio-risk cap ("add without increasing risk exposure")? Consulted only for an add, at emit
-   * time. {@link #NONE} always returns false (it never reaches here — {@link #allowsAdd} already
-   * short-circuited the add).
+   * portfolio-risk cap ("add without increasing risk exposure")? Consulted at emit time for an add AND
+   * (M40, 2026-08-02) for a FRESH entry — the aggregate-risk cap binds the book's total open risk
+   * regardless of whether this is the symbol's first lot or another one. {@link #NONE} always returns
+   * false (the Minervini/default family carries no portfolio-risk cap).
    */
   boolean wouldBreachRiskCap(
       StrategyDefinition definition,

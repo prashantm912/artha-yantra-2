@@ -79,6 +79,34 @@ public class PaperPositionRepository {
         .findFirst();
   }
 
+  /**
+   * The id of the OPEN position for a book+key+side, but ONLY if it was opened by exactly
+   * {@code expectedOpeningSignalId} — {@code empty} both when nothing is open for the key AND when
+   * something IS open but was opened by a DIFFERENT signal (round 5, cross-vendor review Critical
+   * 1, 2026-08-02): {@code SwingBatchEngine}'s exit pass computes a governing stop from a
+   * PARTICULAR signal anchor, so caching it must assert the currently-open row is the SAME position
+   * that anchor opened, not merely "whichever row happens to be open" — a stale-anchor-treated-as-
+   * fresh entry, or a close+reopen racing the write, can otherwise attach one position's trail to a
+   * DIFFERENT one under the same key. {@code opening_signal_id} is retained unchanged across an
+   * averaging add (audit H5), so this check also correctly ADMITS a pyramid add onto the same
+   * anchor's position, not just its very first open.
+   */
+  public Optional<Long> findOpenIdIfOpenedBy(
+      String book, String exchange, String tradingsymbol, String side, long expectedOpeningSignalId) {
+    return jdbc
+        .query(
+            "SELECT id FROM paper_positions WHERE book=? AND exchange=? AND tradingsymbol=?"
+                + " AND side=? AND status='OPEN' AND opening_signal_id=?",
+            (rs, n) -> rs.getLong("id"),
+            book,
+            exchange,
+            tradingsymbol,
+            side,
+            expectedOpeningSignalId)
+        .stream()
+        .findFirst();
+  }
+
   /** A position by id. */
   public Optional<PositionRow> find(long id) {
     return jdbc

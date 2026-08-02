@@ -96,6 +96,7 @@ class PaperServiceMtmBlindGaugeTest {
         mock(ScalperAccountModel.class),
         mock(org.springframework.context.ApplicationEventPublisher.class),
         mock(PaperStaleTickAlerter.class), mock(PaperOrderRejectionRecorder.class),
+        new ManasGoverningStopCache(),
         mock(org.springframework.transaction.PlatformTransactionManager.class),
         new BigDecimal("1.0"), 15L, 60L, meters);
   }

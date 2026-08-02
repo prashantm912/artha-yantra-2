@@ -32,7 +32,7 @@ you park in a closing bullet, or the next session will not find it.
 | B10 | **T22** | `oi_spurt` dead — ground-truth distribution then a floor proposal. | analysis → owner tune | **ANALYSIS DONE** (4,118 context rows, 07-21..24): \|spurtOiPct\| p50=11 / p80=20 / p90=33 / p95=50; \|spurtPricePct\| p50=2.4 / p90=10. **The #675 recalibration lowered only the PRICE floor — `DEFAULT_SPURT_OI_PCT` is still 50 = p95 of its own operand.** Joint pass rates (pre-quadrant): current (50,8) **1.26%**; (30,8) 2.4%; (20,5) 6.3%; **(15,3) 15.5%** — the selective-but-alive target. Owner picks; env `artha.scalper.oi.spurtOiPct`/`spurtPricePct` |
 | B11a | **T21** | 30 of 38 live scalpers have NO premium exit (no TP, no premium stop) — measured both directions: −88.4% ridden to square-off 07-23 vs −10.4% on the same leg with a stop; +37.5% banked vs +25.1% without. Intentional indicator-exit design or unfinished config? | **OWNER** | pack delivered 2026-07-25 (below) |
 | B11b | **T6** | `vwap` dot 100% support 6 consecutive sessions / 5,225 rows at the heaviest weight (2.5 = 12.8% Σw) — a free dot is an unlabelled threshold reduction. Narrow the support condition or cut the weight. | **OWNER** (gate number) | pack delivered 2026-07-25 (below) |
-| B11c | **T10** | 17 stale OPEN paper positions (oldest 07-07), swing brackets starved all session every day (equities not on the live tick subscription). Draining (19→17, 0 new ×2 sessions) but chronic. Subscribe the holdings, or accept EOD-only exits + downgrade the alert. | **OWNER** | pack delivered 2026-07-25 (below) |
+| B11c | **T10** | 17 stale OPEN paper positions (oldest 07-07), swing brackets starved all session every day (equities not on the live tick subscription). Draining (19→17, 0 new ×2 sessions) but chronic. Subscribe the holdings, or accept EOD-only exits + downgrade the alert. | **OWNER** | pack delivered 2026-07-25 (below); owner picked (b) → **#992** downgraded the ALERT. ⚠️ **The POSITIONS are untouched and this row has no ledger mirror** — measured live 2026-08-02 (bounded read, `strategy.paper_positions status='OPEN'`): **still exactly 17** — 11 `minervini` (oldest 2026-07-07) + 6 `manas-arora` (oldest 2026-07-10), 0 scalper — unchanged for 8 days, matching the 2026-07-31 findings count exactly. T10 is the **one T-item in the whole namespace with no §0/G row**; it is carried only here and as "OWNER — chronic" in each session's tune table. Promotion candidate (prose-audit shard C) |
 
 ## Owner-decision pack — 2026-07-25 (B11; decide any subset, each lands as its own PR)
 
@@ -70,6 +70,13 @@ you park in a closing bullet, or the next session will not find it.
     The SERVICE state is the half that matters — a correct reading alone would drift straight back.
   - Item 7's blocked tunes remain blocked by design (they wait on post-fix forward sessions, ledger G1 —
     earliest Tue 2026-07-28). That is a gate, not an open task.
+    → ⚠️ **NO LONGER BLOCKED — ledger row G1 is CLOSED (2026-07-29), and none of the five was resolved by
+    being applied** (pointer added by prose-audit shard C, 2026-08-02; the ROW is the status, this doc is the
+    evidence): **T1 REJECTED BY MEASUREMENT** (the volume-floor would-have-fired set 2W/9L, −121.95 pts; every
+    one of six rails' would-have-fired sets loses) · **T7 REJECTED BY MEASUREMENT** (`composite-055` the worst
+    book of four) · **T3** re-scoped into ledger row **G13** (the operand, not the threshold, is the defect) ·
+    **T5** SUPERSEDED by **G12** · **T2** carried, and its home is row **E8** (DONE — "re-open only if Sept
+    IV-history data prompts an iv-rank-dot arming decision"). **Do not re-propose T1 or T7 as available work.**
 
 1. **T21 — premium exits on the 30 bracket-less scalpers.** (a) declare indicator-exit-only
    intentional and accept square-off rides (document it, done); (b) add a `premium_pct` band to the
@@ -132,6 +139,12 @@ Off-session jobs (the 19:xx EOD block, 02:30 prunes, swing batches) are pool-1 b
 threshold), T3 (iv_pair), T5 (iv_abs_band), T2 (iv_rank sourcing) — the rollup's own
 conclusion stands: every PnL number since 07-21 is confounded by T16 (floor disarmed), T21
 (no exits) and T23 (wrong operand); resolve those first or the tunes measure artifacts.
+→ ⚠️ **SUPERSEDED — the confounders were fixed and the data arrived; ledger row G1 CLOSED 2026-07-29**
+(pointer added by prose-audit shard C, 2026-08-02). Per-tune outcomes: **T1 REJECTED BY MEASUREMENT** ·
+**T7 REJECTED BY MEASUREMENT** · **T3 → row G13** · **T5 → superseded by G12** · **T2 → row E8**.
+⚠️ This is the standing prior, not a one-off: **every measured loosening of the scalper entry gate has LOST
+money** (T1, T7, plus G13's and G10's own counterfactuals — four tests across three knobs). A rejected tune
+is not available work.
 
 **Doc-hygiene note:** the 07-21/22/23 midday gates still carry "Timescale `non-Var pathkey`
 mitigation scheduled 15:40 IST" — stale boilerplate; #957 shipped 2026-07-20 and OI quadrants

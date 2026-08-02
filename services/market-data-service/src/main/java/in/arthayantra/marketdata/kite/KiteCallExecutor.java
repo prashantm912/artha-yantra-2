@@ -161,10 +161,20 @@ public class KiteCallExecutor {
    * SECOND permit the bucket cannot refill for ~30 minutes, so it dies on the limiter with
    * {@code RequestNotPermitted} — which this method then maps to the exact
    * {@code local broker DUMP budget saturated} 429 the ORIGINAL F-SYNC failure used, masking the
-   * real cause. This does not change call volume: attempts 2-4 never reached the network anyway
-   * (the permit was already spent), so skipping them only lets the real failure surface honestly
-   * and drops the wasted limiter-queue wait. {@code InstrumentSyncScheduler.morningSyncCatchUp} is
-   * the actual retry mechanism for DUMP, not this method.
+   * real cause.
+   *
+   * <p><b>What this trades away, stated honestly.</b> An earlier draft of this comment claimed the
+   * change "does not alter call volume, because attempts 2-4 never reached the network anyway".
+   * That is FALSE at the margin and cross-vendor review caught it: the limiter is a FIXED-CYCLE
+   * 30-minute refresh with a 5-second acquire wait, so a failure landing just before a boundary
+   * lets a retry straddle it, take the newly refreshed permit, and make a real second call — and
+   * one DUMP supplier invocation is FOUR HTTP requests, not one, so the case is not negligible when
+   * it fires. So this DOES remove a rare boundary-straddling retry that could genuinely have
+   * succeeded. That is the accepted cost: recovery for those defers to
+   * {@code InstrumentSyncScheduler.morningSyncCatchUp}, the bounded 09:05-10:50 IST weekday sweep
+   * that is the real retry mechanism for this family, in exchange for every OTHER failure reporting
+   * its true cause instead of a saturation that never happened. Away from a refresh boundary — the
+   * overwhelmingly common case — attempts 2-4 do die at the limiter without touching the network.
    */
   public <T> T execute(Family family, Supplier<T> call) {
     RateLimiter limiter = rateLimiters.rateLimiter(family.limiterName);

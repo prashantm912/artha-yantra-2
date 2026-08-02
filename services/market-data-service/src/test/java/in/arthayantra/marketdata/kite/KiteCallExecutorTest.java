@@ -318,6 +318,16 @@ class KiteCallExecutorTest {
    * saturation message that never happened. DUMP must surface its one real failure untouched;
    * {@code InstrumentSyncScheduler.morningSyncCatchUp} is the actual retry mechanism for this
    * family, not an internal Retry.
+   *
+   * <p>⚠️ <b>WHAT THIS TEST CANNOT SHOW, so do not read it as proving more than it does.</b> It
+   * builds a limiter with {@code timeoutDuration(ZERO)}, which models the common case — the retry
+   * cannot wait, so it dies on the limiter without touching the network. PRODUCTION uses a
+   * FIXED-CYCLE 30-minute refresh with a 5-second acquire wait, so a failure landing just before a
+   * boundary lets a retry straddle it and take the newly refreshed permit. This test is
+   * structurally incapable of exercising that path, and cross-vendor review correctly rejected an
+   * earlier "call volume is unchanged" claim built on it. The change DOES remove those rare
+   * boundary-straddling retries; that cost is accepted and documented on
+   * {@code KiteCallExecutor.execute}.
    */
   @Test
   void dumpFamilyNeverRetriesInternally() {

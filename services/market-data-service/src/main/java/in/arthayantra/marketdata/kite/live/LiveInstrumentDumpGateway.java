@@ -55,7 +55,9 @@ public class LiveInstrumentDumpGateway implements InstrumentDumpGateway {
   @Override
   public List<InstrumentRecord> fetchDump() {
     // one DUMP permit covers the full three-exchange sweep — the 1/30m budget guards the
-    // manual sync trigger from hammering Kite; idempotent GETs, so executor retry is safe
+    // manual sync trigger from hammering Kite. KiteCallExecutor skips its internal retry for
+    // DUMP (a 2nd attempt would need a permit the bucket can't refill for ~30 min); the actual
+    // retry mechanism for this family is InstrumentSyncScheduler.morningSyncCatchUp.
     return executor.execute(in.arthayantra.marketdata.kite.KiteCallExecutor.Family.DUMP, this::fetchAllExchanges);
   }
 

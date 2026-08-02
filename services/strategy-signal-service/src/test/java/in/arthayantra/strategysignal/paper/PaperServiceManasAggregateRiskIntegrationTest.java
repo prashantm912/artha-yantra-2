@@ -32,13 +32,21 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * the pure-math test instead. Uses the 'manas-arora' book (V021-seeded, ₹1.5 L) and cleans only that
  * book's state so it never clobbers a sibling IT sharing the singleton DB.
  *
- * <p>Also carries the M40 Critical 3 fix's proof (owner decision 2026-08-02: fixed in THIS PR, not
- * split out): {@code ratchetStopLossTightensButNeverLoosens} pins the column mechanics directly, and
- * {@code ratchetingAnExistingPositionsStopFlipsAFreshEntryFromRefusedToAdmitted} proves the SAME
- * candidate is refused before a ratchet and admitted after one — not merely "the cap still works",
- * but that the persisted-stop change is what moved the outcome. {@code
+ * <p>Also carries the M40 Critical 3 fix's proof, ROUND 3 (owner ruling, 2026-08-02 — supersedes
+ * round 1's {@code stop_loss} write and round 2's dedicated column, both reverted after the audit
+ * found round 1 would have silently converted Manas from EOD-managed to intraday-trail-managed the
+ * moment a live tick reached a held symbol, reachable even today via the mock profile's fixture
+ * ticker). The fix is now IN MEMORY ONLY ({@link ManasGoverningStopCache}), never a database write:
+ * {@code cacheManasGoverningStopTightensButNeverLoosens} pins the cache mechanics directly;
+ * {@code cachingAnExistingPositionsStopFlipsAFreshEntryFromRefusedToAdmitted} proves the SAME
+ * candidate is refused before a cache write and admitted after one — not merely "the cap still
+ * works", but that the cached-stop change is what moved the outcome; and {@code
+ * theCacheWriteNeverTouchesStopLossTheIntradayDisasterStop} is THE load-bearing proof the owner
+ * specifically asked for — running a FULL admission cycle that reads the cache must NEVER write
+ * {@code stop_loss}, the column {@code PaperBracketEvaluator} polls every 15 seconds with no book
+ * filter, so its outcome stays byte-identical before and after this PR. {@code
  * ManasAroraSwingEngineTest#anArmedTrailRatchetsTheGoverningStopWithoutFiringAnExit} covers the
- * OTHER half: that {@code SwingBatchEngine}'s daily exit pass is what calls the ratchet, with the
+ * OTHER half: that {@code SwingBatchEngine}'s daily exit pass is what populates the cache, with the
  * real ATR/Chandelier arithmetic, when a held position does not exit.
  */
 @SpringBootTest(properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
@@ -59,7 +67,7 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
 
   @Autowired private PaperService paper;
   @Autowired private RiskService risk;
-  @Autowired private PaperPositionRepository positions;
+  @Autowired private ManasGoverningStopCache governingStopCache;
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
@@ -77,16 +85,26 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
     // update()'s trippedOn.remove(...) side effect is the only public way to re-arm that dedup;
     // the harmless-inert risk_settings row it also writes is not read by anything this rail consults.
     risk.update(BOOK, RiskService.PYRAMID_RISK_CAP, "{}");
+    // The governing-stop cache is ALSO a shared in-memory Spring bean across test methods — evict
+    // every symbol this class uses so one method's cached value can never leak into another's.
+    for (String sym : new String[] {"RATCHETCO", "SHORTCO"}) {
+      governingStopCache.evict(BOOK, "NSE", sym, "BUY");
+      governingStopCache.evict(BOOK, "NSE", sym, "SELL");
+    }
   }
 
   private void insertOpen(String symbol, String qty, String avgEntry, String stop) {
+    insertOpen(symbol, "BUY", qty, avgEntry, stop);
+  }
+
+  private void insertOpen(String symbol, String side, String qty, String avgEntry, String stop) {
     jdbc.update(
         """
         INSERT INTO paper_positions
           (exchange, tradingsymbol, side, qty, avg_entry_price, stop_loss, status, opened_at, book)
-        VALUES ('NSE', ?, 'BUY', ?, ?, ?, 'OPEN', now(), ?)
+        VALUES ('NSE', ?, ?, ?, ?, ?, 'OPEN', now(), ?)
         """,
-        symbol, new BigDecimal(qty), new BigDecimal(avgEntry), new BigDecimal(stop), BOOK);
+        symbol, side, new BigDecimal(qty), new BigDecimal(avgEntry), new BigDecimal(stop), BOOK);
   }
 
   private int openCount(String symbol) {
@@ -97,6 +115,7 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
     return c == null ? 0 : c;
   }
 
+  /** The intraday disaster-stop — the column {@code PaperBracketEvaluator} polls every 15s. */
   private BigDecimal currentStop(String symbol) {
     return jdbc.queryForObject(
         "SELECT stop_loss FROM paper_positions WHERE book=? AND tradingsymbol=? AND status='OPEN'",
@@ -176,33 +195,72 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
   }
 
   @Test
-  void ratchetStopLossTightensButNeverLoosens() {
-    // M40 Critical 3 fix (2026-08-02): proves the column mechanics directly — the SQL-level
-    // tighten-only guard, independent of anything SwingBatchEngine computes.
-    insertOpen("RATCHETCO", "100", "100", "90");
+  void cacheManasGoverningStopTightensButNeverLoosens() {
+    // M40 Critical 3 fix, round 3 (2026-08-02): proves the IN-MEMORY cache's mechanics directly —
+    // the tighten-only guard, independent of anything SwingBatchEngine computes.
+    governingStopCache.put(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("95.00"));
+    assertThat(governingStopCache.get(BOOK, "NSE", "RATCHETCO", "BUY")).isEqualByComparingTo("95.00");
 
-    int applied = positions.ratchetStopLoss(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("95.00"));
-    assertThat(applied).as("a strictly tighter stop is applied").isEqualTo(1);
-    assertThat(currentStop("RATCHETCO")).isEqualByComparingTo("95.00");
+    governingStopCache.put(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("92.00"));
+    assertThat(governingStopCache.get(BOOK, "NSE", "RATCHETCO", "BUY"))
+        .as("a LOOSER value is rejected in the cache itself, not merely by caller discipline")
+        .isEqualByComparingTo("95.00");
 
-    int noop = positions.ratchetStopLoss(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("92.00"));
-    assertThat(noop).as("a LOOSER value is rejected at the SQL layer, not merely by caller discipline").isZero();
-    assertThat(currentStop("RATCHETCO")).as("unchanged after the rejected loosen").isEqualByComparingTo("95.00");
-
-    int tighterAgain =
-        positions.ratchetStopLoss(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("97.00"));
-    assertThat(tighterAgain).isEqualTo(1);
-    assertThat(currentStop("RATCHETCO")).isEqualByComparingTo("97.00");
+    governingStopCache.put(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("97.00"));
+    assertThat(governingStopCache.get(BOOK, "NSE", "RATCHETCO", "BUY")).isEqualByComparingTo("97.00");
   }
 
   @Test
-  void ratchetingAnExistingPositionsStopFlipsAFreshEntryFromRefusedToAdmitted() {
-    // M40 Critical 3 fix (2026-08-02), the "lowers computed aggregate risk" proof: the SAME candidate
-    // is refused BEFORE the ratchet and admitted AFTER it — not merely "the cap still works", but that
-    // the persisted stop change is what moved the outcome. Book equity ₹150,000, cap 6% = ₹9,000.
-    // Existing 1000@100/stop91.30 risks 8,700 (5.8%). A fresh 50@100/stop90 candidate adds 500 ->
-    // 9,200 = 6.13% -> BREACH. Ratcheting the existing position's stop to 95 drops its risk to
-    // 1000×(100-95)=5,000 (3.33%); the SAME candidate then totals 5,500 = 3.67% -> ADMITTED.
+  void theCacheWriteNeverTouchesStopLossTheIntradayDisasterStop() {
+    // THE load-bearing proof the owner asked for (2026-08-02): a FULL admission cycle that reads the
+    // governing-stop cache must NEVER write stop_loss, the column PaperBracketEvaluator polls every
+    // 15 seconds with no book filter. Two earlier drafts of this fix (a direct stop_loss ratchet, then
+    // a dedicated persisted column) were reverted specifically because they could have moved that
+    // column; this in-memory design cannot, by construction — but this test proves it end-to-end
+    // rather than resting on "the code has no SQL for it".
+    insertOpen("RATCHETCO", "1000", "100", "91.30"); // 1000*(100-91.30)=8,700 = 5.8% of 150,000
+    governingStopCache.put(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("97.50")); // as if armed
+    assertThat(currentStop("RATCHETCO")).as("the initial intraday bracket, pre-cycle").isEqualByComparingTo("91.30");
+
+    // Run a FULL admission cycle: a fresh candidate whose risk check reads the cached governing stop
+    // for RATCHETCO (existing risk now 1000*(100-97.50)=2,500=1.67%) and the DB for its own fill.
+    // Cap 6% = 9,000; candidate 50@100/stop90 adds 500 -> 3,000 = 2.0% -> ADMITTED (exercises the
+    // cache read on the REAL money-write path, not a mocked one).
+    PaperService.PositionDto opened =
+        paper.openOrder(
+            new PaperService.OrderRequest(
+                null, "NSE", "FRESHCO-" + UUID.randomUUID(), "BUY", 50, new BigDecimal("100.00"),
+                new BigDecimal("90.00"), null, null, BOOK));
+    assertThat(opened.status()).isEqualTo("OPEN");
+
+    assertThat(currentStop("RATCHETCO"))
+        .as("stop_loss — the intraday disaster-stop — is BYTE-IDENTICAL to before the admission cycle")
+        .isEqualByComparingTo("91.30");
+  }
+
+  @Test
+  void theCacheRejectsANonLongSideRatherThanApplyingABackwardsComparison() {
+    // SEPARATE, SMALLER finding (Architect audit, 2026-08-02): "tighter means higher" is correct
+    // only for a LONG. Manas trades long-only in production, but a known parked SELL row exists in
+    // the live manas-arora book, so this must REJECT (never cache) rather than silently applying a
+    // higher-is-tighter comparison that would be backwards for a short.
+    governingStopCache.put(BOOK, "NSE", "SHORTCO", "SELL", new BigDecimal("105.00"));
+
+    assertThat(governingStopCache.get(BOOK, "NSE", "SHORTCO", "SELL"))
+        .as("a non-BUY side is rejected outright, never cached")
+        .isNull();
+  }
+
+  @Test
+  void cachingAnExistingPositionsStopFlipsAFreshEntryFromRefusedToAdmitted() {
+    // M40 Critical 3 fix, round 3 (2026-08-02), the "lowers computed aggregate risk" proof: the SAME
+    // candidate is refused BEFORE the cache write and admitted AFTER it — not merely "the cap still
+    // works", but that the cached governing-stop change is what moved the outcome. Book equity
+    // ₹150,000, cap 6% = ₹9,000. Existing 1000@100/stop_loss=91.30 (unarmed) risks 8,700 (5.8%). A
+    // fresh 50@100/stop90 candidate adds 500 -> 9,200 = 6.13% -> BREACH. Caching the existing
+    // position's GOVERNING stop (not stop_loss) at 95 drops its effective risk to
+    // 1000×(100-95)=5,000 (3.33%); the SAME candidate then totals 5,500 = 3.67% -> ADMITTED — while
+    // stop_loss itself never moves (proven separately above).
     insertOpen("RATCHETCO", "1000", "100", "91.30");
     String sym = "MANASRATCHET-" + UUID.randomUUID();
     PaperService.OrderRequest candidate =
@@ -211,18 +269,18 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
             null, BOOK);
 
     assertThatThrownBy(() -> paper.openOrder(candidate))
-        .as("BEFORE the ratchet: 8,700 existing + 500 new = 9,200 = 6.13% breaches the 6% cap")
+        .as("BEFORE the cache write: 8,700 existing + 500 new = 9,200 = 6.13% breaches the 6% cap")
         .isInstanceOf(ApiException.class)
         .hasMessageContaining(RiskService.PYRAMID_RISK_CAP);
     assertThat(openCount(sym)).isZero();
 
-    int applied = positions.ratchetStopLoss(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("95.00"));
-    assertThat(applied).as("the ratchet actually reached the column").isEqualTo(1);
-    assertThat(currentStop("RATCHETCO")).isEqualByComparingTo("95.00");
+    governingStopCache.put(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("95.00"));
+    assertThat(governingStopCache.get(BOOK, "NSE", "RATCHETCO", "BUY")).isEqualByComparingTo("95.00");
+    assertThat(currentStop("RATCHETCO")).as("stop_loss is untouched").isEqualByComparingTo("91.30");
 
     PaperService.PositionDto opened = paper.openOrder(candidate);
     assertThat(opened.status())
-        .as("AFTER the ratchet: 5,000 existing + 500 new = 5,500 = 3.67% — the SAME candidate admits")
+        .as("AFTER the cache write: 5,000 existing + 500 new = 5,500 = 3.67% — the SAME candidate admits")
         .isEqualTo("OPEN");
   }
 }

@@ -19,7 +19,9 @@ import org.junit.jupiter.api.Test;
  * (2026-08-02): the AUTHORITATIVE aggregate open-risk check at the paper-position WRITE, projected
  * against the actual fill/stop, closing two gaps {@code ManasPyramidPolicy#wouldBreachRiskCap}'s
  * emission-time (candle-close) estimate could not see. Both worked examples below are the reviewer's
- * OWN numbers, reproduced exactly.
+ * OWN numbers, reproduced exactly. Also covers Critical 3, round 3 (owner ruling, 2026-08-02): the
+ * IN-MEMORY {@link ManasGoverningStopCache} — never {@code stop_loss} itself, never persisted — takes
+ * precedence in the risk math once a position's Chandelier trail has armed.
  */
 class RiskServiceManasAggregateRiskTest {
 
@@ -36,9 +38,9 @@ class RiskServiceManasAggregateRiskTest {
     PaperAccountService account = mock(PaperAccountService.class);
     PaperMarginClient margin = mock(PaperMarginClient.class);
     NotifierClient notifier = mock(NotifierClient.class);
-    RiskService risk =
-        new RiskService(settings, positions, account, margin, notifier, CLOCK, false, bd(capPct));
-    return risk;
+    return new RiskService(
+        settings, positions, account, margin, notifier, CLOCK, false, bd(capPct),
+        new ManasGoverningStopCache());
   }
 
   private static PositionRow position(String symbol, long qty, String avgEntry, String stop) {
@@ -61,7 +63,9 @@ class RiskServiceManasAggregateRiskTest {
     PaperMarginClient margin = mock(PaperMarginClient.class);
     NotifierClient notifier = mock(NotifierClient.class);
     RiskService risk =
-        new RiskService(settings, positions, account, margin, notifier, CLOCK, false, bd("6.0"));
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, false, bd("6.0"),
+            new ManasGoverningStopCache());
     when(positions.listOpen(BOOK))
         .thenReturn(List.of(position("EXISTING", 5_000, "100", "90"))); // 5000*(100-90)=50,000
     when(account.equity(BOOK)).thenReturn(bd("1000000"));
@@ -96,7 +100,9 @@ class RiskServiceManasAggregateRiskTest {
     PaperMarginClient margin = mock(PaperMarginClient.class);
     NotifierClient notifier = mock(NotifierClient.class);
     RiskService risk =
-        new RiskService(settings, positions, account, margin, notifier, CLOCK, false, bd("3.5"));
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, false, bd("3.5"),
+            new ManasGoverningStopCache());
     when(positions.listOpen(BOOK)).thenReturn(List.of(position("TESTCO", 100, "100", "90")));
     when(account.equity(BOOK)).thenReturn(bd("100000"));
 
@@ -111,6 +117,40 @@ class RiskServiceManasAggregateRiskTest {
         .isTrue();
   }
 
+  /**
+   * M40 Critical 3 fix, round 3 (owner ruling, 2026-08-02): when the existing row's Chandelier trail
+   * has ARMED (cached in {@link ManasGoverningStopCache}), the averaging projection uses THAT
+   * tighter figure — never the stale {@code stop_loss} — even though {@code stop_loss} itself is
+   * never touched by this fix. Existing 100@100 with {@code stop_loss} 50 (would give a wide
+   * retained-bracket projection) but a CACHED governing stop of 95 (much tighter): a same-key fill
+   * at 120 averages to 200@110, projected against 95 → 200×(110−95)=3,000 = 3.0% of 100,000,
+   * comfortably under a 6% cap. Using the stale stop_loss (50) instead would have projected
+   * 200×(110−50)=12,000 = 12% — wrongly breaching. The two numbers are discriminated, not just both
+   * "some risk detected".
+   */
+  @Test
+  void averagingUsesTheCachedGoverningStopNotTheStaleStopLoss() {
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    RiskSettingsRepository settings = mock(RiskSettingsRepository.class);
+    PaperMarginClient margin = mock(PaperMarginClient.class);
+    NotifierClient notifier = mock(NotifierClient.class);
+    ManasGoverningStopCache cache = new ManasGoverningStopCache();
+    cache.put(BOOK, "NSE", "TESTCO", "BUY", bd("95"));
+    RiskService risk =
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, false, bd("6.0"), cache);
+    when(positions.listOpen(BOOK)).thenReturn(List.of(position("TESTCO", 100, "100", "50")));
+    when(account.equity(BOOK)).thenReturn(bd("100000"));
+
+    assertThat(
+            risk.manasAggregateRiskWouldCross(
+                BOOK, "NSE", "TESTCO", "BUY", 100, bd("120"), bd("999")))
+        .as("200×(110−95)=3,000 → 3.0% under the 6% cap; the stale stop_loss(50) would wrongly give"
+            + " 12,000 → 12% and breach")
+        .isFalse();
+  }
+
   @Test
   void aGenuinelyFreshEntryWithNoExistingRowUsesItsOwnRequestedStop() {
     PaperPositionRepository positions = mock(PaperPositionRepository.class);
@@ -119,7 +159,9 @@ class RiskServiceManasAggregateRiskTest {
     PaperMarginClient margin = mock(PaperMarginClient.class);
     NotifierClient notifier = mock(NotifierClient.class);
     RiskService risk =
-        new RiskService(settings, positions, account, margin, notifier, CLOCK, false, bd("6.0"));
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, false, bd("6.0"),
+            new ManasGoverningStopCache());
     when(positions.listOpen(BOOK)).thenReturn(List.of());
     when(account.equity(BOOK)).thenReturn(bd("1000000"));
 
@@ -143,7 +185,9 @@ class RiskServiceManasAggregateRiskTest {
     PaperMarginClient margin = mock(PaperMarginClient.class);
     NotifierClient notifier = mock(NotifierClient.class);
     RiskService risk =
-        new RiskService(settings, positions, account, margin, notifier, CLOCK, false, bd("6.0"));
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, false, bd("6.0"),
+            new ManasGoverningStopCache());
     when(positions.listOpen(any())).thenReturn(List.of(position("HUGE", 1_000_000, "1000", "1")));
     when(account.equity(any())).thenReturn(bd("1"));
 

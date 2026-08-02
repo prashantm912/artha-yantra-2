@@ -141,22 +141,27 @@ public interface SwingDoctrine {
       int entryIndex);
 
   /**
-   * M40 cross-vendor review Critical 3 fix (2026-08-02): the position's CURRENT effective governing
-   * stop, for persisting into {@code paper_positions.stop_loss} so the Manas aggregate open-risk cap
-   * (which reads that persisted column) sees LIVE risk instead of the value frozen at open. Called by
-   * {@link SwingBatchEngine}'s exit pass on a bar where the position did NOT exit; it never affects
-   * the exit DECISION itself (that stays exactly {@link ExitEvaluator#evaluate}, unchanged).
+   * M40 cross-vendor review Critical 3 fix, round 3 (owner ruling, 2026-08-02): the position's
+   * CURRENT effective governing stop, for CACHING IN MEMORY (never persisted — see {@code
+   * EmissionGuard#cacheManasGoverningStop}) so the Manas aggregate open-risk cap sees LIVE risk
+   * instead of the value frozen at open in {@code paper_positions.stop_loss}. Called by {@link
+   * SwingBatchEngine}'s exit pass on a bar where the position did NOT exit; it never affects the exit
+   * DECISION itself (that stays exactly {@link ExitEvaluator#evaluate}, unchanged), and — because
+   * nothing this value feeds is ever written to the database — it cannot affect {@code stop_loss} or
+   * any intraday-exit path either. M40 owns the risk calculation only; whether {@code stop_loss}
+   * itself should ever reflect the trail is a separate, later, owner decision.
    *
    * <p><b>Deliberately DISTINCT from {@link #trailLevel}</b>, which is a family-specific ADVISORY
    * display figure that need NOT equal the family's actual enforced exit trigger — Minervini's is the
    * 50-day-MA, a commonly-watched reference level, NOT its real exit rule (percent/ATR-based per its
-   * own {@code exit_rules}). Persisting {@code trailLevel}'s value here for every family would corrupt
-   * Minervini's {@code stop_loss} with an unrelated number. The default returns {@code null} (a safe
-   * no-op — nothing is persisted) so only a family whose OWN governing exit rule this figure actually
-   * mirrors byte-for-byte need override it; today that is Manas alone, via {@code
-   * ExitEvaluator#trailStop} — see that method's javadoc for the "equals the price the live exit
-   * check uses" guarantee that makes it safe to write into the risk-accounting column. The write side
-   * ({@code EmissionGuard#ratchetStopLoss}) separately enforces "never loosens", so a stale/late read
+   * own {@code exit_rules}). Caching {@code trailLevel}'s value here for every family would feed the
+   * risk calc an unrelated number for Minervini (moot today since only Manas has an aggregate-risk
+   * consumer, but wrong in principle). The default returns {@code null} (a safe no-op — nothing is
+   * cached) so only a family whose OWN governing exit rule this figure actually mirrors byte-for-byte
+   * need override it; today that is Manas alone, via {@code ExitEvaluator#trailStop} — see that
+   * method's javadoc for the "equals the price the live exit check uses" guarantee that makes it safe
+   * to feed into the risk-accounting cache. The write side ({@code
+   * EmissionGuard#cacheManasGoverningStop}) separately enforces "never loosens", so a stale/late read
    * of this value can only be a costless no-op, never a wrong tighten OR a silent loosen.
    */
   default BigDecimal governingStop(

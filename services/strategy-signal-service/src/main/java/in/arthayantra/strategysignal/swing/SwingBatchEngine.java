@@ -844,7 +844,7 @@ public class SwingBatchEngine {
           closed++;
         }
       } else {
-        ratchetGoverningStop(
+        cacheGoverningStop(
             doctrine, primary, strat.definition(), bank, position, series.size() - 1, entryIndex);
       }
     }
@@ -852,16 +852,22 @@ public class SwingBatchEngine {
   }
 
   /**
-   * M40 cross-vendor review Critical 3 fix (2026-08-02): on a bar where the position did NOT exit,
-   * persists a tighter (never looser — enforced at the write, see {@code
-   * EmissionGuard#ratchetStopLoss}) governing stop for aggregate-risk accounting. {@link
+   * M40 cross-vendor review Critical 3 fix, round 3 (owner ruling, 2026-08-02 — supersedes round 1's
+   * {@code stop_loss} write and round 2's dedicated column, both reverted): on a bar where the
+   * position did NOT exit, CACHES a tighter (never looser — enforced in the cache itself, see {@code
+   * EmissionGuard#cacheManasGoverningStop}) governing stop for aggregate-risk accounting, IN MEMORY
+   * ONLY — never a database write, never {@code paper_positions.stop_loss}, never any new column.
+   * {@code stop_loss} is ALSO the intraday disaster-stop the paper module's 15-second bracket poller
+   * reads with no book filter; both earlier drafts of this fix risked or would have coupled the risk
+   * figure to that intraday-exit surface, so M40 ships EXIT-NEUTRAL — this call cannot change what
+   * {@code PaperBracketEvaluator} (or anything else reading {@code stop_loss}) ever sees. {@link
    * SwingDoctrine#governingStop}'s default is {@code null} (a safe no-op) for every family except
    * Manas, whose trail rule IS its exit_rules trailing_stop (see that method's javadoc). Fail-soft,
    * mirroring the Major-4 fix for the risk-cap audit: this batch is the position's ONLY exit
-   * evaluator, so an accounting-write failure here must never propagate and skip a later position's
-   * stop evaluation this run.
+   * evaluator, so an accounting failure here must never propagate and skip a later position's stop
+   * evaluation this run.
    */
-  private void ratchetGoverningStop(
+  private void cacheGoverningStop(
       SwingDoctrine doctrine,
       SignalRepository.SignalRow primary,
       StrategyDefinition definition,
@@ -877,11 +883,11 @@ public class SwingBatchEngine {
       if (governingStop != null) {
         emissionGuard
             .get()
-            .ratchetStopLoss(doctrine.book(), EX, primary.tradingsymbol(), "BUY", governingStop);
+            .cacheManasGoverningStop(doctrine.book(), EX, primary.tradingsymbol(), "BUY", governingStop);
       }
     } catch (RuntimeException e) {
       log.warn(
-          "{} swing: governing-stop ratchet failed for {} (accounting only, exit unaffected): {}",
+          "{} swing: governing-stop cache failed for {} (accounting only, exit unaffected): {}",
           doctrine.batchName(), primary.tradingsymbol(), e.getMessage());
     }
   }

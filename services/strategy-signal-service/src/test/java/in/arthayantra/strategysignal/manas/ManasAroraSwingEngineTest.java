@@ -80,12 +80,14 @@ class ManasAroraSwingEngineTest {
 
   @Test
   void anArmedTrailRatchetsTheGoverningStopWithoutFiringAnExit() throws IOException {
-    // M40 Critical 3 fix (2026-08-02): proves SwingBatchEngine's exit pass — with the REAL ATR/
-    // Chandelier arithmetic (ExitEvaluator, unmodified) — calls the NEW ratchet port when a held
-    // position's trail has armed but nothing exits, and that it does NOT fire an exit in the same run
-    // (the two are mutually exclusive branches of the same evaluation). See
-    // PaperServiceManasAggregateRiskIntegrationTest for the "reaches the column and lowers computed
-    // risk" half of this proof.
+    // M40 Critical 3 fix, round 3 (owner ruling, 2026-08-02): proves SwingBatchEngine's exit pass —
+    // with the REAL ATR/Chandelier arithmetic (ExitEvaluator, unmodified) — calls the
+    // cacheManasGoverningStop port (IN MEMORY ONLY, never stop_loss or any database column — see
+    // that method's javadoc for why: stop_loss also serves as the intraday disaster-stop a 15s
+    // poller reads with no book filter) when a held position's trail has armed but nothing exits,
+    // and that it does NOT fire an exit in the same run (the two are mutually exclusive branches of
+    // the same evaluation). See PaperServiceManasAggregateRiskIntegrationTest for the "lowers
+    // computed risk and never touches stop_loss" half of this proof.
     UUID strategyId = UUID.randomUUID();
     UUID publishedVersion = UUID.randomUUID();
     JsonNode config = breakoutConfig();
@@ -119,7 +121,8 @@ class ManasAroraSwingEngineTest {
 
     assertThat(run.exits()).as("the armed trail has not been BREACHED — nothing exits").isZero();
     ArgumentCaptor<BigDecimal> stop = ArgumentCaptor.forClass(BigDecimal.class);
-    verify(guard).ratchetStopLoss(eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), stop.capture());
+    verify(guard)
+        .cacheManasGoverningStop(eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), stop.capture());
     assertThat(stop.getValue())
         .as("the armed (breakeven-floored) trail ratchets to AT LEAST entry price — strictly tighter"
             + " than the persisted initial stop (entry − 2×ATR, well below entry)")

@@ -29,14 +29,36 @@ class PaperEmissionGuardTest {
 
   @Test
   void openRiskInrSumsPerPositionRiskAndTreatsTrailedOrStoplessPositionsAsZero() {
+    ManasGoverningStopCache cache = new ManasGoverningStopCache();
     // Position A: 100 qty, entry 200, stop 190 -> risk 100 × 10 = ₹1,000.
     PositionRow a = position(100, "200", "190");
     // Position B: 50 qty, entry 300, stop 320 (trailed ABOVE entry) -> open risk 0 (§3.5.B).
     PositionRow b = position(50, "300", "320");
     // Position C: 10 qty, entry 100, NO stop -> contributes 0 (no defined risk to sum).
     PositionRow c = position(10, "100", null);
-    assertThat(PaperEmissionGuard.openRiskInr(List.of(a, b, c))).isEqualByComparingTo("1000");
-    assertThat(PaperEmissionGuard.openRiskInr(List.of())).isEqualByComparingTo("0");
+    assertThat(PaperEmissionGuard.openRiskInr(List.of(a, b, c), cache)).isEqualByComparingTo("1000");
+    assertThat(PaperEmissionGuard.openRiskInr(List.of(), cache)).isEqualByComparingTo("0");
+  }
+
+  /**
+   * M40 Critical 3 fix, round 3 (owner ruling, 2026-08-02): the IN-MEMORY {@link
+   * ManasGoverningStopCache} entry — never {@code stop_loss} itself (which also serves as the
+   * intraday disaster-stop, never touched by this fix) — takes precedence once armed. 100 qty, entry
+   * 200, {@code stop_loss} 190 (would give risk 1,000) but a tighter CACHED governing stop of 195 ->
+   * effective risk 100×(200−195)=500. Before the trail arms (nothing cached), {@code stop_loss}
+   * alone governs, unchanged from before this fix.
+   */
+  @Test
+  void openRiskInrPrefersTheCachedGoverningStopOverStopLossOnceArmed() {
+    ManasGoverningStopCache cache = new ManasGoverningStopCache();
+    PositionRow armed = position(100, "200", "190");
+    cache.put("manas-arora", "NSE", "TESTCO", "BUY", bd("195"));
+    assertThat(PaperEmissionGuard.openRiskInr(List.of(armed), cache)).isEqualByComparingTo("500");
+    assertThat(PaperEmissionGuard.effectiveStop(armed, cache)).isEqualByComparingTo("195");
+
+    PositionRow unarmed = position(100, "200", "190");
+    ManasGoverningStopCache emptyCache = new ManasGoverningStopCache();
+    assertThat(PaperEmissionGuard.effectiveStop(unarmed, emptyCache)).isEqualByComparingTo("190");
   }
 
   private static PositionRow position(long qty, String avgEntry, String stop) {
@@ -97,7 +119,8 @@ class PaperEmissionGuardTest {
     PaperEmissionGuard guard =
         new PaperEmissionGuard(
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
-            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class));
+            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
+            new ManasGoverningStopCache());
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
     when(account.realisedProfit("scalper")).thenReturn(bd("150000"));
@@ -128,7 +151,8 @@ class PaperEmissionGuardTest {
     PaperEmissionGuard guard =
         new PaperEmissionGuard(
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
-            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class));
+            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
+            new ManasGoverningStopCache());
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
     // ₹150k profit -> ₹15k budget; premium 20 × lot 75 = ₹1,500/lot -> 10 affordable lots.
@@ -156,7 +180,8 @@ class PaperEmissionGuardTest {
     PaperEmissionGuard guard =
         new PaperEmissionGuard(
             mock(RiskService.class), account, instruments, mock(ScalperAccountModel.class),
-            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class));
+            mock(PaperPositionRepository.class), mock(PaperOrderRejectionRecorder.class),
+            new ManasGoverningStopCache());
     when(instruments.meta(any(), any()))
         .thenReturn(new InstrumentMeta(InstrumentClass.OPTION, bd("0.05"), 75L));
 
@@ -182,7 +207,8 @@ class PaperEmissionGuardTest {
     PaperEmissionGuard guard =
         new PaperEmissionGuard(
             mock(RiskService.class), mock(PaperAccountService.class), instruments,
-            mock(ScalperAccountModel.class), mock(PaperPositionRepository.class), rejections);
+            mock(ScalperAccountModel.class), mock(PaperPositionRepository.class), rejections,
+            new ManasGoverningStopCache());
     StrategyDefinition.SizingSpec sizing =
         new StrategyDefinition.SizingSpec("premium_budget", Map.of("budget_inr", bd("15000")));
 

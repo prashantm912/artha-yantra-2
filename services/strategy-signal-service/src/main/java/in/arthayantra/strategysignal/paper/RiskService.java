@@ -58,6 +58,7 @@ public class RiskService {
   private final PaperMarginClient marginClient;
   private final NotifierClient notifier;
   private final Clock clock;
+  private final ManasGoverningStopCache governingStopCache;
 
   /**
    * F9 master enforcement gate (default OFF → advisory: the heat cap audits + ntfy-alerts on a breach
@@ -99,7 +100,8 @@ public class RiskService {
       Clock clock,
       @Value("${artha.paper.risk.enabled:false}") boolean enforcementEnabled,
       @Value("${artha.manas-arora.pyramid.max-portfolio-risk-pct:6.0}")
-          BigDecimal manasAggregateRiskCapPct) {
+          BigDecimal manasAggregateRiskCapPct,
+      ManasGoverningStopCache governingStopCache) {
     this.settings = settings;
     this.positions = positions;
     this.account = account;
@@ -108,6 +110,7 @@ public class RiskService {
     this.clock = clock;
     this.enforcementEnabled = enforcementEnabled;
     this.manasAggregateRiskCapPct = manasAggregateRiskCapPct;
+    this.governingStopCache = governingStopCache;
   }
 
   /** Whether a book's emitted ENTRY signals should auto-open a paper position (the auto-paper toggle). */
@@ -189,21 +192,27 @@ public class RiskService {
    *       exactly ON the cap can have its ACTUAL persisted risk land fractionally over it.
    *   <li><b>Averaging onto an existing row.</b> {@code PaperService#upsertPosition} averages a 2nd
    *       fill for the same {@code (book,exchange,tradingsymbol,side)} key into ONE row and KEEPS the
-   *       row's ORIGINAL stop. A naive "existing total + this fill's own qty×stopDistance" therefore
-   *       undercounts: the true post-fill risk for that symbol is {@code (newAvg − originalStop) ×
-   *       newQty}, computed against the SAME stop the row will actually retain, not the request's own
-   *       stop. This method looks up the existing row (if any) for the exact key, replaces its OLD
-   *       contribution with the PROJECTED post-fill one, and only then compares the total to equity.
+   *       row's ORIGINAL bracket. A naive "existing total + this fill's own qty×stopDistance" therefore
+   *       undercounts: the true post-fill risk for that symbol is {@code (newAvg − governingStop) ×
+   *       newQty}, computed against the SAME {@link PaperEmissionGuard#effectiveStop} the row will
+   *       actually retain, not the request's own stop. This method looks up the existing row (if any)
+   *       for the exact key, replaces its OLD contribution with the PROJECTED post-fill one, and only
+   *       then compares the total to equity.
    * </ul>
    *
-   * <p>⚠️ Known residual gap (Critical 3, not fixed here — a materially larger, separately-scoped
-   * change): {@code paper_positions.stop_loss} is set ONCE at open and never updated by Manas's daily
-   * Chandelier trail ({@code updateBrackets}'s one production caller is the MANUAL {@code
-   * editBrackets} path) — so every OTHER open position's contribution to {@code existingTotal} below
-   * reads a STALE, wider (never tighter) stop than the position's true current governing one. Since a
-   * trail only ever tightens a long's stop, this bias is CONSERVATIVE (over-states existing risk, so
-   * this gate can refuse a fresh entry the true tighter-stop risk would actually have allowed) — it
-   * cannot let true aggregate risk secretly exceed the cap, unlike the two defects this method fixes.
+   * <p><b>Critical 3 (round 3, owner ruling, 2026-08-02) — fixed for the RISK CALCULATION ONLY, IN
+   * MEMORY, never persisted.</b> {@code paper_positions.stop_loss} is set once at open and would stay
+   * stale forever if this rail read it directly — but {@code stop_loss} is ALSO the intraday
+   * disaster-stop the paper module's 15-second bracket poller reads with no book filter, so writing
+   * the daily Chandelier trail there (round 1) OR into any new persisted column (round 2, a
+   * dedicated {@code manas_governing_stop} column) both risked or would have coupled the risk figure
+   * to an intraday-exit surface. {@code effectiveStop} instead reads {@link
+   * ManasGoverningStopCache}, an IN-MEMORY-ONLY map ({@code EmissionGuard#cacheManasGoverningStop})
+   * that no {@code stop_loss}-reading path ever sees or can see — M40 fixes the risk calculation;
+   * {@code stop_loss} itself, and whether Manas should ever become intraday-trail-managed, are
+   * explicitly OUT of scope here (a separate, later, owner decision — see the PR receipt). The cache
+   * is empty on a fresh boot / before the trail arms, falling back to the persisted {@code stopLoss}
+   * — the SAME conservative reading this rail had before any of M40, not a regression.
    *
    * <p>Manas-only ({@code BookResolver.MANAS_ARORA}) and deliberately PURE like {@link
    * #deploymentWouldCross} — no audit row, no ntfy, safe to call from the fill path; the caller emits
@@ -225,7 +234,7 @@ public class RiskService {
       return false;
     }
     List<PositionRow> open = positions.listOpen(book);
-    BigDecimal existingTotal = PaperEmissionGuard.openRiskInr(open);
+    BigDecimal existingTotal = PaperEmissionGuard.openRiskInr(open, governingStopCache);
     PositionRow existing =
         open.stream()
             .filter(
@@ -236,7 +245,9 @@ public class RiskService {
             .findFirst()
             .orElse(null);
     BigDecimal oldSymbolRisk =
-        existing == null ? BigDecimal.ZERO : PaperEmissionGuard.openRiskInr(List.of(existing));
+        existing == null
+            ? BigDecimal.ZERO
+            : PaperEmissionGuard.openRiskInr(List.of(existing), governingStopCache);
     BigDecimal projectedSymbolRisk;
     if (existing != null) {
       // Mirrors PaperService#upsertPosition's averaging math exactly: the row's qty/avg move, its
@@ -248,7 +259,7 @@ public class RiskService {
               .multiply(BigDecimal.valueOf(existing.qty()))
               .add(fillPrice.multiply(BigDecimal.valueOf(qty)))
               .divide(BigDecimal.valueOf(newQty), 4, RoundingMode.HALF_UP);
-      BigDecimal governingStop = existing.stopLoss();
+      BigDecimal governingStop = PaperEmissionGuard.effectiveStop(existing, governingStopCache);
       projectedSymbolRisk =
           governingStop == null
               ? BigDecimal.ZERO

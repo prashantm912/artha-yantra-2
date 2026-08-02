@@ -78,34 +78,46 @@ public interface EmissionGuard {
   }
 
   /**
-   * The book's current aggregate OPEN risk in ₹: {@code Σ qty × max(0, avgEntry − stopLoss)} over its
-   * open positions (a position whose stop has trailed above its entry contributes 0 — "trailing reduces
-   * open risk", §2.2/§3.5.B). The Manas pyramiding gate adds the prospective new lot's risk to this and
-   * blocks the add/fresh-entry if the total would breach the ≤5–6% portfolio cap (§3.4.3). Default 0 ⇒
-   * paper disabled / no open positions (the gate then never blocks on risk).
+   * The book's current aggregate OPEN risk in ₹: {@code Σ qty × max(0, avgEntry − effectiveStop)} over
+   * its open positions (a position whose stop has trailed above its entry contributes 0 — "trailing
+   * reduces open risk", §2.2/§3.5.B). The Manas pyramiding gate adds the prospective new lot's risk to
+   * this and blocks the add/fresh-entry if the total would breach the ≤5–6% portfolio cap (§3.4.3).
+   * Default 0 ⇒ paper disabled / no open positions (the gate then never blocks on risk).
    *
-   * <p>The persisted {@code stopLoss} this reads was, before the M40 Critical 3 fix (2026-08-02), ALWAYS
-   * the position's ORIGINAL bracket — Manas's daily Chandelier trail was computed fresh every batch run
-   * but never written back, so "trailing reduces open risk" was true in doctrine but not in this figure.
-   * {@link #ratchetStopLoss} now keeps the persisted value in sync with the trail (tighten-only), so this
-   * read is CURRENT for Manas, not merely conservative. Still conservative for any family/position where
-   * nothing ratchets it (Minervini; a Manas position before its trail arms).
+   * <p>{@code effectiveStop} is the persisted {@code stopLoss} for every family EXCEPT Manas, where
+   * it is the IN-MEMORY {@code ManasGoverningStopCache} entry when the daily Chandelier trail has
+   * armed (see {@link #cacheManasGoverningStop}), else {@code stopLoss} (the initial bracket, before
+   * the trail arms or on a fresh boot). Before the M40 Critical 3 fix (2026-08-02) Manas's trail was
+   * computed fresh every batch run but never read anywhere else, so "trailing reduces open risk" was
+   * true in doctrine but not in this figure — always conservative (overstated), never current. The
+   * fix is IN MEMORY ONLY, never a database write: {@code stopLoss} is ALSO the intraday
+   * disaster-stop {@code PaperBracketEvaluator} polls every 15s with no book filter, so this figure
+   * deliberately never reaches that column (or any new persisted column — two earlier drafts of this
+   * fix tried exactly that and were reverted) — M40 owns the risk calculation only; whether {@code
+   * stopLoss} itself should ever reflect the trail (making Manas intraday-trail-managed) is a
+   * separate, later, owner decision.
    */
   default BigDecimal openRiskInr(String book) {
     return BigDecimal.ZERO;
   }
 
   /**
-   * M40 Critical 3 fix (2026-08-02): ratchets a held position's persisted {@code stop_loss} UP to
-   * {@code newStop} when it is tighter than the currently stored value — so {@link #openRiskInr} (and
-   * the Manas aggregate open-risk cap it feeds) reads the position's LIVE governing stop instead of the
-   * one frozen at open. Pure accounting: this never itself closes a position or otherwise changes what
-   * the engine's own {@code ExitEvaluator} decides. The paper adapter enforces "never loosens" at the
-   * SQL layer (a no-op write when {@code newStop} is not strictly tighter), so a caller can never
-   * accidentally widen a stop by calling this with a stale/late value. Default no-op keeps non-paper and
-   * test adapters permissive.
+   * M40 Critical 3 fix, round 3 (owner ruling, 2026-08-02): caches a held Manas position's CURRENT
+   * governing stop — IN MEMORY ONLY, never a database write, never {@code stopLoss}, never any new
+   * column — so {@link #openRiskInr} (and the Manas aggregate open-risk cap it feeds) reads the
+   * position's LIVE governing stop instead of the stale one frozen at open, with ZERO effect on the
+   * column the paper module's intraday bracket poller reads. Pure accounting: this never itself
+   * closes a position or otherwise changes what the engine's own {@code ExitEvaluator} decides, and
+   * cannot affect intraday exit behaviour by construction — there is nothing here for a 15-second
+   * poll to read. The paper adapter enforces "never loosens" AND "LONG only" in the cache itself (a
+   * no-op when {@code newStop} is not strictly tighter than whatever is already cached, or when
+   * {@code side} is not {@code "BUY"} — Manas trades long-only, but a known parked SELL row exists in
+   * the live book, so this rejects rather than silently applying a higher-is-tighter comparison that
+   * would be backwards for a short). Empty on a fresh boot / before the trail arms — callers then
+   * fall back to {@code stopLoss}, the SAME conservative reading as before this whole M40 effort, not
+   * a regression. Default no-op keeps non-paper and test adapters permissive.
    */
-  default void ratchetStopLoss(
+  default void cacheManasGoverningStop(
       String book, String exchange, String tradingsymbol, String side, BigDecimal newStop) {}
 
   /**

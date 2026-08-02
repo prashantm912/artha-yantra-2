@@ -65,7 +65,7 @@ class RiskServiceHeatCapTest {
     RiskService risk =
         new RiskService(
             settings, positions, account, margin, notifier, CLOCK, enforcementEnabled,
-            new BigDecimal("6.0"));
+            new BigDecimal("6.0"), new ManasGoverningStopCache());
     return new Harness(risk, settings, margin, notifier);
   }
 

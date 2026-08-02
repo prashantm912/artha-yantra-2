@@ -34,6 +34,7 @@ public class PaperEmissionGuard implements EmissionGuard {
   private final ScalperAccountModel scalperAccounts;
   private final PaperPositionRepository positions;
   private final PaperOrderRejectionRecorder rejections;
+  private final ManasGoverningStopCache governingStopCache;
 
   /** Wires the risk gate + capital model + the scalper 5-account discipline + the position ledger. */
   public PaperEmissionGuard(
@@ -42,13 +43,15 @@ public class PaperEmissionGuard implements EmissionGuard {
       InstrumentMetaClient instruments,
       ScalperAccountModel scalperAccounts,
       PaperPositionRepository positions,
-      PaperOrderRejectionRecorder rejections) {
+      PaperOrderRejectionRecorder rejections,
+      ManasGoverningStopCache governingStopCache) {
     this.risk = risk;
     this.account = account;
     this.instruments = instruments;
     this.scalperAccounts = scalperAccounts;
     this.positions = positions;
     this.rejections = rejections;
+    this.governingStopCache = governingStopCache;
   }
 
   @Override
@@ -70,25 +73,45 @@ public class PaperEmissionGuard implements EmissionGuard {
 
   @Override
   public BigDecimal openRiskInr(String book) {
-    return openRiskInr(positions.listOpen(book));
+    return openRiskInr(positions.listOpen(book), governingStopCache);
   }
 
   /**
-   * Aggregate open risk (₹) over a set of open positions: {@code Σ qty × max(0, avgEntry − stopLoss)},
-   * a stop-less position contributing 0 (no defined risk to sum). Pure + package-visible for a unit test.
+   * Aggregate open risk (₹) over a set of open positions: {@code Σ qty × max(0, avgEntry −
+   * effectiveStop)}, a stop-less position contributing 0 (no defined risk to sum). {@code
+   * effectiveStop} is {@link #effectiveStop} — the IN-MEMORY {@link ManasGoverningStopCache} entry
+   * when cached (Manas only; every other family/position is never cached), else the persisted
+   * {@code stopLoss}. Pure (given the cache) + package-visible for a unit test.
    */
-  static BigDecimal openRiskInr(java.util.List<PaperPositionRepository.PositionRow> open) {
+  static BigDecimal openRiskInr(
+      java.util.List<PaperPositionRepository.PositionRow> open, ManasGoverningStopCache cache) {
     BigDecimal total = BigDecimal.ZERO;
     for (PaperPositionRepository.PositionRow p : open) {
-      if (p.stopLoss() == null) {
+      BigDecimal stop = effectiveStop(p, cache);
+      if (stop == null) {
         continue;
       }
-      BigDecimal perUnit = p.avgEntryPrice().subtract(p.stopLoss());
+      BigDecimal perUnit = p.avgEntryPrice().subtract(stop);
       if (perUnit.signum() > 0) {
         total = total.add(perUnit.multiply(BigDecimal.valueOf(p.qty())));
       }
     }
     return total;
+  }
+
+  /**
+   * M40 Critical 3 fix, round 3 (owner ruling, 2026-08-02): the stop the aggregate open-risk cap
+   * should treat as CURRENTLY governing this position — the {@link ManasGoverningStopCache} entry
+   * once the daily Chandelier trail has armed (Manas only; every other family/position is never
+   * cached), else the persisted {@code stopLoss} (the initial bracket, or the ONLY figure for any
+   * family other than Manas). IN MEMORY ONLY — {@code stopLoss} itself is never read from or
+   * written to by anything in this fix; a cache miss (fresh boot, or before the trail arms) falls
+   * back to it unchanged. Package-visible + pure (given the cache) for a unit test.
+   */
+  static BigDecimal effectiveStop(
+      PaperPositionRepository.PositionRow p, ManasGoverningStopCache cache) {
+    BigDecimal cached = cache.get(p.book(), p.exchange(), p.tradingsymbol(), p.side());
+    return cached != null ? cached : p.stopLoss();
   }
 
   @Override
@@ -191,9 +214,9 @@ public class PaperEmissionGuard implements EmissionGuard {
   }
 
   @Override
-  public void ratchetStopLoss(
+  public void cacheManasGoverningStop(
       String book, String exchange, String tradingsymbol, String side, BigDecimal newStop) {
-    positions.ratchetStopLoss(book, exchange, tradingsymbol, side, newStop);
+    governingStopCache.put(book, exchange, tradingsymbol, side, newStop);
   }
 
   @Override

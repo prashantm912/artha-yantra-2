@@ -246,6 +246,7 @@ public class PaperService {
   private final ApplicationEventPublisher events;
   private final PaperStaleTickAlerter staleTicks;
   private final PaperOrderRejectionRecorder rejections;
+  private final ManasGoverningStopCache governingStopCache;
   private final BigDecimal perTradeRiskPct;
   /** Audit V3: a fill priced off a last tick older than this is fiction — rejected DATA_STALE. */
   private final Duration tickMaxAge;
@@ -273,6 +274,7 @@ public class PaperService {
       ApplicationEventPublisher events,
       PaperStaleTickAlerter staleTicks,
       PaperOrderRejectionRecorder rejections,
+      ManasGoverningStopCache governingStopCache,
       PlatformTransactionManager transactionManager,
       @org.springframework.beans.factory.annotation.Value("${artha.paper.risk.per-trade-risk-pct:1.0}")
           BigDecimal perTradeRiskPct,
@@ -295,6 +297,7 @@ public class PaperService {
     this.events = events;
     this.staleTicks = staleTicks;
     this.rejections = rejections;
+    this.governingStopCache = governingStopCache;
     this.perTradeRiskPct = perTradeRiskPct;
     this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
     this.signalTakeMaxAge = Duration.ofMinutes(signalTakeMaxAgeMinutes);
@@ -331,14 +334,15 @@ public class PaperService {
       ApplicationEventPublisher events,
       PaperStaleTickAlerter staleTicks,
       PaperOrderRejectionRecorder rejections,
+      ManasGoverningStopCache governingStopCache,
       PlatformTransactionManager transactionManager,
       BigDecimal perTradeRiskPct,
       long tickMaxAgeSeconds,
       long signalTakeMaxAgeMinutes) {
     this(
         orders, positions, fills, lastTick, instruments, signals, accountService, books, risk,
-        accounts, events, staleTicks, rejections, transactionManager, perTradeRiskPct,
-        tickMaxAgeSeconds, signalTakeMaxAgeMinutes, new SimpleMeterRegistry());
+        accounts, events, staleTicks, rejections, governingStopCache, transactionManager,
+        perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, new SimpleMeterRegistry());
   }
 
   /**
@@ -1111,6 +1115,11 @@ public class PaperService {
       // not close this position, or it reports someone else's exit as its own (§9-05).
       return Optional.empty();
     }
+    // M40 Critical 3 fix, round 3 (2026-08-02): drop this key's in-memory governing-stop cache entry
+    // on a REAL close (past the CAS, so a race loser never evicts on someone else's close) — a later
+    // re-open of the same (book,exchange,tradingsymbol,side) key must never inherit a stale trail
+    // from the position that just closed. A no-op for any key never cached (every non-Manas book).
+    governingStopCache.evict(pos.book(), pos.exchange(), pos.tradingsymbol(), pos.side());
     if (staleAge != null) {
       staleTicks.staleSettleUsed(pos, closeReason, staleAge);
     }

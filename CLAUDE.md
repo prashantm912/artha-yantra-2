@@ -45,6 +45,23 @@ one. Evidence (2026-07-25): the T21 cross-vendor review found a LIVE Critical no
 take), and a later review round caught a foreign hunk the Architect had already read past in audit.
 
 Rules proven over the first delegated runs (#675–#680), model-independent:
+- ⚠️ **EVERY brief opens with a STEP 0: "verify this brief's premise against the code before writing
+  anything; reporting the premise is wrong is a SUCCESSFUL outcome."** On 2026-08-02 five builders were
+  dispatched from one enumeration pass and **all five items were already shipped**; every one stopped itself
+  at STEP 0, so the cost was minutes rather than five junk PRs. Two further briefs that day had premises that
+  were simply wrong — a global `BigDecimal`→string converter (position-blind, would have retyped 28 REQUEST
+  surfaces where `number` is TRUE) and a set of divergences that did not exist. **The builder falsifying the
+  brief is the single highest-yield thing in this pipeline; write briefs so that is rewarded, not resisted.**
+- ⚠️ **A `recalled` fact about LIVE state has a shelf life of days — re-query before it is load-bearing.**
+  Same day, the Architect asserted `paper_positions id=28` was an open SELL three times from a stale memory
+  note; it had been CLOSED since 2026-07-17, and the error reached a cross-vendor reviewer's findings before
+  anyone caught it. Two audit docs also went stale DURING their own writing (a deploy and a data re-fetch
+  landed mid-audit). Corollary for closeouts: **re-measure at write time, not at investigation time.**
+- ⚠️ **A builder that reports "build still running, I'll report when it lands" is STOPPED, not waiting.** The
+  task notification fires only when no background child is live, so its watcher died with it. Treat the
+  message as a stall: send it back to re-read its own log, and treat a frozen log with no `BUILD` line as
+  truncated rather than passed. Tell builders to run long verifies in the FOREGROUND and read Maven's own
+  exit code — backgrounding buys nothing and adds a way to die silently.
 - The brief must be self-contained: goal, constraints, **relevant memory-trap content pasted in**
   (subagents get this file but never the memory files), and a required receipt shape — diff, test
   output, claims WITH evidence (file:line / SQL+result / log line) **each labeled
@@ -396,6 +413,26 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   first, then ALWAYS DB-probe the new object (`to_regclass`/information_schema). A healthy container
   + an "up to date" flyway log do NOT prove the migration applied (a stale checkout deployed
   "healthy" without its migration once, 2026-07-11; only the probe caught it).
+- ⚠️ **"13/13 healthy" says NOTHING about whether a service runs current code — and neither does an image
+  timestamp.** Found 2026-08-02: five services were silently stale while every container was healthy.
+  **The deploy-currency check, in order:** (1) per service, `git log origin/main -1 -- services/<svc>/src/main
+  libs/` — note `libs/` makes a shared-lib change stale EVERY Java service at once, which is how four went
+  stale on one PR; (2) compare against `docker image inspect <img> --format '{{.Created}}'` — **that field is
+  UTC**, so convert before comparing with IST commit times (misreading it cost a false "stale" alarm the same
+  night); (3) **PROBE what the service actually SERVES.** A timestamp says a service *might* be stale; a probe
+  says what it *is*. The decisive case: committed spec said `BacktestTradeItem.entryPrice: {"type":"string"}`
+  while the deployed service served `{"type":"number"}` — a lie the sweep had already removed from the repo,
+  still being published. Cheap live probes: `/v3/api-docs` for a known field, the frontend's served bundle
+  hash vs `dist/index.html` (an IDENTITY check, not an mtime), `pg_constraint` for a migration object.
+- ⚠️ **Fingerprinting a NESTED lib class returns 0 from the outer fat jar — that is a FALSE NEGATIVE, not
+  absence.** `unzip -l /app/*.jar | grep <LibClass>` = 0 for anything in `libs/`; and `unzip -p … | unzip -l
+  /dev/stdin` does not work either (unzip cannot read stdin). Extract first:
+  `cd /tmp && unzip -o -q /app/*.jar "BOOT-INF/lib/common-web-core-*.jar" && unzip -l BOOT-INF/lib/common-web-core-*.jar | grep <Class>`.
+  Also expect MORE hits than classes — a nested record (`Foo$Decimal`) counts separately.
+- ⚠️ **`engine_reloads.installed=f` on the row right after a deploy is NORMAL, not a failed install.** Rows
+  alternate `t` then `f` ~38 s apart on every deploy (measured across all three on 2026-08-02: 97→98, 99→100,
+  101→102, each 38 loaded / 0 unresolved / 0 errors). The first reload installs; the second is the periodic
+  reconcile finding no drift. Judge health on `loaded`/`unresolved`/`load_errors`, never on `installed` alone.
 - **Deploy migrations IN VERSION ORDER.** Deploying V044 before V043 makes flyway-init fail *validation*
   (`Detected resolved migration not applied: 043`), which blocks EVERY future migration, not just the skipped
   one. Fix = renumber the stranded (never-applied) migration HIGHER, never `outOfOrder=true` (2026-07-20).

@@ -314,6 +314,49 @@ class RiskServiceManasAggregateRiskTest {
         .isTrue();
   }
 
+  /**
+   * Round 6, cross-vendor review Critical: the round-5 sweep validates sides already IN the book —
+   * on an EMPTY book there is nothing to sweep, so a fresh SELL candidate fell through to the
+   * BUY-only {@code fillPrice − requestStopLoss} arithmetic, which clamps a short's negative
+   * distance (stop ABOVE fill) to zero and silently ADMITS it. REACHABLE today via the manual
+   * paper-order endpoint, independent of any pre-existing SELL row.
+   */
+  @Test
+  void aFreshSellOnAnEmptyBookRefusesRatherThanComputingAFalseZero() {
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    RiskService risk = risk(positions, account, new ManasGoverningStopCache(), "6.0");
+    when(positions.listOpen(BOOK)).thenReturn(List.of());
+    when(account.equity(BOOK)).thenReturn(bd("1000000"));
+
+    assertThat(
+            risk.manasAggregateRiskWouldCross(
+                BOOK, "NSE", "NEWSHORT", "SELL", 100, bd("100"), bd("110")))
+        .as("a normal short stop (110) sits ABOVE the fill (100); fillPrice-requestStopLoss clamps"
+            + " to zero without this fix — refuse the unsupported side outright instead")
+        .isTrue();
+  }
+
+  /**
+   * Companion to the SELL red-proof above (the reviewer's explicit ask): a fresh BUY on the SAME
+   * empty book, at a size that is comfortably under the cap, must still be ADMITTED — proving the
+   * fix refuses the unsupported SIDE specifically, not every fresh entry on an empty book.
+   */
+  @Test
+  void aFreshBuyOnTheSameEmptyBookStillAdmits() {
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    RiskService risk = risk(positions, account, new ManasGoverningStopCache(), "6.0");
+    when(positions.listOpen(BOOK)).thenReturn(List.of());
+    when(account.equity(BOOK)).thenReturn(bd("1000000"));
+
+    assertThat(
+            risk.manasAggregateRiskWouldCross(
+                BOOK, "NSE", "NEWLONG", "BUY", 100, bd("100"), bd("90")))
+        .as("100×(100−90)=1,000 = 0.1% of 1,000,000 — comfortably under the 6% cap, admits")
+        .isFalse();
+  }
+
   @Test
   void nonManasBooksAndDegenerateInputsAreAlwaysFalse() {
     PaperPositionRepository positions = mock(PaperPositionRepository.class);

@@ -256,6 +256,21 @@ public class RiskService {
    * was chosen over implementing SELL risk arithmetic specifically because there is no live row to
    * verify SELL arithmetic against — refusing what cannot be safely computed is testable and
    * correct regardless; a bespoke formula that has never run against real data would not be.
+   *
+   * <p><b>Critical (round 6, cross-vendor review, 2026-08-02) — the round-5 sweep validated sides
+   * already IN the book; it never validated the INCOMING candidate's own side.</b> On an empty (or
+   * all-BUY) Manas book the sweep loop above has nothing to reject, {@code existing} is {@code
+   * null}, and a fresh {@code SELL} with a normal short stop ABOVE its fill reaches the {@code else}
+   * branch: {@code fillPrice − requestStopLoss} is negative, {@code .max(ZERO)} clamps it to zero,
+   * and the call is silently ADMITTED at zero computed risk. Once that SELL row persists, the
+   * round-5 book-wide sweep then refuses EVERY subsequent Manas entry (a non-BUY row in {@code
+   * open} always refuses) — fail-open on the way in, fail-closed forever after. **This is REACHABLE
+   * today** via the manual paper-order endpoint (`PaperController`), independent of whether any
+   * SELL row exists yet — it does not depend on the retracted "known parked SELL row" claim above.
+   * Fixed by refusing a non-BUY candidate outright, immediately after confirming Manas scope,
+   * before touching the book at all — consistent with how every existing row's side is already
+   * handled in the sweep, and for the same reason: no live SELL row exists to verify short-risk
+   * arithmetic against, so refusing is the only safe, testable option.
    */
   public boolean manasAggregateRiskWouldCross(
       String book,
@@ -267,6 +282,13 @@ public class RiskService {
       BigDecimal requestStopLoss) {
     if (!BookResolver.MANAS_ARORA.equals(book) || fillPrice == null || qty <= 0) {
       return false;
+    }
+    if (!"BUY".equals(side)) {
+      // Critical fix (round 6): the book-wide sweep below only validates sides already IN the
+      // book — an empty or all-BUY book has nothing to reject, so a fresh non-BUY candidate would
+      // otherwise fall through to the BUY-only arithmetic below and compute a false zero risk.
+      // Refuse the incoming side directly, matching how an existing non-BUY row is already refused.
+      return true;
     }
     BigDecimal equity = account.equity(book);
     if (equity.signum() <= 0) {

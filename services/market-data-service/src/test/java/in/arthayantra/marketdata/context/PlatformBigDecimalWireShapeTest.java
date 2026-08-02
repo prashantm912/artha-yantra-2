@@ -344,6 +344,25 @@ class PlatformBigDecimalWireShapeTest {
     assertTextual(json(instance), "strike", "tickSize");
   }
 
+  /**
+   * {@code GET /api/v1/instruments/{underlying}/strikes} returns a BARE {@code List<BigDecimal>} —
+   * no record component to hang {@code @Schema} on, so the sweep's annotation-based method could
+   * not reach it and the spec kept claiming {@code items: {type: number}} while the wire carried
+   * strings (generated TS read {@code number[]}). The element type is now declared via
+   * {@code @ArraySchema} on the handler; this pins the WIRE side of that claim.
+   */
+  @Test
+  void strikesArrayElementsAreTextual() throws Exception {
+    JsonNode array = json(java.util.List.of(new BigDecimal("18000"), new BigDecimal("18100.50")));
+    assertThat(array.isArray()).as("strikes is a bare JSON array").isTrue();
+    assertThat(array).hasSize(2);
+    for (JsonNode element : array) {
+      assertThat(element.isTextual())
+          .as("every strike must be a JSON string, was %s", element)
+          .isTrue();
+    }
+  }
+
   @Test
   void longShortRowDecimalsAreTextual() throws Exception {
     var instance = new FiiDiiController.LongShortRow(null, 1L, 1L, D);

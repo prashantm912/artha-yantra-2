@@ -28,8 +28,9 @@ else; where a sibling doc disagrees, the row wins and the sibling is what gets c
 > three are owner flag/data actions, three are verifications, two are undecidable.**
 >
 > Alongside them: **14 prose declarations were stale** (promoted, shipped, or superseded, and never annotated), and
-> **0 lost T-items** — the T-namespace turned out to be in far better shape than its reputation, with 29 of 30
-> carrying a durable row. **1 T-item (T10) has no register anywhere.**
+> **0 lost T-items** — the T-namespace is in far better shape than its reputation, with **27 of 30 carrying a durable
+> row**. Of the three that do not: **T10 is OPEN and registerless** (the finding above), while **T4 and T18 are CLOSED
+> and registerless** — harmless, but see the correction below, because the *mechanism* that lost them is the same one.
 
 Counts: **8** genuinely-open-and-invisible · **14** stale prose declarations now pointered · **2** sibling-doc drifts
 in the newest tune table · **2** chip ids whose content is unrecoverable · **0** items lost outright.
@@ -105,15 +106,28 @@ verdicts checked against the row, the PR, or the code.
 ## Part 3 — The T-namespace, enumerated end to end
 
 The recipe warns that T1…T23 "exist ONLY in the newest session-findings tune table unless someone promoted them to
-§0 group G". **The good news is that somebody did.** 30 T-items exist (T1–T30, no gaps — T4 is real, it is the
-`basis` dot). **29 carry a durable row.** Exactly one does not.
+§0 group G". **The good news is that somebody mostly did.** 30 T-items exist (T1–T30, no gaps — T4 is real, it is
+the `basis` dot). **27 carry a durable row** (a §0/group-G row, or a bug-queue B/D row mirrored into §0). Three do
+not, and it is worth separating them because only one is a risk:
+
+- **T10 — OPEN and registerless.** The finding in Part 1 #4. This is the one that matters.
+- **T4 and T18 — CLOSED and registerless.** ⚠️ **Correction to my own first draft, which claimed 29 of 30.**
+  Both were resolved as *regime*, not by a PR, so no row was ever opened — and both have since dropped out of the
+  tune table entirely (`computed`: T4 last appears in `2026-07-27-session-findings.md`, T18 in `2026-07-28-…`;
+  neither is in the 2026-07-31 table, not even in its "remain CLOSED" roll-up row). They are harmless *today*
+  precisely because they are closed — a closed item that vanishes costs nothing.
+  **But the mechanism is the one this audit exists to catch:** an item resolved by *observation* rather than by a
+  merge gets no row, and then ages out of the only doc that held it. Had either been resolved the other way, it
+  would now be invisible open work — which is exactly T10's situation. **The generalisable rule: a tune closed by
+  regime still needs a durable resting place, or the reasoning for closing it is lost with the row that never
+  existed.** Recommend the newest tune table's "remain CLOSED" roll-up be treated as append-only.
 
 | T | subject | verdict | durable register |
 |---|---|---|---|
 | T1 | `relativeVolumeMultiplier` k 1.5→1.2 | **REJECTED BY MEASUREMENT** | G1 (CLOSED) — 6th consecutive no-pay; made final by the G11 decision |
 | T2 | `iv_rank` dot NULL 100% | carried, not open | row **E8** (DONE — "re-open only if Sept IV-history data") |
 | T3 | `iv_pair` gap 0.02→0.005 | knob **REJECTED**; operand re-scoped | G1 → successor row **G13** (DROP vs REDEFINE, design call open) |
-| T4 | `basis` dot 0/359 support | **CLOSED — no action** | resolved as REGIME on 07-20 (505/748 = 67.5%); alive 23–90% since |
+| T4 | `basis` dot 0/359 support | **CLOSED — no action** | ⚠️ **none** — resolved as REGIME on 07-20 (505/748 = 67.5%), alive 23–90% since; no row, and it left the tune table after 07-27 |
 | T5 | `iv_abs_band` 10–12→10–13 | **SUPERSEDED** | G12 (the band was never the question) |
 | T6 | `vwap` dot ≥15 bps | SHIPPED | bug-queue D2+D3 → #991 |
 | T7 | composite threshold 0.600 | **REJECTED BY MEASUREMENT** | G1 (CLOSED) |
@@ -126,7 +140,7 @@ The recipe warns that T1…T23 "exist ONLY in the newest session-findings tune t
 | T14 | sign-aware margin invariant | SHIPPED | row **G17** — #1171 (2026-08-01) |
 | T15 | engine boot-line durability | SHIPPED + verified 07-31 | B7 #987 |
 | T16 | relative-volume-floor tag | SHIPPED | B1 #980 |
-| T18 | `breadth` threshold >32 | **CLOSED as regime** | 07-23; successor question is T30 |
+| T18 | `breadth` threshold >32 | **CLOSED as regime** | ⚠️ **none** — closed 07-23 (declines 36–45 on a real down day, dot supported 96.6%); successor question is T30/G16; left the tune table after 07-28 |
 | T19 | gap-backfill phantom candles | SHIPPED | B3 #982 |
 | T20 | FINNIFTY thin-tape canary | SHIPPED | B6 #986 |
 | T21 | premium exits on bracket-less YAMLs | SHIPPED | D1 #990 |
@@ -201,7 +215,12 @@ signals since 07-21; 18 enabled+published `-pe`; nse_eod_bhavcopy 3,268/266/3,28
 (`ARTHA_HEARTBEAT_SESSION_URL` empty, `ARTHA_HEARTBEAT_URL` len 56) · the FE image build timestamp · all `gh pr view`
 states (#935/#938/#930/#936/#894/#1036/#737/#739/#741/#655/#649/#607/#750/#751/#900/#889/#959/#1171) · the
 `git log -S` provenance of task_019321d3 / task_2938fa28 / task_8f139394 / readSeriesBatched · the T1…T30 enumeration
-(swept every `docs/signal-analysis/*.md` tune table, not just the newest).
+(swept every `docs/signal-analysis/*.md` tune table, not just the newest) · the last-appearance dates of T4 and T18.
+
+**self-corrected in-session**: the headline first read "29 of 30 carry a durable row". Checking it rather than
+shipping it showed T4 and T18 carry none either — closed, not open, so the count was wrong without the conclusion
+being wrong. Recorded in place rather than quietly amended, because the mechanism that lost them is the audit's
+subject.
 
 **sourced** (read from code or a row, cited inline): `application.yml:87`, `EodBackfillController:38-46`,
 `ActiveStrikeService.sentimentLevelPct:88`, `MinerviniBacktestService:353,508`, the batch-equality ITs, T9 design

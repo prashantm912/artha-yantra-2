@@ -40,7 +40,7 @@ rail**, across **112 distinct sessions** (~4.1% of the ~2,750 NSE trading sessio
 own trajectory actually admitted).
 
 **The 139 refused trades were, on net, close to breakeven — not the clear winners the two withdrawn versions
-both reported**: mean **+1.13%**, but **median −0.68%** and **win rate 46.0%** (64 wins, 75 losses) — a
+both reported**: mean **+1.13%**, but **median −0.68%** and **win rate 46.0%** (64 wins, 74 losses, 1 flat) — a
 right-skewed distribution (a handful of large winners, e.g. +48.64% RDBRL, +46.72% HIRECT, pull the mean above
 the median) with a TYPICAL trade slightly negative. The whole-portfolio counterfactual — both arms using the
 SAME real, equity-proportional position sizing throughout — shows enforcing the cap would have **improved**
@@ -337,7 +337,8 @@ run output, not hand-transcribed):
 
 **[computed]** Summary (139 closed rows, no open-at-end entries this run; independently re-derived via a
 separate `awk` pass directly against the harness's raw output, matching the harness's own printed figures
-exactly): **mean +1.129% / median −0.68% / win rate 46.04% (64 wins, 75 losses) / best +48.64% (RDBRL) / worst
+exactly): **mean +1.129% / median −0.68% / win rate 46.04% (64 wins, 74 losses, 1 flat — GOLDIAM +0.00%) / best
++48.64% (RDBRL) / worst
 −21.94% (MIRZAINT)**. Entries span 2016 through early 2025.
 
 **Reading:** unlike both withdrawn versions, the trades a real 6% cap would refuse are NOT clearly net-winners —

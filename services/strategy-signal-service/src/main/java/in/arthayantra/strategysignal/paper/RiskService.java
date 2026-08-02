@@ -16,7 +16,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Global paper-risk limits (A12 / FP-42). Tripping the daily loss pauses ENTRY emission for the IST
@@ -59,6 +58,7 @@ public class RiskService {
   private final NotifierClient notifier;
   private final Clock clock;
   private final ManasGoverningStopCache governingStopCache;
+  private final PyramidRiskCapAuditor pyramidRiskCapAuditor;
 
   /**
    * F9 master enforcement gate (default OFF → advisory: the heat cap audits + ntfy-alerts on a breach
@@ -101,7 +101,8 @@ public class RiskService {
       @Value("${artha.paper.risk.enabled:false}") boolean enforcementEnabled,
       @Value("${artha.manas-arora.pyramid.max-portfolio-risk-pct:6.0}")
           BigDecimal manasAggregateRiskCapPct,
-      ManasGoverningStopCache governingStopCache) {
+      ManasGoverningStopCache governingStopCache,
+      PyramidRiskCapAuditor pyramidRiskCapAuditor) {
     this.settings = settings;
     this.positions = positions;
     this.account = account;
@@ -111,6 +112,7 @@ public class RiskService {
     this.enforcementEnabled = enforcementEnabled;
     this.manasAggregateRiskCapPct = manasAggregateRiskCapPct;
     this.governingStopCache = governingStopCache;
+    this.pyramidRiskCapAuditor = pyramidRiskCapAuditor;
   }
 
   /** Whether a book's emitted ENTRY signals should auto-open a paper position (the auto-paper toggle). */
@@ -217,6 +219,21 @@ public class RiskService {
    * <p>Manas-only ({@code BookResolver.MANAS_ARORA}) and deliberately PURE like {@link
    * #deploymentWouldCross} — no audit row, no ntfy, safe to call from the fill path; the caller emits
    * the refusal audit via {@link #recordPyramidRiskCapBreach}, mirroring the deployment rail's split.
+   *
+   * <p><b>Critical 2 (round 4, cross-vendor review, 2026-08-02) — a safety gate FAILS CLOSED when it
+   * cannot compute, never open.</b> Three earlier branches treated "I don't know the risk" as "the
+   * risk is zero" — non-positive equity returned {@code false} (does not cross, so the fill
+   * proceeds), an existing lot with NO governing stop at all (neither cached nor persisted)
+   * contributed zero to the projected total, and a genuinely fresh entry with no requested stop
+   * ALSO contributed zero. All three inverted the cap's purpose: an insolvent/zeroed book, or a
+   * stopless fill, could add UNBOUNDED risk and sail through undetected. Each now returns {@code
+   * true} (refuse) instead — "cannot compute" means refuse, matching every other safety gate in
+   * this class (e.g. {@link PaperEmissionGuard#suggestedQty} fails closed on an unresolved
+   * instrument, checklist "Money/data fidelity"). The {@code !MANAS_ARORA.equals(book) ||
+   * fillPrice == null || qty <= 0} guard above stays {@code false} — that is genuine
+   * scope-limiting (the cap does not apply outside Manas) and defensive validation already enforced
+   * upstream ({@code PaperService#openOrder} rejects non-positive qty before this is ever called),
+   * not a "cannot compute" case.
    */
   public boolean manasAggregateRiskWouldCross(
       String book,
@@ -231,7 +248,9 @@ public class RiskService {
     }
     BigDecimal equity = account.equity(book);
     if (equity.signum() <= 0) {
-      return false;
+      // Critical 2 fix (round 4): cannot compute a percentage of non-positive equity — refuse
+      // rather than silently admit an unbounded-risk fill on an insolvent/zeroed book.
+      return true;
     }
     List<PositionRow> open = positions.listOpen(book);
     BigDecimal existingTotal = PaperEmissionGuard.openRiskInr(open, governingStopCache);
@@ -260,17 +279,22 @@ public class RiskService {
               .add(fillPrice.multiply(BigDecimal.valueOf(qty)))
               .divide(BigDecimal.valueOf(newQty), 4, RoundingMode.HALF_UP);
       BigDecimal governingStop = PaperEmissionGuard.effectiveStop(existing, governingStopCache);
+      if (governingStop == null) {
+        // Critical 2 fix (round 4): the existing lot has NO governing stop at all (neither a
+        // cached trail nor a persisted stopLoss) — its risk is genuinely UNDEFINED, not zero.
+        // Refuse rather than silently admit.
+        return true;
+      }
       projectedSymbolRisk =
-          governingStop == null
-              ? BigDecimal.ZERO
-              : newAvg.subtract(governingStop).max(BigDecimal.ZERO)
-                  .multiply(BigDecimal.valueOf(newQty));
+          newAvg.subtract(governingStop).max(BigDecimal.ZERO).multiply(BigDecimal.valueOf(newQty));
     } else {
+      if (requestStopLoss == null) {
+        // Critical 2 fix (round 4): a genuinely fresh Manas entry with no stop at all cannot have
+        // its risk computed — refuse rather than silently admit at zero risk.
+        return true;
+      }
       projectedSymbolRisk =
-          requestStopLoss == null
-              ? BigDecimal.ZERO
-              : fillPrice.subtract(requestStopLoss).max(BigDecimal.ZERO)
-                  .multiply(BigDecimal.valueOf(qty));
+          fillPrice.subtract(requestStopLoss).max(BigDecimal.ZERO).multiply(BigDecimal.valueOf(qty));
     }
     BigDecimal projectedTotal = existingTotal.subtract(oldSymbolRisk).add(projectedSymbolRisk);
     BigDecimal totalPct =
@@ -417,36 +441,37 @@ public class RiskService {
    * never import this module (the acyclic module-graph rule that already forced the port pattern for
    * every other paper↔swing signal) — never need to know this class exists.
    *
-   * <p>{@link Propagation#REQUIRES_NEW} (cross-vendor review, 2026-08-02): {@code PaperService
-   * #openOrder}'s own write-time call to this method sits INSIDE that method's {@code @Transactional}
-   * boundary, immediately before it throws the 422 that refuses the fill — the same "throw rolls back
-   * everything in this transaction" hazard {@link PaperOrderRejectionRecorder}'s javadoc documents for
-   * the sibling rejection ledger. Without its own fresh transaction the {@code risk_audit} row this
-   * method writes would roll back with the refused fill, silently discarding the very audit trail the
-   * refusal is supposed to leave. A no-op-equivalent change for the OTHER call site
-   * (SwingBatchEngine's entry pass, which runs outside any enclosing transaction) — REQUIRES_NEW just
-   * starts a fresh transaction there too, byte-behaviour-identical to before.
+   * <p>The actual {@link Propagation#REQUIRES_NEW} write lives on the separate {@link
+   * PyramidRiskCapAuditor} bean (round 4, cross-vendor review Major 3, 2026-08-02) — {@code
+   * PaperService#openOrder}'s own write-time call to THIS method sits INSIDE that method's {@code
+   * @Transactional} boundary, immediately before it throws the 422 that refuses the fill, the same
+   * "throw rolls back everything in this transaction" hazard {@link PaperOrderRejectionRecorder}'s
+   * javadoc documents for the sibling rejection ledger. Round 3 put the REQUIRES_NEW annotation AND
+   * an internal try/catch on this same method — but a catch INSIDE a REQUIRES_NEW method's own body
+   * can only catch what the body itself throws; it cannot catch the surrounding Spring transaction
+   * interceptor failing to acquire a connection (before the body runs) or failing to commit (after
+   * it returns), both of which throw from OUTSIDE that stack frame straight to the caller. Round 4
+   * moves the write to the separate bean and wraps the PROXIED call here instead — a genuine outer
+   * boundary, mirroring how {@code PaperService#recordStaleRejectQuietly} wraps {@code
+   * PaperOrderRejectionRecorder}'s own REQUIRES_NEW call at ITS call site. One fail-soft boundary
+   * here covers both callers ({@code PaperService#openOrder} and, via {@code PaperEmissionGuard},
+   * {@code SwingBatchEngine}'s entry pass) rather than duplicating a catch at each — an audit-write
+   * failure must never break either the fill's own transaction or the batch's exit pass that day
+   * (the "an observability write must never break the run" rule {@code SwingBatchRecorder}'s
+   * flag-snapshot {@code capture()} documents and follows), and never consumes the per-day dedup key
+   * on a write that did not durably land (a retry later the same day should still get one real row).
    */
-  @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void recordPyramidRiskCapBreach(String book, String symbol, String detail) {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);
     String dedupKey = tripKey(book, PYRAMID_RISK_CAP);
     if (today.equals(trippedOn.get(dedupKey))) {
       return;
     }
-    // Major 4 fix (cross-vendor review, 2026-08-02): this is now reachable from SwingBatchEngine's
-    // entry pass BEFORE its exit pass runs (the batch's ONLY exit evaluator for open positions), so an
-    // uncaught audit-write failure here would abort the whole run and skip every stop evaluation for
-    // the day — the exact "an observability write must never break the run" rule SwingBatchRecorder's
-    // flag-snapshot capture() documents and follows. Mirror that fail-soft shape: never let the JDBC
-    // write escape, and never consume the per-day dedup key on a write that did not durably land (a
-    // retry later the same day should still get one real audit row).
     try {
-      settings.audit(book, PYRAMID_RISK_CAP, "TRIP", detail);
+      pyramidRiskCapAuditor.record(book, PYRAMID_RISK_CAP, detail);
       trippedOn.put(dedupKey, today);
       log.warn("risk pyramid-cap {} tripped for {} ({})", book, symbol, detail);
-      pushAlert("ArthaYantra Risk — pyramid open-risk cap (" + book + ")", detail);
-    } catch (Exception e) {
+    } catch (RuntimeException e) {
       log.warn("risk_audit not written for pyramid-cap trip {}/{}: {}", book, symbol, e.getMessage());
     }
   }

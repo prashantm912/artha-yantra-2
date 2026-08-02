@@ -1,7 +1,9 @@
 package in.arthayantra.strategysignal.paper;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -50,7 +52,7 @@ class RiskServicePyramidCapTest {
     RiskService risk =
         new RiskService(
             settings, positions, account, margin, notifier, CLOCK, false, new BigDecimal("6.0"),
-            new ManasGoverningStopCache());
+            new ManasGoverningStopCache(), new PyramidRiskCapAuditor(settings, notifier));
     return new Harness(risk, settings, notifier);
   }
 
@@ -88,5 +90,45 @@ class RiskServicePyramidCapTest {
   void neverCalledMeansNeverAudited() {
     Harness h = harness();
     verify(h.settings(), never()).audit(any(), any(), any(), any());
+  }
+
+  /**
+   * Round 4, cross-vendor review Major 3: the fail-soft catch now lives at {@code
+   * RiskService#recordPyramidRiskCapBreach}, wrapping the PROXIED call to the separate {@link
+   * PyramidRiskCapAuditor} bean — a genuine outer boundary, unlike round 3's catch INSIDE the
+   * REQUIRES_NEW method's own body (which could not catch a transaction-interceptor failure at
+   * commit/connection-acquisition time, since that throws from outside the method's stack frame).
+   * A mocked auditor that throws stands in for exactly that class of failure: whatever throws it,
+   * the exception must never reach either caller ({@code PaperService#openOrder}, mid-refusal, or
+   * {@code SwingBatchEngine}'s entry pass, the batch's only exit evaluator), and the per-day dedup
+   * key must NOT be consumed on a write that did not durably land — a retry later the same day
+   * should still get one real attempt.
+   */
+  @Test
+  void aFailureInTheProxiedAuditorCallNeverPropagatesAndNeverConsumesTheDedupKey() {
+    RiskSettingsRepository settings = mock(RiskSettingsRepository.class);
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    PaperMarginClient margin = mock(PaperMarginClient.class);
+    NotifierClient notifier = mock(NotifierClient.class);
+    PyramidRiskCapAuditor auditor = mock(PyramidRiskCapAuditor.class);
+    // First call fails (simulating a commit/connection-acquisition failure the caller cannot avoid);
+    // the second (same-day retry) succeeds — proving the failed attempt did not consume the dedup key.
+    doThrow(new RuntimeException("simulated connection/commit failure"))
+        .doNothing()
+        .when(auditor)
+        .record(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), any());
+    RiskService risk =
+        new RiskService(
+            settings, positions, account, margin, notifier, CLOCK, false, new BigDecimal("6.0"),
+            new ManasGoverningStopCache(), auditor);
+
+    assertThatCode(() -> risk.recordPyramidRiskCapBreach(BOOK, "RELIANCE", "first attempt"))
+        .as("the proxied auditor's failure must never propagate to the caller")
+        .doesNotThrowAnyException();
+
+    risk.recordPyramidRiskCapBreach(BOOK, "RELIANCE", "retry, same day");
+    verify(auditor, times(2))
+        .record(eq(BOOK), eq(RiskService.PYRAMID_RISK_CAP), any());
   }
 }

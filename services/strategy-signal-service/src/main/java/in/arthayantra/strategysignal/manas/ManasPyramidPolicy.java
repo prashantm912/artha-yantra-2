@@ -81,12 +81,17 @@ public class ManasPyramidPolicy implements PyramidPolicy {
     // (newAvg − origStop) × totalQty; summing existing + newQty × newStopDistance never understates
     // (the original stop only trails up), the safe direction for a "do not increase risk" gate. M40
     // (2026-08-02) reuses this SAME method for a FRESH (first) entry too (SwingBatchEngine's entry
-    // pass), where the proxy is not merely conservative but EXACT — a symbol with no existing lot has
-    // no bracket to average into, so its own risk contribution truly is newQty × stopDistance. Either
-    // way, existingRiskInr already reflects every OTHER open position in the book (both Manas
-    // strategies share one Books.MANAS_ARORA key), so this call aggregates across the whole book, not
-    // just the calling strategy. False (does not block) when the guard is absent or equity/qty/stop is
-    // unknown — then the position is simply not auto-papered (no risk to gate).
+    // pass). ⚠️ Restated (round 4, cross-vendor review, 2026-08-02): this is an EMISSION-TIME PREVIEW
+    // off the candle close, not the authority — a symbol with no OPEN, ACTIVE-ANCHOR lot has none of
+    // ITS OWN existing brackets to average into, so newQty × stopDistance is exact for what this
+    // preview can see, but it cannot see a dead-anchor paper row (a held position whose signal anchor
+    // has expired/superseded), a delayed swing-effect retry, or the slippage-adjusted real fill price.
+    // {@code RiskService#manasAggregateRiskWouldCross} is the AUTHORITATIVE write-time check that can
+    // refuse what this preview passed. Either way, existingRiskInr already reflects every OTHER open
+    // position in the book (both Manas strategies share one Books.MANAS_ARORA key), so this call
+    // aggregates across the whole book, not just the calling strategy. False (does not block) when the
+    // guard is absent or equity/qty/stop is unknown — then the position is simply not auto-papered (no
+    // risk to gate).
     if (guard == null) {
       return false;
     }

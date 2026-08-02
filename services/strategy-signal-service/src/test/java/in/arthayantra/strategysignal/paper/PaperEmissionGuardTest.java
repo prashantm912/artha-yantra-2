@@ -31,11 +31,11 @@ class PaperEmissionGuardTest {
   void openRiskInrSumsPerPositionRiskAndTreatsTrailedOrStoplessPositionsAsZero() {
     ManasGoverningStopCache cache = new ManasGoverningStopCache();
     // Position A: 100 qty, entry 200, stop 190 -> risk 100 × 10 = ₹1,000.
-    PositionRow a = position(100, "200", "190");
+    PositionRow a = position(1L, 100, "200", "190");
     // Position B: 50 qty, entry 300, stop 320 (trailed ABOVE entry) -> open risk 0 (§3.5.B).
-    PositionRow b = position(50, "300", "320");
+    PositionRow b = position(2L, 50, "300", "320");
     // Position C: 10 qty, entry 100, NO stop -> contributes 0 (no defined risk to sum).
-    PositionRow c = position(10, "100", null);
+    PositionRow c = position(3L, 10, "100", null);
     assertThat(PaperEmissionGuard.openRiskInr(List.of(a, b, c), cache)).isEqualByComparingTo("1000");
     assertThat(PaperEmissionGuard.openRiskInr(List.of(), cache)).isEqualByComparingTo("0");
   }
@@ -46,24 +46,42 @@ class PaperEmissionGuardTest {
    * intraday disaster-stop, never touched by this fix) — takes precedence once armed. 100 qty, entry
    * 200, {@code stop_loss} 190 (would give risk 1,000) but a tighter CACHED governing stop of 195 ->
    * effective risk 100×(200−195)=500. Before the trail arms (nothing cached), {@code stop_loss}
-   * alone governs, unchanged from before this fix.
+   * alone governs, unchanged from before this fix. Keyed by position id (round 4).
    */
   @Test
   void openRiskInrPrefersTheCachedGoverningStopOverStopLossOnceArmed() {
     ManasGoverningStopCache cache = new ManasGoverningStopCache();
-    PositionRow armed = position(100, "200", "190");
-    cache.put("manas-arora", "NSE", "TESTCO", "BUY", bd("195"));
+    PositionRow armed = position(1L, 100, "200", "190");
+    cache.put(armed.id(), "BUY", bd("195"));
     assertThat(PaperEmissionGuard.openRiskInr(List.of(armed), cache)).isEqualByComparingTo("500");
     assertThat(PaperEmissionGuard.effectiveStop(armed, cache)).isEqualByComparingTo("195");
 
-    PositionRow unarmed = position(100, "200", "190");
+    PositionRow unarmed = position(2L, 100, "200", "190");
     ManasGoverningStopCache emptyCache = new ManasGoverningStopCache();
     assertThat(PaperEmissionGuard.effectiveStop(unarmed, emptyCache)).isEqualByComparingTo("190");
   }
 
-  private static PositionRow position(long qty, String avgEntry, String stop) {
+  /**
+   * Round 4, cross-vendor review Critical 1: the cache is keyed by the position's OWN id, so two
+   * DIFFERENT positions on the SAME symbol/side never share a cache entry — the exact "stale trail
+   * attaches to a new position" failure the review found when the cache was keyed by the
+   * (book,exchange,symbol,side) tuple instead (a dead-anchor row treated as fresh, or a manual
+   * close racing the daily batch's exit pass, could otherwise resurrect a stale tuple-keyed entry
+   * for a genuinely different position).
+   */
+  @Test
+  void openRiskInrNeverSharesACachedStopAcrossDifferentPositionIdsOnTheSameSymbol() {
+    ManasGoverningStopCache cache = new ManasGoverningStopCache();
+    cache.put(99L, "BUY", bd("195")); // a DIFFERENT (e.g. since-closed) position's cached trail
+    PositionRow different = position(7L, 100, "200", "190"); // same symbol/side, id 7, own stop 190
+    assertThat(PaperEmissionGuard.effectiveStop(different, cache))
+        .as("id 7 falls back to its OWN stopLoss(190) — id 99's cached 195 is never read for id 7")
+        .isEqualByComparingTo("190");
+  }
+
+  private static PositionRow position(long id, long qty, String avgEntry, String stop) {
     return new PositionRow(
-        1L, "NSE", "TESTCO", "BUY", qty, bd(avgEntry), BigDecimal.ZERO, "OPEN",
+        id, "NSE", "TESTCO", "BUY", qty, bd(avgEntry), BigDecimal.ZERO, "OPEN",
         null, null, null, stop == null ? null : bd(stop), null, "manas-arora");
   }
 

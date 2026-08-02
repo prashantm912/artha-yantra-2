@@ -912,6 +912,13 @@ public class PaperService {
               .add(fillPrice.multiply(BigDecimal.valueOf(qty)))
               .divide(BigDecimal.valueOf(newQty), 4, RoundingMode.HALF_UP);
       positions.updateOpen(row.id(), newQty, newAvg);
+      // Round 4 fix (cross-vendor review Critical 1, 2026-08-02): an averaging add changes this
+      // row's qty/avg in place (same id) — any cached governing stop was computed by the daily exit
+      // pass against the PRE-average avg/qty and must not silently keep governing the newly-blended
+      // position. Evict rather than let it linger: the risk calc falls back to the persisted (wider,
+      // conservative) stopLoss until the next exit-pass run recomputes a fresh trail for the new
+      // shape — the safe direction for a stale-vs-missing cache entry either way.
+      governingStopCache.evict(row.id());
     } else {
       positions.insertOpen(
           book, exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit, subaccountIdx,
@@ -1115,11 +1122,14 @@ public class PaperService {
       // not close this position, or it reports someone else's exit as its own (§9-05).
       return Optional.empty();
     }
-    // M40 Critical 3 fix, round 3 (2026-08-02): drop this key's in-memory governing-stop cache entry
-    // on a REAL close (past the CAS, so a race loser never evicts on someone else's close) — a later
-    // re-open of the same (book,exchange,tradingsymbol,side) key must never inherit a stale trail
-    // from the position that just closed. A no-op for any key never cached (every non-Manas book).
-    governingStopCache.evict(pos.book(), pos.exchange(), pos.tradingsymbol(), pos.side());
+    // M40 Critical 3 fix, round 3 (2026-08-02), keyed by id round 4 (cross-vendor review Critical 1):
+    // drop this position's in-memory governing-stop cache entry on a REAL close (past the CAS, so a
+    // race loser never evicts on someone else's close). A re-open of the same
+    // (book,exchange,tradingsymbol,side) key mints a NEW row id, so it could never read this entry
+    // anyway once the cache is keyed by id — this eviction is memory hygiene, not a correctness
+    // requirement, unlike round 3's tuple-keyed version where it was load-bearing. A no-op for any
+    // id never cached (every non-Manas book).
+    governingStopCache.evict(pos.id());
     if (staleAge != null) {
       staleTicks.staleSettleUsed(pos, closeReason, staleAge);
     }

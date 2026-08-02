@@ -106,11 +106,13 @@ public class PaperEmissionGuard implements EmissionGuard {
    * cached), else the persisted {@code stopLoss} (the initial bracket, or the ONLY figure for any
    * family other than Manas). IN MEMORY ONLY — {@code stopLoss} itself is never read from or
    * written to by anything in this fix; a cache miss (fresh boot, or before the trail arms) falls
-   * back to it unchanged. Package-visible + pure (given the cache) for a unit test.
+   * back to it unchanged. Keyed by {@code p.id()} (round 4, cross-vendor review Critical 1) — the
+   * position's own immutable row id, never a symbol tuple, so a different position can never read
+   * this one's cached value. Package-visible + pure (given the cache) for a unit test.
    */
   static BigDecimal effectiveStop(
       PaperPositionRepository.PositionRow p, ManasGoverningStopCache cache) {
-    BigDecimal cached = cache.get(p.book(), p.exchange(), p.tradingsymbol(), p.side());
+    BigDecimal cached = cache.get(p.id());
     return cached != null ? cached : p.stopLoss();
   }
 
@@ -213,10 +215,23 @@ public class PaperEmissionGuard implements EmissionGuard {
     risk.recordPyramidRiskCapBreach(book, symbol, detail);
   }
 
+  /**
+   * Round 4 fix (cross-vendor review Critical 1, 2026-08-02): resolves the CURRENTLY open position
+   * for this key via a FRESH repository read — never the stale in-loop anchor snapshot {@code
+   * SwingBatchEngine}'s exit pass iterates — and caches against that row's own id. This closes the
+   * close-race the review found: {@code SwingBatchEngine} has no {@code @Transactional} boundary of
+   * its own, so a concurrent manual close (which evicts by id in {@code PaperService#doSettle})
+   * commits and is immediately visible here; if the position already closed before this call runs,
+   * {@code findOpen} returns empty and nothing is cached — the tuple key can never be resurrected
+   * for a position that no longer exists, and a later, genuinely NEW position on the same
+   * (book,exchange,tradingsymbol,side) gets a fresh id with no prior cache entry to inherit.
+   */
   @Override
   public void cacheManasGoverningStop(
       String book, String exchange, String tradingsymbol, String side, BigDecimal newStop) {
-    governingStopCache.put(book, exchange, tradingsymbol, side, newStop);
+    positions
+        .findOpen(book, exchange, tradingsymbol, side)
+        .ifPresent(row -> governingStopCache.put(row.id(), row.side(), newStop));
   }
 
   @Override

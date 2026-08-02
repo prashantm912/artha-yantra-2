@@ -322,7 +322,15 @@ class SwingPaperExitCriticalsIntegrationTest extends StrategySignalIntegrationTe
   }
 
   private PositionRow openPosition(long signalId, String symbol, BigDecimal price) {
-    paper.openOrder(new PaperService.OrderRequest(signalId, "NSE", symbol, "BUY", 10, price, null, null));
+    // Round 4, cross-vendor review Critical 2 (2026-08-02): a stopless fresh Manas entry is now
+    // REFUSED by RiskService#manasAggregateRiskWouldCross ("cannot compute" must mean refuse). This
+    // helper's OrderRequest now carries the SAME 137 stop insertEntry() gives the signal row (10 qty
+    // × 15-point distance = ₹150 risk — trivial vs the 6% cap on this book's equity), matching how
+    // PaperSignalListener's real auto-take path threads the signal's own stopLoss through, rather
+    // than the previous null placeholder this class's exit-criticals tests never depended on.
+    paper.openOrder(
+        new PaperService.OrderRequest(
+            signalId, "NSE", symbol, "BUY", 10, price, new BigDecimal("137"), null));
     return positions.findOpen(Books.MANAS_ARORA, "NSE", symbol, "BUY").orElseThrow();
   }
 

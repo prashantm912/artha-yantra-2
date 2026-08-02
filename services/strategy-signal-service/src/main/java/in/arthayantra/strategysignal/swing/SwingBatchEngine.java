@@ -499,10 +499,15 @@ public class SwingBatchEngine {
           // P&L), never aggregate open RISK, so concurrent fresh entries could otherwise exceed
           // doctrine's 5-6% cap even with pyramiding OFF (multiple names each risking 1% of equity is
           // reachable at current config, since max_open_paper_positions=7 is shared by both Manas
-          // strategies through the one Books.MANAS_ARORA key). wouldBreachRiskCap's formula is exact,
-          // not merely conservative, for a fresh entry: with no existing lot on this symbol the new
-          // position's own risk contribution truly IS newQty × stopDistance — the averaging caveat in
-          // its javadoc applies only to an add into an already-open bracket.
+          // strategies through the one Books.MANAS_ARORA key). wouldBreachRiskCap is an EMISSION-TIME
+          // PREVIEW off the candle close, not the authority (round 4, cross-vendor review,
+          // 2026-08-02) — for a fresh entry with no existing lot on THIS symbol its own risk
+          // contribution is newQty × stopDistance, but the preview cannot see a dead-anchor paper row
+          // (this pass classifies "held" purely from active signal anchors — openLotsBySymbol above —
+          // so a symbol with an open position but no live anchor reads as fresh here), a delayed
+          // swing-effect retry, or the real slippage-adjusted fill.
+          // RiskService#manasAggregateRiskWouldCross is the AUTHORITATIVE write-time check that can
+          // still refuse what this preview passed.
           if (pyramid.wouldBreachRiskCap(
               strat.definition(), EX, c.symbol(), bank, series.size() - 1, bar.close(),
               emissionGuard.orElse(null))) {

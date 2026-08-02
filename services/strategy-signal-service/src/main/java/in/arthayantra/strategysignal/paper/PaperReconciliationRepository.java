@@ -228,8 +228,13 @@ public class PaperReconciliationRepository {
    *   <li><b>Live ENTRY</b> — {@code signal_type='ENTRY' AND status IN ('ACTIVE','TAKEN')}: both drivers
    *       gate on it ({@code SignalRepository.activeEntry:167-179}, which {@code SignalEngine:959-961}
    *       requires to enter the exit branch at all, and {@code activeEntries:149-152} for the swing batch).
-   *       Live {@code paper_positions} id=28 fails here: its only linked signal (id=46) is an ACTIVE
-   *       <b>EXIT</b>, which {@code activeEntry} can never return — so a status-only test reads it healthy.
+   *       A position whose only linked signal is an <b>EXIT</b> fails here: {@code activeEntry} can never
+   *       return one, so a status-only test reads such a position healthy. ⚠️ <b>Historical provenance,
+   *       re-verified 2026-08-02:</b> this condition was written against a real live row,
+   *       {@code paper_positions} id=28 linked to signal id=46, and earlier wording here described that row
+   *       as live. It is not: id=28 has been CLOSED since 2026-07-17 13:04 IST ({@code close_reason=MANUAL})
+   *       and signal 46 is now EXPIRED rather than ACTIVE. No currently-open position matches the shape.
+   *       The condition stands on its own logic; do not cite id=28 as a current example.
    *   <li><b>Linked to this position</b> — through {@code paper_orders.signal_id} on the open key, the
    *       exact join {@code openForSignal} uses. Deliberately NOT lifetime-bounded: {@code openForSignal}
    *       has no lifetime bound either (it filters only {@code p.status='OPEN'}), so a stale same-key link

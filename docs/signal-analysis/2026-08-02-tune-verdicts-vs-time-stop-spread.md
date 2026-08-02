@@ -12,9 +12,13 @@
 from "stop-conditional" to "FINAL" is not supported, so all four revert to CONDITIONAL.** Three separate
 reasons, each measured this session:
 
-1. **The engine honours `max_bars` per strategy** (computed, code + live) — so the five-horizon spread is
-   real running behaviour, not a cosmetic YAML difference. The escape hatch that would have made this
-   whole question moot is closed.
+1. **The engine honours `max_bars` per strategy** — established **from code**, corroborated narrowly by the
+   8 live `TIME_STOP` rows in **`strategy.signals`** (the engine's exit-decision layer). So the five-horizon
+   spread is real running behaviour, not a cosmetic YAML difference, and the escape hatch that would have
+   made this whole question moot is closed. ⚠️ **The paper-fill layer shows 5 exits all at 30 minutes and
+   cannot corroborate this** — pyramiding collapses fan-out legs into one position that the earliest exit
+   closes, so a 36-minute hold is structurally invisible there. Reconciled in §2.2; do not read those five
+   rows as a contradiction, and do not cite them as support either.
 2. **The counterfactuals' "30-minute time stop" was never the fleet's `time_stop` at all** (sourced). It is
    a harness parameter — `ExitKnobs.timeStopBars`, counted in **wall-minutes on the option's own 1m premium
    series** — applied uniformly because a COUNTERFACTUAL job carries *no strategy version*. The engine's
@@ -76,8 +80,15 @@ intraday sweep (`services/strategy-signal-service/.../signals/SignalEngine.java:
 (`:3142-3148`), an index into **that strategy's own 3m primary series**. `held = index − entryIndex`, so the
 count is per-strategy 3m bars. Nothing global is consulted.
 
-**Live confirmation.** Every `TIME_STOP` exit the engine has emitted since 2026-07-01 (n=8) held for exactly
-`max_bars × 3` minutes, 8 for 8:
+**Live corroboration — and read the source line before the table.** This is **`strategy.signals`**: the EXIT
+rows the live `SignalEngine.emit(...)` wrote in production, `signal_type='EXIT' AND exit_reason='TIME_STOP'`,
+paired to each strategy version's own preceding ENTRY. Not a replay and not the backtest — the instrument is
+`NFO NIFTY26AUGFUT`, the **live dated front contract**, whereas the deterministic replay runs on
+`NIFTY-FUT-CONT`. It is the engine's exit *decision* layer, which is exactly what question (2) asks about;
+it is **not** realized money, and §2.2 explains why the paper-fill layer cannot corroborate it.
+
+Every `TIME_STOP` exit the engine emitted since 2026-07-01 (n=8) held for exactly `max_bars × 3` minutes,
+8 for 8:
 
 | slug | `max_bars` | entry (IST) | exit | held | expected |
 |---|---|---|---|---|---|
@@ -90,12 +101,54 @@ count is per-strategy 3m bars. Nothing global is consulted.
 | `scalp-connect-the-dots-nifty` | 10 | 07-31 11:15 | 11:45 | 30 min | 30 |
 | `scalp-connect-the-dots-nifty` | 10 | 07-31 12:15 | 12:45 | 30 min | 30 |
 
-The two bolded pairs are a natural A/B the tape ran for us: on 07-29 14:03 and 07-30 12:33 a `max_bars: 10`
-and a `max_bars: 12` strategy entered on the **same bar, same instrument** (`NFO NIFTY26AUGFUT`) and exited
-**6 minutes apart**, in the predicted direction. That is per-strategy honouring observed live, not inferred.
+The two bolded pairs are a natural A/B the tape ran twice: on 07-29 14:03 and 07-30 12:33 a `max_bars: 10`
+and a `max_bars: 12` strategy entered on the **same bar, same instrument** and their exits came
+**6 minutes apart**, in the predicted direction.
+
+**Weight this correctly.** The verdict rests on the **code reading**; these 8 rows are narrow corroboration —
+one horizon contrast, on two occasions, at the decision layer only. They would not carry the claim alone.
+
+### 2.2 The paper-fill layer shows 5 exits, all at 30 minutes — and cannot corroborate this, by construction
+
+Anyone checking this against `strategy.paper_positions` will get a different and apparently contradicting
+answer, so it is recorded here rather than left as a trap:
+
+```sql
+SELECT id, book, tradingsymbol, opened_at AT TIME ZONE 'Asia/Kolkata',
+       round(extract(epoch from (closed_at-opened_at))/60) AS held_min
+FROM strategy.paper_positions WHERE close_reason='TIME_STOP';
+--  41 | scalper | SENSEX26JUL77200CE | 07-29 11:07 | 30
+--  43 | scalper | SENSEX26JUL77200CE | 07-29 13:10 | 30
+--  44 | scalper | SENSEX26JUL77300CE | 07-29 14:04 | 30
+--  47 | scalper | NIFTY2680424200CE  | 07-31 11:16 | 30
+--  48 | scalper | NIFTY2680424200CE  | 07-31 12:16 | 30
+```
+
+**Five rows, every one at 30 minutes, nothing on 07-30 — no 36-minute hold anywhere.** The 8 → 5 gap
+reconciles exactly, and the "all 30" pattern is a structural property of that layer, not a contradiction:
+
+- **07-30 (−2).** Both `TIME_STOP` exits (signals 121 `mb=10`, 122 `mb=12`) fired against a position that was
+  **never opened**: the option leg resolved (`NIFTY2680424100CE`) but both paper orders were rejected
+  **`ZERO_SIZE`, qty 0** (`strategy.paper_order_rejections`, signals 119/120, 12:34:18). The engine tracked
+  and time-stopped the signals regardless. Hence signals on 07-30, no paper row.
+- **07-29 14:39 (−1).** Exit 116 (`mb=12`) had nothing left to close — the shared leg `SENSEX26JUL77300CE`
+  (position 44) was already closed at 14:34 by exit 115 (`mb=10`, fired 14:33).
+- 8 − 3 = **5**. ✓
+
+**Why 36 minutes can never appear there.** Fan-out: 3 strategies emitted ENTRY on 07-29 11:06 and 2 on
+07-30 12:33, all routing to the *same* option leg, which `PaperService.openPosition` **pyramids into ONE
+position** — and the first EXIT closes the whole thing. Whenever a `max_bars: 10` strategy shares a leg, its
+30-minute exit closes the position before any 36-minute exit can. The attribution is misleading in the same
+motion: **position 41's `opening_signal_id` is 97 = `scalp-golden-crossover-sensex-niftyoi`, a `max_bars: 12`
+strategy — yet it shows a 30-minute hold**, because signal 100 from a `max_bars: 10` strategy closed it.
+
+So the paper layer is a lossy projection of the per-strategy decision, and **`strategy.signals` is the only
+layer where this question is answerable at all.** (This is open doubt 5, promoted into the body because it
+was load-bearing for reading the evidence and I had left it as a footnote.)
 
 **So the brief's "complete and successful answer, stop here" branch does not apply.** The YAML difference is
-behaviour.
+behaviour — established by code, corroborated narrowly at the decision layer, and **not** observable in
+realized paper P&L.
 
 ### 2.1 The counterfactual's "30-minute time stop" is a different object
 
@@ -300,7 +353,8 @@ owner decision and a separate PR.
 ## Claim labels
 
 - **computed** this session: the five-horizon spread re-derived from live `artha`; the 8-for-8 `TIME_STOP`
-  hold-time table; the 5,035-row cohort composition and the 695-group horizon-overlap table; the entire §4
+  hold-time table **from `strategy.signals`** (engine exit decisions — *not* `paper_positions`, which shows
+  5 rows all at 30 min for the structural reason in §2.2, reconciled 8 − 2 never-opened − 1 already-closed); the 5,035-row cohort composition and the 695-group horizon-overlap table; the entire §4
   horizon sweep including the per-session and ex-top-5 cuts; the −590.98 vs −590.95 cost-model check; the
   0-added / 0-removed / 30-context classification of `max_bars` in `64f9caaa`.
 - **sourced** (read this session in this worktree at `39c4bc79`): every `file:line` code citation in §2 and
@@ -331,12 +385,12 @@ owner decision and a separate PR.
    `signal_rejections` logs every strategy that evaluated the bar, and a fan-out entry pyramids into ONE
    paper position, so the counterfactual leg is a shared object. §3 shows 86% of legs are multi-horizon; I did
    not attempt a tie-break rule, and I do not think one would be meaningful.
-5. **`paper_positions.opening_signal_id` is not a reliable cohort key under fan-out.** On 07-29 11:06 three
-   strategies opened the same option leg; one position exists, its opening signal names an arbitrary one of
-   them, and it was closed by whichever strategy's EXIT fired first — which is how a `max_bars: 12` position
-   comes to show a 30-minute hold. I switched to `strategy.signals` for §2 and did not pursue it. This is
-   consistent with the documented pyramiding behaviour, not a new defect, but it will mislead anyone who
-   cohorts paper P&L that way.
+5. ~~`paper_positions.opening_signal_id` is not a reliable cohort key under fan-out.~~ **PROMOTED to §2.2
+   after review (2026-08-02).** It was filed here as a footnote and that was a misjudgement: it is not a side
+   observation, it is the reason the paper-fill layer reads as *contradicting* §2, and leaving it in an
+   open-doubts list meant §2's live table could be checked against the wrong source and look fabricated.
+   Consistent with documented pyramiding behaviour, not a new defect — but load-bearing for reading the
+   evidence, so it belongs in the body.
 6. **Whether a longer stop is actually better is wide open.** Two trending sessions say yes, the expiry
    session says emphatically no, and long-premium theta argues against it a priori. Nothing here should be
    read as evidence for lengthening any horizon.

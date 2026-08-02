@@ -21,7 +21,8 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 /**
- * The B-3 resilience stack composed once: {@code Retry( CircuitBreaker( RateLimiter( call ) ) )}.
+ * The B-3 resilience stack composed once: {@code Retry( CircuitBreaker( RateLimiter( call ) ) )}
+ * for every family EXCEPT {@code DUMP}, which skips the Retry layer (see {@link #execute}).
  * Every attempt that the breaker admits re-acquires a limiter permit (strict pacing — retries never
  * burst past the budget) and is recorded by the breaker; a call the breaker REJECTS never reaches
  * the bucket, so an outage cannot silently drain a scarce budget (see {@link #execute}). Retry: idempotent GETs only, max 4 attempts,
@@ -152,14 +153,37 @@ public class KiteCallExecutor {
    * does NOT by itself make the daily sync recover — {@code CallNotPermittedException} is
    * deliberately non-retryable and the 08:30 job runs once — so
    * {@code InstrumentSyncScheduler.morningSyncCatchUp} is the pass that actually spends it.
+   *
+   * <p><b>{@code Family.DUMP} skips the shared {@code Retry} entirely — a distinct sub-defect of
+   * the same F-SYNC symptom (task_4fd8eadc).</b> {@code kite-dump}'s budget is 1 permit / 30
+   * minutes for the WHOLE three-exchange sweep, so an internal retry there is self-defeating: if
+   * the one attempt that reaches Kite fails with a genuinely retryable error, attempt 2 needs a
+   * SECOND permit the bucket cannot refill for ~30 minutes, so it dies on the limiter with
+   * {@code RequestNotPermitted} — which this method then maps to the exact
+   * {@code local broker DUMP budget saturated} 429 the ORIGINAL F-SYNC failure used, masking the
+   * real cause.
+   *
+   * <p><b>What this trades away, stated honestly.</b> An earlier draft of this comment claimed the
+   * change "does not alter call volume, because attempts 2-4 never reached the network anyway".
+   * That is FALSE at the margin and cross-vendor review caught it: the limiter is a FIXED-CYCLE
+   * 30-minute refresh with a 5-second acquire wait, so a failure landing just before a boundary
+   * lets a retry straddle it, take the newly refreshed permit, and make a real second call — and
+   * one DUMP supplier invocation is FOUR HTTP requests, not one, so the case is not negligible when
+   * it fires. So this DOES remove a rare boundary-straddling retry that could genuinely have
+   * succeeded. That is the accepted cost: recovery for those defers to
+   * {@code InstrumentSyncScheduler.morningSyncCatchUp}, the bounded 09:05-10:50 IST weekday sweep
+   * that is the real retry mechanism for this family, in exchange for every OTHER failure reporting
+   * its true cause instead of a saturation that never happened. Away from a refresh boundary — the
+   * overwhelmingly common case — attempts 2-4 do die at the limiter without touching the network.
    */
   public <T> T execute(Family family, Supplier<T> call) {
     RateLimiter limiter = rateLimiters.rateLimiter(family.limiterName);
     CircuitBreaker breaker = circuitBreakers.circuitBreaker(family.breakerName);
     Supplier<T> attempt =
         () -> CircuitBreaker.decorateSupplier(breaker, RateLimiter.decorateSupplier(limiter, call)).get();
+    Supplier<T> decorated = family == Family.DUMP ? attempt : Retry.decorateSupplier(retry, attempt);
     try {
-      return Retry.decorateSupplier(retry, attempt).get();
+      return decorated.get();
     } catch (RequestNotPermitted saturation) {
       throw new ApiException(
           429, ErrorCodes.RATE_LIMIT_LOCAL, "local broker " + family + " budget saturated");

@@ -9,6 +9,8 @@ import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
 import in.arthayantra.strategysignal.signals.SignalRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -23,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -244,7 +247,8 @@ public class PaperService {
   private final Duration signalTakeMaxAge;
   private final TransactionTemplate txTemplate;
 
-  /** Wires the ledger collaborators. */
+  /** Wires the ledger collaborators, registering the M4 MTM-blind visibility gauge. */
+  @Autowired
   public PaperService(
       PaperOrderRepository orders,
       PaperPositionRepository positions,
@@ -266,7 +270,8 @@ public class PaperService {
           long tickMaxAgeSeconds,
       @org.springframework.beans.factory.annotation.Value(
               "${artha.paper.signal-take-max-age-minutes:60}")
-          long signalTakeMaxAgeMinutes) {
+          long signalTakeMaxAgeMinutes,
+      MeterRegistry meterRegistry) {
     this.orders = orders;
     this.positions = positions;
     this.fills = fills;
@@ -284,6 +289,46 @@ public class PaperService {
     this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
     this.signalTakeMaxAge = Duration.ofMinutes(signalTakeMaxAgeMinutes);
     this.txTemplate = new TransactionTemplate(transactionManager);
+    // M4 (#128): "how many OPEN positions are structurally MTM-blind (no live tick) RIGHT NOW" —
+    // DERIVED, not tracked. A prior transition-tracked Set<Long> design (cross-vendor review round
+    // 1) fixed the poll-frequency problem but round 2 found it could permanently retain a closed
+    // position (a settlement racing a stale DTO read could re-add an id AFTER the close's own
+    // removal — the Set is thread-safe, but that ordering is not the same as CORRECT), never
+    // purged on reset() (PaperPositionRepository.deleteAll has no matching cleanup), and started
+    // EMPTY after a restart (under-reporting until every position was re-observed). A derived
+    // value cannot drift: every metric read re-queries the CURRENT open-position set + CURRENT
+    // tick state directly (see #countMtmBlindPositions), so there is no persistent state to race,
+    // purge, or rebuild.
+    meterRegistry.gauge("ay_paper_mtm_blind_positions", this, PaperService::countMtmBlindPositions);
+  }
+
+  /**
+   * Test-only convenience (pre-M4 signature): a private, unshared registry absorbs the MTM-blind
+   * gauge registration, so every existing direct-construction call site keeps compiling
+   * byte-identical.
+   */
+  public PaperService(
+      PaperOrderRepository orders,
+      PaperPositionRepository positions,
+      PaperFillService fills,
+      LastTickReader lastTick,
+      InstrumentMetaClient instruments,
+      SignalRepository signals,
+      PaperAccountService accountService,
+      BookResolver books,
+      RiskService risk,
+      ScalperAccountModel accounts,
+      ApplicationEventPublisher events,
+      PaperStaleTickAlerter staleTicks,
+      PaperOrderRejectionRecorder rejections,
+      PlatformTransactionManager transactionManager,
+      BigDecimal perTradeRiskPct,
+      long tickMaxAgeSeconds,
+      long signalTakeMaxAgeMinutes) {
+    this(
+        orders, positions, fills, lastTick, instruments, signals, accountService, books, risk,
+        accounts, events, staleTicks, rejections, transactionManager, perTradeRiskPct,
+        tickMaxAgeSeconds, signalTakeMaxAgeMinutes, new SimpleMeterRegistry());
   }
 
   /**
@@ -1331,5 +1376,18 @@ public class PaperService {
     return new TradeDto(
         row.id(), row.exchange(), row.tradingsymbol(), row.side(), row.qty(), row.avgEntryPrice(),
         row.realizedPnl(), row.openedAt(), row.closedAt());
+  }
+
+  /**
+   * M4 (#128) visibility gauge value: a fresh count of OPEN positions with no live tick, queried
+   * DIRECTLY from the authoritative sources (the position table + the Redis last-tick map) on
+   * every metric read — never cached, never tracked. Called by Micrometer whenever the gauge is
+   * scraped/read, decoupled from how often the UI polls {@link #positionDetail}/{@link
+   * #openPositions} (which stay display-only and never touch this method at all).
+   */
+  private double countMtmBlindPositions() {
+    return positions.listOpen().stream()
+        .filter(p -> lastTick.lastPrice(p.exchange(), p.tradingsymbol()).isEmpty())
+        .count();
   }
 }

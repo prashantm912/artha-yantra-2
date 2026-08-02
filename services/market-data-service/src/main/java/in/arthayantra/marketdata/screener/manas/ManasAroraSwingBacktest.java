@@ -103,7 +103,16 @@ public final class ManasAroraSwingBacktest {
   private static final double MAX_OPEN_RISK_PCT = 0.06; // ... while total open risk stays ≤ 6%
   private static final int MAX_LOTS = 3; // §3.4 up to 3 lots per position
 
-  private static final double VOL_MIN = 1.2; // expanding-volume gate (§4.7)
+  // Package-private (M8, #128): the swing volume-gate divergence characterization test
+  // (ManasVolumeGateDivergenceTest) reads this SAME production default to characterize this
+  // backtest-only expanding-volume filter against the live §4.3 absolute-liquidity gate
+  // (ManasGates.liquidVolume). CORRECTED 2026-08-02 (cross-vendor review): this filter is NOT
+  // doctrine — the operative doctrine's own §4.7 is "EOD Workflow & Timeframes"
+  // (MomentumTradingManasArora_Consolidated_Strategy.md:259), and its only volume rule is the §4.3
+  // liquidity veto (:234-236), which contains no breakout-expansion ratio at all. The prior "(§4.7)"
+  // label below was a confident-but-wrong provenance claim; this is a backtest-only filter with
+  // unverified doctrine provenance.
+  static final double VOL_MIN = 1.2; // backtest-only expanding-volume filter (no doctrine citation)
   private static final int WEEKLY = 5; // geometry recompute cadence (sessions)
   private static final int GEO_LOOKBACK = 400; // detector window
   private static final int MIN_BARS = 260; // 252 for the 52-week gate + slack
@@ -453,7 +462,7 @@ public final class ManasAroraSwingBacktest {
       return false;
     }
     if (volRatio50[i] <= volMin) {
-      return false; // §4.7 expanding-volume breakout
+      return false; // backtest-only expanding-volume filter (unverified doctrine provenance — M8)
     }
     return switch (setup) {
       case "breakout" -> crossover(close, breakoutPivot, i);
@@ -594,7 +603,17 @@ public final class ManasAroraSwingBacktest {
     return out;
   }
 
-  private static double[] volumeRatio(double[] v, int lookback) {
+  /**
+   * A backtest-only expanding-volume ratio ({@code v[i] / mean(v[i-lookback..i-1])}, {@code 0}
+   * before {@code lookback} bars of history exist) — NOT a doctrine citation. The operative
+   * doctrine's own §4.7 is "EOD Workflow & Timeframes"
+   * ({@code MomentumTradingManasArora_Consolidated_Strategy.md:259}); its only volume rule is the
+   * §4.3 liquidity veto, which has no breakout-expansion ratio. Package-private (M8, #128) so the
+   * swing volume-gate divergence characterization test ({@code ManasVolumeGateDivergenceTest}) can
+   * drive this SAME production formula directly, alongside the live {@code ManasGates.liquidVolume}
+   * §4.3 absolute-floor gate.
+   */
+  static double[] volumeRatio(double[] v, int lookback) {
     double[] out = new double[v.length];
     for (int i = 0; i < v.length; i++) {
       if (i < lookback) {

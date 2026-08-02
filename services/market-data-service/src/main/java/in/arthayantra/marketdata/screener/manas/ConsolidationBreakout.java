@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * and lows sit inside a tolerance band) and takes the highest confirmed swing high in that window as
  * the buy trigger.
  *
- * <p>Rules encoded (source §3.2 / §4.7):
+ * <p>Rules encoded (source §3.2):
  *
  * <ul>
  *   <li>The consolidation must span at least {@code minBaseDays} (~2 weeks) and at most {@code

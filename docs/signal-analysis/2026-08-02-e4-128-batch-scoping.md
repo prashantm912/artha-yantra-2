@@ -210,12 +210,16 @@ it doesn't exist for swing at all.
 `ManasGates.java:94-100`, `liquidVolume(BigDecimal avgVolume20, BigDecimal minAvgVolume)` — "§4.3
 absolute low-volume veto: reject any name whose ~20-day average traded volume is ≤ `minAvgVolume`."
 Backtest: `ManasAroraSwingBacktest.java:209` builds `volRatio50 = volumeRatio(volume, 50)` and gates
-entries on it at line 436, `if (volRatio50[i] <= volMin) { return false; } // §4.7 expanding-volume
-breakout` — a *different* doctrine section (§4.7, a volume-expansion-on-breakout check) over a
-different window (50 vs 20 sessions), computed as a ratio rather than an absolute floor. The
-backtest's `selectionGates` (`ManasAroraSwingBacktest.java:452-467`) calls `ManasGates.gates()` (the
-6 core §4.1 gates) but never calls `ManasGates.liquidVolume`/`liquidDepth` at all — the deep sim has
-no §4.3 liquidity check whatsoever; it substitutes an unrelated §4.7 volume-expansion filter.
+entries on it at line 436, `if (volRatio50[i] <= volMin) { return false; }` (the code comment at that
+line read `// §4.7 expanding-volume breakout` at the time this doc was first written — **CORRECTED
+2026-08-02, cross-vendor review**: that citation is WRONG. The operative doctrine's own §4.7 is "EOD
+Workflow & Timeframes" (`MomentumTradingManasArora_Consolidated_Strategy.md:259`), and its only
+volume rule, §4.3, has no breakout-expansion ratio at all — this is a **backtest-only filter with
+unverified doctrine provenance**, not a citable doctrine section) over a different window (50 vs 20
+sessions), computed as a ratio rather than an absolute floor. The backtest's `selectionGates`
+(`ManasAroraSwingBacktest.java:452-467`) calls `ManasGates.gates()` (the 6 core §4.1 gates) but never
+calls `ManasGates.liquidVolume`/`liquidDepth` at all — the deep sim has no §4.3 liquidity check
+whatsoever; it substitutes an unrelated, doctrine-unverified volume-expansion filter.
 
 **Verdict: STILL LIVE.** Genuinely different populations, on two different axes (window length AND
 which doctrine rule is even being enforced).

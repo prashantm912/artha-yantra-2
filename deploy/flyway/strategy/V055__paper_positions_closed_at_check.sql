@@ -27,20 +27,32 @@
 -- This constraint converts all of that from a silent wrong answer into a loud write failure at the
 -- one place that can still name the culprit.
 --
--- WHAT THIS DOES NOT CLAIM. It does not assert the converse (an OPEN row with a closed_at set).
--- That shape is not reachable today either — close() is the only writer of closed_at and it sets
--- status in the same statement, and reopen() does not exist — but it is not what the downstream
--- readers above depend on, so it is left out rather than guessed at.
+-- SYMMETRIC, BY OWNER DECISION 2026-08-02. The first cut asserted only the forward direction
+-- (CLOSED ⇒ closed_at present) and deliberately left out the converse (an OPEN row carrying a
+-- closed_at). The owner chose the biconditional instead, and the reasoning is worth recording:
+-- the converse is unreachable today for the SAME reason the forward direction is — close() is the
+-- only writer of closed_at, it stamps status in the same statement, and no reopen() exists — so
+-- both halves rest on exactly one convention. If that convention is worth pinning in one
+-- direction it is worth pinning in both, and a future "reopen a position" path that flips status
+-- back to OPEN without clearing the timestamp is a real bug class: equity() buckets realized P&L
+-- by closed_at's IST date, so a reopened row with a stale stamp would keep contributing realized
+-- P&L it no longer has. Costs nothing to enforce here; needs a second migration later.
 --
--- NO-OP ON EXISTING DATA, MEASURED, NOT ASSUMED. Verified against the dev/mock database before
--- shipping (see the PR receipt): zero rows in paper_positions have status='CLOSED' with a NULL
--- closed_at, so ADD CONSTRAINT validates without rewriting or rejecting anything. The table is a
--- plain (non-hypertable) ledger of a few thousand rows, so the brief ACCESS EXCLUSIVE lock that
--- validation takes is not a deployment concern.
+-- NO-OP ON EXISTING DATA, MEASURED ON THE LIVE DATABASE, NOT ASSUMED. Both directions checked
+-- against live `artha` (read-only) immediately before this was widened:
+--
+--   status | total | with_closed_at        violations of the converse
+--   CLOSED |    27 |             27        (OPEN with closed_at set) = 0
+--   OPEN   |    17 |              0
+--
+-- so every one of the 44 rows already satisfies the biconditional and ADD CONSTRAINT validates
+-- without rewriting or rejecting anything. The table is a plain (non-hypertable) ledger of a few
+-- dozen rows, so the brief ACCESS EXCLUSIVE lock that validation takes is milliseconds — but it
+-- IS a lock on the money path, so this ships during a closed market.
 
 ALTER TABLE paper_positions
-  ADD CONSTRAINT ck_paper_positions_closed_at_present
-  CHECK (status <> 'CLOSED' OR closed_at IS NOT NULL);
+  ADD CONSTRAINT ck_paper_positions_closed_at_matches_status
+  CHECK ((status = 'CLOSED') = (closed_at IS NOT NULL));
 
-COMMENT ON CONSTRAINT ck_paper_positions_closed_at_present ON paper_positions IS
-  'A CLOSED position always carries its closed_at. PaperPositionRepository.close() sets both in one atomic UPDATE; this makes that the DATABASE''s promise rather than a convention, because listClosed / PortfolioReader / GraduationService / equity() all window or bucket on closed_at and would silently drop or misdate a null-stamped row. Backs the non-nullable PaperService.TradeDto.closedAt in the published OpenAPI contract.';
+COMMENT ON CONSTRAINT ck_paper_positions_closed_at_matches_status ON paper_positions IS
+  'closed_at is present if and only if status = ''CLOSED''. PaperPositionRepository.close() sets both in one atomic UPDATE; this makes that the DATABASE''s promise rather than a convention, because listClosed / PortfolioReader / GraduationService / equity() all window or bucket on closed_at — a CLOSED row with a null stamp is silently dropped or misdated, and an OPEN row with a stale stamp would keep contributing realized P&L it no longer has. Backs the non-nullable PaperService.TradeDto.closedAt in the published OpenAPI contract.';

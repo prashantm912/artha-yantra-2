@@ -190,17 +190,22 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
   }
 
   /**
-   * V055: a CLOSED paper position must carry its {@code closed_at}. Until V055 this held only by
-   * convention — {@link PaperPositionRepository#close} is the sole writer of {@code status='CLOSED'}
-   * and stamps {@code closed_at=now()} in the same atomic UPDATE — so a second closer could have
-   * falsified it silently, and every reader that windows on {@code closed_at} (listClosed,
-   * PortfolioReader, GraduationService, PaperService.equity) would have dropped or misdated the row
-   * rather than erroring. It also backs the NON-nullable {@code PaperService.TradeDto.closedAt} in
-   * the published OpenAPI contract. Both violating write shapes are asserted, plus the legitimate
-   * close, so a constraint that is merely too TIGHT fails here too.
+   * V055: {@code closed_at} is present if and only if {@code status='CLOSED'}. Until V055 this held
+   * only by convention — {@link PaperPositionRepository#close} is the sole writer of
+   * {@code status='CLOSED'} and stamps {@code closed_at=now()} in the same atomic UPDATE — so a
+   * second closer could have falsified it silently, and every reader that windows on
+   * {@code closed_at} (listClosed, PortfolioReader, GraduationService, PaperService.equity) would
+   * have dropped or misdated the row rather than erroring. It also backs the NON-nullable
+   * {@code PaperService.TradeDto.closedAt} in the published OpenAPI contract.
+   *
+   * <p>The constraint is a BICONDITIONAL by owner decision (2026-08-02), so this asserts BOTH
+   * directions: two violating CLOSED shapes, two violating OPEN shapes (the converse — including
+   * the reopen-without-clearing case, where a stale stamp would keep contributing realized P&amp;L the
+   * row no longer has), plus the legitimate close, so a constraint that is merely too TIGHT fails
+   * here too.
    */
   @Test
-  void closedPositionWithoutClosedAtIsRejectedByTheDatabase() {
+  void closedAtIsPresentIfAndOnlyIfTheRowIsClosed() {
     String sym = "TESTOPT-" + UUID.randomUUID();
     String book = "ck-closed-at-" + UUID.randomUUID().toString().substring(0, 8);
 
@@ -213,7 +218,7 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
                         + " VALUES (?, 'NFO', ?, 'BUY', 50, 100, 'CLOSED', now())",
                     book, sym))
         .isInstanceOf(DataIntegrityViolationException.class)
-        .hasMessageContaining("ck_paper_positions_closed_at_present");
+        .hasMessageContaining("ck_paper_positions_closed_at_matches_status");
 
     // (2) UPDATE an OPEN row to CLOSED without stamping closed_at — the shape a future second
     // closer would actually take.
@@ -221,11 +226,28 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThatThrownBy(
             () -> jdbc.update("UPDATE paper_positions SET status='CLOSED' WHERE id=?", id))
         .isInstanceOf(DataIntegrityViolationException.class)
-        .hasMessageContaining("ck_paper_positions_closed_at_present");
+        .hasMessageContaining("ck_paper_positions_closed_at_matches_status");
 
-    // (3) the real close() — status and closed_at set together — must still be accepted.
+    // (3) THE CONVERSE, direction one: INSERT an OPEN row that already carries a closed_at.
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO paper_positions (book, exchange, tradingsymbol, side, qty,"
+                        + " avg_entry_price, status, opened_at, closed_at)"
+                        + " VALUES (?, 'NFO', ?, 'BUY', 50, 100, 'OPEN', now(), now())",
+                    book, "TESTOPT-" + UUID.randomUUID()))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_paper_positions_closed_at_matches_status");
+
+    // (4) the real close() — status and closed_at set together — must still be accepted.
     assertThat(positions.close(id, new BigDecimal("5.00"), "MANUAL")).isEqualTo(1);
     assertThat(positions.find(id).orElseThrow().closedAt()).isNotNull();
+
+    // (5) THE CONVERSE, direction two — the reopen shape, and the reason the owner chose the
+    // biconditional: flipping a CLOSED row back to OPEN while leaving the stamp behind.
+    assertThatThrownBy(() -> jdbc.update("UPDATE paper_positions SET status='OPEN' WHERE id=?", id))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_paper_positions_closed_at_matches_status");
   }
 
   @Test

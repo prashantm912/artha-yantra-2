@@ -15,20 +15,22 @@ import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 
 /**
- * Add-path observability fix (E4 decision-sheet §2f — NOT a fix for M40's live aggregate-risk gap,
- * see {@code docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md}): {@link
- * RiskService#recordPyramidRiskCapBreach} is the audit/alert treatment a Manas §3.4.3
- * pyramid-add-blocked-by-risk-cap event now gets. Three of {@code RiskService}'s four audited
- * threshold rails — daily-loss, profit-target, heat-cap — write a {@code risk_audit} row AND push an
- * ntfy alert on trip; the fourth, deployment, audits only (no alert, {@code RiskService.java:188}).
- * Before this method existed, the pyramid-add risk-cap block matched NEITHER group — it reached only
- * the application log. This joins the audit+alert group. Coverage/visibility only: it does not change
- * the 6% (or any other) pyramid-risk-cap THRESHOLD, and pyramiding itself stays disabled by default
- * ({@code artha.manas-arora.pyramid.enabled=false}) — this call site is unreachable in production
- * until that flag is re-armed (see {@code ManasAroraSwingEngineTest}'s
- * {@code aPyramidAddIsBlockedWhenItWouldBreachTheOpenRiskCap} for the engine-to-port wiring proof —
- * that test mocks {@code EmissionGuard}, proving {@code SwingBatchEngine} calls the port correctly,
- * not the complete paper-adapter path; this test covers the {@code RiskService} half directly).
+ * Add-path observability fix (E4 decision-sheet §2f) plus its M40 (2026-08-02) fresh-entry extension
+ * — see {@code docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md} for the gap: {@link
+ * RiskService#recordPyramidRiskCapBreach} is the audit/alert treatment BOTH a Manas §3.4.3
+ * pyramid-add-blocked-by-risk-cap event AND a fresh-entry-blocked-by-risk-cap event get. Three of
+ * {@code RiskService}'s four audited threshold rails — daily-loss, profit-target, heat-cap — write a
+ * {@code risk_audit} row AND push an ntfy alert on trip; the fourth, deployment, audits only (no
+ * alert, {@code RiskService.java:188}). Before this method existed, the pyramid-add risk-cap block
+ * matched NEITHER group — it reached only the application log. This joins the audit+alert group.
+ * Coverage/visibility only: it does not change the 6% (or any other) pyramid-risk-cap THRESHOLD. The
+ * ADD call site stays unreachable in production while pyramiding is disabled by default ({@code
+ * artha.manas-arora.pyramid.enabled=false}); the FRESH-entry call site is live regardless of that flag
+ * (see {@code ManasAroraSwingEngineTest}'s {@code aPyramidAddIsBlockedWhenItWouldBreachTheOpenRiskCap}
+ * and {@code aFreshEntryAtSixOpenPositionsIsRefusedWhenTheSeventhWouldBreachTheOpenRiskCap} for the
+ * engine-to-port wiring proof of each — those tests mock {@code EmissionGuard}, proving {@code
+ * SwingBatchEngine} calls the port correctly, not the complete paper-adapter path; this test covers
+ * the {@code RiskService} half directly, shared by both call sites).
  */
 class RiskServicePyramidCapTest {
 

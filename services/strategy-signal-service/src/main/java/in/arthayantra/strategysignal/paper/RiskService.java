@@ -36,10 +36,12 @@ public class RiskService {
   /** When ON, an emitted ENTRY auto-opens a paper position at the suggested qty (no manual take). */
   public static final String AUTO_PAPER_TRADE = "auto_paper_trade";
   /**
-   * M40 governor-coverage marker: a Manas §3.4.3 pyramid ADD blocked by the family's portfolio
-   * open-risk cap. NOT a {@code risk_settings} row — the cap itself is the pyramid policy's own
-   * {@code artha.manas-arora.pyramid.max-portfolio-risk-pct} knob, not a DB-editable limit — so this
-   * key exists only as a {@code risk_audit} label, mirroring the other trip-audited rails' treatment.
+   * M40 governor-coverage marker: a Manas §3.4.3 pyramid ADD, or (2026-08-02) a FRESH entry, blocked by
+   * the family's portfolio open-risk cap. NOT a {@code risk_settings} row — the cap itself is the
+   * pyramid policy's own {@code artha.manas-arora.pyramid.max-portfolio-risk-pct} knob, not a
+   * DB-editable limit — so this key exists only as a {@code risk_audit} label, mirroring the other
+   * trip-audited rails' treatment. One label covers both kinds; the free-text {@code detail} passed to
+   * {@link #recordPyramidRiskCapBreach} says which.
    */
   public static final String PYRAMID_RISK_CAP = "pyramid_risk_cap";
 
@@ -280,11 +282,13 @@ public class RiskService {
   }
 
   /**
-   * Audits + ntfy-alerts a Manas pyramid ADD blocked by the portfolio open-risk cap (deduped per IST
-   * day per book, like {@link #recordHeatTrip}). Called via the {@code EmissionGuard} port so
-   * {@code swing}/{@code manas} — which must never import this module (the acyclic module-graph rule
-   * that already forced the port pattern for every other paper↔swing signal) — never need to know
-   * this class exists.
+   * Audits + ntfy-alerts a Manas pyramid ADD or FRESH entry blocked by the portfolio open-risk cap
+   * (deduped per IST day per book, like {@link #recordHeatTrip} — a same-day add-breach and
+   * fresh-entry-breach on the same book therefore dedupe against EACH OTHER, since both share this one
+   * {@code (book, PYRAMID_RISK_CAP)} key; only the first trip of the day is audited/alerted, whichever
+   * kind it was). Called via the {@code EmissionGuard} port so {@code swing}/{@code manas} — which must
+   * never import this module (the acyclic module-graph rule that already forced the port pattern for
+   * every other paper↔swing signal) — never need to know this class exists.
    */
   public void recordPyramidRiskCapBreach(String book, String symbol, String detail) {
     LocalDate today = LocalDate.ofInstant(clock.instant(), IST);

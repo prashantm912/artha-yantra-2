@@ -133,19 +133,19 @@ public interface EmissionGuard {
       String side) {}
 
   /**
-   * Add-path observability fix (E4 decision-sheet §2f — a narrow fix, NOT the whole of M40; see
-   * {@code docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md} for the residual,
-   * reachable-today gap this does NOT close): records that a §3.4.3 pyramid ADD was blocked because
-   * it would have breached the family's portfolio open-risk cap. Three of RiskService's four audited
-   * threshold rails — daily-loss, profit-target, heat-cap — write a durable {@code risk_audit} row AND
-   * push an ntfy alert on trip; the fourth, deployment, audits only (no alert). Before this method
-   * existed, a pyramid-cap block matched NEITHER group — it only reached the application log
-   * (SwingBatchEngine's own {@code log.info}), so re-arming pyramiding ({@code
-   * artha.manas-arora.pyramid.enabled}, currently default OFF — this call site is UNREACHABLE today,
-   * since a disabled policy's {@code hasRoom} never lets an add reach the risk-cap check) would have
-   * silently omitted the one governor-trip TYPE from both the audit trail and ntfy. The signals module
-   * owns only this port; the paper adapter supplies the durable implementation (mirrors {@link
-   * #recordZeroSizedEntry}). Default no-op keeps non-paper and test adapters permissive.
+   * Records that a §3.4.3 pyramid ADD, or (M40, 2026-08-02) a FRESH Manas entry, was blocked because it
+   * would have breached the family's portfolio open-risk cap — see {@code
+   * docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md} for the gap this closes. Three of
+   * RiskService's four audited threshold rails — daily-loss, profit-target, heat-cap — write a durable
+   * {@code risk_audit} row AND push an ntfy alert on trip; the fourth, deployment, audits only (no
+   * alert). Before this method existed (E4 §2f), a pyramid-cap block matched NEITHER group — it only
+   * reached the application log (SwingBatchEngine's own {@code log.info}). The ADD call site stays
+   * UNREACHABLE while pyramiding is disabled ({@code artha.manas-arora.pyramid.enabled}, default OFF —
+   * a disabled policy's {@code hasRoom} never lets an add reach the risk-cap check); the FRESH-entry
+   * call site is live regardless of that flag, since the aggregate cap on a first lot never depended on
+   * pyramiding. The signals module owns only this port; the paper adapter supplies the durable
+   * implementation (mirrors {@link #recordZeroSizedEntry}). Default no-op keeps non-paper and test
+   * adapters permissive.
    */
   default void recordPyramidRiskCapBreach(String book, String symbol, String detail) {}
 }

@@ -492,34 +492,41 @@ public class SwingBatchEngine {
                 doctrine.batchName(), doctrine.book(), fired);
             return new EntryResult(candidates.size(), fired, refusalReasons, false);
           }
-          // §3.4.3: an ADD only goes on if the book's aggregate open risk stays within the portfolio
-          // cap. A fresh (first) entry is NOT bounded by this cap: the deployment/daily-loss governor
-          // rails bound CAPITAL (or day P&L), not aggregate open RISK, so concurrent fresh entries can
-          // exceed doctrine's 5-6% open-risk cap today even with pyramiding OFF — reachable at current
-          // config (multiple names each risking 1% of equity). That gap is real, live, and NOT fixed
-          // here (enforcing it would refuse currently-accepted entries, a HOLD-tier owner decision) —
-          // see docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md.
-          if (isAdd
-              && pyramid.wouldBreachRiskCap(
-                  strat.definition(), EX, c.symbol(), bank, series.size() - 1, bar.close(),
-                  emissionGuard.orElse(null))) {
+          // §3.4.3 / M40 (owner-directed 2026-08-02, HOLD-tier — see
+          // docs/signal-analysis/2026-08-02-m40-fresh-entry-risk-cap-gap.md for the gap this closes):
+          // the book's aggregate open risk must stay within the portfolio cap for BOTH a pyramid ADD
+          // and a FRESH (first) entry — the deployment/daily-loss governor rails bound CAPITAL (or day
+          // P&L), never aggregate open RISK, so concurrent fresh entries could otherwise exceed
+          // doctrine's 5-6% cap even with pyramiding OFF (multiple names each risking 1% of equity is
+          // reachable at current config, since max_open_paper_positions=7 is shared by both Manas
+          // strategies through the one Books.MANAS_ARORA key). wouldBreachRiskCap's formula is exact,
+          // not merely conservative, for a fresh entry: with no existing lot on this symbol the new
+          // position's own risk contribution truly IS newQty × stopDistance — the averaging caveat in
+          // its javadoc applies only to an add into an already-open bracket.
+          if (pyramid.wouldBreachRiskCap(
+              strat.definition(), EX, c.symbol(), bank, series.size() - 1, bar.close(),
+              emissionGuard.orElse(null))) {
+            String kind = isAdd ? "pyramid add" : "fresh entry";
             log.info(
-                "{} swing: pyramid add for {} would breach the open-risk cap — skipped",
-                doctrine.batchName(), c.symbol());
-            // Add-path observability fix only (E4 §2f): three of RiskService's four audited rails
+                "{} swing: {} for {} would breach the open-risk cap — skipped",
+                doctrine.batchName(), kind, c.symbol());
+            // Audit + alert on refusal (E4 §2f pattern; M40 extends the SAME call site to the
+            // fresh-entry path rather than duplicating it): three of RiskService's four audited rails
             // (daily-loss/profit-target/heat-cap) write a risk_audit row + push an ntfy alert on trip;
-            // deployment audits only. This pyramid-add block previously matched neither group — now it
-            // joins the audit+alert group, so a future re-arm of pyramiding cannot silently omit this
-            // one trip type from the owner's audit/alert surface.
+            // deployment audits only. Both kinds share one EmissionGuard port call + one RiskService
+            // audit key (PYRAMID_RISK_CAP, per-IST-day-per-book deduped) — the free-text detail records
+            // which kind fired; a same-day add-breach and fresh-entry-breach on the same book dedupe
+            // against each other (only the first of the day is audited/alerted), see the receipt's
+            // open-doubts.
             emissionGuard.ifPresent(
                 g ->
                     g.recordPyramidRiskCapBreach(
                         doctrine.book(),
                         c.symbol(),
-                        "pyramid add for " + c.symbol() + " blocked by the "
+                        kind + " for " + c.symbol() + " blocked by the "
                             + pyramid.describe().getOrDefault("maxPortfolioRiskPct", "?")
                             + "% portfolio open-risk cap"));
-            break; // no setup may add more risk for this symbol this run
+            break; // no setup may open/add more risk for this symbol this run
           }
           if (deadline.expired()) {
             return new EntryResult(candidates.size(), fired, refusalReasons, true);

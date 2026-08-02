@@ -76,11 +76,17 @@ public class ManasPyramidPolicy implements PyramidPolicy {
       EmissionGuard guard) {
     // §3.4.3 portfolio-risk gate: true when opening the prospective new lot would push the book's
     // aggregate open risk over the cap. The new lot's risk = its advisory qty × the stop distance (the
-    // very sizing/stop the emit will use). A CONSERVATIVE proxy — the add averages into one position
-    // keeping the ORIGINAL lot-1 bracket, so the true post-add risk is (newAvg − origStop) × totalQty;
-    // summing existing + newQty × newStopDistance never understates (the original stop only trails up),
-    // the safe direction for a "do not increase risk" gate. False (does not block) when the guard is
-    // absent or equity/qty/stop is unknown — then the add is simply not auto-papered (no risk to gate).
+    // very sizing/stop the emit will use). For an ADD this is a CONSERVATIVE proxy — the add averages
+    // into one position keeping the ORIGINAL lot-1 bracket, so the true post-add risk is
+    // (newAvg − origStop) × totalQty; summing existing + newQty × newStopDistance never understates
+    // (the original stop only trails up), the safe direction for a "do not increase risk" gate. M40
+    // (2026-08-02) reuses this SAME method for a FRESH (first) entry too (SwingBatchEngine's entry
+    // pass), where the proxy is not merely conservative but EXACT — a symbol with no existing lot has
+    // no bracket to average into, so its own risk contribution truly is newQty × stopDistance. Either
+    // way, existingRiskInr already reflects every OTHER open position in the book (both Manas
+    // strategies share one Books.MANAS_ARORA key), so this call aggregates across the whole book, not
+    // just the calling strategy. False (does not block) when the guard is absent or equity/qty/stop is
+    // unknown — then the position is simply not auto-papered (no risk to gate).
     if (guard == null) {
       return false;
     }

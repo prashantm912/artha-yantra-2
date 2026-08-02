@@ -212,7 +212,7 @@ red-main regression found:
 - **ci-contracts sees a renamed/retyped RESPONSE key** ([#900](https://github.com/prashantm912/artha-yantra-2/pull/900), task_ade97df8) — **CLOSES the CLAUDE.md "renamed response key reaches live un-caught / UniverseResolver wire-read" blind spot.** Relabels specs to 3.0.1 for the diff step + validates the relabel against the 3.0 schema (openapi-spec-validator, fail-closed) + `RecordRequiredModelConverter`/`ResponseRequiredCustomizer` emit `required` on response-only record schemas. Codex converged over 3 rounds (deny-list → 3.0-schema-validate backstop → explicit `$ref`-sibling reject). Committed specs stay 3.1.0; regen byte-identical.
 - **docs** ([#898](https://github.com/prashantm912/artha-yantra-2/pull/898)) — DataTable-jsdom/header/refactor traps + the `AT TIME ZONE '+05:30'` display-INVERSION correction.
 - ✅ **FIXED [#901](https://github.com/prashantm912/artha-yantra-2/pull/901) (`2b5b74a2`) — main ci-java GREEN again.** `SignalEngineIntegrationTest.everyEvaluationIsCountedExactlyOnceSoTheOutcomeSumIsTheEvaluationCount` (task_37ee83e0) was RED ON MAIN from #895's merge (`17a69ea2`) — a **test-harness delivery race, not an engine bug** (NOT caused by #900; proven red on the #895 merge commit itself). The cold `SIGSUM<rand>` symbol's per-token channel is subscribed only after `loadedSlugs()` flips (`SignalEngine.java:680`) and `resubscribe()` (`:685`) rebuilds the Redis listener with an async SUBSCRIBE, so bars published into the gap drop on a 2-core runner. A "prove the subscription is live" probe is structurally unfixable (loadedSlugs flips BEFORE resubscribe; single + two-probe both stayed red on CI). Fix (test-only): **publish each bar and confirm its exact +2 landed before the next** — rides out the subscribe gap + any mid-publish rebuild, keeps the exact-count invariant strong. Cross-vendor Codex took 3 rounds (caught the outgoing-listener race, then a weakened exact-count invariant). **Lesson: the red hid a full day behind GREEN PR checks — only the `push:main` ci-java run went red; check `gh run list --workflow ci-java.yml --branch main` after a merge.**
-- **PENDING:** one batched `frontend-react` rebuild+redeploy for #897+#899 (market closed → low urgency; #900 is CI/spec-gen only, no deploy).
+- **PENDING:** one batched `frontend-react` rebuild+redeploy for #897+#899 (market closed → low urgency; #900 is CI/spec-gen only, no deploy). → **DISCHARGED — do not enumerate** (prose-audit shard C, 2026-08-02): the FE has been rebuilt+redeployed many times since (the DataTable waves #943–#948 among them); the live `arthayantra/frontend-react:dev` image was built **2026-07-31T22:25Z**, weeks after these two.
 
 **UPDATE 2026-07-17 (chip-wave, Codex builder lane; PRs #877/#878/#879 merged, main = `ea6211a4`,
 strategy-signal DEPLOYED + drill-proven live).** First full run of the `codex-build` pipeline
@@ -356,7 +356,13 @@ session is lost.** A session-cadence heartbeat (~10min, 09:30–15:20 IST, gated
 outcomes) on the existing external dead-man's-switch closes it; absence-is-the-alarm survives process death and cannot
 be muted in-process. Owner-gated on creating the external check.
 **BUILT + MERGED 2026-07-19 — [#941](https://github.com/prashantm912/artha-yantra-2/pull/941) @ f1b412f6 (`SessionLivenessHeartbeat`, strategy-signal; clean-tier, default-OFF, UNDEPLOYED — dormant, rides the next deploy).** The IN-STACK half is closed: `@Scheduled(0 */10 9-15, Asia/Kolkata)` pings a SEPARATE external monitor every ~10min within [09:30,15:20) IST, gated ONLY on `SignalEngine.lastBarReceivedAtMs()` receive-gap (< `bar-gap-ms`) + calendar-open — never rejections/gate-output/outcomes (the SignalStarvationCanary false-page class). Withholds the ping when bars aren't arriving (absence-is-the-alarm). Default pool, NOT `monitorTaskScheduler` (a 5s HTTP ping there would starve `SubscriberHealthCanary.sweep`). Dormant via `@ConditionalOnProperty(artha.heartbeat.session-url)` + `artha.signals.engine-enabled` (codex cross-vendor caught the missing engine-lifecycle condition = an engine-off boot break the builder+Architect both missed). **OWNER STEP TO ARM:** create the external check (healthchecks.io/UptimeRobot) expecting a ~10min ping in-window, set `ARTHA_HEARTBEAT_SESSION_URL` in `.env`, redeploy. ⚠️ arming caveat: a weekday NSE holiday withholds ALL pings (correct — no session) → pause the check on NSE holidays or use a generous grace, else a holiday false-alarm.
-**HIGHEST-VALUE NEXT ACTION IS A DRILL, NOT A BUILD:** #886's receive-gap path is drill-proven on COLD-START ONLY; a
+**HIGHEST-VALUE NEXT ACTION IS A DRILL, NOT A BUILD:** ⚠️ **THAT DRILL HAS STILL NOT RUN, and the row that used to
+carry it no longer does** (prose-audit shard C, 2026-08-02). Row **F10** now reads `Part A DONE #874 · Part B DONE —
+G2's StrategyCoverageWatchdog ARMED live 2026-08-01` and says in terms "this row no longer carries independent work";
+G2 covers the *load*-coverage class, not the mid-session subscription-drop class this drill targets. So the paragraph
+below is the ONLY place the drill is asked for. Nothing in `docs/signal-analysis/` records one being run (the two
+logged drills, 07-16 and 07-17, are both COLD-START). Listed as a promotion candidate — a verification, not a build.
+#886's receive-gap path is drill-proven on COLD-START ONLY; a
 mid-session subscription drop is reconstructed, not observed. If a drill shows it not firing there, the eval/receive
 composition needs rework — and that would overturn "Part B is already shipped". **Re-read §3.1 regardless: REST and JDBC
 both remain blind.** Also found: **the PE variants score a LONG-BIASED composite** (`direction` = bullish→1) so
@@ -425,13 +431,31 @@ one-second window was called "the smoking gun" when it is PROOF OF HEALTH** — 
 `onClosedBar` and *cannot* stop separately. Two independent investigations (Opus + Fable) and a live thread dump refuted it.
 **Cost:** the container was recreated mid-"incident", **destroying the 12:52 logs** — the exact "snapshot `docker logs` BEFORE
 any post-incident recreate" trap.
-**STILL OPEN:** `feat/dead-anchor-orphan-detection` (3 commits, round-3 receipt in hand, needs its final cross-vendor round —
+**STILL OPEN:** ⚠️ **STALE HEADING — this branch SHIPPED as [#894](https://github.com/prashantm912/artha-yantra-2/pull/894) @ a716d851** (the addition at the TOP of this same block records it; this paragraph is the "original note" written before the merge). Verified MERGED via `gh pr view 894` on 2026-08-02 — prose-audit shard C. Nothing below this word is open work. `feat/dead-anchor-orphan-detection` (3 commits, round-3 receipt in hand, needs its final cross-vendor round —
 its live SQL now returns **0 rows** because id=28 was remediated; a read-only counterfactual projecting id=28 back to OPEN
 still flags, so the quiet is a clean population, not a blind detector). **F10 Part B revival = OWNER decision** (market-data
 bounded-recent-closed-bar contract vs cross-schema grant + ADR) — **but read the invalidation above first; its premise is now
 dead on two axes.** Open chips: task_37ee83e0 (the silent no-entry path), task_79092520 (PE long-biased composite, owner),
 task_f624fca7 (#877 empty-contracts residue), task_ade97df8 (ci-contracts still 3.1-blind), task_019321d3, task_8f139394,
 task_2938fa28, task_f10a03, task_a6c12601, task_1b85c64f.
+⚠️ **THAT LIST IS A 2026-07-17 SNAPSHOT AND IS NOW MOSTLY DISCHARGED — do not enumerate open work from it** (prose-audit
+shard C, 2026-08-02; every verdict below checked against the §4b row, the merged PR or the code, never against other prose).
+**Six of the ten have NO §4b row and live only in this sentence**, which is why they never got flipped:
+**task_37ee83e0** → SHIPPED (the observability half is #895's `ay_signal_eval_outcome_total`; the red-on-main test race it
+also named was fixed by [#901](https://github.com/prashantm912/artha-yantra-2/pull/901), see the 2026-07-17 weekend-batch
+block above) · **task_79092520** (+ its twin **task_71a017e6**, ¶ in the STATE block above) → the config half SHIPPED as
+[#959](https://github.com/prashantm912/artha-yantra-2/pull/959) (all 27 `-pe` YAMLs inverted, republished 2026-07-20); the
+FEATURE + bearish-numbers half is **still owner-parked, and its successor is §0a row AUD-PF02** (`2026-07-18-pf02-typed-
+scoring-bias-design.md`, BUILD owner-gated) · **task_f624fca7** → **STILL OPEN and unregistered** — "should an empty
+`contracts` array on an INDEX ladder be a FAULT?", cited as live and un-owned at `2026-07-26-t9-strategy-coverage-watchdog-
+design.md` §3.7 · **task_ade97df8** → DONE [#900](https://github.com/prashantm912/artha-yantra-2/pull/900) (recorded in the
+2026-07-17 weekend-batch block above) · **task_8f139394** → DONE — it is the `universe.bucket` live/sim divergence, shipped
+as [#889](https://github.com/prashantm912/artha-yantra-2/pull/889) · **task_f10a03** → §4b row, PARTIAL · **task_a6c12601**
+→ §4b row, CLOSED 2026-07-26 by the retirement (task_3a928626) · **task_1b85c64f** → §4b row, DONE
+[#1033](https://github.com/prashantm912/artha-yantra-2/pull/1033) · **task_019321d3** and **task_2938fa28** → **CONTENT
+UNRECOVERABLE**: both ids were written into the repo by this very sentence (#893, 2026-07-17) and are described *nowhere*,
+in any doc, ever (`git log -S` confirms a single introducing commit each). They cannot be actioned and must not be counted
+as queue depth — treat them as retired unless the owner recalls what they were.
 **DOC CORRECTION owed to CLAUDE.md:** `AT TIME ZONE '+05:30'` **INVERTS** in POSIX (renders 14:20 IST as 03:20). CLAUDE.md's
 guidance is right for a *bound literal* (`timestamptz '...+05:30'`) but WRONG for *display* — use `AT TIME ZONE 'Asia/Kolkata'`
 to render. This nearly sent an investigator down a false path.
@@ -467,6 +491,11 @@ Triggered by an owner "both morning routines show issues" report at market-open.
 - Docs earlier same day: [#949] session closeout, [#950] 07-17 session findings (scheduled agent), [#951] corrected a false cron finding in #950.
 
 **PARKED — HOLD-tier, money-path, NOT armed (owner decision, chip task_e263cfb0):**
+⚠️ **THIS HEADING IS SUPERSEDED BY ITS OWN BULLETS — nothing under it is parked or unarmed** (prose-audit shard C,
+2026-08-02). Both halves shipped and are ARMED LIVE: the detector [#1044](https://github.com/prashantm912/artha-yantra-2/pull/1044)
+(2026-07-26) and the auto-replay [#1036](https://github.com/prashantm912/artha-yantra-2/pull/1036) (2026-07-27 ~22:45 IST,
+owner "merge and arm both"), both since verified on real sweeps. `task_e263cfb0` appears in this repo *only* in this line
+and has no §4b row; it is discharged with the heading.
 - **Swing-batch catch-up** — ✅ **CLOSED: MERGED + DEPLOYED + ARMED 2026-07-27 ~22:45 IST** ([#1036](https://github.com/prashantm912/artha-yantra-2/pull/1036) `2e4ea6f0`, owner: "merge and arm both"). V049–V051 applied via forced flyway-init, **all 3 tables + `swing_catchup_runs.reason` DB-probed**; `ARTHA_SWING_CATCHUP_ENABLED=true` in `.env`, `flag=true` confirmed in-container, `swing-catchup-sched-1` + `swing-detector-sched-1` threads both live (kill -3 dump). First armed sweep = next weekday 08:35 IST, expected NO-OP (no missed sessions) — one-time 08:50 verify task scheduled. **The #640 dead-man's-switch turned out ALREADY ARMED** (ARTHA_HEARTBEAT_URL set, bean conditional satisfied, manual ping PING-OK — memory's "dormant" note was stale); owner to eyeball the healthchecks.io check schedule (`15 20 * * 1-5` Asia/Kolkata + grace) and alert channel. ⚠️ Note the squash-commit title says "PARKED" — stale PR title at merge; the BODY is the accurate record. Build history: Owner funded "finish it (M1+M2+tests+review)" 2026-07-27; same-day close-out: main-merge reconciliation (detector machinery deduped, migrations renumbered **V049–V051** after V047 detector + V048 exit-reason, swing EXITs persist their reason), the round-4 **TOCTOU Critical** fixed by per-anchor `pg_advisory_xact_lock` serialization (exit discovery inside the effect tx; `PaperService.openOrder` refuses an EXPIRED anchor), the mutation-verified regression suite COMMITTED (it had existed only untracked while its receipt was cited — round-4 Major), and the detector page made arming-aware (round-5 Major: it recommended a manual `/run` that would duplicate a queued replay). **Cross-vendor: APPROVED round 6, PROMOTION_READY, no findings deferred** (7 Criticals + 9 Majors closed across the branch's lifetime). Full reactor 1106 tests (one `SignalEngineIntegrationTest` counter flake under double-load, green on isolated rerun). Ships default-OFF (`artha.swing.catchup-enabled`); deploy needs flyway force-recreate + 3 table probes; arming is a separate later owner decision. Historical record of the split + the six deferred Criticals follows (all now fixed): ✅ **SPLIT 2026-07-26 (owner-approved): DETECT ships, REPLAY parks.** Four review rounds established that the branch divides cleanly along *knowing* vs *doing*: every one of the 7 Criticals lives in the auto-replay half (as-of lot filtering, atomic claim-vs-money-effect, partial-session sweep, two-fetch readiness), and **zero** live in the detection half. So the incident that motivated the whole branch — nobody knew the 07-17 batch had not run for 3 days — is closed by paging a human, without shipping a machine that re-trades a missed session unattended. Three outcomes: **(a)** the detector SHIPPED as **[#1044](https://github.com/prashantm912/artha-yantra-2/pull/1044) @ `f64f8f07`, DEPLOYED + ARMED live 2026-07-26** (`ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED=true` — it replaces an always-on canary, so leaving it default-false would have been a net coverage regression; V047 applied 046→047 with flyway-init forced, both tables DB-probed, `swing-detector-sched-1` thread confirmed live with `SwingBatchCanary.check()` its only task, engine 38 strategies `unresolved=0` after restart). **Behaviour is NOT yet verified** — the schedulers fire Mon–Fri 20:00/20:05, so the intent table was empty at deploy and the first sweep with real data is the morning after the first weekday evening; a recurring 08:40 IST weekday check is scheduled, and Monday's expected result is TOTAL SILENCE against an empty table (a page there would be a false positive and a real bug). **Four cross-vendor review rounds closed 2 Criticals + 3 Majors, none reachable by the test suite:** the first cut was BLIND to the container-down case (candidates came only from intent rows, which only the schedulers write — so a session where the JVM was down at cron had no row and could never page, a net regression vs the canary it deletes); the terminal latch was taken on a fire-and-forget `@Async` publish that swallows exceptions, so "paged" meant "enqueued"; the fix for THAT then created an alarm with no exit, because a past session can never acquire a run marker (`SwingBatchRecorder` stamps today), so "repeat until it runs" would have paged ~64 times per incident — capped at 5; the calendar cliff silently disabled the container-down sweep with no log; and the migration still asserted the removed falsehood in a `COMMENT ON TABLE`, which lands in the live catalog. Follow-up orphan closed as [#1046](https://github.com/prashantm912/artha-yantra-2/pull/1046) (chip task_bc04c4d3). — a single V047 records *schedule-time* arming intent so a session can no longer be mistaken for deliberately-disarmed (the old canary read CURRENT `@Value` flags + a last-run watermark, Critical 5's root cause), V047 latches one page per session, dedicated scheduler, **never invokes a batch or touches a paper position**; **(b)** M2's emergency-close defect was extracted and **MERGED as [#1043](https://github.com/prashantm912/artha-yantra-2/pull/1043)** (`4ca5485`) — it was never swing-related, just noticed there; **(c)** the auto-replay half is parked as **draft [#1036](https://github.com/prashantm912/artha-yantra-2/pull/1036)** and owes permanent tests for the round-4 fixes plus an unreviewed round 4 before it can be reconsidered. Reviving it is an owner decision, not a queue item. Historical detail below. ⛔ **DEFERRED 2026-07-26, NOT SHIPPABLE: 6 Critical money defects + 2 Major regressions** found by a fresh cross-vendor review on the CURRENT base. Rebase + renumber are DONE and pushed as **`origin/feat/swing-batch-catchup`** (use this, not the old `worktree-agent-abb02bf43adbb895d`): zero-conflict rebase onto main, `V046__swing_catchup_runs`→**`V047`** (main's V046__engine_reloads is applied live; lineage V044..V047 contiguous), verify green **1019 tests**. THE SIX CRITICALS: (1) the sweep CONTINUES past a partial session — Thursday's bar missing + Friday's present ⇒ Friday closes the position at Friday's price and Thursday's retry then sees no anchor and falsely completes; (2) historical runs evaluate CURRENTLY-active lots without filtering as-of the pinned bar date, so a Friday anchor settles against Thursday's truncated bar and Manas can close an averaged position containing FUTURE lots; (3) durable `PENDING` rows fall out of the `maxAttempts+2` window forever — a 7-session outage leaves the oldest session never reaching DONE or ABANDONED; (4) the claim is NOT atomic with the money effect — paper failures are swallowed in the listeners while the sweep still declares DONE, leaving an active signal with no paper open or a position with no anchor; (5) `DISARMED` records CURRENT intent, so re-enabling replays a deliberately-skipped session and disabling suppresses an armed-but-missed one; (6) readiness and candidates come from two SEPARATE HTTP fetches, so it can validate session X and trade session Y's names. MAJORS: the unqualified `@Scheduled` shares the default pool with the 15s SL/TP sweep, funnel calls have no timeout and the market-hours check is START-ONLY (the Architect reached this one independently); and the manual-close path now runs full `positionDetail()` enrichment BEFORE closing, so an emergency explicit-price close can hang. ⚠️ **Findings 1/2/3/5 look BASE-INDEPENDENT — i.e. missed by the three cross-vendor rounds this branch passed in July, not introduced by the rebase. Treat any revived long-parked branch as unreviewed.** Owner decision: fix the six, or solve the missed-batch incident another way. ⚠️ **MIGRATION NUMBER NOW COLLIDES (verified 2026-07-25):** the branch carries `V046__swing_catchup_runs.sql`, but main shipped `V046__engine_reloads.sql` and it is APPLIED LIVE (`strategy.flyway_schema_history`, 2026-07-25 09:18 UTC). Reviving this branch **must renumber its migration to `V047`** — never `outOfOrder=true`, and never re-use 046, or flyway-init fails *validation* and blocks every future migration. (The old note "V046 unmerged so main stays deployable" is stale — main is deployable because 046 is engine_reloads, not because the number is free.) This is the ONLY non-`main` branch left on the remote after the 2026-07-25 cleanup; every other branch was verified shipped and deleted. Gives the Manas/Minervini swing batch a catch-up path (the gap that cost `paper_positions id=28` OMAXAUTO a missed stop for 3 days after the 07-17 stack outage). Canary-window (08:35 IST) default-OFF trigger, atomic durable claim (V046 `swing_catchup_runs` + `DISARMED` status) + in-process mutex, oldest-first bounded sweep. **5 real findings across 3 review rounds, ALL closed** (double-fill via `PaperService` averaging; partial-run-stamps-complete; no-retry; re-arm-replays-disarmed-sessions; failed-marker-becomes-DONE) — 991 tests, the double-fill IT asserts ONE position not two, Golden/Parity 9/9. Owner-approved "merge+arm" but the Architect HELD the arm (won't arm a money path that found a bug every round without a clean final pass). **Arms nothing tomorrow regardless — tonight's 20:00 batch ran clean, no session to catch up.** OMAXAUTO itself was manually closed live at the 07-17 NSE daily close 228.38 (−₹1,613.71, `MANUAL`), and the `POST /positions/{id}/close` no-audit-row gap is fixed inside this branch.
 
 - **Missed-batch detector ([#1044](https://github.com/prashantm912/artha-yantra-2/pull/1044) `f64f8f07`, deployed 2026-07-26) — ✅ VERIFIED LIVE END-TO-END 2026-07-28 08:40 IST** (scheduled verify task). Both halves of the design proven on real sweeps, no false positive: **(a) no-intent half** — the 08:29:59 IST sweep (18 INFO lines, thread `swing-detector-sched-1`) walked back 10 trading days over both families and skipped every pre-deploy session with `predates any recorded arming intent — skipping (fail closed)`; **zero** `DID NOT RUN`, `swing_missed_batch_alerts` still 0 rows. This is the case the old `SwingBatchCanary` could not have handled — it read the CURRENT `artha.<family>.swing.enabled` flag and would have paged for 9 sessions × 2 families it has no arming record for. **(b) intent half** — the first weekday ticks after deploy (Mon 2026-07-27) wrote exactly two rows to `strategy.swing_batch_schedule_intents`: `minervini 2026-07-27 armed=t @ 19:59:59.593 IST` and `manas-arora 2026-07-27 armed=t @ 20:04:59.563 IST`. `armed` matches the live env (`ARTHA_MINERVINI_SWING_ENABLED` / `ARTHA_MANAS_ARORA_SWING_ENABLED` both `true`), `session_date` is the **IST** calendar date (no UTC off-by-one), and `strategy.swing_batch_runs` carries both `2026-07-27` rows — so the sweep correctly emitted nothing. Detector flag confirmed in-container (`ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED=true`), bean thread alive. **Still unobserved (nothing to observe yet): a genuine `DID NOT RUN` page** — needs an armed session that actually misses; the paging path stays test-covered only. Recurring verify task can be deleted.
@@ -476,10 +505,12 @@ Triggered by an owner "both morning routines show issues" report at market-open.
 **RESOLVED — investigation, NOT a bug:** the batch-verify agent's "NFO option 1m capture DEAD (0 rows today)" RED was a **misread** (and the Architect's own subscription-death hypothesis was ALSO wrong). Root cause (Opus-investigated, Architect-DB-confirmed): **there has NEVER been live per-contract option-premium streaming — ZERO option `TICK_AGG` rows on ANY day.** Option premium 1m is populated RETROACTIVELY post-expiry from Upstox (`ExpiredBackfillService`), landing 1–2 days AFTER each weekly expiry; the "334→0 decline" was a `fetched_at` illusion (only futures + indices are WS-pinned; no option pinner exists). "0 today" is EXPECTED — the current 21JUL week hasn't expired. Nothing to fix. If LIVE intraday option premium is ever wanted, it's a NEW `OptionAtmPinner` feature (~160 tokens « 3000 cap), not a repair — **ledger item F-OPT below**, not a chip.
 
 **OWNER-GATED / carried forward:**
-- **#941 session-liveness heartbeat** — still needs the owner to create an external check URL + set `ARTHA_HEARTBEAT_SESSION_URL` + redeploy (the ONLY mid-session-death detector; #640 `SwingBatchHeartbeat` covers only the 20:15 batch). Verified live-dormant tonight (0 pings, correctly unarmed).
-- **PE forward-paper verdict** — #959 is live; whether the 27 `-pe` actually FIRE needs OI-restored (#957) forward sessions. Watch `futures_oi`/`underlying_oi` dot support tomorrow (~57%/52% pre-outage vs 0% during) to confirm the OI fix, then judge PE.
+- **#941 session-liveness heartbeat** — still needs the owner to create an external check URL + set `ARTHA_HEARTBEAT_SESSION_URL` + redeploy (the ONLY mid-session-death detector; #640 `SwingBatchHeartbeat` covers only the 20:15 batch). Verified live-dormant tonight (0 pings, correctly unarmed). ⚠️ **STILL OPEN — RE-MEASURED LIVE 2026-08-02** (prose-audit shard C): `ARTHA_HEARTBEAT_SESSION_URL` is **EMPTY** inside `ay-strategy-signal-service`, so the `@ConditionalOnProperty` bean is not created and the heartbeat has been dormant for **14 days**. The *other* var, `ARTHA_HEARTBEAT_URL` (#640, the 20:15 swing-batch dead-man's-switch), **IS set** — do not read "a heartbeat is armed" from that one; they are different detectors covering different windows. **This item has NO §0 row and is findable only in this bullet** — flagged as a promotion candidate by the 2026-08-02 audit; the Architect/owner decides whether it earns one.
+- **PE forward-paper verdict** — #959 is live; whether the 27 `-pe` actually FIRE needs OI-restored (#957) forward sessions. Watch `futures_oi`/`underlying_oi` dot support tomorrow (~57%/52% pre-outage vs 0% during) to confirm the OI fix, then judge PE. ⚠️ **STILL OPEN — and the verdict is now MEASURABLE, 2026-08-02** (prose-audit shard C, live DB, bounded reads): **18 `-pe` strategies are live (enabled + published) and they have fired ZERO signals since 2026-07-21**, against **69** non-PE signals over the same window (`strategy.signals` ⋈ `strategy_versions` ⋈ `strategies`, `generated_at >= 2026-07-21T00:00+05:30`). So 11 sessions after the inversion the answer to "do they fire" is *still no*. **The 27-vs-18 gap is NOT a publish gap** — all 27 `-pe` are published; the split is **9 NIFTY live + 9 SENSEX live + 9 SENSEX explicitly `enabled=false`** — so both indices are represented in the zero and it is not a one-index artifact. (Why those 9 SENSEX twins are disabled is documented nowhere; noted, not promoted.) **No §0 row exists for this watch** — promotion candidate, owner/Architect call.
 
-**OPEN CHIPS (not yet built):**
+**OPEN CHIPS (not yet built):** ⚠️ **EMPTY as of 2026-08-02 — the heading outlived its content** (prose-audit shard C).
+Its one and only bullet is struck through and CLOSED. This literal string `OPEN CHIPS` is one of the greps the §0
+enumeration recipe tells you to run for location #4, so it matches here and reads like a live section; it is not one.
 - ~~**task_a2ae20ed** — move 7 remaining synchronous-JDBC/network `@Scheduled` methods off the single-thread default pool (incl. `PaperScheduler.bracketEvaluation` = the paper SL/TP money job, every 15s; `SignalEngine.reconcilePublishedStrategies` no query timeout). Surfaced by #958's sweep; a DESIGN task (pool topology), not a mechanical move.~~ — **CLOSED 2026-07-25.** The chip's deliverable WAS the sweep, and the sweep ran: all 69 `@Scheduled` methods across both services had their binding verified (`docs/signal-analysis/2026-07-25-weekly-bug-queue.md` §Scheduler-binding sweep), producing successors **S1/S2/S3 — all shipped [#1016](https://github.com/prashantm912/artha-yantra-2/pull/1016) @ 28860acd, deployed + thread-dump-verified live.** `PaperScheduler.bracketEvaluation` **deliberately stays** on the default pool — the reasoning is written into `MonitorSchedulingConfig:156-162` ("why the poller moves and bracketEvaluation stays"), so this bullet's "7 remaining" figure is stale, not outstanding work. ⚠️ Note the B8 row in §0a still says this chip "stays open" — that line is the drifted one; **this is the correct status** (per the single-status rule at the top of §0).
 
 ⚠️ **The two F-* declarations below were PROMOTED to §0 group-G rows on 2026-07-25 and are both DONE. They are kept only as the origin record of how the items were first described — the ROW is the status, per the single-status rule at the top of §0. Do not enumerate open work from them.**
@@ -620,6 +651,7 @@ Source: `docs/audits/2026-07-18-comprehensive-audit.md` (dual-signed; detail liv
 Secret ROTATION (Kite/Upstox/owner-password/master-key) = owner-gated residual of SEC-01, parked.
 
 **OVERNIGHT WAVE 2 (2026-07-19 ~00:40→09:21 IST, owner asleep — "spin the recommended batch + continue autonomously").** Delegated-build pipeline, codex cross-vendor review every round. **6 CLEAN PRs MERGED to main `eb1bdb08` — UNDEPLOYED, batch-deploy DEFERRED to post-close ≥15:30 IST** (wave finished at market-open; full-stack rebuild, NO migrations in the `fdc2324..eb1bdb08` delta): FE-01 #928, EXT-03 #929 + margin-canary #932 + canary-lot #933, optimizer AY-SL-07/OPT-02/03 #931, FE-03/04 #937, **EXT-02 #934** (one token-scoped Upstox rate budget, 3 codex rounds). **3 HOLD PRs — OPEN for owner (built+reviewed+APPROVED, never merged):** #935 AY-SL-04 (avgEntryPrice settle fix + past-expiry reconciler), **#938 AY-SL-06** (premium-exit paise-rounding parity, Golden/Parity 9/9 byte-identical), **#930 PF-01** (8 rounds — r8 the draft-hybrid-config fix is PARTIAL+uncommitted in worktree, builder hit network+session-limit crashes; last pushed = r7; RESUME post-close or owner design-call). **#936 AYDB-01 = OWNER DECISION** (V049 cagg-compression UNSAFE on Timescale 2.17.2 — breaks manual historical cagg-refresh in CA-recovery/gap-backfill; needs ≥2.18.1 upgrade or a decompress→refresh→recompress wrapper). Live engine verified healthy mid-wave (both JVM UP @ `fdc2324`, feed GREEN). Detail: memory `comprehensive-audit-2026-07-18` (overnight-wave section).
+⚠️ **THE FOUR "OPEN FOR OWNER" PRs IN THE PARAGRAPH ABOVE ARE ALL RESOLVED — do not enumerate work from them** (prose-audit shard C, 2026-08-02, checked with `gh pr view`, not against prose): **#935 MERGED** · **#938 MERGED** · **#930 MERGED** · **#936 CLOSED** (AYDB-01 — the cagg-compression proposal was closed, not merged; the compression it wanted landed separately, see the AYDB-03 row's "compressed since #940" note). The paragraph is kept as the wave's origin record only. ⚠️ Memory topic `comprehensive-audit-2026-07-18` still carries the stale "3 HOLD PRs OPEN + #936 AYDB-01" line — that is the drifted copy; per the single-status rule these outcomes win.
 
 | id | item | tier | status |
 |---|---|---|---|
@@ -708,7 +740,7 @@ Chips filed from the #990 round-3 review: OpenAPI non-null stopLoss/target on 3 
 (task_392b3672); `hasBoundingExit` reachability hardening (task_85543821) — both ran in separate
 sessions. New chip from the republish pass: **task_9ffe390d** (a wrong `Content-Type` returns 500,
 not 415 — unmapped `HttpMediaTypeNotSupportedException` in the shared `GlobalExceptionHandler`).
-**OWNER before Monday: B8 host clock resync (commands in the bug-queue doc).** Monday
+**OWNER before Monday: B8 host clock resync (commands in the bug-queue doc).** → **row B8, DONE 2026-07-27** — resync confirmed, drift +1 s, `W32Time` Running/Automatic (pointer added by prose-audit shard C, 2026-08-02). Monday
 verifies: §3.14 floor tags live, PartialBucketCanary quiet, dot-health no false all-dead, and the
 combined T22+T6 dot effect judged over 2 forward sessions.
 
@@ -756,6 +788,14 @@ long-stale mains.
 | `soft-dot-arming` | FU2 dots + drasticFloor default built inert | arm only if live forward-paper data proves them (else stays a §7 WON'T) |
 
 ## 3. Verification only — next market session
+
+⚠️ **"NEXT market session" HAS MEANT 2026-07-03 FOR A MONTH.** Three boxes below are still unchecked, none has a §0 row,
+and the §0 enumeration recipe does not name this section — so nothing surfaces them (prose-audit shard C, 2026-08-02).
+Re-verified 2026-08-02 that all three code surfaces still exist and the questions are still unanswered:
+`AnnouncementController`/`AnnouncementService` (#378), `ActiveStrikeService.sentimentLevelPct:88` +
+`OptionsAnalyticsController:151/454` (#512), the stock-chain warm path (#472). They are **promotion candidates**, listed as
+such in `docs/audits/2026-08-02-ledger-audit-prose-shard-c.md`; the Architect decides whether each earns a row or a
+WON'T-DO. Item 4 (owner hard-reload after an FE redeploy) is a standing habit, not work.
 
 Ran live 2026-07-03 (findings addendum A2 in `docs/signal-analysis/2026-07-03-session-findings.md`):
 
@@ -905,6 +945,11 @@ Provenance rows live in [`docs/DEFERRED_BACKLOG.md`](../../DEFERRED_BACKLOG.md) 
 - ~~Upstox `/pcr` … dormant `source.pcr` flag~~ **FLAG ALREADY BUILT as `source.optionanalytics=upstox|native`**
   (routes `/pcr-series` to Upstox `/pcr` vs native; mapping tested). Only a LIVE market-hours freshness
   check remains before flipping it (§4-adjacent; not an offline build). Do not re-flag as buildable.
+  ⚠️ **That check has still never run — re-verified 2026-08-02** (prose-audit shard C):
+  `market-data-service/src/main/resources/application.yml:87` reads
+  `optionanalytics: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:native}`, i.e. the flag is still on `native` and the Upstox
+  route is unexercised in production. It has **no §0 row**; it is a live-session verification, not a build, and is
+  listed as a promotion candidate in the 2026-08-02 prose audit.
 - ~~optimizer `requirements.txt` hash-pinning~~ **ALREADY DONE (2026-07-04 audit) — remove, do not re-flag:**
   `requirements.lock` (799 SHA-256 hashes) + `requirements-dev.lock` (922) via `uv pip compile
   --generate-hashes`; Dockerfile installs `--require-hashes`, `ci-optimizer.yml` installs
@@ -1035,6 +1080,10 @@ Owner batch ("implement autonomously while I sleep"), all merged + deployed to t
   a labeled A/B probe). Live-verified (sha==HEAD, pyramid off in-container, Manas re-published). Doc:
   `docs/strategies/manas-h4-chandelier-backtest-2026-07-07.md`.
 - **OPEN (owner "add to pending, take it later") — FIFO vs RS-priority slot admission for the RS-gated funnel.**
+  → **row F3 `fifo-slot-probe`, DONE — #751 @ 9c8df0b6, MERGED + DEPLOYED 2026-07-12** (pointer added by prose-audit
+  shard C, 2026-08-02). The word OPEN above is stale: option **(b)** below (the live 7-slot-cap exceedance measure) is
+  what shipped, as V034 measurement-only probe columns. Option **(a)** — the offline `portfolioFifoNet` re-run over the
+  persisted dropped-names+ranks — is carried as F3's **own** follow-up inside that row, so read F3, not this paragraph.
   The H4 compare's headline "45 vs 24" was FIFO-**gross** vs RS-priority-**net** (confounded). Like-for-like on
   `rs-turnover` (our live config, H4 run 2026-07-07): FIFO-gross **45.0** > RS-priority-gross **32.1** at equal
   DD (~50%) and Sharpe (~0.96), turnover ~equal (1270 vs 1322 trades) → inferred **FIFO-net ~34–37% >
@@ -1049,7 +1098,13 @@ Owner batch ("implement autonomously while I sleep"), all merged + deployed to t
   map to a same-day batch (entries fire together at EOD), so the real live lever is "don't pile into top-RS on
   an over-subscribed day / raise the cap."
 - **No buildable code left otherwise;** the one open perf follow-up is the audit LOW "serial/N+1 backtest
-  reads" (`ManasAroraBacktestService.readSeries`).
+  reads" (`ManasAroraBacktestService.readSeries`). → **row F2 `manas-n1-reads`, DONE — #750 `4639a844`**
+  (pointer added by prose-audit shard C, 2026-08-02; the same claim is repeated twice more below, at §8a's LOW
+  bullet and §8d's "N+1 backtest reads — HOLD/next" — all three are stale). Verified in code, not prose:
+  production now goes through `readClosesBatched`/`readSeriesBatched`
+  (`MinerviniBacktestService:353,508`; the Manas twin likewise), and `readSeries` survives **only** as the
+  per-symbol reference path the batch-equality ITs compare against
+  (`ManasBacktestBatchEqualityIntegrationTest` / `MinerviniBacktestBatchEqualityIntegrationTest`).
 
 ---
 
@@ -1067,6 +1122,11 @@ reverses — live-order arming, SPAN sell-legs, OpenAlgo gateway arm, full-auto 
 batch-liveness gap** (§1 row). Below = items NOT already enumerated elsewhere in this ledger.
 
 ### 8a. Open 2026-07-05 full-audit findings (`docs/audits/2026-07-05-full-codebase-audit.md` §12; fix log §13)
+⚠️ **Every named item below now has a §0 row — read the ROW for status, never these bullets** (pointers added by
+prose-audit shard C, 2026-08-02): **H6** → row **B4** `fid-p0-4-screener-ca` · **H8**, the swing exit-parity HOLD batch
+**#128** (M2/M3/M4/M6/M7/M8/M9/M10/M11/M13/M14/M27) and **M36–M40** → row **E4** `audit-doctrine-holds` (re-mapped
+against current HEAD 2026-08-02) · **M31** → §8g DONE #655 · **M12/M35/M39** → landed via #607 · **M20** → DONE #649 ·
+**M1/M16/M17/M18/M28** → shipped in the 2026-07-12 waves (#737/#739/#741). The bullets are the origin record.
 - **HIGH (2):** **H6** screener reads CA-UNADJUSTED bhavcopy (splits/bonuses poison SMA/52wk/RS/VCP ~1yr/event vs the
   adjusted engine plane; data-fidelity, owner call) · **H8** cheat-3c is a synthetic proxy mislabelled as the doc's true
   cheat setup (doctrine, owner call).
@@ -1092,6 +1152,8 @@ is inherently the next 20:00/20:05 IST batch (dead-man's-switch + P0-4 canary wa
 mid-reliability-month deploy (parity-neutral + characterization-proven) — overriding the "hold — watch" posture for this one.
 - **LOW (~28, none started):** cosmetic/test/long-tail; the only one with teeth = serial/N+1 backtest reads
   (`ManasAroraBacktestService.readSeries`, ~1,800 round-trips, ~40 min under a concurrent pg_dump).
+  → **that one is DONE — row F2, #750 `4639a844`** (pointer added by prose-audit shard C, 2026-08-02; see the
+  §Manas-section bullet above for the code evidence). "None started" now applies to the cosmetic remainder only.
 
 ### 8b. Open 2026-07-06 UI/data-correctness audit (`docs/audits/2026-07-06-ui-data-correctness/`, 21 items)
 - **MED:** **D1** participant-OI keeps the synthetic `TOTAL` row in the group list AND the %-denominator → every
@@ -1101,7 +1163,7 @@ mid-reliability-month deploy (parity-neutral + characterization-proven) — over
 - **Cross-cutting root:** `latestMapped` cross-date staleness — `ROW_NUMBER … ORDER BY trade_date DESC` spans dates, so
   357 EQ names resolve to a pre-07-03 "latest" under one "as of 07-03" badge (SectorStats/Heatmap/IndexContribution/
   EquityReturns) — one `WHERE trade_date = max()` fix.
-- **Data action:** re-fetch the partial 2026-07-02 bhavcopy (181 EQ/BE vs ~2670; poisons Equity-Returns r1d + delivery).
+- **Data action:** re-fetch the partial 2026-07-02 bhavcopy (181 EQ/BE vs ~2670; poisons Equity-Returns r1d + delivery). → **STILL OPEN, and no longer blocked** — see the §8d "07-02 bhavcopy re-fetch" bullet below for the discharged blocker, the exact endpoint and the 2026-08-02 live measurement (266 rows vs 3,268/3,283). Pointer added by prose-audit shard C, 2026-08-02.
 - Rest = cosmetic (D3 sector staleness, D4 signals-strategy-UUID, D5 mojibake, D6 CAGR-0.00%, D7 drawdown-downsample) +
   LOW visual.
 
@@ -1152,10 +1214,21 @@ before actioning** (frozen 2026-07-02; the 3 moot ones no longer apply).
   max-subquery is index/chunk-metadata-served, actually *faster*; IST/DATE clean; IT deterministic). Shared-DB ITs
   reworked to today-seed + collision-free symbols (Testcontainers-verified). Live-verified: `/sector-stats` `asOf: 2026-07-09`.
 - **N+1 backtest reads — HOLD/next**: parity-adjacent (touches owner-facing CAGR via `ManasAroraBacktestService`); needs
-  a strict before/after equality re-run, done carefully.
+  a strict before/after equality re-run, done carefully. → **DONE — row F2, #750 `4639a844`** (pointer added by
+  prose-audit shard C, 2026-08-02). The "strict before/after equality re-run" this bullet asked for is exactly what
+  shipped as the permanent batch-equality ITs.
 - **07-02 bhavcopy re-fetch — DEFERRED (needs a trigger)**: still partial (167/~2380 EQ), but the reconcile SKIPS partial
   dates (anti-join on DISTINCT `trade_date` — 07-02 is present, just incomplete), so no clean single-date re-fetch path
   exists. Needs a targeted re-fetch endpoint (small build) or a delete-then-reconcile (mutating). Flagged, not run.
+  ⚠️ **THE STATED BLOCKER IS DISCHARGED AND THE DATA IS STILL BAD — this reads "blocked" but is now a one-call fix**
+  (prose-audit shard C, 2026-08-02). The targeted endpoint EXISTS: `POST /api/v1/market/eod-backfill/refetch?date=`
+  (`EodBackfillController:43`, shipped in the #744 F6-residue batch), and its javadoc names *this exact case* — "the
+  correction path for a partially-captured bhavcopy the self-healing catch-up cannot reach (it anti-joins against dates
+  already present, so an incomplete day is skipped forever)". **Measured live 2026-08-02** (bounded read,
+  `marketdata.nse_eod_bhavcopy`): `2026-07-01` = **3,268** rows · `2026-07-02` = **266** · `2026-07-03` = **3,283** — so
+  the hole is real and ~8% populated, still poisoning Equity-Returns r1d + delivery for that date. **No §0 row**;
+  promotion candidate (a data action, not a build). ⚠️ It is a mutating live write, so it stays an owner/Architect call,
+  not an autonomous one.
 
 ### 8e. "do 1 and 2" batch — OUTCOMES (2026-07-10)
 Owner picked the two remaining clean-autonomous items off the "what next" fork (option 3 = the gated levers below).

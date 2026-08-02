@@ -37,7 +37,10 @@
 // hand-written `string`) but investigation showed it isn't one: every write path that sets a
 // position's status to CLOSED sets `closed_at` atomically in the same statement
 // (`PaperPositionRepository.close()`), so a `TradeDto` row can never actually carry a null one —
-// the wire's nullable annotation is the stale side here, a backend fix out of scope for this PR.
+// the wire's nullable annotation was the stale side. THAT BACKEND FIX HAS SINCE LANDED (V055 +
+// a non-nullable `TradeDto.closedAt`): the wire now says `string`, the hand type already said
+// `string`, and the invariant is enforced by a DB CHECK rather than by the single-writer
+// convention above, so this is no longer a divergence in either direction.
 //
 // Full findings + file:line evidence for every case: the `chore/contracts-bridge-tightening` PR
 // description (2026-08-02 investigation) — tightening AssertKeys itself is a separate, follow-up

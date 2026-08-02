@@ -138,7 +138,17 @@ public class PaperService {
     }
   }
 
-  /** A closed trade. */
+  /**
+   * A closed trade. {@code closedAt} is NON-nullable, unlike the same-named field on {@link
+   * PositionDetail} (which describes OPEN positions too, where it is genuinely null and stays
+   * annotated as such). {@link PositionDto} has no {@code closedAt} at all — an earlier draft of
+   * this javadoc named it here and the cross-vendor review caught that. Every row that reaches this
+   * DTO has {@code status='CLOSED'} — {@link #trades} reads only
+   * {@code listClosed}, and {@link #closePosition} re-reads AFTER a won close — and {@link
+   * PaperPositionRepository#close} is the only writer of that status, setting {@code closed_at=now()}
+   * in the same atomic UPDATE. V055 pins the invariant in the DATABASE so a future writer cannot
+   * silently falsify this type.
+   */
   public record TradeDto(
       long id,
       String exchange,
@@ -148,7 +158,7 @@ public class PaperService {
       @Schema(type = "string") BigDecimal avgEntryPrice,
       @Schema(type = "string") BigDecimal realizedPnl,
       OffsetDateTime openedAt,
-      @Schema(types = {"string", "null"}) OffsetDateTime closedAt) {}
+      OffsetDateTime closedAt) {}
 
   /** The itemized statutory cost legs of one fill (recomputed for display; {@link PaperFillService#costs}). */
   public record FeeBreakdown(

@@ -554,7 +554,7 @@ class BigDecimalWireContractTest {
         wire(
             new PaperService.TradeDto(
                 1L, "NFO", "NIFTY26JUL24500CE", "BUY", 50L, bd("101.5"), bd("245.0"),
-                OffsetDateTime.now(), null));
+                OffsetDateTime.now(), OffsetDateTime.now()));
     assertThat(trade.get("id").isIntegralNumber()).as("id").isTrue();
     assertThat(trade.get("qty").isIntegralNumber()).as("qty").isTrue();
 

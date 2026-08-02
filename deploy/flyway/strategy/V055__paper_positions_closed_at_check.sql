@@ -33,10 +33,22 @@
 -- the converse is unreachable today for the SAME reason the forward direction is — close() is the
 -- only writer of closed_at, it stamps status in the same statement, and no reopen() exists — so
 -- both halves rest on exactly one convention. If that convention is worth pinning in one
--- direction it is worth pinning in both, and a future "reopen a position" path that flips status
--- back to OPEN without clearing the timestamp is a real bug class: equity() buckets realized P&L
--- by closed_at's IST date, so a reopened row with a stale stamp would keep contributing realized
--- P&L it no longer has. Costs nothing to enforce here; needs a second migration later.
+-- direction it is worth pinning in both, and it costs nothing to enforce here while it needs a
+-- second migration later.
+--
+-- ⚠️ THE CONVERSE IS WEAKER THAN THE FORWARD DIRECTION, AND THIS COMMENT ORIGINALLY OVERSTATED IT.
+-- An earlier draft claimed a reopened row with a stale stamp "would keep contributing realized P&L
+-- it no longer has". That is FALSE and the cross-vendor review caught it: every realized-P&L reader
+-- goes through listClosed(), which filters `WHERE status='CLOSED'` (PaperPositionRepository:327),
+-- so an OPEN row simply drops out of pnl() and trades() entirely — including equity()'s per-IST-day
+-- bucketing, whose rows come from that same filter. A reopened row corrupts no money figure.
+--
+-- What the converse actually buys is LIFECYCLE COHERENCE: status and closed_at are two encodings of
+-- one fact, and readers use them together — listClosed filters on the status and windows on the
+-- timestamp. Letting them disagree makes closed_at unusable as "when did this end", and silently
+-- mis-serves any future reader that keys on the timestamp's PRESENCE rather than on the status.
+-- That is a coherence guarantee, not a demonstrated bug — stated at its real strength rather than
+-- dressed up, because the forward direction is the one with measured downstream damage (see above).
 --
 -- NO-OP ON EXISTING DATA, MEASURED ON THE LIVE DATABASE, NOT ASSUMED. Both directions checked
 -- against live `artha` (read-only) immediately before this was widened:
@@ -55,4 +67,4 @@ ALTER TABLE paper_positions
   CHECK ((status = 'CLOSED') = (closed_at IS NOT NULL));
 
 COMMENT ON CONSTRAINT ck_paper_positions_closed_at_matches_status ON paper_positions IS
-  'closed_at is present if and only if status = ''CLOSED''. PaperPositionRepository.close() sets both in one atomic UPDATE; this makes that the DATABASE''s promise rather than a convention, because listClosed / PortfolioReader / GraduationService / equity() all window or bucket on closed_at — a CLOSED row with a null stamp is silently dropped or misdated, and an OPEN row with a stale stamp would keep contributing realized P&L it no longer has. Backs the non-nullable PaperService.TradeDto.closedAt in the published OpenAPI contract.';
+  'closed_at is present if and only if status = ''CLOSED''. PaperPositionRepository.close() sets both in one atomic UPDATE; this makes that the DATABASE''s promise rather than a convention. The FORWARD direction is the one with measured downstream damage: listClosed / PortfolioReader / GraduationService / equity() all window or bucket on closed_at, so a CLOSED row with a null stamp is silently dropped from every bounded window or misdated to today. The CONVERSE is a lifecycle-coherence guarantee, NOT a money bug — every realized-P&L reader filters WHERE status=''CLOSED'', so an OPEN row simply drops out and corrupts no figure; what it would break is closed_at''s meaning as "when did this end", and any future reader keying on the timestamp''s presence rather than the status. Backs the non-nullable PaperService.TradeDto.closedAt in the published OpenAPI contract.';

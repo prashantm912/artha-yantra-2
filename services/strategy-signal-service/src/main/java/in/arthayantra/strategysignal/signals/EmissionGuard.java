@@ -111,14 +111,27 @@ public interface EmissionGuard {
    * cannot affect intraday exit behaviour by construction — there is nothing here for a 15-second
    * poll to read. The paper adapter enforces "never loosens" AND "LONG only" in the cache itself (a
    * no-op when {@code newStop} is not strictly tighter than whatever is already cached, or when
-   * {@code side} is not {@code "BUY"} — Manas trades long-only, but a known parked SELL row exists in
-   * the live book, so this rejects rather than silently applying a higher-is-tighter comparison that
-   * would be backwards for a short). Empty on a fresh boot / before the trail arms — callers then
-   * fall back to {@code stopLoss}, the SAME conservative reading as before this whole M40 effort, not
-   * a regression. Default no-op keeps non-paper and test adapters permissive.
+   * {@code side} is not {@code "BUY"} — Manas trades long-only, and short-arithmetic support is
+   * intentionally NOT implemented here; see {@code RiskService#manasAggregateRiskWouldCross}'s
+   * javadoc for why a non-BUY row fails the aggregate CLOSED rather than being silently mispriced).
+   * Empty on a fresh boot / before the trail arms — callers then fall back to {@code stopLoss}, the
+   * SAME conservative reading as before this whole M40 effort, not a regression. Default no-op keeps
+   * non-paper and test adapters permissive.
+   *
+   * <p><b>{@code openingSignalId} (round 5, cross-vendor review Critical 1, 2026-08-02): the identity
+   * this stop was computed FOR, not merely the key it should be cached under.</b> {@code
+   * SwingBatchEngine}'s exit pass computes {@code newStop} from one PARTICULAR held signal anchor;
+   * passing only the {@code (book,exchange,symbol,side)} tuple let the paper adapter cache it against
+   * WHATEVER position happened to be open for that key when the write landed — if the anchor's own
+   * position had since closed and a DIFFERENT position opened on the same key (a dead-anchor row
+   * misread as fresh, or a close racing this write), the new position would silently inherit a trail
+   * computed for a position it has no relationship to. The adapter MUST validate the currently-open
+   * row's own {@code opening_signal_id} equals this parameter before caching — matching {@code null}
+   * (no cache) is the safe outcome, never a best-effort attach to whatever is open.
    */
   default void cacheManasGoverningStop(
-      String book, String exchange, String tradingsymbol, String side, BigDecimal newStop) {}
+      String book, String exchange, String tradingsymbol, String side, long openingSignalId,
+      BigDecimal newStop) {}
 
   /**
    * §3.7 hero-zero profit-funded sizing — the lot-rounded qty for an expiry-day hero-zero leg sized to

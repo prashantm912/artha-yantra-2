@@ -268,6 +268,52 @@ class RiskServiceManasAggregateRiskTest {
         .isTrue();
   }
 
+  /**
+   * Round 5, cross-vendor review Critical 2 — the "real half": round 4 only fixed the CANDIDATE's
+   * own matching row. {@link PaperEmissionGuard#openRiskInr} silently SKIPS any OTHER stopless row
+   * when summing the book's existing total, so a fresh candidate on a totally unrelated symbol
+   * could be admitted against an aggregate that omits what it cannot price. A tiny, otherwise
+   * perfectly safe candidate must still be refused while an unrelated stopless row is open anywhere
+   * in the book. LATENT today (measured 2026-08-02: manas-arora's 6/6 open rows all carry a stop).
+   */
+  @Test
+  void aStoplessUnrelatedPositionInTheBookRefusesEvenATinyFreshCandidate() {
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    RiskService risk = risk(positions, account, new ManasGoverningStopCache(), "6.0");
+    when(positions.listOpen(BOOK)).thenReturn(List.of(position("OLDCO", 10, "100", null)));
+    when(account.equity(BOOK)).thenReturn(bd("1000000"));
+
+    assertThat(
+            risk.manasAggregateRiskWouldCross(BOOK, "NSE", "NEWCO", "BUY", 1, bd("100"), bd("90")))
+        .as("OLDCO (unrelated symbol) has no stop at all — the book's aggregate cannot be trusted,"
+            + " so even a tiny, well-stopped NEWCO candidate refuses")
+        .isTrue();
+  }
+
+  /**
+   * Round 5, cross-vendor review Critical 2 — the second shape of the same "real half": {@code
+   * openRiskInr}'s {@code avgEntry − stop} arithmetic is BUY-only, so an OPEN SELL row's real risk
+   * (its stop sits ABOVE entry) silently sums to zero rather than refusing. Failing closed on an
+   * unsupported side was chosen over implementing SELL arithmetic that has no live row to verify
+   * against. LATENT today (measured 2026-08-02: zero open SELL rows exist in any book).
+   */
+  @Test
+  void anUnrelatedSellPositionInTheBookRefusesEvenATinyFreshCandidate() {
+    PaperPositionRepository positions = mock(PaperPositionRepository.class);
+    PaperAccountService account = mock(PaperAccountService.class);
+    RiskService risk = risk(positions, account, new ManasGoverningStopCache(), "6.0");
+    when(positions.listOpen(BOOK))
+        .thenReturn(List.of(position(1L, "OLDSHORT", "SELL", 10, "100", "110")));
+    when(account.equity(BOOK)).thenReturn(bd("1000000"));
+
+    assertThat(
+            risk.manasAggregateRiskWouldCross(BOOK, "NSE", "NEWCO", "BUY", 1, bd("100"), bd("90")))
+        .as("OLDSHORT is a non-BUY row — its arithmetic is unsupported, refuse rather than treat it"
+            + " as riskless")
+        .isTrue();
+  }
+
   @Test
   void nonManasBooksAndDegenerateInputsAreAlwaysFalse() {
     PaperPositionRepository positions = mock(PaperPositionRepository.class);

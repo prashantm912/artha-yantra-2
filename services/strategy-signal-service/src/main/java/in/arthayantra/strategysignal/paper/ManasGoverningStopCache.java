@@ -46,9 +46,13 @@ import org.springframework.stereotype.Component;
  * cached for that id, mirroring the "tighten-only" guarantee a persisted ratchet would have
  * enforced at the SQL layer — enforced here in Java since there is no row to constrain the UPDATE
  * against. LONG-only, explicitly: Manas trades long-only (its {@code entry_rules} declare {@code
- * direction: long}), so "tighter" means "higher"; a non-{@code "BUY"} side is rejected outright (a
- * known parked SELL row exists in the live {@code manas-arora} book) rather than silently applying
- * a comparison that would be backwards for a short.
+ * direction: long}), so "tighter" means "higher"; a non-{@code "BUY"} side is rejected outright
+ * rather than silently applying a comparison that would be backwards for a short. This is a
+ * defensive, currently LATENT guard, not a response to a live row — measured 2026-08-02: zero open
+ * SELL rows exist in any book today (an earlier claim citing a "known parked SELL row" was sourced
+ * from a stale memory note and was wrong; the cited row, {@code paper_positions} id=28, has been
+ * CLOSED since 2026-07-17). The guard stays because Manas is long-only by doctrine, not because a
+ * short is reachable today.
  */
 @Component
 public class ManasGoverningStopCache {

@@ -218,20 +218,32 @@ public class PaperEmissionGuard implements EmissionGuard {
   /**
    * Round 4 fix (cross-vendor review Critical 1, 2026-08-02): resolves the CURRENTLY open position
    * for this key via a FRESH repository read — never the stale in-loop anchor snapshot {@code
-   * SwingBatchEngine}'s exit pass iterates — and caches against that row's own id. This closes the
-   * close-race the review found: {@code SwingBatchEngine} has no {@code @Transactional} boundary of
-   * its own, so a concurrent manual close (which evicts by id in {@code PaperService#doSettle})
-   * commits and is immediately visible here; if the position already closed before this call runs,
-   * {@code findOpen} returns empty and nothing is cached — the tuple key can never be resurrected
-   * for a position that no longer exists, and a later, genuinely NEW position on the same
-   * (book,exchange,tradingsymbol,side) gets a fresh id with no prior cache entry to inherit.
+   * SwingBatchEngine}'s exit pass iterates. This closes the close-race the round-4 review found:
+   * {@code SwingBatchEngine} has no {@code @Transactional} boundary of its own, so a concurrent
+   * manual close (which evicts by id in {@code PaperService#doSettle}) commits and is immediately
+   * visible here.
+   *
+   * <p><b>Round 5 fix (cross-vendor review Critical 1, 2026-08-02): "currently open" is not enough —
+   * it must be the SAME position {@code openingSignalId} was computed from.</b> The round-4 version
+   * resolved WHATEVER row was open for the tuple key, which fixed the read side (a closed key can
+   * never be resurrected) but not the write side: if the anchor's own position closed and a
+   * DIFFERENT position opened on the same key before this write landed, round 4 would have cached
+   * the first position's trail under the second position's perfectly valid id — a wrongly-attributed
+   * entry, not a stale one. {@link PaperPositionRepository#findOpenIdIfOpenedBy} validates the
+   * currently-open row's own {@code opening_signal_id} column equals {@code openingSignalId} before
+   * caching anything — a mismatch (nothing open, or something open but opened by a DIFFERENT signal)
+   * is a safe no-op, never a best-effort attach. {@code opening_signal_id} is retained unchanged
+   * across an averaging add (audit H5, {@code PaperService#upsertPosition}), so a pyramid add onto
+   * the SAME anchor's position still validates correctly — only a genuinely different position is
+   * rejected.
    */
   @Override
   public void cacheManasGoverningStop(
-      String book, String exchange, String tradingsymbol, String side, BigDecimal newStop) {
+      String book, String exchange, String tradingsymbol, String side, long openingSignalId,
+      BigDecimal newStop) {
     positions
-        .findOpen(book, exchange, tradingsymbol, side)
-        .ifPresent(row -> governingStopCache.put(row.id(), row.side(), newStop));
+        .findOpenIdIfOpenedBy(book, exchange, tradingsymbol, side, openingSignalId)
+        .ifPresent(id -> governingStopCache.put(id, side, newStop));
   }
 
   @Override

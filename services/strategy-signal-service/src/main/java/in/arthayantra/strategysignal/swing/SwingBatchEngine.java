@@ -871,6 +871,12 @@ public class SwingBatchEngine {
    * mirroring the Major-4 fix for the risk-cap audit: this batch is the position's ONLY exit
    * evaluator, so an accounting failure here must never propagate and skip a later position's stop
    * evaluation this run.
+   *
+   * <p>Passes {@code primary.id()} — the anchor THIS trail was computed from — as the expected
+   * opening-signal identity (round 5, cross-vendor review Critical 1, 2026-08-02): the paper
+   * adapter validates it against the currently-open row's own {@code opening_signal_id} before
+   * caching, so a stale-anchor-treated-as-fresh position, or a close+reopen racing this write, can
+   * never have this anchor's trail attached to it under the shared symbol/side key.
    */
   private void cacheGoverningStop(
       SwingDoctrine doctrine,
@@ -888,7 +894,8 @@ public class SwingBatchEngine {
       if (governingStop != null) {
         emissionGuard
             .get()
-            .cacheManasGoverningStop(doctrine.book(), EX, primary.tradingsymbol(), "BUY", governingStop);
+            .cacheManasGoverningStop(
+                doctrine.book(), EX, primary.tradingsymbol(), "BUY", primary.id(), governingStop);
       }
     } catch (RuntimeException e) {
       log.warn(

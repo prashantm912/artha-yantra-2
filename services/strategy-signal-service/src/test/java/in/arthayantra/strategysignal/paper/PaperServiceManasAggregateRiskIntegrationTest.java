@@ -57,6 +57,26 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * no inherited cache entry. Critical 2: {@code
  * aZeroEquityManasBookRefusesRatherThanSilentlyAdmitting} proves the safety gate now fails CLOSED
  * (refuses) rather than silently admitting when it cannot compute a risk figure.
+ *
+ * <p><b>Round 5 (cross-vendor review, 2026-08-02): round 4 fixed the READ side of position
+ * identity, not the WRITE side.</b> Resolving "whichever row is currently open" (round 4) stops a
+ * NEW position from INHERITING a stale entry, but does not stop the write from CREATING a
+ * wrongly-attributed one: if the anchor whose trail was computed closes and a DIFFERENT anchor's
+ * position takes the same key before the write lands, "whatever is open" is the wrong position.
+ * {@link PaperEmissionGuard#cacheManasGoverningStop} now takes the anchor's own
+ * {@code openingSignalId} and validates it against the currently-open row's {@code
+ * opening_signal_id} column ({@link PaperPositionRepository#findOpenIdIfOpenedBy}) before caching.
+ * This class's fixture has no real signal-anchor chain, so the anchor-MISMATCH-while-still-OPEN
+ * proof lives in {@code
+ * SwingPaperExitCriticalsIntegrationTest.aStaleAnchorsGoverningStopIsNeverAttachedToADifferentPositionOnTheSameKey},
+ * which does; {@code aCacheWriteForAClosedPositionIsANoOpNotAResurrection} here still covers the
+ * simpler "nothing is OPEN at all" case correctly regardless of which {@code openingSignalId} is
+ * passed. Round 5 also closed the SECOND half of Critical 2: {@link
+ * PaperEmissionGuard#openRiskInr} silently skips a stopless row (and its BUY-only arithmetic zeros
+ * a SHORT's real risk) when summing the WHOLE book, not just the candidate's own matching row —
+ * {@code manasAggregateRiskWouldCross} now sweeps every open row and refuses on either shape,
+ * LATENT today (measured 2026-08-02: manas-arora's 6/6 open rows all carry a stop, zero open SELL
+ * rows exist in any book) but no longer fail-open on principle.
  */
 @SpringBootTest(properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
 class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegrationTestBase {
@@ -78,6 +98,7 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
   @Autowired private RiskService risk;
   @Autowired private ManasGoverningStopCache governingStopCache;
   @Autowired private PaperEmissionGuard emissionGuard;
+  @Autowired private PaperPositionRepository positions;
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
@@ -113,7 +134,8 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
           (exchange, tradingsymbol, side, qty, avg_entry_price, stop_loss, status, opened_at, book)
         VALUES ('NSE', ?, ?, ?, ?, ?, 'OPEN', now(), ?)
         """,
-        symbol, side, new BigDecimal(qty), new BigDecimal(avgEntry), new BigDecimal(stop), BOOK);
+        symbol, side, new BigDecimal(qty), new BigDecimal(avgEntry),
+        stop == null ? null : new BigDecimal(stop), BOOK);
   }
 
   private int openCount(String symbol) {
@@ -259,9 +281,10 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
   @Test
   void theCacheRejectsANonLongSideRatherThanApplyingABackwardsComparison() {
     // SEPARATE, SMALLER finding (Architect audit, 2026-08-02): "tighter means higher" is correct
-    // only for a LONG. Manas trades long-only in production, but a known parked SELL row exists in
-    // the live manas-arora book, so this must REJECT (never cache) rather than silently applying a
-    // higher-is-tighter comparison that would be backwards for a short. Pure cache API — synthetic id.
+    // only for a LONG. Manas trades long-only by doctrine; this guard is LATENT, not a response to
+    // a live row (measured 2026-08-02: zero open SELL rows in any book today) — it must still
+    // REJECT (never cache) rather than silently applying a higher-is-tighter comparison that would
+    // be backwards for a short if one were ever opened. Pure cache API — synthetic id.
     long id = 777777L;
     governingStopCache.put(id, "SELL", new BigDecimal("105.00"));
 
@@ -347,14 +370,24 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
     // Round 4, cross-vendor review Critical 1 (the close-race half): SwingBatchEngine's exit pass has
     // no @Transactional boundary of its own, so PaperEmissionGuard#cacheManasGoverningStop resolves
     // the CURRENTLY open row via a fresh read at write time — never a stale in-loop snapshot. If the
-    // position already closed (simulated here by flipping status directly, standing in for a manual
-    // close that raced the batch), the fresh lookup finds nothing OPEN and the write is a safe no-op:
-    // it can never resurrect a stale entry under a symbol/side key that no longer has an open row.
+    // position already closed (via the REAL closer, positions.close — the sole production writer of
+    // this transition, standing in for a manual close that raced the batch: it stamps closed_at
+    // atomically with status, satisfying ck_paper_positions_closed_at_matches_status, unlike a raw
+    // status-only UPDATE which CI caught as a state production cannot produce), the fresh lookup
+    // finds nothing OPEN and the write is a safe no-op: it can never resurrect a stale entry under a
+    // symbol/side key that no longer has an open row.
+    // Round 5 additionally validates the anchor identity (opening_signal_id) once something IS open
+    // — this row's fixture never sets that column, so ANY openingSignalId value correctly finds no
+    // match here regardless (status='OPEN' fails first); the anchor-mismatch-while-still-OPEN case
+    // is covered separately by
+    // SwingPaperExitCriticalsIntegrationTest.aStaleAnchorsGoverningStopIsNeverAttachedToADifferentPositionOnTheSameKey,
+    // which has the real signal-anchor fixture this class does not.
     insertOpen("RATCHETCO", "1000", "100", "91.30");
     long closedId = positionId("RATCHETCO");
-    jdbc.update("UPDATE paper_positions SET status='CLOSED' WHERE id=?", closedId);
+    assertThat(positions.close(closedId, BigDecimal.ZERO, "MANUAL")).isEqualTo(1);
 
-    emissionGuard.cacheManasGoverningStop(BOOK, "NSE", "RATCHETCO", "BUY", new BigDecimal("97.50"));
+    emissionGuard.cacheManasGoverningStop(
+        BOOK, "NSE", "RATCHETCO", "BUY", 999_999L, new BigDecimal("97.50"));
 
     assertThat(governingStopCache.get(closedId))
         .as("nothing was OPEN for this key at write time — the write is a no-op, not a resurrection")
@@ -386,6 +419,29 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
                         null, "NSE", sym, "BUY", 1, new BigDecimal("100.00"),
                         new BigDecimal("99.00"), null, null, BOOK)))
         .as("zero equity means the risk-cap percentage is undefined — refuse, never silently admit")
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining(RiskService.PYRAMID_RISK_CAP);
+    assertThat(openCount(sym)).isZero();
+  }
+
+  @Test
+  void aStoplessUnrelatedOpenPositionRefusesEvenATinyFreshCandidateAtTheWriter() {
+    // Round 5, cross-vendor review Critical 2 (the "real half"): round 4 only validated the
+    // CANDIDATE's own matching row; the aggregate SUM over every OTHER open row in the book still
+    // silently skipped a stopless one. OLDCO (unrelated symbol, no stop_loss at all, no cache entry)
+    // must make the WHOLE book's aggregate untrustworthy — even a tiny, well-stopped fresh candidate
+    // on a different symbol is refused at the real writer. LATENT today (measured 2026-08-02:
+    // manas-arora's 6/6 open rows all carry a stop) — this proves the wiring end-to-end regardless.
+    insertOpen("OLDCO", "10", "100", null);
+    String sym = "TINYFRESH-" + UUID.randomUUID();
+
+    assertThatThrownBy(
+            () ->
+                paper.openOrder(
+                    new PaperService.OrderRequest(
+                        null, "NSE", sym, "BUY", 1, new BigDecimal("100.00"),
+                        new BigDecimal("99.00"), null, null, BOOK)))
+        .as("OLDCO's undefined risk makes the whole book's aggregate untrustworthy — refuse")
         .isInstanceOf(ApiException.class)
         .hasMessageContaining(RiskService.PYRAMID_RISK_CAP);
     assertThat(openCount(sym)).isZero();

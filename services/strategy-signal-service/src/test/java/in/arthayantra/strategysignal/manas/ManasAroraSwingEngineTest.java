@@ -122,7 +122,8 @@ class ManasAroraSwingEngineTest {
     assertThat(run.exits()).as("the armed trail has not been BREACHED — nothing exits").isZero();
     ArgumentCaptor<BigDecimal> stop = ArgumentCaptor.forClass(BigDecimal.class);
     verify(guard)
-        .cacheManasGoverningStop(eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), stop.capture());
+        .cacheManasGoverningStop(
+            eq(Books.MANAS_ARORA), eq("NSE"), eq("TESTCO"), eq("BUY"), eq(42L), stop.capture());
     assertThat(stop.getValue())
         .as("the armed (breakeven-floored) trail ratchets to AT LEAST entry price — strictly tighter"
             + " than the persisted initial stop (entry − 2×ATR, well below entry)")

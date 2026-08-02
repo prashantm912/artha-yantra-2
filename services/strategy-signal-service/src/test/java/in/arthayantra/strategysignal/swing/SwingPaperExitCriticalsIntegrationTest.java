@@ -20,6 +20,8 @@ import in.arthayantra.strategysignal.manas.ManasPyramidPolicy;
 import in.arthayantra.strategysignal.paper.EngineExitListener;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
+import in.arthayantra.strategysignal.paper.ManasGoverningStopCache;
+import in.arthayantra.strategysignal.paper.PaperEmissionGuard;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
 import in.arthayantra.strategysignal.paper.PaperService;
@@ -112,6 +114,8 @@ class SwingPaperExitCriticalsIntegrationTest extends StrategySignalIntegrationTe
   @Autowired private ObjectMapper objectMapper;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private MarketDataCandlesClient candles;
+  @Autowired private ManasGoverningStopCache governingStopCache;
+  @Autowired private PaperEmissionGuard emissionGuard;
 
   @Test
   void crashBeforeListenerDeliveryRemainsRetryableAndExactReplayClosesThePosition() throws Exception {
@@ -209,6 +213,52 @@ class SwingPaperExitCriticalsIntegrationTest extends StrategySignalIntegrationTe
     assertThat(positions.findOpen(Books.MANAS_ARORA, "NSE", symbol, "BUY"))
         .as("no position row may exist for a settled anchor")
         .isEmpty();
+  }
+
+  /**
+   * Round 5, cross-vendor review Critical 1 (2026-08-02): the round-4 fix resolved WHATEVER
+   * position was open for the {@code (book,exchange,symbol,side)} key at write time — closing the
+   * close-race, but not the misattribution it can still cause. If anchor A's own position closes
+   * and a DIFFERENT position, opened by anchor B, takes the same key before the write lands,
+   * caching "whatever is open" would attach A's trail to B's exposure — a wrongly-attributed entry,
+   * not merely a stale one. {@link PaperEmissionGuard#cacheManasGoverningStop} must validate the
+   * currently-open row's OWN {@code opening_signal_id} against the anchor the write was computed
+   * from, not just that something is open.
+   */
+  @Test
+  void aStaleAnchorsGoverningStopIsNeverAttachedToADifferentPositionOnTheSameKey() throws Exception {
+    String uid = uniqueId();
+    String symbol = "R5ID" + uid;
+    UUID versionId = publishManasBreakout(uid);
+    OffsetDateTime t0 = SESSION.atStartOfDay(IST).toOffsetDateTime();
+    long anchorA = insertEntry(versionId, symbol, t0, new BigDecimal("152"));
+    PositionRow positionA = openPosition(anchorA, symbol, new BigDecimal("152"));
+    // Simulate anchor A's position closing (racing the daily exit pass that computed a trail for
+    // it) and a DIFFERENT anchor's position opening on the SAME key before that write lands. Uses
+    // the REAL closer (positions.close) — the sole production writer of this transition, which
+    // stamps closed_at atomically with status (ck_paper_positions_closed_at_matches_status), unlike
+    // a raw status-only UPDATE.
+    assertThat(positions.close(positionA.id(), BigDecimal.ZERO, "MANUAL")).isEqualTo(1);
+    long anchorB = insertEntry(versionId, symbol, t0.plusMinutes(1), new BigDecimal("150"));
+    PositionRow positionB = openPosition(anchorB, symbol, new BigDecimal("150"));
+    assertThat(positionB.id()).isNotEqualTo(positionA.id());
+
+    // The stale write: caching a trail computed from anchor A must be a no-op now, since the
+    // CURRENTLY open position (B) was opened by anchor B, not A.
+    emissionGuard.cacheManasGoverningStop(
+        Books.MANAS_ARORA, "NSE", symbol, "BUY", anchorA, new BigDecimal("151"));
+    assertThat(governingStopCache.get(positionB.id()))
+        .as("position B was opened by anchor B, not A — anchor A's trail must never attach to it")
+        .isNull();
+
+    // Positive control: caching under the CORRECT anchor (the one that actually opened the
+    // currently-open position) succeeds, proving the validation discriminates rather than always
+    // refusing.
+    emissionGuard.cacheManasGoverningStop(
+        Books.MANAS_ARORA, "NSE", symbol, "BUY", anchorB, new BigDecimal("151"));
+    assertThat(governingStopCache.get(positionB.id()))
+        .as("caching under the anchor that actually opened the currently-open position succeeds")
+        .isEqualByComparingTo("151");
   }
 
   @Test

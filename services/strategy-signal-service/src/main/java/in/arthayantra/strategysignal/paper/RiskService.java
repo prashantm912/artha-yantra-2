@@ -234,6 +234,24 @@ public class RiskService {
    * scope-limiting (the cap does not apply outside Manas) and defensive validation already enforced
    * upstream ({@code PaperService#openOrder} rejects non-positive qty before this is ever called),
    * not a "cannot compute" case.
+   *
+   * <p><b>Critical 2 (round 5, cross-vendor review, 2026-08-02) — the round-4 fix covered the
+   * CANDIDATE's matching row; the aggregate SUM over every OTHER open row in the book still failed
+   * open.</b> {@link PaperEmissionGuard#openRiskInr} silently SKIPS a stopless position when
+   * summing (contributes 0), and its {@code avgEntry − stop} arithmetic is BUY-only — a SHORT's
+   * real risk (stop ABOVE entry) also sums to zero. Either shape lets {@code existingTotal}
+   * understate the book's true risk while this method validates only the one row matching the
+   * candidate's own key. Fixed by sweeping EVERY open row in the book before computing any total:
+   * a non-BUY side, or a row with no governing stop at all, now refuses the whole call. **Both
+   * halves are LATENT, not live, as measured 2026-08-02** — zero open SELL rows exist in any book,
+   * and every one of manas-arora's 6 open rows carries a {@code stopLoss}; state that plainly
+   * rather than describing either as reachable today. (A prior draft of this class's javadoc
+   * additionally cited a "known parked SELL row" to justify the BUY-only cache guard — that citation
+   * was WRONG, sourced from a stale note, and has been retracted; see {@link
+   * ManasGoverningStopCache}'s javadoc for the correction.) Failing closed on an unsupported side
+   * was chosen over implementing SELL risk arithmetic specifically because there is no live row to
+   * verify SELL arithmetic against — refusing what cannot be safely computed is testable and
+   * correct regardless; a bespoke formula that has never run against real data would not be.
    */
   public boolean manasAggregateRiskWouldCross(
       String book,
@@ -253,6 +271,23 @@ public class RiskService {
       return true;
     }
     List<PositionRow> open = positions.listOpen(book);
+    for (PositionRow p : open) {
+      if (!"BUY".equals(p.side())) {
+        // Critical 2 fix (round 5): openRiskInr's avgEntry-minus-stop arithmetic is BUY-only — a
+        // SHORT's real risk (stop ABOVE entry) would silently sum to zero instead. Refuse rather
+        // than compute an aggregate that treats an unsupported side as riskless. LATENT today
+        // (measured 2026-08-02: zero open SELL rows in any book) — the invariant holds regardless.
+        return true;
+      }
+      if (PaperEmissionGuard.effectiveStop(p, governingStopCache) == null) {
+        // Critical 2 fix (round 5): openRiskInr SKIPS a stopless row when summing (contributes 0),
+        // so a fresh candidate could be admitted against an aggregate that silently omits what it
+        // cannot price. Refuse if ANY row in the book has no governing stop, not just the
+        // candidate's own matching row. LATENT today (measured 2026-08-02: manas-arora's 6/6 open
+        // rows all carry a stopLoss).
+        return true;
+      }
+    }
     BigDecimal existingTotal = PaperEmissionGuard.openRiskInr(open, governingStopCache);
     PositionRow existing =
         open.stream()
@@ -278,13 +313,11 @@ public class RiskService {
               .multiply(BigDecimal.valueOf(existing.qty()))
               .add(fillPrice.multiply(BigDecimal.valueOf(qty)))
               .divide(BigDecimal.valueOf(newQty), 4, RoundingMode.HALF_UP);
+      // governingStop cannot be null here: existing is a member of `open`, and the book-wide sweep
+      // above already refused (returned true) if ANY row in `open` — including this one — had no
+      // governing stop (round 5 superseded this branch's own round-4 null check, which is now
+      // unreachable dead code; removed rather than left as redundant defensive noise).
       BigDecimal governingStop = PaperEmissionGuard.effectiveStop(existing, governingStopCache);
-      if (governingStop == null) {
-        // Critical 2 fix (round 4): the existing lot has NO governing stop at all (neither a
-        // cached trail nor a persisted stopLoss) — its risk is genuinely UNDEFINED, not zero.
-        // Refuse rather than silently admit.
-        return true;
-      }
       projectedSymbolRisk =
           newAvg.subtract(governingStop).max(BigDecimal.ZERO).multiply(BigDecimal.valueOf(newQty));
     } else {

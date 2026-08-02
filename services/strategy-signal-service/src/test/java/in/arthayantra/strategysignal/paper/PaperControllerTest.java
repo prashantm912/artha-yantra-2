@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -74,9 +75,15 @@ class PaperControllerTest {
   void manualCloseUsesLightweightBookBeforeCloseAndDoesNotLoadFullDetail() {
     BigDecimal price = new BigDecimal("123.45");
     BigDecimal realizedPnl = new BigDecimal("23.45");
+    // Real timestamps: this test never reads them, but a TradeDto with a null openedAt/closedAt
+    // cannot exist (V055 + the non-nullable contract), and a stub that contradicts the type it
+    // stands in for is the counter-evidence a future reader would find when asking whether the
+    // field is nullable.
+    OffsetDateTime openedAt = OffsetDateTime.now().minusMinutes(30);
     PaperService.TradeDto trade =
         new PaperService.TradeDto(
-            7L, "NSE", "TESTCO", "BUY", 10L, new BigDecimal("100"), realizedPnl, null, null);
+            7L, "NSE", "TESTCO", "BUY", 10L, new BigDecimal("100"), realizedPnl, openedAt,
+            OffsetDateTime.now());
     when(paper.positionBook(7L)).thenReturn("manas-arora");
     when(paper.closePosition(7L, price)).thenReturn(trade);
 

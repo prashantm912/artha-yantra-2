@@ -189,6 +189,45 @@ class PaperLedgerIntegrationTest extends StrategySignalIntegrationTestBase {
         .isInstanceOf(DataIntegrityViolationException.class);
   }
 
+  /**
+   * V055: a CLOSED paper position must carry its {@code closed_at}. Until V055 this held only by
+   * convention — {@link PaperPositionRepository#close} is the sole writer of {@code status='CLOSED'}
+   * and stamps {@code closed_at=now()} in the same atomic UPDATE — so a second closer could have
+   * falsified it silently, and every reader that windows on {@code closed_at} (listClosed,
+   * PortfolioReader, GraduationService, PaperService.equity) would have dropped or misdated the row
+   * rather than erroring. It also backs the NON-nullable {@code PaperService.TradeDto.closedAt} in
+   * the published OpenAPI contract. Both violating write shapes are asserted, plus the legitimate
+   * close, so a constraint that is merely too TIGHT fails here too.
+   */
+  @Test
+  void closedPositionWithoutClosedAtIsRejectedByTheDatabase() {
+    String sym = "TESTOPT-" + UUID.randomUUID();
+    String book = "ck-closed-at-" + UUID.randomUUID().toString().substring(0, 8);
+
+    // (1) INSERT a CLOSED row that never stamped closed_at.
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "INSERT INTO paper_positions (book, exchange, tradingsymbol, side, qty,"
+                        + " avg_entry_price, status, opened_at)"
+                        + " VALUES (?, 'NFO', ?, 'BUY', 50, 100, 'CLOSED', now())",
+                    book, sym))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_paper_positions_closed_at_present");
+
+    // (2) UPDATE an OPEN row to CLOSED without stamping closed_at — the shape a future second
+    // closer would actually take.
+    long id = positions.insertOpen(book, "NFO", sym, "BUY", 50, new BigDecimal("100.00"), null, null);
+    assertThatThrownBy(
+            () -> jdbc.update("UPDATE paper_positions SET status='CLOSED' WHERE id=?", id))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_paper_positions_closed_at_present");
+
+    // (3) the real close() — status and closed_at set together — must still be accepted.
+    assertThat(positions.close(id, new BigDecimal("5.00"), "MANUAL")).isEqualTo(1);
+    assertThat(positions.find(id).orElseThrow().closedAt()).isNotNull();
+  }
+
   @Test
   void takenSignalWithQtyOpensAPaperPosition() throws Exception {
     UUID versionId = jdbc.queryForObject("SELECT id FROM strategy_versions LIMIT 1", UUID.class);

@@ -1501,7 +1501,7 @@ export interface components {
             /** Format: date-time */
             openedAt: string;
             /** Format: date-time */
-            closedAt: string | null;
+            closedAt: string;
         };
         OrderBody: {
             /** Format: int64 */

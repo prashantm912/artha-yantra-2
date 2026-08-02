@@ -4401,7 +4401,7 @@
             "format" : "date-time"
           },
           "closedAt" : {
-            "type" : [ "string", "null" ],
+            "type" : "string",
             "format" : "date-time"
           }
         },

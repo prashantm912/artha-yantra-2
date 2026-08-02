@@ -506,7 +506,7 @@ public class SwingBatchEngine {
           // (this pass classifies "held" purely from active signal anchors — openLotsBySymbol above —
           // so a symbol with an open position but no live anchor reads as fresh here), a delayed
           // swing-effect retry, or the real slippage-adjusted fill.
-          // RiskService#manasAggregateRiskWouldCross is the AUTHORITATIVE write-time check that can
+          // RiskService#manasAggregateRiskCheck is the AUTHORITATIVE write-time check that can
           // still refuse what this preview passed.
           if (pyramid.wouldBreachRiskCap(
               strat.definition(), EX, c.symbol(), bank, series.size() - 1, bar.close(),

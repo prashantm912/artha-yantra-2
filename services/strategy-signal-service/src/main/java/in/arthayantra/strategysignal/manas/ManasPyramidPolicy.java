@@ -86,7 +86,7 @@ public class ManasPyramidPolicy implements PyramidPolicy {
     // ITS OWN existing brackets to average into, so newQty × stopDistance is exact for what this
     // preview can see, but it cannot see a dead-anchor paper row (a held position whose signal anchor
     // has expired/superseded), a delayed swing-effect retry, or the slippage-adjusted real fill price.
-    // {@code RiskService#manasAggregateRiskWouldCross} is the AUTHORITATIVE write-time check that can
+    // {@code RiskService#manasAggregateRiskCheck} is the AUTHORITATIVE write-time check that can
     // refuse what this preview passed. Either way, existingRiskInr already reflects every OTHER open
     // position in the book (both Manas strategies share one Books.MANAS_ARORA key), so this call
     // aggregates across the whole book, not just the calling strategy. False (does not block) when the

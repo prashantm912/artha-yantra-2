@@ -788,10 +788,16 @@ public class PaperService {
     // M40 cross-vendor review Critical 1+2 fix (2026-08-02): the AUTHORITATIVE aggregate open-risk
     // check, under the same lock, against the ACTUAL fill/stop this write is about to persist — not
     // SwingBatchEngine's emission-time estimate off the candle close (see RiskService
-    // #manasAggregateRiskWouldCross's javadoc for exactly which two gaps this closes and the one it
-    // deliberately does not). Manas-only; a no-op read for every other book.
-    if (risk.manasAggregateRiskWouldCross(
-        book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(), request.stopLoss())) {
+    // #manasAggregateRiskCheck's javadoc for exactly which gaps this closes). Manas-only; a no-op
+    // read for every other book. Round 7 (owner-approved, 2026-08-02): the result is a TYPED
+    // outcome, not a boolean — only CALCULATED_BREACH may be audited via recordPyramidRiskCapBreach
+    // (which consumes the per-day dedup key); every other refusal reason gets its own message and
+    // NEVER touches that audit/dedup, so an accidental unsupported-side/uncomputable refusal can
+    // never suppress a later, genuine breach the same day.
+    RiskService.ManasRiskOutcome riskOutcome =
+        risk.manasAggregateRiskCheck(
+            book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(), request.stopLoss());
+    if (riskOutcome == RiskService.ManasRiskOutcome.CALCULATED_BREACH) {
       String detail =
           "fill-time aggregate risk for " + tradingsymbol + " would breach the "
               + risk.manasAggregateRiskCapPct().toPlainString()
@@ -803,6 +809,25 @@ public class PaperService {
           "entry blocked by risk governor (" + RiskService.PYRAMID_RISK_CAP + ") on book " + book
               + " — " + detail,
           Map.of("book", book, "rail", RiskService.PYRAMID_RISK_CAP));
+    } else if (riskOutcome != RiskService.ManasRiskOutcome.ADMIT) {
+      String reason =
+          switch (riskOutcome) {
+            case UNSUPPORTED_SIDE -> "an unsupported side (Manas is long-only; no live SELL row"
+                + " exists to verify short-risk arithmetic against)";
+            case UNDEFINED_GOVERNING_STOP -> "an undefined governing stop somewhere in the book"
+                + " (neither a cached trail nor a persisted stop_loss)";
+            case NON_POSITIVE_EQUITY -> "non-positive book equity (a percentage of it is undefined)";
+            default -> "an uncomputable aggregate risk";
+          };
+      String detail =
+          "fill-time aggregate risk for " + tradingsymbol + " could not be safely calculated: "
+              + reason + " — refusing rather than admitting an unverifiable fill";
+      throw new ApiException(
+          422,
+          ErrorCodes.RISK_ENTRY_BLOCKED,
+          "entry blocked by risk governor (" + RiskService.MANAS_RISK_UNCOMPUTABLE + ") on book "
+              + book + " — " + detail,
+          Map.of("book", book, "rail", RiskService.MANAS_RISK_UNCOMPUTABLE));
     }
     if (risk.deploymentWouldCross(book, projectedCost)) {
       String detail =

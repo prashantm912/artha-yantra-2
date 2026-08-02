@@ -46,6 +46,17 @@ public class RiskService {
    */
   public static final String PYRAMID_RISK_CAP = "pyramid_risk_cap";
 
+  /**
+   * Round 7 (owner-approved, 2026-08-02): the rail label for a Manas entry refused because its
+   * aggregate risk could NOT be safely calculated (unsupported side, undefined governing stop, or
+   * non-positive equity) — {@link ManasRiskOutcome}'s non-{@code CALCULATED_BREACH} refusal
+   * values. Deliberately a DIFFERENT rail from {@link #PYRAMID_RISK_CAP}: this is not a breach,
+   * carries no {@code risk_audit} row, and does not consume that rail's per-day dedup key — see
+   * {@link #manasAggregateRiskCheck}'s javadoc for why conflating the two silently suppressed a
+   * later, genuine breach.
+   */
+  public static final String MANAS_RISK_UNCOMPUTABLE = "manas_risk_uncomputable";
+
   private static final Logger log = LoggerFactory.getLogger(RiskService.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
   /** Upstox caps a margin basket at 20 legs; the paper book is small, but cap defensively. */
@@ -257,22 +268,23 @@ public class RiskService {
    * verify SELL arithmetic against — refusing what cannot be safely computed is testable and
    * correct regardless; a bespoke formula that has never run against real data would not be.
    *
-   * <p><b>Critical (round 6, cross-vendor review, 2026-08-02) — the round-5 sweep validated sides
-   * already IN the book; it never validated the INCOMING candidate's own side.</b> On an empty (or
-   * all-BUY) Manas book the sweep loop above has nothing to reject, {@code existing} is {@code
-   * null}, and a fresh {@code SELL} with a normal short stop ABOVE its fill reaches the {@code else}
-   * branch: {@code fillPrice − requestStopLoss} is negative, {@code .max(ZERO)} clamps it to zero,
-   * and the call is silently ADMITTED at zero computed risk. Once that SELL row persists, the
-   * round-5 book-wide sweep then refuses EVERY subsequent Manas entry (a non-BUY row in {@code
-   * open} always refuses) — fail-open on the way in, fail-closed forever after. **This is REACHABLE
-   * today** via the manual paper-order endpoint (`PaperController`), independent of whether any
-   * SELL row exists yet — it does not depend on the retracted "known parked SELL row" claim above.
-   * Fixed by refusing a non-BUY candidate outright, immediately after confirming Manas scope,
-   * before touching the book at all — consistent with how every existing row's side is already
-   * handled in the sweep, and for the same reason: no live SELL row exists to verify short-risk
-   * arithmetic against, so refusing is the only safe, testable option.
+   * <h2>{@link ManasRiskOutcome} — a TYPED result, not a boolean (round 7, owner-approved,
+   * 2026-08-02)</h2>
+   * Rounds 4–6 each added a new "cannot compute" refusal (an unsupported side, an undefined
+   * governing stop, non-positive equity), and each one returned the SAME {@code true} a genuine
+   * calculated breach returns. {@code PaperService#openOrder} could not tell them apart, so it
+   * treated EVERY refusal as a calculated breach and audited it via {@link
+   * #recordPyramidRiskCapBreach} — which consumes the ONE-PER-IST-DAY-PER-BOOK dedup key. An
+   * accidental manual SELL (a cannot-calculate refusal needing no real breach at all) would
+   * therefore silently SUPPRESS the audit/alert for a LATER, GENUINE breach on the SAME book the
+   * SAME day — the exact "a fix reopens a hole elsewhere" shape this repo keeps hitting. {@link
+   * ManasRiskOutcome#CALCULATED_BREACH} is the ONLY value the caller may pass to {@link
+   * #recordPyramidRiskCapBreach}; every other refusal value must refuse the entry WITHOUT ever
+   * touching that audit/dedup, with its own operator message explaining what actually happened.
+   * Full six-round history of this method (three cross-vendor review rounds, each finding a real
+   * gap in the shape before it) lives in PR #1221, not repeated inline here.
    */
-  public boolean manasAggregateRiskWouldCross(
+  public ManasRiskOutcome manasAggregateRiskCheck(
       String book,
       String exchange,
       String tradingsymbol,
@@ -281,37 +293,35 @@ public class RiskService {
       BigDecimal fillPrice,
       BigDecimal requestStopLoss) {
     if (!BookResolver.MANAS_ARORA.equals(book) || fillPrice == null || qty <= 0) {
-      return false;
+      return ManasRiskOutcome.ADMIT;
     }
     if (!"BUY".equals(side)) {
-      // Critical fix (round 6): the book-wide sweep below only validates sides already IN the
-      // book — an empty or all-BUY book has nothing to reject, so a fresh non-BUY candidate would
-      // otherwise fall through to the BUY-only arithmetic below and compute a false zero risk.
-      // Refuse the incoming side directly, matching how an existing non-BUY row is already refused.
-      return true;
+      // Round 6: the book-wide sweep below only validates sides already IN the book — an empty or
+      // all-BUY book has nothing to reject, so a fresh non-BUY candidate would otherwise fall
+      // through to the BUY-only arithmetic below and compute a false zero risk. Refuse the
+      // incoming side directly, matching how an existing non-BUY row is already refused.
+      return ManasRiskOutcome.UNSUPPORTED_SIDE;
     }
     BigDecimal equity = account.equity(book);
     if (equity.signum() <= 0) {
-      // Critical 2 fix (round 4): cannot compute a percentage of non-positive equity — refuse
-      // rather than silently admit an unbounded-risk fill on an insolvent/zeroed book.
-      return true;
+      // Round 4: cannot compute a percentage of non-positive equity.
+      return ManasRiskOutcome.NON_POSITIVE_EQUITY;
     }
     List<PositionRow> open = positions.listOpen(book);
     for (PositionRow p : open) {
       if (!"BUY".equals(p.side())) {
-        // Critical 2 fix (round 5): openRiskInr's avgEntry-minus-stop arithmetic is BUY-only — a
-        // SHORT's real risk (stop ABOVE entry) would silently sum to zero instead. Refuse rather
-        // than compute an aggregate that treats an unsupported side as riskless. LATENT today
-        // (measured 2026-08-02: zero open SELL rows in any book) — the invariant holds regardless.
-        return true;
+        // Round 5: openRiskInr's avgEntry-minus-stop arithmetic is BUY-only — a SHORT's real risk
+        // (stop ABOVE entry) would silently sum to zero instead. LATENT today (measured
+        // 2026-08-02: zero open SELL rows in any book) — the invariant holds regardless.
+        return ManasRiskOutcome.UNSUPPORTED_SIDE;
       }
       if (PaperEmissionGuard.effectiveStop(p, governingStopCache) == null) {
-        // Critical 2 fix (round 5): openRiskInr SKIPS a stopless row when summing (contributes 0),
-        // so a fresh candidate could be admitted against an aggregate that silently omits what it
-        // cannot price. Refuse if ANY row in the book has no governing stop, not just the
-        // candidate's own matching row. LATENT today (measured 2026-08-02: manas-arora's 6/6 open
-        // rows all carry a stopLoss).
-        return true;
+        // Round 5: openRiskInr SKIPS a stopless row when summing (contributes 0), so a fresh
+        // candidate could be admitted against an aggregate that silently omits what it cannot
+        // price. Any row in the book with no governing stop, not just the candidate's own
+        // matching row. LATENT today (measured 2026-08-02: manas-arora's 6/6 open rows all carry
+        // a stopLoss).
+        return ManasRiskOutcome.UNDEFINED_GOVERNING_STOP;
       }
     }
     BigDecimal existingTotal = PaperEmissionGuard.openRiskInr(open, governingStopCache);
@@ -340,17 +350,16 @@ public class RiskService {
               .add(fillPrice.multiply(BigDecimal.valueOf(qty)))
               .divide(BigDecimal.valueOf(newQty), 4, RoundingMode.HALF_UP);
       // governingStop cannot be null here: existing is a member of `open`, and the book-wide sweep
-      // above already refused (returned true) if ANY row in `open` — including this one — had no
-      // governing stop (round 5 superseded this branch's own round-4 null check, which is now
-      // unreachable dead code; removed rather than left as redundant defensive noise).
+      // above already returned UNDEFINED_GOVERNING_STOP if ANY row in `open` — including this one
+      // — had no governing stop (round 5 superseded this branch's own round-4 null check, which is
+      // now unreachable dead code; removed rather than left as redundant defensive noise).
       BigDecimal governingStop = PaperEmissionGuard.effectiveStop(existing, governingStopCache);
       projectedSymbolRisk =
           newAvg.subtract(governingStop).max(BigDecimal.ZERO).multiply(BigDecimal.valueOf(newQty));
     } else {
       if (requestStopLoss == null) {
-        // Critical 2 fix (round 4): a genuinely fresh Manas entry with no stop at all cannot have
-        // its risk computed — refuse rather than silently admit at zero risk.
-        return true;
+        // Round 4: a genuinely fresh Manas entry with no stop at all cannot have its risk computed.
+        return ManasRiskOutcome.UNDEFINED_GOVERNING_STOP;
       }
       projectedSymbolRisk =
           fillPrice.subtract(requestStopLoss).max(BigDecimal.ZERO).multiply(BigDecimal.valueOf(qty));
@@ -358,7 +367,33 @@ public class RiskService {
     BigDecimal projectedTotal = existingTotal.subtract(oldSymbolRisk).add(projectedSymbolRisk);
     BigDecimal totalPct =
         projectedTotal.divide(equity, 6, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
-    return totalPct.compareTo(manasAggregateRiskCapPct) > 0;
+    return totalPct.compareTo(manasAggregateRiskCapPct) > 0
+        ? ManasRiskOutcome.CALCULATED_BREACH
+        : ManasRiskOutcome.ADMIT;
+  }
+
+  /**
+   * The result of {@link #manasAggregateRiskCheck} (round 7, owner-approved, 2026-08-02). Only
+   * {@link #CALCULATED_BREACH} may be passed to {@link #recordPyramidRiskCapBreach} — every other
+   * refusal value means the risk could not be safely calculated at all, and must refuse the entry
+   * WITHOUT auditing it as a breach or consuming the per-day dedup key (see the method javadoc for
+   * why: doing so silently suppressed a LATER, genuine breach the same day).
+   */
+  public enum ManasRiskOutcome {
+    /** Not applicable (non-Manas book, a degenerate input {@code PaperService#openOrder} already
+     *  validates) or the calculated aggregate stays within the cap — proceed, no audit either way. */
+    ADMIT,
+    /** A genuinely CALCULATED aggregate risk exceeds the cap. */
+    CALCULATED_BREACH,
+    /** The incoming candidate's side, or an existing row's side, is not {@code BUY} — Manas is
+     *  long-only and there is no live SELL row to verify short-risk arithmetic against. */
+    UNSUPPORTED_SIDE,
+    /** An open row in the book — the candidate's own matching row, an unrelated row swept by the
+     *  book-wide check, or a genuinely fresh candidate's own request — has no governing stop at
+     *  all: neither a cached trail nor a persisted {@code stopLoss}. */
+    UNDEFINED_GOVERNING_STOP,
+    /** The book's equity is zero or negative — a percentage of it is undefined. */
+    NON_POSITIVE_EQUITY
   }
 
   /**
@@ -496,7 +531,12 @@ public class RiskService {
    * (deduped per IST day per book, like {@link #recordHeatTrip} — a same-day add-breach and
    * fresh-entry-breach on the same book therefore dedupe against EACH OTHER, since both share this one
    * {@code (book, PYRAMID_RISK_CAP)} key; only the first trip of the day is audited/alerted, whichever
-   * kind it was). Called via the {@code EmissionGuard} port so {@code swing}/{@code manas} — which must
+   * kind it was). <b>Reserved for a GENUINELY CALCULATED breach only</b> (round 7, owner-approved,
+   * 2026-08-02) — {@link ManasRiskOutcome#CALCULATED_BREACH}, never a cannot-calculate refusal
+   * ({@link ManasRiskOutcome#UNSUPPORTED_SIDE} / {@link ManasRiskOutcome#UNDEFINED_GOVERNING_STOP} /
+   * {@link ManasRiskOutcome#NON_POSITIVE_EQUITY}), which would consume this SAME per-day dedup key
+   * and silently suppress a later genuine breach the same day — see {@link #manasAggregateRiskCheck}'s
+   * javadoc. Called via the {@code EmissionGuard} port so {@code swing}/{@code manas} — which must
    * never import this module (the acyclic module-graph rule that already forced the port pattern for
    * every other paper↔swing signal) — never need to know this class exists.
    *

@@ -35,7 +35,7 @@ import org.springframework.stereotype.Component;
  * port, on a bar where a held position does NOT exit (it already computes the trail there — see
  * {@code SwingDoctrine#governingStop}). Read by {@link PaperEmissionGuard#effectiveStop} /
  * {@link PaperEmissionGuard#openRiskInr(java.util.List, ManasGoverningStopCache)} and {@code
- * RiskService#manasAggregateRiskWouldCross}, the ONLY consumers.
+ * RiskService#manasAggregateRiskCheck}, the ONLY consumers.
  *
  * <p>Empty on a fresh boot, or for any position whose trail has not yet ARMED — callers fall back
  * to the persisted (stale) {@code stopLoss}, the SAME behaviour the aggregate cap already had

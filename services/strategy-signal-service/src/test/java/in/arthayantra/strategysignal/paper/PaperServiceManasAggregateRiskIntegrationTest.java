@@ -74,9 +74,26 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * passed. Round 5 also closed the SECOND half of Critical 2: {@link
  * PaperEmissionGuard#openRiskInr} silently skips a stopless row (and its BUY-only arithmetic zeros
  * a SHORT's real risk) when summing the WHOLE book, not just the candidate's own matching row —
- * {@code manasAggregateRiskWouldCross} now sweeps every open row and refuses on either shape,
- * LATENT today (measured 2026-08-02: manas-arora's 6/6 open rows all carry a stop, zero open SELL
- * rows exist in any book) but no longer fail-open on principle.
+ * {@code manasAggregateRiskCheck} now sweeps every open row and refuses on either shape, LATENT
+ * today (measured 2026-08-02: manas-arora's 6/6 open rows all carry a stop, zero open SELL rows
+ * exist in any book) but no longer fail-open on principle.
+ *
+ * <p><b>Round 6 fixed the SELL-admits-at-zero-risk gap; round 7 (owner-approved, 2026-08-02) fixed
+ * what round 6 broke.</b> Round 6's one-line guard refused an incoming non-BUY candidate — but it
+ * returned the SAME {@code true} a genuinely calculated breach returns, so {@code
+ * PaperService#openOrder} audited it via {@link RiskService#recordPyramidRiskCapBreach}, which
+ * consumes the ONE-PER-IST-DAY-PER-BOOK dedup key. An accidental manual SELL would therefore
+ * silently SUPPRESS the audit/alert for a LATER, GENUINE breach the SAME day. {@link
+ * RiskService#manasAggregateRiskCheck} now returns a TYPED {@link RiskService.ManasRiskOutcome} —
+ * only {@link RiskService.ManasRiskOutcome#CALCULATED_BREACH} may reach {@code
+ * recordPyramidRiskCapBreach}; every cannot-calculate refusal (unsupported side, undefined
+ * governing stop, non-positive equity) gets the SEPARATE {@code MANAS_RISK_UNCOMPUTABLE} rail and
+ * never touches the audit/dedup. {@code
+ * aFreshSellRefusesWithoutClaimingACalculatedBreachOrConsumingTheDedupKey} proves the refusal
+ * itself and the missing audit row; {@code
+ * aGenuineBreachStillAuditsAfterAnEarlierUnsupportedSideRefusalTheSameDay} is THE assertion this
+ * Critical is about — a genuine breach the SAME book, SAME day, AFTER an unrelated SELL refusal,
+ * still audits exactly once.
  */
 @SpringBootTest(properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
 class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegrationTestBase {
@@ -409,6 +426,8 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
     // Round 4, cross-vendor review Critical 2: a safety gate must fail CLOSED, not open, when it
     // cannot compute a percentage of equity. Zero out the book's equity (no open positions, so cash
     // + realized P&L is the whole of it) and confirm even an ordinarily-tiny fresh fill is refused.
+    // Round 7: this is a CANNOT-CALCULATE refusal (MANAS_RISK_UNCOMPUTABLE), never a calculated
+    // breach — it must not touch the PYRAMID_RISK_CAP audit trail at all.
     jdbc.update("UPDATE paper_account SET starting_capital=0, cash=0 WHERE book=?", BOOK);
     String sym = "ZEROEQ-" + UUID.randomUUID();
 
@@ -418,10 +437,14 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
                     new PaperService.OrderRequest(
                         null, "NSE", sym, "BUY", 1, new BigDecimal("100.00"),
                         new BigDecimal("99.00"), null, null, BOOK)))
-        .as("zero equity means the risk-cap percentage is undefined — refuse, never silently admit")
+        .as("zero equity means the risk-cap percentage is undefined — refuse, never silently admit,"
+            + " and never claim a calculated 6% breach")
         .isInstanceOf(ApiException.class)
-        .hasMessageContaining(RiskService.PYRAMID_RISK_CAP);
+        .hasMessageContaining(RiskService.MANAS_RISK_UNCOMPUTABLE);
     assertThat(openCount(sym)).isZero();
+    assertThat(pyramidRiskCapTrips())
+        .as("a cannot-calculate refusal must NEVER write a PYRAMID_RISK_CAP audit trip")
+        .isZero();
   }
 
   @Test
@@ -432,6 +455,7 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
     // must make the WHOLE book's aggregate untrustworthy — even a tiny, well-stopped fresh candidate
     // on a different symbol is refused at the real writer. LATENT today (measured 2026-08-02:
     // manas-arora's 6/6 open rows all carry a stop) — this proves the wiring end-to-end regardless.
+    // Round 7: this is a CANNOT-CALCULATE refusal, never a calculated breach.
     insertOpen("OLDCO", "10", "100", null);
     String sym = "TINYFRESH-" + UUID.randomUUID();
 
@@ -441,9 +465,105 @@ class PaperServiceManasAggregateRiskIntegrationTest extends StrategySignalIntegr
                     new PaperService.OrderRequest(
                         null, "NSE", sym, "BUY", 1, new BigDecimal("100.00"),
                         new BigDecimal("99.00"), null, null, BOOK)))
-        .as("OLDCO's undefined risk makes the whole book's aggregate untrustworthy — refuse")
+        .as("OLDCO's undefined risk makes the whole book's aggregate untrustworthy — refuse, but"
+            + " never claim a calculated 6% breach")
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining(RiskService.MANAS_RISK_UNCOMPUTABLE);
+    assertThat(openCount(sym)).isZero();
+    assertThat(pyramidRiskCapTrips())
+        .as("a cannot-calculate refusal must NEVER write a PYRAMID_RISK_CAP audit trip")
+        .isZero();
+  }
+
+  private int pyramidRiskCapTrips() {
+    Integer trips =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM risk_audit WHERE book=? AND action='TRIP' AND key=?",
+            Integer.class, BOOK, RiskService.PYRAMID_RISK_CAP);
+    return trips == null ? 0 : trips;
+  }
+
+  /**
+   * Round 7 (owner-approved, 2026-08-02) — the fix for the Critical round 6's one-liner caused: a
+   * fresh SELL is a CANNOT-CALCULATE refusal ({@link RiskService.ManasRiskOutcome#UNSUPPORTED_SIDE}),
+   * not a calculated breach, so it must refuse WITHOUT writing a {@code PYRAMID_RISK_CAP} audit trip
+   * and WITHOUT consuming that rail's per-day dedup key.
+   */
+  @Test
+  void aFreshSellRefusesWithoutClaimingACalculatedBreachOrConsumingTheDedupKey() {
+    String sym = "SELLNOAUDIT-" + UUID.randomUUID();
+
+    assertThatThrownBy(
+            () ->
+                paper.openOrder(
+                    new PaperService.OrderRequest(
+                        null, "NSE", sym, "SELL", 100, new BigDecimal("100.00"),
+                        new BigDecimal("110.00"), null, null, BOOK)))
+        .as("round 6 regression guard: a fresh SELL must still be refused, not admitted")
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining(RiskService.MANAS_RISK_UNCOMPUTABLE);
+    assertThat(openCount(sym)).isZero();
+    assertThat(pyramidRiskCapTrips())
+        .as("the SELL refusal must NOT write a PYRAMID_RISK_CAP audit trip — it is not a calculated"
+            + " breach")
+        .isZero();
+  }
+
+  /**
+   * Round 7 (owner-approved, 2026-08-02) — THE assertion that matters most. Round 6's one-liner
+   * fixed the SELL-admits-at-zero-risk bug but reused the SAME {@code true}/refuse path a genuine
+   * calculated breach uses, so {@code recordPyramidRiskCapBreach} consumed the ONE-PER-IST-DAY
+   * dedup key for an accidental SELL refusal — silently SUPPRESSING the audit/alert for a LATER,
+   * GENUINE breach on the SAME book the SAME day. Proves the suppression is gone: an unsupported-
+   * side refusal followed by a real >6% breach on the SAME book, SAME day, STILL audits/alerts.
+   */
+  @Test
+  void aGenuineBreachStillAuditsAfterAnEarlierUnsupportedSideRefusalTheSameDay() {
+    // Step 1: an unsupported-side (SELL) refusal — cannot-calculate, must not touch the dedup key.
+    assertThatThrownBy(
+            () ->
+                paper.openOrder(
+                    new PaperService.OrderRequest(
+                        null, "NSE", "SELLFIRST-" + UUID.randomUUID(), "SELL", 100,
+                        new BigDecimal("100.00"), new BigDecimal("110.00"), null, null, BOOK)))
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining(RiskService.MANAS_RISK_UNCOMPUTABLE);
+    assertThat(pyramidRiskCapTrips())
+        .as("the SELL refusal alone must not have tripped the pyramid-risk-cap audit yet")
+        .isZero();
+
+    // Step 2: a GENUINE calculated breach, same book, same IST day (mock CLOCK is real system time
+    // in this @SpringBootTest, so both calls land the same IST calendar day within the test run).
+    // Existing 100@100/stop13 risks 8,700 (5.8%); a fresh 50@100/stop90 candidate adds 500 -> 9,200
+    // = 6.13% -> a genuine breach of the 6% cap, well clear of slippage noise.
+    insertOpen("GENUINE", "100", "100", "13");
+    String sym = "GENUINEBREACH-" + UUID.randomUUID();
+
+    assertThatThrownBy(
+            () ->
+                paper.openOrder(
+                    new PaperService.OrderRequest(
+                        null, "NSE", sym, "BUY", 50, new BigDecimal("100.00"),
+                        new BigDecimal("90.00"), null, null, BOOK)))
+        .as("a genuine calculated breach must still refuse")
         .isInstanceOf(ApiException.class)
         .hasMessageContaining(RiskService.PYRAMID_RISK_CAP);
     assertThat(openCount(sym)).isZero();
+    // A bare COUNT of 1 is NOT sufficient here: the historical round-6 bug also lands at exactly 1
+    // trip (step 1's SELL refusal mislabeled as a breach, then step 2 silently deduped) — the
+    // discriminator is WHICH fill the recorded trip's detail describes.
+    String latestTripDetail =
+        jdbc.queryForObject(
+            "SELECT detail FROM risk_audit WHERE book=? AND action='TRIP' AND key=?"
+                + " ORDER BY id DESC LIMIT 1",
+            String.class, BOOK, RiskService.PYRAMID_RISK_CAP);
+    assertThat(pyramidRiskCapTrips())
+        .as("exactly 1 trip exists for today")
+        .isEqualTo(1);
+    assertThat(latestTripDetail)
+        .as("THE assertion this Critical is about: the recorded trip must be STEP 2's genuine"
+            + " breach (names its own symbol), not a leftover from step 1's SELL refusal consuming"
+            + " the same-day dedup key and silently suppressing step 2's real audit/alert")
+        .contains(sym);
   }
 }

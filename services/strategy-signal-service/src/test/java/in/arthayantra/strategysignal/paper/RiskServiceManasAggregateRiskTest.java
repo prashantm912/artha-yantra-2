@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import in.arthayantra.strategysignal.notifier.NotifierClient;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
+import in.arthayantra.strategysignal.paper.RiskService.ManasRiskOutcome;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -15,15 +16,21 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@link RiskService#manasAggregateRiskWouldCross} — the M40 cross-vendor review Critical 1+2 fix
+ * {@link RiskService#manasAggregateRiskCheck} — the M40 cross-vendor review Critical 1+2 fix
  * (2026-08-02): the AUTHORITATIVE aggregate open-risk check at the paper-position WRITE, projected
  * against the actual fill/stop, closing two gaps {@code ManasPyramidPolicy#wouldBreachRiskCap}'s
  * emission-time (candle-close) estimate could not see. Both worked examples below are the reviewer's
  * OWN numbers, reproduced exactly. Also covers Critical 3, round 3 (owner ruling, 2026-08-02): the
  * IN-MEMORY {@link ManasGoverningStopCache} — never {@code stop_loss} itself, never persisted — takes
  * precedence in the risk math once a position's Chandelier trail has armed, keyed by position id
- * (round 4). And Critical 2, round 4 (cross-vendor review, 2026-08-02): the gate FAILS CLOSED — never
- * open — when it cannot compute a risk figure (non-positive equity, or an undefined governing stop).
+ * (round 4). Critical 2, round 4/5/6 (cross-vendor review): the gate FAILS CLOSED — never open — when
+ * it cannot compute a risk figure (non-positive equity, an undefined governing stop, or an
+ * unsupported side). <b>Round 7 (owner-approved, 2026-08-02): the method returns a TYPED {@link
+ * ManasRiskOutcome}, not a boolean</b> — a boolean could not distinguish a genuinely CALCULATED
+ * breach from a refusal because the risk could not be safely calculated at all, so {@code
+ * PaperService#openOrder} audited every refusal the same way, letting an accidental cannot-calculate
+ * refusal silently consume the per-day dedup key a LATER genuine breach needed. Every assertion below
+ * checks the SPECIFIC {@link ManasRiskOutcome} value, not merely "refused" vs "admitted".
  */
 class RiskServiceManasAggregateRiskTest {
 
@@ -84,15 +91,15 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("1000000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "NEWCO", "BUY", 1_000, bd("100"), bd("90")))
         .as("the emission-time candle-close estimate: exactly AT the 6% cap, not over it")
-        .isFalse();
+        .isEqualTo(ManasRiskOutcome.ADMIT);
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "NEWCO", "BUY", 1_000, bd("100.05"), bd("90")))
         .as("the REAL slippage-adjusted fill (100 + 5bps): 60,050 / 1,000,000 = 6.005% breaches")
-        .isTrue();
+        .isEqualTo(ManasRiskOutcome.CALCULATED_BREACH);
   }
 
   /**
@@ -117,11 +124,11 @@ class RiskServiceManasAggregateRiskTest {
     // the wrong 2,000 total, 2.0% — under a 3.5% cap); the method must ignore it once an existing row
     // is found and use the RETAINED stop (90) against the AVERAGED price/qty instead.
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "TESTCO", "BUY", 100, bd("120"), bd("110")))
         .as("true projected risk 200×(110−90)=4,000 → 4.0% breaches the 3.5% cap"
             + " (a naive sum would compute 2,000 → 2.0%, wrongly passing)")
-        .isTrue();
+        .isEqualTo(ManasRiskOutcome.CALCULATED_BREACH);
   }
 
   /**
@@ -147,11 +154,11 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("100000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "TESTCO", "BUY", 100, bd("120"), bd("999")))
         .as("200×(110−95)=3,000 → 3.0% under the 6% cap; the stale stop_loss(50) would wrongly give"
             + " 12,000 → 12% and breach")
-        .isFalse();
+        .isEqualTo(ManasRiskOutcome.ADMIT);
   }
 
   /**
@@ -175,11 +182,11 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("100000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "TESTCO", "BUY", 100, bd("120"), bd("999")))
         .as("id 7 falls back to ITS OWN stopLoss(50): 200×(110−50)=12,000 → 12% breaches the 6% cap"
             + " — id 99's cached 95 (which would wrongly admit at 3.0%) is never read for id 7")
-        .isTrue();
+        .isEqualTo(ManasRiskOutcome.CALCULATED_BREACH);
   }
 
   @Test
@@ -191,22 +198,22 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("1000000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "NEWCO", "BUY", 100, bd("100"), bd("40")))
         .as("100×(100−40)=6,000 = 0.6% of 1,000,000 — comfortably under the 6% cap")
-        .isFalse();
+        .isEqualTo(ManasRiskOutcome.ADMIT);
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "NEWCO", "BUY", 7_000, bd("100"), bd("40")))
         .as("7,000×60=420,000 = 42% of 1,000,000 — breaches")
-        .isTrue();
+        .isEqualTo(ManasRiskOutcome.CALCULATED_BREACH);
   }
 
   /**
    * Round 4, cross-vendor review Critical 2: a safety gate must fail CLOSED, not open, when it
    * cannot compute — a book with zero or negative equity cannot have a percentage-of-equity risk
-   * figure at all, so the gate now REFUSES (returns true) rather than the round-3 behaviour of
-   * silently admitting (returning false, "does not cross").
+   * figure at all. Round 7: this is a {@link ManasRiskOutcome#NON_POSITIVE_EQUITY} refusal, NOT a
+   * {@link ManasRiskOutcome#CALCULATED_BREACH} — it must never be audited as a pyramid-cap trip.
    */
   @Test
   void nonPositiveEquityRefusesRatherThanSilentlyAdmitting() {
@@ -217,22 +224,22 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(BigDecimal.ZERO);
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(BOOK, "NSE", "NEWCO", "BUY", 100, bd("100"), bd("90")))
-        .as("zero equity: a % of it is undefined — refuse, never silently admit")
-        .isTrue();
+            risk.manasAggregateRiskCheck(BOOK, "NSE", "NEWCO", "BUY", 100, bd("100"), bd("90")))
+        .as("zero equity: a % of it is undefined — refuse, never silently admit, and never claim a"
+            + " calculated breach")
+        .isEqualTo(ManasRiskOutcome.NON_POSITIVE_EQUITY);
 
     when(account.equity(BOOK)).thenReturn(bd("-500"));
     assertThat(
-            risk.manasAggregateRiskWouldCross(BOOK, "NSE", "NEWCO", "BUY", 100, bd("100"), bd("90")))
-        .as("negative equity: same refusal")
-        .isTrue();
+            risk.manasAggregateRiskCheck(BOOK, "NSE", "NEWCO", "BUY", 100, bd("100"), bd("90")))
+        .as("negative equity: same refusal reason")
+        .isEqualTo(ManasRiskOutcome.NON_POSITIVE_EQUITY);
   }
 
   /**
    * Round 4, cross-vendor review Critical 2: an existing lot with NEITHER a cached governing stop
-   * NOR a persisted {@code stopLoss} has a genuinely UNDEFINED risk contribution — round 3 silently
-   * treated that as zero (admitting an averaging add that could carry unlimited real risk); round 4
-   * refuses instead.
+   * NOR a persisted {@code stopLoss} has a genuinely UNDEFINED risk contribution. Round 7: this is
+   * {@link ManasRiskOutcome#UNDEFINED_GOVERNING_STOP}, not a calculated breach.
    */
   @Test
   void anExistingLotWithNoGoverningStopAtAllRefusesAnAveragingAdd() {
@@ -243,16 +250,16 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("100000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "TESTCO", "BUY", 100, bd("120"), bd("999")))
-        .as("the existing lot's risk is undefined (no stop at all) — refuse, never treat as zero")
-        .isTrue();
+        .as("the existing lot's risk is undefined (no stop at all) — refuse, never treat as zero,"
+            + " never claim a calculated breach")
+        .isEqualTo(ManasRiskOutcome.UNDEFINED_GOVERNING_STOP);
   }
 
   /**
    * Round 4, cross-vendor review Critical 2: a genuinely fresh entry with NO requested stop at all
-   * cannot have its risk computed — round 3 silently treated that as zero risk (admitting an
-   * unbounded-risk fill); round 4 refuses instead.
+   * cannot have its risk computed. Round 7: {@link ManasRiskOutcome#UNDEFINED_GOVERNING_STOP}.
    */
   @Test
   void aFreshEntryWithNoRequestedStopAtAllRefuses() {
@@ -263,9 +270,10 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("1000000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(BOOK, "NSE", "NEWCO", "BUY", 100, bd("100"), null))
-        .as("no requested stop means the risk is undefined — refuse, never admit at zero risk")
-        .isTrue();
+            risk.manasAggregateRiskCheck(BOOK, "NSE", "NEWCO", "BUY", 100, bd("100"), null))
+        .as("no requested stop means the risk is undefined — refuse, never admit at zero risk,"
+            + " never claim a calculated breach")
+        .isEqualTo(ManasRiskOutcome.UNDEFINED_GOVERNING_STOP);
   }
 
   /**
@@ -275,6 +283,7 @@ class RiskServiceManasAggregateRiskTest {
    * could be admitted against an aggregate that omits what it cannot price. A tiny, otherwise
    * perfectly safe candidate must still be refused while an unrelated stopless row is open anywhere
    * in the book. LATENT today (measured 2026-08-02: manas-arora's 6/6 open rows all carry a stop).
+   * Round 7: {@link ManasRiskOutcome#UNDEFINED_GOVERNING_STOP}, not a calculated breach.
    */
   @Test
   void aStoplessUnrelatedPositionInTheBookRefusesEvenATinyFreshCandidate() {
@@ -285,10 +294,10 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("1000000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(BOOK, "NSE", "NEWCO", "BUY", 1, bd("100"), bd("90")))
+            risk.manasAggregateRiskCheck(BOOK, "NSE", "NEWCO", "BUY", 1, bd("100"), bd("90")))
         .as("OLDCO (unrelated symbol) has no stop at all — the book's aggregate cannot be trusted,"
-            + " so even a tiny, well-stopped NEWCO candidate refuses")
-        .isTrue();
+            + " so even a tiny, well-stopped NEWCO candidate refuses without claiming a breach")
+        .isEqualTo(ManasRiskOutcome.UNDEFINED_GOVERNING_STOP);
   }
 
   /**
@@ -296,7 +305,8 @@ class RiskServiceManasAggregateRiskTest {
    * openRiskInr}'s {@code avgEntry − stop} arithmetic is BUY-only, so an OPEN SELL row's real risk
    * (its stop sits ABOVE entry) silently sums to zero rather than refusing. Failing closed on an
    * unsupported side was chosen over implementing SELL arithmetic that has no live row to verify
-   * against. LATENT today (measured 2026-08-02: zero open SELL rows exist in any book).
+   * against. LATENT today (measured 2026-08-02: zero open SELL rows exist in any book). Round 7:
+   * {@link ManasRiskOutcome#UNSUPPORTED_SIDE}, not a calculated breach.
    */
   @Test
   void anUnrelatedSellPositionInTheBookRefusesEvenATinyFreshCandidate() {
@@ -308,10 +318,10 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("1000000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(BOOK, "NSE", "NEWCO", "BUY", 1, bd("100"), bd("90")))
+            risk.manasAggregateRiskCheck(BOOK, "NSE", "NEWCO", "BUY", 1, bd("100"), bd("90")))
         .as("OLDSHORT is a non-BUY row — its arithmetic is unsupported, refuse rather than treat it"
-            + " as riskless")
-        .isTrue();
+            + " as riskless, and never claim a calculated breach")
+        .isEqualTo(ManasRiskOutcome.UNSUPPORTED_SIDE);
   }
 
   /**
@@ -319,7 +329,10 @@ class RiskServiceManasAggregateRiskTest {
    * on an EMPTY book there is nothing to sweep, so a fresh SELL candidate fell through to the
    * BUY-only {@code fillPrice − requestStopLoss} arithmetic, which clamps a short's negative
    * distance (stop ABOVE fill) to zero and silently ADMITS it. REACHABLE today via the manual
-   * paper-order endpoint, independent of any pre-existing SELL row.
+   * paper-order endpoint, independent of any pre-existing SELL row. Round 7: {@link
+   * ManasRiskOutcome#UNSUPPORTED_SIDE} — this is the value that must NEVER reach {@link
+   * RiskService#recordPyramidRiskCapBreach}; see {@code PaperServiceManasAggregateRiskIntegrationTest}
+   * for the end-to-end proof that it does not.
    */
   @Test
   void aFreshSellOnAnEmptyBookRefusesRatherThanComputingAFalseZero() {
@@ -330,11 +343,12 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("1000000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "NEWSHORT", "SELL", 100, bd("100"), bd("110")))
         .as("a normal short stop (110) sits ABOVE the fill (100); fillPrice-requestStopLoss clamps"
-            + " to zero without this fix — refuse the unsupported side outright instead")
-        .isTrue();
+            + " to zero without this fix — refuse the unsupported side outright instead, and never"
+            + " claim a calculated breach")
+        .isEqualTo(ManasRiskOutcome.UNSUPPORTED_SIDE);
   }
 
   /**
@@ -351,14 +365,14 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(BOOK)).thenReturn(bd("1000000"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 BOOK, "NSE", "NEWLONG", "BUY", 100, bd("100"), bd("90")))
         .as("100×(100−90)=1,000 = 0.1% of 1,000,000 — comfortably under the 6% cap, admits")
-        .isFalse();
+        .isEqualTo(ManasRiskOutcome.ADMIT);
   }
 
   @Test
-  void nonManasBooksAndDegenerateInputsAreAlwaysFalse() {
+  void nonManasBooksAndDegenerateInputsAlwaysAdmit() {
     PaperPositionRepository positions = mock(PaperPositionRepository.class);
     PaperAccountService account = mock(PaperAccountService.class);
     RiskService risk = risk(positions, account, new ManasGoverningStopCache(), "6.0");
@@ -366,16 +380,16 @@ class RiskServiceManasAggregateRiskTest {
     when(account.equity(any())).thenReturn(bd("1"));
 
     assertThat(
-            risk.manasAggregateRiskWouldCross(
+            risk.manasAggregateRiskCheck(
                 "scalper", "NSE", "NEWCO", "BUY", 1_000, bd("100"), bd("90")))
         .as("scoped to Books.MANAS_ARORA only — a no-op for every other book")
-        .isFalse();
-    assertThat(risk.manasAggregateRiskWouldCross(BOOK, "NSE", "NEWCO", "BUY", 0, bd("100"), bd("90")))
+        .isEqualTo(ManasRiskOutcome.ADMIT);
+    assertThat(risk.manasAggregateRiskCheck(BOOK, "NSE", "NEWCO", "BUY", 0, bd("100"), bd("90")))
         .as("non-positive qty never breaches (validated upstream by PaperService#openOrder already)")
-        .isFalse();
-    assertThat(risk.manasAggregateRiskWouldCross(BOOK, "NSE", "NEWCO", "BUY", 100, null, bd("90")))
+        .isEqualTo(ManasRiskOutcome.ADMIT);
+    assertThat(risk.manasAggregateRiskCheck(BOOK, "NSE", "NEWCO", "BUY", 100, null, bd("90")))
         .as("no fill price means nothing to project (never reached on the real write path either)")
-        .isFalse();
+        .isEqualTo(ManasRiskOutcome.ADMIT);
   }
 
   @Test

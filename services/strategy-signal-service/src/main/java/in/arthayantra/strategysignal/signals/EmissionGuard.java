@@ -112,7 +112,7 @@ public interface EmissionGuard {
    * poll to read. The paper adapter enforces "never loosens" AND "LONG only" in the cache itself (a
    * no-op when {@code newStop} is not strictly tighter than whatever is already cached, or when
    * {@code side} is not {@code "BUY"} — Manas trades long-only, and short-arithmetic support is
-   * intentionally NOT implemented here; see {@code RiskService#manasAggregateRiskWouldCross}'s
+   * intentionally NOT implemented here; see {@code RiskService#manasAggregateRiskCheck}'s
    * javadoc for why a non-BUY row fails the aggregate CLOSED rather than being silently mispriced).
    * Empty on a fresh boot / before the trail arms — callers then fall back to {@code stopLoss}, the
    * SAME reading as before this whole M40 effort, not a regression, but NOT a rare edge case either

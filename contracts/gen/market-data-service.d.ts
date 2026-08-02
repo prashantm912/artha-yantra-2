@@ -9892,7 +9892,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": number[];
+                    "*/*": string[];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

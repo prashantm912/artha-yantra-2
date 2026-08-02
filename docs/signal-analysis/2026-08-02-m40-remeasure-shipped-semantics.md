@@ -21,10 +21,11 @@ shock question that the cap actually exists for remains entirely unmeasured and 
 Under the semantics #1221 ships, the cap refuses **304** entries (274 sessions) that fire under today's
 live rail — **2.2× #1218's 139** — and the whole-portfolio effect is **CAGR 25.36% → 24.48% (−0.88pp, a
 COST), maxDD 42.89% → 31.27% (−11.62pp, far SHALLOWER), Sharpe 1.08 → 1.15 (+0.07)**. #1218 reported
-**+4.08pp / −6.99pp / +0.13** — a benefit. **This is the third time M40's headline sign has moved**
-(152 refusals/costly → 66/costly → 139/beneficial → 304/CAGR-costly-but-DD-beneficial), and the reason
-it moved this time is not a harness defect: #1218's harness is intact and reproduces byte-identically
-here. It modelled a stop basis production almost never reaches.
+**+4.08pp / −6.99pp / +0.13** — a benefit. **This is the fourth M40 headline and the second sign
+reversal** (152 refusals/costly → 66/costly → 139/beneficial → 304/CAGR-costly-but-drawdown-beneficial;
+the sign itself flipped at v2→v3 and again here). The reason it moved this time is **not** a harness
+defect: #1218's harness is intact and reproduces byte-identically here. It modelled a stop basis
+production almost never reaches.
 
 The one recommendation this measurement does support: if #1221 merges, it should merge as a
 **drawdown-control** change with the CAGR cost disclosed and accepted, not as a free improvement.

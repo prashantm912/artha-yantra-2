@@ -246,6 +246,7 @@ public class PaperService {
   private final ApplicationEventPublisher events;
   private final PaperStaleTickAlerter staleTicks;
   private final PaperOrderRejectionRecorder rejections;
+  private final ManasGoverningStopCache governingStopCache;
   private final BigDecimal perTradeRiskPct;
   /** Audit V3: a fill priced off a last tick older than this is fiction — rejected DATA_STALE. */
   private final Duration tickMaxAge;
@@ -273,6 +274,7 @@ public class PaperService {
       ApplicationEventPublisher events,
       PaperStaleTickAlerter staleTicks,
       PaperOrderRejectionRecorder rejections,
+      ManasGoverningStopCache governingStopCache,
       PlatformTransactionManager transactionManager,
       @org.springframework.beans.factory.annotation.Value("${artha.paper.risk.per-trade-risk-pct:1.0}")
           BigDecimal perTradeRiskPct,
@@ -295,6 +297,7 @@ public class PaperService {
     this.events = events;
     this.staleTicks = staleTicks;
     this.rejections = rejections;
+    this.governingStopCache = governingStopCache;
     this.perTradeRiskPct = perTradeRiskPct;
     this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
     this.signalTakeMaxAge = Duration.ofMinutes(signalTakeMaxAgeMinutes);
@@ -331,14 +334,15 @@ public class PaperService {
       ApplicationEventPublisher events,
       PaperStaleTickAlerter staleTicks,
       PaperOrderRejectionRecorder rejections,
+      ManasGoverningStopCache governingStopCache,
       PlatformTransactionManager transactionManager,
       BigDecimal perTradeRiskPct,
       long tickMaxAgeSeconds,
       long signalTakeMaxAgeMinutes) {
     this(
         orders, positions, fills, lastTick, instruments, signals, accountService, books, risk,
-        accounts, events, staleTicks, rejections, transactionManager, perTradeRiskPct,
-        tickMaxAgeSeconds, signalTakeMaxAgeMinutes, new SimpleMeterRegistry());
+        accounts, events, staleTicks, rejections, governingStopCache, transactionManager,
+        perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, new SimpleMeterRegistry());
   }
 
   /**
@@ -781,6 +785,51 @@ public class PaperService {
     // straddle is not a limit (cross-vendor round 3). Transaction-scoped, so for a straddle (whose
     // legs share one transaction) it is held across BOTH legs.
     positions.lockBookCapital(book);
+    // M40 cross-vendor review Critical 1+2 fix (2026-08-02): the AUTHORITATIVE aggregate open-risk
+    // check, under the same lock, against the ACTUAL fill/stop this write is about to persist — not
+    // SwingBatchEngine's emission-time estimate off the candle close (see RiskService
+    // #manasAggregateRiskCheck's javadoc for exactly which gaps this closes). Manas-only; a no-op
+    // read for every other book. Round 7 (owner-approved, 2026-08-02): the result is a TYPED
+    // outcome, not a boolean — only CALCULATED_BREACH may be audited via recordPyramidRiskCapBreach
+    // (which consumes the per-day dedup key); every other refusal reason gets its own message and
+    // NEVER touches that audit/dedup, so an accidental unsupported-side/uncomputable refusal can
+    // never suppress a later, genuine breach the same day. Round 7 hardening (Codex, owner-approved,
+    // 2026-08-02): a switch EXPRESSION, not an if/else-if — every ManasRiskOutcome constant must
+    // yield a value here, so adding a 6th outcome later without a matching case is a COMPILE ERROR,
+    // not a silent fall-through into a branch that was never meant to carry it (the exact shape of
+    // the round-6 Critical this whole method exists to prevent, one level out). Deliberately no
+    // `default` — if that error ever fires, the fix is to add a real case, not to silence it.
+    RiskService.ManasRiskOutcome riskOutcome =
+        risk.manasAggregateRiskCheck(
+            book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(), request.stopLoss());
+    ApiException riskRefusal =
+        switch (riskOutcome) {
+          case ADMIT -> null;
+          case CALCULATED_BREACH -> {
+            String detail =
+                "fill-time aggregate risk for " + tradingsymbol + " would breach the "
+                    + risk.manasAggregateRiskCapPct().toPlainString()
+                    + "% portfolio open-risk cap (fill " + fill.fillPrice().toPlainString() + ")";
+            risk.recordPyramidRiskCapBreach(book, tradingsymbol, detail);
+            yield new ApiException(
+                422,
+                ErrorCodes.RISK_ENTRY_BLOCKED,
+                "entry blocked by risk governor (" + RiskService.PYRAMID_RISK_CAP + ") on book "
+                    + book + " — " + detail,
+                Map.of("book", book, "rail", RiskService.PYRAMID_RISK_CAP));
+          }
+          case UNSUPPORTED_SIDE -> uncomputableRiskRefusal(
+              book, tradingsymbol, "an unsupported side (Manas is long-only; no live SELL row"
+                  + " exists to verify short-risk arithmetic against)");
+          case UNDEFINED_GOVERNING_STOP -> uncomputableRiskRefusal(
+              book, tradingsymbol, "an undefined governing stop somewhere in the book (neither a"
+                  + " cached trail nor a persisted stop_loss)");
+          case NON_POSITIVE_EQUITY -> uncomputableRiskRefusal(
+              book, tradingsymbol, "non-positive book equity (a percentage of it is undefined)");
+        };
+    if (riskRefusal != null) {
+      throw riskRefusal;
+    }
     if (risk.deploymentWouldCross(book, projectedCost)) {
       String detail =
           "projected " + projectedCost.toPlainString()
@@ -889,6 +938,13 @@ public class PaperService {
               .add(fillPrice.multiply(BigDecimal.valueOf(qty)))
               .divide(BigDecimal.valueOf(newQty), 4, RoundingMode.HALF_UP);
       positions.updateOpen(row.id(), newQty, newAvg);
+      // Round 4 fix (cross-vendor review Critical 1, 2026-08-02): an averaging add changes this
+      // row's qty/avg in place (same id) — any cached governing stop was computed by the daily exit
+      // pass against the PRE-average avg/qty and must not silently keep governing the newly-blended
+      // position. Evict rather than let it linger: the risk calc falls back to the persisted (wider,
+      // conservative) stopLoss until the next exit-pass run recomputes a fresh trail for the new
+      // shape — the safe direction for a stale-vs-missing cache entry either way.
+      governingStopCache.evict(row.id());
     } else {
       positions.insertOpen(
           book, exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit, subaccountIdx,
@@ -922,6 +978,26 @@ public class PaperService {
     BigDecimal riskBudget = equity.multiply(riskPct).divide(BigDecimal.valueOf(100));
     // longValue (not longValueExact): advisory only — it must never throw and roll back a real fill.
     return riskBudget.divide(stopDistance, 0, RoundingMode.DOWN).longValue();
+  }
+
+  /**
+   * Round 7 (owner-approved, 2026-08-02): builds the refusal for a Manas
+   * {@link RiskService.ManasRiskOutcome} value that means "could not be safely calculated" —
+   * {@code UNSUPPORTED_SIDE} / {@code UNDEFINED_GOVERNING_STOP} / {@code NON_POSITIVE_EQUITY}.
+   * Deliberately NEVER calls {@link RiskService#recordPyramidRiskCapBreach} — that rail, and its
+   * per-day dedup key, are reserved for a genuine {@code CALCULATED_BREACH} (see that method's
+   * javadoc for why conflating the two silently suppressed a later, real breach the same day).
+   */
+  private ApiException uncomputableRiskRefusal(String book, String tradingsymbol, String reason) {
+    String detail =
+        "fill-time aggregate risk for " + tradingsymbol + " could not be safely calculated: "
+            + reason + " — refusing rather than admitting an unverifiable fill";
+    return new ApiException(
+        422,
+        ErrorCodes.RISK_ENTRY_BLOCKED,
+        "entry blocked by risk governor (" + RiskService.MANAS_RISK_UNCOMPUTABLE + ") on book "
+            + book + " — " + detail,
+        Map.of("book", book, "rail", RiskService.MANAS_RISK_UNCOMPUTABLE));
   }
 
   /**
@@ -1092,6 +1168,14 @@ public class PaperService {
       // not close this position, or it reports someone else's exit as its own (§9-05).
       return Optional.empty();
     }
+    // M40 Critical 3 fix, round 3 (2026-08-02), keyed by id round 4 (cross-vendor review Critical 1):
+    // drop this position's in-memory governing-stop cache entry on a REAL close (past the CAS, so a
+    // race loser never evicts on someone else's close). A re-open of the same
+    // (book,exchange,tradingsymbol,side) key mints a NEW row id, so it could never read this entry
+    // anyway once the cache is keyed by id — this eviction is memory hygiene, not a correctness
+    // requirement, unlike round 3's tuple-keyed version where it was load-bearing. A no-op for any
+    // id never cached (every non-Manas book).
+    governingStopCache.evict(pos.id());
     if (staleAge != null) {
       staleTicks.staleSettleUsed(pos, closeReason, staleAge);
     }

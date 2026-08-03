@@ -251,11 +251,22 @@ public class ShadowVariants {
    * theoretical: {@code ScalperConfluenceGate.compositeMargin} records 4 live rows where the
    * aggregate cleared the threshold while a decisive leg blocked.
    *
+   * <p><b>The §5.3 coverage floor is part of that verdict, and must be applied HERE.</b> The only
+   * armable form of the unified null policy implies the floor
+   * ({@code ScalperConfluenceGate.coverageFloorArmed}), but the champion writing these rows has it
+   * UNARMED — so its {@code decisiveLegsHeld} does not include the floor and, on its own, would let
+   * this book open a challenger position on a bar whose data plane had vanished and which the armed
+   * policy would in fact have refused. That is a real P&L number carrying the label of evidence for
+   * a proposal that never took the trade. {@code coverageFloorHeld} is recorded unconditionally on
+   * every bar precisely so this check is possible; it is a no-op whenever the champion HAS armed the
+   * floor, because {@code decisiveLegsHeld} already subsumes it there.
+   *
    * <p>Fail-closed on a missing counterfactual: no confluence (the direction-neutral straddle
-   * stand-in), no recorded {@code withheldAggregate} (a pre-U4b row), or legs that did not hold all
-   * DECLINE. Declining is deliberate rather than degrading to champion behaviour — a bar with no
-   * counterfactual has nothing for this experiment to measure, and booking it under the variant's
-   * name would attribute a champion-duplicate row to the proposal.
+   * stand-in), no recorded {@code withheldAggregate} (a pre-U4b row), legs that did not hold, or a
+   * coverage floor the armed policy would have failed all DECLINE. Declining is deliberate rather
+   * than degrading to champion behaviour — a bar with no counterfactual has nothing for this
+   * experiment to measure, and booking it under the variant's name would attribute a
+   * champion-duplicate row to the proposal.
    *
    * <p>Scope note: this guard is deliberately confined to {@code nullPolicy} variants. The champion
    * book and the rail-override variants keep their existing floor-ruled semantics ({@code
@@ -265,7 +276,8 @@ public class ShadowVariants {
   private static boolean armedPolicyCouldHaveFired(ScalperConfluenceGate.RejectionDiagnostic d) {
     return d.confluence() != null
         && d.confluence().withheldAggregate() != null
-        && d.confluence().decisiveLegsHeld();
+        && d.confluence().decisiveLegsHeld()
+        && d.confluence().coverageFloorHeld();
   }
 
   /**

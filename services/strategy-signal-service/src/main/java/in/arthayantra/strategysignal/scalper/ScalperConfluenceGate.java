@@ -1185,7 +1185,9 @@ public class ScalperConfluenceGate {
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     diag.failsScore(
         "confluence-composite", valid, conf.aggregate(), cfg.confluenceThreshold(),
-        compositeReason(conf, cfg.confluenceThreshold(), vwapHardGate));
+        compositeReason(
+            conf, cfg.confluenceThreshold(), vwapHardGate,
+            coverageFloorArmed(cfg) ? oiProps.dotCoverageFloor() : null));
     BigDecimal stop = structuralStop;
     // #7 (section 7) Hero-Zero buys the option ONE STRIKE INSIDE the short-covering strike (a CALL one
     // strike below the max-CE-OI strike for a bullish break, a PUT one above the max-PE-OI strike for a
@@ -1262,9 +1264,22 @@ public class ScalperConfluenceGate {
    * A human reason for a blocked confluence composite: which of the decisive legs failed (VWAP side
    * — decisive only while {@code vwapHardGate} holds; the #9 opening-tick path degrades it to a soft
    * dot before 10:30, where naming it "decisive" would be the exact T14 contradiction — the 60m
-   * bias, the 40/40 stand-aside) or, when all held, the aggregate falling short of the threshold.
+   * bias, the 40/40 stand-aside, the §5.3 data-coverage floor) or, when all held, the aggregate
+   * falling short of the threshold.
+   *
+   * <p>{@code coverageFloor} is the ARMED floor value or NULL when the strategy has not armed it.
+   * Without this branch a coverage-floor block fell through to the scalar sentence and persisted
+   * <b>"aggregate 0.9202 below threshold 0.60"</b> — a statement that is false on its own face, with
+   * the real reason (a vanished data plane) recorded nowhere. It is the same T14 class of defect the
+   * margin fix above addresses: a diagnostic column asserting something the numbers contradict is
+   * worse than an empty one, because every later §3 query believes it.
+   *
+   * <p>The coverage branch sits LAST among the legs so the three original ones keep their exact
+   * precedence — an unarmed strategy, or an armed one whose coverage held, produces a byte-identical
+   * string.
    */
-  static String compositeReason(Confluence conf, BigDecimal threshold, boolean vwapHardGate) {
+  static String compositeReason(
+      Confluence conf, BigDecimal threshold, boolean vwapHardGate, BigDecimal coverageFloor) {
     if (conf.standAside()) {
       return "stand-aside (both-IV-high 40/40 suppression)";
     }
@@ -1273,6 +1288,10 @@ public class ScalperConfluenceGate {
     }
     if (!conf.biasAligned()) {
       return "60m bias opposes the side";
+    }
+    if (coverageFloor != null && !conf.coverageFloorHeld()) {
+      return "dot data coverage " + conf.coverage() + " below floor " + coverageFloor
+          + " (decisive)";
     }
     return "aggregate " + conf.aggregate() + " below threshold " + threshold;
   }

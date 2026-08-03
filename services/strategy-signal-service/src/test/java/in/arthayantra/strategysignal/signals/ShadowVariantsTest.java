@@ -183,10 +183,23 @@ class ShadowVariantsTest {
   /** As above, with the three decisive legs (hard VWAP / 60m bias / stand-aside) held or not. */
   private static RejectionDiagnostic diagWithShadow(
       String composite, String withheld, String threshold, boolean decisiveLegsHeld) {
+    return diagWithShadow(composite, withheld, threshold, decisiveLegsHeld, true);
+  }
+
+  /**
+   * As above, with the §5.3 coverage the ARMED policy would have judged. The champion writes these
+   * rows with the floor UNARMED, so {@code coverageFloorHeld} is recorded independently of
+   * {@code decisiveLegsHeld} — which is exactly the fact the counterfactual has to consult.
+   */
+  private static RejectionDiagnostic diagWithShadow(
+      String composite, String withheld, String threshold, boolean decisiveLegsHeld,
+      boolean coverageFloorHeld) {
     ConnectTheDotsScorer.Confluence conf =
         new ConnectTheDotsScorer.Confluence(
             new BigDecimal(composite), OptionType.CE, false, false, true, true, false, List.of(),
-            withheld == null ? null : new BigDecimal(withheld), decisiveLegsHeld);
+            withheld == null ? null : new BigDecimal(withheld), decisiveLegsHeld,
+            coverageFloorHeld ? new BigDecimal("1.0000") : new BigDecimal("0.6011"),
+            coverageFloorHeld);
     return new RejectionDiagnostic(
         "confluence-composite", OptionType.CE, null, null, null, "t",
         new BigDecimal(composite), new BigDecimal(threshold),
@@ -320,6 +333,40 @@ class ShadowVariantsTest {
     // variants keep their existing floor-ruled semantics on exactly the same row.
     ShadowVariants.Variant plain = variants("[{\"name\":\"noop3\",\"rails\":[]}]").all().get(0);
     assertThat(ShadowVariants.accepts(noConfluence, plain)).isTrue();
+  }
+
+  @Test
+  void nullWithheldDeclinesWhatTheImpliedCoverageFloorWouldHaveRefused() {
+    // Codex review Major 1. `dot-null-withheld` cannot be armed without the §5.3 coverage floor
+    // (ScalperConfluenceGate.coverageFloorArmed), but the CHAMPION writing these rows has the floor
+    // UNARMED — so its `decisiveLegsHeld` says nothing about coverage. Reading it alone lets this
+    // book open a challenger position on a bar whose data plane had vanished, and hand a real P&L
+    // number to a proposal that would have refused the trade. Withhold RAISES the aggregate exactly
+    // on those bars (1,812 of 1,816 rows across the 07-20 outage and the 07-28 expiry), so this is
+    // the common case there, not a corner.
+    //
+    // Identical bar, identical champion legs, coverage the ONLY difference — the two implementations
+    // give opposite answers, which is what makes this a test.
+    assertThat(
+            ShadowVariants.accepts(
+                diagWithShadow("0.55", "0.72", "0.60", true, true), NULL_WITHHELD))
+        .as("coverage intact: the unified rule genuinely promoted this bar")
+        .isTrue();
+    assertThat(
+            ShadowVariants.accepts(
+                diagWithShadow("0.55", "0.72", "0.60", true, false), NULL_WITHHELD))
+        .as("data plane gone: the only armable policy refuses it, so the book must not credit it")
+        .isFalse();
+  }
+
+  @Test
+  void theCoverageGuardIsConfinedToNullPolicyVariants() {
+    // Same scope note as the decisive-legs guard: the champion book and the rail-override variants
+    // keep their existing floor-ruled semantics on exactly the same row. Widening the coverage check
+    // to them would silently shrink live books this change has no mandate to touch.
+    ShadowVariants.Variant plain = variants("[{\"name\":\"noop4\",\"rails\":[]}]").all().get(0);
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.70", "0.41", "0.60", true, false), plain))
+        .isTrue();
   }
 
   @Test

@@ -94,19 +94,33 @@ public final class ConnectTheDotsScorer {
    *
    * <p>{@code decisiveLegsHeld} is the other half of that counterfactual: the conjunction of the
    * POLICY-INDEPENDENT decisive legs (hard-VWAP alignment, 60m bias, no IV stand-aside, and — when
-   * the DEFAULT-OFF {@code dot-coverage-floor} is armed — sufficient dot-plane data coverage) that
+   * the DEFAULT-OFF {@code dot-coverage-floor} is armed — {@code coverageFloorHeld}) that
    * {@code valid} requires ALONGSIDE the scalar. A consumer asking "would the armed policy have
-   * fired?" must read {@code decisiveLegsHeld && withheldAggregate >= threshold} — the scalar alone
-   * is NOT the verdict, and bars where it clears while a decisive leg blocks are observed live.
+   * fired?" must read
+   * {@code decisiveLegsHeld && coverageFloorHeld && withheldAggregate >= threshold} — the scalar
+   * alone is NOT the verdict, and bars where it clears while a decisive leg blocks are observed live.
+   *
+   * <p><b>{@code coverage} and {@code coverageFloorHeld} (§5.3) are recorded UNCONDITIONALLY</b> —
+   * on every bar, under both {@link NullPolicy} values, and whether or not the floor is armed. That
+   * is deliberate and it is what makes them usable in a counterfactual. {@code decisiveLegsHeld}
+   * folds the floor in only when the CHAMPION armed it, but the only armable form of the unified
+   * null policy implies the floor ({@code ScalperConfluenceGate.coverageFloorArmed}), so a consumer
+   * reasoning about "would the armed policy have fired?" from an UNARMED champion's row must apply
+   * {@code coverageFloorHeld} itself — otherwise a bar whose data plane had vanished draws P&L
+   * credit, or keeps its fired status, under a policy that would in fact have refused it. Both
+   * counterfactual consumers do exactly that: {@code ShadowVariants.armedPolicyCouldHaveFired} and
+   * the fired-side {@code FiredDiagnosticJson} serialization.
    */
   public record Confluence(
       BigDecimal aggregate, OptionType side, boolean bullish, boolean bearish,
       boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots,
-      BigDecimal withheldAggregate, boolean decisiveLegsHeld) {
+      BigDecimal withheldAggregate, boolean decisiveLegsHeld, BigDecimal coverage,
+      boolean coverageFloorHeld) {
 
     /**
-     * Pre-U4b 8-arg form: {@code withheldAggregate} mirrors {@code aggregate} (no shadow recorded)
-     * and {@code decisiveLegsHeld} is FALSE — fail-closed, so a hand-built or legacy confluence can
+     * Pre-U4b 8-arg form: {@code withheldAggregate} mirrors {@code aggregate} (no shadow recorded),
+     * {@code coverage} is NULL (not recorded) and both {@code decisiveLegsHeld} and
+     * {@code coverageFloorHeld} are FALSE — fail-closed, so a hand-built or legacy confluence can
      * never let a counterfactual consumer conclude the armed policy would have fired.
      */
     public Confluence(
@@ -114,7 +128,7 @@ public final class ConnectTheDotsScorer {
         boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots) {
       this(
           aggregate, side, bullish, bearish, vwapAligned, biasAligned, standAside, dots, aggregate,
-          false);
+          false, null, false);
     }
   }
 
@@ -503,16 +517,20 @@ public final class ConnectTheDotsScorer {
     // §5.3's floor is the FOURTH such leg, and belongs here for the same reason the other three do:
     // it never reads the aggregate, so the counterfactual stays exact under either policy. Below the
     // floor the confluence is INVALID — refused outright, not merely scored lower — because a
-    // vanished data plane is not weak evidence, it is no evidence. DEFAULT-OFF: unarmed,
-    // `coverageHeld` is unconditionally true and every leg is byte-identical to before.
-    boolean coverageHeld =
-        !coverageFloorGate || coverage.compareTo(props.dotCoverageFloor()) >= 0;
+    // vanished data plane is not weak evidence, it is no evidence.
+    //
+    // `coverageFloorHeld` is computed UNCONDITIONALLY — it is the ARMED policy's coverage verdict,
+    // recorded even on an unarmed bar, because that is the only way a counterfactual reader can
+    // apply a floor the champion did not. `decisiveLegsHeld` consumes it only when armed, so
+    // DEFAULT-OFF the live verdict and every leg stay byte-identical to before.
+    boolean coverageFloorHeld = coverage.compareTo(props.dotCoverageFloor()) >= 0;
     boolean decisiveLegsHeld =
-        (!vwapHardGate || vwapSide) && biasAligned && !standAside && coverageHeld;
+        (!vwapHardGate || vwapSide) && biasAligned && !standAside
+            && (!coverageFloorGate || coverageFloorHeld);
     boolean valid = decisiveLegsHeld && aggregate.compareTo(threshold) >= 0;
     return new Confluence(
         aggregate, side, valid && ce, valid && !ce, vwapSide, biasAligned, standAside, dots,
-        withheldAggregate, decisiveLegsHeld);
+        withheldAggregate, decisiveLegsHeld, coverage, coverageFloorHeld);
   }
 
   /** The confluence ratio at the frozen 4-dp scale; an empty denominator is ZERO (fail-closed). */

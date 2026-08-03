@@ -67,9 +67,17 @@ public final class PaperViews {
    * <p>{@code slug} is NULL for fills with no signal (a manual ticket) — reported rather than
    * dropped, so the rows always sum back to the tagged total instead of quietly losing quantity.
    *
-   * <p>{@code attributedRealizedPnl} is {@code Σ realized_pnl × lot.qty / position.qty} over CLOSED
-   * positions. The division is exact, not an estimate: a paper position exits every unit against one
-   * {@code avg_entry_price} and closes in full, so a qty share IS a P&amp;L share.
+   * <p>{@code attributedRealizedPnl} is a FILL-BASIS decomposition over CLOSED positions — each
+   * lot's pro-rata share of the pooled result plus its own entry edge against the blended basis
+   * ({@code R·q/Q + sign·(A−f)·q}), so a strategy that entered better reads better rather than
+   * being averaged into its co-contributor.
+   *
+   * <p>⚠️ <b>This does NOT reconstruct the book's realized P&amp;L bit-for-bit</b>, and two earlier
+   * versions of this javadoc wrongly said the arithmetic was exact. The stored {@code
+   * avg_entry_price} is rounded to 4dp, so the entry-edge terms carry a small residual (measured:
+   * ₹0.0065 on {@code 65 @ 100.00 + 130 @ 100.01}); {@link PaperPositionLotRepository#attribution}
+   * allocates it deterministically to one lot per position. Group totals are therefore accurate to
+   * well under a paisa — treat them as money figures, not as an audit-grade reconciliation.
    */
   public record AttributionRow(
       @Schema(types = {"string", "null"}) String slug,

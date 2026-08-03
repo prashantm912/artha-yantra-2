@@ -182,6 +182,75 @@ class PaperLotAttributionIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   /**
+   * UNEQUAL QUANTITIES — the case that exposes the ledger-rounding residual.
+   *
+   * <p>Cross-vendor review Critical, round 3. Fill-basis attribution was justified by
+   * {@code Σ(A - f_i)q_i = 0}, which holds for the EXACT lot-weighted mean but NOT for the mean
+   * {@code PaperService.upsertPosition} actually stores, which is rounded to 4 decimals. The
+   * algebra was right; the ledger was not consulted.
+   *
+   * <p>The reviewer's counterexample is used verbatim because it is a REAL pyramid shape — 65 and
+   * 130 are exactly the scalper quantities this feature exists to decompose. Their exact mean
+   * (100.00666…) is NOT representable at 4dp, so the stored average is off by a rounding step and
+   * the entry-edge terms sum to +₹0.0065 instead of zero.
+   *
+   * <p>⚠️ Every earlier test used EQUAL quantities, whose mean lands exactly on a representable
+   * midpoint — where the residual is exactly zero and both the right and the wrong implementation
+   * agree. That is the third time in this PR a tidy fixture hid a real defect, so this test asserts
+   * the fixture is DISCRIMINATING (the stored basis really is rounded) before asserting the fix.
+   */
+  @Test
+  void aPositionWithUnequalQuantitiesStillSumsToRealized() {
+    String suffix = UUID.randomUUID().toString();
+    String book = "lotround-" + suffix.substring(0, 8);
+    String sym = "LOTOPT-" + suffix;
+    String small = "round-small-" + suffix;
+    String large = "round-large-" + suffix;
+    long signalSmall = seedSignal(small, suffix + "-s");
+    long signalLarge = seedSignal(large, suffix + "-l");
+
+    // Unequal QUANTITIES and unequal PRICES — the reviewer's counterexample.
+    paper.openOrder(order(book, sym, signalSmall, 65, "100.00"));
+    paper.openOrder(order(book, sym, signalLarge, 130, "100.01"));
+
+    PaperPositionRepository.PositionRow open =
+        positions.findOpen(book, "NFO", sym, "BUY").orElseThrow();
+    assertThat(open.qty()).isEqualTo(195L);
+
+    // THE FIXTURE MUST DISCRIMINATE: prove the stored basis really is a ROUNDED mean, otherwise
+    // this test would pass against the broken implementation too.
+    List<java.util.Map<String, Object>> lotRows =
+        jdbc.queryForList(
+            "SELECT qty, fill_price FROM paper_position_lots WHERE book = ? ORDER BY qty", book);
+    BigDecimal weighted = BigDecimal.ZERO;
+    for (java.util.Map<String, Object> r : lotRows) {
+      weighted =
+          weighted.add(
+              ((BigDecimal) r.get("fill_price"))
+                  .multiply(new BigDecimal(String.valueOf(r.get("qty")))));
+    }
+    BigDecimal exactMean = weighted.divide(new BigDecimal("195"), 10, RoundingMode.HALF_UP);
+    assertThat(open.avgEntryPrice())
+        .as("the stored basis is the mean ROUNDED to 4dp, not the exact mean — the whole defect")
+        .isNotEqualByComparingTo(exactMean);
+    BigDecimal residual =
+        open.avgEntryPrice().multiply(new BigDecimal("195")).subtract(weighted);
+    assertThat(residual.abs())
+        .as("so the entry-edge terms have a NON-ZERO sum to allocate — the fixture discriminates")
+        .isGreaterThan(BigDecimal.ZERO);
+
+    paper.closePosition(open.id(), new BigDecimal("101.00"));
+    BigDecimal realized = positions.find(open.id()).orElseThrow().realizedPnl();
+
+    List<PaperPositionLotRepository.AttributionRow> rows = lots.attribution(book);
+    assertThat(rows).hasSize(2);
+    BigDecimal sum = shareOf(rows, small).add(shareOf(rows, large));
+    assertThat(sum)
+        .as("the shares must sum EXACTLY to realized P&L — no rounding residual leaks into the book")
+        .isEqualByComparingTo(realized);
+  }
+
+  /**
    * The negative that makes the positive meaningful: the OLD attribution — grouping by the
    * position's {@code opening_signal_id} — reports the second strategy at n=0 on the very same data
    * the lots decompose correctly. Without this the test above cannot show it fixed anything.

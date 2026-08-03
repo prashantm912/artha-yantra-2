@@ -31,9 +31,20 @@
 -- WHAT THIS TABLE IS. One row per ENTRY fill, carrying the (signal, qty, price) triple and the
 -- position the fill built. Exit fills are deliberately NOT recorded: an exit carries no signal_id
 -- (doSettle passes null) and closes the whole position in one leg, so it has nothing to attribute.
--- Realized P&L is decomposed at READ time, pro-rata by each lot's qty share of the position — which
--- is not an approximation but the exact same fungibility the position itself already assumes, since
--- every unit exits against one `avg_entry_price`.
+-- Realized P&L is decomposed at READ time on a FILL BASIS — each lot gets its pro-rata share of the
+-- pooled result PLUS its own entry edge against the blended basis, so a strategy that entered better
+-- is reported as having done better:
+--
+--   attributed = R*(q/Q) + sign*(A - f)*q          sign = +1 BUY, -1 SELL
+--
+-- ⚠️ THE EDGE TERMS DO NOT SUM TO ZERO, and two earlier versions of this comment claimed the whole
+-- decomposition was "exact". `Sum((A - f_i)*q_i) = 0` holds for the EXACT lot-weighted mean, but
+-- PaperService.upsertPosition ROUNDS the average to 4dp before storing it, and the stored value is
+-- what both the realized P&L and the attribution query use. Measured, on a real pyramid shape:
+-- 65 @ 100.00 + 130 @ 100.01 has exact mean 100.00666..., stored A = 100.0067, and the edge terms
+-- sum to +0.0065 — so the shares summed to R + Rs 0.0065. The query therefore subtracts that
+-- per-position residual from ONE deterministic lot (largest qty, ties by lowest id). What is left
+-- inexact is only R*q/Q at numeric division precision, i.e. well under a paisa per group.
 --
 -- WHY A NEW TABLE RATHER THAN A COLUMN ON paper_orders. `paper_orders` already carries signal_id,
 -- qty and fill_price per fill — the raw attribution genuinely already exists there — but it has NO
@@ -111,7 +122,7 @@ GRANT SELECT, INSERT ON paper_position_lots TO ay_strategy;
 GRANT USAGE, SELECT ON SEQUENCE paper_position_lots_id_seq TO ay_strategy;
 
 COMMENT ON TABLE paper_position_lots IS
-  'One row per paper ENTRY fill: which signal caused it, how much it contributed, and at what price. Exists because a second openPosition on an open (book, exchange, tradingsymbol, side) AVERAGES into the position (uq_paper_positions_open guards the row, never the qty) while opening_signal_id records only the first signal — so a position built by scalp-golden-crossover + scalp-connect-the-dots firing on the same bar credits one strategy and hides the other. Realized P&L is decomposed at read time pro-rata by qty share, which is exact rather than approximate because the position exits every unit against one avg_entry_price. Exit fills are not recorded (they carry no signal and close the whole position). Positions opened before this migration have no lots and are reported UNTAGGED; there is no backfill.';
+  'One row per paper ENTRY fill: which signal caused it, how much it contributed, and at what price. Exists because a second openPosition on an open (book, exchange, tradingsymbol, side) AVERAGES into the position (uq_paper_positions_open guards the row, never the qty) while opening_signal_id records only the first signal — so a position built by scalp-golden-crossover + scalp-connect-the-dots firing on the same bar credits one strategy and hides the other. Realized P&L is decomposed at read time on a FILL BASIS: each lot gets R*(q/Q) plus its own entry edge sign*(A-f)*q against the blended basis, so a strategy that entered better reads better. The edge terms do NOT sum to zero — avg_entry_price is stored rounded to 4dp, so e.g. 65 @ 100.00 + 130 @ 100.01 leaves a +0.0065 residual — which the read subtracts from one deterministic lot per position (largest qty, ties by lowest id). Group totals therefore reconstruct realized P&L to well under a paisa, NOT bit-for-bit. Exit fills are not recorded (they carry no signal and close the whole position). Positions opened before this migration have no lots and are reported UNTAGGED; there is no backfill.';
 
 COMMENT ON COLUMN paper_position_lots.signal_id IS
   'The ENTRY signal that caused this fill; NULL for a manual/unlinked fill. ON DELETE SET NULL matches paper_positions.opening_signal_id — losing the signal must not delete the money record of the fill.';

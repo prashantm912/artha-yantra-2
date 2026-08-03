@@ -1431,8 +1431,11 @@ public class PaperService {
    * <p>Answers the question {@code GROUP BY opening_signal_id} cannot: when two strategies fire on
    * the same bar and the second {@code openPosition} AVERAGES into the first's position, the row
    * credits only the opener. This walks {@code paper_position_lots} instead, so each contributing
-   * fill is attributed to the signal that actually caused it and the position's realized P&amp;L is
-   * split pro-rata by qty share.
+   * fill is attributed to the signal that actually caused it, on a FILL BASIS — each lot's pro-rata
+   * share of the pooled result plus its own entry edge against the blended basis, so a strategy that
+   * entered better reads better. Group totals reconstruct the book's realized P&amp;L to well under a
+   * paisa but <b>not bit-for-bit</b>: the stored {@code avg_entry_price} is rounded to 4dp, leaving
+   * a residual that {@link PaperPositionLotRepository#attribution} allocates deterministically.
    *
    * <p>Always returns {@link PaperViews.Attribution#coverage()} beside the rows, and the coverage is
    * not decoration — no position opened before V057 carries lots, so the day this ships the rows are

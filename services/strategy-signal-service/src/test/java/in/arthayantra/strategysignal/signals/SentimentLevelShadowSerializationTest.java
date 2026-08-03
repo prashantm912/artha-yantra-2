@@ -35,10 +35,18 @@ import org.junit.jupiter.api.Test;
  * which references none of these classes — {@code libs/} and {@code backtest-service} have zero
  * references to {@code ScalperGateContext} / {@code ConnectTheDotsScorer} / {@code MarketOiClient}.
  *
- * <p>Population note (recorded so a later reader does not over-claim): these two writers cover every
- * bar on which the sentiment operand is actually READ — a bar that fires, and a bar the confluence
- * gate blocks. A chart-stage block never reaches the gate and never consults sentiment, so it has no
- * verdict to record and correctly has no row here.
+ * <p><b>Population — ENTRY path only.</b> These two writers cover every bar on which the operand is
+ * read while DECIDING AN ENTRY: a bar that fires, and a bar the confluence gate blocks. A chart-stage
+ * block never reaches the gate and never consults sentiment, so it correctly has no row.
+ *
+ * <p>⚠️ <b>They do NOT cover the EXIT path, and an earlier version of this note wrongly claimed they
+ * covered every read.</b> The E9 D4 confluence-flip exit oracle ({@code SignalEngine.confluenceFlipExit},
+ * tag {@code oi-confluence-exit}, armed on 12 shipped YAMLs) RE-RUNS the same confluence gate on every
+ * bar a position is held, and that call produces neither diagnostic. Left uncovered, a future
+ * flow→level swap could move EXIT TIMING and realized P&L with no counterfactual evidence at all —
+ * biasing the eventual legs→P&L comparison in an unknown direction rather than merely thinning it.
+ * That half is captured separately in {@code exit_oracle_shadow} (V056, {@link ExitOracleShadowWriter});
+ * the two populations together are the complete set of sentiment reads. Found by cross-vendor review.
  */
 class SentimentLevelShadowSerializationTest {
 

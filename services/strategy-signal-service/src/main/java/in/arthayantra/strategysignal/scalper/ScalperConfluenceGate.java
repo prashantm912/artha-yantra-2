@@ -326,12 +326,35 @@ public class ScalperConfluenceGate {
       Instant barInstant,
       LocalTime istTime,
       LocalDate eodDate) {
-    // Bare-decision ORACLE read (E9 D4 confluence-flip EXIT, SignalEngine.confluenceFlipExit): does NOT
-    // enforce option_types — the flip oracle must see the TRUE market side, including the one the strategy
-    // will not ENTER, so a held single-side position can detect a confluence flip against it.
+    return evaluateOracle(cfg, bank, future, index, barInstant, istTime, eodDate).decision();
+  }
+
+  /**
+   * The ORACLE read as a full {@link Result} — byte-identical evaluation to {@link #evaluate}, which
+   * now delegates here and simply drops everything but the decision.
+   *
+   * <p><b>This is NOT {@link #evaluateWithDiagnostic}.</b> The two differ on {@code enforceOptionSide}
+   * ({@code false} here, {@code true} there), and that difference is load-bearing: the flip oracle must
+   * see the TRUE market side, INCLUDING the one the strategy will not ENTER, so a held single-side
+   * position can detect a confluence flip against it. Calling the entry form from the exit path would
+   * silently change which held positions exit — a money defect. The oracle keeps its own accessor
+   * precisely so nobody has to choose between "I need the diagnostic" and "I need oracle semantics".
+   *
+   * <p>Exists because the diagnostic was ALREADY being computed and discarded: the shared core builds
+   * the full {@link Result} either way, so exposing it costs nothing at runtime and lets the caller
+   * record what the oracle saw (the measurement-only {@code SentimentLevelShadow}) without a second
+   * evaluation and without touching the decision.
+   */
+  public Result evaluateOracle(
+      ScalperConfig cfg,
+      BarValues bank,
+      EngineSeries future,
+      int index,
+      Instant barInstant,
+      LocalTime istTime,
+      LocalDate eodDate) {
     return evaluateInternal(
-            cfg, bank, future, index, barInstant, istTime, eodDate, null, false, false)
-        .decision();
+        cfg, bank, future, index, barInstant, istTime, eodDate, null, false, false);
   }
 
   /**

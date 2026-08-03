@@ -323,6 +323,10 @@ public class SignalEngine {
   // under threshold (V044 composite_rejections). Bounded ASYNC writer so a DB stall can never park
   // the sole signal-eval thread (#866 class).
   private final CompositeRejectionWriter compositeRejections;
+  // MEASUREMENT ONLY, live-only: the per-bar sentiment-operand counterfactual for the E9 D4
+  // confluence-flip EXIT oracle (V056). Bounded ASYNC writer — this rides the PROTECTIVE EXIT path,
+  // where parking the sole signal-eval thread on I/O would be at its most expensive.
+  private final ExitOracleShadowWriter exitOracleShadows;
 
   /**
    * Last-resort exchange resolution for a leg market-data did not key (see {@link
@@ -611,11 +615,13 @@ public class SignalEngine {
       RejectionWriter rejectionWriter,
       RiskSuppressionWriter riskSuppressions,
       CompositeRejectionWriter compositeRejections,
+      ExitOracleShadowWriter exitOracleShadows,
       java.util.Optional<EngineReloadLedger> reloadLedger,
       org.springframework.transaction.PlatformTransactionManager transactionManager,
       @Value("${artha.signals.ttl-minutes:60}") int signalTtlMinutes,
       @Value("${artha.signals.record-composite-rejections:true}") boolean recordCompositeRejections) {
     this.compositeRejections = compositeRejections;
+    this.exitOracleShadows = exitOracleShadows;
     this.exchangeResolver = exchangeResolver.orElse(null);
     this.reloadLedger = reloadLedger.orElse(null);
     this.recordCompositeRejections = recordCompositeRejections;
@@ -3064,13 +3070,58 @@ public class SignalEngine {
       return false;
     }
     OffsetDateTime istBar = bar.bucketStart().withOffsetSameInstant(Ist.OFFSET);
-    Optional<ScalperConfluenceGate.Decision> now =
-        scalperGate.get().evaluate(
+    // evaluateOracle is the SAME evaluateInternal invocation the bare evaluate() always made
+    // (enforceOptionSide=false — the oracle must see the TRUE market side, including the one the
+    // strategy will not ENTER); it merely stops discarding the diagnostic it had already built.
+    // NOT evaluateWithDiagnostic, which enforces the option-side constraint and would change which
+    // held positions exit.
+    ScalperConfluenceGate.Result result =
+        scalperGate.get().evaluateOracle(
             strategy.scalper(), bank, future, index, bar.bucketStart().toInstant(),
             istBar.toLocalTime(), istBar.toLocalDate());
-    return now.isPresent()
-        && !now.get().neutral()
-        && ScalperGates.confluenceFlippedAgainst(heldSide, now.get().side().name());
+    Optional<ScalperConfluenceGate.Decision> now = result.decision();
+    boolean flip =
+        now.isPresent()
+            && !now.get().neutral()
+            && ScalperGates.confluenceFlippedAgainst(heldSide, now.get().side().name());
+    // MEASUREMENT ONLY, strictly AFTER the verdict above — the exit decision is already computed and
+    // this cannot alter it. Records what the sentiment operand looked like on THIS oracle bar so a
+    // future flow->level swap can be judged on exit timing too, not entries alone (the entry-side
+    // diagnostics never see this path). Enqueue is O(1), bounded and fail-soft: a stalled DB drops
+    // counted rows rather than parking the eval thread mid-exit.
+    recordExitOracleShadow(strategy, entry, istBar, heldSide, result, now, flip);
+    return flip;
+  }
+
+  /**
+   * Persists the measurement-only exit-oracle counterfactual (V056). Reads the operands out of
+   * whichever diagnostic the oracle produced — a fired oracle carries {@code FiredDiagnostic}, a
+   * blocked one {@code RejectionDiagnostic}; both carry the side actually scored and the OI context.
+   * Never throws: any failure here must be invisible to the protective exit path.
+   */
+  private void recordExitOracleShadow(
+      Loaded strategy, SignalRepository.SignalRow entry, OffsetDateTime istBar, String heldSide,
+      ScalperConfluenceGate.Result result, Optional<ScalperConfluenceGate.Decision> now,
+      boolean flip) {
+    try {
+      ScalperGateContext ctx =
+          result.fired() != null ? result.fired().context()
+              : result.rejection() != null ? result.rejection().context() : null;
+      OptionType evaluatedSide =
+          result.fired() != null ? result.fired().side()
+              : result.rejection() != null ? result.rejection().side() : null;
+      // The counterfactual is computed for the side the oracle ACTUALLY scored, so it is the
+      // counterfactual of this very evaluation rather than of a hypothetical different one.
+      SentimentLevelShadow shadow =
+          SentimentLevelShadow.of(ctx == null ? null : ctx.oi(), evaluatedSide);
+      exitOracleShadows.record(
+          entry.id(), strategy.slug(), istBar, heldSide,
+          evaluatedSide == null ? null : evaluatedSide.name(),
+          now.isPresent() && !now.get().neutral() ? now.get().side().name() : null,
+          flip, shadow);
+    } catch (RuntimeException e) {
+      log.warn("exit-oracle shadow capture failed for entry {}: {}", entry.id(), e.toString());
+    }
   }
 
   /** A scalper structural stop fires when the bar touches the level: low ≤ stop (long), high ≥ stop (short). */

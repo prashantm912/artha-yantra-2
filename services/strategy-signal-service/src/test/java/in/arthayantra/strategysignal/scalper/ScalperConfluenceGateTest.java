@@ -1960,6 +1960,42 @@ class ScalperConfluenceGateTest {
     assertThat(oracle.get().side()).isEqualTo(CE);
     // the confluenceFlipExit contract: held PE, oracle says CE → the read flipped against the held side.
     assertThat(ScalperGates.confluenceFlippedAgainst("PE", oracle.get().side().name())).isTrue();
+
+    // V056: the Result-returning ORACLE accessor the exit path now calls carries the SAME
+    // non-enforcing semantics — same decision, same TRUE side. This is the assertion that stops a
+    // future "simplification" of evaluateOracle into evaluateWithDiagnostic: that swap would make
+    // the line below empty/blocked and silently remove the protective flip-exit on every
+    // single-side slug, which no entry-path test could ever catch.
+    ScalperConfluenceGate.Result oracleResult =
+        gate.evaluateOracle(peOnly, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    assertThat(oracleResult.decision()).isPresent();
+    assertThat(oracleResult.decision().get().side()).isEqualTo(CE);
+    assertThat(oracleResult.blocked()).isFalse();
+  }
+
+  /**
+   * V056: {@code evaluate(...)} is now a thin delegation to {@code evaluateOracle(...).decision()}.
+   * Pinned so the two can never drift — the exit path reads the Result form while
+   * {@code ScalperEntryEnforcementGuardTest} still reasons about "the one non-enforcing read", and
+   * that argument only holds while both spellings mean the same evaluation.
+   */
+  @Test
+  void theOracleResultAndTheBareOracleDecisionAgree() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any())).thenReturn(bullContext());
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
+
+    Optional<Decision> bare = gate.evaluate(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    ScalperConfluenceGate.Result viaOracle =
+        gate.evaluateOracle(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+
+    assertThat(bare.isPresent()).isEqualTo(viaOracle.decision().isPresent());
+    assertThat(bare.get().side()).isEqualTo(viaOracle.decision().get().side());
+    // …and the Result form additionally carries the diagnostic the bare form discards — which is the
+    // whole reason it exists (the exit-oracle shadow reads the OI context out of it).
+    assertThat(viaOracle.fired()).isNotNull();
+    assertThat(viaOracle.fired().context()).isNotNull();
   }
 
   @Test

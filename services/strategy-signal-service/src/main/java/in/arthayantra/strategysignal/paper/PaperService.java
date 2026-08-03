@@ -368,6 +368,7 @@ public class PaperService {
    */
   public PaperService(
       PaperOrderRepository orders,
+      PaperPositionLotRepository lots,
       PaperPositionRepository positions,
       PaperFillService fills,
       LastTickReader lastTick,
@@ -387,7 +388,7 @@ public class PaperService {
       long signalTakeMaxAgeMinutes,
       MeterRegistry meterRegistry) {
     this(
-        orders, positions, fills, lastTick, instruments, signals, accountService, books, risk,
+        orders, lots, positions, fills, lastTick, instruments, signals, accountService, books, risk,
         accounts, events, staleTicks, rejections, governingStopCache, transactionManager,
         perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, "", meterRegistry);
   }
@@ -1438,10 +1439,14 @@ public class PaperService {
         unrealized = move.multiply(BigDecimal.valueOf(row.qty())).setScale(2, RoundingMode.HALF_UP);
       }
     }
+    // V058 (round-2 review Major 2): attribute the trade chain to THIS position's strategy, so a
+    // co-fired sibling's entry fills stop appearing in this position's detail pane. Settle legs
+    // carry no signal and remain shared until #1259's V057 exact linkage — see legsForPosition.
     List<OrderLeg> legs =
         orders
             .legsForPosition(
-                row.book(), row.exchange(), row.tradingsymbol(), row.openedAt(), row.closedAt())
+                row.book(), row.exchange(), row.tradingsymbol(), row.openedAt(), row.closedAt(),
+                positions.strategyIdOf(row.id()).orElse(null))
             .stream()
             .map(o -> toOrderLeg(o, meta))
             .toList();

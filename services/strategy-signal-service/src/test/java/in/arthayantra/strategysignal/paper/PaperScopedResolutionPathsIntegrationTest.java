@@ -217,7 +217,10 @@ class PaperScopedResolutionPathsIntegrationTest extends StrategySignalIntegratio
     long bLot = lot(BOOK, sym, bStrategy);
     ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, aSignal, EX, sym, "BUY", 10);
     ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, bSignal, EX, sym, "BUY", 10);
-    // An exit leg each, so exit_count is non-zero (only exitCount == 0 classifies as missingExit).
+    // ONE settle leg PER position. The first version of this test seeded a SINGLE exit order for
+    // BOTH closed positions and asserted exitCount > 0 for each — which passed, and in passing
+    // ENCODED round-2 Major 1 (see #exitReconciliationCannotSeeAMissingSettleLegOnAScopedBook).
+    ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, null, EX, sym, "SELL", 10);
     ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, null, EX, sym, "SELL", 10);
 
     OffsetDateTime from = OffsetDateTime.now().minusMinutes(5);
@@ -235,6 +238,112 @@ class PaperScopedResolutionPathsIntegrationTest extends StrategySignalIntegratio
       assertThat(r.positionQty()).isEqualTo(10);
       assertThat(r.exitCount()).isGreaterThan(0);
     });
+  }
+
+  /**
+   * ⚠️ PINS A KNOWN DEFECT — round-2 cross-vendor review Major 1. <b>This test asserts the WRONG
+   * behaviour on purpose, because the right behaviour is not reachable in this branch.</b>
+   *
+   * <p>Twin A settles; twin B is closed with NO settle leg of its own — a genuinely missing exit
+   * that reconciliation exists to report. Because settle orders carry {@code signal_id = NULL},
+   * nothing in today's schema ties A's exit order to A rather than to B, so the unscoped exit
+   * lateral hands B a non-zero {@code exit_count} and the zero-only classifier at
+   * {@code PaperReconciliationService:166-174} never reports it. The inflation is not inert: it
+   * converts missing-exit detection into a FALSE NEGATIVE.
+   *
+   * <p>My original justification for leaving the exit leg unscoped ("only exitCount == 0
+   * classifies, so inflation is harmless") was exactly this error, and the first version of the
+   * test above demonstrated the hole while claiming to prove the fix.
+   *
+   * <p><b>When PR #1259's V057 lands and exit orders gain an exact position linkage, this test MUST
+   * FAIL</b> — {@code exitCount()} will correctly become 0 for B. Flip the assertion then; do not
+   * "repair" it by loosening. That deliberate future failure is the point: it makes the gap
+   * machine-visible instead of prose-only.
+   */
+  @Test
+  void exitReconciliationCannotSeeAMissingSettleLegOnAScopedBook() {
+    String sym = "RCNGAP-" + UUID.randomUUID().toString().substring(0, 8);
+    UUID aStrategy = ScopedKeyTwinFixture.seedStrategy(jdbc, "rcngap-a");
+    UUID bStrategy = ScopedKeyTwinFixture.seedStrategy(jdbc, "rcngap-b");
+    long aSignal =
+        ScopedKeyTwinFixture.seedEntry(
+            jdbc, ScopedKeyTwinFixture.seedVersion(jdbc, aStrategy, "1"), EX, sym, "BUY");
+    long bSignal =
+        ScopedKeyTwinFixture.seedEntry(
+            jdbc, ScopedKeyTwinFixture.seedVersion(jdbc, bStrategy, "1"), EX, sym, "BUY");
+    long aLot = lot(BOOK, sym, aStrategy);
+    long bLot = lot(BOOK, sym, bStrategy);
+    ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, aSignal, EX, sym, "BUY", 10);
+    ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, bSignal, EX, sym, "BUY", 10);
+    ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, null, EX, sym, "SELL", 10); // A's settle only
+
+    OffsetDateTime from = OffsetDateTime.now().minusMinutes(5);
+    positions.close(aLot, BigDecimal.ZERO, "TEST");
+    positions.close(bLot, BigDecimal.ZERO, "TEST"); // closed WITHOUT its own settle order
+    OffsetDateTime to = OffsetDateTime.now().plusMinutes(5);
+
+    var bRow =
+        recon.closedPositionReconciliation(from, to).stream()
+            .filter(r -> r.positionId() == bLot)
+            .findFirst()
+            .orElseThrow();
+    // The entry side IS correctly scoped, so B's own entry is attributed to B.
+    assertThat(bRow.entryQty()).isEqualTo(10);
+    // ⚠️ WRONG-BY-DESIGN: B has no settle leg, yet borrows A's and reports "exit present".
+    assertThat(bRow.exitCount())
+        .as("KNOWN GAP (Major 1): B's missing exit is masked by A's settle order — must become 0"
+            + " once V057 gives exit orders an exact position linkage")
+        .isGreaterThan(0);
+  }
+
+  /**
+   * Round-2 Major 2 — the position DETAIL trade chain, and the site the first sweep could not find.
+   *
+   * <p>{@code legsForPosition} reconstructs one position's fills from book + instrument + lifetime
+   * ONLY. It lives entirely in {@code paper_orders} and never names {@code paper_positions}, so a
+   * sweep enumerated over "SQL touching paper_positions" excluded it by construction — the unit has
+   * to be "queries that ATTRIBUTE rows to a position".
+   *
+   * <p>UNDER THE UNSCOPED QUERY both twins' entry fills come back for either position, so
+   * {@code GET /api/v1/paper/positions/{id}} renders the sibling's entry inside this position's
+   * trade chain: `hasSize(2)` fails with 3, and the sibling's order id is present.
+   *
+   * <p>The settle leg is asserted PRESENT for both, which is the documented remaining gap: a
+   * signal-less order cannot be tied to one of two siblings until V057.
+   */
+  @Test
+  void thePositionDetailTradeChainExcludesASiblingsEntryFills() {
+    String sym = "LEGSCOPE-" + UUID.randomUUID().toString().substring(0, 8);
+    UUID aStrategy = ScopedKeyTwinFixture.seedStrategy(jdbc, "leg-a");
+    UUID bStrategy = ScopedKeyTwinFixture.seedStrategy(jdbc, "leg-b");
+    long aSignal =
+        ScopedKeyTwinFixture.seedEntry(
+            jdbc, ScopedKeyTwinFixture.seedVersion(jdbc, aStrategy, "1"), EX, sym, "BUY");
+    long bSignal =
+        ScopedKeyTwinFixture.seedEntry(
+            jdbc, ScopedKeyTwinFixture.seedVersion(jdbc, bStrategy, "1"), EX, sym, "BUY");
+    long aLot = lot(BOOK, sym, aStrategy);
+    lot(BOOK, sym, bStrategy);
+    long aOrder = ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, aSignal, EX, sym, "BUY", 10);
+    long bOrder = ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, bSignal, EX, sym, "BUY", 10);
+    long settle = ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, null, EX, sym, "SELL", 10);
+
+    var opened = positions.find(aLot).orElseThrow().openedAt();
+    List<Long> legs =
+        orders
+            .legsForPosition(BOOK, EX, sym, opened.minusMinutes(5), null, aStrategy)
+            .stream()
+            .map(o -> o.id())
+            .toList();
+    assertThat(legs).contains(aOrder, settle);
+    assertThat(legs).doesNotContain(bOrder);
+
+    // Unscoped (null) keeps the pre-V058 reach for every unscoped book.
+    assertThat(
+            orders.legsForPosition(BOOK, EX, sym, opened.minusMinutes(5), null, null).stream()
+                .map(o -> o.id())
+                .toList())
+        .contains(aOrder, bOrder, settle);
   }
 
   private long lot(String book, String sym, UUID strategyId) {

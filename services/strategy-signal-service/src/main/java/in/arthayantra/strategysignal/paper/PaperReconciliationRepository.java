@@ -66,9 +66,21 @@ public class PaperReconciliationRepository {
             -- reports 20 against a 10-unit row: a nightly qty-mismatch alarm on a perfectly valid
             -- split. An order with no signal maps to UNATTRIBUTED_SCOPE so a hand-ticket lot still
             -- matches its own orders instead of reporting missing-entry. NULL = unscoped, as before.
-            -- The EXIT leg below is deliberately NOT scoped: settle orders carry no signal_id, so
-            -- scoping it would zero every exit_count and turn missingExit into a mass false alarm.
-            -- An inflated exit_count is harmless -- only exitCount == 0 classifies (V5 missingExit).
+            -- The EXIT leg below is NOT scoped, and that is a KNOWN DEFECT, not a design choice.
+            -- ROUND-2 REVIEW MAJOR 1 -- an earlier version of this comment claimed an inflated
+            -- exit_count was "harmless, since only exitCount == 0 classifies". That reasoning is
+            -- WRONG and was overturned: if twin A has a settle order and twin B does not, A's order
+            -- satisfies the exit lateral for BOTH rows, so the zero-only classifier at
+            -- PaperReconciliationService:166-174 never sees B. Inflation does not add a false
+            -- alarm, it DELETES a real one -- missing-exit detection becomes a FALSE NEGATIVE and
+            -- the reconciler silently stops reporting a genuinely unsettled position.
+            -- It is not fixable here: doSettle writes exit orders with signal_id NULL, so nothing
+            -- in today's schema ties a settle leg to ONE of two sibling positions. Scoping it the
+            -- way the entry leg is scoped would zero every exit_count instead -- trading a false
+            -- negative for a mass false alarm. The fix is an exact position_id <-> exit_order_id
+            -- association (PR #1259's V057 lot table plus an exit-side linkage), which is why
+            -- #1275 is HARD-BLOCKED on #1259 rather than merely version-coupled.
+            -- PaperScopedResolutionPathsIntegrationTest pins this gap so it cannot be forgotten.
             AND (
               p.strategy_id IS NULL
               OR COALESCE(

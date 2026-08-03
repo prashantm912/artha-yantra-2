@@ -246,6 +246,38 @@ public class PaperOrderRepository {
       String tradingsymbol,
       OffsetDateTime openedAt,
       OffsetDateTime closedAt) {
+    return legsForPosition(book, exchange, tradingsymbol, openedAt, closedAt, null);
+  }
+
+  /**
+   * The V058 scoped form (round-2 cross-vendor review Major 2). {@code strategyId} null keeps the
+   * pre-V058 behaviour; non-null restricts the SIGNAL-CARRYING legs to that strategy's own.
+   *
+   * <p>This is a position-ATTRIBUTION query that lives entirely in {@code paper_orders} — which is
+   * why the first V058 sweep missed it: that sweep enumerated SQL touching {@code paper_positions},
+   * so a defect attributing orders to a position without naming the table was outside the search
+   * space by construction. The unit is "queries that attribute rows to a position", not "queries
+   * that touch paper_positions".
+   *
+   * <p>Armed, overlapping twins otherwise make {@code GET /api/v1/paper/positions/{id}} render the
+   * SIBLING's entry fills as part of this position's trade chain — an externally observable
+   * attribution error on exactly the co-fired input this feature enables.
+   *
+   * <p>⚠️ <b>PARTIAL, and the remainder is blocked on PR #1259's V057.</b> Entry legs carry a
+   * {@code signal_id} and can be attributed; SETTLE legs carry none ({@code doSettle} writes no
+   * signal), so a signal-less order cannot be tied to one of two sibling positions by anything in
+   * the schema today. Those legs are therefore still shared between siblings, deliberately and
+   * visibly, rather than dropped — dropping them would blank the exit row of every position's detail
+   * pane. Read entries through {@code paper_position_lots.position_id} and add an exact linkage for
+   * exit orders once V057 is on main.
+   */
+  public List<OrderRow> legsForPosition(
+      String book,
+      String exchange,
+      String tradingsymbol,
+      OffsetDateTime openedAt,
+      OffsetDateTime closedAt,
+      java.util.UUID strategyId) {
     return jdbc.query(
         """
         SELECT id, signal_id, exchange, tradingsymbol, side, qty, status, placed_at, filled_at,
@@ -255,6 +287,14 @@ public class PaperOrderRepository {
         WHERE book=? AND exchange=? AND tradingsymbol=?
           AND COALESCE(filled_at, placed_at) >= ?
           AND COALESCE(filled_at, placed_at) <= COALESCE(?, now())
+          AND (
+            CAST(? AS uuid) IS NULL
+            OR signal_id IS NULL
+            OR EXISTS (
+                 SELECT 1 FROM signals sg
+                 JOIN strategy_versions sv ON sv.id = sg.strategy_version_id
+                 WHERE sg.id = paper_orders.signal_id AND sv.strategy_id = CAST(? AS uuid))
+          )
         ORDER BY COALESCE(filled_at, placed_at) ASC, id ASC
         """,
         PaperOrderRepository::mapOrder,
@@ -262,7 +302,9 @@ public class PaperOrderRepository {
         exchange,
         tradingsymbol,
         openedAt,
-        closedAt);
+        closedAt,
+        strategyId,
+        strategyId);
   }
 
   private static OrderRow mapOrder(java.sql.ResultSet rs, int n) throws java.sql.SQLException {

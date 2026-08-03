@@ -93,19 +93,34 @@ public final class ConnectTheDotsScorer {
    * construction.
    *
    * <p>{@code decisiveLegsHeld} is the other half of that counterfactual: the conjunction of the
-   * three POLICY-INDEPENDENT decisive legs (hard-VWAP alignment, 60m bias, no IV stand-aside) that
+   * POLICY-INDEPENDENT decisive legs (hard-VWAP alignment, 60m bias, no IV stand-aside, and — when
+   * the DEFAULT-OFF {@code dot-coverage-floor} is armed — {@code coverageFloorHeld}) that
    * {@code valid} requires ALONGSIDE the scalar. A consumer asking "would the armed policy have
-   * fired?" must read {@code decisiveLegsHeld && withheldAggregate >= threshold} — the scalar alone
-   * is NOT the verdict, and bars where it clears while a decisive leg blocks are observed live.
+   * fired?" must read
+   * {@code decisiveLegsHeld && coverageFloorHeld && withheldAggregate >= threshold} — the scalar
+   * alone is NOT the verdict, and bars where it clears while a decisive leg blocks are observed live.
+   *
+   * <p><b>{@code coverage} and {@code coverageFloorHeld} (§5.3) are recorded UNCONDITIONALLY</b> —
+   * on every bar, under both {@link NullPolicy} values, and whether or not the floor is armed. That
+   * is deliberate and it is what makes them usable in a counterfactual. {@code decisiveLegsHeld}
+   * folds the floor in only when the CHAMPION armed it, but the only armable form of the unified
+   * null policy implies the floor ({@code ScalperConfluenceGate.coverageFloorArmed}), so a consumer
+   * reasoning about "would the armed policy have fired?" from an UNARMED champion's row must apply
+   * {@code coverageFloorHeld} itself — otherwise a bar whose data plane had vanished draws P&L
+   * credit, or keeps its fired status, under a policy that would in fact have refused it. Both
+   * counterfactual consumers do exactly that: {@code ShadowVariants.armedPolicyCouldHaveFired} and
+   * the fired-side {@code FiredDiagnosticJson} serialization.
    */
   public record Confluence(
       BigDecimal aggregate, OptionType side, boolean bullish, boolean bearish,
       boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots,
-      BigDecimal withheldAggregate, boolean decisiveLegsHeld) {
+      BigDecimal withheldAggregate, boolean decisiveLegsHeld, BigDecimal coverage,
+      boolean coverageFloorHeld) {
 
     /**
-     * Pre-U4b 8-arg form: {@code withheldAggregate} mirrors {@code aggregate} (no shadow recorded)
-     * and {@code decisiveLegsHeld} is FALSE — fail-closed, so a hand-built or legacy confluence can
+     * Pre-U4b 8-arg form: {@code withheldAggregate} mirrors {@code aggregate} (no shadow recorded),
+     * {@code coverage} is NULL (not recorded) and both {@code decisiveLegsHeld} and
+     * {@code coverageFloorHeld} are FALSE — fail-closed, so a hand-built or legacy confluence can
      * never let a counterfactual consumer conclude the armed policy would have fired.
      */
     public Confluence(
@@ -113,7 +128,7 @@ public final class ConnectTheDotsScorer {
         boolean vwapAligned, boolean biasAligned, boolean standAside, List<DotScore> dots) {
       this(
           aggregate, side, bullish, bearish, vwapAligned, biasAligned, standAside, dots, aggregate,
-          false);
+          false, null, false);
     }
   }
 
@@ -263,6 +278,46 @@ public final class ConnectTheDotsScorer {
       ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
       ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot,
       boolean dowDot, BigDecimal volumeFloor, boolean ivRankDot, NullPolicy nullPolicy) {
+    return score(
+        ctx, side, bias60mDir, threshold, props, vwapHardGate, ivPerStrikeGate, premiumSkewDot,
+        dowDot, volumeFloor, ivRankDot, nullPolicy, false);
+  }
+
+  /**
+   * As the 12-arg form but with the F5 U4b §5.3 DATA-COVERAGE FLOOR opted in, via the DEFAULT-OFF
+   * {@code dot-coverage-floor} tag (the {@code dot-null-withheld} tag implies it — see below).
+   *
+   * <p><b>Why the floor exists.</b> {@link NullPolicy#WITHHELD} has one perverse property: the LESS
+   * data arrives, the HIGHER the composite can go, because the denominator shrinks faster than the
+   * numerator whenever the surviving dots agree. The degenerate all-absent case is already
+   * fail-closed ({@link #ratio} returns ZERO on an empty denominator), but the INTERMEDIATE case is
+   * not. Measured over the 11,068 post-P3 scored evaluations (decision sheet
+   * {@code docs/signal-analysis/2026-08-03-dot-null-semantics-decision.md} §5.3): on 2026-07-20 (the
+   * TimescaleDB 2.18.2 planner outage) and 2026-07-28 (the NSE monthly expiry, where
+   * {@code MarketOiClient.oi()} suppresses the whole OI block BY DESIGN) withholding would have
+   * RAISED the aggregate on 1,812 of 1,816 rows. Nothing fired only because a decisive leg happened
+   * to block — that is the tape's luck, not a guarantee. <b>Withhold without a coverage floor
+   * converts a data outage into a reason to trade MORE</b>, which is precisely the direction the
+   * standing prior (every measured loosening of the scalper entry gate has lost money) forbids.
+   *
+   * <p><b>The floor is a natural break, not a fitted parameter.</b> The measured distribution of
+   * {@code surviving weight / legacy baseline weight} is 9,207 rows at exactly 1.000, 45 rows in
+   * 0.947–0.961 (exactly one dot missing), then ZERO rows until 0.828, below which sit the 748
+   * outage rows and the 1,068 expiry rows. Any floor in [0.85, 0.94] separates "one dot happened to
+   * be missing" from "a whole data plane is gone" with no row in the gap; {@code 0.90}
+   * ({@link ScalperOiProps#dotCoverageFloor()}) sits dead centre.
+   *
+   * <p><b>DEFAULT-OFF and never the policy alone.</b> {@code coverageFloorGate} false is
+   * byte-identical to the 12-arg form. {@link ScalperConfluenceGate} arms it from
+   * {@code dot-coverage-floor} OR {@code dot-null-withheld}, so the unified null rule can never be
+   * armed WITHOUT its floor — the doctrine is structural rather than a convention someone has to
+   * remember. The floor alone (LEGACY policy) is a pure TIGHTENING and safe to measure first.
+   */
+  public static Confluence score(
+      ScalperGateContext ctx, OptionType side, int bias60mDir, BigDecimal threshold,
+      ScalperOiProps props, boolean vwapHardGate, boolean ivPerStrikeGate, boolean premiumSkewDot,
+      boolean dowDot, BigDecimal volumeFloor, boolean ivRankDot, NullPolicy nullPolicy,
+      boolean coverageFloorGate) {
     Chart c = ctx.chart();
     Oi oi = ctx.oi();
     Macro m = ctx.macro();
@@ -341,6 +396,17 @@ public final class ConnectTheDotsScorer {
     // self-arm it on a calendar trigger — the unarmed dot is withheld exactly as a null input is.
     boolean ivRankNull = m.ivRank() == null;
     boolean ivRankAbsent = ivRankNull || !ivRankDot;
+    // §5.3 coverage baseline: the weight the LEGACY policy puts in the denominator — every enabled
+    // dot MINUS whatever LEGACY itself already withholds. `iv_rank` is the only such dot today: its
+    // `absent` is set here rather than by `add(...)`'s `withhold && inputMissing`, covering BOTH the
+    // honest-null input and the unarmed `iv-rank-dot` gate, and it reads absent on 100% of live
+    // rows. Normalizing it out is what the decision sheet §5.3 measured, and where the empty
+    // [0.828, 0.947] band that locates the 0.90 floor was found — a baseline that counted a
+    // permanently-null dot as missing coverage would put a clean bar at 0.959, not 1.000, and the
+    // floor would no longer sit in a gap. ⚠️ A FUTURE dot that sets its own `absent` outside
+    // `add(...)` must subtract its weight here too; `coverageIsIdenticalUnderBothNullPolicies`
+    // pins the policy-independence half of that contract.
+    double legacyWithheldWeight = ivRankAbsent ? W_IV : 0;
     // U4b: iv_rank is the ONE dot already on the unified rule, so its `absent` is untouched by the
     // policy — a null input is withheld under both. The GATE absence (unarmed) is not an input gap,
     // so `inputMissing` tracks only the null, keeping the shadow aggregate honest.
@@ -408,7 +474,9 @@ public final class ConnectTheDotsScorer {
     // WITHHELD the two loops coincide because `absent` already subsumes `inputMissing`.
     double shadowNum = 0;
     double shadowDen = 0;
+    double totalWeight = 0;
     for (DotScore d : dots) {
+      totalWeight += d.weight();
       if (!d.absent()) {
         den += d.weight();
         if (d.supports()) {
@@ -424,6 +492,14 @@ public final class ConnectTheDotsScorer {
     }
     BigDecimal aggregate = ratio(num, den);
     BigDecimal withheldAggregate = ratio(shadowNum, shadowDen);
+    // §5.3: how much of the dot plane ACTUALLY had data this bar. `shadowDen` is the surviving
+    // weight under the unified rule; the baseline is the LEGACY denominator (see
+    // `legacyWithheldWeight`). Deliberately POLICY-INDEPENDENT — `shadowDen` and the baseline are
+    // both computed the same way under LEGACY and WITHHELD — because a floor that moved when the
+    // policy was armed could not gate the policy, and because the same ratio has to mean one thing
+    // on the unarmed rows the shadow lane records. An empty baseline is ZERO ⇒ below any positive
+    // floor ⇒ blocks, the same fail-closed direction as `aggregate`.
+    BigDecimal coverage = ratio(shadowDen, totalWeight - legacyWithheldWeight);
 
     boolean biasAligned = bias60mDir == 0 || (ce ? bias60mDir > 0 : bias60mDir < 0);
     // VWAP is decisive by default; the #9 opening-tick-before-10:30 path drops it from the HARD gate
@@ -437,11 +513,24 @@ public final class ConnectTheDotsScorer {
     // rows (3 on 2026-07-24, 1 on 07-23) where the aggregate CLEARED the threshold while a decisive
     // leg blocked, which is exactly the shape that would let a challenger book a trade the armed
     // policy still rejects.
-    boolean decisiveLegsHeld = (!vwapHardGate || vwapSide) && biasAligned && !standAside;
+    //
+    // §5.3's floor is the FOURTH such leg, and belongs here for the same reason the other three do:
+    // it never reads the aggregate, so the counterfactual stays exact under either policy. Below the
+    // floor the confluence is INVALID — refused outright, not merely scored lower — because a
+    // vanished data plane is not weak evidence, it is no evidence.
+    //
+    // `coverageFloorHeld` is computed UNCONDITIONALLY — it is the ARMED policy's coverage verdict,
+    // recorded even on an unarmed bar, because that is the only way a counterfactual reader can
+    // apply a floor the champion did not. `decisiveLegsHeld` consumes it only when armed, so
+    // DEFAULT-OFF the live verdict and every leg stay byte-identical to before.
+    boolean coverageFloorHeld = coverage.compareTo(props.dotCoverageFloor()) >= 0;
+    boolean decisiveLegsHeld =
+        (!vwapHardGate || vwapSide) && biasAligned && !standAside
+            && (!coverageFloorGate || coverageFloorHeld);
     boolean valid = decisiveLegsHeld && aggregate.compareTo(threshold) >= 0;
     return new Confluence(
         aggregate, side, valid && ce, valid && !ce, vwapSide, biasAligned, standAside, dots,
-        withheldAggregate, decisiveLegsHeld);
+        withheldAggregate, decisiveLegsHeld, coverage, coverageFloorHeld);
   }
 
   /** The confluence ratio at the frozen 4-dp scale; an empty denominator is ZERO (fail-closed). */

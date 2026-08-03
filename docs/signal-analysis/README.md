@@ -1297,9 +1297,26 @@ Proposed 2026-07-03 from the first pass — each is small and parity-safe (rejec
     GROUP BY strategy_slug ORDER BY evaluations DESC;
    ```
    Full protocol + guarantee boundary: the `V053__strategy_eval_denominator.sql` header.
-6. **Dot-null semantics unification** — decide null = NEUTRAL-supports vs null = withhold vs
-   exclude-from-denominator, ONCE, for all dots (today: dow null→supports, ivRank/fii null→against).
-   Analysis keeps mis-reading dead-data dots as bearish evidence until this is uniform.
+6. **Dot-null semantics unification** — **DECIDED 2026-08-03, shipped DEFAULT-OFF, not armed.**
+   Owner adopted `null = withhold from BOTH numerator and denominator` for all dots, paired with a
+   data-coverage floor. Mechanism: `NullPolicy.WITHHELD` (tag `dot-null-withheld`) + the §5.3
+   coverage floor (tag `dot-coverage-floor`, which the policy tag implies — never the policy alone).
+   Arming is an owner call and needs a republish.
+   **Do not restate the per-dot map here — `NullPolicy.java`'s javadoc is the authority** and
+   reproduces exactly against `ConnectTheDotsScorer`: three classes (withheld / supports /
+   opposes-in-denominator), with **15 of the 18 default dots** scoring a missing input as evidence
+   AGAINST the side. Prose drifts; that javadoc sits next to the code it describes.
+   ⚠️ **This row previously read "today: dow null→supports, ivRank/fii null→against". Two of those
+   three were wrong**, which is why it now points at code:
+   `dow`→supports is true (`ConnectTheDotsScorer:390-393`) but the dot is behind default-OFF
+   `dow-confluence`, armed on 0 strategies and present in 0 of 13,192 live rejection rows;
+   `ivRank`→against went stale on 2026-07-10 (#676 — `:342-350` marks it `absent`, i.e. already on
+   the target semantic); and there is no `fii` **dot** at all — `fii` is a RAIL
+   (`ScalperGates.fiiBias:805-808`) whose null DEGRADES TO PASS, plus a `DotHealthCanary` probe name.
+   "exclude-from-denominator" is also **not a distinct third option**: it is identical to withhold
+   wherever `supports=false`, and where a null yields `supports=true` it is the most loosening of the
+   three. Evidence, per-dot table and the coverage-floor derivation:
+   [`2026-08-03-dot-null-semantics-decision.md`](2026-08-03-dot-null-semantics-decision.md).
 7. **FE funnel view** on /signal-rejections — per-strategy Sankey/waterfall (bars → rail₁ → … →
    composite → fired) per day; the §3 pass at a glance.
 8. **`DataHealthCanary` (code, FeedWatchdog pattern)** — **v1 SHIPPED 2026-07-03 (roadmap F4)**:

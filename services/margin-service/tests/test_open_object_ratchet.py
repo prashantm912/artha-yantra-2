@@ -125,7 +125,7 @@ SUBSCHEMA_BEARING_KEYWORDS = frozenset(
 
 
 def _nonempty(value):
-    return bool(value) if isinstance(value, (dict, list)) else value is not None
+    return bool(value) if isinstance(value, dict | list) else value is not None
 
 
 def _discloses_key_information(node, root: dict) -> bool:

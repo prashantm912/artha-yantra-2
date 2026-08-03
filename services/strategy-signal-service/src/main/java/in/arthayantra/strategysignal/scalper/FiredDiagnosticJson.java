@@ -28,6 +28,12 @@ import java.math.BigDecimal;
  * NULL if selected from {@code signal_rejections.diagnostic}. Do NOT "complete" the symmetry by adding
  * them there, and do NOT add them to {@code signals.scalper_detail} — that is the light order/paper
  * carrier, not a forensics surface.
+ *
+ * <p>The root-level {@code sentimentLevelShadow} object ({@link SentimentLevelShadow}) is NOT such an
+ * exception: it is written IN LOCKSTEP on both sides, because the sentiment operand is read on every
+ * bar that reaches the gate regardless of how that bar resolves. It is measurement only — recorded
+ * after the decision, read by no gate. Same reasoning as above puts it here rather than in
+ * {@code signals.scalper_detail}.
  */
 public final class FiredDiagnosticJson {
 
@@ -109,6 +115,11 @@ public final class FiredDiagnosticJson {
         n.put("reason", ds.reason());
       }
     }
+    // MEASUREMENT-ONLY, and in LOCKSTEP with SignalEngine.rejectionDiagnosticJson (unlike the two
+    // U4b keys above, this one has a real counterpart on both sides — the operand is read on every
+    // bar that reaches the gate, whichever way the bar then resolves). Built AFTER the decision from
+    // the context already in hand; nothing here feeds a gate. See SentimentLevelShadow.
+    SentimentLevelShadow.of(d.context() == null ? null : d.context().oi(), d.side()).appendTo(root);
     if (d.context() != null) {
       ScalperGateContext ctx = d.context();
       ObjectNode c = root.putObject("context");

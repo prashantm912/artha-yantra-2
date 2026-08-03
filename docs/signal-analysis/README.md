@@ -612,7 +612,38 @@ Run in order; each answers one question. Canned SQL in §6.
     (c) the freeze is ALSO §3.30's telemetry subject — log frozen-by times per sub and which rail
     (profit-lock vs first-loss) froze each. A profit-lock freeze banking a green day is the design
     working, not starvation.
-32. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+32. **Verify the daily bar against the DERIVATIVE COMPLEX before stamping regime — a single bogus
+    closing tick can rewrite the day** (added 2026-08-03) — the `NIFTY 50` 1m stream froze at
+    24,573.35 for 15:20–15:28, then the 15:29 `TICK_AGG` bar printed **24,774.30 (+200.95 pts in
+    one minute)**; the session high excluding that bar was 24,609.45. Three independent markets
+    refuted the print: the front future ticked freely and closed 24,650 (a real +200 index move
+    cannot leave the future 124 pts UNDER spot), the near-ATM CE closed at intrinsic-plus-time for
+    spot ~24,573, and SENSEX (unfrozen) drifted DOWN across the same minutes. The tick poisoned
+    THREE surfaces: the 1m bar, **the 1d daily bar** (`source=KITE, fetched_at 15:45` — Kite's own
+    REST carried it at fetch time; high AND close), and `options_chain_snapshots.spot_price` for
+    the 15:28–15:30 captures. Consequences: the G15 regime stamp flipped **trend-up 0.778 →
+    chop 0.007** on correction; the swing books' RS benchmark and any backtest window covering the
+    day inherit the bar. ⚠️ **It does NOT self-heal**: cache-first reads re-fetch only the 10-min
+    trailing tail (a present, past bucket is skipped) and bhavcopy is DO-NOTHING — repair needs an
+    authoritative re-fetch or hand UPDATE (ledger G18). **Standing check before writing any regime
+    row:**
+    ```sql
+    -- (a) is the daily close reachable from the 1m series ex-the-last-bar?
+    SELECT max(high) FROM marketdata.candles
+    WHERE tradingsymbol='NIFTY 50' AND exchange='NSE' AND interval='1m'
+      AND EXTRACT(second FROM bucket)=0 AND bucket >= :d0915 AND bucket < :d1529;
+    -- (b) does the future corroborate the close? (index close far above spot-implied future = bad tick)
+    SELECT close FROM marketdata.candles WHERE tradingsymbol=:front_fut AND interval='1m'
+      AND bucket = :d1529 AND EXTRACT(second FROM bucket)=0;
+    -- (c) the option market's verdict: near-ATM CE ltp at 15:30 vs intrinsic under the claimed close
+    SELECT ltp, spot_price FROM marketdata.options_chain_snapshots
+    WHERE underlying=:u AND expiry=:front_exp AND strike=:atm AND option_type='CE'
+      AND ts >= :d1528 ORDER BY ts DESC LIMIT 3;
+    ```
+    A daily high/close that exists ONLY in the final bar, against a flat future and an option chain
+    pricing the old spot, is a bad tick — compute the regime from the 1m series ex-that-bar, state
+    both values, and file the repair.
+33. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 
@@ -1201,11 +1232,54 @@ Proposed 2026-07-03 from the first pass — each is small and parity-safe (rejec
    sampled offsets).
 2. ~~Nightly forward-outcome stamper~~ — **superseded by the shadow book** (real exit labels beat
    fixed-offset sampling). Revisit only if a non-shadowed rejection class needs outcomes too.
-3. **All-eval mode (diagnostic completeness)** — evaluate ALL rails per bar instead of short-circuiting
-   at the first CLOSED failure (the straddle path already does this), so `checks[]` is the full matrix
-   and "only X failed" needs no caveat. Costs a few extra reads per bar.
-4. **Data-health flags on the row** — precomputed booleans (ivRank-null, breadth-zero, dow-null…) so
-   the health query is an index scan and the FE can badge degraded rows.
+3. ~~All-eval mode (diagnostic completeness)~~ — **ALREADY SHIPPED WHEN THIS ROW WAS FILED; the
+   residual is deliberate and PINNED. Do not build it.** The row's premise ("the straddle path
+   already does this", implying the directional path does not) was stale on arrival: #404
+   (`00172811`, **2026-07-01**) introduced the diagnostic and the all-eval sweep together, two days
+   before this file was created (#477, `c38b710c`, 2026-07-03). Verified by reading the gate AT
+   `c38b710c` — its short-circuit set is the same one standing today. Every rail past the chain
+   fetch records via `Diag.fails/failsBool/failsScore` and falls through; only a terminal
+   `diag.anyFailed()` blocks, so `blockingRail` is the FIRST failure while `checks[]` carries the
+   whole matrix. Pinned by `ScalperConfluenceGateTest
+   .diagnosticAllEvalRecordsDownstreamRailsEvenAfterAnEarlierFailure` (asserts the OI context and
+   `confluence-composite` are still scored after an `rsi-band` failure).
+
+   Six `return diag.block()` sites remain. Three are structurally forced — nothing downstream is
+   computable: `chain-unavailable`, `context-unavailable`, and the `morning-opening-formation`
+   opening-bar case (the 2nd candle does not exist yet). Three are the deliberate
+   "block before the fan-out" pre-flight: `time-window`, `time-of-day-preference`,
+   `option-side-constraint`. **Removing those three is a Critical, not a completion:**
+   * `ShadowBookService.maybeOpen` returns early on `d.pick() == null`, with a comment naming
+     time-window as the case it excludes. Resolve the pick on an out-of-window bar and the shadow
+     book — the evidence base the entry tunes are judged on — starts opening virtual positions on
+     bars no strategy could ever have traded. `ShadowVariants.accepts` iterates `d.checks()`, so a
+     variant carrying a `time-window` disable override would accept them outright.
+   * V054 (row 4 below, 2026-08-02) **deliberately encodes the opposite decision**: the pre-fetch
+     rows are `contextBearing=false` — "UNINFORMATIVE, not degraded … T17's lesson (a context-less
+     row cannot testify about dot liveness) applied per row instead of per window". Building this
+     row would partly undo a decision taken after it, with a written rationale.
+   * Measured, not argued: deleting the `time-window` short-circuit reds two existing tests —
+     `ScalperConfluenceGateTest.blocksInTheMiddayWindowBeforeAnyChainFetch:1195` and
+     `.openingTickStrategyPassesTheOpenWindowWhileADefaultStrategyIsBlocked:1645`, both on
+     `verifyNoInteractions(marketOiClient)` (74 tests, 2 failures; 74/74 green unmodified).
+   * Cost it would add: `MarketOiClient`'s memo TTL is 45 s against a 180 s primary bar, so it
+     amortizes across strategies within a bar but never across bars — every affected bar pays a
+     fresh chain + macro/context fan-out. Upper bound ~50 of the 125 3m bars per session
+     (09:15–09:45 plus the 11:00–13:00 midday block), restricted to bars where the chart gate had
+     already fired.
+4. ~~Data-health flags on the row~~ — **SHIPPED (F5 unit U3, [#1193](https://github.com/prashantm912/artha-yantra-2/pull/1193)
+   @ `5071a0b8`, V054 `signal_rejection_data_health`)**: `RejectionWriter` computes `DataHealthFlags`
+   in memory from the same `ScalperGateContext` the diagnostic is serialized from (pure function, no
+   new read, on the writer's existing bounded async thread) and the INSERT carries
+   `data_health JSONB {degraded, contextBearing, oiSuppressed, flags[]}` plus an indexable `degraded
+   BOOLEAN`, with a partial index `WHERE degraded`. A flag means the input was **ABSENT**, never that
+   its value was unremarkable; the S24 monthly-expiry OI inertness is exempt **per OI root** (NSE last
+   Tuesday / BSE last Thursday), and `DataHealthFlagsTest` reflects over every `Macro`/`Oi` component
+   so adding one without classifying it is a build failure. Read surfaces: the `degraded` query param
+   on `GET /api/v1/signal-rejections` and the FE badge (word + flag count, absent inputs named on
+   expand — `RejectionsPage`). ⚠️ `degraded` reads TRUE on nearly every context-bearing row today
+   because `ivRank` and `dowUp` are absent on 100% of them; that is the column working, not a bug —
+   see the `V054__signal_rejection_data_health.sql` header, which is the authority on the semantics.
 5. ~~Per-session eval-denominator row~~ — **SHIPPED (F5 unit U2, V053 `strategy_eval_denominator`)**:
    the engine's `Outcome` counters now carry a per-strategy dimension, flushed on the EXISTING V045
    3m rollup tick to a day-keyed table — one row per `(session_date, boot_id, strategy_slug,

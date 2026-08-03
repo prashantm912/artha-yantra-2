@@ -576,8 +576,14 @@ public final class ConnectTheDotsScorer {
     return false;
   }
 
-  /** CE wants the value positive (put-heavy / PE-OI rising), PE wants it negative. */
-  private static boolean sideSigned(BigDecimal value, boolean ce) {
+  /**
+   * CE wants the value positive (put-heavy / PE-OI rising), PE wants it negative.
+   *
+   * <p>Package-private rather than private so {@link SentimentLevelShadow} evaluates its
+   * counterfactual through the SAME predicate the live {@code sentiment} dot uses, with only the
+   * operand swapped — a copy of the rule there could drift from this one and silently mis-measure.
+   */
+  static boolean sideSigned(BigDecimal value, boolean ce) {
     if (value == null) {
       return false;
     }

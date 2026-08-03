@@ -61,7 +61,11 @@ class MarketOiClientTest {
         "{\"items\":["
             + "{\"expiry\":\"2026-07-30\",\"interpretation\":\"LONG_UNWINDING\",\"basis\":\"30\"},"
             + "{\"expiry\":\"2026-06-25\",\"interpretation\":\"LONG_BUILDUP\",\"basis\":\"10\"}]}");
-    stub("/api/v1/market/options/active-strikes", "{\"sentimentPct\":\"12.5\",\"items\":[]}");
+    // `sentimentLevelPct` is the measurement-only LEVEL sibling market-data already publishes beside
+    // the ΔOI-FLOW `sentimentPct` the gates consume — asserted below to prove it reaches the Oi record.
+    stub(
+        "/api/v1/market/options/active-strikes",
+        "{\"sentimentPct\":\"12.5\",\"sentimentLevelPct\":\"-33.33\",\"items\":[]}");
     // trending: latest point PE 200 / CE 100 of 300 total → (200-100)*100/300 = 33.3333.
     // The rolling window MUST be pinned (buckets=20) — the bare endpoint now serves the full
     // session, which would silently make the first-vs-last derivations session-cumulative.
@@ -79,6 +83,9 @@ class MarketOiClientTest {
     assertThat(oi.underlying()).isEqualTo(OiQuadrant.SHORT_COVERING);
     assertThat(oi.futures()).isEqualTo(OiQuadrant.LONG_BUILDUP); // nearest expiry, not the far leg
     assertThat(oi.sentimentPct()).isEqualByComparingTo("12.5");
+    // The measurement-only sibling lands on its OWN field — opposite in sign to the flow operand on
+    // this payload, so a mis-wire that copied one onto the other could not pass both assertions.
+    assertThat(oi.sentimentLevelPct()).isEqualByComparingTo("-33.33");
     assertThat(oi.trendingPeMinusCePct()).isEqualByComparingTo("33.3333");
     assertThat(oi.futuresBasis()).isEqualByComparingTo("10.5"); // front leg basis
     server.verify();
@@ -98,6 +105,9 @@ class MarketOiClientTest {
     assertThat(oi.underlying()).isEqualTo(OiQuadrant.NEUTRAL);
     assertThat(oi.futures()).isEqualTo(OiQuadrant.NEUTRAL);
     assertThat(oi.sentimentPct()).isNull();
+    // …including the measurement-only sibling: a suppressed chain gives no honest LEVEL either, so
+    // the shadow correctly records "no verdict" rather than a reading off unwinding writers.
+    assertThat(oi.sentimentLevelPct()).isNull();
     assertThat(oi.trendingPeMinusCePct()).isNull();
     assertThat(oi.ceOiDelta()).isNull();
     assertThat(oi.peOiDelta()).isNull();

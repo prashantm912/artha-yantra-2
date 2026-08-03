@@ -104,6 +104,18 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   code on purpose, see BUILD SUCCESS, and wrongly conclude your test cannot detect the break. Always
   red-proof through a lifecycle PHASE (`test` / `verify`). Both fail in the safe-looking direction,
   which is what makes them worse than a crash.
+  **(3) A STALE `.class` NEWER than its `.java` makes Maven report a failure that contradicts the
+  source you just read** (2026-08-03). Measured: a ratchet test failed with an expected-set missing an
+  entry demonstrably present in the source; the `.class` mtime was newer than the `.java`; re-running
+  that test ALONE passed 20/20, and a fresh full `verify` was clean. **Tell: a failure whose message
+  disagrees with the file you are looking at.** Remedy: re-run the single test, then a clean full
+  `verify`; do not "fix" the source to match a phantom. It surfaced as a false RED, but the same race
+  produces a false GREEN — which is why it belongs next to the two above.
+- ⚠️ **A red-proof can be BROKEN by being TOO STRONG, not only by staying green** (2026-08-03, caught
+  by a builder on itself). Red-proofing a rule by reverting to a *stricter* wrong rule reddened only 1
+  of the 2 tests that the *actually shipped* wrong rule reddens — under-reporting the blast radius and
+  the tests' real coverage. **Red-proof by restoring the LITERAL pre-fix body**, not by writing a rule
+  you think is equivalent. The weaker-looking result is the informative one.
 - **CI `build-test` is sharded per-service** (`.github/workflows/ci-java.yml`): a 3-leg
   matrix (`market-data` / `backtest` / `strategy-gateway` = strategy-signal + edge-gateway),
   each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the
@@ -518,6 +530,22 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   trust green healthchecks. A DB-level GUC flip
   (`ALTER DATABASE artha SET timescaledb.enable_decompression_sorted_merge = off`) is the
   emergency mitigation; the query rewrites are the real fix so the optimisation stays on.
+
+- ⚠️ **BOTH equity source tables are RETRO-MUTABLE — a persisted decision row CANNOT be reproduced
+  from current data** (found 2026-08-03, and it silently invalidates A-vs-B measurements). `candles`
+  is retroactively rewritten (one symbol's ENTIRE July series was rewritten on 2026-07-31), and
+  `nse_eod_bhavcopy` was **still gaining rows for April–June trade dates months later**. So comparing
+  "what the screen decided then" against "what the data says now" compares two different worlds and
+  reports the difference as a divergence. **Any cross-table or historical A-vs-B comparison must gate
+  on `fetched_at`** — and note `fetched_at` is an UPSERT timestamp, not first-seen, so it bounds
+  rather than pins. Concretely: this is why a "CA-plane split" investigation found **46 of 47**
+  exposures had no corporate action anywhere near them and all 38 clean cases had **byte-identical
+  closes** — the disagreement was entirely in a 50-bar mean computed over retro-mutated history.
+- ⚠️ **A YAML default is NOT a deployed value.** `application.yml`'s `${ENV:default}` says what happens
+  when the env var is absent — it says nothing about production. Reading the default as the live
+  setting put a wrong "still on `native`, needs flipping" claim into **four** documents for ~28 days
+  while the flag had in fact been flipped the whole time (2026-08-03). **Read `.env` or, better,
+  `docker inspect <container>`'s env — then PROBE what the service actually serves.**
 
 ## Docker / compose
 - **Never invoke `docker compose` directly without `--env-file .env`** — compose

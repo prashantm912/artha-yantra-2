@@ -188,6 +188,15 @@ artha:
     # (minervini / manas-arora) are always exempt (EOD signals taken next session); 0/negative disables.
     # Separate from the tick-freshness guard above. Env-tunable (.env override) via the compose passthrough.
     signal-take-max-age-minutes: ${ARTHA_PAPER_SIGNAL_TAKE_MAX_AGE_MINUTES:60}
+    # V058 / option D (HOLD, owner-approved 2026-08-03): books whose OPEN-position key is
+    # STRATEGY-SCOPED — two strategies entering the same (exchange, tradingsymbol, side) hold
+    # SEPARATE rows with their own brackets and their own exits, instead of the second averaging into
+    # the first and both exiting on whichever doctrine fires first. Capital is NOT forked: one book,
+    # one paper_account row, one kill switch, one heat cap, and a co-firing sibling INHERITS the key's
+    # existing sub-account. EMPTY = DISARMED and byte-identical to pre-V058; arming a book (e.g.
+    # `scalper`) CHANGES REALISED P&L on every co-fired trade, so it is an owner decision, not a
+    # deploy default. Env name MUST match the compose passthrough exactly (#653 placeholder trap).
+    strategy-scoped-books: ${ARTHA_PAPER_STRATEGY_SCOPED_BOOKS:}
     # A12 per-class capital-usage margin approximations (no Kite margin API).
     # Equities use full notional; long options the premium; futures & short
     # options a margin-pct-of-notional approximation (real SPAN+exposure varies).

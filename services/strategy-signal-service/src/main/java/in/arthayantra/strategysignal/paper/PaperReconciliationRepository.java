@@ -328,6 +328,12 @@ public class PaperReconciliationRepository {
                   AND o.exchange      = p.exchange
                   AND o.tradingsymbol = p.tradingsymbol
                   AND o.side          = p.side
+                  -- V058: mirrors PaperPositionRepository.openForSignal's strategy predicate. On a
+                  -- strategy-scoped book a live ENTRY from a SIBLING strategy no longer reaches this
+                  -- position through closeForSignal, so counting it as a healthy anchor here would be
+                  -- a false NEGATIVE in a detector whose whole job is "no exit driver will ever settle
+                  -- this row". Null strategy_id (unscoped/legacy) matches on the key alone, as before.
+                  AND (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)
                   AND a.signal_type   = 'ENTRY'
                   AND a.status IN ('ACTIVE', 'TAKEN')
                   AND (

@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.signals;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -82,4 +83,21 @@ public final class SignalViews {
 
   /** {@code GET /api/v1/signal-rejections/rail-counts} — the per-rail block rollup. */
   public record RailCountList(List<SignalRejectionRepository.RailCount> items) {}
+
+  /**
+   * {@code GET /api/v1/signal-rejections/eval-funnel} — the V053 per-strategy evaluation ladder for
+   * one IST session date (signal-analysis README §7 row 7).
+   *
+   * <p>{@code items} is EMPTY for a date the rollup never wrote — a down stack, a pre-V053 date, or
+   * a session outside retention. That is genuinely "unknown", not "nothing evaluated", and the
+   * consumer must say so: the V053 header is explicit that the absence of a row does not prove a
+   * strategy evaluated nothing.
+   *
+   * <p>{@code boots} is how many process boots contributed rows; {@code >1} means the day spans a
+   * restart and its totals are a SUM across boots (correct, but worth showing rather than hiding).
+   */
+  public record EvalFunnel(
+      LocalDate sessionDate,
+      int boots,
+      List<StrategyEvalDenominatorRepository.OutcomeCount> items) {}
 }

@@ -29,7 +29,8 @@ import org.springframework.stereotype.Repository;
  * across boots.
  *
  * <p>Written ONLY by {@link SignalEvalOutcomeRollupJob}, on the existing V045 scheduler thread —
- * never from the signal-eval thread. OBSERVABILITY ONLY: no trading decision reads this table.
+ * never from the signal-eval thread. READ by {@link SignalRejectionsController} for the per-strategy
+ * funnel view. OBSERVABILITY ONLY: no trading decision reads this table.
  */
 @Repository
 public class StrategyEvalDenominatorRepository {
@@ -94,6 +95,60 @@ public class StrategyEvalDenominatorRepository {
             + " eval_count = EXCLUDED.eval_count",
         args.toArray());
   }
+
+  /**
+   * The canonical denominator read (the V053 header's "what did each strategy evaluate on date X,
+   * and what was its mix"): every {@code (strategy_slug, outcome)} total for one IST session date,
+   * SUMMED across boots.
+   *
+   * <p><b>The SUM over {@code boot_id} is the whole point.</b> A mid-day restart writes a SECOND set
+   * of rows rather than overwriting the first, so reading a single boot's rows would under-report the
+   * day by however much ran before the restart. Summing makes a restart invisible to the answer —
+   * exactly as the header's canonical query does. {@link #bootCount} reports how many boots were
+   * folded in, so a reader can tell a one-boot day from a restarted one.
+   *
+   * <p>Returns an EMPTY list for a date with no rows. That is not the same as "the engine evaluated
+   * nothing": the table only ever holds combinations that were actually observed, and a stack that
+   * was down writes nothing at all. Callers must render absence as absence, never as zeros.
+   *
+   * @param sessionDate the IST session date of the evaluated BARS (never a UTC {@code ::date} cast)
+   * @return one row per observed (slug, outcome), ordered by slug then outcome
+   */
+  public List<OutcomeCount> outcomeCounts(LocalDate sessionDate) {
+    return jdbc.query(
+        "SELECT strategy_slug, outcome, SUM(eval_count) AS eval_count"
+            + " FROM strategy_eval_denominator"
+            + " WHERE session_date = ?"
+            + " GROUP BY strategy_slug, outcome"
+            + " ORDER BY strategy_slug, outcome",
+        (rs, i) ->
+            new OutcomeCount(
+                rs.getString("strategy_slug"), rs.getString("outcome"), rs.getLong("eval_count")),
+        sessionDate);
+  }
+
+  /**
+   * How many distinct boots contributed rows to {@code sessionDate} — 1 on an uninterrupted day, more
+   * after a restart. Read alongside {@link #outcomeCounts} so a consumer can say WHY a day's totals
+   * span several boots instead of silently presenting the sum as one continuous run.
+   */
+  public int bootCount(LocalDate sessionDate) {
+    Integer boots =
+        jdbc.queryForObject(
+            "SELECT count(DISTINCT boot_id) FROM strategy_eval_denominator WHERE session_date = ?",
+            Integer.class,
+            sessionDate);
+    return boots == null ? 0 : boots;
+  }
+
+  /**
+   * One (strategy, outcome) evaluation total for a session date, already summed across boots.
+   *
+   * <p>{@code outcome} is the stable {@code SignalEngine.Outcome} wire tag, NOT an enum: persisted
+   * history is keyed by the tag string and a tag that no longer maps to a constant must still be
+   * readable. Consumers order the tags into a funnel themselves.
+   */
+  public record OutcomeCount(String strategySlug, String outcome, long evalCount) {}
 
   /**
    * Bounded-retention prune: deletes every session strictly before {@code cutoff}.

@@ -169,6 +169,7 @@ class SignalEngineLivenessGaugeTest {
         mock(RejectionWriter.class),
         mock(RiskSuppressionWriter.class),
         mock(CompositeRejectionWriter.class),
+        mock(ExitOracleShadowWriter.class),
         Optional.empty(),
         mock(PlatformTransactionManager.class),
         60,

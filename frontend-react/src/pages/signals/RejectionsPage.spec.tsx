@@ -20,6 +20,9 @@ vi.mock('../../api/signalRejections.ts', async (orig) => {
     }),
     useRejectionRailCounts: () => ({ data: { items: [] } }),
     useShadowSummary: () => ({ data: { items: [] } }),
+    // The funnel panel is React.lazy, so it is still suspended while these synchronous assertions
+    // run — stubbed anyway so no real fetch is ever attempted if the chunk does resolve.
+    useEvalFunnel: () => ({ isLoading: false, isError: false, data: undefined }),
     useDotHealth: () => ({
       isLoading: false,
       isError: false,

@@ -2557,6 +2557,13 @@
             "format" : "uuid"
           }
         }, {
+          "name" : "strategySlug",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
           "name" : "from",
           "in" : "query",
           "required" : false,
@@ -2580,6 +2587,43 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/RailCountList"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/signal-rejections/eval-funnel" : {
+      "get" : {
+        "tags" : [ "signal-rejections-controller" ],
+        "operationId" : "evalFunnel",
+        "parameters" : [ {
+          "name" : "date",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EvalFunnel"
                 }
               }
             }
@@ -5662,6 +5706,42 @@
           }
         },
         "required" : [ "items" ]
+      },
+      "EvalFunnel" : {
+        "type" : "object",
+        "properties" : {
+          "sessionDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "boots" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/OutcomeCount"
+            }
+          }
+        },
+        "required" : [ "boots", "items", "sessionDate" ]
+      },
+      "OutcomeCount" : {
+        "type" : "object",
+        "properties" : {
+          "strategySlug" : {
+            "type" : "string"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "evalCount" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "evalCount", "outcome", "strategySlug" ]
       },
       "DotHealth" : {
         "type" : "object",

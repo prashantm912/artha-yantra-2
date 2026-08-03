@@ -125,10 +125,37 @@ expect "the shared json-schema keyword artifact reaches the ratchet" \
   "contracts/json-schema-2020-12-keywords.json" \
   "market_data=false,backtest=false,strategy_gateway=true"
 
-# --- a service no shard owns: fan out AND name it (CLAUDE.md sharding rule) ---
+# --- a service no shard owns: named, which ci-java turns into a HARD FAILURE ---
 expect "unowned service fans out and is named" \
   "services/brand-new-service/src/main/java/Foo.java" \
   "market_data=true,backtest=true,strategy_gateway=true,unowned_services=brand-new-service"
+
+# tools/hash-password is in the root reactor but no shard — a pre-existing gap. It lives under
+# tools/, not services/, so the unowned guard can never see it and it must NOT start failing
+# every PR now that `unowned_services` is a hard failure.
+expect "tools/ never trips the unowned guard" \
+  "tools/hash-password/src/main/java/in/arthayantra/tools/HashPassword.java" \
+  "unowned_services=,market_data=true,backtest=true,strategy_gateway=true"
+
+# --- RENAME EXTRACTION (cross-vendor review finding, 2026-08-03) ---
+# `git diff --name-only` reports ONLY the destination of a detected rename, so a cross-shard move
+# made the SOURCE shard report its required context green while code was deleted out from under
+# it. The classifiers run `git diff --no-renames --name-only` so BOTH paths reach this script.
+# These cases pin the classifier's half of that contract; the assert_workflow_greps below pin the
+# flag itself, which is the part that can actually regress.
+expect "cross-shard rename runs BOTH the source and destination shards" \
+  "services/backtest-service/src/main/java/in/arthayantra/backtest/analytics/BenchmarkAnalytics.java
+services/market-data-service/src/main/java/in/arthayantra/marketdata/RenameProbe.java" \
+  "market_data=true,backtest=true,strategy_gateway=false"
+
+expect "destination-only (what rename detection WOULD have produced) misses the source shard" \
+  "services/market-data-service/src/main/java/in/arthayantra/marketdata/RenameProbe.java" \
+  "market_data=true,backtest=false,strategy_gateway=false"
+
+expect "moving the metrics catalog out reaches both owning gates" \
+  "contracts/metrics/trial-metrics-catalog.json
+docs/metrics/trial-metrics-catalog.json" \
+  "backtest=true,market_data=false,strategy_gateway=false"
 
 # A loose file directly under services/ is not a service directory and must not trip the guard.
 expect "loose file under services/ is not an unowned service" \
@@ -145,6 +172,52 @@ expect "docs alongside a service change still runs that shard" \
   "README.md
 services/market-data-service/src/main/java/A.java" \
   "market_data=true,backtest=false,strategy_gateway=false"
+
+# --- the WORKFLOW side of the contract -------------------------------------------------------
+# The classifier above is only half of it. The other half is how the workflows FEED it, and that
+# is where the rename bug actually lived: no input this script can be given would have caught a
+# missing `--no-renames`, because by then git has already dropped the source path. So assert on
+# the workflow text directly. These are the two regressions that reintroduce a green required
+# context over a shard that never ran.
+workflows="$script_dir/../workflows"
+
+# must_grep <file> <fixed-string> <why>
+must_grep() {
+  if ! grep -qF -- "$2" "$workflows/$1"; then
+    echo "FAIL [$1] missing required text: $2"
+    echo "      why: $3"
+    failures=$((failures + 1))
+  fi
+}
+# must_not_grep <file> <extended-regex> <why>
+# COMMENT LINES ARE STRIPPED FIRST. These files explain the rename trap in prose, and the prose
+# necessarily quotes the very form being banned — without this filter the check fired on its own
+# documentation and failed permanently (caught while writing it).
+must_not_grep() {
+  if sed 's/[[:space:]]*#.*$//' "$workflows/$1" | grep -qE -- "$2"; then
+    echo "FAIL [$1] contains forbidden pattern in CODE: $2"
+    echo "      why: $3"
+    failures=$((failures + 1))
+  fi
+}
+
+for wf in ci-java.yml ci-optimizer.yml ci-margin.yml; do
+  must_grep "$wf" 'git diff --no-renames --name-only' \
+    "without --no-renames git reports only a rename's DESTINATION, so a cross-shard move leaves the source gate green having never run"
+  # Catches a partial revert that leaves the flag off on one line while another still has it.
+  must_not_grep "$wf" 'git diff --name-only' \
+    "a bare 'git diff --name-only' is the rename-blind form; every classifier must use --no-renames"
+done
+
+must_grep ci-java.yml 'unowned_services=' \
+  "the unowned-service guard must stay wired to the classifier output"
+# Deliberately NOT a bare `exit 1` grep: ci-java.yml has several other `exit 1`s (the two
+# fail-closed steps), so that assertion would pass with the whole policy deleted. Pin the
+# annotation title, which exists only in this policy, and the ::warning form it replaced.
+must_grep ci-java.yml '::error title=Service directory not covered by any build-test shard::' \
+  "an unmapped service directory is a HARD FAILURE (owner decision 2026-08-03), not a warning — fanning out to three shards does not BUILD it"
+must_not_grep ci-java.yml '::warning title=Service not covered by any build-test shard' \
+  "the old warning-only form must not come back; it reads as covered while providing none"
 
 if [ "$failures" -ne 0 ]; then
   echo "classify_java_shards: $failures assertion(s) failed"

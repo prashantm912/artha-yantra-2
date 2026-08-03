@@ -84,7 +84,14 @@ jobs:
           fi
 
           echo "diff base: $base"
-          files="$(git diff --name-only "$base" HEAD)"
+          # --no-renames is LOAD-BEARING, not a style choice. `git diff --name-only` reports
+          # only the DESTINATION of a detected rename, so moving a file from one shard to
+          # another makes the SOURCE shard invisible -- it reports its required context GREEN
+          # while code was deleted out from under it and its tests never ran. Reproduced against
+          # repository rename commit bc9ae69f (cross-vendor review, 2026-08-03), and directly:
+          # a backtest -> market-data move classified backtest=false with rename detection on,
+          # backtest=true with it off. A rename is exactly when BOTH shards must build.
+          files="$(git diff --no-renames --name-only "$base" HEAD)"
           echo "$files"
 
           # The service itself, plus every SHARED file its suite actually reads — measured, not

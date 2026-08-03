@@ -70,15 +70,25 @@ if grep -Eq '^contracts/([^/]*\.openapi\.json|json-schema-2020-12-keywords\.json
   strategy_gateway=true
 fi
 
-# A service directory no shard owns. CLAUDE.md: "Adding a new service? Add a matrix shard or
-# its tests NEVER run in CI." Fan out (fail-safe) AND name it, so the omission is visible on
-# the PR that introduces it rather than discovered months later. The Python services are
-# listed as known-not-JVM so they do not trip this.
+# Every service directory this repo knows about. The four JVM services are mapped to shards
+# above; the two Python services own their own workflows (ci-optimizer / ci-margin) and are
+# listed here so they do not read as unowned. EDIT THIS when a service is added, renamed or
+# removed — ci-java.yml turns a non-empty `unowned_services` into a hard failure (owner
+# decision 2026-08-03), because CLAUDE.md's rule is "add a matrix shard or its tests NEVER run
+# in CI", and fanning out to three shards does NOT build a new service. It only looks busy.
+KNOWN_SERVICES='market-data-service|backtest-service|strategy-signal-service|edge-gateway|optimizer-service|margin-service'
+
+# Note this matches `services/<dir>/`, so a loose file directly under services/ (e.g.
+# services/README.md) is not a service and does not trip it. `tools/` is a different tree
+# entirely and can never reach this — tools/hash-password is in the root reactor but no shard,
+# a pre-existing gap that must NOT start failing every PR.
 unowned="$(grep -Eo '^services/[^/]+/' <<<"$files" \
   | cut -d/ -f2 \
   | sort -u \
-  | grep -Ev '^(market-data-service|backtest-service|strategy-signal-service|edge-gateway|optimizer-service|margin-service)$' \
+  | grep -Ev "^($KNOWN_SERVICES)$" \
   | paste -sd, - || true)"
+# Still fan out. The workflow fails the run on this, so the booleans are moot there — but they
+# stay fail-safe for any caller that treats `unowned_services` as advisory.
 if [ -n "$unowned" ]; then
   mark_all
 fi

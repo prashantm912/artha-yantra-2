@@ -122,7 +122,14 @@ jobs:
           fi
 
           echo "diff base: $base"
-          files="$(git diff --name-only "$base" HEAD)"
+          # --no-renames is LOAD-BEARING, not a style choice. `git diff --name-only` reports
+          # only the DESTINATION of a detected rename, so moving a file from one shard to
+          # another makes the SOURCE shard invisible -- it reports its required context GREEN
+          # while code was deleted out from under it and its tests never ran. Reproduced against
+          # repository rename commit bc9ae69f (cross-vendor review, 2026-08-03), and directly:
+          # a backtest -> market-data move classified backtest=false with rename detection on,
+          # backtest=true with it off. A rename is exactly when BOTH shards must build.
+          files="$(git diff --no-renames --name-only "$base" HEAD)"
           echo "$files"
 
           # The path -> shard mapping lives in a tested script (see its header for how the
@@ -139,9 +146,18 @@ jobs:
           echo "$out"
           echo "$out" >> "$GITHUB_OUTPUT"
 
+          # HARD FAILURE, not a warning (owner decision 2026-08-03). Fanning out to all three
+          # shards does not BUILD an unmapped service — it looks busy while providing no coverage,
+          # and CLAUDE.md's rule is "add a matrix shard or its tests NEVER run in CI". Failing here
+          # forces the mapping to be updated in the same PR that moves a service. Accepted cost: a
+          # service RENAME or REMOVAL also fails until KNOWN_SERVICES is updated, which is exactly
+          # when the mapping needs attention. The message below has to make that case readable,
+          # because --no-renames means a rename reports BOTH the old and the new directory.
           unowned="$(grep '^unowned_services=' <<<"$out" | cut -d= -f2-)"
           if [ -n "$unowned" ]; then
-            echo "::warning title=Service not covered by any build-test shard::$unowned — every shard was run as a fail-safe, but NO shard builds this service, so its tests do not run in CI. Add a matrix shard in ci-java.yml."
+            echo "::error title=Service directory not covered by any build-test shard::$unowned — no shard builds it, so its tests would never run in CI. If this is a NEW service: add a matrix shard to build-test in ci-java.yml AND add the directory to KNOWN_SERVICES in .github/scripts/classify_java_shards.sh. If this is a RENAME or a REMOVAL: the classifier runs with --no-renames on purpose, so BOTH the old and the new directory are listed here — update KNOWN_SERVICES (and the shard's \`modules:\`) to match the new layout."
+            echo "::error::unowned service directories: $unowned"
+            exit 1
           fi
 
   gitleaks:

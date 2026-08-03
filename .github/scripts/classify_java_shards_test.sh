@@ -201,7 +201,14 @@ must_not_grep() {
   fi
 }
 
-for wf in ci-java.yml ci-optimizer.yml ci-margin.yml; do
+# EVERY path classifier in .github/workflows, not just the JVM one — a swept list, verified
+# 2026-08-03 to be exhaustive (`grep -rn "git diff" .github/` found these four and nothing else).
+# ci-contracts is in here because it had the identical defect: a move out of a service directory
+# to docs/ classified contracts=FALSE, and `contracts` is a REQUIRED context, so it reported green
+# with every step skipped while a service source file was deleted.
+# This runs in ci-java's `changes` job, which is UNGATED and on a workflow with no `paths:` filter,
+# so it fires on every PR — including one that touches only ci-contracts.yml.
+for wf in ci-java.yml ci-optimizer.yml ci-margin.yml ci-contracts.yml; do
   must_grep "$wf" 'git diff --no-renames --name-only' \
     "without --no-renames git reports only a rename's DESTINATION, so a cross-shard move leaves the source gate green having never run"
   # Catches a partial revert that leaves the flag off on one line while another still has it.

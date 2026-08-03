@@ -488,6 +488,43 @@ public class OptionsSnapshotReader {
     return series(underlying, expiry, interval, earliest, newestBucket.plus(interval.bucket()));
   }
 
+  /**
+   * True iff [{@code from}, {@code to}) holds at least one LIVE-CAPTURED, non-quarantined snapshot
+   * row for ({@code underlying}, {@code expiry}) — the provenance discriminator behind the OI reads'
+   * freshness envelope ({@code OptionsAnalyticsController.oiFreshness}).
+   *
+   * <p>"Live-captured" is deliberately the SAME predicate {@code OptionsSnapshotRepository}'s {@code
+   * CAPTURED_ONLY} already uses to decide whether a stored chain may be served back as the live one:
+   * {@code source} is NULL on pre-V023 rows ("read as live by convention", V023's own wording) and
+   * {@code 'LIVE'} on every capture since, while every other label is a DERIVATION rather than a
+   * capture — {@code 'BACKFILL'} (the OI importer's 1m history) and {@code 'UPSTOX_1M'} (the
+   * on-demand stock-chain warm, {@code StockChainWarmService}). Quarantined rows are excluded because
+   * every OI fold excludes them, so they can never be the rows a response was actually built from.
+   *
+   * <p>The {@code +1s} shift on both bounds mirrors {@link #series}, so the window probed is exactly
+   * the one that produced the rows under the end-of-window labelling this class documents (bucket
+   * {@code B} holds {@code B < ts <= B + interval}).
+   *
+   * <p>A bare {@code count(*)} rather than {@code EXISTS}/{@code ORDER BY … LIMIT 1} for the same
+   * reason {@link #latestPair} uses two aggregates: an aggregate carries no pathkey, so TimescaleDB
+   * 2.18.2's compressed-batch sorted-merge planner assertion is never reachable. The window is one
+   * interval bucket wide, so the count is bounded by the chain size.
+   */
+  public boolean hasCapturedRows(
+      String underlying, LocalDate expiry, OffsetDateTime from, OffsetDateTime to) {
+    Long rows =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM options_chain_snapshots "
+                + "WHERE underlying = ? AND expiry = ? AND ts >= ? AND ts < ? "
+                + "AND (source IS NULL OR source = 'LIVE') AND (quarantined IS NOT TRUE)",
+            Long.class,
+            underlying,
+            java.sql.Date.valueOf(expiry),
+            Timestamp.from(from.plusSeconds(1).toInstant()),
+            Timestamp.from(to.plusSeconds(1).toInstant()));
+    return rows != null && rows > 0;
+  }
+
   /** Runs a single-row bucket aggregate; null when the filtered set is empty. */
   private OffsetDateTime queryBucket(String sql, List<Object> args) {
     List<OffsetDateTime> rows =

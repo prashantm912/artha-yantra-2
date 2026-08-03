@@ -120,6 +120,17 @@ public class HistoricalOiReader {
     return eu == null ? live : derived.eodSeries(eu, expiry, from, to);
   }
 
+  /**
+   * True iff [{@code from}, {@code to}) is backed by at least one LIVE-CAPTURED snapshot row —
+   * {@link OptionsSnapshotReader#hasCapturedRows}, straight through. Deliberately NOT facaded onto
+   * the derived reader: the derived path writes nothing, so a window it served has no snapshot row
+   * at all and this correctly answers false.
+   */
+  public boolean hasCapturedRows(
+      String name, LocalDate expiry, OffsetDateTime from, OffsetDateTime to) {
+    return snap.hasCapturedRows(name, expiry, from, to);
+  }
+
   public List<PerStrikeSessionStat> sessionStats(
       String name, LocalDate expiry, LocalDate session, int intervalMinutes) {
     List<PerStrikeSessionStat> live = snap.sessionStats(name, expiry, session, intervalMinutes);

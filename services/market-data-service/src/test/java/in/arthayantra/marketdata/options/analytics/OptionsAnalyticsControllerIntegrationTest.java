@@ -48,6 +48,86 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.maxPain").value("22500.00"));
   }
 
+  /**
+   * A WARMED STOCK chain is candle-derived data that is served TODAY, and live is the DEFAULT mode —
+   * so its freshness must read {@code derived}/{@code candle-derived}. {@code oiFreshness} used to
+   * carry a {@code !q.live()} conjunct that made {@code derived} structurally unreachable in live
+   * mode, so {@code StockChainWarmService}'s {@code source='UPSTOX_1M'} rows (candle-derived, iv
+   * null) were published as live captured OI — measured live 2026-08-03 on {@code SBIN}, on both
+   * {@code /oi-stats} and {@code /active-strikes}.
+   */
+  @Test
+  void warmedStockChainReadsAsDerivedInLiveMode() throws Exception {
+    String u = "FRESHWARMSTOCK";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "CE", "100", 1000L, 0L, "UPSTOX_1M");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "PE", "90", 1500L, 0L, "UPSTOX_1M");
+
+    // live mode = no `mode` param at all (OiQuery.of defaults live=true, date=null)
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.freshness.provenance").value("derived"))
+        .andExpect(jsonPath("$.freshness.source").value("candle-derived"));
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/active-strikes")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.freshness.provenance").value("derived"))
+        .andExpect(jsonPath("$.freshness.source").value("candle-derived"));
+  }
+
+  /**
+   * The opposite regression the source-based discriminator must not introduce: a genuine LIVE-captured
+   * INDEX chain whose legs carry NO iv yet (early session, or a forward the solver could not resolve)
+   * must still read {@code live}/{@code capture}. {@code iv == null} is a SYMPTOM of derivation, never
+   * its identity — this fixture is byte-identical to {@code warmedStockChainReadsAsDerivedInLiveMode}'s
+   * except for the {@code source} label, so it isolates the discriminator itself.
+   */
+  @Test
+  void liveCapturedIndexChainReadsAsCaptureEvenWithNullIv() throws Exception {
+    String u = "FRESHLIVEINDEX";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 16, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "CE", "100", 1000L, 0L, "LIVE");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "PE", "90", 1500L, 0L, "LIVE");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.freshness.provenance").value("live"))
+        .andExpect(jsonPath("$.freshness.source").value("capture"));
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/active-strikes")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.freshness.provenance").value("live"))
+        .andExpect(jsonPath("$.freshness.source").value("capture"));
+  }
+
   @Test
   void unsupportedIntervalIs400WithCode() throws Exception {
     mockMvc

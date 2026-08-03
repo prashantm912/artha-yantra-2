@@ -72,12 +72,13 @@ function renderPanel() {
 }
 
 describe('FocusPanel', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3697ms in a full-suite run.
   it('renders the signal + attention queues and a feed link', async () => {
     renderPanel();
     expect(await screen.findByRole('button', { name: 'NIFTY 25200 CE scalp' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Participant-OI missing for 2026-07-09' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open feed/ })).toHaveAttribute('href', '/insights');
-  });
+  }, 15_000);
 
   it('opens the explain drawer from Review', async () => {
     renderPanel();

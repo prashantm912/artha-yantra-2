@@ -112,6 +112,7 @@ function renderCockpit() {
 }
 
 describe('CockpitPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 5104ms in a full-suite run.
   it('renders the single shared FilterBar and all five panel headings when data is present', () => {
     useChainTable.mockReturnValue({ data: chain, ...idle });
     useConnectingDots.mockReturnValue({ data: cd, ...idle });
@@ -140,7 +141,7 @@ describe('CockpitPage', () => {
     expect(screen.getByTestId('straddle-chart')).toBeInTheDocument();
     expect(screen.getByTestId('ce-heatmap')).toBeInTheDocument();
     expect(screen.getByTestId('pe-heatmap')).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('badges the Option-chain panel as stale, with the capture DATE, when the chain degraded to the last captured book', () => {
     // After market close the server serves the last CAPTURED chain instead of 503-ing (freshness

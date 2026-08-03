@@ -34,6 +34,7 @@ describe('BacktestRunnerPage', () => {
     sweep.mockClear();
   });
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 8883ms in a full-suite run.
   it('runs a backtest once a strategy is picked, and the sweep tab reveals sweep params', () => {
     renderPage();
     const runBtn = screen.getByRole('button', { name: /Run backtest/ });
@@ -74,7 +75,7 @@ describe('BacktestRunnerPage', () => {
     expect(within(sweepDialog).getByText(/sharpe.*maximize.*mean/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Confirm & run' }));
     expect(sweep).toHaveBeenCalledWith(expect.objectContaining({ strategyId: 's1', maxTrials: 30 }), expect.anything());
-  });
+  }, 15_000);
 
   it('cancels the confirmation without submitting', () => {
     renderPage();

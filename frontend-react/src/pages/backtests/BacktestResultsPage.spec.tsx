@@ -117,6 +117,7 @@ describe('BacktestResultsPage', () => {
     foldsMock.result = foldsMock.success();
   });
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 4535ms in a full-suite run.
   it('shows metrics, trades, folds and the Monte Carlo tab', () => {
     renderPage();
     expect(screen.getByText('Sharpe')).toBeInTheDocument();
@@ -145,7 +146,7 @@ describe('BacktestResultsPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Monte Carlo' }));
     expect(screen.getByText(/risk of ruin 0.02/)).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('surfaces a folds fetch error instead of a false-empty "no folds" (FE-03)', () => {
     // A fold-fetch 500 used to be swallowed to [] → the Folds tab silently vanished, reading as a

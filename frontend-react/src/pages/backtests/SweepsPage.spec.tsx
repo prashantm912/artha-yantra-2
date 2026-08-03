@@ -68,9 +68,10 @@ describe('SweepsPage', () => {
     expect(screen.getAllByText('Optimizer restarted before this sweep completed.').length).toBeGreaterThan(0);
   });
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3351ms in a full-suite run.
   it('links a sweep to the existing detail page', () => {
     renderPage();
     fireEvent.click(screen.getAllByRole('link', { name: 'Open sweep aaaa1111' })[0]);
     expect(screen.getByTestId('location')).toHaveTextContent('/optimizations/aaaa1111-bb');
-  });
+  }, 15_000);
 });

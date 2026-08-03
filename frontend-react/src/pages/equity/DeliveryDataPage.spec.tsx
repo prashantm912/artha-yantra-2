@@ -39,6 +39,7 @@ function renderPage() {
 }
 
 describe('DeliveryDataPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 5310ms in a full-suite run.
   it('shows a prompt before a symbol is submitted, then the delivery series after Go', () => {
     renderPage();
     expect(screen.getByText(/Enter a stock symbol/)).toBeInTheDocument();
@@ -52,5 +53,5 @@ describe('DeliveryDataPage', () => {
     }
     expect(screen.getAllByText('2026-06-12').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/69\.39%/).length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });

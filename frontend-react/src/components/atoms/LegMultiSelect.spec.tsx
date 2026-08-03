@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { LegMultiSelect } from './LegMultiSelect.tsx';
 
 describe('LegMultiSelect', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3803ms in a full-suite run.
   it('exposes aria state, opens on click, toggles a leg, and filters by search', () => {
     const onToggle = vi.fn();
     render(
@@ -30,7 +31,7 @@ describe('LegMultiSelect', () => {
     });
     expect(screen.queryByRole('checkbox', { name: '57200 CE' })).toBeNull();
     expect(screen.getByRole('checkbox', { name: '57100 CE' })).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('shows the placeholder label when nothing is selected', () => {
     render(<LegMultiSelect options={['57200 CE']} selected={[]} onToggle={vi.fn()} />);

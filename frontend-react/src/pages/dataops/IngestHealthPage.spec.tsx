@@ -95,6 +95,7 @@ function renderPage() {
 }
 
 describe('IngestHealthPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 4052ms in a full-suite run.
   it('renders the per-source health table with verdicts, missing-days and last-run', () => {
     renderPage();
 
@@ -121,5 +122,5 @@ describe('IngestHealthPage', () => {
     expect(screen.getAllByText(/stale/).length).toBeGreaterThan(0);
     // The data-starved screener detail is shown.
     expect(screen.getAllByText(/data-starved/).length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });

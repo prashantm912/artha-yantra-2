@@ -70,6 +70,7 @@ describe('DataQualityPage', () => {
     apiFetchMock.mockResolvedValue(report);
   });
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 4433ms in a full-suite run.
   it('renders all completeness scopes, coverage, failures, and the EQ summary rollup', async () => {
     renderPage();
 
@@ -85,7 +86,7 @@ describe('DataQualityPage', () => {
     expect(within(failedRow).getByText('14 one-minute bars missing')).toBeInTheDocument();
     expect(screen.getByText('180/187 EQ symbols')).toBeInTheDocument();
     expect(screen.queryByText('__SUMMARY__')).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('requests the selected report date', async () => {
     renderPage();

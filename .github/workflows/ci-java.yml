@@ -95,7 +95,13 @@ jobs:
           # in it because the ITs migrate the REAL lineages into Testcontainers (audit P2) —
           # else a column rename/type change merges green and breaks every service IT on the
           # NEXT unrelated PR.
-          if echo "$files" | grep -Eq '^(services/|libs/|tools/|\.mvn/|config/checkstyle/|deploy/flyway/|pom\.xml$|\.github/workflows/ci-java\.yml$)'; then
+          # contracts/metrics/ is in it for the SAME reason (measured 2026-08-03): the
+          # trial-metrics catalog is a cross-language source of truth that Java pins via
+          # TrialMetricsCatalogConsistencyTest, but a catalog-ONLY edit matched nothing here,
+          # so java=false and the gate reported pass WITHOUT RUNNING. ci-optimizer was blind
+          # to the same edit (paths: services/optimizer-service/**), so the one file the whole
+          # contract exists to protect was the one file neither half of the gate covered.
+          if echo "$files" | grep -Eq '^(services/|libs/|tools/|\.mvn/|config/checkstyle/|deploy/flyway/|contracts/metrics/|pom\.xml$|\.github/workflows/ci-java\.yml$)'; then
             echo "java=true" >> "$GITHUB_OUTPUT"
           else
             echo "java=false" >> "$GITHUB_OUTPUT"

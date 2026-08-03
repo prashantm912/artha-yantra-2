@@ -40,8 +40,16 @@ import org.junit.jupiter.api.Test;
 class ExitOracleShadowWriterTest {
 
   private static final OffsetDateTime BAR = OffsetDateTime.now(ZoneOffset.ofHoursMinutes(5, 30));
+  /**
+   * ⚠️ The raw {@code oiSlopeAgreeWouldPass} here (FALSE) deliberately DISAGREES with the tag-aware
+   * {@code slopeGatePass} on the counterfactual below (TRUE). {@link SentimentLevelShadow} evaluates
+   * oi-slope-agree unconditionally, while the gate's value is null when the tag is unarmed — so the
+   * writer must read the GATE's. With both spellings set to the same value (as this fixture
+   * originally had) every assertion below passes whichever source the writer reads, which is exactly
+   * how the round-4 Major survived a green suite.
+   */
   private static final SentimentLevelShadow SHADOW =
-      new SentimentLevelShadow(new BigDecimal("0.00"), new BigDecimal("30"), true, true);
+      new SentimentLevelShadow(new BigDecimal("0.00"), new BigDecimal("30"), true, false);
   /** The level operand would have fired a CE — against a held PE that is a flip. */
   private static final SentimentCounterfactual WOULD_FIRE_CE =
       new SentimentCounterfactual(
@@ -212,6 +220,65 @@ class ExitOracleShadowWriterTest {
           .insert(
               7L, "slug", BAR, "CE", "CE", null, false, new BigDecimal("1.5"), null,
               false, null, null, null, null, null, null, null, null, null);
+    } finally {
+      writer.drainAndShutdown(500L);
+    }
+  }
+
+  /**
+   * VERIFY GOAL (round-4 Major) — a strategy WITHOUT {@code oi-slope-agree} persists
+   * {@code slope_gate_would_pass = NULL}, honouring the schema's "null ⇒ tag unarmed" contract.
+   *
+   * <p>Discriminating by construction: the raw {@link SentimentLevelShadow} verdict handed in is a
+   * REAL boolean (it is computed unconditionally), so a writer persisting that instead of the gate's
+   * tag-aware null writes {@code false} here and fails. Six of the twelve armed strategies are in
+   * exactly this state, and for them the raw value is meaningless — a row reporting it would look
+   * self-contradictory beside {@code shadow_would_fire = true}.
+   */
+  @Test
+  void aStrategyWithoutTheSlopeTagPersistsNullNotTheAlwaysEvaluatedRawVerdict() {
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    ExitOracleShadowRepository repo = mock(ExitOracleShadowRepository.class);
+    ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
+    try {
+      // tag UNARMED ⇒ the gate reports slopeGatePass = null, while the raw shadow says false.
+      SentimentCounterfactual unarmed =
+          new SentimentCounterfactual(
+              CE, true, new BigDecimal("0.94"), new BigDecimal("0.6"), true, null, null);
+      writer.record(21L, "slug-no-slope-tag", BAR, "PE", "CE", "CE", true, SHADOW, unarmed);
+      verify(repo, timeout(5_000))
+          .insert(
+              21L, "slug-no-slope-tag", BAR, "PE", "CE", "CE", true,
+              new BigDecimal("0.00"), new BigDecimal("30"),
+              true, true, "CE", true,
+              new BigDecimal("0.94"), new BigDecimal("0.6"), true, null,
+              true,
+              null); // ← the contract: unarmed tag ⇒ NULL, never the raw false
+    } finally {
+      writer.drainAndShutdown(500L);
+    }
+  }
+
+  /**
+   * The other half: a strategy WITH the tag persists the gate's real verdict. The fixture's raw
+   * shadow value is FALSE and the gate's is TRUE, so this pins that the persisted value comes from
+   * the counterfactual — a writer reading the shadow would store {@code false} and fail here.
+   */
+  @Test
+  void aStrategyWithTheSlopeTagPersistsTheGatesVerdictNotTheRawOne() {
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    ExitOracleShadowRepository repo = mock(ExitOracleShadowRepository.class);
+    ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
+    try {
+      record(writer); // WOULD_FIRE_CE carries slopeGatePass = TRUE; SHADOW's raw value is FALSE
+      verify(repo, timeout(5_000))
+          .insert(
+              42L, "scalp-trending-oi-nifty", BAR, "PE", "CE", "CE", true,
+              new BigDecimal("0.00"), new BigDecimal("30"),
+              true, true, "CE", true,
+              new BigDecimal("0.94"), new BigDecimal("0.6"), true, null,
+              true,
+              true); // ← the GATE's tag-aware verdict, not the shadow's raw false
     } finally {
       writer.drainAndShutdown(500L);
     }

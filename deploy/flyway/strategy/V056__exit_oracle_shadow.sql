@@ -97,8 +97,20 @@ CREATE TABLE exit_oracle_shadow (
   shadow_composite_valid BOOLEAN,             -- aggregate cleared threshold AND decisive legs held
   shadow_blocking_rail  TEXT,                 -- first SENTIMENT-INDEPENDENT rail that blocked live;
                                               -- non-null ⇒ no operand could have made it fire
-  dot_would_support     BOOLEAN,              -- `sentiment` dot verdict on the LEVEL operand
-  slope_gate_would_pass BOOLEAN,              -- `oi-slope-agree` verdict; null ⇒ tag unarmed
+  -- ⚠️ These last two are NOT the same scope as each other, despite sitting together.
+  -- dot_would_support is an OPERAND fact: the `sentiment` dot is scored on EVERY bar, so this is
+  -- populated whenever a level operand exists — INDEPENDENT of shadow_verdict_known, and it may be
+  -- non-null on a row whose verdict was not evaluable. Read it as "what the dot would have said",
+  -- never as part of the verdict.
+  dot_would_support     BOOLEAN,
+  -- slope_gate_would_pass IS verdict-scoped and CONFIGURATION-AWARE: `oi-slope-agree` is armed on
+  -- only 6 of the 12 strategies carrying oi-confluence-exit, and NULL here means the tag is unarmed
+  -- (or the verdict was not evaluable) — never "the rail would have failed". The writer must take
+  -- the gate's tag-aware value; SentimentLevelShadow computes this rail UNCONDITIONALLY and its raw
+  -- value is meaningless for the 6 unarmed strategies. Persisting that raw value was a real defect
+  -- (round-4 review): rows reported slope_gate_would_pass=false beside shadow_would_fire=true, which
+  -- is self-contradictory and breaks the "provable from the row alone" property.
+  slope_gate_would_pass BOOLEAN,
 
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   -- One row per (entry, bar): the oracle evaluates a given held position at most once per bar, so a

@@ -107,7 +107,15 @@ public class ExitOracleShadowWriter {
                 known ? counterfactual.threshold() : null,
                 known ? counterfactual.compositeValid() : null,
                 known ? counterfactual.blockingRail() : null,
-                shadow.sentimentDotWouldSupport(), shadow.oiSlopeAgreeWouldPass());
+                // dot_would_support is an OPERAND fact (the `sentiment` dot is scored on every
+                // bar), so it rides straight off the shadow. slope_gate_would_pass is NOT: the
+                // schema contract is "null ⇒ tag unarmed", and SentimentLevelShadow evaluates
+                // oi-slope-agree UNCONDITIONALLY. Persisting its raw value would report a real
+                // boolean for the six strategies that never run that rail — a row claiming more
+                // than it knows, and self-contradictory beside shadow_would_fire=true. Take the
+                // gate's tag-aware value, which is already null when the tag is unarmed.
+                shadow.sentimentDotWouldSupport(),
+                known ? counterfactual.slopeGatePass() : null);
             return true;
           } catch (RuntimeException e) {
             log.warn(

@@ -36,8 +36,13 @@ Three facts compose, each independently verified:
 
 1. **07-17 is a real historical hole.** `strategy.swing_batch_runs` jumps `2026-07-16` →
    `2026-07-20` for *both* families — the 07-17 stack outage that motivated the whole catch-up
-   branch (the incident where `paper_positions id=28` OMAXAUTO sat 3 days past its stop). Every
+   branch (the incident where `paper_positions id=29` OMAXAUTO sat past its stop). Every
    other session in the window has a marker.
+   > ⚠️ **CORRECTED 2026-08-03.** This line cited `id=28`; that row is **SBCL**, a manas-arora SELL
+   > closed 07-17. OMAXAUTO is **`id=29`**. And "3 days past its stop" was calendar days, not
+   > sessions: only **07-17** closed below the 229.9553 stop (228.38). 07-20 closed back above at
+   > 233.72, so the economic cost of the miss was ≈ zero — the owner hand-closed at 228.27 on 07-20,
+   > i.e. backfilled the missed 07-17 exit at the 07-17 price.
 2. **07-17 sits in the sweep window.** The window is the `max-attempts + 2` = **7** most-recent NSE
    trading sessions strictly before today
    ([`SwingBatchCatchUp.sessionWindow`](../../services/strategy-signal-service/src/main/java/in/arthayantra/strategysignal/swing/SwingBatchCatchUp.java), `catchup-max-attempts` default `5`):

@@ -29,6 +29,7 @@ import in.arthayantra.strategysignal.scalper.ScalperGateContext;
 import in.arthayantra.strategysignal.scalper.ScalperGates;
 import in.arthayantra.strategysignal.scalper.ScalperManualChecks;
 import in.arthayantra.strategysignal.scalper.ScalperRisk;
+import in.arthayantra.strategysignal.scalper.SentimentLevelShadow;
 import in.arthayantra.strategysignal.scalper.StrikePicker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
@@ -2686,6 +2687,11 @@ public class SignalEngine {
         n.put("reason", ds.reason());
       }
     }
+    // MEASUREMENT-ONLY, in LOCKSTEP with FiredDiagnosticJson: what the two sentiment SIGN tests
+    // (the `sentiment` dot + the `oi-slope-agree` rail) would have said had they read the LEVEL
+    // operand instead of the ΔOI-FLOW one they do read. Built AFTER the block decision from the
+    // context already in hand; nothing here feeds a gate. See SentimentLevelShadow.
+    SentimentLevelShadow.of(d.context() == null ? null : d.context().oi(), d.side()).appendTo(root);
     if (d.context() != null) {
       ScalperGateContext ctx = d.context();
       ObjectNode c = root.putObject("context");

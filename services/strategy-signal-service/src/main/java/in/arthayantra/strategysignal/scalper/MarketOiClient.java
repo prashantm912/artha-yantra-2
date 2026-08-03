@@ -418,7 +418,9 @@ public class MarketOiClient {
         sentiment.slope(),
         spurt.oiPct(),
         spurt.pricePct(),
-        trending.divergencePct());
+        trending.divergencePct(),
+        // Measurement-only carrier — no gate or dot reads it (see SentimentLevelShadow).
+        sentiment.levelBased());
   }
 
   /**
@@ -740,28 +742,45 @@ public class MarketOiClient {
     return peDelta.subtract(ceDelta).abs().multiply(HUNDRED).divide(denom, 4, RoundingMode.HALF_UP);
   }
 
-  /** §A5 carrier: the sentiment LEVEL plus the signed slope over the {@code sentimentSeries} window. */
-  record Sentiment(BigDecimal level, BigDecimal slope) {
-    static final Sentiment EMPTY = new Sentiment(null, null);
+  /**
+   * §A5 carrier: the sentiment LEVEL plus the signed slope over the {@code sentimentSeries} window.
+   *
+   * <p>{@code levelBased} is the MEASUREMENT-ONLY sibling: market-data's {@code sentimentLevelPct}
+   * (OI stock, the oipulse convention) beside the ΔOI-FLOW {@code level} the gates consume. Read by
+   * {@link SentimentLevelShadow} only; null when the field is absent from the payload.
+   */
+  record Sentiment(BigDecimal level, BigDecimal slope, BigDecimal levelBased) {
+    static final Sentiment EMPTY = new Sentiment(null, null, null);
+
+    /** Flow-only form (the shape before the shadow carrier): {@code levelBased} defaults to null. */
+    Sentiment(BigDecimal level, BigDecimal slope) {
+      this(level, slope, null);
+    }
   }
 
   /**
    * §A5: the sentiment LEVEL (scalar {@code sentimentPct}) plus a simple signed slope over the new
    * {@code sentimentSeries:[{sentimentPct}]} (newest-last): {@code last − first}. null slope when the
    * series is shorter than 2 buckets or absent — the level is still surfaced from the scalar.
+   *
+   * <p>The LEVEL-based {@code sentimentLevelPct} rides alongside on every branch — it is a sibling
+   * scalar of {@code sentimentPct}, independent of the series, so a short/absent series must not
+   * suppress it. {@code decimal()} already maps a missing node to null, so an older market-data that
+   * does not publish the key degrades to "no shadow verdict" with no branch of its own.
    */
   Sentiment deriveSentiment(JsonNode json) {
     BigDecimal level = decimal(json.path("sentimentPct"));
+    BigDecimal levelBased = decimal(json.path("sentimentLevelPct"));
     JsonNode series = json.path("sentimentSeries");
     if (!series.isArray() || series.size() < 2) {
-      return new Sentiment(level, null);
+      return new Sentiment(level, null, levelBased);
     }
     BigDecimal first = decimal(series.get(0).path("sentimentPct"));
     BigDecimal last = decimal(series.get(series.size() - 1).path("sentimentPct"));
     if (first == null || last == null) {
-      return new Sentiment(level, null);
+      return new Sentiment(level, null, levelBased);
     }
-    return new Sentiment(level, last.subtract(first));
+    return new Sentiment(level, last.subtract(first), levelBased);
   }
 
   /** §A6 carrier: the underlying quadrant plus the representative spurt OI/price %-changes. */

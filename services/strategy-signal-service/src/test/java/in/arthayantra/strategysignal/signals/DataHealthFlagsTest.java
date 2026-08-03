@@ -494,6 +494,14 @@ class DataHealthFlagsTest {
           Map.entry(
               "trendingPeMinusCePct",
               Coverage.exempt("diagnostic-only; no dot or gate reads it")),
+          // Measurement-only, same class as trendingPeMinusCePct: SentimentLevelShadow is its sole
+          // reader, off the live path. Flagging its absence would be a FALSE alarm — an older
+          // market-data that does not publish the key degrades to "no shadow verdict", which costs
+          // the measurement a row and the live gate nothing. The genuine absence behind the operand
+          // the gates DO read is sentimentPct, which sentiment-absent already covers.
+          Map.entry(
+              "sentimentLevelPct",
+              Coverage.exempt("measurement-only shadow operand; no dot or gate reads it")),
           // Primitive booleans — cannot be absent.
           Map.entry("crossedThisWindow", Coverage.exempt("primitive boolean, cannot be absent")),
           Map.entry("gapWidening", Coverage.exempt("primitive boolean, cannot be absent")));

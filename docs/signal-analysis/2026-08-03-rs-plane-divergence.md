@@ -306,8 +306,13 @@ forgot: round 1 had no marker at all, round 2 had a marker no forced recompute c
 had a forced recompute that bypassed the *read* but left a stale marker behind on failure. Deriving
 it removes the class: `MinerviniScreenRepository` bumps `computed_at = now()` on INSERT and UPDATE,
 so any recompute moves the screen past its old marker automatically. The rejected alternative —
-invalidate the marker *before* the forced observation — is a second write that can itself fail, and a
-crash between invalidate and observe is a fresh silent state.
+invalidate the marker *before* the forced observation — is a second **correctness-bearing write**, and
+that write can itself fail, leaving the stale marker intact and the retry suppressed exactly as
+before. (An earlier draft of this paragraph claimed the danger was a crash *between* invalidate and
+observe; cross-vendor review corrected it — that case is benign, because the marker is already absent
+and the next door observes, as the table below states. The real objection is the failed write, not the
+interrupted sequence.) Derivation is preferable because it removes the correctness-bearing write
+altogether rather than adding one that must succeed.
 
 **Every marker state, every door.** Written out because three rounds of patching the cited line is
 what produced the previous two variants:

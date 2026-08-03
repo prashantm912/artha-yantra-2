@@ -270,37 +270,62 @@ public class ShadowVariants {
 
   /**
    * The composite this variant scores against: the champion's recorded score, or — for a
-   * {@code nullPolicy: withheld} variant (F5 U4b) — the MAX of it and the confluence's
-   * {@code withheldAggregate}, the number the composite WOULD have been had every input-missing dot
-   * been withheld rather than scored.
+   * {@code nullPolicy: withheld} variant (F5 U4b) — the confluence's {@code withheldAggregate}
+   * UNCLAMPED, the number the composite WOULD have been had every input-missing dot been withheld
+   * rather than scored.
    *
-   * <p>The {@code max} is the §3.3.3 relaxing-or-neutral clamp in its per-bar form: unifying the
-   * null rule moves the composite BOTH ways — withholding an opposes-in-denominator dot RAISES it,
-   * withholding one that currently reads a null as SUPPORT ({@code vix} / {@code basis} / and, when
-   * enabled, {@code premium_skew} / {@code dow}) LOWERS it — and the shadow writer only ever sees
-   * REJECTED entries, so an unclamped variant would shed champion-accepted rows whose fired-side
-   * counterparts are invisible here.
+   * <p><b>The {@code max(champion, withheld)} clamp this used to apply was removed (2026-08-03).</b>
+   * Unifying the null rule moves the composite BOTH ways — withholding an opposes-in-denominator dot
+   * RAISES it, withholding one that currently reads a null as SUPPORT ({@code vix} / {@code basis} /
+   * and, when enabled, {@code premium_skew} / {@code dow}) LOWERS it — and on live data the dominant
+   * missing input is {@code vix} (38 of the 45 clean rows with any gap in the post-P3 window), which
+   * LOWERS it. A clamp that floors the variant at the champion is therefore blind in exactly the
+   * direction the data moves: a ratchet that can only ever confirm its own hypothesis.
    *
-   * <p><b>⚠️ This plane measures the PROMOTION half only and CANNOT authorize arming.</b> The clamp
-   * that keeps the book unbiased is the same thing that hides the tightening half, and the
-   * rejection-only writer never observes a champion-FIRED trade that WITHHELD would have removed. So
-   * this book answers "which extra entries would the unified rule admit, and did they pay?" — never
-   * "is the unified rule net-positive?". The strategy-evolution design (§ accepted-entry scoring)
-   * requires counterfactual replay or a paper A/B for the tightening direction; an arming verdict
-   * needs that paired plane, not this one. A further caveat for whoever reads the book: the shadow
-   * exit monitor deliberately omits confluence/indicator exits, while twelve live strategies carry
+   * <p><b>Removing it cannot change a decision this book was entitled to make</b>, and it closes one
+   * it was not. Two cases, both provable from the code above rather than asserted:
+   *
+   * <ul>
+   *   <li><b>Pure {@code nullPolicy} variant (the live {@code dot-null-withheld} shape): the clamp
+   *       was arithmetically INERT.</b> {@link #accepts} returns false unless every non-composite
+   *       rail passed, and {@link #armedPolicyCouldHaveFired} returns false unless the decisive legs
+   *       held — so on any row that reaches here the block WAS the composite rail with legs held,
+   *       i.e. {@code champion < championThreshold}, and the floor IS that threshold. Then
+   *       {@code max(champion, withheld) >= floor} exactly when {@code withheld >= floor}. Same
+   *       answer, every row. {@code clampRemovalIsInertForAPureNullPolicyVariant} pins it.
+   *   <li><b>{@code nullPolicy} + a lower {@code compositeThreshold} (the vocabulary permits it):
+   *       the clamp produced FALSE ACCEPTS.</b> With floor 0.55, champion 0.60 and withheld 0.50 the
+   *       clamp scored 0.60 and opened a challenger position on a bar the armed policy scores 0.50
+   *       and REJECTS — a trade booked against a proposal that would not have taken it.
+   *       {@code clampWouldFalselyAcceptWhenWithholdingLowersBelowALowerFloor} pins that the two
+   *       implementations disagree here, and which one is right.
+   * </ul>
+   *
+   * <p>The §3.3.3 relaxing-or-neutral guarantee the clamp was reasoned from is NOT weakened: the
+   * unclamped accept set is a SUBSET of the clamped one ({@code withheld <= max(champion, withheld)}
+   * always), so this can only remove accepts, never add them, and the rejection-only writer still
+   * cannot be biased upward.
+   *
+   * <p><b>⚠️ This plane still measures the PROMOTION half only and CANNOT authorize arming.</b> That
+   * limit was never the clamp — it is the WRITER: the shadow book opens positions off the REJECTION
+   * path, so a champion-FIRED trade that WITHHELD would have removed has no row here to appear in,
+   * clamp or no clamp. This book answers "which extra entries would the unified rule admit, and did
+   * they pay?" — never "is the unified rule net-positive?". The instrument for the tightening half is
+   * the fired-side counterfactual ({@code withheldAggregate} + {@code decisiveLegsHeld} on
+   * {@code signals.fired_diagnostic}, F5 U4b Part 1); a full verdict needs counterfactual replay or a
+   * paper A/B, not this plane. A further caveat for whoever reads the book: the shadow exit monitor
+   * deliberately omits confluence/indicator exits, while twelve live strategies carry
    * {@code oi-confluence-exit} and re-evaluate this same scorer on the EXIT path — for those, arming
-   * would change exits too, which this book does not model.
+   * would change exits too, which this book does not model. Nor does it model the §5.3 coverage
+   * floor that {@code dot-null-withheld} now arms alongside the policy.
    */
   private static BigDecimal compositeFor(ScalperConfluenceGate.RejectionDiagnostic d, Variant v) {
-    BigDecimal champion = d.compositeScore();
     // A nullWithheld variant only reaches here past armedPolicyCouldHaveFired, so the confluence and
     // its shadow are both present; the guards stay so this stays correct if it is ever called first.
     if (!v.nullWithheld() || d.confluence() == null || d.confluence().withheldAggregate() == null) {
-      return champion;
+      return d.compositeScore();
     }
-    BigDecimal withheld = d.confluence().withheldAggregate();
-    return champion == null ? withheld : champion.max(withheld);
+    return d.confluence().withheldAggregate();
   }
 
   /** The §3.3.3 clamp: floor overrides may only lower, cap overrides may only raise. */

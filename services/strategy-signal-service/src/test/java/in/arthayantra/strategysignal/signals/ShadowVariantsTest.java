@@ -207,13 +207,87 @@ class ShadowVariantsTest {
   }
 
   @Test
-  void nullWithheldVariantNeverDropsARowTheChampionAccepted() {
-    // §3.3.3 relaxing-or-neutral, per bar: unifying the null rule LOWERS the composite whenever a dot
-    // that currently reads a null as SUPPORT (vix / basis / premium_skew / dow) goes missing. Left
-    // unclamped the variant would quietly shed champion-accepted rows — and since the shadow writer
-    // only ever sees REJECTED entries, the ones it would shed on the FIRED side are invisible, so its
-    // book would read better than the rule deserves. max(champion, withheld) forbids that.
-    assertThat(ShadowVariants.accepts(diagWithShadow("0.70", "0.41", "0.60"), NULL_WITHHELD)).isTrue();
+  void withholdingThatLowersTheCompositeIsRecordedAsARefusal() {
+    // ⚠️ REPLACES `nullWithheldVariantNeverDropsARowTheChampionAccepted` (2026-08-03), which asserted
+    // the OPPOSITE — `accepts(champion 0.70, withheld 0.41, floor 0.60)` is TRUE — to pin the
+    // `max(champion, withheld)` clamp. Two things were wrong with it.
+    //
+    // 1. THE FIXTURE COULD NOT OCCUR. `blockingRail = confluence-composite` with the composite ABOVE
+    //    its threshold and the decisive legs held is a contradiction: `valid = decisiveLegsHeld &&
+    //    aggregate >= threshold`, so that bar FIRED and is not in `signal_rejections` at all. The
+    //    clamp was pinned by a bar the writer can never produce.
+    // 2. IT NAMED THE WRONG MECHANISM. What stops this book shedding champion-accepted rows is the
+    //    WRITER — it only ever sees REJECTED entries, so a row the unified rule would demote was
+    //    never in the book to lose. The clamp added nothing to that, and on live data (where the
+    //    dominant missing input is `vix`, which LOWERS the composite) it made the lane blind in the
+    //    only direction the data actually moves.
+    //
+    // The honest behaviour on the REACHABLE shape — champion below its floor, withholding drags it
+    // further down — is a refusal, and refusals are what the null result is made of.
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.55", "0.41", "0.60"), NULL_WITHHELD))
+        .as("withholding lowered it further below the floor — no entry to attribute")
+        .isFalse();
+  }
+
+  @Test
+  void clampRemovalIsInertForAPureNullPolicyVariant() {
+    // The claim that made removing the clamp safe, pinned. On any row that REACHES the composite
+    // comparison, `accepts` has already required every non-composite rail to pass and
+    // `armedPolicyCouldHaveFired` has already required the decisive legs to hold — so the block WAS
+    // the composite rail with legs held, i.e. champion < championThreshold, and the floor IS that
+    // threshold. `max(champion, withheld) >= floor` is then exactly `withheld >= floor`.
+    //
+    // ⚠️ Honest label: this is a CHARACTERIZATION test, not a discriminator — the clamped
+    // implementation gives these same answers, which is the whole point of the claim. The
+    // discriminating case is the next test.
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.59", "0.61", "0.60"), NULL_WITHHELD)).isTrue();
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.59", "0.59", "0.60"), NULL_WITHHELD)).isFalse();
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.10", "0.99", "0.60"), NULL_WITHHELD)).isTrue();
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.59", "0.01", "0.60"), NULL_WITHHELD)).isFalse();
+  }
+
+  @Test
+  void clampWouldFalselyAcceptWhenWithholdingLowersBelowALowerFloor() {
+    // THE discriminating case, and a reachable one: the vocabulary allows `nullPolicy` and
+    // `compositeThreshold` on the SAME variant, and `ShadowVariantRegistry.enforceRelaxingOrNeutral`
+    // rejects only a floor ABOVE the champion's — a LOWER one registers fine. Once the floor is no
+    // longer the champion's own threshold, the inertness argument above evaporates.
+    //
+    //   floor 0.55 · champion 0.60 · withheld 0.50
+    //     clamped   -> max(0.60, 0.50) = 0.60 >= 0.55 -> ACCEPT  (a position booked against a
+    //                                                             proposal that scores 0.50 and
+    //                                                             would NOT have taken this bar)
+    //     unclamped ->             0.50           < 0.55 -> REFUSE (correct)
+    //
+    // The two implementations give OPPOSITE answers here. Reverting `compositeFor` to
+    // `champion.max(withheld)` turns this assertion red.
+    ShadowVariants.Variant lowFloor =
+        variants("[{\"name\":\"dnw-055\",\"nullPolicy\":\"withheld\",\"compositeThreshold\":0.55}]")
+            .all().get(0);
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.60", "0.50", "0.65"), lowFloor))
+        .as("the armed policy scores 0.50 and rejects — the book must not credit it an entry")
+        .isFalse();
+    // …and the same variant still books the bars the unified rule genuinely promoted.
+    assertThat(ShadowVariants.accepts(diagWithShadow("0.50", "0.60", "0.65"), lowFloor)).isTrue();
+  }
+
+  @Test
+  void unclampedAcceptsAreASubsetOfClampedAccepts() {
+    // The §3.3.3 direction check: removing the clamp can only REMOVE accepts, never add one, because
+    // `withheld <= max(champion, withheld)` always. So the rejection-only writer still cannot be
+    // biased upward — the change is conservative, which is the safe direction for an evidence lane.
+    String[][] rows = {
+      {"0.55", "0.72"}, {"0.55", "0.58"}, {"0.59", "0.61"}, {"0.59", "0.01"}, {"0.10", "0.99"},
+    };
+    for (String[] r : rows) {
+      RejectionDiagnostic d = diagWithShadow(r[0], r[1], "0.60");
+      boolean unclamped = ShadowVariants.accepts(d, NULL_WITHHELD);
+      boolean clamped =
+          new BigDecimal(r[0]).max(new BigDecimal(r[1])).compareTo(new BigDecimal("0.60")) >= 0;
+      assertThat(!unclamped || clamped)
+          .as("champion=%s withheld=%s: unclamped accepted where clamped did not", r[0], r[1])
+          .isTrue();
+    }
   }
 
   @Test

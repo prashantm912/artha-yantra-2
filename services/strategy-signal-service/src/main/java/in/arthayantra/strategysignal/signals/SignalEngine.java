@@ -1528,15 +1528,20 @@ public class SignalEngine {
    * path can be exercised deliberately. Reachable ONLY from {@link SignalFaultInjector}, which does
    * not exist unless {@code artha.signals.fault-injection.enabled=true} (default OFF).
    *
-   * <p><b>Why a container stop and not a socket kill.</b> A transport-level drop cannot reach the
-   * canary at all: the 2026-08-03 drill killed the pub/sub connection server-side and Lettuce's own
+   * <p><b>What this is and is not.</b> A transport-level drop cannot reach the canary at all: the
+   * 2026-08-03 drill killed the pub/sub connection server-side and Lettuce's own
    * {@code ConnectionWatchdog} reconnected in ~22 ms — four orders of magnitude below the 180 s
-   * {@code bar-gap-ms} threshold, so no bar was missed and nothing was detected. The incident this
-   * canary exists for was the opposite shape: the container silently stopped dispatching while the
-   * connection factory stayed perfectly healthy, so Lettuce saw nothing to repair. {@code stop()}
-   * reproduces exactly that — it tears down the pub/sub SUBSCRIPTION (an intentional close, so no
-   * watchdog reconnect fires and no listener is left dispatching) while leaving the shared
-   * {@code connectionFactory} — and therefore every other Redis user in this JVM — untouched.
+   * {@code bar-gap-ms} threshold, so no bar was missed and nothing was detected. This produces a
+   * <b>detector-equivalent receive stall</b>: the canary-visible state (candle receipt stops while the
+   * producer heartbeat stays fresh) is identical to the 2026-07-07 episode, so the real detection,
+   * recovery, alert and telemetry branch all execute for real.
+   *
+   * <p>It is <b>not</b> a literal reproduction of the 2026-07-07 mechanism. {@code stop()}
+   * intentionally CLOSES the pub/sub subscription connection, so this is a THIRD mechanism — distinct
+   * both from a server-side socket kill and from the hypothesised socket-up listener loss. Nothing
+   * here should be read as evidence for or against that hypothesis; what it validates is the
+   * detector, not the diagnosis. The shared {@code connectionFactory} — and therefore every other
+   * Redis user in this JVM — is untouched, and no watchdog reconnect fires (the close is deliberate).
    *
    * <p>Deliberately NOT self-healing here: recovery must come from the watchdog's own
    * {@link #forceResubscribe} (that is the path under test), with the injector's bounded auto-restore
@@ -1552,6 +1557,18 @@ public class SignalEngine {
     }
     current.stop();
     return true;
+  }
+
+  /**
+   * Whether a candle listener container is currently installed AND running — the confirmation signal
+   * {@link SignalFaultInjector}'s bounded restore retries against, so recovery is verified rather
+   * than merely requested. {@link #resubscribe()} assigns {@code this.container} only AFTER the fresh
+   * container has started, so a failed rebuild leaves the old, stopped one in place and this stays
+   * false; that is exactly what makes it a usable retry predicate.
+   */
+  boolean candleSubscriptionActive() {
+    RedisMessageListenerContainer current = this.container;
+    return current != null && current.isRunning();
   }
 
   /** Redis receive thread: parse + conflate + hand off. NEVER evaluates here. */

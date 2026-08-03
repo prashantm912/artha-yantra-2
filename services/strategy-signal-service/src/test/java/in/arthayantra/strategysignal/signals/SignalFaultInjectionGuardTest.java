@@ -20,6 +20,7 @@ class SignalFaultInjectionGuardTest {
   private final ApplicationContextRunner runner =
       new ApplicationContextRunner()
           .withBean(SignalEngine.class, () -> mock(SignalEngine.class))
+          .withBean(SubscriberHealthCanary.class, () -> mock(SubscriberHealthCanary.class))
           .withUserConfiguration(SignalFaultInjector.class, SignalFaultInjectionController.class);
 
   @Test
@@ -52,5 +53,32 @@ class SignalFaultInjectionGuardTest {
               assertThat(context).hasSingleBean(SignalFaultInjector.class);
               assertThat(context).hasSingleBean(SignalFaultInjectionController.class);
             });
+  }
+
+  /**
+   * The combination that used to break STARTUP rather than stay absent: injection explicitly on,
+   * engine explicitly off. {@link SignalEngine} itself is conditional on {@code engine-enabled}, so
+   * without mirroring that gate the injector would be created against a missing dependency and the
+   * context would fail on an unsatisfied-dependency error. Absent beans is the correct outcome.
+   */
+  @Test
+  void injectionEnabledButEngineDisabled_startsCleanlyWithNoBeans() {
+    runner
+        .withPropertyValues(
+            "artha.signals.fault-injection.enabled=true", "artha.signals.engine-enabled=false")
+        .run(
+            context -> {
+              assertThat(context).hasNotFailed();
+              assertThat(context).doesNotHaveBean(SignalFaultInjector.class);
+              assertThat(context).doesNotHaveBean(SignalFaultInjectionController.class);
+            });
+  }
+
+  /** The engine gate must be default-ON, so an unset engine-enabled still allows a drill. */
+  @Test
+  void injectionEnabledAndEngineUnset_bothBeansExist() {
+    runner
+        .withPropertyValues("artha.signals.fault-injection.enabled=true")
+        .run(context -> assertThat(context).hasSingleBean(SignalFaultInjector.class));
   }
 }

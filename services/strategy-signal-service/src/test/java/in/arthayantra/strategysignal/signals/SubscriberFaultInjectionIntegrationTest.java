@@ -28,7 +28,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -45,11 +48,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
  *
  * <p>Background: the 2026-08-03 live drill killed the pub/sub connection server-side and Lettuce's
  * {@code ConnectionWatchdog} healed it in ~22 ms, so the transport-drop class can never reach a 180 s
- * {@code bar-gap-ms} detector. This test injects the OTHER shape — the 2026-07-07 silent subscription
- * loss — and asserts the full chain: the injector produces exactly the observable pair the canary
- * keys on ({@code lastBarReceivedAtMs} stale WHILE {@code ticks:last-at} fresh), and the canary then
- * fires, re-subscribes, publishes {@link SubscriberStallAlert} and writes its
- * {@code subscriber_health_events} rows.
+ * {@code bar-gap-ms} detector. This injects a <b>detector-equivalent</b> receive stall — the same
+ * canary-visible state as 2026-07-07, though by a different mechanism (see {@link SignalFaultInjector}
+ * — this validates the detector, not the 07-07 diagnosis) — and asserts the full chain: the injector
+ * produces exactly the observable pair the canary keys on ({@code lastBarReceivedAtMs} stale WHILE
+ * {@code ticks:last-at} fresh), and the canary then fires, re-subscribes, publishes
+ * {@link SubscriberStallAlert} and writes its {@code subscriber_health_events} rows.
+ *
+ * <p>⚠️ The fire-path method deliberately drills with the <b>DEFAULT</b> window. An earlier revision
+ * passed the maximum, which hid the fact that the default was too short to ever reach detection —
+ * exactly the defect the default must now be proof against.
  *
  * <p>The context runs on a SHIFTABLE clock: it ticks in real time (so a received bar always stamps a
  * NEW value — a frozen clock would make the "heartbeat did not advance" assertion pass for free) but
@@ -58,6 +66,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  */
 @SpringBootTest(
     properties = {"spring.profiles.active=mock", "artha.signals.fault-injection.enabled=true"})
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SubscriberFaultInjectionIntegrationTest extends StrategySignalIntegrationTestBase {
 
   private static final String SYMBOL = "FAULTINJ";
@@ -178,13 +187,56 @@ class SubscriberFaultInjectionIntegrationTest extends StrategySignalIntegrationT
   @Autowired private ObjectMapper objectMapper;
   @Autowired private JdbcTemplate jdbc;
 
+  private static UUID strategyId;
+
+  /**
+   * The bounded restore, proved against the REAL engine and with the watchdog kept out of it: a
+   * fire-and-forget {@code forceResubscribe} could leave the subscription down indefinitely, so the
+   * injector must retry until {@code candleSubscriptionActive()} actually confirms it is back. Runs
+   * FIRST because a drill holds the injector for its whole window — the default-window fire-path
+   * method below would be refused if this ran after it.
+   */
   @Test
+  @Order(1)
+  void boundedRestore_isConfirmedBackWithoutTheWatchdog() throws Exception {
+    ensureStrategyLoaded();
+    long beforeDelivery = engine.lastBarReceivedAtMs();
+    await()
+        .atMost(Duration.ofSeconds(30))
+        .until(
+            () -> {
+              publishBar();
+              return engine.lastBarReceivedAtMs() > beforeDelivery;
+            });
+
+    // A deliberately SHORT window: this method is about the restore, not about detection.
+    SignalFaultInjector.SubscriptionStallInjection injection =
+        injector.injectSubscriptionStall(SignalFaultInjector.MIN_AUTO_RESTORE_MS);
+
+    assertThat(injection.injected()).isTrue();
+    assertThat(injection.detectorCapable())
+        .as("a sub-floor window must SAY the watchdog cannot reach it")
+        .isFalse();
+    assertThat(engine.candleSubscriptionActive())
+        .as("the injection really did take the subscription down")
+        .isFalse();
+
+    // The injector alone — no canary sweep in this method — must bring it back and confirm it.
+    await().atMost(Duration.ofSeconds(60)).until(engine::candleSubscriptionActive);
+    long beforeRecovery = engine.lastBarReceivedAtMs();
+    await()
+        .atMost(Duration.ofSeconds(30))
+        .until(
+            () -> {
+              publishBar();
+              return engine.lastBarReceivedAtMs() > beforeRecovery;
+            });
+  }
+
+  @Test
+  @Order(2)
   void injectedSubscriptionStall_drivesTheWatchdogsFullFirePath() throws Exception {
-    // ── Arrange: a published intraday strategy so the engine subscribes candles.1m.NSE.FAULTINJ ──
-    UUID strategyId =
-        registryService.create("Engine IT Fault Injection", null, null, STRATEGY_YAML).id();
-    registryService.publish(strategyId, null, null);
-    await().atMost(Duration.ofSeconds(30)).until(() -> engine.loadedSlugs().contains(SLUG));
+    ensureStrategyLoaded();
 
     // Baseline: bars really are being delivered. Without this the "no longer delivered" assertion
     // below would pass for a context that never delivered anything in the first place.
@@ -209,10 +261,18 @@ class SubscriberFaultInjectionIntegrationTest extends StrategySignalIntegrationT
         .as("control: with the subscription healthy this window DOES advance the heartbeat")
         .isGreaterThan(beforeControlWindow);
 
-    // ── Act 1: inject. MAX auto-restore so the WATCHDOG, not the timer, is what recovers here. ──
+    // ── Act 1: inject with the DEFAULT window — the path an operator gets from a bare POST. ──
+    // Passing an explicit large value here would prove nothing about the default, which is precisely
+    // how the default's inadequacy hid in an earlier revision.
     SignalFaultInjector.SubscriptionStallInjection injection =
-        injector.injectSubscriptionStall(SignalFaultInjector.MAX_AUTO_RESTORE_MS);
+        injector.injectSubscriptionStall(null);
     assertThat(injection.injected()).isTrue();
+    assertThat(injection.detectorCapable())
+        .as("a bare POST must produce a drill the watchdog can actually detect")
+        .isTrue();
+    assertThat(injection.autoRestoreMs())
+        .as("the default window must outlast bar-gap-ms + one sweep")
+        .isGreaterThanOrEqualTo(canary.barGapMs() + SubscriberHealthCanary.SWEEP_INTERVAL_MS);
     // Redis pub/sub is fire-and-forget: a message already in flight when the container stopped can
     // still land. Let those drain before baselining — the claim is that no bar is received once the
     // stall has taken effect, not that the stop is instantaneous.
@@ -257,6 +317,19 @@ class SubscriberFaultInjectionIntegrationTest extends StrategySignalIntegrationT
               publishBar();
               return engine.lastBarReceivedAtMs() > heartbeatBeforeInjection;
             });
+  }
+
+  /**
+   * Publishes the fixture strategy once per class so the engine subscribes
+   * {@code candles.1m.NSE.FAULTINJ}. The IT DB is shared with no per-method cleanup and
+   * {@code RegistryService.create} 409s on a duplicate slug, so this must be idempotent.
+   */
+  private void ensureStrategyLoaded() {
+    if (strategyId == null) {
+      strategyId = registryService.create("Engine IT Fault Injection", null, null, STRATEGY_YAML).id();
+      registryService.publish(strategyId, null, null);
+    }
+    await().atMost(Duration.ofSeconds(30)).until(() -> engine.loadedSlugs().contains(SLUG));
   }
 
   /** Publishes one bar per 100 ms — the fixed window both the control and the stall are measured on. */

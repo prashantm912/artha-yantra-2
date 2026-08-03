@@ -299,6 +299,39 @@ unmarked date, the dedup-skip path included. A probe failure leaves the date unm
 retries. No CLAIMED→DONE lease: that protocol exists because a duplicate *page* is harmful, and this
 writes only a log line — if it ever grows an alert it must adopt the lease with it.
 
+**Completion is DERIVED, not flagged.** A marker counts only while its `completed_at` is at or after
+the screen's own `max(computed_at)`. This is the third revision of this mechanism and the first that
+is not a flag someone has to remember to clear — each earlier round found a different path that
+forgot: round 1 had no marker at all, round 2 had a marker no forced recompute could refresh, round 3
+had a forced recompute that bypassed the *read* but left a stale marker behind on failure. Deriving
+it removes the class: `MinerviniScreenRepository` bumps `computed_at = now()` on INSERT and UPDATE,
+so any recompute moves the screen past its old marker automatically. The rejected alternative —
+invalidate the marker *before* the forced observation — is a second write that can itself fail, and a
+crash between invalidate and observe is a fresh silent state.
+
+**Every marker state, every door.** Written out because three rounds of patching the cited line is
+what produced the previous two variants:
+
+| marker state | scheduled door (`force=false`) | `POST /run` (`force=true`) | covered by |
+|---|---|---|---|
+| absent | observe, then mark | observe, then mark | `anOutstandingProbeIsRetriedOnTheDedupSkipPathAndOnlyOnce` |
+| `completed_at ≥ computed_at` (describes this screen) | **stand down** | observe | `aScheduledDoorOnAnAlreadyMarkedDateStandsDown`, `aForcedRecomputeProbesEvenWhenTheDateIsAlreadyMarked` |
+| `completed_at < computed_at` (a recompute happened after) | observe | observe | `aMarkerOlderThanTheScreenDoesNotCountAsComplete` |
+| marker present, date never screened (`computed_at` NULL) | observe | observe | `aMarkerForANeverScreenedDateDoesNotCountAsComplete` |
+
+| failure during the run | result | covered by |
+|---|---|---|
+| probe throws | no marker written → the date stays behind the screen → next door observes | `aFailedForcedProbeLeavesTheDateRetryableForTheNextScheduledDoor` |
+| probe disabled | no probe, **no marker** → enabling it later still observes | `aDisabledProbeWritesNoMarker` |
+| marker WRITE throws | screen + ledger unaffected; date stays retryable (duplicate log next door, harmless) | `aMarkerWriteFailureIsFailSoft` |
+| marker READ throws | **fails OPEN** — observes anyway; absence of evidence never buys silence | `aMarkerReadFailureStillObserves` |
+| screen throws before the probe | ledger records the failure, no marker written → next door observes | `runQuietly`'s existing catch |
+
+Two states are deliberately **uncovered** and named rather than tested: two doors racing the same
+date (no lease, by design — a duplicate log line is the entire cost, §4 above), and a marker written
+with a clock-skewed `completed_at`, which derivation would misread in either direction. Both are
+recorded in §6.
+
 ⚠️ **One orchestration, four doors — and it was three for a while.** `MinerviniScheduler.runOnce`
 carried the geometry-consistency and plane-divergence guarantees and its javadoc said the controller
 called it. It did not: `POST /run` duplicated the screen → upsert → geometry sequence inline, so
@@ -358,6 +391,8 @@ separate decision. Recorded here, not built.
 | **passthrough** — remove the three compose entries | **RED**: `everyKnobHasAMarketDataComposePassthrough:36` |
 | **`POST /run`** — restore the controller's inline screen/upsert/geometry | **RED**: `postRunDelegatesToTheInstrumentedOrchestration` |
 | **forced probe** — make `runOnce` pass `force=false` | **RED**: `aForcedRecomputeProbesEvenWhenTheDateIsAlreadyMarked` |
+| **derived completion** — revert the marker to a plain `state='DONE'` flag | **RED**: `aMarkerOlderThanTheScreenDoesNotCountAsComplete:196` (the reported round-3 hole) + `aMarkerForANeverScreenedDateDoesNotCountAsComplete:212` |
+| **fail-open read** — let a marker-read exception propagate | **RED**: `aMarkerReadFailureStillObserves:237` |
 | plane axis — compare plane A against **itself** | **RED**: the IT's `containsExactlyInAnyOrder` (measured on the pre-review revision of the same fixture) |
 | candidate axis — `servedSymbols()` also returns the WATCH bucket | **RED**: the IT's `PDVWATCH.candidate()` assertion (same) |
 
@@ -406,9 +441,14 @@ Against `origin/main` the diff is purely additive — 1 path, 2 schemas, **0** s
    cannot recover what the bytes were at that moment. A row written before the screen and rewritten
    again before it is judged clean either way. Exact history needs the nightly report persisted, not
    recomputed — the marker row records only that the probe ran, not what it saw.
-10. **The whole-universe rerank of §3 is not built.** It is the only thing that would catch the
+10. **Two marker states are named, not tested.** Two doors racing the same screen date are not
+    serialised — there is no lease, deliberately, because the entire cost of losing that race is a
+    duplicate log line. And derived completion compares two timestamps written by different
+    statements, so a clock-skewed `completed_at` could read either as stale (a harmless re-observe)
+    or as fresh (a missed observation until the next recompute). Neither is covered by a test.
+11. **The whole-universe rerank of §3 is not built.** It is the only thing that would catch the
     ICEMAKE channel, and it is what an honest alert would have to be keyed on. §3 ran it once, by
     hand, off-line.
-11. **I did not verify the deployed jar.** Java citations are read off `origin/main` @ `23f92ba0`;
+12. **I did not verify the deployed jar.** Java citations are read off `origin/main` @ `23f92ba0`;
    the DB numbers are authoritative live state. Whether `ay-market-data-service` currently runs
    current `main` was not probed.

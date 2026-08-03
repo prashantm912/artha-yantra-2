@@ -275,14 +275,39 @@ public class PlaneDivergenceProbe {
    */
   public static final String CANARY_KEY = "MINERVINI_PLANE_DIVERGENCE";
 
-  /** True once this screen date's reading has been recorded. Drives the scheduler's retry. */
+  /**
+   * True once this screen date's reading has been recorded <b>for the screen it currently holds</b>.
+   *
+   * <p>⚠️ Completion is <b>derived, not flagged</b>: the marker counts only while its {@code
+   * completed_at} is at or after the screen's own {@code max(computed_at)}. A boolean flag has to be
+   * explicitly cleared by whoever invalidates it, and every path that forgets — a failed forced
+   * probe, a disabled probe, a screen that threw after upserting — leaves a marker asserting an
+   * observation that no longer describes anything. That is precisely how the round-2 fix reopened
+   * the hole it closed. Deriving it from {@code computed_at} means no path has to remember: {@code
+   * MinerviniScreenRepository} bumps {@code computed_at = now()} on INSERT and on UPDATE, so any
+   * recompute moves the screen past its old marker automatically and re-opens the date.
+   *
+   * <p>This deliberately avoids the alternative — invalidating the marker BEFORE the forced
+   * observation. That is a second write that can itself fail, and a failure between the invalidate
+   * and the observation is a new silent state. Derived completion has no such window.
+   *
+   * <p>A date with no screen rows has a NULL {@code max(computed_at)}, so the comparison is NULL and
+   * the marker never counts — a marker can never suppress a date that has not been screened.
+   */
   public boolean alreadyReported(LocalDate screenDate) {
+    java.sql.Date d = java.sql.Date.valueOf(screenDate);
     Integer n =
         jdbc.queryForObject(
-            "SELECT count(*) FROM canary_runs WHERE canary=? AND run_day=? AND state='DONE'",
+            """
+            SELECT count(*) FROM canary_runs cr
+            WHERE cr.canary = ? AND cr.run_day = ? AND cr.state = 'DONE'
+              AND cr.completed_at >= (
+                SELECT max(computed_at) FROM minervini_screen_results WHERE screen_date = ?)
+            """,
             Integer.class,
             CANARY_KEY,
-            java.sql.Date.valueOf(screenDate));
+            d,
+            d);
     return n != null && n > 0;
   }
 

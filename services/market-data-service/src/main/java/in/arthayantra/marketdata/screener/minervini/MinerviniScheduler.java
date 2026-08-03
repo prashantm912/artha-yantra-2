@@ -182,8 +182,14 @@ public class MinerviniScheduler {
    * so a duplicate run is harmless and a single completion marker is the whole requirement. If this
    * ever grows an alert, it must adopt the CLAIMED→DONE protocol with it.
    *
-   * <p>{@code force} is for the recompute path only — see {@link #runOnce}. Every scheduled door
-   * passes false, so a completed date is observed exactly once.
+   * <p><b>Two independent guards, covering different things.</b> {@code
+   * PlaneDivergenceProbe#alreadyReported} is <i>derived</i> — a marker counts only while it is at
+   * least as new as the screen's {@code computed_at} — which re-opens the date automatically after
+   * ANY recompute, including one whose probe then failed or was disabled. {@code force} is the
+   * explicit operator guarantee for {@link #runOnce}, and it additionally covers the one case
+   * derivation misses: a recompute that upserts ZERO rows leaves {@code computed_at} unmoved. Every
+   * scheduled door passes false, so a date whose marker still describes the current screen is
+   * observed exactly once.
    *
    * <p>Fail-soft: a probe failure never fails a screen, and it leaves the date UNMARKED so the next
    * door retries rather than inheriting the gap.
@@ -193,7 +199,18 @@ public class MinerviniScheduler {
       return;
     }
     try {
-      if (!force && planeDivergence.alreadyReported(screenDate)) {
+      // Fail-OPEN on the marker read: if canary_runs itself is unusable, observe anyway. Absence of
+      // evidence must never buy silence, and a duplicate log line is the whole cost of being wrong.
+      boolean done = false;
+      if (!force) {
+        try {
+          done = planeDivergence.alreadyReported(screenDate);
+        } catch (Exception e) {
+          log.warn("minervini plane-divergence marker unreadable for {} — observing anyway",
+              screenDate, e);
+        }
+      }
+      if (done) {
         return;
       }
       PlaneDivergenceProbe.Report r = planeDivergence.probe(screenDate);

@@ -71,6 +71,9 @@ class PlaneDivergenceProbeIntegrationTest extends MarketDataIntegrationTestBase 
       jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE symbol=?", s);
       jdbc.update("DELETE FROM candles WHERE exchange='NSE' AND tradingsymbol=?", s);
     }
+    jdbc.update(
+        "DELETE FROM canary_runs WHERE canary=? AND run_day=?",
+        PlaneDivergenceProbe.CANARY_KEY, java.sql.Date.valueOf(AS_OF));
   }
 
   @AfterEach
@@ -175,6 +178,42 @@ class PlaneDivergenceProbeIntegrationTest extends MarketDataIntegrationTestBase 
     assertThat(r.screenDate()).isEqualTo(AS_OF);
   }
 
+  /**
+   * <b>The state that took three review rounds to close.</b> Completion is DERIVED from the screen,
+   * not flagged: a marker counts only while it is at least as new as the screen's {@code
+   * computed_at}. The two halves are the same marker moved five minutes either side of the screen —
+   * a flag-based implementation answers {@code true} to both, a derived one splits them.
+   *
+   * <p>Why it matters: after a forced recompute whose probe then FAILED (or was disabled), the old
+   * marker survives. Under a flag it suppresses every later door forever — the durability mechanism
+   * silently destroying the observation it exists to protect. Under derivation the recompute has
+   * already moved {@code computed_at} past it, so the date re-opens with no invalidation write.
+   */
+  @Test
+  void aMarkerOlderThanTheScreenDoesNotCountAsComplete() {
+    // stale: reported BEFORE the screen was (re)computed -> describes a screen that no longer exists
+    writeMarker(AS_OF, SCREEN_AT.minusMinutes(5));
+    assertThat(probe.alreadyReported(AS_OF)).isFalse();
+
+    // fresh: reported after -> genuinely describes the current screen
+    writeMarker(AS_OF, SCREEN_AT.plusMinutes(5));
+    assertThat(probe.alreadyReported(AS_OF)).isTrue();
+
+    clearMarker(AS_OF);
+  }
+
+  /** A marker can never suppress a date that was never screened (NULL {@code computed_at}). */
+  @Test
+  void aMarkerForANeverScreenedDateDoesNotCountAsComplete() {
+    LocalDate neverScreened = LocalDate.of(2019, 1, 4);
+    clearMarker(neverScreened);
+    writeMarker(neverScreened, SCREEN_AT.plusYears(5));
+
+    assertThat(probe.alreadyReported(neverScreened)).isFalse();
+
+    clearMarker(neverScreened);
+  }
+
   /** The completion marker the scheduler retries on — recorded once, idempotent. */
   @Test
   void completionMarkerIsRecordedAndIdempotent() {
@@ -192,6 +231,20 @@ class PlaneDivergenceProbeIntegrationTest extends MarketDataIntegrationTestBase 
         "DELETE FROM canary_runs WHERE canary=? AND run_day=?",
         PlaneDivergenceProbe.CANARY_KEY,
         java.sql.Date.valueOf(AS_OF));
+  }
+
+  private void writeMarker(LocalDate day, OffsetDateTime completedAt) {
+    jdbc.update(
+        "INSERT INTO canary_runs(canary, run_day, state, source, claimed_at, completed_at)"
+            + " VALUES(?,?, 'DONE', 'TEST', ?, ?)"
+            + " ON CONFLICT (canary, run_day) DO UPDATE SET state='DONE', completed_at=EXCLUDED.completed_at",
+        PlaneDivergenceProbe.CANARY_KEY, java.sql.Date.valueOf(day), completedAt, completedAt);
+  }
+
+  private void clearMarker(LocalDate day) {
+    jdbc.update(
+        "DELETE FROM canary_runs WHERE canary=? AND run_day=?",
+        PlaneDivergenceProbe.CANARY_KEY, java.sql.Date.valueOf(day));
   }
 
   /** Bar-pairs among the seeded symbols where either side post-dates the screen's cutoff. */

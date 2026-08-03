@@ -164,6 +164,79 @@ class MinerviniSchedulerTest {
     org.mockito.Mockito.verify(planeDivergence, org.mockito.Mockito.never()).probe(any());
   }
 
+  /**
+   * The reported round-3 hole, end to end: a FORCED probe that FAILS must leave the date retryable
+   * by the next SCHEDULED door. Previously {@code force} only bypassed the read — the old marker
+   * survived the failure and suppressed every later door, contradicting the "will retry" log.
+   */
+  @Test
+  void aFailedForcedProbeLeavesTheDateRetryableForTheNextScheduledDoor() {
+    LocalDate day = LocalDate.of(2026, 7, 6);
+    when(screener.screen(day)).thenReturn(new TrendTemplateService.ScreenResult(day, 0, List.of()));
+    when(planeDivergence.probe(day)).thenThrow(new IllegalStateException("probe died"));
+
+    scheduler(true).runOnce(day);
+
+    // nothing was marked, so the date's completion still describes the PRE-recompute screen
+    org.mockito.Mockito.verify(planeDivergence, org.mockito.Mockito.never()).markReported(any());
+
+    // ...and the next scheduled door does observe it (derived completion re-opened the date)
+    org.mockito.Mockito.reset(planeDivergence);
+    when(repo.latestScreenDate()).thenReturn(day);
+    when(screener.latestScreenDate()).thenReturn(day);
+    when(planeDivergence.alreadyReported(day)).thenReturn(false); // stale marker < computed_at
+    when(planeDivergence.probe(day)).thenReturn(report(day));
+
+    scheduler(true).onBhavcopyBackfillCompleted();
+
+    verify(planeDivergence).probe(day);
+    verify(planeDivergence).markReported(day);
+  }
+
+  /** A DISABLED probe must write no marker, so enabling it later still yields an observation. */
+  @Test
+  void aDisabledProbeWritesNoMarker() {
+    LocalDate day = LocalDate.of(2026, 7, 6);
+    when(screener.screen(day)).thenReturn(new TrendTemplateService.ScreenResult(day, 0, List.of()));
+
+    new MinerviniScheduler(screener, repo, geometry, planeDivergence, ntfy, ledger, true, false)
+        .runOnce(day);
+
+    org.mockito.Mockito.verify(planeDivergence, org.mockito.Mockito.never()).probe(any());
+    org.mockito.Mockito.verify(planeDivergence, org.mockito.Mockito.never()).markReported(any());
+  }
+
+  /** A marker WRITE failure must not fail the screen; the date simply stays retryable. */
+  @Test
+  void aMarkerWriteFailureIsFailSoft() {
+    LocalDate day = LocalDate.of(2026, 7, 6);
+    when(screener.screen(null))
+        .thenReturn(new TrendTemplateService.ScreenResult(day, 0, List.of()));
+    when(planeDivergence.probe(day)).thenReturn(report(day));
+    org.mockito.Mockito.doThrow(new IllegalStateException("canary_runs gone"))
+        .when(planeDivergence).markReported(day);
+
+    scheduler(true).onBhavcopyBackfillCompleted();
+
+    verify(repo).upsertAll(eq(day), any());
+    verify(ledger).succeed(any(), org.mockito.ArgumentMatchers.anyLong());
+  }
+
+  /** A marker READ failure must fail OPEN — observe anyway, never inherit silence. */
+  @Test
+  void aMarkerReadFailureStillObserves() {
+    LocalDate day = LocalDate.of(2026, 7, 6);
+    when(repo.latestScreenDate()).thenReturn(day);
+    when(screener.latestScreenDate()).thenReturn(day);
+    when(planeDivergence.alreadyReported(day))
+        .thenThrow(new IllegalStateException("canary_runs unreadable"));
+    when(planeDivergence.probe(day)).thenReturn(report(day));
+
+    scheduler(true).onBhavcopyBackfillCompleted();
+
+    verify(planeDivergence).probe(day);
+  }
+
   private static PlaneDivergenceProbe.DivergentName name(
       String symbol, String pct, LocalDate worst, boolean candidate) {
     return new PlaneDivergenceProbe.DivergentName(

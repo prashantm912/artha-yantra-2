@@ -1201,11 +1201,54 @@ Proposed 2026-07-03 from the first pass — each is small and parity-safe (rejec
    sampled offsets).
 2. ~~Nightly forward-outcome stamper~~ — **superseded by the shadow book** (real exit labels beat
    fixed-offset sampling). Revisit only if a non-shadowed rejection class needs outcomes too.
-3. **All-eval mode (diagnostic completeness)** — evaluate ALL rails per bar instead of short-circuiting
-   at the first CLOSED failure (the straddle path already does this), so `checks[]` is the full matrix
-   and "only X failed" needs no caveat. Costs a few extra reads per bar.
-4. **Data-health flags on the row** — precomputed booleans (ivRank-null, breadth-zero, dow-null…) so
-   the health query is an index scan and the FE can badge degraded rows.
+3. ~~All-eval mode (diagnostic completeness)~~ — **ALREADY SHIPPED WHEN THIS ROW WAS FILED; the
+   residual is deliberate and PINNED. Do not build it.** The row's premise ("the straddle path
+   already does this", implying the directional path does not) was stale on arrival: #404
+   (`00172811`, **2026-07-01**) introduced the diagnostic and the all-eval sweep together, two days
+   before this file was created (#477, `c38b710c`, 2026-07-03). Verified by reading the gate AT
+   `c38b710c` — its short-circuit set is the same one standing today. Every rail past the chain
+   fetch records via `Diag.fails/failsBool/failsScore` and falls through; only a terminal
+   `diag.anyFailed()` blocks, so `blockingRail` is the FIRST failure while `checks[]` carries the
+   whole matrix. Pinned by `ScalperConfluenceGateTest
+   .diagnosticAllEvalRecordsDownstreamRailsEvenAfterAnEarlierFailure` (asserts the OI context and
+   `confluence-composite` are still scored after an `rsi-band` failure).
+
+   Six `return diag.block()` sites remain. Three are structurally forced — nothing downstream is
+   computable: `chain-unavailable`, `context-unavailable`, and the `morning-opening-formation`
+   opening-bar case (the 2nd candle does not exist yet). Three are the deliberate
+   "block before the fan-out" pre-flight: `time-window`, `time-of-day-preference`,
+   `option-side-constraint`. **Removing those three is a Critical, not a completion:**
+   * `ShadowBookService.maybeOpen` returns early on `d.pick() == null`, with a comment naming
+     time-window as the case it excludes. Resolve the pick on an out-of-window bar and the shadow
+     book — the evidence base the entry tunes are judged on — starts opening virtual positions on
+     bars no strategy could ever have traded. `ShadowVariants.accepts` iterates `d.checks()`, so a
+     variant carrying a `time-window` disable override would accept them outright.
+   * V054 (row 4 below, 2026-08-02) **deliberately encodes the opposite decision**: the pre-fetch
+     rows are `contextBearing=false` — "UNINFORMATIVE, not degraded … T17's lesson (a context-less
+     row cannot testify about dot liveness) applied per row instead of per window". Building this
+     row would partly undo a decision taken after it, with a written rationale.
+   * Measured, not argued: deleting the `time-window` short-circuit reds two existing tests —
+     `ScalperConfluenceGateTest.blocksInTheMiddayWindowBeforeAnyChainFetch:1195` and
+     `.openingTickStrategyPassesTheOpenWindowWhileADefaultStrategyIsBlocked:1645`, both on
+     `verifyNoInteractions(marketOiClient)` (74 tests, 2 failures; 74/74 green unmodified).
+   * Cost it would add: `MarketOiClient`'s memo TTL is 45 s against a 180 s primary bar, so it
+     amortizes across strategies within a bar but never across bars — every affected bar pays a
+     fresh chain + macro/context fan-out. Upper bound ~50 of the 125 3m bars per session
+     (09:15–09:45 plus the 11:00–13:00 midday block), restricted to bars where the chart gate had
+     already fired.
+4. ~~Data-health flags on the row~~ — **SHIPPED (F5 unit U3, [#1193](https://github.com/prashantm912/artha-yantra-2/pull/1193)
+   @ `5071a0b8`, V054 `signal_rejection_data_health`)**: `RejectionWriter` computes `DataHealthFlags`
+   in memory from the same `ScalperGateContext` the diagnostic is serialized from (pure function, no
+   new read, on the writer's existing bounded async thread) and the INSERT carries
+   `data_health JSONB {degraded, contextBearing, oiSuppressed, flags[]}` plus an indexable `degraded
+   BOOLEAN`, with a partial index `WHERE degraded`. A flag means the input was **ABSENT**, never that
+   its value was unremarkable; the S24 monthly-expiry OI inertness is exempt **per OI root** (NSE last
+   Tuesday / BSE last Thursday), and `DataHealthFlagsTest` reflects over every `Macro`/`Oi` component
+   so adding one without classifying it is a build failure. Read surfaces: the `degraded` query param
+   on `GET /api/v1/signal-rejections` and the FE badge (word + flag count, absent inputs named on
+   expand — `RejectionsPage`). ⚠️ `degraded` reads TRUE on nearly every context-bearing row today
+   because `ivRank` and `dowUp` are absent on 100% of them; that is the column working, not a bug —
+   see the `V054__signal_rejection_data_health.sql` header, which is the authority on the semantics.
 5. ~~Per-session eval-denominator row~~ — **SHIPPED (F5 unit U2, V053 `strategy_eval_denominator`)**:
    the engine's `Outcome` counters now carry a per-strategy dimension, flushed on the EXISTING V045
    3m rollup tick to a day-keyed table — one row per `(session_date, boot_id, strategy_slug,

@@ -36,12 +36,14 @@ COMPONENT_PREFIX = "#/components/schemas/"
 # assertion is exact-set equality in BOTH directions: a new open object fails, and an exemption
 # that no longer exists also fails, so typing a response forces its line to be deleted.
 FROZEN_OPEN_OBJECTS = {
-    # DEBT, not doctrine. FastAPI's own HTTPValidationError detail carries `ctx` and `input` as
-    # bare `Any` — pydantic's rendering of "whatever value failed validation", which genuinely has
-    # no shape. They are framework-owned: closing them means overriding FastAPI's built-in 422
-    # model, not editing this service.
-    "#ValidationError.ctx",
-    "#ValidationError.input",
+    # NOTE 2026-08-03: `#ValidationError.ctx` and `#ValidationError.input` USED to be frozen here
+    # as framework-owned debt. They are gone — not because this service changed, but because
+    # FastAPI's own generated `ValidationError` schema gains `ctx`/`input` only in versions NEWER
+    # than the pinned one. Under `requirements-dev.lock` (fastapi 0.115.6) those properties do not
+    # exist, so the ratchet's exact-set equality correctly demanded their removal. They were frozen
+    # against an AMBIENT interpreter rather than the lockfile — the same wrong-version capture the
+    # contract guard was added to prevent. Run this suite through the pinned venv, never the
+    # ambient interpreter, or it will disagree with CI in both directions.
     # prometheus-fastapi-instrumentator mounts /metrics with no declared response model (it serves
     # text/plain in practice). The empty schema is the instrumentator's, not ours, and typing it
     # would mean patching a third-party mount. optimizer-service carries the same exemption.

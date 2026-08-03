@@ -237,7 +237,15 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   IS the forward), and **Dow + IV factors degrade to NEUTRAL on history** → the composite rarely reaches
   strong confluence on backtests, so the OI edge reads MUTED on derived history (it's a data-fidelity
   artifact, not a strategy verdict — judge OI-led strategies on FORWARD paper with real captured OI,
-  not a weak historical backtest). **Timestamp-key trap (root cause of #214):** an `OffsetDateTime`
+  not a weak historical backtest). ⚠️ **COROLLARY, and it is sharper than the rule it follows: an A/B
+  between two strategies whose OI-GATING DIFFERS cannot be run on derived history AT ALL** (2026-08-03,
+  caught in scoping before it was proposed). The muting is not noise that averages out — it is a
+  one-sided handicap, so the OI-gated arm loses by construction and the backtest returns a decisive,
+  confident, WRONG winner. Concretely: `scalp-connect-the-dots-nifty` runs `oi_confluence_gate.enabled:
+  true` and `scalp-golden-crossover-nifty` runs it `false`, so any historical comparison of that twin
+  pair is contaminated by design. **The tell is that the arms differ in a factor history cannot
+  represent** — check that BEFORE reaching for a backtest as a discriminator, not after reading the
+  result. Forward paper is the only valid comparison for such a pair. **Timestamp-key trap (root cause of #214):** an `OffsetDateTime`
   map key SILENTLY misses across data sources with different UTC offsets — the futures-spine bars carry
   `+05:30` but JDBC `time_bucket` returns `+00`, so `map.get(bar.bucket)` missed EVERY lookup and 3
   Connecting-Dots factors (activeStrikeOi/IV/VIX) read NEUTRAL on every history session for months. Key

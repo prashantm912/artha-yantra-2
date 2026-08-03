@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.kite.ticker;
 
+import in.arthayantra.common.web.error.NotFoundException;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import java.util.List;
 import org.slf4j.Logger;
@@ -59,7 +60,14 @@ public class PinnedIndicesSubscriber {
       try {
         registry.subscribe(
             "system-pinned", key, SubscriptionMode.QUOTE, SubscriptionPriority.PINNED_INDEX);
-      } catch (Exception unknownYet) {
+      } catch (NotFoundException unknownYet) {
+        // ONLY an unresolved instrument is retryable — the master may not have synced yet, and the
+        // InstrumentMasterUpdated listener re-runs this pass. PR #1251: every other failure now
+        // PROPAGATES, so a pinned entry the registry refuses as a tradable cash EQUITY fails the
+        // ApplicationReadyEvent listener and therefore boot, loudly, instead of being reduced to a
+        // warning nobody reads. The rule itself stays where it belongs, on the registry — this is
+        // the same single authority, simply no longer swallowed. Widening this catch again would
+        // silently re-open that hole; see SubscriptionRegistry.refuseCashEquity.
         log.warn("pinned index {} not resolvable yet: {}", key.canonical(), unknownYet.getMessage());
       }
     }

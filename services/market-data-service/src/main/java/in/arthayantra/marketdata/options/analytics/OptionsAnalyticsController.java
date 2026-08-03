@@ -123,18 +123,62 @@ public class OptionsAnalyticsController {
   }
 
   /**
-   * The freshness envelope for an OI read: {@code live} provenance for a live read OR a past session
-   * whose captured rows carry IV (real snapshots); {@code derived} only when a fully-past read fell
-   * back to the candle-derived chain (iv/greeks all null — the §11.12 sanctioned inference, no reader
-   * plumbing). {@code asOf} + {@code complete} are supplied by the caller from the rows it already read.
+   * The freshness envelope for an OI read. {@code provenance} is the data KIND, INDEPENDENT of the
+   * query mode ({@link DataFreshness} — "a past captured session is still live provenance, just with
+   * a large staleSeconds"), so it is decided by the ROW PROVENANCE behind {@code rows}: {@code live}
+   * / {@code capture} when the buckets those rows span hold a LIVE-captured snapshot row, {@code
+   * derived} / {@code candle-derived} otherwise — i.e. when the read came from the candle-derived
+   * chain (no snapshot row at all) or from a candle-derived WARM ({@code source='UPSTOX_1M'}, the
+   * on-demand stock chain). "Holds a captured row" is not good enough and is not what is asked:
+   * the label tracks the row that WON each {@code last(…, ts)} group, so ONE derived leg, or one
+   * derived row arriving later in an otherwise-captured bucket, makes the whole read derived —
+   * see {@link OptionsSnapshotReader#allGroupsCaptured}. {@code asOf} + {@code complete} are
+   * supplied by the caller from the rows it already read.
+   *
+   * <p>This used to test {@code !q.live() && rows.stream().allMatch(p -> p.iv() == null)}, which was
+   * wrong in BOTH directions. (a) The {@code !q.live()} conjunct made {@code derived} unreachable in
+   * LIVE mode — the default — while {@code StockChainWarmService} deliberately writes candle-derived
+   * rows that ARE served today, so a warmed STOCK chain was published as {@code capture}/{@code live}
+   * (measured live 2026-08-03 on {@code SBIN}: both {@code /active-strikes} and {@code /oi-stats}).
+   * (b) {@code iv == null} is a SYMPTOM of derivation, not its identity: {@code
+   * CandleDerivedChainReader.enrichIv} back-solves ATM-band IVs, so derived rows can carry IV, and a
+   * genuine live capture whose solver produced nothing carries none. {@code source} is the identity —
+   * see {@link OptionsSnapshotReader#allGroupsCaptured}, which reuses the platform's existing
+   * capture-trust predicate for it.
    */
   private DataFreshness oiFreshness(
-      OiQuery q, OffsetDateTime asOf, List<OptionsSnapshotReader.StrikePoint> rows, boolean complete) {
-    boolean derived =
-        !q.live() && !rows.isEmpty() && rows.stream().allMatch(p -> p.iv() == null);
+      OiQuery q,
+      LocalDate expiry,
+      OffsetDateTime asOf,
+      List<OptionsSnapshotReader.StrikePoint> rows,
+      boolean complete) {
+    boolean derived = !rows.isEmpty() && !capturedBehind(q, expiry, rows);
     return derived
         ? DataFreshness.of(asOf, DataFreshness.DERIVED, "candle-derived", null, complete, clock)
         : DataFreshness.of(asOf, DataFreshness.LIVE, "capture", null, complete, clock);
+  }
+
+  /**
+   * Did EVERY group behind the buckets {@code rows} span resolve to a LIVE-captured row? The window is
+   * taken from the rows themselves — {@code [oldest bucket, newest bucket + one interval)} — so it is
+   * exactly the window the reader served them from, and it holds no snapshot row at all on the
+   * candle-derived path (the facade only derives when the snapshot read came back EMPTY for that
+   * day), which is how that path still reads {@code derived}.
+   */
+  private boolean capturedBehind(
+      OiQuery q, LocalDate expiry, List<OptionsSnapshotReader.StrikePoint> rows) {
+    OffsetDateTime oldest = rows.get(0).bucket();
+    OffsetDateTime newest = oldest;
+    for (OptionsSnapshotReader.StrikePoint p : rows) {
+      if (p.bucket().isBefore(oldest)) {
+        oldest = p.bucket();
+      }
+      if (p.bucket().isAfter(newest)) {
+        newest = p.bucket();
+      }
+    }
+    return reader.allGroupsCaptured(
+        q.name(), expiry, q.interval(), oldest, newest.plus(q.interval().bucket()));
   }
 
   public record OiStats(
@@ -292,7 +336,7 @@ public class OptionsAnalyticsController {
     }
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
     BigDecimal pcr = OptionsChainService.pcr(ce, pe);
-    DataFreshness freshness = oiFreshness(q, asOf, latest, true);
+    DataFreshness freshness = oiFreshness(q, exp, asOf, latest, true);
     BigDecimal maxPain = MaxPainCalculator.maxPain(chain);
     // source.optionanalytics=upstox: replace the band-computed PCR/max-pain with Upstox's full-chain
     // values (ceOi/peOi stay native — Upstox exposes only the ratio). Any Upstox miss keeps native.
@@ -457,7 +501,7 @@ public class OptionsAnalyticsController {
             .map(s -> new StrikeView(s.strike(), s.ceOi(), s.peOi()))
             .toList();
     OffsetDateTime asOf = latest.get(latest.size() - 1).bucket();
-    DataFreshness freshness = oiFreshness(q, asOf, latest, true);
+    DataFreshness freshness = oiFreshness(q, exp, asOf, latest, true);
     if (buckets == null) {
       // NON_NULL on all series omits the keys, keeping the absent-buckets response byte-identical.
       return new ActiveStrikesResponse(
@@ -950,7 +994,7 @@ public class OptionsAnalyticsController {
       }
     }
     OiTrendingService.TrendSeries out = trendingService.trending(filterToBasket(series, strikes));
-    return out.withFreshness(oiFreshness(q, out.asOf(), latest, true));
+    return out.withFreshness(oiFreshness(q, exp, out.asOf(), latest, true));
   }
 
   /** Restricts the series to the comma-separated strike basket; null/blank = the whole chain. */
@@ -1029,7 +1073,7 @@ public class OptionsAnalyticsController {
     if (latest.isEmpty()) {
       return heatmapService
           .fold(List.of(), null, heatmapWindow)
-          .withFreshness(oiFreshness(q, null, List.of(), false));
+          .withFreshness(oiFreshness(q, exp, null, List.of(), false));
     }
     OffsetDateTime newest = latest.get(0).bucket();
     LocalDate day = newest.atZoneSameInstant(Ist.ZONE).toLocalDate();
@@ -1040,7 +1084,7 @@ public class OptionsAnalyticsController {
     BigDecimal spot = latestSpot(latest);
     BigDecimal atm = nearestListedStrike(series, spot);
     OiHeatmapService.Heatmap hm = heatmapService.fold(series, atm, heatmapWindow);
-    return hm.withFreshness(oiFreshness(q, hm.asOf(), latest, true));
+    return hm.withFreshness(oiFreshness(q, exp, hm.asOf(), latest, true));
   }
 
   /**
@@ -1286,7 +1330,7 @@ public class OptionsAnalyticsController {
             : BigDecimal.valueOf(peOi).divide(BigDecimal.valueOf(ceOi), 4, RoundingMode.HALF_UP);
     return new ChainTable(
         q.name(), exp, spot, null, null, null, pcr, false, false, asOf, q.interval().token(), rows,
-        oiFreshness(q, asOf, latest, true));
+        oiFreshness(q, exp, asOf, latest, true));
   }
 
   /** Builds a chain leg from a captured snapshot point (greeks null — the projection carries IV only). */

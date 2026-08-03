@@ -212,7 +212,15 @@ jobs:
           fi
 
           echo "diff base: $base"
-          files="$(git diff --name-only "$base" HEAD)"
+          # --no-renames is LOAD-BEARING here too (cross-vendor review, 2026-08-03). `git diff
+          # --name-only` reports only the DESTINATION of a detected rename, which blinded BOTH
+          # classifications below. Measured on this workflow specifically:
+          #   move services/optimizer-service/app/x.py -> services/margin-service/  =>  optimizer=FALSE
+          #   move services/optimizer-service/app/x.py -> docs/                     =>  contracts=FALSE
+          # The second is the dangerous one: `contracts` is a REQUIRED context, so it reported
+          # green with every step skipped while a service source file was deleted. Same one-flag
+          # fix as ci-java/ci-optimizer/ci-margin; pinned by classify_java_shards_test.sh.
+          files="$(git diff --no-renames --name-only "$base" HEAD)"
           echo "$files"
 
           if echo "$files" | grep -Eq '^(services/|libs/|contracts/|\.github/workflows/ci-contracts\.yml$|\.github/scripts/openapi_relabel_30\.py$|\.github/scripts/optimizer_spec_staleness\.py$|\.github/scripts/margin_spec_staleness\.py$|\.github/scripts/contract_service_inventory\.sh$)'; then

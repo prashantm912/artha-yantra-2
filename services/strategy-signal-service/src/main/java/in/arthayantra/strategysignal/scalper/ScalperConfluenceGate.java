@@ -310,6 +310,12 @@ public class ScalperConfluenceGate {
   /**
    * Confluence-gate one passing chart entry. Empty BLOCKS the signal.
    *
+   * <p><b>This is the non-enforcing ORACLE read</b> — it does NOT enforce the strategy's declared
+   * {@code option_types}, because its caller is the E9 D4 confluence-flip EXIT oracle, which must see
+   * the TRUE market side including the one the strategy will not ENTER. Thin delegation to
+   * {@link #evaluateOracle}, where that contract is spelled out; entry paths use
+   * {@link #evaluateWithDiagnostic} instead.
+   *
    * @param cfg the strategy's scalper knobs (underlying, strike band, threshold)
    * @param bank the engine indicator bank for the index future at this bar
    * @param future the index-future series (raw OHLCV for the §3.1 candle pattern + structural stop)

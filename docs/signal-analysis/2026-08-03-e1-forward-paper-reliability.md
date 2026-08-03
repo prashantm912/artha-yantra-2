@@ -360,7 +360,29 @@ An 8%-stop book is in practice an ~11.7%-stop book. Owner already accepted EOD-o
 
 ## 5. Incidental finding (not part of E1, flagged because it is on the live money path)
 
-⚠️ **The 2026-07-31 swing batch priced its entries off Thursday 07-30's close.** *(computed)*
+> ⚠️❌ **§5 IS FALSIFIED — CORRECTED SAME DAY, 2026-08-03. Do not act on it. Rupee error: ₹0.00.**
+> A dedicated follow-up probe ([#1250](https://github.com/prashantm912/artha-yantra-2/pull/1250),
+> `2026-08-03-swing-stop-realization-and-stale-entry-probe.md`) swept **all 32** batch-priced entries:
+> **32 same-day, 0 stale.** `KAPSTON` filled at 475.14 = **07-31's own close** 474.90 × 1.0005 (07-30
+> closed 464.00, which would have filled 464.23); `SCPL` at 615.31 = 615.00 × 1.0005 (07-30: 551.15).
+> The persisted stops confirm it independently: 436.9080 = 474.90 × 0.92 exactly.
+>
+> **Root cause of this false positive: `bucket::date` is UTC.** The "no rows for 2026-07-31" and "last
+> full day 07-30 with 2,701 symbols" readings below are the *same rows* shifted one day — that "last
+> full day 07-30 with 2,701" **is** 07-31 with 2,701, and the "stray row on 08-02, a Sunday" is 08-03,
+> a Monday. Both reproduce to the row once the bound is `+05:30` instead of `::date`. This is the trap
+> CLAUDE.md documents, and it produced a confident, wrong, money-path finding here.
+>
+> **What survived the correction, and is real:** a **5-session candle-projection hole** (2026-06-12/15/16/18/19
+> + partial 06-17) where raw bhavcopy ingested 3,245–3,287 rows/day and the `candles` projection wrote
+> **zero**; the ingest canary being structurally unable to see it (`BHAVCOPY` is `REQUIRE_SUCCESS`,
+> satisfied regardless of `rows_written`, and counts RAW rows not projected candles); and the fact that
+> **the guard exists and is armed on the wrong path** — `truncateToSession` with a pinned
+> `requiredBarDate` works, the 08:35 catch-up pins it, the 20:00/20:05 scheduled path passes `null`.
+> ⚠️ Also corrected there: **M14 is not that guard** — its `stale` flag is an upstream-exception marker,
+> not an age check, so the sentence below about M14 "materialising" is wrong on the mechanism too.
+
+⚠️ ~~**The 2026-07-31 swing batch priced its entries off Thursday 07-30's close.**~~ *(FALSIFIED — see the box above)*
 
 `marketdata.candles` @ `1d` / NSE has **no rows for 2026-07-31 or 2026-08-03** (last full day
 2026-07-30 with 2,701 symbols; a single stray row on 08-02, a Sunday). The swing batch takes

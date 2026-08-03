@@ -146,6 +146,18 @@ public class TrendTemplateService {
         AND calc2.sessions >= ?
         AND calc2.close >= ?
         AND calc2.avg_turnover_50 >= ?
+        -- Trailing-bar guard: the rn=1 row is the symbol's OWN latest bar, whatever date that is, but
+        -- the result is labelled with latestScreenDate() = the UNIVERSE's max trade_date. A symbol
+        -- that stopped printing (delisted/renamed/suspended) therefore emitted a full candidate row
+        -- computed on a weeks-old close under today's badge, with the staleness neither carried on
+        -- the row nor visible in the response. Same guard EquityReturnsService already applies to
+        -- this table (its rn=1 HAVING). Comparing against base's OWN max — not a restated
+        -- max(trade_date) subquery — keeps the series filter structurally identical to the
+        -- population (base is series IN ('EQ','BE'), matching latestScreenDate(); EquityReturnsService
+        -- says 'EQ' only because ITS population is 'EQ' only) and keeps the historical
+        -- screen(asOf) replay correct: base is already bounded by asOf, so this is "the universe's
+        -- latest bar as of the screen date", not "as of today", which would drop every symbol.
+        AND calc2.bucket = (SELECT max(bucket) FROM base)
       """;
 
   /** Runs the screen as of {@code asOf} (default = latest). Computes gates + RS-rank + Stage. */

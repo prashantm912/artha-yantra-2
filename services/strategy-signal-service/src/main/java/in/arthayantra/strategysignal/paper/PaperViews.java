@@ -62,7 +62,7 @@ public final class PaperViews {
   public record Pnl(List<EquityPoint> points, PnlSummary summary) {}
 
   /**
-   * One strategy's measured share of a book, decomposed from the V056 per-signal lots.
+   * One strategy's measured share of a book, decomposed from the V057 per-signal lots.
    *
    * <p>{@code slug} is NULL for fills with no signal (a manual ticket) — reported rather than
    * dropped, so the rows always sum back to the tagged total instead of quietly losing quantity.
@@ -83,14 +83,14 @@ public final class PaperViews {
    * How much of the book the lots cover — the denominator that makes {@link AttributionRow}
    * readable.
    *
-   * <p>Positions opened before V056 have no lots and there is no backfill, so {@code
+   * <p>Positions opened before V057 have no lots and there is no backfill, so {@code
    * closedPositionsTagged} starts at 0 against a non-zero {@code closedPositions}. Without this
    * beside the rows an empty decomposition reads as "this book never traded" rather than "this book
    * traded before tagging existed" — a false negative of exactly the kind the tagging exists to
    * remove.
    *
    * <p>{@code *QtyTagged} can be LESS than {@code *Qty} for a tagged position too: a position that
-   * predates V056 and later takes an add carries a lot for the add only.
+   * predates V057 and later takes an add carries a lot for the add only.
    */
   public record AttributionCoverage(
       int closedPositions,

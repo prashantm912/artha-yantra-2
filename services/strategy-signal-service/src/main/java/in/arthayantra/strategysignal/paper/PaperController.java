@@ -184,7 +184,7 @@ public class PaperController {
   }
 
   /**
-   * Per-strategy P&amp;L decomposition from the V056 per-signal lots ({@code book} absent → all
+   * Per-strategy P&amp;L decomposition from the V057 per-signal lots ({@code book} absent → all
    * books) — the read that {@code GROUP BY opening_signal_id} cannot produce.
    *
    * <p>A second entry on an already-open key AVERAGES into the position and the row keeps its
@@ -192,7 +192,7 @@ public class PaperController {
    * credits one and hides the other. This walks the per-fill lots instead.
    *
    * <p>The {@code coverage} block ships with every response by design — it is what stops an empty
-   * decomposition from being misread as an untraded book while positions opened before V056 (which
+   * decomposition from being misread as an untraded book while positions opened before V057 (which
    * have no lots, and no honest backfill) still dominate the ledger.
    */
   @GetMapping("/attribution")

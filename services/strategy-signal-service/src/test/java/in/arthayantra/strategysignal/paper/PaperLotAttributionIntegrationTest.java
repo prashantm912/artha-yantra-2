@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.paper;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -9,6 +10,12 @@ import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -23,7 +30,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * V056 per-signal lot tagging: a position built by TWO strategies firing on the same bar decomposes
+ * V057 per-signal lot tagging: a position built by TWO strategies firing on the same bar decomposes
  * back into both, instead of crediting only the one that happened to open it.
  *
  * <p>This reproduces the live shape measured on 2026-08-03, where all 10 closed scalper positions
@@ -55,6 +62,7 @@ class PaperLotAttributionIntegrationTest extends StrategySignalIntegrationTestBa
   @Autowired private PaperService paper;
   @Autowired private PaperPositionRepository positions;
   @Autowired private PaperPositionLotRepository lots;
+  @Autowired private PaperOrderRepository orders;
   @Autowired private JdbcTemplate jdbc;
 
   /**
@@ -112,6 +120,68 @@ class PaperLotAttributionIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   /**
+   * THE DISCRIMINATING CASE — unequal fill prices, which the equal-price test above cannot see.
+   *
+   * <p>Cross-vendor review Critical 1: the first cut allocated realized P&amp;L by QUANTITY ALONE, so
+   * two equal lots entered at ₹100 and ₹120 and exited around ₹110 were reported IDENTICALLY when
+   * one had made money and the other lost it. That erases exactly the entry-quality difference a
+   * keep/cut verdict turns on, and every existing test filled both lots at the same price (the live
+   * scalper shape), so the suite was green.
+   *
+   * <p>Fill-basis attribution credits each lot with its OWN entry: the cheaper entry must come out
+   * strictly ahead, and the two must still sum to the position's realized P&amp;L.
+   */
+  @Test
+  void aPositionWithUnequalFillPricesAttributesTheEntryEdge() {
+    String suffix = UUID.randomUUID().toString();
+    String book = "lotedge-" + suffix.substring(0, 8);
+    String sym = "LOTOPT-" + suffix;
+    String cheap = "edge-cheap-" + suffix;
+    String dear = "edge-dear-" + suffix;
+    long signalCheap = seedSignal(cheap, suffix + "-c");
+    long signalDear = seedSignal(dear, suffix + "-d");
+
+    // Same qty, DIFFERENT prices — the blended basis lands at 110.
+    paper.openOrder(order(book, sym, signalCheap, 65, "100.00"));
+    paper.openOrder(order(book, sym, signalDear, 65, "120.00"));
+
+    PaperPositionRepository.PositionRow open =
+        positions.findOpen(book, "NFO", sym, "BUY").orElseThrow();
+    // Derived, not hardcoded: the fill simulator adds a 1-tick (0.05) buy slippage, so the fills are
+    // 100.05 and 120.05 and the basis is 110.05, not 110.00. Reading it back keeps this test honest
+    // about the real fills rather than about the prices requested.
+    List<BigDecimal> fills =
+        jdbc.queryForList(
+            "SELECT fill_price FROM paper_position_lots WHERE book = ? ORDER BY fill_price",
+            BigDecimal.class,
+            book);
+    assertThat(fills).as("two lots, at two different prices").hasSize(2);
+    BigDecimal spread = fills.get(1).subtract(fills.get(0));
+    assertThat(open.avgEntryPrice())
+        .as("the two fills blend to ONE basis — which is exactly what hides the difference")
+        .isEqualByComparingTo(
+            fills.get(0).add(fills.get(1)).divide(new BigDecimal("2"), 4, RoundingMode.HALF_UP));
+
+    paper.closePosition(open.id(), new BigDecimal("110.00"));
+    BigDecimal realized = positions.find(open.id()).orElseThrow().realizedPnl();
+
+    List<PaperPositionLotRepository.AttributionRow> rows = lots.attribution(book);
+    BigDecimal cheapShare = shareOf(rows, cheap);
+    BigDecimal dearShare = shareOf(rows, dear);
+
+    assertThat(cheapShare)
+        .as("the lot that entered 20 points cheaper must be attributed STRICTLY more")
+        .isGreaterThan(dearShare);
+    // Entry edge is (avg - fill) * qty = ±10 * 65 = ±650, and costs ride the pro-rata term.
+    assertThat(cheapShare.subtract(dearShare))
+        .as("and by exactly the entry edge: the 20.00 fill spread x 65 units = 1300")
+        .isEqualByComparingTo(spread.multiply(new BigDecimal("65")));
+    assertThat(cheapShare.add(dearShare))
+        .as("while still reconstructing the position's realized P&L exactly")
+        .isEqualByComparingTo(realized);
+  }
+
+  /**
    * The negative that makes the positive meaningful: the OLD attribution — grouping by the
    * position's {@code opening_signal_id} — reports the second strategy at n=0 on the very same data
    * the lots decompose correctly. Without this the test above cannot show it fixed anything.
@@ -142,7 +212,7 @@ class PaperLotAttributionIntegrationTest extends StrategySignalIntegrationTestBa
             String.class,
             book);
     assertThat(credited)
-        .as("the pre-V056 grouping sees ONE strategy where two traded")
+        .as("the pre-V057 grouping sees ONE strategy where two traded")
         .containsExactly(slugA);
     assertThat(credited)
         .as("and the second is invisible at n=0 — the defect, reproduced")
@@ -156,7 +226,7 @@ class PaperLotAttributionIntegrationTest extends StrategySignalIntegrationTestBa
 
   /**
    * Coverage must report an untagged position as UNTAGGED rather than absent. A position written
-   * straight to the table (standing in for the 45 that predate V056, which get no backfill) has no
+   * straight to the table (standing in for the 45 that predate V057, which get no backfill) has no
    * lots, and an attribution read that silently ignored it would turn "not instrumented" into
    * "never traded".
    */
@@ -166,7 +236,7 @@ class PaperLotAttributionIntegrationTest extends StrategySignalIntegrationTestBa
     String book = "lotcov-" + suffix.substring(0, 8);
     String sym = "LOTOPT-" + suffix;
 
-    // A pre-V056-shaped row: inserted directly, so it has an order-less, lot-less history.
+    // A pre-V057-shaped row: inserted directly, so it has an order-less, lot-less history.
     long legacyId =
         positions.insertOpen(
             book, "NFO", sym + "-LEGACY", "BUY", 100L, new BigDecimal("50.00"), null, null);
@@ -179,7 +249,7 @@ class PaperLotAttributionIntegrationTest extends StrategySignalIntegrationTestBa
     assertThat(before.closedQtyTagged()).isZero();
     assertThat(lots.attribution(book)).as("and contributes no attribution row").isEmpty();
 
-    // A post-V056 fill in the same book is tagged, so coverage moves off zero.
+    // A post-V057 fill in the same book is tagged, so coverage moves off zero.
     long signal = seedSignal("cov-" + suffix, suffix);
     paper.openOrder(order(book, sym, signal, 40, "100.00"));
 
@@ -263,6 +333,67 @@ class PaperLotAttributionIntegrationTest extends StrategySignalIntegrationTestBa
         // BigDecimal is a JSON STRING platform-wide (ArthaJacksonAutoConfiguration's
         // ToStringSerializer) — asserted as such so a retype to a number would fail here.
         .andExpect(jsonPath("$.items[0].attributedRealizedPnl").isString());
+  }
+
+  /**
+   * The V057 grants, asserted under {@code SET ROLE ay_strategy} — the only way they are observable.
+   *
+   * <p>Services connect as {@code artha} (the D10 single-writer convention), which MASKS a missing
+   * grant entirely: every test above, the endpoint, and the live write path all pass with no grant
+   * at all. It fails only under {@code SET ROLE}, which is what the rest of this lineage pins and
+   * what a future least-privilege move would use everywhere at once. Cross-vendor review caught the
+   * omission; this is what stops it recurring.
+   *
+   * <p>Also pins that the table is APPEND-ONLY by grant — a lot's (signal, qty, price) is a
+   * historical fact, so UPDATE and DELETE are denied to this role exactly as {@code
+   * composite_rejections} denies them.
+   */
+  @Test
+  void theLotsTableIsReadableAndAppendOnlyForTheReadOnlyRole() throws SQLException {
+    String suffix = UUID.randomUUID().toString();
+    String book = "lotrole-" + suffix.substring(0, 8);
+    long signal = seedSignal("role-golden-" + suffix, suffix);
+    // A real fill, so there is a genuine (position, order) pair for the role's INSERT to reference.
+    paper.openOrder(order(book, "LOTOPT-" + suffix, signal, 20, "90.00"));
+    Long positionId =
+        jdbc.queryForObject(
+            "SELECT position_id FROM paper_position_lots WHERE book = ?", Long.class, book);
+    // A SECOND, lot-less order for the role's INSERT to reference: uq_paper_position_lots_order is
+    // one-lot-per-fill, so reusing the fill above would trip that constraint rather than the grant
+    // (it did, on the first run of this test — the index is reachable by hand even though
+    // insertFilled's fresh identity makes it unreachable from the production path).
+    long freeOrderId =
+        orders.insertFilled(
+            book, signal, "NFO", "LOTROLE-" + suffix, "BUY", 5L, new BigDecimal("1.00"),
+            "ltp_slippage/v1", BigDecimal.ZERO, null, null);
+
+    try (Connection conn = DriverManager.getConnection(jdbcUrl(), dbUser(), dbPassword());
+        Statement st = conn.createStatement()) {
+      st.execute("SET ROLE ay_strategy");
+      st.execute("SET search_path TO strategy");
+
+      // SELECT allowed — without the table grant this alone throws, which is the whole finding.
+      try (ResultSet rs =
+          st.executeQuery("SELECT count(*) FROM paper_position_lots WHERE book = '" + book + "'")) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getLong(1)).as("the read-only role can READ the lots").isEqualTo(1L);
+      }
+
+      // INSERT allowed, identity column included — this is what proves the sequence is reachable.
+      st.execute(
+          "INSERT INTO paper_position_lots"
+              + " (position_id, order_id, signal_id, book, exchange, tradingsymbol, side, qty, fill_price)"
+              + " VALUES (" + positionId + ", " + freeOrderId + ", " + signal + ", '" + book + "-role',"
+              + " 'NFO', 'LOTROLE-" + suffix + "', 'BUY', 5, 1.0000)");
+
+      // UPDATE / DELETE denied — lots are append-only by grant, as the lineage's doctrine requires.
+      assertThatThrownBy(() -> st.execute("UPDATE paper_position_lots SET qty = 1"))
+          .as("a lot is a historical fact — the read-only role must not rewrite one")
+          .isInstanceOf(SQLException.class);
+      assertThatThrownBy(() -> st.execute("DELETE FROM paper_position_lots"))
+          .as("nor delete one")
+          .isInstanceOf(SQLException.class);
+    }
   }
 
   private static PaperService.OrderRequest order(

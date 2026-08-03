@@ -9,7 +9,7 @@ import org.springframework.stereotype.Repository;
 
 /**
  * JDBC access to {@code paper_position_lots} — one row per paper ENTRY fill, recording WHICH signal
- * caused it and how much it contributed (V056).
+ * caused it and how much it contributed (V057).
  *
  * <p>Exists because a second {@code openPosition} on an already-open {@code (book, exchange,
  * tradingsymbol, side)} AVERAGES into the position rather than rejecting — {@code
@@ -19,12 +19,29 @@ import org.springframework.stereotype.Repository;
  * {@code GROUP BY slug} over {@code opening_signal_id} reports the other at n=0. Lots restore the
  * per-fill truth the position row averages away.
  *
- * <p><b>Attribution arithmetic.</b> Realized P&amp;L is decomposed at READ time, pro-rata by each
- * lot's share of {@code paper_positions.qty}. That is exact rather than approximate: the position
- * exits every unit against a single {@code avg_entry_price} (closes are always full — {@code
- * doSettle} settles {@code pos.qty()}), so units are fungible by construction and a qty share IS a
- * P&amp;L share. Dividing by the POSITION's qty rather than by the summed lots is deliberate — a
- * position that predates V056 and later takes a tagged add is then attributed only its tagged share,
+ * <p><b>Attribution arithmetic — FILL-BASIS, not quantity-only.</b> Each lot is credited with the
+ * P&amp;L its OWN entry price earned, so a strategy that entered better is reported as having done
+ * better. For a lot of {@code q} filled at {@code f}, on a position of {@code Q} units with average
+ * entry {@code A} and realized {@code R}:
+ *
+ * <pre>{@code   attributed = R * (q / Q)  +  sign * (A - f) * q      sign = +1 BUY, -1 SELL}</pre>
+ *
+ * <p>The first term shares the pooled result (and with it the costs, which scale with quantity); the
+ * second is the lot's entry edge against the blended basis. <b>This is exact, not an
+ * approximation.</b> Writing {@code X} for the exit price, a long lot's true gross is {@code (X-f)q}
+ * and the position's is {@code (X-A)Q}; substituting shows {@code X CANCELS}, which is why no exit
+ * price is needed and no exit-side linkage has to exist. The shares also sum back to {@code R}
+ * exactly, since {@code Σ(A - f_i)q_i = A·Q - Σf_i·q_i = 0} by the definition of the average.
+ *
+ * <p>⚠️ <b>An earlier cut allocated by QUANTITY ALONE and was wrong</b> (cross-vendor review
+ * Critical 1). Two equal lots at ₹100 and ₹120 exiting at ₹110 were reported IDENTICALLY, when one
+ * made ₹650 and the other lost ₹650 — erasing precisely the entry-quality difference a keep/cut
+ * verdict turns on. The integration test masked it by filling both lots at the SAME price, which is
+ * the live scalper shape; {@code aPositionWithUnequalFillPricesAttributesTheEntryEdge} is the
+ * discriminating case that now pins it.
+ *
+ * <p>Dividing the pooled term by the POSITION's qty rather than by the summed lots is deliberate — a
+ * position that predates V057 and later takes a tagged add is then attributed only its tagged share,
  * with the remainder visible as untagged, instead of the one add silently claiming the whole trade.
  */
 @Repository
@@ -48,7 +65,7 @@ public class PaperPositionLotRepository {
    * How much of the book the lots actually cover — the denominator that makes every {@link
    * AttributionRow} readable.
    *
-   * <p>Load-bearing, not decoration: no position opened before V056 has lots, so on the day this
+   * <p>Load-bearing, not decoration: no position opened before V057 has lots, so on the day this
    * ships the attribution rows are EMPTY while the book holds 45 real positions. Without coverage
    * beside them an empty decomposition reads as "this book never traded" rather than "this book
    * traded before tagging existed".
@@ -117,7 +134,11 @@ public class PaperPositionLotRepository {
                CASE WHEN p.status = 'CLOSED' THEN l.qty ELSE 0 END AS closed_qty,
                CASE WHEN p.status = 'OPEN' THEN l.qty ELSE 0 END AS open_qty,
                CASE WHEN p.status = 'CLOSED'
-                    THEN round(p.realized_pnl * l.qty / p.qty, 4)
+                    THEN round(
+                           p.realized_pnl * l.qty / p.qty
+                             + CASE WHEN p.side = 'BUY' THEN 1 ELSE -1 END
+                               * (p.avg_entry_price - l.fill_price) * l.qty,
+                           4)
                     ELSE 0 END AS attributed_realized_pnl
           FROM paper_position_lots l
           JOIN paper_positions p ON p.id = l.position_id
@@ -134,9 +155,13 @@ public class PaperPositionLotRepository {
   /**
    * The per-strategy decomposition of a book ({@code book} null → every book).
    *
-   * <p>The realized share is {@code realized_pnl * lot.qty / position.qty} summed over CLOSED
-   * positions — see the class javadoc for why that division is exact and why the denominator is the
-   * position's qty rather than the summed lots.
+   * <p>Fill-basis: the pooled share plus each lot's entry edge against the blended basis — see the
+   * class javadoc for the identity and for why the exit price cancels out.
+   *
+   * <p>The per-lot terms are summed at PostgreSQL {@code numeric}'s full precision and rounded once
+   * per group, so a group figure is accurate to its last paise; only {@code R·q/Q} is inexact when
+   * {@code Q} does not divide {@code q}, and the entry-edge term is exact. Group totals therefore
+   * reconstruct the book's realized P&amp;L up to sub-paise rounding, not bit-for-bit.
    */
   public List<AttributionRow> attribution(String book) {
     return jdbc.query(
@@ -147,7 +172,13 @@ public class PaperPositionLotRepository {
                coalesce(sum(l.qty) FILTER (WHERE p.status = 'CLOSED'), 0) AS closed_qty,
                coalesce(sum(l.qty) FILTER (WHERE p.status = 'OPEN'), 0) AS open_qty,
                coalesce(
-                 round(sum(p.realized_pnl * l.qty / p.qty) FILTER (WHERE p.status = 'CLOSED'), 4),
+                 round(
+                   sum(
+                     p.realized_pnl * l.qty / p.qty
+                       + CASE WHEN p.side = 'BUY' THEN 1 ELSE -1 END
+                         * (p.avg_entry_price - l.fill_price) * l.qty
+                   ) FILTER (WHERE p.status = 'CLOSED'),
+                   4),
                  0) AS attributed_realized_pnl
           FROM paper_position_lots l
           JOIN paper_positions p ON p.id = l.position_id
@@ -167,7 +198,7 @@ public class PaperPositionLotRepository {
    * What fraction of the book carries lots at all ({@code book} null → every book).
    *
    * <p>A position counts as TAGGED when it has at least one lot; its tagged QTY is the sum of those
-   * lots, which is less than the position's qty exactly when the position predates V056 and later
+   * lots, which is less than the position's qty exactly when the position predates V057 and later
    * took an add. Both are reported so the gap is visible rather than inferred.
    */
   public Coverage coverage(String book) {

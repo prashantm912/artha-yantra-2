@@ -82,6 +82,34 @@ CREATE INDEX ix_paper_position_lots_signal ON paper_position_lots (signal_id)
   WHERE signal_id IS NOT NULL;
 CREATE INDEX ix_paper_position_lots_book_filled ON paper_position_lots (book, filled_at DESC);
 
+-- Least-privilege grants, matching what every other CREATE TABLE in this lineage already does
+-- (V050 swing_paper_effects, V052 canary_runs, V053 strategy_eval_denominator). Services connect as
+-- `artha` by the D10 single-writer convention, which MASKS a missing grant completely — the table
+-- works in every normal path and fails only under SET ROLE, i.e. under the grant tests and under any
+-- future least-privilege operation, which would break everywhere at once. Caught in cross-vendor
+-- review, not by any test, precisely because the `artha` connection hides it.
+--
+-- SELECT + INSERT only, deliberately: lots are APPEND-ONLY. Nothing updates a lot — a fill's
+-- (signal, qty, price) is a historical fact — and nothing deletes one directly.
+--
+-- No DELETE grant is needed despite both foreign keys being ON DELETE CASCADE: PostgreSQL performs
+-- referential actions with the privileges of the REFERENCING table's owner, not the invoking role,
+-- so a cascade from paper_positions or paper_orders fires regardless of what ay_strategy may do.
+-- PaperService.reset() is the only caller that deletes either parent, and it runs as `artha`.
+GRANT SELECT, INSERT ON paper_position_lots TO ay_strategy;
+
+-- The identity column's sequence. MEASURED, not assumed: with the table grant present and this line
+-- removed, the SET ROLE INSERT still SUCCEEDS (7/7 green) — GENERATED ALWAYS AS IDENTITY owns its
+-- sequence and INSERT on the table is sufficient, unlike a BIGSERIAL column, which is why V050's
+-- swing_paper_effects genuinely needed its sequence grant and this one does not.
+--
+-- Kept anyway, and the reason is not symmetry for its own sake: it costs nothing, it makes the
+-- lineage read uniformly, and it means a later change of this column to BIGSERIAL (or a manual
+-- nextval) cannot silently strand the role in a way that, again, only SET ROLE would reveal.
+-- Stated as belt-and-braces rather than dressed up as load-bearing — the TABLE grant above is the
+-- one the red-proof reddens on.
+GRANT USAGE, SELECT ON SEQUENCE paper_position_lots_id_seq TO ay_strategy;
+
 COMMENT ON TABLE paper_position_lots IS
   'One row per paper ENTRY fill: which signal caused it, how much it contributed, and at what price. Exists because a second openPosition on an open (book, exchange, tradingsymbol, side) AVERAGES into the position (uq_paper_positions_open guards the row, never the qty) while opening_signal_id records only the first signal — so a position built by scalp-golden-crossover + scalp-connect-the-dots firing on the same bar credits one strategy and hides the other. Realized P&L is decomposed at read time pro-rata by qty share, which is exact rather than approximate because the position exits every unit against one avg_entry_price. Exit fills are not recorded (they carry no signal and close the whole position). Positions opened before this migration have no lots and are reported UNTAGGED; there is no backfill.';
 

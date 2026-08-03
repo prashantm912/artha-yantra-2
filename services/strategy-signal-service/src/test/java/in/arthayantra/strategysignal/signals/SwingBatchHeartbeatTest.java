@@ -3,21 +3,28 @@ package in.arthayantra.strategysignal.signals;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 /**
  * The swing-batch dead-man's-switch: pings the configured external monitor once per evening; the
  * monitor alerts when the ping is ABSENT. Verifies the arming gate, the ping target, the fail-soft
  * contract (a ping error must never surface to the batch) and — the point of the run-marker gate —
  * that the ping is EARNED: it is withheld when an armed family recorded no {@code swing_batch_runs}
- * marker for the session, while an NSE holiday, a disarmed family and a date past the bundled
- * calendar's coverage all still ping (a withheld ping there would be a false alarm).
+ * marker for the session, when the marker cannot be read, and past the bundled calendar's coverage
+ * (where a session cannot be judged expected-or-not) — while an NSE holiday and a disarmed family
+ * still ping, since a withheld ping there would be a false alarm. Also pins that the secret ping URL
+ * never reaches the log, not even indirectly through a throwable's message.
  */
 class SwingBatchHeartbeatTest {
 
@@ -134,14 +141,27 @@ class SwingBatchHeartbeatTest {
   }
 
   @Test
-  void pingsPastTheCalendarCoverageWithoutCheckingMarkers() {
-    // MarketCalendar.isTradingDay throws outside the bundled years. Fail OPEN: degrade to the
-    // pre-gate behaviour rather than false-alarm on every uncovered holiday — and never let the
-    // throw escape the scheduled method.
+  void withholdsThePingPastTheCalendarCoverage() {
+    // MarketCalendar.isTradingDay throws outside the bundled years. Fail CLOSED: outside coverage a
+    // holiday is indistinguishable from a trading day, so pinging would report green through every
+    // real miss for the whole uncovered window (2027 lists land ~Dec 2026; the horizon canary
+    // reddens 2026-11-17). The throw must still never escape the scheduled method.
     Markers markers = new Markers(false);
     Recording heartbeat = armed(markers);
 
     assertThatCode(() -> heartbeat.pingIfRecorded(PAST_COVERAGE)).doesNotThrowAnyException();
+
+    assertThat(heartbeat.calls).isZero();
+    assertThat(markers.reads).isZero(); // decided by the cliff, never by the marker
+  }
+
+  @Test
+  void pingsPastTheCalendarCoverageWhenNoFamilyIsArmed() {
+    // Arming is checked BEFORE the calendar, so an idle configuration cannot be paged by the cliff.
+    Markers markers = new Markers(false);
+    Recording heartbeat = new Recording(PING_URL, markers, false, Clock.systemUTC(), false, false);
+
+    heartbeat.pingIfRecorded(PAST_COVERAGE);
 
     assertThat(heartbeat.calls).isEqualTo(1);
     assertThat(markers.reads).isZero();
@@ -180,6 +200,40 @@ class SwingBatchHeartbeatTest {
     assertThatCode(() -> heartbeat.pingIfRecorded(TRADING_DAY)).doesNotThrowAnyException();
 
     assertThat(heartbeat.calls).isZero();
+  }
+
+  // ---- the ping URL is a secret and must never reach the log -----------------------------------
+
+  @Test
+  void pingFailureNeverPutsTheHeartbeatUrlIntoTheLog() {
+    // Uses the REAL send(), not the Recording override: the whitespace makes URI.create throw an
+    // IllegalArgumentException whose message quotes the WHOLE url, token and all. Logging the
+    // throwable would publish the secret to the service log, so the catch may log only its class.
+    // No network I/O happens — URI.create throws before the HttpClient is touched.
+    String secretUrl = "https://hc-ping.com/dead beef-SUPERSECRETTOKEN";
+    SwingBatchHeartbeat heartbeat =
+        new SwingBatchHeartbeat(secretUrl, bothFamiliesRan(), Clock.systemUTC(), true, true);
+    Logger heartbeatLog = (Logger) LoggerFactory.getLogger(SwingBatchHeartbeat.class);
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.start();
+    heartbeatLog.addAppender(logs);
+    try {
+      assertThatCode(() -> heartbeat.pingIfRecorded(TRADING_DAY)).doesNotThrowAnyException();
+
+      String logged =
+          logs.list.stream()
+              .map(ILoggingEvent::getFormattedMessage)
+              .collect(Collectors.joining("\n"));
+      // Guard against the test silently passing because nothing was logged at all.
+      assertThat(logged).contains("swing batch heartbeat ping failed");
+      assertThat(logged).doesNotContain("SUPERSECRETTOKEN");
+      assertThat(logged).doesNotContain("hc-ping.com");
+      assertThat(logged).doesNotContain(secretUrl);
+      // The exception class is still there, so the failure stays diagnosable.
+      assertThat(logged).contains(IllegalArgumentException.class.getName());
+    } finally {
+      heartbeatLog.detachAppender(logs);
+    }
   }
 
   // ---- the session date is IST, never UTC ------------------------------------------------------

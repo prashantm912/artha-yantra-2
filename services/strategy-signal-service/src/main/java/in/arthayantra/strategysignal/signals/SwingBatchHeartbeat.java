@@ -43,9 +43,9 @@ import org.springframework.stereotype.Component;
  * <p><b>Truth table</b>, evaluated for TODAY's IST date in {@link #batchesRecorded}, first match wins:
  *
  * <ol>
- *   <li>Date outside the bundled calendar's covered years (CD-2 cliff) → <b>PING</b> (fail OPEN).
+ *   <li>No swing family armed → <b>PING</b> — nothing is ever expected, on any date.
+ *   <li>Date outside the bundled calendar's covered years (CD-2 cliff) → <b>WITHHOLD</b>.
  *   <li>Not an NSE trading day (holiday / weekend) → <b>PING</b> — no batch was expected.
- *   <li>Trading day, no family armed → <b>PING</b> — nothing was expected.
  *   <li>Trading day, every armed family has its marker → <b>PING</b> — the batches ran.
  *   <li>Trading day, an armed family has NO marker → <b>WITHHOLD</b> — this is the whole point.
  *   <li>The marker read itself threw → <b>WITHHOLD</b> — the run cannot be proven.
@@ -56,14 +56,17 @@ import org.springframework.stereotype.Component;
  * the owner learns to ignore is worse than no pager. {@link MarketCalendar#nse()} decides whether a
  * session was expected at all.
  *
- * <p><b>Past the calendar's coverage the gate fails OPEN</b> (the bundled holiday CSVs cover a FIXED year
- * set; {@link MarketCalendar#isTradingDay} throws outside it). Outside coverage a holiday is
- * indistinguishable from a trading day, so requiring a marker would false-alarm on every uncovered
- * holiday, and letting the throw escape would kill the schedule outright. Pinging degrades this beat to
- * EXACTLY its pre-gate behaviour — the stack-down shape stays covered and only the batch-failed-while-up
- * extension is lost — so the failure direction is "no worse than before", never "newly wrong". The cliff
- * is separately guarded: {@code CalendarHorizonCanaryTest} goes red ~45 days before the last covered year
- * ends (the CD-2 yearly-refresh reminder) and the WARN below names it.
+ * <p><b>Past the calendar's coverage the gate fails CLOSED</b> (the bundled holiday CSVs cover a FIXED
+ * year set; {@link MarketCalendar#isTradingDay} throws outside it). Pinging there was the first design
+ * and it is wrong: outside coverage a holiday is indistinguishable from a trading day, so a green ping
+ * would report success through EVERY real miss for the whole uncovered window — precisely the silent lie
+ * this gate exists to remove, merely relocated to a window nobody is watching. And the window is not
+ * hypothetical: the 2027 NSE/BSE holiday lists are not published until roughly December 2026, while the
+ * bundled CSVs stop at 2026 and {@code CalendarHorizonCanaryTest} reddens on 2026-11-17 — a known, dated,
+ * multi-week gap. Withholding costs a burst of false alarms an operator can anticipate and silence from
+ * the WARN this logs; fail-open costs a detector that lies exactly when it is least supervised. The throw
+ * is still caught either way — letting it escape would kill the schedule outright. Arming is checked
+ * FIRST (row 1), so an idle configuration cannot be paged by the cliff.
  *
  * <p><b>A disarmed family is expected to record nothing.</b> {@code SwingBatchRecorder} short-circuits a
  * flag-off family before the marker write, so requiring its marker would withhold the ping EVERY evening
@@ -84,6 +87,12 @@ import org.springframework.stereotype.Component;
  * grace window, so a missed 20:15 ping raises the alert. Fail-soft: a ping failure is logged, never
  * thrown, and neither is a marker-read failure — the batch is unaffected (this observes it, never gates
  * it).
+ *
+ * <p><b>The ping URL never reaches the log, directly or via a throwable.</b> It is a secret-ish token from
+ * {@code .env}, and both {@code URI.create}'s {@code IllegalArgumentException} and the HTTP client's
+ * connect failures embed the FULL request URL in their message — so the ping catch logs the exception
+ * CLASS only, never {@code e}/{@code e.getMessage()}/{@code e.toString()}. The marker-read catch is the
+ * one place a message IS logged, and it is a JDBC exception that has never seen this URL.
  */
 @Component
 @ConditionalOnProperty(name = "artha.heartbeat.url")
@@ -146,7 +155,14 @@ public class SwingBatchHeartbeat {
       send(url);
       log.info("swing batch heartbeat: pinged the external dead-man's-switch");
     } catch (Exception e) {
-      log.warn("swing batch heartbeat ping failed (external monitor may alert): {}", e.toString());
+      // NEVER log the throwable's message or toString() here. The ping URL is a secret-ish token
+      // from .env, and both URI.create's IllegalArgumentException and the HttpClient's connect
+      // failures embed the FULL request URL in their message — logging `e` would publish the token
+      // to the service log. The exception CLASS is the whole diagnostic budget on this path.
+      log.warn(
+          "swing batch heartbeat ping failed (external monitor may alert): {} (message withheld —"
+              + " it can embed the secret ping URL)",
+          e.getClass().getName());
     }
   }
 
@@ -156,6 +172,13 @@ public class SwingBatchHeartbeat {
    * testing. Never throws: a {@code @Scheduled} method that dies takes the whole schedule with it.
    */
   boolean batchesRecorded(LocalDate session) {
+    // Arming is checked BEFORE the calendar: with no family armed nothing is ever expected on any
+    // date, so neither a holiday nor the coverage cliff can turn an idle configuration into a page.
+    List<String> expected = expectedBatches();
+    if (expected.isEmpty()) {
+      log.info("swing batch heartbeat: no swing family is armed — nothing was expected, pinging");
+      return true;
+    }
     try {
       if (!calendar.isTradingDay(session)) {
         log.info(
@@ -164,16 +187,18 @@ public class SwingBatchHeartbeat {
         return true;
       }
     } catch (IllegalArgumentException uncoveredYear) {
-      log.warn(
-          "swing batch heartbeat: the NSE calendar does not cover {} — pinging WITHOUT the run-marker"
-              + " check (CD-2 calendar cliff; refresh the bundled holiday CSVs)",
+      // Fail CLOSED. Outside coverage we cannot tell a holiday from a trading day, and pinging would
+      // make EVERY real miss report green for the whole uncovered window — the exact lie this gate
+      // exists to prevent, and not a hypothetical one: the 2027 NSE/BSE holiday lists are not
+      // published until ~Dec 2026 while the horizon canary reddens 2026-11-17, so there is a known,
+      // dated multi-week window with no coverage. A withheld ping is loud, anticipatable and
+      // self-announcing (this WARN plus the monitor's alarm); a green lie is neither.
+      log.error(
+          "swing batch heartbeat: the NSE calendar does not cover {} — WITHHOLDING the ping because"
+              + " a session cannot be judged expected-or-not (CD-2 calendar cliff; refresh the"
+              + " bundled holiday CSVs to restore it)",
           session);
-      return true; // fail open: degrade to the pre-gate behaviour, never to a holiday false alarm
-    }
-    List<String> expected = expectedBatches();
-    if (expected.isEmpty()) {
-      log.info("swing batch heartbeat: no swing family is armed — nothing was expected, pinging");
-      return true;
+      return false;
     }
     try {
       for (String batch : expected) {
@@ -192,6 +217,11 @@ public class SwingBatchHeartbeat {
       // Fail CLOSED. The marker lives in the database the batch writes to, so a read that fails at
       // 20:15 far more likely means the 20:00 batch could not write than that a blip straddles only
       // this beat. On an alerting path an unprovable state must be loud.
+      //
+      // The message IS kept here, unlike the ping path above: this exception comes from JDBC and can
+      // never have seen the heartbeat URL, and the DB password is a separate Spring property (see
+      // SecretFilePasswordPostProcessor), never embedded in the JDBC URL a connection failure would
+      // quote. The SQL/driver message is the only diagnostic on this branch, so it is worth keeping.
       log.error(
           "swing batch heartbeat: the run-marker read for session {} failed — WITHHOLDING the ping"
               + " (cannot prove the batches ran): {}",

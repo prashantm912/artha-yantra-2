@@ -48,8 +48,11 @@ public class OptionsSnapshotReader {
    * {@code option_type}); {@code ltp} / {@code oi} / {@code volume} / {@code iv} are nullable
    * columns, {@code oi_change} is nullable by V007_1 and is additionally null for the FIRST bucket
    * of each leg on the candle-derived path, and {@code spot} is null whenever the bucket carried no
-   * underlying sample. The candle-derived reader passes {@code iv} as a literal null (§11.12), which
-   * is exactly what {@code OptionsAnalyticsController.oiFreshness} tests to label a read "derived".
+   * underlying sample. The candle-derived reader leaves {@code iv} null except on the ATM band it
+   * back-solves ({@code CandleDerivedChainReader.enrichIv}) — so a null {@code iv} is a SYMPTOM of
+   * derivation, never its identity, and nothing may key provenance on it. {@code
+   * OptionsAnalyticsController.oiFreshness} used to, and mislabelled both directions; it now asks
+   * {@link #hasCapturedRows} for the row's {@code source} instead.
    *
    * <p>Spelled as the 3.1 type union, NOT {@code @Schema(nullable = true)} — the latter is a silent
    * no-op at OpenAPI 3.1 and would publish these as non-nullable, a lie in the generated TS.

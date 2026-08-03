@@ -43,13 +43,14 @@ function renderTable(props: Partial<Parameters<typeof DataTable<Row>>[0]> = {}) 
 }
 
 describe('DataTable', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3082ms in a full-suite run.
   it('renders headers and rows', () => {
     renderTable();
     for (const h of ['Name', 'Price', 'Qty']) {
       expect(within(body()).getByRole('columnheader', { name: new RegExp(h) })).toBeInTheDocument();
     }
     expect(names()).toEqual(['BBB', 'AAA', 'CCC']); // input order when unsorted
-  });
+  }, 15_000);
 
   it('sorts descending on first header click, ascending on the second', () => {
     renderTable();

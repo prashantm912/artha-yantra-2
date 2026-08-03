@@ -237,7 +237,15 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   IS the forward), and **Dow + IV factors degrade to NEUTRAL on history** → the composite rarely reaches
   strong confluence on backtests, so the OI edge reads MUTED on derived history (it's a data-fidelity
   artifact, not a strategy verdict — judge OI-led strategies on FORWARD paper with real captured OI,
-  not a weak historical backtest). **Timestamp-key trap (root cause of #214):** an `OffsetDateTime`
+  not a weak historical backtest). ⚠️ **COROLLARY, and it is sharper than the rule it follows: an A/B
+  between two strategies whose OI-GATING DIFFERS cannot be run on derived history AT ALL** (2026-08-03,
+  caught in scoping before it was proposed). The muting is not noise that averages out — it is a
+  one-sided handicap, so the OI-gated arm loses by construction and the backtest returns a decisive,
+  confident, WRONG winner. Concretely: `scalp-connect-the-dots-nifty` runs `oi_confluence_gate.enabled:
+  true` and `scalp-golden-crossover-nifty` runs it `false`, so any historical comparison of that twin
+  pair is contaminated by design. **The tell is that the arms differ in a factor history cannot
+  represent** — check that BEFORE reaching for a backtest as a discriminator, not after reading the
+  result. Forward paper is the only valid comparison for such a pair. **Timestamp-key trap (root cause of #214):** an `OffsetDateTime`
   map key SILENTLY misses across data sources with different UTC offsets — the futures-spine bars carry
   `+05:30` but JDBC `time_bucket` returns `+00`, so `map.get(bar.bucket)` missed EVERY lookup and 3
   Connecting-Dots factors (activeStrikeOi/IV/VIX) read NEUTRAL on every history session for months. Key
@@ -496,13 +504,28 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `npm run test:ci` + `npm run build`. After a rebuild HARD-reload (Ctrl+Shift+R) — a stale cached
   chunk renders the old UI. **Deploy gotcha:** the Dockerfile COPYs the HOST-built `dist/`, so
   `npm run build` on the main checkout FIRST, then `docker compose build frontend-react`.
-- **Full-suite vitest timeouts in UNTOUCHED specs are usually suite-growth, not your bug** (#1061,
-  2026-07-28): the heaviest render specs sit at 96–99% of the default 5s budget and tip over when
-  ANY new spec file shifts worker scheduling — green in isolation, red in the full run, and a fresh
-  worktree's cold caches make it worse (a worktree full-suite red proves nothing by itself). Debug
-  ladder: name the failures → run them in ISOLATION → full suite on MAIN's warm checkout (baseline)
-  → full suite at the branch on that same checkout (the only decisive gate). A borderline spec gets
-  an explicit `}, 15_000);` budget + dated comment, not a global testTimeout bump. Also: fake-timer
+- **Full-suite vitest timeouts in UNTOUCHED specs CAN BE load contention rather than your bug — run the
+  ladder below before blaming the branch** (⚠️ they can also be real: an untouched spec regresses through
+  CHANGED SHARED CODE, and the A/B ladder is what distinguishes the two — do not read "untouched spec" as
+  "not my change") (#1061,
+  2026-07-28; ⚠️ **re-measured and CORRECTED 2026-08-03, #1269 — the old "heaviest render specs sit at
+  96–99% of the default 5s budget" was ONE moderate-load sample and materially understated this**):
+  heavy page-render specs cost **1.2–2.2s in isolation vs 3.0–9.1s under full-suite worker contention —
+  a 2.2–6.2× multiplier that tracks MACHINE LOAD, not code**, spanning 60–182% of the 5s default. The
+  default sits INSIDE that spread, so *which* specs fail is decided by what else the box is doing: CI
+  stays green on its 2-core runner while a 16-CPU box sharing Docker + other agents went red on **6 of
+  6** unmodified runs, a different failing set each time, every one green in isolation. Cleanest tell —
+  the control group: `OrdersPage` / `OiExpiryStrategyPage` measure 4075–9140ms in EVERY run and pass
+  ONLY because they already carry `}, 15_000);`. Debug ladder: name the failures → run them in
+  ISOLATION → full suite on MAIN's warm checkout (baseline) → full suite at the branch on that same
+  checkout (the only decisive gate); a fresh worktree's cold caches make it worse, so warm a worktree
+  with one DISCARDED run before trusting any number from it. A borderline spec gets an explicit
+  `}, 15_000);` budget + dated comment, never a global testTimeout bump. ⚠️ **A SECOND, DISTINCT
+  failure mode that NO budget can fix:** a name-matcher `findBy*` exhausting Testing Library's default
+  **1000ms `asyncUtilTimeout`** (it recomputes accessible names over the whole DOM on every 50ms poll)
+  fails as `Unable to find role="…"`, **NOT** as a test timeout — widen the wait at the CALL SITE
+  (`{ timeout: 3000 }`). Measured on `InsightsPage` at 1869ms + 1578ms; **the repo was NOT swept for
+  other name-matcher `findBy*` sites, so that class is only PARTLY closed.** Also: fake-timer
   specs — `findBy*`/`vi.waitFor` poll with the FAKED setTimeout and stall; flush with
   `act(async () => { …; await vi.advanceTimersByTimeAsync(0); })` then plain `getBy*`; and a
   force-close that UNMOUNTS a Radix dialog never fires `onCloseAutoFocus` (focus repair needs a

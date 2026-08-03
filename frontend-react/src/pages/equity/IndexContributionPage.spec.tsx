@@ -38,6 +38,7 @@ function renderPage() {
 }
 
 describe('IndexContributionPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3270ms in a full-suite run.
   it('renders the advances/declines split with contributors', () => {
     renderPage();
     expect(screen.getByText(/Advances: 1/)).toBeInTheDocument();
@@ -51,5 +52,5 @@ describe('IndexContributionPage', () => {
     expect(screen.queryByText(/EOD · as of/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/24117\.65/).length).toBeGreaterThan(0);
     expect(screen.getByLabelText('Live')).toBeChecked();
-  });
+  }, 15_000);
 });

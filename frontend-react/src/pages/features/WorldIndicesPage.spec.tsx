@@ -73,6 +73,7 @@ function renderPage() {
 }
 
 describe('WorldIndicesPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 6592ms in a full-suite run.
   it('renders the faithful columns and a sign-aware change per row', () => {
     renderPage();
     const table = screen.getByRole('table');
@@ -86,5 +87,5 @@ describe('WorldIndicesPage', () => {
     expect(within(table).getByText('-0.21%')).toBeInTheDocument();
     // The price-less row still lists (name shown) with muted dashes for its missing prices.
     expect(within(table).getByText('BRENT CRUDE')).toBeInTheDocument();
-  });
+  }, 15_000);
 });

@@ -61,6 +61,7 @@ function renderPage() {
 }
 
 describe('ManasAroraScreenerPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3806ms in a full-suite run.
   it('renders the selection screen table with the passer row and its gates', () => {
     renderPage();
     const table = screen.getByRole('table', { name: 'Manas Arora screen' });
@@ -73,5 +74,5 @@ describe('ManasAroraScreenerPage', () => {
     const link = within(table).getByRole('link', { name: 'SANGINITA' });
     expect(link).toHaveAttribute('href', '/equity/manas-arora/SANGINITA');
     expect(screen.getByText(/1590 scanned/)).toBeInTheDocument();
-  });
+  }, 15_000);
 });

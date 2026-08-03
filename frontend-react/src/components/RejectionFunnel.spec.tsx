@@ -92,6 +92,7 @@ beforeEach(() => {
 });
 
 describe('RejectionFunnel', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3821ms in a full-suite run.
   it('walks the ladder from the true denominator down to the fired survivors', () => {
     state.funnel = BUSY_DAY;
     renderFunnel();
@@ -114,7 +115,7 @@ describe('RejectionFunnel', () => {
     const firedRow = screen.getByRole('row', { name: /^Fired/ });
     expect(within(firedRow).getByText('10')).toBeInTheDocument();
     expect(within(firedRow).getByText('1.0%')).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('renders a day with no recorded counts as absent, never as zeros', () => {
     state.funnel = { sessionDate: '2026-08-03', boots: 0, items: [] };
@@ -170,6 +171,7 @@ describe('RejectionFunnel', () => {
   // `remaining` all the way down and drew them arriving at the green Fired node — the chart showed
   // 10 trades that never happened while the table beside it correctly said 0. Not-dropped had become
   // FABRICATED, which is strictly worse than dropped. The fixture pins BOTH surfaces at once.
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3220ms in a full-suite run.
   it('never routes an unmappable outcome into Fired — the chart and the table must agree on zero', () => {
     state.funnel = {
       sessionDate: '2026-08-01',
@@ -202,7 +204,7 @@ describe('RejectionFunnel', () => {
 
     const firedRow = screen.getByRole('row', { name: /^Fired/ });
     expect(within(firedRow).getByText('0')).toBeInTheDocument();
-  });
+  }, 15_000);
 
   // Cross-vendor review Critical 1. In `SignalEngine.scalperEntry` the `scalperGate.isEmpty()`
   // branch returns CONFLUENCE_GATE_ABSENT before the `emissionGuard … scalperEntryAllowed()` branch

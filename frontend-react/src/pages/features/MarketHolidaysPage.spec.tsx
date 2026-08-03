@@ -25,6 +25,7 @@ function renderPage() {
 }
 
 describe('MarketHolidaysPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 4292ms in a full-suite run.
   it('renders the faithful columns and a Passed/Coming validity per date', () => {
     renderPage();
     const table = screen.getByRole('table');
@@ -34,5 +35,5 @@ describe('MarketHolidaysPage', () => {
     // A long-past date reads Passed; a far-future date reads Coming.
     expect(within(table).getByText('Passed')).toBeInTheDocument();
     expect(within(table).getByText('Coming')).toBeInTheDocument();
-  });
+  }, 15_000);
 });

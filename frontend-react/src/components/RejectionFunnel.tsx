@@ -50,9 +50,12 @@ const LEAKS: { outcome: string; label: string; survivor: string; why: string }[]
     survivor: 'Chart entry fired',
     why: 'Every chart gate passed and the composite still came in under the strategy’s scoring threshold.',
   },
-  // ⚠️ ORDER: gate-absent comes BEFORE discipline. `scalperEntry` returns CONFLUENCE_GATE_ABSENT at
-  // SignalEngine.java:1961 and only then consults the discipline guard at :1967 — so a bar on a
-  // gate-less scalper never reaches discipline at all. The reverse order (shipped and caught in
+  // ⚠️ ORDER: gate-absent comes BEFORE discipline. In `SignalEngine.scalperEntry`, the
+  // `scalperGate.isEmpty()` branch returns CONFLUENCE_GATE_ABSENT and only then does the
+  // `emissionGuard … scalperEntryAllowed()` branch return DISCIPLINE_PAUSED — so a bar on a
+  // gate-less scalper never reaches discipline at all. (Pinned by guard name, not line number:
+  // line pins drift, and a stale pin is what a reader would trust while it silently rots.)
+  // The reverse order (shipped and caught in
   // cross-vendor review) drew those bars surviving “Discipline open”, a stage production never put
   // them through. Read this order off SignalEngine; never reconstruct it from the outcome names.
   {

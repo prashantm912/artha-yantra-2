@@ -145,7 +145,8 @@ describe('RejectionFunnel', () => {
     // The rails hang off the leak node, and the leak keeps the DENOMINATOR's 90 on its inbound link
     // rather than being rewritten to the rails' 90 — the two are bounded differently and may differ.
     // The inbound stage is "Discipline open" because gate-absent is checked BEFORE discipline
-    // (SignalEngine.java:1961 then :1967), so discipline is the last stage before the confluence call.
+    // (`SignalEngine.scalperEntry`: the `scalperGate.isEmpty()` branch precedes the `emissionGuard`
+    // one), so discipline is the last stage before the confluence call.
     expect(links).toContainEqual({
       source: 'Discipline open',
       target: 'Confluence gate blocked',
@@ -203,8 +204,9 @@ describe('RejectionFunnel', () => {
     expect(within(firedRow).getByText('0')).toBeInTheDocument();
   });
 
-  // Cross-vendor review Critical 1. `scalperEntry` returns CONFLUENCE_GATE_ABSENT at
-  // SignalEngine.java:1961 and consults the discipline guard only at :1967, so a gate-less bar never
+  // Cross-vendor review Critical 1. In `SignalEngine.scalperEntry` the `scalperGate.isEmpty()`
+  // branch returns CONFLUENCE_GATE_ABSENT before the `emissionGuard … scalperEntryAllowed()` branch
+  // returns DISCIPLINE_PAUSED, so a gate-less bar never
   // reaches discipline. The shipped order had them swapped, drawing those bars surviving a stage
   // production never put them through.
   it('orders gate-absent before discipline, matching scalperEntry’s real return order', () => {

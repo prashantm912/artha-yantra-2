@@ -1522,6 +1522,38 @@ public class SignalEngine {
         });
   }
 
+  /**
+   * FAULT-INJECTION SEAM (drill only) — stops the CURRENT candle listener container, reproducing the
+   * 2026-07-07 "silent subscription loss" shape so {@link SubscriberHealthCanary}'s receive-side fire
+   * path can be exercised deliberately. Reachable ONLY from {@link SignalFaultInjector}, which does
+   * not exist unless {@code artha.signals.fault-injection.enabled=true} (default OFF).
+   *
+   * <p><b>Why a container stop and not a socket kill.</b> A transport-level drop cannot reach the
+   * canary at all: the 2026-08-03 drill killed the pub/sub connection server-side and Lettuce's own
+   * {@code ConnectionWatchdog} reconnected in ~22 ms — four orders of magnitude below the 180 s
+   * {@code bar-gap-ms} threshold, so no bar was missed and nothing was detected. The incident this
+   * canary exists for was the opposite shape: the container silently stopped dispatching while the
+   * connection factory stayed perfectly healthy, so Lettuce saw nothing to repair. {@code stop()}
+   * reproduces exactly that — it tears down the pub/sub SUBSCRIPTION (an intentional close, so no
+   * watchdog reconnect fires and no listener is left dispatching) while leaving the shared
+   * {@code connectionFactory} — and therefore every other Redis user in this JVM — untouched.
+   *
+   * <p>Deliberately NOT self-healing here: recovery must come from the watchdog's own
+   * {@link #forceResubscribe} (that is the path under test), with the injector's bounded auto-restore
+   * as the backstop. {@code synchronized} so it serialises with {@link #resubscribe()} rather than
+   * racing a concurrent reload for the {@code container} reference.
+   *
+   * @return false when there was no container to stop (engine not started / already stopped)
+   */
+  synchronized boolean suspendCandleSubscriptionForFaultDrill() {
+    RedisMessageListenerContainer current = this.container;
+    if (current == null) {
+      return false;
+    }
+    current.stop();
+    return true;
+  }
+
   /** Redis receive thread: parse + conflate + hand off. NEVER evaluates here. */
   void onCandleMessage(String json) {
     long receivedAtMs = clock.millis();

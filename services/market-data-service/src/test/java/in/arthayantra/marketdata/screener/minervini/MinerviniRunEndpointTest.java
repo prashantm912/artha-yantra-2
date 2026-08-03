@@ -63,7 +63,7 @@ class MinerviniRunEndpointTest {
     // ...and it does NOT re-run the screen or persist anything itself — that duplication is what
     // stranded runOnce as dead code in the first place.
     verify(screener, never()).screen(any());
-    verify(repo, never()).upsertAll(any(), any());
+    verify(repo, never()).replaceAll(any(), any());
     verify(geometry, never()).persistForPassers(any(), any());
   }
 

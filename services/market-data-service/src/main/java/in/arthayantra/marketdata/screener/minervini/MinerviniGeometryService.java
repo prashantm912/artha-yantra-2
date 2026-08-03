@@ -69,9 +69,8 @@ public class MinerviniGeometryService {
     }
     List<String> passers =
         candidates.stream().filter(TrendCandidate::passesAll).map(TrendCandidate::symbol).toList();
-    if (passers.isEmpty()) {
-      return 0;
-    }
-    return setupsRepo.upsertAll(screenDate, detectAll(passers, screenDate));
+    // No early return on an empty passer list: replaceAll must still run so a setup row for a
+    // symbol the trailing-bar guard has since dropped is cleared rather than stranded at this date.
+    return setupsRepo.replaceAll(screenDate, detectAll(passers, screenDate));
   }
 }

@@ -28,24 +28,30 @@ public class MinerviniScheduler {
   private final TrendTemplateService screener;
   private final MinerviniScreenRepository repo;
   private final MinerviniGeometryService geometry;
+  private final PlaneDivergenceProbe planeDivergence;
   private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
   private final IngestRunLedger ledger;
   private final boolean enabled;
+  private final boolean planeDivergenceEnabled;
 
   /** Wires the screener + screen repository + geometry service + the ops ntfy client + ingest ledger. */
   public MinerviniScheduler(
       TrendTemplateService screener,
       MinerviniScreenRepository repo,
       MinerviniGeometryService geometry,
+      PlaneDivergenceProbe planeDivergence,
       in.arthayantra.marketdata.alerts.NtfyClient ntfy,
       IngestRunLedger ledger,
-      @Value("${artha.minervini.screen.enabled:true}") boolean enabled) {
+      @Value("${artha.minervini.screen.enabled:true}") boolean enabled,
+      @Value("${artha.minervini.plane-divergence.enabled:true}") boolean planeDivergenceEnabled) {
     this.screener = screener;
     this.repo = repo;
     this.geometry = geometry;
+    this.planeDivergence = planeDivergence;
     this.ntfy = ntfy;
     this.ledger = ledger;
     this.enabled = enabled;
+    this.planeDivergenceEnabled = planeDivergenceEnabled;
   }
 
   /** Boot one-shot. */
@@ -66,15 +72,32 @@ public class MinerviniScheduler {
     runQuietly("scheduled");
   }
 
-  /** On-demand run (used by the controller's POST /run). Returns rows written. */
-  public int runOnce(LocalDate asOf) {
+  /**
+   * On-demand forced recompute — the ONE orchestration behind {@code POST /run}.
+   *
+   * <p>⚠️ This method's javadoc used to claim the controller called it while the controller in fact
+   * duplicated the screen/upsert/geometry sequence inline, so {@code runOnce} had no production
+   * caller at all. Every guarantee added here — geometry consistency, and now the plane-divergence
+   * observation — silently did not apply to the one path a human triggers by hand. The controller
+   * now delegates; keep it that way, and {@link MinerviniRunEndpointTest} fails if it stops.
+   *
+   * <p>The probe is FORCED here. A recompute rewrites {@code computed_at} and can change the
+   * candidate set, so the observation the date already carries describes a screen that no longer
+   * exists — letting the existing completion marker suppress a fresh reading would make the
+   * durability marker actively destroy the thing it exists to protect.
+   *
+   * <p>Returns the fresh {@link TrendTemplateService.ScreenResult} so the caller can render exactly
+   * what was persisted without a second read.
+   */
+  public TrendTemplateService.ScreenResult runOnce(LocalDate asOf) {
     TrendTemplateService.ScreenResult r = screener.screen(asOf);
     if (r.screenDate() == null) {
-      return 0;
+      return r;
     }
-    int written = repo.upsertAll(r.screenDate(), r.candidates());
+    repo.upsertAll(r.screenDate(), r.candidates());
     computeGeometry(r);
-    return written;
+    probePlaneDivergence(r.screenDate(), "run-once", true);
+    return r;
   }
 
   private void runQuietly(String trigger) {
@@ -93,6 +116,11 @@ public class MinerviniScheduler {
       LocalDate persisted = repo.latestScreenDate();
       if (persisted != null && persisted.equals(screener.latestScreenDate())) {
         log.debug("minervini screen already current for {} — skipped ({})", persisted, trigger);
+        // ...but the probe is a SEPARATE observation with its own durable marker. A crash or a
+        // probe exception after the screen persisted used to be unrecoverable: every later door
+        // hit this skip and returned, so that evening's plane-divergence reading was lost for
+        // good. Retry it here instead — the screen stays skipped, only the probe re-runs.
+        probePlaneDivergence(persisted, trigger + "-retry", false);
         return;
       }
       runId = ledger.start(IngestRunLedger.SOURCE_MINERVINI_SCREEN);
@@ -109,6 +137,7 @@ public class MinerviniScheduler {
       log.info(
           "minervini screen upserted {} rows for {} ({} pass all 8 gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
+      probePlaneDivergence(r.screenDate(), trigger, false);
     } catch (Exception e) {
       // Audit P0-4/H10: a failed screen leaves the 20:00 swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
@@ -132,6 +161,70 @@ public class MinerviniScheduler {
     } catch (Exception e) {
       log.warn("minervini geometry failed for {} — non-fatal", r.screenDate(), e);
       return 0;
+    }
+  }
+
+  /**
+   * Two-plane read-back over the screen just persisted (see {@link PlaneDivergenceProbe}). Runs
+   * here rather than on its own cron because this is the ONLY moment the screen, the geometry and
+   * therefore the funnel are all fresh for the date; a separate job would have to re-derive when
+   * that is true.
+   *
+   * <p><b>Durable, and retried.</b> Completion is recorded per screen date by the probe itself, and
+   * every door into the scheduler retries a date that has no completion row — including the
+   * dedup-skip path above. Without that, the ordering was silently lossy: the screen persists and
+   * the ingest ledger succeeds BEFORE the probe runs, so a crash or a probe exception in between
+   * left the screen "already current" and every later trigger skipped straight past the missing
+   * observation, permanently.
+   *
+   * <p>Unlike {@code IngestCoverageCanary} this needs no two-state claim or lease. That protocol
+   * exists because a duplicate PAGE is harmful; this probe writes only a log line and a marker row,
+   * so a duplicate run is harmless and a single completion marker is the whole requirement. If this
+   * ever grows an alert, it must adopt the CLAIMED→DONE protocol with it.
+   *
+   * <p><b>Two independent guards, covering different things.</b> {@code
+   * PlaneDivergenceProbe#alreadyReported} is <i>derived</i> — a marker counts only while it is at
+   * least as new as the screen's {@code computed_at} — which re-opens the date automatically after
+   * ANY recompute, including one whose probe then failed or was disabled. {@code force} is the
+   * explicit operator guarantee for {@link #runOnce}, and it additionally covers the one case
+   * derivation misses: a recompute that upserts ZERO rows leaves {@code computed_at} unmoved. Every
+   * scheduled door passes false, so a date whose marker still describes the current screen is
+   * observed exactly once.
+   *
+   * <p>Fail-soft: a probe failure never fails a screen, and it leaves the date UNMARKED so the next
+   * door retries rather than inheriting the gap.
+   */
+  private void probePlaneDivergence(LocalDate screenDate, String trigger, boolean force) {
+    if (!planeDivergenceEnabled || screenDate == null) {
+      return;
+    }
+    try {
+      // Fail-OPEN on the marker read: if canary_runs itself is unusable, observe anyway. Absence of
+      // evidence must never buy silence, and a duplicate log line is the whole cost of being wrong.
+      boolean done = false;
+      if (!force) {
+        try {
+          done = planeDivergence.alreadyReported(screenDate);
+        } catch (Exception e) {
+          log.warn("minervini plane-divergence marker unreadable for {} — observing anyway",
+              screenDate, e);
+        }
+      }
+      if (done) {
+        return;
+      }
+      PlaneDivergenceProbe.Report r = planeDivergence.probe(screenDate);
+      log.info(
+          "minervini plane-divergence {} [{}]: {} of {} passers read two ways (>= {}% over {}d),"
+              + " {} are served candidates; {} bar-pairs compared, {} excluded as-of (cutoff {}),"
+              + " {} symbols unjudgeable — {}",
+          screenDate, trigger, r.divergentPassers(), r.passersChecked(), r.thresholdPct(),
+          r.lookbackDays(), r.divergentCandidates(), r.barsCompared(), r.barsExcludedAsOf(),
+          r.asOfCutoff(), r.symbolsWithNoHonestBars(), r.names());
+      planeDivergence.markReported(screenDate);
+    } catch (Exception e) {
+      log.warn(
+          "minervini plane-divergence probe failed for {} — non-fatal, will retry", screenDate, e);
     }
   }
 }

@@ -1433,9 +1433,13 @@ public class PaperService {
    * credits only the opener. This walks {@code paper_position_lots} instead, so each contributing
    * fill is attributed to the signal that actually caused it, on a FILL BASIS — each lot's pro-rata
    * share of the pooled result plus its own entry edge against the blended basis, so a strategy that
-   * entered better reads better. Group totals reconstruct the book's realized P&amp;L to well under a
-   * paisa but <b>not bit-for-bit</b>: the stored {@code avg_entry_price} is rounded to 4dp, leaving
-   * a residual that {@link PaperPositionLotRepository#attribution} allocates deterministically.
+   * entered better reads better.
+   *
+   * <p><b>Group totals reconstruct the book's realized P&amp;L only over FULLY TAGGED positions</b>,
+   * and then not bit-for-bit: the stored {@code avg_entry_price} is rounded to 4dp, leaving a
+   * residual that {@link PaperPositionLotRepository#attribution} allocates deterministically. A
+   * PARTIALLY tagged position — every position that predates V057, i.e. all of them on launch day —
+   * contributes only its tagged share by design, with the remainder visible in {@code coverage}.
    *
    * <p>Always returns {@link PaperViews.Attribution#coverage()} beside the rows, and the coverage is
    * not decoration — no position opened before V057 carries lots, so the day this ships the rows are

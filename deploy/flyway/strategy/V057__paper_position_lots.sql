@@ -43,8 +43,18 @@
 -- what both the realized P&L and the attribution query use. Measured, on a real pyramid shape:
 -- 65 @ 100.00 + 130 @ 100.01 has exact mean 100.00666..., stored A = 100.0067, and the edge terms
 -- sum to +0.0065 — so the shares summed to R + Rs 0.0065. The query therefore subtracts that
--- per-position residual from ONE deterministic lot (largest qty, ties by lowest id). What is left
--- inexact is only R*q/Q at numeric division precision, i.e. well under a paisa per group.
+-- per-position residual from ONE deterministic lot (largest qty, ties by lowest id).
+--
+-- ⚠️ THAT SUBTRACTION IS GATED ON FULL COVERAGE, and omitting the gate was itself a Critical.
+-- sum(edge) is a rounding artifact ONLY when the lots cover the whole position; otherwise it is
+-- GENUINE signal. For a legacy untagged 65 @ 100 plus one tagged 65 @ 120, the tagged lot's real
+-- edge is -650, and subtracting it as a 'residual' collapsed the row to a quantity-only R/2 —
+-- destroying the very attribution this table exists for. Every position that exists today is
+-- untagged, so that is not a corner case, it is launch day.
+--
+-- The residual's bound is 5e-5 * Q (half a 4dp step, times the position quantity), so it is NOT
+-- universally sub-paise: ~0.01 at Q=195, but ~Rs 0.50 at Q=10000, and it COMPOUNDS across adds
+-- because upsertPosition re-rounds from an already-rounded basis each time.
 --
 -- WHY A NEW TABLE RATHER THAN A COLUMN ON paper_orders. `paper_orders` already carries signal_id,
 -- qty and fill_price per fill — the raw attribution genuinely already exists there — but it has NO
@@ -122,7 +132,7 @@ GRANT SELECT, INSERT ON paper_position_lots TO ay_strategy;
 GRANT USAGE, SELECT ON SEQUENCE paper_position_lots_id_seq TO ay_strategy;
 
 COMMENT ON TABLE paper_position_lots IS
-  'One row per paper ENTRY fill: which signal caused it, how much it contributed, and at what price. Exists because a second openPosition on an open (book, exchange, tradingsymbol, side) AVERAGES into the position (uq_paper_positions_open guards the row, never the qty) while opening_signal_id records only the first signal — so a position built by scalp-golden-crossover + scalp-connect-the-dots firing on the same bar credits one strategy and hides the other. Realized P&L is decomposed at read time on a FILL BASIS: each lot gets R*(q/Q) plus its own entry edge sign*(A-f)*q against the blended basis, so a strategy that entered better reads better. The edge terms do NOT sum to zero — avg_entry_price is stored rounded to 4dp, so e.g. 65 @ 100.00 + 130 @ 100.01 leaves a +0.0065 residual — which the read subtracts from one deterministic lot per position (largest qty, ties by lowest id). Group totals therefore reconstruct realized P&L to well under a paisa, NOT bit-for-bit. Exit fills are not recorded (they carry no signal and close the whole position). Positions opened before this migration have no lots and are reported UNTAGGED; there is no backfill.';
+  'One row per paper ENTRY fill: which signal caused it, how much it contributed, and at what price. Exists because a second openPosition on an open (book, exchange, tradingsymbol, side) AVERAGES into the position (uq_paper_positions_open guards the row, never the qty) while opening_signal_id records only the first signal — so a position built by scalp-golden-crossover + scalp-connect-the-dots firing on the same bar credits one strategy and hides the other. Realized P&L is decomposed at read time on a FILL BASIS: each lot gets R*(q/Q) plus its own entry edge sign*(A-f)*q against the blended basis, so a strategy that entered better reads better. The edge terms do NOT sum to zero — avg_entry_price is stored rounded to 4dp, so e.g. 65 @ 100.00 + 130 @ 100.01 leaves a +0.0065 residual — which the read subtracts from one deterministic lot per position (largest qty, ties by lowest id) ONLY when the lots cover the whole position — on a PARTIALLY tagged position that sum is genuine entry edge, not a rounding artifact, and is preserved. Group totals therefore reconstruct realized P&L over FULLY TAGGED positions only, and not bit-for-bit; the residual bound is 5e-5 * position qty, so it is not universally sub-paise and it compounds across averaging adds. Exit fills are not recorded (they carry no signal and close the whole position). Positions opened before this migration have no lots and are reported UNTAGGED; there is no backfill.';
 
 COMMENT ON COLUMN paper_position_lots.signal_id IS
   'The ENTRY signal that caused this fill; NULL for a manual/unlinked fill. ON DELETE SET NULL matches paper_positions.opening_signal_id — losing the signal must not delete the money record of the fill.';

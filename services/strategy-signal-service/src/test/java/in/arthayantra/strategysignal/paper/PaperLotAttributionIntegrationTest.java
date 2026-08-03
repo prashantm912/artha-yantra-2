@@ -251,6 +251,83 @@ class PaperLotAttributionIntegrationTest extends StrategySignalIntegrationTestBa
   }
 
   /**
+   * SAME-POSITION legacy-then-tagged: a tagged add onto an UNTAGGED position keeps its entry edge.
+   *
+   * <p>Cross-vendor review Critical, round 4 — the round-3 residual fix creating a new defect. The
+   * correction subtracts {@code sum(edge)} over a position's lots, which is a rounding artifact ONLY
+   * when those lots cover the whole position. On a partially tagged position it is GENUINE signal:
+   * for a legacy untagged {@code 65 @ ₹100} plus one tagged {@code 65 @ ₹120}, the tagged lot's real
+   * edge is {@code −₹650}, and being the only lot that entire amount was subtracted, collapsing the
+   * row to a quantity-only {@code R/2}.
+   *
+   * <p>⚠️ <b>This must be the SAME position.</b> The coverage test below builds a legacy position
+   * and a tagged one SEPARATELY, and is therefore structurally blind to this — a separate position
+   * is precisely the value at which the bug vanishes. That is the sixth fixture in this PR unable to
+   * see the defect beside it, so this test derives its precondition from raw state before asserting:
+   * it proves coverage really is partial and the edge really is material.
+   */
+  @Test
+  void aTaggedAddOntoAnUntaggedPositionKeepsItsEntryEdge() {
+    String suffix = UUID.randomUUID().toString();
+    String book = "lotlegacy-" + suffix.substring(0, 8);
+    String sym = "LOTOPT-" + suffix;
+    String slug = "legacy-add-" + suffix;
+    long signal = seedSignal(slug, suffix);
+
+    // The legacy half: written straight to paper_positions, so it has NO lot — exactly the shape of
+    // all 45 positions that exist today.
+    positions.insertOpen(book, "NFO", sym, "BUY", 65L, new BigDecimal("100.00"), null, null);
+    // The tagged half: averages into that SAME position and writes one lot.
+    paper.openOrder(order(book, sym, signal, 65, "120.00"));
+
+    PaperPositionRepository.PositionRow open =
+        positions.findOpen(book, "NFO", sym, "BUY").orElseThrow();
+    assertThat(open.qty()).as("one position, both halves").isEqualTo(130L);
+
+    // FIXTURE SELF-CHECK 1 — coverage really is PARTIAL (this is what the gate keys on).
+    Long taggedQty =
+        jdbc.queryForObject(
+            "SELECT coalesce(sum(qty), 0) FROM paper_position_lots WHERE position_id = ?",
+            Long.class,
+            open.id());
+    assertThat(taggedQty)
+        .as("only the add is tagged — if this equalled 130 the gate would not be exercised")
+        .isEqualTo(65L);
+
+    // FIXTURE SELF-CHECK 2 — the edge is MATERIAL, so its destruction would be detectable.
+    BigDecimal taggedFill =
+        jdbc.queryForObject(
+            "SELECT fill_price FROM paper_position_lots WHERE position_id = ?",
+            BigDecimal.class,
+            open.id());
+    BigDecimal edge =
+        open.avgEntryPrice().subtract(taggedFill).multiply(new BigDecimal("65"));
+    assertThat(edge.abs())
+        .as("the tagged lot entered materially worse than the blend — a real edge to preserve")
+        .isGreaterThan(new BigDecimal("100"));
+
+    paper.closePosition(open.id(), new BigDecimal("115.00"));
+    BigDecimal realized = positions.find(open.id()).orElseThrow().realizedPnl();
+    BigDecimal quantityOnlyShare =
+        realized.multiply(new BigDecimal("65")).divide(new BigDecimal("130"), 4, RoundingMode.HALF_UP);
+
+    BigDecimal attributed = shareOf(lots.attribution(book), slug);
+    assertThat(attributed)
+        .as("the tagged lot keeps its entry edge — NOT collapsed to a bare quantity share")
+        .isNotEqualByComparingTo(quantityOnlyShare);
+    assertThat(attributed.subtract(quantityOnlyShare))
+        .as("and differs from that quantity share by exactly the preserved edge")
+        .isEqualByComparingTo(edge);
+
+    // The untagged half is not invented — coverage reports it as the missing remainder.
+    PaperPositionLotRepository.Coverage coverage = lots.coverage(book);
+    assertThat(coverage.closedQty()).as("the position's full size").isEqualTo(130L);
+    assertThat(coverage.closedQtyTagged())
+        .as("of which only the add is attributable — coverage does its job")
+        .isEqualTo(65L);
+  }
+
+  /**
    * The negative that makes the positive meaningful: the OLD attribution — grouping by the
    * position's {@code opening_signal_id} — reports the second strategy at n=0 on the very same data
    * the lots decompose correctly. Without this the test above cannot show it fixed anything.

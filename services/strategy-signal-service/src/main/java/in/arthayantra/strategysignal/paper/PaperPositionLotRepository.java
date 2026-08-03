@@ -47,14 +47,21 @@ import org.springframework.stereotype.Repository;
  * a re-read can never move it. Determinism is the point: a residual scattered by row order would
  * make the same position attribute differently on every read.
  *
- * <p>⚠️ <b>Two earlier cuts were wrong here, each hidden by a TIDY FIXTURE</b>, which is the real
- * lesson. Round 1 allocated by QUANTITY ALONE — two equal lots at ₹100 and ₹120 exiting at ₹110 read
- * IDENTICALLY when one made ₹650 and the other lost ₹650 — and equal-PRICE tests hid it. Round 3 is
- * the rounding residual above, and equal-QUANTITY tests hid that, because equal quantities put the
- * mean exactly on a representable midpoint where the residual is exactly zero. <b>A fixture chosen
- * to be clean is precisely one where both the right and the wrong implementation agree.</b> The two
- * discriminating tests are {@code aPositionWithUnequalFillPricesAttributesTheEntryEdge} and
- * {@code aPositionWithUnequalQuantitiesStillSumsToRealized}.
+ * <p>⚠️ <b>THREE cuts were wrong here, each hidden by a TIDY FIXTURE — that is the real lesson.</b>
+ * Round 1 allocated by QUANTITY ALONE (two equal lots at ₹100 and ₹120 exiting at ₹110 read
+ * IDENTICALLY when one made ₹650 and the other lost ₹650) and equal-PRICE tests hid it. Round 3 was
+ * the rounding residual above, and equal-QUANTITY tests hid it, because equal quantities put the
+ * mean exactly on a representable midpoint where the residual is exactly zero. Round 4 was the
+ * missing full-coverage gate, and SEPARATE-POSITION tests hid it, because a legacy position and a
+ * tagged position built independently never share the partition the bug lives in.
+ *
+ * <p><b>A fixture chosen to be clean is precisely one where the right and the wrong implementation
+ * agree.</b> Each of these fixtures was picked for tidiness, and tidiness was the defect's hiding
+ * place every time. The discriminating tests deliberately use unequal prices, unequal quantities and
+ * a SAME-POSITION legacy-then-tagged sequence, and each asserts its own fixture discriminates before
+ * asserting the behaviour: {@code aPositionWithUnequalFillPricesAttributesTheEntryEdge},
+ * {@code aPositionWithUnequalQuantitiesStillSumsToRealized} and
+ * {@code aTaggedAddOntoAnUntaggedPositionKeepsItsEntryEdge}.
  *
  * <p>Dividing the pooled term by the POSITION's qty rather than by the summed lots is deliberate — a
  * position that predates V057 and later takes a tagged add is then attributed only its tagged share,
@@ -153,9 +160,20 @@ public class PaperPositionLotRepository {
    * from exactly ONE lot, picked by {@code qty DESC, id} — largest first so the correction is
    * proportionally smallest, {@code id} to break ties, and both stable across re-reads.
    *
-   * <p>What remains inexact is only {@code R·q/Q}, at PostgreSQL {@code numeric} division precision
-   * (~16+ significant digits), summed at full precision and rounded once per group. So group totals
-   * reconstruct the book's realized P&amp;L to well within a paisa — <b>not bit-for-bit</b>.
+   * <p>⚠️ <b>The correction is gated on FULL COVERAGE, and omitting that gate was a Critical</b>
+   * (cross-vendor review round 4 — the round-3 fix creating a new defect). {@code sum(edge)} is only
+   * a rounding artifact when the lots account for the WHOLE position. When they do not, it is
+   * GENUINE SIGNAL, and subtracting it destroys exactly the attribution this feature exists to
+   * produce: for a legacy untagged {@code 65 @ ₹100} followed by one tagged {@code 65 @ ₹120}, the
+   * tagged lot's real edge is {@code −₹650}; being the only lot, that entire "residual" was
+   * subtracted and the row collapsed to a quantity-only {@code R/2}. That is not a corner case —
+   * <b>every position that exists today is untagged</b>, so legacy-plus-tagged-add is what launch
+   * day looks like. Partial coverage now keeps its edge, and {@code coverage} reports the missing
+   * remainder, which is what {@code coverage} is for.
+   *
+   * <p><b>Group totals reconstruct the book's realized P&amp;L ONLY over FULLY TAGGED positions</b>,
+   * and then only to within {@code R·q/Q}'s division precision — never bit-for-bit. A partially
+   * tagged position deliberately contributes just its tagged share.
    */
   public List<AttributionRow> attribution(String book) {
     return jdbc.query(
@@ -175,7 +193,11 @@ public class PaperPositionLotRepository {
                            * (p.avg_entry_price - l.fill_price) * l.qty
                       ELSE 0 END AS edge,
                  row_number() OVER (PARTITION BY l.position_id ORDER BY l.qty DESC, l.id)
-                                 AS residual_rank
+                                 AS residual_rank,
+                 -- Coverage, per position: the residual correction is ONLY valid when the lots
+                 -- account for the whole position (see `allocated` below).
+                 sum(l.qty) OVER (PARTITION BY l.position_id) AS tagged_qty,
+                 p.qty AS position_qty
             FROM paper_position_lots l
             JOIN paper_positions p ON p.id = l.position_id
            WHERE (?::text IS NULL OR l.book = ?)
@@ -183,7 +205,7 @@ public class PaperPositionLotRepository {
         allocated AS (
           SELECT position_id, signal_id, book, status, qty,
                  pooled + edge
-                   - CASE WHEN residual_rank = 1
+                   - CASE WHEN residual_rank = 1 AND tagged_qty = position_qty
                           THEN sum(edge) OVER (PARTITION BY position_id)
                           ELSE 0 END AS attributed
             FROM lot_terms

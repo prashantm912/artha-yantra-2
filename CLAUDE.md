@@ -124,6 +124,15 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   of the 2 tests that the *actually shipped* wrong rule reddens — under-reporting the blast radius and
   the tests' real coverage. **Red-proof by restoring the LITERAL pre-fix body**, not by writing a rule
   you think is equivalent. The weaker-looking result is the informative one.
+- ⚠️ **A red-proof can also go RED for a MECHANICAL reason and prove nothing** (2026-08-03, two in one
+  PR, both caught by the builder re-checking its own proofs). Neither stayed green — both "failed
+  convincingly": one died on a **duplicate-class compile error** (the restore glob copied a `signals`
+  file into `paper/`), the other on `The column index is out of range: 5, number of columns: 4`
+  because reverting only the SQL predicate left 6 args bound to 4 placeholders. A red-proof proves
+  detection **only if the failure message names YOUR assertion**. Two checks: assert
+  `compile-errors: 0` on every proof, and read the actual failure text — a JDBC/compile/fixture error
+  is a broken proof wearing a passing gate's clothes. Completes the set: a proof can be broken by
+  staying green, by being too strong, or by reddening for the wrong reason.
 - **CI `build-test` is sharded per-service** (`.github/workflows/ci-java.yml`): a 3-leg
   matrix (`market-data` / `backtest` / `strategy-gateway` = strategy-signal + edge-gateway),
   each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the

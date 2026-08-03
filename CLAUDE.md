@@ -87,7 +87,15 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   (`-pl services/<svc> -am package -DskipTests`), never a bare `-pl` on a leaf lib —
   a `-pl` install skips parent POMs and nested lib submodules
   (`libs/common-web/servlet`, `libs/black76-math`), so the compose fat JAR silently
-  embeds a stale lib. In **PowerShell**, a `-D` property containing dots must be QUOTED
+  embeds a stale lib. ⚠️ **SIBLING CASE, and it does NOT look like staleness (2026-08-03):
+  with a CONCURRENT SESSION building, a bare `-pl` resolves the lib from the SHARED `~/.m2`,
+  where the other session may have installed a DIFFERENT `common-web-core` — so your build
+  fails with a PHANTOM COMPILE ERROR naming a class you never touched** (measured:
+  `SchemaNameCollisionDetector not found`, on a red-proof run that had nothing to do with it).
+  The rule is unchanged — always `-am` — but the symptom is a compile error in *your* code
+  rather than a silently-wrong jar, so it reads as your bug and is easy to chase for an hour.
+  **Tell: the missing symbol is in a lib you did not edit.** Re-run with `-am` before debugging.
+  In **PowerShell**, a `-D` property containing dots must be QUOTED
   (`'-Dcontracts.capture=true'`) — unquoted, PS hands Maven a split token and it dies with
   `Unknown lifecycle phase ".capture=true"`. (An earlier example here used
   `-Dspotless.check.skip=true`, which is INERT — no spotless plugin exists in this repo; it rode

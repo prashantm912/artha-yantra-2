@@ -25,6 +25,8 @@ urgent: the screens keep scoring the dead predecessor.** `JBCHEPHARM` is being s
 Minervini endpoint **right now** as `passesAll: true`, 8/8 gates, Stage 2, `rsRank 86.65`, at
 ₹2408.90 — a price from **2026-07-16**, on a symbol that has not traded for 18 days. That is a false
 positive an owner could act on, where the rename gap only produces false negatives.
+**Its fix already exists** on the unmerged branch `fix/screener-trailing-bar-guard` — see
+Priority 1. Nothing new needs writing for it; it needs landing and deploying.
 
 ---
 
@@ -423,8 +425,20 @@ Sizing: 9 candidates gained out of 278 (+3%), 46 universe members restored out o
 ~59/year event rate that will not stop. Against that, the fix does **not** require touching the
 instrument identity model at all — which was the owner's stated reason for investigating first.
 
-**Priority 1 — a recency guard on the screen universe (small, and it fixes a live false positive).**
-Add `last bar is the screen date` (or within N sessions) to the universe predicate on both screens.
+**Priority 1 — a recency guard on the screen universe. ⚠️ ALREADY BUILT — do not build it again.**
+`computed`: the branch `fix/screener-trailing-bar-guard` (commits `23bceb8f` "drop screener rows
+whose latest bar trails the universe" + `4f3e1649` "refuse to publish a screen below the coverage
+floor", authored 2026-08-03 23:06 IST) implements exactly this on both screens — an `is_current`
+flag `(calc2.bucket = (SELECT max(bucket) FROM base))`, applied **before** the low-cap gate and the
+RS-rank so the percentile is computed over the surviving universe, plus a coverage floor and three
+new test classes. It is **not merged to `main`** (`git log origin/main -- .../screener/` tops out at
+`b4becbcc`) and **not deployed** — which is why `JBCHEPHARM` was still being served as a candidate
+during this measurement. **The action here is to land and deploy that branch, not to write a new
+one.** The description below is retained only to state what the fix must do, and to record that its
+design already handles the RS-percentile caveat.
+
+The shape: add `last bar is the screen date` (or within N sessions) to the universe predicate on
+both screens.
 This closes the `JBCHEPHARM` case, removes all 9 ghosts, and is independent of any rename work. It
 is the one thing that should not wait. **Caveat, and it is the same one the merge counterfactual
 exposed:** shrinking the universe from 1776 to 1767 re-computes the cross-sectional RS percentile

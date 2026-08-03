@@ -101,12 +101,28 @@ expect "trial-metrics catalog targets the backtest shard" \
   "contracts/metrics/trial-metrics-catalog.json" \
   "market_data=false,backtest=true,strategy_gateway=false"
 
-expect "committed spec targets its owning shard" \
+# Owning shard PLUS strategy-gateway: edge-gateway's SpecOpenObjectRatchetTest reads every
+# committed spec's content and enumerates the whole contracts/ directory.
+expect "committed spec targets its owning shard AND the repo-wide ratchet" \
   "contracts/market-data-service.openapi.json" \
-  "market_data=true,backtest=false,strategy_gateway=false"
+  "market_data=true,backtest=false,strategy_gateway=true"
 
 expect "edge-gateway spec targets the strategy-gateway shard" \
   "contracts/edge-gateway.openapi.json" \
+  "market_data=false,backtest=false,strategy_gateway=true"
+
+# A PYTHON service's spec still reddens the JVM ratchet, because that test fails on any spec
+# in contracts/ it does not account for. Missing this leaves the ratchet unreachable.
+expect "python service spec still reaches the repo-wide ratchet" \
+  "contracts/optimizer-service.openapi.json" \
+  "market_data=false,backtest=false,strategy_gateway=true,java=true"
+
+expect "margin spec still reaches the repo-wide ratchet" \
+  "contracts/margin-service.openapi.json" \
+  "strategy_gateway=true,market_data=false,backtest=false"
+
+expect "the shared json-schema keyword artifact reaches the ratchet" \
+  "contracts/json-schema-2020-12-keywords.json" \
   "market_data=false,backtest=false,strategy_gateway=true"
 
 # --- a service no shard owns: fan out AND name it (CLAUDE.md sharding rule) ---

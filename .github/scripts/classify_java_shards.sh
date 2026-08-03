@@ -57,6 +57,18 @@ fi
 if grep -Eq '^(services/(strategy-signal-service|edge-gateway)/|contracts/(strategy-signal-service|edge-gateway)\.)' <<<"$files"; then
   strategy_gateway=true
 fi
+# edge-gateway's SpecOpenObjectRatchetTest is REPO-WIDE, not edge-gateway-scoped, so it pulls
+# extra inputs into this shard (verified by reading the test, 2026-08-03):
+#   - `everyCommittedSpecIsEitherRatchetedOrDeclaredOutOfScope` LISTS contracts/*.openapi.json and
+#     fails on any spec accounted for in neither FROZEN_OPEN_OBJECTS nor OUT_OF_SCOPE — so ADDING
+#     or REMOVING any spec, INCLUDING the Python services' (optimizer/margin), reddens this shard.
+#   - it reads each accounted spec's CONTENT, and
+#   - `keywordArtifact()` reads contracts/json-schema-2020-12-keywords.json.
+# Without this rule a spec-only edit would classify to no shard at all and the ratchet would be
+# unreachable — the same class of hole the old contracts-blind classifier had.
+if grep -Eq '^contracts/([^/]*\.openapi\.json|json-schema-2020-12-keywords\.json)$' <<<"$files"; then
+  strategy_gateway=true
+fi
 
 # A service directory no shard owns. CLAUDE.md: "Adding a new service? Add a matrix shard or
 # its tests NEVER run in CI." Fan out (fail-safe) AND name it, so the omission is visible on

@@ -25,6 +25,7 @@ import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.signals.SwingBatchAlert;
 import in.arthayantra.strategysignal.signals.SwingPaperEffectRepository;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -69,6 +70,15 @@ public class SwingBatchEngine {
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
   private static final String EX = "NSE";
   private static final String IV = "1d";
+
+  /**
+   * Relative gap between a held anchor's stored entry price and its entry bar's close on the series in
+   * hand, above which the two are treated as different corporate-action planes rather than rounding —
+   * see {@link #entryReference}. 0.5% sits three orders of magnitude above the worst
+   * {@code NUMERIC(18,4)} round-trip artifact and comfortably below the smallest split/bonus ratio
+   * {@code EquitySplitBonusAdjuster} can apply (a 1:20 bonus already shifts the plane by 4.76%).
+   */
+  private static final BigDecimal ENTRY_PLANE_TOLERANCE = new BigDecimal("0.005");
 
   /**
    * A loaded published swing strategy (identity + compiled definition + neutral setup token). {@code
@@ -831,7 +841,10 @@ public class SwingBatchEngine {
         continue;
       }
       ExitEvaluator.Position position =
-          new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex);
+          new ExitEvaluator.Position(
+              ExitEvaluator.Direction.LONG,
+              entryReference(doctrine, primary, bank.primarySeries(), entryIndex),
+              entryIndex);
       Optional<ExitEvaluator.ExitDecision> exit =
           ExitEvaluator.evaluate(strat.definition(), bank, position, series.size() - 1);
       if (exit.isPresent()) {
@@ -854,6 +867,65 @@ public class SwingBatchEngine {
       }
     }
     return new ExitResult(closed, skipped, refusalReasons, false);
+  }
+
+  /**
+   * The entry reference the exit rules compare against, RE-ANCHORED onto the corporate-action plane of
+   * the series this run is actually reading.
+   *
+   * <p>{@link #emitEntry} stores {@code entryPrice = bar.close()} and {@code generatedAt =
+   * bar.bucketStart()}, so {@code strategy.signals.entry_price} is a DENORMALISED SNAPSHOT of the entry
+   * bar's close on the back-adjusted {@code candles}@1d plane the batch reads. That plane is
+   * retro-mutable: once a split/bonus ex-date lands, every pre-ex-date bar reads {@code raw × ratio} —
+   * either because {@code EquitySplitBonusAdjuster} starts scaling the BHAVCOPY bars at read time, or
+   * because {@code CorporateActionJob} re-fetched already-adjusted Kite bars over the stored ones.
+   * Nothing rewrites {@code entry_price}, so from that moment {@link ExitEvaluator} compares a
+   * post-split {@code close} against a pre-split entry: a 1:2 split presents as an instant −50% move and
+   * fires the {@code basis: percent} 8% stop at a price that never happened
+   * (docs/signal-analysis/2026-08-03-minervini-live-plane-split.md §5.3 — latent, 0 of 63 live swing
+   * signals has ever spanned an ex-date).
+   *
+   * <p>Re-reading the reference off the entry bar restores the {@code entryPrice ==
+   * series[entryIndex].close} identity that held at emit, on whichever plane is in hand. For a corporate
+   * action that is exactly right and needs no ratio lookup: the entry bar is scaled iff it predates the
+   * ex-date, which is precisely when the stored price needs the same scaling — an entry ON or AFTER the
+   * ex-date is already on the new plane and is left alone. The stop FORMULA is untouched.
+   *
+   * <p>Deliberately narrow, so no exit decision can move on non-corporate-action data:
+   * <ul>
+   *   <li>the resolved bar must BE the entry bar (same instant). A data gap that makes {@code
+   *       indexAtOrBefore} land on an EARLIER bar keeps the stored price, exactly as today.
+   *   <li>a gap within {@link #ENTRY_PLANE_TOLERANCE} keeps the stored price, so a rounding artifact can
+   *       never move a level (both columns are {@code NUMERIC(18,4)} and the adjuster emits
+   *       {@code setScale(4)}, so the healthy case is an exact match).
+   * </ul>
+   *
+   * <p>It does NOT rewrite the stored row: realised P&amp;L, the sell-decision report's {@code
+   * unrealized_pct}, the paper position's average entry and the {@code stop_loss} scalar the intraday
+   * bracket poller reads all stay on the pre-action plane and still need a manual reconcile — hence the
+   * ERROR rather than a silent correction.
+   */
+  private BigDecimal entryReference(
+      SwingDoctrine doctrine, SignalRepository.SignalRow primary, EngineSeries series, int entryIndex) {
+    BigDecimal stored = primary.entryPrice();
+    EngineCandle entryBar = series.candle(entryIndex);
+    if (stored == null
+        || stored.signum() <= 0
+        || !entryBar.bucketStart().toInstant().equals(primary.generatedAt().toInstant())) {
+      return stored;
+    }
+    BigDecimal onPlane = entryBar.close();
+    BigDecimal gap = onPlane.subtract(stored).abs().divide(stored, 6, RoundingMode.HALF_UP);
+    if (gap.compareTo(ENTRY_PLANE_TOLERANCE) <= 0) {
+      return stored;
+    }
+    log.error(
+        "{} swing exit: entry bar for #{} {} now closes at {} but the stored entry price is {} —"
+            + " the series was re-planed under the held position (corporate action?); evaluating the"
+            + " stop against the bar's close so the shift cannot fire a synthetic stop-out. The stored"
+            + " entry price, paper average entry and intraday stop_loss are still on the old plane.",
+        doctrine.batchName(), primary.id(), primary.tradingsymbol(), onPlane, stored);
+    return onPlane;
   }
 
   /**

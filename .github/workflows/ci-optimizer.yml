@@ -1,57 +1,147 @@
 # ci-optimizer (Phase 33 / CD-15): the mechanical reviewer for optimizer-service
-# (Python). Path-filtered so a JVM/frontend commit never runs it. Stages:
-# gitleaks -> ruff + pytest (>= 75% line) -> image build -> GHCR push on main only.
+# (Python). Stages: ruff + pytest (>= 75% line) -> image build -> GHCR push on main only.
+#
+# WHY THE WORKFLOW-LEVEL `paths:` FILTER IS GONE (2026-08-03) — this workflow is being made
+# SAFE TO PROMOTE to a required status check, and a `paths:`-filtered workflow can never be one.
+# GitHub's docs are explicit that the two skip mechanisms are NOT equivalent:
+#
+#   "If a job within a workflow is skipped due to a conditional, it will report its status as
+#    'Success'. [...] if a workflow is skipped due to path filtering [...] then checks associated
+#    with that workflow will remain in a 'Pending' state [and] a pull request that requires those
+#    checks to be successful will be blocked from merging."
+#
+# So with the old filter, promoting this to required would have wedged EVERY PR that does not
+# touch optimizer-service on "Expected — waiting for status", forever. That exact breakage has
+# already happened in this repo once (a dead `frontend` required context plus path-filtered
+# workflows never reporting — it masked a branch-level lock for weeks and normalised `--admin`
+# merges that bypass all six required checks). The workflow now ALWAYS triggers; a cheap
+# `changes` job decides whether there is real work.
+#
+# GATE THE STEPS, NEVER THE JOB, for the job whose name becomes the required context. A job
+# skipped by its own `if:` reports SKIPPED, and branch protection COUNTS a skipped required check
+# as satisfied — so a broken classifier would wave optimizer changes through with no gate having
+# run, and `changes` is not itself required. `optimizer-lint-test` therefore carries `if: always()`,
+# a first step that FAILS CLOSED when the classifier did not succeed, and per-step `if:` on the
+# expensive work. `build-image` is NOT a required context, so gating that job wholesale is fine.
+#
+# THE JOB NAME IS THE CONTRACT. `optimizer-lint-test`, not the old `lint-test`: required contexts
+# are matched by check-run NAME across the whole repo, and ci-margin.yml has a structurally
+# identical job. Two workflows both publishing `lint-test` would make the required context
+# ambiguous. Keep this name stable — renaming it silently un-gates the branch.
+#
+# The duplicate `gitleaks` job that used to live here was REMOVED, deliberately: it ran the
+# byte-identical full-history scan that ci-java.yml's ungated `gitleaks` job already runs on every
+# PR and every main push, and `gitleaks` IS a required context. Once this workflow always runs,
+# keeping it would publish a SECOND check run named `gitleaks` on every PR in the repo —
+# ambiguity on a required name, for zero extra coverage.
 name: ci-optimizer
 
 on:
   push:
     branches: [main]
-    paths:
-      - "services/optimizer-service/**"
-      - ".github/workflows/ci-optimizer.yml"
   pull_request:
-    paths:
-      - "services/optimizer-service/**"
-      - ".github/workflows/ci-optimizer.yml"
 
 concurrency:
   group: ci-optimizer-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  gitleaks:
+  # Cheap path classifier. Replaces the workflow-level `paths:` filter (see the header): this
+  # ALWAYS runs, so the job downstream of it always reports a conclusion. Classify and exit —
+  # on an unrelated PR nothing installs Python and nothing builds an image.
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      optimizer: ${{ steps.classify.outputs.optimizer }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
+          # The diff needs the merge base (PR) or the pushed range (main); the default
+          # shallow fetch contains neither.
           fetch-depth: 0
-      - name: gitleaks full-history scan
+      - name: Classify changed paths
+        id: classify
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o gitleaks.tar.gz
-          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
-          tar -xzf gitleaks.tar.gz gitleaks
-          ./gitleaks git --redact --no-banner .
+          set -euo pipefail
+          # FAIL SAFE = RUN (same convention as ci-java/ci-contracts): an unresolvable base
+          # must run the suite, never silently declare the service unchanged.
+          base=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" || true
+            base="$(git merge-base HEAD "origin/$BASE_REF" 2>/dev/null || true)"
+          elif [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null && base="$BEFORE_SHA" || base=""
+          fi
+
+          if [ -z "$base" ]; then
+            echo "::notice::change base did not resolve — running the optimizer suite (fail-safe)"
+            echo "optimizer=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "diff base: $base"
+          files="$(git diff --name-only "$base" HEAD)"
+          echo "$files"
+
+          # The service itself, plus every SHARED file its suite actually reads — measured, not
+          # assumed: app/metrics_catalog.py resolves contracts/metrics/trial-metrics-catalog.json
+          # (test_metrics_catalog.py asserts the derived objective allow-list against it),
+          # test_open_object_ratchet.py reads contracts/json-schema-2020-12-keywords.json, and
+          # test_openapi_contract.py asserts both committed contracts/optimizer-service.* artifacts.
+          # Nothing outside these paths can move this service's behaviour.
+          if echo "$files" | grep -Eq '^(services/optimizer-service/|contracts/optimizer-service\.|contracts/metrics/|contracts/json-schema-2020-12-keywords\.json$|\.github/workflows/ci-optimizer\.yml$)'; then
+            echo "optimizer=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "optimizer=false" >> "$GITHUB_OUTPUT"
+          fi
 
   lint-test:
+    needs: changes
+    # ALWAYS materialise, gate the STEPS — this job's name is the required context (see header).
+    # `always()` also keeps it reporting when the classifier itself fails; the first step turns
+    # that into an explicit RED rather than a silent pass.
+    if: always()
+    name: optimizer-lint-test
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: services/optimizer-service
     steps:
+      # FAIL CLOSED. A classifier that errored or was cancelled must not read as "nothing to do".
+      - name: Classifier must have succeeded
+        if: needs.changes.result != 'success'
+        # `working-directory` above points at a path that does not exist until checkout, so this
+        # step (which runs BEFORE checkout) must override it.
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "::error::the changes classifier did not succeed (${{ needs.changes.result }}) — refusing to report optimizer-lint-test green without knowing what changed"
+          exit 1
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        if: needs.changes.outputs.optimizer == 'true'
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        if: needs.changes.outputs.optimizer == 'true'
         with:
           python-version: "3.12"
           cache: pip
       - name: Install dev dependencies (hash-locked)
+        if: needs.changes.outputs.optimizer == 'true'
         run: pip install --require-hashes -r requirements-dev.lock
       - name: ruff
+        if: needs.changes.outputs.optimizer == 'true'
         run: ruff check .
       - name: pytest (>= 75% line)
+        if: needs.changes.outputs.optimizer == 'true'
         run: pytest -q --cov=app --cov-report=term-missing --cov-fail-under=75
 
   build-image:
-    needs: lint-test
+    needs: [changes, lint-test]
+    # NOT a required context, so gating the whole job is safe here (unlike lint-test above).
+    # Without the classifier clause an unrelated PR would build a Docker image for an
+    # unchanged service now that the workflow always triggers.
+    if: needs.changes.outputs.optimizer == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

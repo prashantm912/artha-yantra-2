@@ -144,8 +144,10 @@ describe('RejectionFunnel', () => {
 
     // The rails hang off the leak node, and the leak keeps the DENOMINATOR's 90 on its inbound link
     // rather than being rewritten to the rails' 90 — the two are bounded differently and may differ.
+    // The inbound stage is "Discipline open" because gate-absent is checked BEFORE discipline
+    // (SignalEngine.java:1961 then :1967), so discipline is the last stage before the confluence call.
     expect(links).toContainEqual({
-      source: 'Gate present',
+      source: 'Discipline open',
       target: 'Confluence gate blocked',
       value: 90,
     });
@@ -159,7 +161,82 @@ describe('RejectionFunnel', () => {
       target: 'volume-floor',
       value: 30,
     });
-    expect(links).toContainEqual({ source: 'Gate present', target: 'Fired', value: 10 });
+    expect(links).toContainEqual({ source: 'Discipline open', target: 'Fired', value: 10 });
+  });
+
+  // Cross-vendor review Critical 2. The reviewer's own numbers are the discriminating fixture: with
+  // 90 chart failures, 10 unknowns and ZERO fires, the first cut carried the 10 unknowns in
+  // `remaining` all the way down and drew them arriving at the green Fired node — the chart showed
+  // 10 trades that never happened while the table beside it correctly said 0. Not-dropped had become
+  // FABRICATED, which is strictly worse than dropped. The fixture pins BOTH surfaces at once.
+  it('never routes an unmappable outcome into Fired — the chart and the table must agree on zero', () => {
+    state.funnel = {
+      sessionDate: '2026-08-01',
+      boots: 1,
+      items: [
+        { strategySlug: 'scalp-a', outcome: 'chart-gate-failed', evalCount: 90 },
+        { strategySlug: 'scalp-a', outcome: 'some-future-outcome', evalCount: 10 },
+        // No `fired` row at all — V053 writes only observed combinations, so zero fires is an
+        // ABSENT row, which is exactly the shape that let the remainder masquerade as a fire.
+      ],
+    };
+    renderFunnel();
+
+    const links = sankeyLinks();
+    expect(links.some((l) => l.target === 'Fired')).toBe(false);
+
+    // The 10 leave through their own terminal branch, straight off the denominator...
+    expect(links).toContainEqual({
+      source: 'Evaluated',
+      target: 'Unmapped outcomes',
+      value: 10,
+    });
+    // ...and nothing ever flows OUT of that node into a stage.
+    expect(links.some((l) => l.source === 'Unmapped outcomes')).toBe(false);
+
+    // The ordered ladder starts from the MAPPED 90, so no rung inherits a remainder it did not earn.
+    const chartRow = screen.getByRole('row', { name: /Chart gate said no/ });
+    expect(within(chartRow).getAllByText('90').length).toBeGreaterThan(0); // entering AND left here
+    expect(within(chartRow).getByText('0')).toBeInTheDocument(); // surviving
+
+    const firedRow = screen.getByRole('row', { name: /^Fired/ });
+    expect(within(firedRow).getByText('0')).toBeInTheDocument();
+  });
+
+  // Cross-vendor review Critical 1. `scalperEntry` returns CONFLUENCE_GATE_ABSENT at
+  // SignalEngine.java:1961 and consults the discipline guard only at :1967, so a gate-less bar never
+  // reaches discipline. The shipped order had them swapped, drawing those bars surviving a stage
+  // production never put them through.
+  it('orders gate-absent before discipline, matching scalperEntry’s real return order', () => {
+    state.funnel = {
+      sessionDate: '2026-08-01',
+      boots: 1,
+      items: [
+        { strategySlug: 'scalp-a', outcome: 'confluence-gate-absent', evalCount: 40 },
+        { strategySlug: 'scalp-a', outcome: 'discipline-paused', evalCount: 0 },
+        { strategySlug: 'scalp-a', outcome: 'fired', evalCount: 60 },
+      ],
+    };
+    renderFunnel();
+
+    // The 40 gate-absent bars leave from "Chart entry fired" — they never reach discipline. Under the
+    // swapped order they would have left from "Discipline open" instead, i.e. after surviving it.
+    const links = sankeyLinks();
+    expect(links).toContainEqual({
+      source: 'Chart entry fired',
+      target: 'Confluence gate absent',
+      value: 40,
+    });
+    expect(links.some((l) => l.source === 'Discipline open' && l.target === 'Confluence gate absent'))
+      .toBe(false);
+
+    // And the table's rung order is the engine's order, top to bottom.
+    const stageNames = screen
+      .getAllByRole('rowheader')
+      .map((h) => h.textContent ?? '')
+      .filter((n) => n.includes('Confluence gate absent') || n.includes('Discipline freeze'));
+    expect(stageNames[0]).toContain('Confluence gate absent');
+    expect(stageNames[1]).toContain('Discipline freeze');
   });
 
   it('surfaces an outcome tag it does not know about instead of silently dropping it', () => {

@@ -50,17 +50,22 @@ const LEAKS: { outcome: string; label: string; survivor: string; why: string }[]
     survivor: 'Chart entry fired',
     why: 'Every chart gate passed and the composite still came in under the strategy’s scoring threshold.',
   },
+  // ⚠️ ORDER: gate-absent comes BEFORE discipline. `scalperEntry` returns CONFLUENCE_GATE_ABSENT at
+  // SignalEngine.java:1961 and only then consults the discipline guard at :1967 — so a bar on a
+  // gate-less scalper never reaches discipline at all. The reverse order (shipped and caught in
+  // cross-vendor review) drew those bars surviving “Discipline open”, a stage production never put
+  // them through. Read this order off SignalEngine; never reconstruct it from the outcome names.
+  {
+    outcome: 'confluence-gate-absent',
+    label: 'Confluence gate absent',
+    survivor: 'Gate present',
+    why: 'A scalper is loaded but its confluence seam is absent, so it can never fire (fail-closed). Checked FIRST in scalperEntry, before the discipline guard. A misconfiguration, not a market “no”.',
+  },
   {
     outcome: 'discipline-paused',
     label: 'Discipline freeze',
     survivor: 'Discipline open',
     why: 'The five-account discipline (5 losses freeze / 5 wins bank the day) held entries for the rest of the session — a deliberate freeze, and the confluence was never consulted.',
-  },
-  {
-    outcome: 'confluence-gate-absent',
-    label: 'Confluence gate absent',
-    survivor: 'Gate present',
-    why: 'A scalper is loaded but its confluence seam is absent, so it can never fire (fail-closed). A misconfiguration, not a market “no”.',
   },
   {
     outcome: 'confluence-blocked',
@@ -71,6 +76,14 @@ const LEAKS: { outcome: string; label: string; survivor: string; why: string }[]
 ];
 
 const FIRED = 'fired';
+
+/**
+ * The node an outcome this view cannot place flows into. TERMINAL by construction — it is the
+ * fourth member of the family of "what does the view do when it does not know?" states (absent vs
+ * zero, dropped zero-links, the unknown-tag warning), and the only one that could FABRICATE rather
+ * than omit if it were merged into the ordered flow. See {@link buildLadder}.
+ */
+const UNMAPPED_NODE = 'Unmapped outcomes';
 
 /** One rung of the computed ladder: what entered, what leaked here, and what survived. */
 interface Rung {
@@ -84,7 +97,10 @@ interface Rung {
 }
 
 interface Ladder {
+  /** Σ of EVERY outcome — the true denominator, unmapped included. Rates are computed against it. */
   evaluations: number;
+  /** The count diverted into {@link UNMAPPED_NODE}; never carried into the ordered ladder. */
+  unmapped: number;
   rungs: Rung[];
   fired: number;
   /**
@@ -95,13 +111,29 @@ interface Ladder {
   unknown: EvalOutcomeCount[];
 }
 
-/** Folds one strategy's outcome totals into the ladder. Pure — the whole funnel is derived here. */
+/**
+ * Folds one strategy's outcome totals into the ladder. Pure — the whole funnel is derived here.
+ *
+ * <p><b>An unmapped outcome is diverted at the TOP, not carried in `remaining`.</b> The first cut of
+ * this function started `remaining` at the full `evaluations` and subtracted only the leaks it knew,
+ * so an unrecognised tag stayed in the remainder all the way down and arrived at the green `Fired`
+ * node — 90 chart failures + 10 unknowns + 0 fires drew **10 fired** on the Sankey while the table
+ * beside it correctly said 0. That is worse than dropping the tag: not-dropped became FABRICATED.
+ * Starting the walk at `evaluations - unmapped` makes the closing identity arithmetic rather than
+ * hopeful — mapped − Σleaks ≡ fired — so no rung can inherit a remainder it did not earn, and the
+ * chart cannot disagree with the table.
+ */
 function buildLadder(rows: EvalOutcomeCount[]): Ladder {
   const byOutcome = new Map<string, number>();
   for (const r of rows) byOutcome.set(r.outcome, (byOutcome.get(r.outcome) ?? 0) + r.evalCount);
   const evaluations = rows.reduce((sum, r) => sum + r.evalCount, 0);
 
-  let remaining = evaluations;
+  const known = new Set<string>([...LEAKS.map((l) => l.outcome), FIRED]);
+  const unknown = rows.filter((r) => !known.has(r.outcome));
+  const unmapped = unknown.reduce((sum, r) => sum + r.evalCount, 0);
+
+  // The ordered walk sees only what it can place. Everything else already left, visibly.
+  let remaining = evaluations - unmapped;
   const rungs = LEAKS.map((leak) => {
     const entering = remaining;
     const leaked = byOutcome.get(leak.outcome) ?? 0;
@@ -109,13 +141,7 @@ function buildLadder(rows: EvalOutcomeCount[]): Ladder {
     return { ...leak, entering, leaked, remaining };
   });
 
-  const known = new Set<string>([...LEAKS.map((l) => l.outcome), FIRED]);
-  return {
-    evaluations,
-    rungs,
-    fired: byOutcome.get(FIRED) ?? 0,
-    unknown: rows.filter((r) => !known.has(r.outcome)),
-  };
+  return { evaluations, unmapped, rungs, fired: byOutcome.get(FIRED) ?? 0, unknown };
 }
 
 function pct(part: number, whole: number): string {
@@ -144,6 +170,10 @@ function makeSankey(ladder: Ladder, rails: { rail: string; count: number }[]) {
   const push = (source: string, target: string, value: number) => {
     if (value > 0) links.push({ source, target, value });
   };
+
+  // Taken off the top and TERMINAL: an outcome this view cannot place must never flow onward into a
+  // stage, least of all into the success node. Nothing is ever pushed OUT of this node.
+  push('Evaluated', UNMAPPED_NODE, ladder.unmapped);
 
   let stage = 'Evaluated';
   for (const rung of ladder.rungs) {
@@ -216,12 +246,20 @@ export default function RejectionFunnel({ date, from, to }: RejectionFunnelProps
           label: { color: t.text, fontSize: 11 },
           lineStyle: { color: 'gradient', opacity: 0.35 },
           itemStyle: { borderColor: t.border },
-          // Three roles, three tones: the surviving spine, the leaks that end a bar's day, and the
-          // one node that means an entry actually happened.
+          // Four roles, four tones: the one node that means an entry actually happened, the
+          // can't-place diversion (warn — it is a gap in THIS view, not a market verdict), the
+          // surviving spine, and the leaks that end a bar's day.
           data: sankey.names.map((name) => ({
             name,
             itemStyle: {
-              color: name === 'Fired' ? t.bull : sankey.survivors.has(name) ? t.accent : t.muted,
+              color:
+                name === 'Fired'
+                  ? t.bull
+                  : name === UNMAPPED_NODE
+                    ? t.warn
+                    : sankey.survivors.has(name)
+                      ? t.accent
+                      : t.muted,
             },
           })),
           links: sankey.links,
@@ -317,6 +355,26 @@ export default function RejectionFunnel({ date, from, to }: RejectionFunnelProps
                 </tr>
               </thead>
               <tbody>
+                {ladder.unmapped > 0 && (
+                  // Shown FIRST and separately: these bars never entered the ordered ladder, so the
+                  // rungs below start from what is left after this row, not from the denominator.
+                  <tr className="border-t border-ay-border/40 text-warn">
+                    <th scope="row" className="py-1 pr-2 text-left font-normal">
+                      Unmapped outcomes{' '}
+                      <span className="text-ay-muted">(diverted, not placed on a rung)</span>
+                    </th>
+                    <td className="py-1 text-right tabular-nums text-ay-muted">
+                      {inIN(ladder.evaluations)}
+                    </td>
+                    <td className="py-1 text-right tabular-nums">{inIN(ladder.unmapped)}</td>
+                    <td className="py-1 text-right tabular-nums text-ay-muted">
+                      {inIN(ladder.evaluations - ladder.unmapped)}
+                    </td>
+                    <td className="py-1 text-right tabular-nums text-ay-muted">
+                      {pct(ladder.unmapped, ladder.evaluations)}
+                    </td>
+                  </tr>
+                )}
                 {ladder.rungs.map((rung) => (
                   <tr key={rung.outcome} className="border-t border-ay-border/40">
                     <th scope="row" className="py-1 pr-2 text-left font-normal text-ay-text">
@@ -369,8 +427,9 @@ export default function RejectionFunnel({ date, from, to }: RejectionFunnelProps
             <p className="mt-2 text-caption text-warn">
               {ladder.unknown.length} outcome tag
               {ladder.unknown.length === 1 ? '' : 's'} this view does not know about (
-              {ladder.unknown.map((u) => u.outcome).join(', ')}) — counted in the denominator but not
-              placed on a rung, so the stages below will not add up until they are mapped.
+              {ladder.unknown.map((u) => u.outcome).join(', ')}) — counted in the denominator, then
+              diverted into “{UNMAPPED_NODE}” rather than walked down the ladder. Map them here to
+              see where those bars actually left; until then this view will not guess.
             </p>
           )}
         </>

@@ -4,13 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.strategyengine.fills.InstrumentClass;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
-import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
+import in.arthayantra.strategysignal.signals.Books;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -25,45 +24,45 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * TRIPWIRE for the corporate-action plane hazard on the INTRADAY paper surface — the half of the
- * defect that PR #1251 deliberately did NOT fix.
+ * TRIPWIRE for the corporate-action plane hazard on the INTRADAY paper surface.
  *
- * <p>#1251 fixed the BATCH path: {@code SwingBatchEngine.entryReference} re-anchors a held swing
- * position's entry reference onto the plane of the daily series it is compared against, so a
- * retroactive split rewrite can no longer manufacture a stop-out there. It left {@link
- * PaperBracketEvaluator} alone, and that is the residual: the 15-second poller reads a position's
- * live LTP straight out of {@code ticks:last} and compares it against the STORED {@code
- * paper_positions.stop_loss} scalar — a level the swing batch computed off the stored entry price on
- * the PRE-corporate-action plane, which nothing ever rewrites. A 1:2 split on a held swing name would
- * halve the tick while the stored stop stayed whole, and the position would be stopped out INTRADAY,
- * on the ex-date morning, before the daily batch #1251 fixed ever ran.
+ * <p><b>Re-scoped once already — read this before changing it.</b> When first written (PR #1251,
+ * round 1) this class guarded an exposure that was live but unreachable: {@link
+ * PaperBracketEvaluator} prices every open position off the {@code ticks:last} LTP and compares it to
+ * the STORED {@code paper_positions.stop_loss} — a level the daily swing batch wrote once at entry, on
+ * the corporate-action plane current then, which nothing re-scales. A split would have halved the tick
+ * while the stored stop stayed whole and stopped the holding out intraday, at a price that never
+ * happened. It could not fire only because no cash equity is on the live tick feed — an accident of
+ * subscription, not a design — while the other half of the arming condition was already true (every
+ * open swing holding carries a non-null {@code stop_loss}). Round 1 therefore guarded "a swing holding
+ * has a tick"; the owner then escalated from guard to FIX on exactly that one-condition-wide
+ * measurement, and {@link PaperBracketEvaluator} now skips {@link Books#eodManaged()} outright.
  *
- * <p><b>Why it was left alone, and why that is not safety.</b> The path is unreachable today only
- * because cash equities are not on the live tick subscription — measured 2026-08-03: {@code
- * ticks:last} held 181 fields (88 BFO, 86 NFO, 5 NSE indices, 2 BSE indices) and ZERO equities, so
- * {@code lastTick} returns empty for every swing holding, {@code ltp} is null and {@link
- * PaperBracketEvaluator#breach} is never reached. That is an accident of what is subscribed, not a
- * design: the OTHER half of the arming condition is already satisfied — all 17 open cash-equity swing
- * positions carry a non-null {@code stop_loss} today. One tick is the entire remaining distance.
- * {@link PaperStaleTickAlerter}'s {@code eod-managed-books} exemption records the same fact from the
- * other side ("their cash-equity holdings are not on the live tick subscription").
+ * <p>That fix made round 1's two assertions wrong in both directions — "no swing holding has a tick"
+ * would now redden on a change that is no longer dangerous, and "the stored stop still stops it out"
+ * is precisely the behaviour that was removed. A guard that fires on a safe change, or one that
+ * silently always passes, is worse than none, so both were replaced rather than left. What is guarded
+ * now:
  *
- * <p><b>The two tests are the two halves of one sentence</b> — "fail if an equity ever reaches that
- * comparison WHILE the evaluator still compares a live tick against the stored scalar":
  * <ul>
- *   <li>{@link #noSwingEquityHoldingIsReachableByTheIntradayBracketComparison} guards the first
- *       clause. It reddens the day a swing holding gets a tick — i.e. the day the exposure arms.
- *   <li>{@link #theStoredStopIsStillComparedToARawTickSoASplitStopsTheHoldingOut} guards the second.
- *       It reddens the day the intraday surface IS fixed — at which point this whole class should be
- *       deleted, not repaired.
+ *   <li>{@link #aSwingHoldingIsNotClosedByTheIntradayBracketEvenWhenItTicks} — the fix itself. Reddens
+ *       if the skip is removed or stops covering a swing book, which is the moment the exposure
+ *       returns. The split-shaped tick is the literal condition it guards.
+ *   <li>{@link #aScalperPositionIsStillClosedByTheIntradayBracket} — the opposite failure. The skip
+ *       must be NARROW: the options books' 15-second stop is a real exit, and a skip that quietly
+ *       widened to every book would disarm them with every swing test still green.
+ *   <li>{@link #theTwoEodManagedBookAuthoritiesAgree} — the drift {@link PaperStaleTickAlerter}'s own
+ *       comment warns about, previously unenforced and now load-bearing, since the skip keys off a
+ *       book set.
  * </ul>
  *
- * <p><b>Known limit, stated so nobody over-reads it.</b> The first test observes the {@code
- * ticks:last} hash of whatever Redis the suite is pointed at. Under CI that is an empty
- * Testcontainers instance with no ticker feeding it, so the assertion cannot fail there for
- * environmental reasons — its reach is (a) any run against a Redis a live ticker feeds, and (b) being
- * the artifact a future reader collides with when they change the subscription universe and go
- * looking for what depended on it. The second test has no environmental dependency at all.
+ * <p>The other half of the fix — that the daily batch still exits these holdings, so the skip strands
+ * nothing — is pinned in {@code SwingPaperExitCriticalsIntegrationTest
+ * .theIntradayBracketSkipsASwingHoldingAndTheDailyBatchStillExitsIt}, which needs the real engine.
+ * Neither test here has any environmental dependency; round 1's first test did (it read whatever
+ * {@code ticks:last} the suite was pointed at, which under CI is an empty container), and that
+ * weakness is part of why the owner asked for the fix plus a subscription-side ratchet instead. The
+ * ratchet lives in {@code PinnedIndicesSubscriber}.
  */
 @SpringBootTest(properties = {"spring.profiles.active=mock", "artha.signals.engine-enabled=false"})
 class SwingEquityBracketTripwireIntegrationTest extends StrategySignalIntegrationTestBase {
@@ -73,26 +72,26 @@ class SwingEquityBracketTripwireIntegrationTest extends StrategySignalIntegratio
   private static final String LAST_TICK_HASH = "ticks:last";
 
   /**
-   * The failure text is the deliverable here — a reader hitting this in CI years from now has none of
-   * the context, so the message carries the whole chain: what armed, why it was inert, what breaks.
+   * The failure text is a deliverable: a reader hitting this in CI years from now has none of the
+   * context, so it carries the whole chain — what broke, why it matters, what to do.
    */
-  private static final String ARMED =
-      "TRIPWIRE ARMED (PR #1251): paper book '%s' holds cash-equity position #%d (%s:%s) and a LIVE"
-          + " TICK now exists for it.%n"
-          + "PaperBracketEvaluator prices every open position straight off ticks:last and compares"
-          + " that LTP to the STORED paper_positions.stop_loss scalar. For a swing holding that"
-          + " scalar was computed by the daily batch off the stored entry price, on the plane that"
-          + " was current when the position opened — and NOTHING rewrites it when a corporate action"
-          + " retroactively re-planes the market.%n"
-          + "#1251 fixed exactly this mismatch on the BATCH path (SwingBatchEngine.entryReference)"
-          + " and deliberately left this intraday surface alone, BECAUSE equities were not on the"
-          + " tick subscription and breach() could therefore never run on one. That precondition has"
-          + " just changed.%n"
-          + "Consequence now live: a split on a held swing name halves the tick while the stored stop"
-          + " stays whole, and the 15s poller stops the position out intraday at a price that never"
-          + " happened — on the ex-date morning, before the fixed daily batch runs.%n"
-          + "Fix the intraday surface (re-anchor the stored level, or suppress the bracket for"
-          + " EOD-managed books) before this ships. Do not just delete this test.";
+  private static final String SKIP_GONE =
+      "TRIPWIRE (PR #1251): an EOD-managed swing holding was CLOSED by the intraday bracket poller.%n"
+          + "PaperBracketEvaluator prices open positions off the ticks:last LTP and compares that to"
+          + " the STORED paper_positions.stop_loss - a level the daily swing batch wrote ONCE, at"
+          + " entry, on the corporate-action plane current then, and which nothing re-scales when a"
+          + " split or bonus retroactively re-planes the market. This test feeds it a tick that is a"
+          + " clean 1:2 split of the entry: the holding has not lost a rupee, yet breach() sees"
+          + " LTP <= stop.%n"
+          + "#1251 closed this by skipping Books.eodManaged() in PaperBracketEvaluator, making the"
+          + " already-merged doctrine ('the swing books stay EOD-managed' -"
+          + " docs/signal-analysis/2026-08-02-manas-exit-stop-doctrine.md) true in code rather than"
+          + " merely true by accident of what is subscribed. If this reddens, that skip is gone or no"
+          + " longer covers this book, and a corporate action can once again stop a swing holding out"
+          + " intraday at a price that never happened - on the ex-date morning, before the daily batch"
+          + " runs.%n"
+          + "Restore the skip. Making the swing books intraday-managed is a doctrine change, not a"
+          + " refactor: the stored level would have to be re-planed first.";
 
   @TestConfiguration
   static class Stubs {
@@ -105,99 +104,93 @@ class SwingEquityBracketTripwireIntegrationTest extends StrategySignalIntegratio
   }
 
   @Autowired private PaperBracketEvaluator bracket;
-  @Autowired private PaperPositionRepository positions;
-  @Autowired private LastTickReader lastTick;
   @Autowired private StringRedisTemplate redis;
   @Autowired private JdbcTemplate jdbc;
 
-  /**
-   * Read from the SAME property {@link PaperStaleTickAlerter} reads, so the guarded population
-   * follows production rather than a copy of it: these are the books whose holdings are cash equities
-   * managed by the EOD batch rather than by the intraday poller.
-   */
+  /** The property {@link PaperStaleTickAlerter} reads — pinned to the compile-time authority below. */
   @Value("${artha.paper.eod-managed-books:minervini,manas-arora}")
-  private String eodManagedBooks;
+  private String eodManagedBooksProperty;
 
   @Test
-  void noSwingEquityHoldingIsReachableByTheIntradayBracketComparison() {
-    // Seed one production-shaped row so the guarded population is never empty even on a clean
-    // container: entry 200 with the batch's 8%-of-entry stop at 184, exactly the shape of the 17 live
-    // rows (non-null stop_loss, null take_profit).
+  void aSwingHoldingIsNotClosedByTheIntradayBracketEvenWhenItTicks() {
+    // Production-shaped row: entry 200 with the batch's 8%-of-entry stop at 184 — the shape of every
+    // live swing holding (non-null stop_loss, null take_profit). The tick is 100, a 1:2 split of the
+    // 200 entry: the position is worth exactly what it was, expressed on the new plane.
     String symbol = unique("TWA");
-    openSwingEquityHolding(symbol, "200.0000", "184.0000");
+    long id = openHolding(symbol, Books.MINERVINI, "200.0000", "184.0000");
 
-    Set<String> books = eodManagedBooks();
-    List<PositionRow> swingHoldings =
-        positions.listOpen().stream()
-            .filter(p -> books.contains(p.book()))
-            .filter(p -> p.stopLoss() != null || p.takeProfit() != null)
-            .toList();
-    assertThat(swingHoldings)
-        .as("the guarded population must not be empty, or this test proves nothing")
-        .isNotEmpty();
+    evaluateWithTick(symbol, "100.0000");
 
-    for (PositionRow pos : swingHoldings) {
-      assertThat(lastTick.lastTick(pos.exchange(), pos.tradingsymbol()))
-          .as(ARMED, pos.book(), pos.id(), pos.exchange(), pos.tradingsymbol())
-          .isEmpty();
-    }
+    assertThat(status(id)).as(SKIP_GONE).isEqualTo("OPEN");
   }
 
   @Test
-  void theStoredStopIsStillComparedToARawTickSoASplitStopsTheHoldingOut() {
-    // The second clause: this pins that the exposure is REAL and gated by nothing but the tick, and
-    // it reddens the day somebody fixes the intraday surface — the signal to delete this class.
-    // Scenario is the same 1:2 split #1251's batch-path test uses: the holding opened at 200 with the
-    // batch's stop at 184; the split halves the market to 100 without costing the position a rupee,
-    // and 100 <= 184 fires a stop that never happened.
+  void aScalperPositionIsStillClosedByTheIntradayBracket() {
+    // Same numbers, so the book is the ONLY difference under test. The scalper book's legs really do
+    // tick and their 15-second stop is a real exit path — if the skip ever widened to cover them it
+    // would disarm that stop silently, and no swing-side assertion could see it.
     String symbol = unique("TWB");
-    long id = openSwingEquityHolding(symbol, "200.0000", "184.0000");
+    long id = openHolding(symbol, Books.SCALPER, "200.0000", "184.0000");
 
-    seedTick(symbol, "100.0000");
-    try {
-      bracket.evaluate();
-    } finally {
-      redis.opsForHash().delete(LAST_TICK_HASH, EX + ":" + symbol);
-    }
+    evaluateWithTick(symbol, "100.0000");
 
     assertThat(status(id))
         .as(
-            "PaperBracketEvaluator still compares the raw tick to the stored pre-split stop — if this"
-                + " is no longer CLOSED the intraday surface has been fixed and this whole tripwire"
-                + " class is obsolete: delete it rather than adjust it")
+            "the #1251 skip must cover EOD-managed books ONLY — if a scalper position stops being"
+                + " evaluated, the intraday stop has been disarmed for the books that depend on it")
         .isEqualTo("CLOSED");
     assertThat(closeReason(id)).isEqualTo("STOP_LOSS");
   }
 
+  @Test
+  void theTwoEodManagedBookAuthoritiesAgree() {
+    // PaperStaleTickAlerter's own comment: "Keep this set in step with PaperService.isSwingBook — a
+    // new swing family must land in BOTH." Nothing enforced that. Now that PaperBracketEvaluator's
+    // skip keys off Books.eodManaged(), a drift would leave one surface treating a book as
+    // EOD-managed while another does not, so the property's shipped default is pinned to it.
+    Set<String> fromProperty =
+        Arrays.stream(eodManagedBooksProperty.trim().split("\\s*,\\s*"))
+            .filter(s -> !s.isBlank())
+            .collect(Collectors.toUnmodifiableSet());
+
+    assertThat(fromProperty)
+        .as(
+            "artha.paper.eod-managed-books (alert suppression) and Books.eodManaged() (the"
+                + " behavioural authority behind PaperBracketEvaluator's skip and"
+                + " PaperService.isSwingBook) must name the same books — a new swing family has to"
+                + " land in both, or one surface treats it as EOD-managed and the other does not")
+        .isEqualTo(Books.eodManaged());
+  }
+
   // ---- helpers ---------------------------------------------------------------------------------
 
-  private Set<String> eodManagedBooks() {
-    return Arrays.stream(eodManagedBooks.trim().split("\\s*,\\s*"))
-        .filter(s -> !s.isBlank())
-        .collect(Collectors.toUnmodifiableSet());
-  }
-
-  /** A production-shaped open swing holding, written straight to the ledger (no governor path). */
-  private long openSwingEquityHolding(String symbol, String entry, String stop) {
-    return jdbc.queryForObject(
-        "INSERT INTO paper_positions"
-            + " (exchange, tradingsymbol, side, qty, avg_entry_price, status, stop_loss, book)"
-            + " VALUES (?, ?, 'BUY', 10, ?::numeric, 'OPEN', ?::numeric, 'minervini') RETURNING id",
-        Long.class,
-        EX,
-        symbol,
-        entry,
-        stop);
-  }
-
-  private void seedTick(String symbol, String lastPrice) {
-    String iso = OffsetDateTime.now(IST).toString();
+  /** Seeds a live tick, runs the real evaluator, and always removes the tick again (shared Redis). */
+  private void evaluateWithTick(String symbol, String lastPrice) {
     redis
         .opsForHash()
         .put(
             LAST_TICK_HASH,
             EX + ":" + symbol,
-            "{\"lastPrice\":\"" + lastPrice + "\",\"timestamp\":\"" + iso + "\"}");
+            "{\"lastPrice\":\"" + lastPrice + "\",\"timestamp\":\"" + OffsetDateTime.now(IST) + "\"}");
+    try {
+      bracket.evaluate();
+    } finally {
+      redis.opsForHash().delete(LAST_TICK_HASH, EX + ":" + symbol);
+    }
+  }
+
+  /** A production-shaped open holding, written straight to the ledger (no governor path). */
+  private long openHolding(String symbol, String book, String entry, String stop) {
+    return jdbc.queryForObject(
+        "INSERT INTO paper_positions"
+            + " (exchange, tradingsymbol, side, qty, avg_entry_price, status, stop_loss, book)"
+            + " VALUES (?, ?, 'BUY', 10, ?::numeric, 'OPEN', ?::numeric, ?) RETURNING id",
+        Long.class,
+        EX,
+        symbol,
+        entry,
+        stop,
+        book);
   }
 
   private String status(long id) {

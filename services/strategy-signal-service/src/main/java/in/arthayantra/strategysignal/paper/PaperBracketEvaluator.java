@@ -1,6 +1,7 @@
 package in.arthayantra.strategysignal.paper;
 
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
+import in.arthayantra.strategysignal.signals.Books;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.slf4j.Logger;
@@ -51,7 +52,7 @@ public class PaperBracketEvaluator {
       }
       Optional<LastTickReader.TickView> tick = lastTick.lastTick(pos.exchange(), pos.tradingsymbol());
       BigDecimal ltp = tick.map(LastTickReader.TickView::price).orElse(null);
-      String reason = ltp == null ? null : breach(pos, ltp);
+      String reason = ltp == null || eodManaged(pos) ? null : breach(pos, ltp);
       if (reason == null) {
         // No level to act on this pass (tick absent, or price inside the band) — the SAME "leave the
         // position open" outcome as before. Additive audit-V3 visibility: flag a bracket that is being
@@ -84,6 +85,38 @@ public class PaperBracketEvaluator {
       }
     }
     return closed;
+  }
+
+  /**
+   * True for a holding of an EOD-managed swing book — the books this poller must never price.
+   *
+   * <p>PR #1251. The level in {@code paper_positions.stop_loss} is written ONCE, at entry, by the daily
+   * swing batch, off that position's entry price on the corporate-action plane that was current then;
+   * the only other writer is a human {@code PATCH .../brackets}. Nothing re-scales it when a split or
+   * bonus retroactively re-planes the market, so comparing it to a live LTP is comparing two different
+   * planes: a 1:2 split halves the tick while the stored stop stays whole, and this poller would stop
+   * the holding out on the ex-date MORNING — at a price that never happened, and before the daily batch
+   * (whose own copy of this hazard #1251 fixed in {@code SwingBatchEngine.entryReference}) ever runs.
+   *
+   * <p>Until now that was unreachable only by accident of what is subscribed: no cash equity is on the
+   * live tick feed, so {@code lastTick} returns empty and {@code breach} is never called (measured, and
+   * the reason all 9 automated swing closes to date came from the 20:05 batch, not a 15-second poll —
+   * docs/signal-analysis/2026-08-02-manas-exit-stop-doctrine.md §3). The other half of the arming
+   * condition was ALREADY true: every open swing holding carries a non-null {@code stop_loss}. One tick
+   * was the entire remaining distance, and nothing marked the transition. This makes the doctrine — "the
+   * swing books stay EOD-managed" (§1, merged) — true in code, so the exposure is structurally
+   * impossible rather than accidentally inert.
+   *
+   * <p><b>This removes no exit.</b> It cannot strand a position: the swing batch is these books' exit
+   * path and remains so (its trailing stop and its own {@code stop_loss} rule both settle off the daily
+   * bar, never off a tick), and this poller has never closed one of these holdings. {@code
+   * SwingEquityBracketTripwireIntegrationTest} pins both halves — skipped here, still exited there.
+   *
+   * <p>Keyed on the compile-time {@link Books#eodManaged()} and deliberately NOT on the tunable {@code
+   * artha.paper.eod-managed-books} property, so no operator value can re-open this.
+   */
+  private static boolean eodManaged(PositionRow pos) {
+    return Books.eodManaged().contains(pos.book());
   }
 
   /**

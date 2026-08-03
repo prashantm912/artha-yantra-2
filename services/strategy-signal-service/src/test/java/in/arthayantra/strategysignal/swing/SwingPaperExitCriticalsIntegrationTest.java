@@ -116,6 +116,55 @@ class SwingPaperExitCriticalsIntegrationTest extends StrategySignalIntegrationTe
   @Autowired private MarketDataCandlesClient candles;
   @Autowired private ManasGoverningStopCache governingStopCache;
   @Autowired private PaperEmissionGuard emissionGuard;
+  @Autowired private in.arthayantra.strategysignal.paper.PaperBracketEvaluator bracket;
+  @Autowired private org.springframework.data.redis.core.StringRedisTemplate redis;
+  @Autowired private ApplicationEventPublisher events;
+
+  @Test
+  void theIntradayBracketSkipsASwingHoldingAndTheDailyBatchStillExitsIt() throws Exception {
+    // PR #1251, the load-bearing half. PaperBracketEvaluator now skips EOD-managed swing books so a
+    // corporate action can never re-plane the market under a STORED stop_loss and stop the holding out
+    // intraday at a price that never happened. A skip is only safe if it removes no exit, so this pins
+    // BOTH halves in one run: the poller declines the holding, and the daily batch — the book's real
+    // and only exit path — still closes it. If the second half ever fails, the skip has stranded a
+    // position and must be reverted, not patched.
+    String uid = uniqueId();
+    String batch = "r4-eodskip-" + uid;
+    String symbol = "R4ES" + uid;
+    UUID versionId = publishManasBreakout(uid);
+    List<EngineCandle> series = craftDecline(SESSION);
+    long anchor = insertEntry(versionId, symbol, series.get(24).bucketStart(), new BigDecimal("152"));
+    PositionRow position = openPosition(anchor, symbol, new BigDecimal("152"));
+    when(candles.fetch(eq("NSE"), eq(symbol), eq("1d"), any(), any())).thenReturn(series);
+    assertThat(position.book()).isEqualTo(Books.MANAS_ARORA);
+    assertThat(position.stopLoss()).as("the stored, entry-time stop the poller used to read").isNotNull();
+
+    // Half 1 — a live tick at 68.50 is a 1:2 split of the stored 137 stop: the holding has not lost a
+    // rupee, but pre-#1251 breach() saw 68.50 <= 137 and closed it. It must now be skipped outright.
+    redis
+        .opsForHash()
+        .put(
+            "ticks:last",
+            "NSE:" + symbol,
+            "{\"lastPrice\":\"68.5000\",\"timestamp\":\"" + OffsetDateTime.now(IST) + "\"}");
+    try {
+      bracket.evaluate();
+    } finally {
+      redis.opsForHash().delete("ticks:last", "NSE:" + symbol);
+    }
+    assertThat(positions.find(position.id()).orElseThrow().status())
+        .as("an EOD-managed swing holding is never priced off a tick, split-shaped or not")
+        .isEqualTo("OPEN");
+
+    // Half 2 — the backstop that remains. The real engine, on the real daily bar, still exits it.
+    SwingBatchEngine.SwingRun run = runExit(doctrine(batch), events);
+
+    assertThat(run.exits()).as("the daily batch still emits the exit").isEqualTo(1);
+    assertThat(positions.find(position.id()).orElseThrow().status())
+        .as("the skip removed a path that never fired, NOT the path that does — a position that"
+            + " can never be exited is the one outcome this change must not produce")
+        .isEqualTo("CLOSED");
+  }
 
   @Test
   void crashBeforeListenerDeliveryRemainsRetryableAndExactReplayClosesThePosition() throws Exception {

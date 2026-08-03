@@ -2,6 +2,7 @@ package in.arthayantra.strategysignal.signals;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 /**
  * The paper BOOK a strategy family belongs to ('scalper' · 'minervini' · 'manas-arora' · 'manual' ·
@@ -27,6 +28,25 @@ public final class Books {
    */
   public static List<String> all() {
     return List.of(SCALPER, MINERVINI, MANAS_ARORA, MANUAL, OTHER);
+  }
+
+  /**
+   * The EOD-MANAGED books: swing families whose holdings are cash equities, exited by the daily swing
+   * batch and by nothing else.
+   *
+   * <p>This is the single behavioural authority for that fact. Two surfaces read it — {@code
+   * PaperBracketEvaluator}, which must never price one of these holdings off a live tick (see its
+   * javadoc), and {@code PaperService.isSwingBook}, the signal-freshness exemption — so the two cannot
+   * drift apart. It is deliberately a COMPILE-TIME set and not the operator-tunable {@code
+   * artha.paper.eod-managed-books} property that {@code PaperStaleTickAlerter} reads: that property
+   * suppresses an ALERT, where a blank value costs visibility, and blanking it must never be able to
+   * re-open a money-path exposure. {@code SwingEquityBracketTripwireIntegrationTest} pins the two in step.
+   *
+   * <p>⚠️ A new swing family MUST be added here, or its holdings become intraday-evaluated against a
+   * stop level the daily batch wrote on a possibly-stale corporate-action plane (PR #1251).
+   */
+  public static Set<String> eodManaged() {
+    return Set.of(MINERVINI, MANAS_ARORA);
   }
 
   /** The book for a family tag set — the first recognised family tag, else {@code OTHER}. */

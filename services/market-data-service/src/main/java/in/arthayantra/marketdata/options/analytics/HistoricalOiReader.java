@@ -120,6 +120,17 @@ public class HistoricalOiReader {
     return eu == null ? live : derived.eodSeries(eu, expiry, from, to);
   }
 
+  /**
+   * True iff every (bucket, strike, optionType) group in [{@code from}, {@code to}) resolves to a
+   * LIVE-CAPTURED row — {@link OptionsSnapshotReader#allGroupsCaptured}, straight through.
+   * Deliberately NOT facaded onto the derived reader: the derived path writes nothing, so a window
+   * it served has no group at all and this correctly answers false.
+   */
+  public boolean allGroupsCaptured(
+      String name, LocalDate expiry, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
+    return snap.allGroupsCaptured(name, expiry, interval, from, to);
+  }
+
   public List<PerStrikeSessionStat> sessionStats(
       String name, LocalDate expiry, LocalDate session, int intervalMinutes) {
     List<PerStrikeSessionStat> live = snap.sessionStats(name, expiry, session, intervalMinutes);

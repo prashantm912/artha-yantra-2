@@ -964,6 +964,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["attribution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orders/tradebook": {
         parameters: {
             query?: never;
@@ -2056,6 +2072,39 @@ export interface components {
         };
         PaperEventsResponse: {
             items: components["schemas"]["PaperEventDto"][];
+        };
+        Attribution: {
+            items: components["schemas"]["AttributionRow"][];
+            coverage: components["schemas"]["AttributionCoverage"];
+        };
+        AttributionCoverage: {
+            /** Format: int32 */
+            closedPositions: number;
+            /** Format: int32 */
+            closedPositionsTagged: number;
+            /** Format: int64 */
+            closedQty: number;
+            /** Format: int64 */
+            closedQtyTagged: number;
+            /** Format: int32 */
+            openPositions: number;
+            /** Format: int32 */
+            openPositionsTagged: number;
+            /** Format: int64 */
+            openQty: number;
+            /** Format: int64 */
+            openQtyTagged: number;
+        };
+        AttributionRow: {
+            slug: string | null;
+            book: string;
+            /** Format: int32 */
+            closedPositions: number;
+            /** Format: int64 */
+            closedQty: number;
+            /** Format: int64 */
+            openQty: number;
+            attributedRealizedPnl: string;
         };
         Tradebook: {
             items: components["schemas"]["TradebookEntry"][];
@@ -4558,6 +4607,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["PaperEventsResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    attribution: {
+        parameters: {
+            query?: {
+                book?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["Attribution"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

@@ -234,6 +234,7 @@ public class PaperService {
       BigDecimal previousStopLoss, BigDecimal previousTakeProfit, PositionDetail detail) {}
 
   private final PaperOrderRepository orders;
+  private final PaperPositionLotRepository lots;
   private final PaperPositionRepository positions;
   private final PaperFillService fills;
   private final LastTickReader lastTick;
@@ -262,6 +263,7 @@ public class PaperService {
   @Autowired
   public PaperService(
       PaperOrderRepository orders,
+      PaperPositionLotRepository lots,
       PaperPositionRepository positions,
       PaperFillService fills,
       LastTickReader lastTick,
@@ -285,6 +287,7 @@ public class PaperService {
           long signalTakeMaxAgeMinutes,
       MeterRegistry meterRegistry) {
     this.orders = orders;
+    this.lots = lots;
     this.positions = positions;
     this.fills = fills;
     this.lastTick = lastTick;
@@ -322,6 +325,7 @@ public class PaperService {
    */
   public PaperService(
       PaperOrderRepository orders,
+      PaperPositionLotRepository lots,
       PaperPositionRepository positions,
       PaperFillService fills,
       LastTickReader lastTick,
@@ -340,7 +344,7 @@ public class PaperService {
       long tickMaxAgeSeconds,
       long signalTakeMaxAgeMinutes) {
     this(
-        orders, positions, fills, lastTick, instruments, signals, accountService, books, risk,
+        orders, lots, positions, fills, lastTick, instruments, signals, accountService, books, risk,
         accounts, events, staleTicks, rejections, governingStopCache, transactionManager,
         perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, new SimpleMeterRegistry());
   }
@@ -870,10 +874,11 @@ public class PaperService {
               "rail", "sub_account_allocation",
               "subaccountIdx", effectiveSubAccount));
     }
-    orders.insertFilled(
-        book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
-        fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId(), refSource,
-        refTickAgeMs, signalGeneratedAt);
+    long orderId =
+        orders.insertFilled(
+            book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
+            fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId(), refSource,
+            refTickAgeMs, signalGeneratedAt);
     Long advisedLots = advisedLots(book, fill.fillPrice(), request.stopLoss());
     upsertPosition(
         book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
@@ -884,6 +889,26 @@ public class PaperService {
     Optional<PositionRow> opened = positions.findOpen(book, exchange, tradingsymbol, side);
     if (opened.isPresent()) {
       PositionRow row = opened.get();
+      // V056 per-signal lot tag, written HERE because this is the first point where both ids exist:
+      // the fill's order id (minted three statements up) and the position id (minted or found by
+      // upsertPosition). Everything upstream knows only one of the two.
+      //
+      // This is the whole point of the change. upsertPosition AVERAGES a second open on an already
+      // open key into the existing row and KEEPS its original opening_signal_id, so a position built
+      // by two strategies firing on the same bar credits exactly one — measured live on 2026-08-03,
+      // where all 10 closed scalper positions are 50/50 blends of scalp-golden-crossover-* and
+      // scalp-connect-the-dots-* and a GROUP BY slug reports the latter at n=0. The averaging is
+      // deliberate and is NOT changed here; the lot row simply keeps the per-fill truth it discards.
+      //
+      // Same transaction as the position write, deliberately. A lot written after commit could be
+      // lost while its fill survived, and sum(lots.qty) = position.qty is exactly what makes a
+      // decomposition trustworthy — a missing lot is indistinguishable from a strategy that traded
+      // less, which is the failure this table exists to remove. It is a plain INSERT of two ids
+      // generated moments earlier in this same transaction, so the only realistic way it can fail is
+      // a DB failure that was already going to abort this open.
+      lots.insert(
+          row.id(), orderId, request.signalId(), book, exchange, tradingsymbol, side, request.qty(),
+          fill.fillPrice());
       events.publishEvent(
           new PaperPositionOpened(row.id(), book, exchange, tradingsymbol, side, row.qty()));
     }
@@ -928,8 +953,21 @@ public class PaperService {
       // averaging onto an open position keeps its original bracket levels AND its original
       // sub-account (set at first open) — a later add never re-charges the trade to a new account.
       // It likewise KEEPS its original opening_signal_id (audit H5): a pyramid add of the same
-      // strategy must not re-attribute the position, and it can never span two strategies (the
-      // per-book open-key means only one strategy holds a given key open at a time).
+      // strategy must not re-attribute the position.
+      //
+      // ⚠️ CORRECTED 2026-08-03. This comment used to end "and it can never span two strategies (the
+      // per-book open-key means only one strategy holds a given key open at a time)". That is FALSE,
+      // and the live rows disprove it: the second open does not TAKE the key, it averages into it,
+      // so two different strategies routinely share one position. Measured on live `artha` — signals
+      // 128 (scalp-golden-crossover-nifty) and 129 (scalp-connect-the-dots-nifty) fired on the same
+      // 11:15 bar at the same price ~2s apart, and position 47 carries qty 130 (65 + 65) with
+      // opening_signal_id 128. All 10 closed scalper positions have that shape.
+      //
+      // The averaging itself is correct and unchanged. What the false premise cost was ATTRIBUTION:
+      // opening_signal_id credits one strategy for a trade two of them built, so a GROUP BY slug
+      // reports the other at n=0 and no amount of further accrual separates them. V056's
+      // paper_position_lots records the (signal, qty, price) of each contributing fill instead —
+      // see the lot write in openOrder.
       PositionRow row = existing.get();
       long newQty = row.qty() + qty;
       BigDecimal newAvg =
@@ -1321,6 +1359,48 @@ public class PaperService {
     return positions.listClosed(book, from, to, tradingsymbol, limit, offset).stream()
         .map(this::toTradeDto)
         .toList();
+  }
+
+  /**
+   * The per-strategy decomposition of a book's paper trading ({@code book} null → all books) — V056.
+   *
+   * <p>Answers the question {@code GROUP BY opening_signal_id} cannot: when two strategies fire on
+   * the same bar and the second {@code openPosition} AVERAGES into the first's position, the row
+   * credits only the opener. This walks {@code paper_position_lots} instead, so each contributing
+   * fill is attributed to the signal that actually caused it and the position's realized P&amp;L is
+   * split pro-rata by qty share.
+   *
+   * <p>Always returns {@link PaperViews.Attribution#coverage()} beside the rows, and the coverage is
+   * not decoration — no position opened before V056 carries lots, so the day this ships the rows are
+   * EMPTY while the book holds real trades. Reading the rows without the coverage would turn "not
+   * yet instrumented" into "never traded", which is the exact class of false negative this change
+   * exists to remove.
+   */
+  public PaperViews.Attribution attribution(String book) {
+    List<PaperViews.AttributionRow> rows =
+        lots.attribution(book).stream()
+            .map(
+                r ->
+                    new PaperViews.AttributionRow(
+                        r.slug(),
+                        r.book(),
+                        r.closedPositions(),
+                        r.closedQty(),
+                        r.openQty(),
+                        r.attributedRealizedPnl()))
+            .toList();
+    PaperPositionLotRepository.Coverage c = lots.coverage(book);
+    return new PaperViews.Attribution(
+        rows,
+        new PaperViews.AttributionCoverage(
+            c.closedPositions(),
+            c.closedPositionsTagged(),
+            c.closedQty(),
+            c.closedQtyTagged(),
+            c.openPositions(),
+            c.openPositionsTagged(),
+            c.openQty(),
+            c.openQtyTagged()));
   }
 
   /** Daily realized-equity curve + win rate / expectancy over a book's closed trades (null → all). */

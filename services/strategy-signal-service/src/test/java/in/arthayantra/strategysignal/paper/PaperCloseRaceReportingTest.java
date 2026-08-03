@@ -94,7 +94,8 @@ class PaperCloseRaceReportingTest {
 
     PaperService paper =
         new PaperService(
-            mock(PaperOrderRepository.class), positions, new PaperFillService(), mock(LastTickReader.class),
+            mock(PaperOrderRepository.class), mock(PaperPositionLotRepository.class), positions,
+            new PaperFillService(), mock(LastTickReader.class),
             instruments, mock(in.arthayantra.strategysignal.signals.SignalRepository.class),
             mock(PaperAccountService.class), mock(BookResolver.class), mock(RiskService.class),
             mock(ScalperAccountModel.class),

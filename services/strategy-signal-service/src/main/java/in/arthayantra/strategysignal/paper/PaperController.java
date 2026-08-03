@@ -184,6 +184,23 @@ public class PaperController {
   }
 
   /**
+   * Per-strategy P&amp;L decomposition from the V056 per-signal lots ({@code book} absent → all
+   * books) — the read that {@code GROUP BY opening_signal_id} cannot produce.
+   *
+   * <p>A second entry on an already-open key AVERAGES into the position and the row keeps its
+   * ORIGINAL {@code opening_signal_id}, so a position built by two strategies on the same bar
+   * credits one and hides the other. This walks the per-fill lots instead.
+   *
+   * <p>The {@code coverage} block ships with every response by design — it is what stops an empty
+   * decomposition from being misread as an untraded book while positions opened before V056 (which
+   * have no lots, and no honest backfill) still dominate the ledger.
+   */
+  @GetMapping("/attribution")
+  public PaperViews.Attribution attribution(@RequestParam(required = false) String book) {
+    return paper.attribution(book);
+  }
+
+  /**
    * The append-only paper-position lifecycle events (OPENED / CLOSED / BRACKET_HIT / SETTLED), newest
    * first — audit §7.2.2. Filters: {@code positionId} (the trade-chain / position-detail read),
    * {@code book}, and {@code day} (an IST calendar date, bounded by explicit +05:30 instants). The

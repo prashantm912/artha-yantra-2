@@ -3085,10 +3085,19 @@ public class SignalEngine {
             && !now.get().neutral()
             && ScalperGates.confluenceFlippedAgainst(heldSide, now.get().side().name());
     // MEASUREMENT ONLY, strictly AFTER the verdict above — the exit decision is already computed and
-    // this cannot alter it. Records what the sentiment operand looked like on THIS oracle bar so a
-    // future flow->level swap can be judged on exit timing too, not entries alone (the entry-side
-    // diagnostics never see this path). Enqueue is O(1), bounded and fail-soft: a stalled DB drops
-    // counted rows rather than parking the eval thread mid-exit.
+    // this cannot alter it. Records what the sentiment operand looked like on THIS oracle bar, and
+    // what the ORACLE would have decided on the level operand, so a future flow->level swap can be
+    // judged on the exit path at all rather than on entries alone (the entry-side diagnostics never
+    // see this path). Enqueue is O(1), bounded and fail-soft: a stalled DB drops counted rows rather
+    // than parking the eval thread mid-exit.
+    //
+    // ⚠️ SCOPE, so nobody reads more into these rows than they carry: this is an ORACLE-DECISION
+    // record, NOT exit timing and NOT P&L. The standard ExitEvaluator runs immediately BELOW this
+    // oracle in the caller, so a bar the counterfactual would not have exited can still be closed on
+    // that same bar by a lower-priority rule (stop/target/trail/time) — the row then shows a decision
+    // change that changed nothing. And where the LIVE position closed, the oracle stops running, so
+    // the counterfactual's later bars are simply absent. Turning these rows into a P&L number needs a
+    // trajectory replay that does not exist; see the V056 header.
     recordExitOracleShadow(strategy, entry, istBar, heldSide, result, now, flip);
     return flip;
   }

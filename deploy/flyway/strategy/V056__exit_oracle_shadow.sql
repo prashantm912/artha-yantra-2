@@ -8,9 +8,11 @@
 -- exit oracle (SignalEngine.confluenceFlipExit, tag `oi-confluence-exit`, armed on 12 shipped YAMLs,
 -- 6 of which also arm `oi-slope-agree`) RE-RUNS the same confluence gate on every bar a position is
 -- held, and that call produced no diagnostic at all. Without this table a future flow->level swap
--- could move EXIT TIMING and realized P&L while leaving no counterfactual evidence, so the eventual
--- legs->P&L comparison would be not merely incomplete but biased in an unknown direction. Found by
--- cross-vendor review of #1242; the entry-only population claim was wrong.
+-- could move EXIT TIMING and realized P&L while leaving no counterfactual evidence at all, so the
+-- eventual legs->P&L comparison would be not merely incomplete but biased in an unknown direction.
+-- Found by cross-vendor review of #1242; the entry-only population claim was wrong. NOTE what that
+-- does and does not buy: this table removes the BLINDNESS (there is now a per-bar record on the exit
+-- path), it does not by itself produce the P&L comparison — see the limitation block further down.
 --
 -- WHY A ROW PER EVALUATION IS AFFORDABLE HERE, WHEN V053's HEADER REJECTED EXACTLY THAT SHAPE. V053
 -- rejected a row per no-entry per strategy per bar: ~7,875 evaluations/day at ~2,624 bytes a
@@ -105,22 +107,47 @@ CREATE TABLE exit_oracle_shadow (
 );
 
 COMMENT ON TABLE exit_oracle_shadow IS
-  'Per-bar counterfactual for the confluence-flip EXIT oracle: both sentiment operands plus the EXACT side/flip the oracle would have decided on the level operand, with the state proving that verdict. Filter on shadow_verdict_known — a NULL verdict means not evaluable, never "would not fire". Measurement only, never read by a trading decision.';
+  'Per-bar counterfactual for the confluence-flip EXIT ORACLE: both sentiment operands plus the EXACT side/flip the oracle would have decided on the level operand, with the state proving that verdict. Filter on shadow_verdict_known — a NULL verdict means not evaluable, never "would not fire". ⚠️ These rows measure ORACLE DECISION changes ONLY — NOT exit timing and NOT P&L: a lower-priority ExitEvaluator rule can close the position on the same bar (overcount), and where the live position closed there are no later counterfactual rows at all (censoring). See the header before joining to fills. Measurement only, never read by a trading decision.';
 
--- CANONICAL QUERY — "on how many held bars would the level operand have changed the EXIT decision":
+-- CANONICAL QUERY — "on how many held bars would the level operand have changed the ORACLE's decision":
 --
 --   SELECT strategy_slug,
 --          COUNT(*)                                              AS evaluable_bars,
---          COUNT(*) FILTER (WHERE shadow_flip <> live_flip)       AS exit_timing_changes,
---          COUNT(*) FILTER (WHERE shadow_flip AND NOT live_flip)  AS exits_added,
---          COUNT(*) FILTER (WHERE live_flip AND NOT shadow_flip)  AS exits_removed
+--          COUNT(*) FILTER (WHERE shadow_flip <> live_flip)       AS oracle_decision_changes,
+--          COUNT(*) FILTER (WHERE shadow_flip AND NOT live_flip)  AS oracle_exits_added,
+--          COUNT(*) FILTER (WHERE live_flip AND NOT shadow_flip)  AS oracle_exits_removed
 --     FROM strategy.exit_oracle_shadow
 --    WHERE shadow_verdict_known
 --      AND bar_time >= timestamptz '2026-08-04T09:15:00+05:30'
 --    GROUP BY strategy_slug;
 --
--- `exit_timing_changes` is the number this table exists to produce, and it is a DECISION delta, not an
--- operand delta. Join each changed bar back to signals/paper_positions for the P&L half.
+-- ============================================================================================
+-- ⚠️ READ THIS BEFORE JOINING THESE ROWS TO FILLS. `oracle_decision_changes` IS NOT A P&L NUMBER,
+-- AND IT IS NOT EVEN AN EXIT-TIMING NUMBER. It is exactly what its name says: the count of bars on
+-- which the confluence-flip ORACLE would have decided differently. It is deliberately NOT called
+-- exit_timing_changes or pnl_impact, because two distinct effects sit between this count and either
+-- of those, and they run in OPPOSITE directions (round-4 cross-vendor review):
+--
+--   (1) OVERCOUNT — the oracle is not the only exit. The standard ExitEvaluator runs AFTER it
+--       (SignalEngine.confluenceFlipExit returns, then the ExitEvaluator block below it), so a bar
+--       where the oracle would NOT have exited can still be closed on that SAME bar by a
+--       lower-priority rule — stop-loss, target, trailing, time stop. Such a row counts as a
+--       "change" here while changing nothing about when the position actually closed.
+--
+--   (2) CENSORING — where the LIVE position did close, there are no later rows for it at all. The
+--       oracle only runs while a position is open, so a counterfactual that keeps a position alive
+--       has NO recorded evaluations for the bars it would then have lived through. The record is
+--       truncated exactly on the trades where the swap would have mattered most, and no aggregate
+--       over these rows can recover them.
+--
+-- Consequence: this table can tell you WHERE the operand changed the oracle's mind, with an exact
+-- per-bar verdict and the state proving it. It CANNOT tell you the resulting exit timing, the
+-- resulting trade set, or the resulting P&L. Answering those needs a trajectory replay — re-running
+-- the held position forward under the substituted operand, including the other exit rules — which is
+-- a separate exercise that does NOT exist. Do not substitute a join against signals or
+-- paper_positions for it: such a join silently assumes (1) and (2) away and will produce a
+-- confident, wrong money number.
+-- ============================================================================================
 
 -- The analysis query is "every oracle evaluation for this entry, in bar order", and the UNIQUE
 -- constraint's leading entry_signal_id already serves it. A session-wide sweep filters on bar_time,

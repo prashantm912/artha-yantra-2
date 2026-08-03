@@ -22,6 +22,14 @@ import org.springframework.stereotype.Component;
  * Fail-soft end to end: a persistence failure is logged by the writer thread, never thrown into the
  * caller. Same seam and same guarantees as {@link RiskSuppressionWriter}.
  *
+ * <p>⚠️ <b>What these rows are, and are not.</b> They record whether the flip ORACLE would have
+ * decided differently on the level operand — not exit timing, and not P&amp;L. The standard
+ * {@code ExitEvaluator} runs AFTER the oracle, so a bar the counterfactual would not have exited can
+ * still be closed on that same bar by a lower-priority rule (overcount); and where the live position
+ * closed, the oracle stops running, so the counterfactual's later bars are absent entirely
+ * (censoring). Those two errors run in OPPOSITE directions, so no aggregate over these rows is a
+ * P&amp;L answer. The V056 header carries the full statement.
+ *
  * <p><b>Dropping a record is the CORRECT failure.</b> This is observability for a decision nobody has
  * made yet; losing a measurement row costs a data point, whereas delaying an exit costs money. If the
  * drop counter is non-zero the measurement is incomplete for that window and the analysis must say so

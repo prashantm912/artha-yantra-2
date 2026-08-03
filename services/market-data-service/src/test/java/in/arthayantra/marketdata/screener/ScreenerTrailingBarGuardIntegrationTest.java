@@ -37,7 +37,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
     properties = {
       "spring.profiles.active=mock",
       "artha.feed.autostart=false",
-      "artha.instruments.bootstrap-sync=false"
+      "artha.instruments.bootstrap-sync=false",
+      // Floor DISABLED here on purpose: this fixture is 1 fresh + 1 stale = 50% surviving, which the
+      // coverage floor would (correctly) refuse, masking what this class is about. The guard and the
+      // floor are separate behaviours and get separate fixtures — the floor's own refusal is proven
+      // in ScreenerCoverageFloorIntegrationTest.
+      "artha.minervini.min-current-coverage-pct=0",
+      "artha.manas-arora.min-current-coverage-pct=0"
     })
 class ScreenerTrailingBarGuardIntegrationTest extends MarketDataIntegrationTestBase {
 

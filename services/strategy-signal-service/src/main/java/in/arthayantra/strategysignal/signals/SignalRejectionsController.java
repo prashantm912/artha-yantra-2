@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.signals;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -27,15 +28,18 @@ public class SignalRejectionsController {
   private final SignalRejectionRepository repository;
   private final ShadowPositionRepository shadows;
   private final DotHealthCanary dotHealth;
+  private final StrategyEvalDenominatorRepository denominators;
 
   /** Wires the repositories + the dot canary. */
   public SignalRejectionsController(
       SignalRejectionRepository repository,
       ShadowPositionRepository shadows,
-      DotHealthCanary dotHealth) {
+      DotHealthCanary dotHealth,
+      StrategyEvalDenominatorRepository denominators) {
     this.repository = repository;
     this.shadows = shadows;
     this.dotHealth = dotHealth;
+    this.denominators = denominators;
   }
 
   /**
@@ -76,15 +80,45 @@ public class SignalRejectionsController {
     return new SignalViews.RejectionPage(items, boundedLimit, boundedOffset);
   }
 
-  /** The per-rail block rollup (which condition blocks most) over an optional window. */
+  /**
+   * The per-rail block rollup (which condition blocks most) over an optional window.
+   *
+   * <p>{@code strategySlug} narrows it to ONE strategy — what the funnel view needs to fan the
+   * confluence-blocked bucket out by rail. The slug is the stable identity across republishes;
+   * {@code strategyVersionId} narrows to one published version instead and the two compose.
+   */
   @GetMapping("/rail-counts")
   public SignalViews.RailCountList railCounts(
       @RequestParam(required = false) UUID strategyVersionId,
+      @RequestParam(required = false) String strategySlug,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime from,
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
           OffsetDateTime to) {
-    return new SignalViews.RailCountList(repository.railCounts(strategyVersionId, from, to));
+    return new SignalViews.RailCountList(
+        repository.railCounts(strategyVersionId, strategySlug, from, to));
+  }
+
+  /**
+   * The per-strategy evaluation FUNNEL for one IST session date — signal-analysis README §7 row 7,
+   * built on the V053 denominator (F5 unit U2) rather than one inferred from the 3m grid.
+   *
+   * <p>Every bar the engine evaluates lands in exactly one {@code SignalEngine.Outcome} bucket, so
+   * the buckets for a day ARE the funnel: their sum is the true denominator and {@code fired} is the
+   * survivor count. The caller orders the tags into stages; this endpoint stays a faithful read of
+   * the table so a tag added later still arrives.
+   *
+   * <p>An empty {@code items} means the rollup wrote nothing for that date — a down stack, a date
+   * before V053, or one past retention. It does NOT mean the strategies evaluated nothing, and the
+   * UI must not render it as zeros.
+   *
+   * @param date the IST SESSION date (the date of the evaluated bars), not a UTC calendar date
+   */
+  @GetMapping("/eval-funnel")
+  public SignalViews.EvalFunnel evalFunnel(
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    return new SignalViews.EvalFunnel(
+        date, denominators.bootCount(date), denominators.outcomeCounts(date));
   }
 
   /** The typed shadow-league envelope (the Map-return ratchet forbids new Map endpoints). */

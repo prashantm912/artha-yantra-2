@@ -113,6 +113,7 @@ function renderPage() {
 const named = (name: string) => within(screen.getByRole('table', { name }));
 
 describe('ManasAroraBacktestPage grids', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 5181ms in a full-suite run.
   it('renders the portfolio-comparison columns + rows cell-for-cell (live badge, signed %, — tone)', () => {
     renderPage();
     const t = named('Portfolio comparison');
@@ -144,7 +145,7 @@ describe('ManasAroraBacktestPage grids', () => {
       '0.10',
       '45.00',
     ]);
-  });
+  }, 15_000);
 
   it('renders a per-setup grid cell-for-cell (breakout + ALL rows)', () => {
     renderPage();

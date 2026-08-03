@@ -82,6 +82,7 @@ const ts = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '—'
 const table = () => within(screen.getByRole('table', { name: 'Backfill history' }));
 
 describe('StatusPage backfill history', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3772ms in a full-suite run.
   it('renders the columns in their declared order', () => {
     render(<StatusPage />);
     expect(table().getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
@@ -92,7 +93,7 @@ describe('StatusPage backfill history', () => {
       'Finished',
       'Error',
     ]);
-  });
+  }, 15_000);
 
   it('renders each run row cell-for-cell (— for a null count / open finish)', () => {
     render(<StatusPage />);

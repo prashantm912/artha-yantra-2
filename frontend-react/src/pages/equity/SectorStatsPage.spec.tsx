@@ -32,6 +32,7 @@ function renderPage() {
 }
 
 describe('SectorStatsPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 4613ms in a full-suite run.
   it('renders a sector card and the stock factor table', () => {
     renderPage();
     // Live sector-index card.
@@ -46,5 +47,5 @@ describe('SectorStatsPage', () => {
       expect(within(table).getByRole('columnheader', { name: h })).toBeInTheDocument();
     }
     expect(screen.getAllByText('RELIANCE').length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });

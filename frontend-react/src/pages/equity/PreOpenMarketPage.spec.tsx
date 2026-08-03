@@ -49,6 +49,7 @@ function renderPage() {
 }
 
 describe('PreOpenMarketPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3754ms in a full-suite run.
   it('renders the three exchange phase cards with humanised phases and a pre-open badge', () => {
     renderPage();
     for (const ex of ['NSE', 'BSE', 'MCX']) {
@@ -60,8 +61,9 @@ describe('PreOpenMarketPage', () => {
     expect(screen.getByText('Closing End')).toBeInTheDocument();
     // The pre-open exchange carries an explicit "Pre-Open" badge (text cue, never colour-only).
     expect(screen.getByText('Pre-Open')).toBeInTheDocument();
-  });
+  }, 15_000);
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3724ms in a full-suite run.
   it('renders the preserved stock scanner split into advances and declines with the break badge', () => {
     renderPage();
     // the advancing stock sits in the Advances table with its High Break badge; the decliner opposite.
@@ -72,8 +74,9 @@ describe('PreOpenMarketPage', () => {
     expect(within(dec).getByText('HINDALCO')).toBeInTheDocument();
     // the counts strip reads the split.
     expect(screen.getByText(/Advances:/)).toBeInTheDocument();
-  });
+  }, 15_000);
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3641ms in a full-suite run.
   it('renders the index snapshot with a sign-aware change per row and a muted dash for the price-less row', () => {
     renderPage();
     const table = screen.getAllByRole('table')[0];
@@ -87,5 +90,5 @@ describe('PreOpenMarketPage', () => {
     expect(within(table).getByText('-0.19%')).toBeInTheDocument();
     // The price-less row still lists (name shown).
     expect(within(table).getByText('Sensex')).toBeInTheDocument();
-  });
+  }, 15_000);
 });

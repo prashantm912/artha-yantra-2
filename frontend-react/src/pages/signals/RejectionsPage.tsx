@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { Ban } from 'lucide-react';
 import { cn } from '../../lib/cn.ts';
 import { Select } from '../../components/atoms/Select.tsx';
@@ -19,6 +19,11 @@ import {
   type RejectionDataHealth,
   type SignalRejectionDto,
 } from '../../api/signalRejections.ts';
+
+// The per-strategy evaluation funnel (README §7 row 7). LAZY on purpose: this route is EAGERLY imported
+// by App.tsx, and the funnel's Sankey pulls the ~1 MB echarts vendor bundle — behind React.lazy that
+// stays a separate chunk (FE-01) instead of riding the main payload for every page in the app.
+const RejectionFunnel = lazy(() => import('../../components/RejectionFunnel.tsx'));
 
 // /signal-rejections — WHY the live §12.3 confluence gate blocked each scalper chart-entry. Every row
 // is a bar where the strategy's chart entry fired but the gate returned no Decision: the first failing
@@ -356,6 +361,16 @@ export function RejectionsPage() {
       />
 
       <DotHealthPanel />
+
+      <Suspense
+        fallback={
+          <div className="mb-4 rounded-lg border border-ay-border bg-surface-1 p-3">
+            <p className="text-caption text-ay-muted">Loading the evaluation funnel…</p>
+          </div>
+        }
+      >
+        <RejectionFunnel date={date} from={bounds.from} to={bounds.to} />
+      </Suspense>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <DateInput

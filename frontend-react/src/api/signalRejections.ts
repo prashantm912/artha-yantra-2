@@ -232,21 +232,63 @@ export function useDotHealth() {
   });
 }
 
-/** The per-rail block rollup (which condition blocks most) over the same optional window. */
+/**
+ * The per-rail block rollup (which condition blocks most) over the same optional window.
+ * `strategySlug` narrows it to ONE strategy — what the funnel needs to fan the confluence-blocked
+ * bucket out by rail, keyed on the same stable identity the V053 denominator uses.
+ */
 export function useRejectionRailCounts(
   strategyVersionId: string | null = null,
   from: string | null = null,
   to: string | null = null,
+  strategySlug: string | null = null,
 ) {
   return useQuery({
-    queryKey: [KEY, 'rail-counts', strategyVersionId, from, to],
+    queryKey: [KEY, 'rail-counts', strategyVersionId, from, to, strategySlug],
     queryFn: () => {
       const params = new URLSearchParams();
       if (strategyVersionId) params.set('strategyVersionId', strategyVersionId);
+      if (strategySlug) params.set('strategySlug', strategySlug);
       if (from) params.set('from', from);
       if (to) params.set('to', to);
       const qs = params.toString();
       return apiFetch<{ items: RailCount[] }>(`/signal-rejections/rail-counts${qs ? `?${qs}` : ''}`);
     },
+  });
+}
+
+/** One (strategy, outcome) evaluation total for a session date, already summed across boots. */
+export interface EvalOutcomeCount {
+  strategySlug: string;
+  /** The stable `SignalEngine.Outcome` wire tag, e.g. `chart-gate-failed` / `fired`. */
+  outcome: string;
+  evalCount: number;
+}
+
+/**
+ * The V053 per-strategy evaluation ladder for one IST session date (F5 unit U2).
+ *
+ * `boots` is how many process boots contributed — `> 1` means the day spans a restart and the totals
+ * are a SUM across them. An EMPTY `items` means the rollup wrote nothing for that date (a down stack,
+ * a pre-V053 date, or one past retention); the table never writes zero rows, so absence is genuinely
+ * unknown and must never be rendered as "nothing evaluated".
+ */
+export interface EvalFunnel {
+  sessionDate: string;
+  boots: number;
+  items: EvalOutcomeCount[];
+}
+
+/**
+ * The real per-strategy evaluation denominator for one IST SESSION date (the date of the evaluated
+ * bars, not a UTC calendar date). Every rate on the funnel is computed against this rather than one
+ * inferred from the 3m grid — the thing U2 was built to fix.
+ */
+export function useEvalFunnel(date: string, enabled = true) {
+  return useQuery({
+    queryKey: [KEY, 'eval-funnel', date],
+    enabled,
+    queryFn: () =>
+      apiFetch<EvalFunnel>(`/signal-rejections/eval-funnel?date=${encodeURIComponent(date)}`),
   });
 }

@@ -820,6 +820,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/signal-rejections/eval-funnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["evalFunnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/signal-rejections/dot-health": {
         parameters: {
             query?: never;
@@ -1947,6 +1963,19 @@ export interface components {
         };
         RailCountList: {
             items: components["schemas"]["RailCount"][];
+        };
+        EvalFunnel: {
+            /** Format: date */
+            sessionDate: string;
+            /** Format: int32 */
+            boots: number;
+            items: components["schemas"]["OutcomeCount"][];
+        };
+        OutcomeCount: {
+            strategySlug: string;
+            outcome: string;
+            /** Format: int64 */
+            evalCount: number;
         };
         DotHealth: {
             asOf: string;
@@ -4223,6 +4252,7 @@ export interface operations {
         parameters: {
             query?: {
                 strategyVersionId?: string;
+                strategySlug?: string;
                 from?: string;
                 to?: string;
             };
@@ -4239,6 +4269,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["RailCountList"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    evalFunnel: {
+        parameters: {
+            query: {
+                date: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["EvalFunnel"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

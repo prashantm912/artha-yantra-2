@@ -207,8 +207,16 @@ public class SignalRejectionRepository {
         from, to);
   }
 
-  /** Per-rail block counts over an optional window (the "which rail blocks most" rollup). */
-  public List<RailCount> railCounts(UUID strategyVersionId, OffsetDateTime from, OffsetDateTime to) {
+  /**
+   * Per-rail block counts over an optional window (the "which rail blocks most" rollup).
+   *
+   * <p>{@code strategySlug} filters on the STABLE per-strategy identity — the same column the V053
+   * denominator is keyed by — so a per-strategy funnel's rail fan-out and its evaluation totals name
+   * the same thing across republishes. Filtering by {@code strategyVersionId} instead would split a
+   * day at every republish, which is exactly the fragmentation V053 chose the slug to avoid.
+   */
+  public List<RailCount> railCounts(
+      UUID strategyVersionId, String strategySlug, OffsetDateTime from, OffsetDateTime to) {
     StringBuilder sql =
         new StringBuilder(
             "SELECT blocking_rail, count(*) AS n FROM signal_rejections WHERE 1=1");
@@ -216,6 +224,10 @@ public class SignalRejectionRepository {
     if (strategyVersionId != null) {
       sql.append(" AND strategy_version_id = ?");
       args.add(strategyVersionId);
+    }
+    if (strategySlug != null && !strategySlug.isBlank()) {
+      sql.append(" AND strategy_slug = ?");
+      args.add(strategySlug);
     }
     if (from != null) {
       sql.append(" AND generated_at >= ?");

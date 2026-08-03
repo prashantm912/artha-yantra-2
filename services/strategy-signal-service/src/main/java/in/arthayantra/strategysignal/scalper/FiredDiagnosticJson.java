@@ -87,8 +87,9 @@ public final class FiredDiagnosticJson {
       c.put("biasAligned", conf.biasAligned());
       c.put("standAside", conf.standAside());
       // F5 U4b Part 1 — the ARMED-policy counterfactual, recorded on the FIRED side. Together these
-      // two answer "would the `dot-null-withheld` policy have fired this bar?" —
-      // `decisiveLegsHeld && withheldAggregate >= threshold` — which is the ONLY way to see the
+      // FOUR answer "would the `dot-null-withheld` policy have fired this bar?" —
+      // `decisiveLegsHeld && coverageFloorHeld && withheldAggregate >= threshold` — which is the
+      // ONLY way to see the
       // TIGHTENING half of the change: a champion-FIRED entry the unified null rule would have
       // removed. The shadow book covers the loosening half (champion-rejected / armed-fires) but is
       // structurally blind here, because its writer fires on the rejection path only.
@@ -101,6 +102,16 @@ public final class FiredDiagnosticJson {
       // is a subtraction over signals joined on this key, not a second virtual book.
       c.put("withheldAggregate", conf.withheldAggregate());
       c.put("decisiveLegsHeld", conf.decisiveLegsHeld());
+      // §5.3: the counterfactual is INCOMPLETE without these. `decisiveLegsHeld` reflects the
+      // CHAMPION's legs, and the champion has the coverage floor unarmed — but the only armable form
+      // of the null policy implies it, so a low-coverage bar that fired here would keep its fired
+      // status under a policy that would have refused it, and the tightening-half subtraction this
+      // key set exists to support would be computed against a wrong population. `coverageFloorHeld`
+      // is the armed policy's coverage verdict, recorded unconditionally; `coverage` is the raw
+      // ratio, so a future re-analysis can re-floor the population without re-deriving it from the
+      // operands in SQL (which is exactly what the 2026-08-03 decision sheet had to do).
+      c.put("coverage", conf.coverage());
+      c.put("coverageFloorHeld", conf.coverageFloorHeld());
       ArrayNode dots = c.putArray("dots");
       for (ConnectTheDotsScorer.DotScore ds : conf.dots()) {
         ObjectNode n = dots.addObject();

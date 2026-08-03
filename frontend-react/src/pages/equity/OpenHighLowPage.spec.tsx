@@ -31,6 +31,7 @@ function renderPage() {
 }
 
 describe('OpenHighLowPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 5597ms in a full-suite run.
   it('renders the O=H (bearish) and O=L (bullish) mirrored tables', () => {
     renderPage();
     expect(screen.getByText(/Open = High \(bearish\): 1/)).toBeInTheDocument();
@@ -40,5 +41,5 @@ describe('OpenHighLowPage', () => {
     expect(within(tables[1]).getByRole('columnheader', { name: 'Day Low' })).toBeInTheDocument();
     expect(screen.getAllByText('INFY').length).toBeGreaterThan(0);
     expect(screen.getAllByText('RELIANCE').length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });

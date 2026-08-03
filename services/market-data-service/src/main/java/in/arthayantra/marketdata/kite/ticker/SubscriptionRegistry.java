@@ -124,6 +124,7 @@ public class SubscriptionRegistry implements PinnedSubscriptionRegistrar {
                   () ->
                       new NotFoundException(
                           ErrorCodes.NOT_FOUND_INSTRUMENT, "unknown instrument " + key.canonical()));
+      refuseCashEquity(key, info.isIndex());
       if (instruments.size() >= cap) {
         evictLowerPriorityThan(priority, key);
       }
@@ -134,6 +135,7 @@ public class SubscriptionRegistry implements PinnedSubscriptionRegistrar {
       persist(subscriber, key, mode, priority);
       return mode;
     }
+    refuseCashEquity(key, existing.index());
     existing.holds().put(subscriber, new Hold(mode, priority));
     persist(subscriber, key, mode, priority);
     SubscriptionMode newEffective = effectiveModeOf(existing.holds());
@@ -144,6 +146,58 @@ public class SubscriptionRegistry implements PinnedSubscriptionRegistrar {
       notifySubscribe(List.of(existing.token()), newEffective);
     }
     return newEffective;
+  }
+
+  /** The cash exchanges - the only ones carrying ordinary tradable EQUITIES alongside indices. */
+  private static final java.util.Set<String> CASH_EXCHANGES = java.util.Set.of("NSE", "BSE");
+
+  /**
+   * RATCHET (PR #1251): refuses to put a CASH EQUITY on the WS ticker.
+   *
+   * <p>It sits here because this method is the one choke point every subscription must pass.
+   * Ratcheting the configured pin list instead ({@code artha.subscriptions.pinned-indices}) looked
+   * equivalent and was not: {@code SubscriptionsController.subscribe} takes an arbitrary
+   * exchange/symbol from the caller straight into this method, and {@code SubscriptionReplayer.replay}
+   * restores persisted holds through it on every restart - so an equity could reach {@code ticks:last}
+   * with a config-level ratchet fully green. Any future caller is covered for the same reason.
+   *
+   * <p><b>Why a subscription bean carries a money-path rule.</b> {@code PaperBracketEvaluator} (in
+   * strategy-signal) prices every open paper position off the {@code ticks:last} LTP and compares it
+   * to the STORED {@code paper_positions.stop_loss} - a level the daily swing batch writes once, at
+   * entry, on the corporate-action plane current then, and which nothing ever re-scales. A split would
+   * halve the tick while the stored stop stayed whole and stop a swing holding out intraday, on the
+   * ex-date morning, at a price that never happened. That exposure is real and deliberately UNFIXED:
+   * PR #1251 attempted fixes on both surfaces, cross-vendor review found four Criticals in them, and
+   * the owner reverted to marking the exposure rather than patching it. It is unreachable today for
+   * exactly one reason - no cash equity is on the live tick feed, so {@code lastTick} returns empty
+   * and the comparison never runs (docs/signal-analysis/2026-08-02-manas-exit-stop-doctrine.md).
+   * Every open swing holding already carries a non-null {@code stop_loss}, so a single tick is the
+   * whole remaining distance. This makes that distance impossible to close by accident.
+   *
+   * <p>The rule is the instrument master's own {@code INDICES} segment, not a name allowlist: an index
+   * is not tradable and can never be a paper holding, so a NEW index needs no change here, while every
+   * tradable cash instrument is refused whatever it is called. Checked after resolution, so an unknown
+   * instrument still 404s exactly as before, and on the already-registered path too, so a hold
+   * persisted before this ratchet existed cannot be re-raised.
+   */
+  private static void refuseCashEquity(InstrumentKey key, boolean isIndex) {
+    String exchange = key.exchange() == null ? "" : key.exchange().trim().toUpperCase(java.util.Locale.ROOT);
+    if (isIndex || !CASH_EXCHANGES.contains(exchange)) {
+      return;
+    }
+    throw new ApiException(
+        400,
+        ErrorCodes.VALIDATION_FAILED,
+        "refusing to subscribe cash-exchange instrument "
+            + key.canonical()
+            + " to the live ticker: the instrument master does not report it in the INDICES segment,"
+            + " so it is a tradable EQUITY. Subscribing it arms a live money-path exposure -"
+            + " PaperBracketEvaluator prices open paper positions off ticks:last against the STORED"
+            + " paper_positions.stop_loss, which is written once at entry and never re-scaled when a"
+            + " corporate action re-planes the market, so a split would stop a swing holding out"
+            + " intraday at a price that never happened. That gap is known and UNFIXED (PR #1251;"
+            + " see docs/signal-analysis/2026-08-02-manas-exit-stop-doctrine.md). Close it before"
+            + " putting equities on the feed.");
   }
 
   /** Releases a subscriber's hold; drops or downgrades the instrument as refcounts dictate. */

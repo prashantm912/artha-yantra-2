@@ -44,6 +44,7 @@ function renderPage() {
 }
 
 describe('BreadthPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 4775ms in a full-suite run.
   it('renders the advance/decline summary and delivery-leaders table', () => {
     renderPage();
     // Summary pills.
@@ -56,5 +57,5 @@ describe('BreadthPage', () => {
       expect(within(table).getByRole('columnheader', { name: new RegExp(h) })).toBeInTheDocument();
     }
     expect(screen.getAllByText('TCS').length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });

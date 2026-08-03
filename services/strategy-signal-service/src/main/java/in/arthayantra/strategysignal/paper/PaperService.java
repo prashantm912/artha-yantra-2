@@ -8,6 +8,7 @@ import in.arthayantra.strategyengine.fills.FillSimulator.Fill;
 import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
+import in.arthayantra.strategysignal.signals.Books;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -591,7 +592,12 @@ public class PaperService {
    * normal, not stale. Every other book (scalper / other) is age-gated.
    */
   private static boolean isSwingBook(String book) {
-    return BookResolver.MINERVINI.equals(book) || BookResolver.MANAS_ARORA.equals(book);
+    // Byte-identical to the previous inline test (BookResolver.MINERVINI/MANAS_ARORA ARE
+    // Books.MINERVINI/MANAS_ARORA, BookResolver:20-21), now expressed through the one authority so
+    // this freshness exemption and PaperStaleTickAlerter's eod-managed-books alert suppression
+    // cannot drift apart — the drift that class's own comment warns about, previously unenforced
+    // (PR #1251).
+    return Books.eodManaged().contains(book);
   }
 
   /**

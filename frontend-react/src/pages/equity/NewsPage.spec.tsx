@@ -33,6 +33,7 @@ function renderPage() {
 }
 
 describe('NewsPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3341ms in a full-suite run.
   it('shows a prompt, then the news articles after Go', () => {
     renderPage();
     expect(screen.getByText(/Enter a stock symbol/)).toBeInTheDocument();
@@ -44,5 +45,5 @@ describe('NewsPage', () => {
     expect(link).toHaveAttribute('href', 'https://example.com/a');
     expect(link).toHaveAttribute('target', '_blank');
     expect(screen.getByText('RIL gained 2% on heavy volume.')).toBeInTheDocument();
-  });
+  }, 15_000);
 });

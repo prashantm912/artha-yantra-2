@@ -170,6 +170,7 @@ afterEach(() => {
 });
 
 describe('SwingSellDecisionsPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3904ms in a full-suite run.
   it('renders the sell-decision table with a HOLD row and a SELL row', () => {
     renderPage();
     const table = screen.getByRole('table');
@@ -184,7 +185,7 @@ describe('SwingSellDecisionsPage', () => {
     // signed unrealized P&L, both directions
     expect(within(table).getByText('+10.00%')).toBeInTheDocument();
     expect(within(table).getByText('-8.00%')).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('renders the live columns in their declared order', () => {
     renderPage();
@@ -291,6 +292,7 @@ describe('SwingSellDecisionsPage', () => {
     expect(screen.getByText('no catch-up rows — nothing has been claimed')).toBeInTheDocument();
   });
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3343ms in a full-suite run.
   it('does not post when the run confirmation is cancelled and restores trigger focus', async () => {
     renderPage();
 
@@ -300,7 +302,7 @@ describe('SwingSellDecisionsPage', () => {
 
     expect(apiFetch).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(trigger).toHaveFocus());
-  });
+  }, 15_000);
 
   it('refuses to open the dialog at all during market hours (requestRun recheck)', () => {
     // Cross-vendor M2: the dialog-open recheck had no regression guard — deleting it left every

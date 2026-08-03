@@ -67,6 +67,39 @@ public record SentimentLevelShadow(
   }
 
   /**
+   * The bar's OI snapshot with the FLOW operand REPLACED by the LEVEL operand — the substitution that
+   * turns any live sentiment rule into its counterfactual. Null when there is no level to substitute,
+   * so a caller can treat null as "no counterfactual is computable".
+   *
+   * <p>Derived purely from the already-fetched immutable snapshot: it copies one record and re-points
+   * one field. There is NO second fetch, so a counterfactual built on it is reproducible and is
+   * guaranteed to have seen exactly what the live decision saw.
+   */
+  public static Oi withLevelAsFlow(Oi oi) {
+    if (oi == null || oi.sentimentLevelPct() == null) {
+      return null;
+    }
+    return withSentiment(oi, oi.sentimentLevelPct());
+  }
+
+  /**
+   * The whole per-bar context with the OI operand substituted — what a counterfactual re-scoring of
+   * the confluence must run against. Null when no level is available. Chart and macro ride through
+   * unchanged; only the one operand under test moves.
+   */
+  public static ScalperGateContext withLevelAsFlow(ScalperGateContext ctx) {
+    if (ctx == null) {
+      return null;
+    }
+    Oi substituted = withLevelAsFlow(ctx.oi());
+    return substituted == null
+        ? null
+        : new ScalperGateContext(
+            ctx.underlying(), ctx.signalIndex(), ctx.istTime(), ctx.chart(), substituted,
+            ctx.macro());
+  }
+
+  /**
    * A copy of {@code oi} with the FLOW sentiment replaced by {@code sentiment} — the substitution
    * that turns a live rule into its counterfactual. Every other field (the slope especially, which
    * {@code oi-slope-agree} also reads) is carried through untouched, so the verdict isolates the one

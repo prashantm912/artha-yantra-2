@@ -1,5 +1,7 @@
 package in.arthayantra.strategysignal.signals;
 
+import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate;
+import in.arthayantra.strategysignal.scalper.ScalperGates;
 import in.arthayantra.strategysignal.scalper.SentimentLevelShadow;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
@@ -69,14 +71,35 @@ public class ExitOracleShadowWriter {
       String evaluatedSide,
       String liveOracleSide,
       boolean liveFlip,
-      SentimentLevelShadow shadow) {
+      SentimentLevelShadow shadow,
+      ScalperConfluenceGate.SentimentCounterfactual counterfactual) {
+    // The EXACT counterfactual DECISION (round-3 review): null means "not evaluable", which is a
+    // different fact from "would not fire" and must stay distinguishable in the row — every
+    // shadow_* column goes NULL together and shadow_verdict_known records which case it is.
+    boolean known = counterfactual != null;
+    Boolean shadowFlip =
+        known
+            ? counterfactual.wouldFire()
+                && ScalperGates.confluenceFlippedAgainst(
+                    heldSide,
+                    counterfactual.oracleSide() == null ? "" : counterfactual.oracleSide().name())
+            : null;
     queue.submit(
         () -> {
           try {
             repository.insert(
                 entrySignalId, strategySlug, barTime, heldSide, evaluatedSide, liveOracleSide,
-                liveFlip, shadow.flowPct(), shadow.levelPct(), shadow.sentimentDotWouldSupport(),
-                shadow.oiSlopeAgreeWouldPass());
+                liveFlip, shadow.flowPct(), shadow.levelPct(),
+                known, known ? counterfactual.wouldFire() : null,
+                known && counterfactual.oracleSide() != null
+                    ? counterfactual.oracleSide().name()
+                    : null,
+                shadowFlip,
+                known ? counterfactual.composite() : null,
+                known ? counterfactual.threshold() : null,
+                known ? counterfactual.compositeValid() : null,
+                known ? counterfactual.blockingRail() : null,
+                shadow.sentimentDotWouldSupport(), shadow.oiSlopeAgreeWouldPass());
             return true;
           } catch (RuntimeException e) {
             log.warn(

@@ -3118,7 +3118,10 @@ public class SignalEngine {
           entry.id(), strategy.slug(), istBar, heldSide,
           evaluatedSide == null ? null : evaluatedSide.name(),
           now.isPresent() && !now.get().neutral() ? now.get().side().name() : null,
-          flip, shadow);
+          flip, shadow,
+          // The EXACT level-operand verdict, computed inside the gate from the SAME immutable
+          // evaluation snapshot this decision came from — no second fetch, no re-evaluation here.
+          result.sentimentCounterfactual());
     } catch (RuntimeException e) {
       log.warn("exit-oracle shadow capture failed for entry {}: {}", entry.id(), e.toString());
     }

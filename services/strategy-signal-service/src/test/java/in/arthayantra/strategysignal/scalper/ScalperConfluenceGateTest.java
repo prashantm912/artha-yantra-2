@@ -247,6 +247,20 @@ class ScalperConfluenceGateTest {
         new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
   }
 
+  /**
+   * V056: a bullish context carrying BOTH sentiment operands — the ΔOI-FLOW scalar the live rules
+   * read and the measurement-only LEVEL sibling the counterfactual substitutes.
+   */
+  private static ScalperGateContext bullContextWithSentiment(BigDecimal flow, BigDecimal level) {
+    return new ScalperGateContext(
+        "NIFTY 50", "NIFTY 50", IST_TIME,
+        new Chart(bd("100"), bd("99"), bd("98"), bd("97"), 1, bd("65"), bd("130000")),
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, flow, bd("5"), bd("5"), null, null,
+            null, false, false, null, null, null, null, level),
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), null, null));
+  }
+
   // a bullish context whose macro carries a specific FII long-share % (the fii-bias rail's operand).
   private static ScalperGateContext bullContextWithFiiLongPct(BigDecimal fiiLongPct) {
     return new ScalperGateContext(
@@ -1996,6 +2010,121 @@ class ScalperConfluenceGateTest {
     // whole reason it exists (the exit-oracle shadow reads the OI context out of it).
     assertThat(viaOracle.fired()).isNotNull();
     assertThat(viaOracle.fired().context()).isNotNull();
+  }
+
+  /**
+   * V056 round-3: the oracle carries the EXACT level-operand VERDICT, not merely operand
+   * disagreement. Recording "the sentiment dot would have flipped" cannot distinguish a
+   * still-passing bar from one that fell below threshold, so the counterfactual must be a decision.
+   *
+   * <p>This bar is built so the two operands genuinely disagree — the FLOW read is what the live
+   * evaluation used, and the substituted LEVEL read is scored through the REAL scorer. The
+   * assertions are on the decision fields, not on the operands.
+   */
+  @Test
+  void theOracleCarriesAnExactLevelOperandVerdictNotJustOperandDisagreement() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSentiment(bd("0.00"), bd("30")));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
+
+    ScalperConfluenceGate.Result r =
+        gate.evaluateOracle(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    ScalperConfluenceGate.SentimentCounterfactual cf = r.sentimentCounterfactual();
+
+    assertThat(cf).as("the ORACLE path computes the counterfactual").isNotNull();
+    // It is a DECISION: a side and a fire verdict, plus the state that proves them.
+    assertThat(cf.wouldFire()).isTrue();
+    assertThat(cf.oracleSide()).isEqualTo(CE);
+    assertThat(cf.compositeValid()).isTrue();
+    assertThat(cf.threshold()).isEqualByComparingTo(CFG.confluenceThreshold());
+    assertThat(cf.blockingRail()).as("no sentiment-independent rail blocked this bar").isNull();
+    // The counterfactual composite is HIGHER than the live one: the flow operand reads 0.00 (the
+    // no-dissemination tick) so the live `sentiment` dot scores against the side, while the +30
+    // level supports it. That difference is the measurement.
+    assertThat(cf.composite())
+        .as("the level operand lifts the composite above the live one")
+        .isGreaterThan(r.fired().confluence().aggregate());
+  }
+
+  /** The ENTRY paths must NOT pay for the counterfactual — it is oracle-only, by construction. */
+  @Test
+  void theEntryPathsNeverComputeTheCounterfactual() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSentiment(bd("0.00"), bd("30")));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
+
+    assertThat(
+            gate.evaluateWithDiagnostic(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)
+                .sentimentCounterfactual())
+        .as("the entry path stays byte-identical — no counterfactual work, no counterfactual field")
+        .isNull();
+  }
+
+  /**
+   * THE DISCRIMINATING CASE — the reviewer's Critical, stated as a test. The level operand SUPPORTS
+   * the side (so any record derived from operand disagreement would say "would fire"), but a
+   * SENTIMENT-INDEPENDENT rail blocked, so the true counterfactual verdict is "would NOT fire".
+   *
+   * <p>This is exactly "a live block whose level predicates pass cannot be classified as cleared
+   * versus still blocked by another rail". Without this test the suite cannot tell the exact verdict
+   * from the weaker operand-level record — measured: substituting {@code sideSigned(level)} for the
+   * decision left the whole gate suite GREEN until this case existed.
+   */
+  @Test
+  void aSupportingLevelOperandStillDoesNotFireWhenAnIndependentRailBlocked() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    // No candidate lands in the 0.6–0.7 delta band → the strike-pick rail blocks. Nothing about the
+    // sentiment operand can influence that rail.
+    when(client.chain("NIFTY 50"))
+        .thenReturn(
+            Optional.of(
+                new ChainSnapshot(
+                    EXPIRY, bd("20000"), bd("20000"),
+                    List.of(
+                        new StrikePicker.Candidate(
+                            "NFO", "NIFTY20000CE", bd("20000"), CE, bd("120"), bd("0.14"))))));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSentiment(bd("0.00"), bd("30")));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
+
+    ScalperConfluenceGate.Result r =
+        gate.evaluateOracle(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD);
+    ScalperConfluenceGate.SentimentCounterfactual cf = r.sentimentCounterfactual();
+
+    assertThat(r.blocked()).as("the live oracle blocked on strike-pick").isTrue();
+    assertThat(cf).isNotNull();
+    // The level operand SUPPORTS CE and the counterfactual composite is valid…
+    assertThat(cf.compositeValid()).isTrue();
+    // …yet the verdict is NO FIRE, because the block was never about sentiment.
+    assertThat(cf.wouldFire())
+        .as("an independent rail blocked — no sentiment operand could have made this fire")
+        .isFalse();
+    assertThat(cf.oracleSide()).isNull();
+    assertThat(cf.blockingRail())
+        .as("the row must NAME the rail that forced the verdict, so it is provable alone")
+        .isEqualTo("strike-pick");
+  }
+
+  /**
+   * No level operand ⇒ NO verdict, not a false one. Null here is what makes
+   * {@code shadow_verdict_known=false} honest downstream.
+   */
+  @Test
+  void theOracleReportsNoCounterfactualWhenMarketDataPublishedNoLevel() {
+    MarketOiClient client = mock(MarketOiClient.class);
+    when(client.chain("NIFTY 50")).thenReturn(Optional.of(chainWithInBandCe()));
+    when(client.context(eq("NIFTY 50"), any(), any(), any(), any(), any(), any()))
+        .thenReturn(bullContextWithSentiment(bd("12"), null));
+    ScalperConfluenceGate gate = new ScalperConfluenceGate(client, ScalperOiProps.defaults());
+
+    assertThat(
+            gate.evaluateOracle(CFG, bullBank(), null, 0, NOW, IST_TIME, EOD)
+                .sentimentCounterfactual())
+        .isNull();
   }
 
   @Test

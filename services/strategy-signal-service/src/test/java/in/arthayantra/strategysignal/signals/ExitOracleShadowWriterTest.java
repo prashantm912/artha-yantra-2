@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.signals;
 
+import static in.arthayantra.black76.Black76.OptionType.CE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
+import in.arthayantra.strategysignal.scalper.ScalperConfluenceGate.SentimentCounterfactual;
 import in.arthayantra.strategysignal.scalper.SentimentLevelShadow;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
@@ -28,17 +30,25 @@ import org.junit.jupiter.api.Test;
  * than latency. Saturation DROPS + counts; a failing insert is swallowed; {@code record()} always
  * returns promptly and never throws.
  *
- * <p>Ported from {@link RiskSuppressionWriterTest} — same {@link BoundedAsyncWriter} seam, same
- * guarantees.
+ * <p>It also derives the one field the gate cannot: {@code shadow_flip}. The gate computes the
+ * counterfactual SIDE — it does not know which side the position holds — so the flip is that side
+ * judged against {@code heldSide} through the same {@code confluenceFlippedAgainst} predicate the
+ * live exit uses.
+ *
+ * <p>Ported from {@link RiskSuppressionWriterTest} — same {@link BoundedAsyncWriter} seam.
  */
 class ExitOracleShadowWriterTest {
 
   private static final OffsetDateTime BAR = OffsetDateTime.now(ZoneOffset.ofHoursMinutes(5, 30));
   private static final SentimentLevelShadow SHADOW =
       new SentimentLevelShadow(new BigDecimal("0.00"), new BigDecimal("30"), true, true);
+  /** The level operand would have fired a CE — against a held PE that is a flip. */
+  private static final SentimentCounterfactual WOULD_FIRE_CE =
+      new SentimentCounterfactual(
+          CE, true, new BigDecimal("0.94"), new BigDecimal("0.6"), true, true, null);
 
   private static void record(ExitOracleShadowWriter writer) {
-    writer.record(42L, "scalp-trending-oi-nifty", BAR, "PE", "CE", "CE", true, SHADOW);
+    writer.record(42L, "scalp-trending-oi-nifty", BAR, "PE", "CE", "CE", true, SHADOW, WOULD_FIRE_CE);
   }
 
   @Test
@@ -55,7 +65,8 @@ class ExitOracleShadowWriterTest {
             })
         .when(repo)
         .insert(
-            anyLong(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), any());
+            anyLong(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(),
+            any(), any(), any(), any(), any(), any(), any(), any(), any());
     ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
     try {
       int n = ExitOracleShadowWriter.QUEUE_CAPACITY * 8;
@@ -88,22 +99,29 @@ class ExitOracleShadowWriterTest {
     doThrow(new IllegalStateException("db down"))
         .when(repo)
         .insert(
-            anyLong(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), any());
+            anyLong(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(),
+            any(), any(), any(), any(), any(), any(), any(), any(), any());
     ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
     try {
       assertThatCode(() -> record(writer)).doesNotThrowAnyException();
       verify(repo, timeout(5_000))
           .insert(
-              anyLong(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(),
-              any());
+              anyLong(), any(), any(), any(), any(), any(), anyBoolean(), any(), any(),
+              anyBoolean(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     } finally {
       writer.drainAndShutdown(500L);
     }
   }
 
-  /** The happy path: every field of the shadow reaches the repository unchanged. */
+  /**
+   * VERIFY GOAL — the counterfactual DECISION is persisted, not merely operand disagreement. On a
+   * held PE where the level operand would have fired a CE, the row records
+   * {@code shadow_would_fire=true}, {@code shadow_oracle_side=CE} and — the field the whole
+   * measurement turns on — {@code shadow_flip=TRUE}, alongside the composite/threshold that PROVE
+   * the verdict without re-deriving it.
+   */
   @Test
-  void theShadowOperandsAndVerdictsArePersistedAsGiven() {
+  void theCounterfactualDecisionAndItsProvingStateArePersisted() {
     SimpleMeterRegistry meters = new SimpleMeterRegistry();
     ExitOracleShadowRepository repo = mock(ExitOracleShadowRepository.class);
     ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
@@ -112,28 +130,88 @@ class ExitOracleShadowWriterTest {
       verify(repo, timeout(5_000))
           .insert(
               42L, "scalp-trending-oi-nifty", BAR, "PE", "CE", "CE", true,
-              new BigDecimal("0.00"), new BigDecimal("30"), true, true);
+              new BigDecimal("0.00"), new BigDecimal("30"),
+              true, true, "CE", true,
+              new BigDecimal("0.94"), new BigDecimal("0.6"), true, null,
+              true, true);
     } finally {
       writer.drainAndShutdown(500L);
     }
   }
 
   /**
-   * A null verdict (market-data published no {@code sentimentLevelPct}) must persist as SQL NULL,
-   * not be coerced to false. "Could not evaluate" and "the level says no" are different facts and
-   * the analysis depends on telling them apart.
+   * The discriminating case for {@code shadow_flip}: the SAME counterfactual side is NOT a flip when
+   * the position already holds it. A writer that copied {@code wouldFire} straight into
+   * {@code shadow_flip} would pass the test above and fail here — which is precisely the
+   * "operand disagreement mistaken for a decision change" error this column exists to prevent.
    */
   @Test
-  void aMissingLevelPersistsNullVerdictsRatherThanFalse() {
+  void aCounterfactualFireOnTheHeldSideIsNotAFlip() {
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    ExitOracleShadowRepository repo = mock(ExitOracleShadowRepository.class);
+    ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
+    try {
+      // held CE, counterfactual confirms CE → the read AGREES with the position, so no exit.
+      writer.record(9L, "slug", BAR, "CE", "CE", "CE", false, SHADOW, WOULD_FIRE_CE);
+      verify(repo, timeout(5_000))
+          .insert(
+              9L, "slug", BAR, "CE", "CE", "CE", false,
+              new BigDecimal("0.00"), new BigDecimal("30"),
+              true, true, "CE", false,
+              new BigDecimal("0.94"), new BigDecimal("0.6"), true, null,
+              true, true);
+    } finally {
+      writer.drainAndShutdown(500L);
+    }
+  }
+
+  /**
+   * A counterfactual that would NOT fire cannot flip, and the sentiment-INDEPENDENT rail that
+   * stopped it is recorded — so a reader can see the verdict was forced by something the operand
+   * could never have influenced.
+   */
+  @Test
+  void aNonFiringCounterfactualRecordsNoFlipAndNamesTheBlockingRail() {
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    ExitOracleShadowRepository repo = mock(ExitOracleShadowRepository.class);
+    ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
+    try {
+      SentimentCounterfactual blocked =
+          new SentimentCounterfactual(
+              null, false, new BigDecimal("0.94"), new BigDecimal("0.6"), true, true, "strike-pick");
+      writer.record(11L, "slug", BAR, "PE", "CE", null, false, SHADOW, blocked);
+      verify(repo, timeout(5_000))
+          .insert(
+              11L, "slug", BAR, "PE", "CE", null, false,
+              new BigDecimal("0.00"), new BigDecimal("30"),
+              true, false, null, false,
+              new BigDecimal("0.94"), new BigDecimal("0.6"), true, "strike-pick",
+              true, true);
+    } finally {
+      writer.drainAndShutdown(500L);
+    }
+  }
+
+  /**
+   * NOT EVALUABLE is its own state. A null counterfactual (no level operand, or the gate blocked
+   * before any confluence was scored) writes {@code shadow_verdict_known=false} with EVERY shadow
+   * column NULL — never {@code false}. An analysis filtering on {@code shadow_flip = false} without
+   * checking {@code shadow_verdict_known} would otherwise count unmeasurable bars as agreement,
+   * which is the exact bias this PR exists to avoid.
+   */
+  @Test
+  void anUnevaluableCounterfactualIsRecordedAsUnknownNotAsNoChange() {
     SimpleMeterRegistry meters = new SimpleMeterRegistry();
     ExitOracleShadowRepository repo = mock(ExitOracleShadowRepository.class);
     ExitOracleShadowWriter writer = new ExitOracleShadowWriter(repo, meters);
     try {
       writer.record(
           7L, "slug", BAR, "CE", "CE", null, false,
-          new SentimentLevelShadow(new BigDecimal("1.5"), null, null, null));
+          new SentimentLevelShadow(new BigDecimal("1.5"), null, null, null), null);
       verify(repo, timeout(5_000))
-          .insert(7L, "slug", BAR, "CE", "CE", null, false, new BigDecimal("1.5"), null, null, null);
+          .insert(
+              7L, "slug", BAR, "CE", "CE", null, false, new BigDecimal("1.5"), null,
+              false, null, null, null, null, null, null, null, null, null);
     } finally {
       writer.drainAndShutdown(500L);
     }

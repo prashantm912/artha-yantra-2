@@ -39,17 +39,29 @@ public class ExitOracleShadowRepository {
       boolean liveFlip,
       BigDecimal flowPct,
       BigDecimal levelPct,
+      boolean shadowVerdictKnown,
+      Boolean shadowWouldFire,
+      String shadowOracleSide,
+      Boolean shadowFlip,
+      BigDecimal shadowComposite,
+      BigDecimal compositeThreshold,
+      Boolean shadowCompositeValid,
+      String shadowBlockingRail,
       Boolean dotWouldSupport,
       Boolean slopeGateWouldPass) {
     jdbc.update(
         """
         INSERT INTO exit_oracle_shadow
           (entry_signal_id, strategy_slug, bar_time, held_side, evaluated_side, live_oracle_side,
-           live_flip, flow_pct, level_pct, dot_would_support, slope_gate_would_pass)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           live_flip, flow_pct, level_pct, shadow_verdict_known, shadow_would_fire,
+           shadow_oracle_side, shadow_flip, shadow_composite, composite_threshold,
+           shadow_composite_valid, shadow_blocking_rail, dot_would_support, slope_gate_would_pass)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (entry_signal_id, bar_time) DO NOTHING
         """,
         entrySignalId, strategySlug, barTime, heldSide, evaluatedSide, liveOracleSide,
-        liveFlip, flowPct, levelPct, dotWouldSupport, slopeGateWouldPass);
+        liveFlip, flowPct, levelPct, shadowVerdictKnown, shadowWouldFire, shadowOracleSide,
+        shadowFlip, shadowComposite, compositeThreshold, shadowCompositeValid, shadowBlockingRail,
+        dotWouldSupport, slopeGateWouldPass);
   }
 }

@@ -94,7 +94,7 @@ public class MinerviniScheduler {
     if (r.screenDate() == null) {
       return r;
     }
-    repo.upsertAll(r.screenDate(), r.candidates());
+    repo.replaceAll(r.screenDate(), r.candidates());
     computeGeometry(r);
     probePlaneDivergence(r.screenDate(), "run-once", true);
     return r;
@@ -130,7 +130,7 @@ public class MinerviniScheduler {
         log.info("minervini screen skipped ({}) — no daily equity data yet", trigger);
         return;
       }
-      int written = repo.upsertAll(r.screenDate(), r.candidates());
+      int written = repo.replaceAll(r.screenDate(), r.candidates());
       long passing = r.candidates().stream().filter(TrendCandidate::passesAll).count();
       int geo = computeGeometry(r);
       ledger.succeed(runId, written);

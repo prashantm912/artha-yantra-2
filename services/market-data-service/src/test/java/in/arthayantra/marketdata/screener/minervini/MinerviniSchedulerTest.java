@@ -40,7 +40,7 @@ class MinerviniSchedulerTest {
 
     scheduler(true).onBhavcopyBackfillCompleted();
 
-    verify(repo).upsertAll(eq(day), any());
+    verify(repo).replaceAll(eq(day), any());
     verify(geometry).persistForPassers(eq(day), any());
   }
 
@@ -62,7 +62,7 @@ class MinerviniSchedulerTest {
     scheduler(true).onBhavcopyBackfillCompleted();
 
     org.mockito.Mockito.verify(screener, org.mockito.Mockito.never()).screen(any());
-    org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).upsertAll(any(), any());
+    org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).replaceAll(any(), any());
   }
 
   /**
@@ -125,7 +125,7 @@ class MinerviniSchedulerTest {
 
     scheduler(true).onBhavcopyBackfillCompleted();
 
-    verify(repo).upsertAll(eq(day), any());
+    verify(repo).replaceAll(eq(day), any());
     verify(ledger).succeed(any(), org.mockito.ArgumentMatchers.anyLong());
     org.mockito.Mockito.verify(planeDivergence, org.mockito.Mockito.never()).markReported(any());
     org.mockito.Mockito.verify(ntfy, org.mockito.Mockito.never()).send(any(), any(), any());
@@ -218,7 +218,7 @@ class MinerviniSchedulerTest {
 
     scheduler(true).onBhavcopyBackfillCompleted();
 
-    verify(repo).upsertAll(eq(day), any());
+    verify(repo).replaceAll(eq(day), any());
     verify(ledger).succeed(any(), org.mockito.ArgumentMatchers.anyLong());
   }
 
@@ -278,7 +278,7 @@ class MinerviniSchedulerTest {
               ctx.getSourceApplicationContext()
                   .publishEvent(
                       new in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted("job"));
-              verify(repo).upsertAll(eq(day), any());
+              verify(repo).replaceAll(eq(day), any());
             });
   }
 }

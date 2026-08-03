@@ -33,7 +33,7 @@ class ManasSchedulerTest {
 
     new ManasScheduler(screener, repo, geometry, ntfy, ledger).onBhavcopyBackfillCompleted();
 
-    verify(repo).upsertAll(eq(day), any());
+    verify(repo).replaceAll(eq(day), any());
     verify(geometry).persistForPassers(eq(day), any());
   }
 
@@ -46,7 +46,7 @@ class ManasSchedulerTest {
     new ManasScheduler(screener, repo, geometry, ntfy, ledger).onBhavcopyBackfillCompleted();
 
     org.mockito.Mockito.verify(screener, org.mockito.Mockito.never()).screen(any());
-    org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).upsertAll(any(), any());
+    org.mockito.Mockito.verify(repo, org.mockito.Mockito.never()).replaceAll(any(), any());
   }
 
   @Test
@@ -66,7 +66,7 @@ class ManasSchedulerTest {
               ctx.getSourceApplicationContext()
                   .publishEvent(
                       new in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted("job"));
-              verify(repo).upsertAll(eq(day), any());
+              verify(repo).replaceAll(eq(day), any());
             });
   }
 }

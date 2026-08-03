@@ -26,10 +26,20 @@ import java.time.LocalDate;
  * the right comparison date rather than a global {@code max(trade_date)}.
  *
  * <p><b>What defeats it:</b> a TOTAL ingest failure, where no rows land for the day at all. Then the
- * universe's max bar is yesterday, every symbol matches it, the ratio is 100% and the floor passes —
- * but the screen is then correctly labelled with YESTERDAY's date, and the schedulers' watermark
- * dedup skips it anyway. The floor targets partial ingests specifically; a total one is already
- * handled and is not silently mislabelled.
+ * universe's max bar is yesterday, every symbol matches it, the ratio is 100% and the floor passes.
+ * The floor cannot see this case at all — it is closed OUTSIDE this class, by resolving the screen
+ * date to the real bhavcopy watermark ({@code effectiveScreenDate}) so the result is labelled with
+ * the date its data actually came from.
+ *
+ * <p>⚠️ That correction is load-bearing and was originally missing. This javadoc previously argued
+ * the total-failure case was "already safe because the screen is labelled yesterday" — true only on
+ * the scheduler path, which passes a null {@code asOf}. An EXPLICIT {@code asOf} (POST /run) used to
+ * be retained verbatim as the label while the row selection compared against the {@code asOf}-bounded
+ * maximum, so {@code POST /run?asOf=today} before the evening bhavcopy landed saw 100% coverage,
+ * passed this floor, and persisted YESTERDAY's rows under TODAY's date — the very mislabelling the
+ * trailing-bar guard exists to prevent, entering through the one door the floor cannot watch. The
+ * argument was reasoned rather than executed; the test that now pins it drives the endpoint and
+ * asserts the persisted {@code screen_date}.
  *
  * <p><b>Threshold.</b> Default 80%, config-tunable per screen. Measured over the 25 trade dates from
  * 2026-06-30 to 2026-08-03, the surviving fraction ranged 99.29%–100.00% (worst: 2026-07-20 and

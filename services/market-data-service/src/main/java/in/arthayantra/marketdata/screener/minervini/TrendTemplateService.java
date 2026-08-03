@@ -169,9 +169,29 @@ public class TrendTemplateService {
         AND calc2.avg_turnover_50 >= ?
       """;
 
+  /**
+   * The latest bhavcopy trade date ON OR BEFORE {@code asOf} — the EFFECTIVE screen date. The
+   * requested {@code asOf} must never become the label: the row selection compares each symbol
+   * against {@code max(bucket) FROM base}, which is bounded by {@code asOf}, so an {@code asOf}
+   * ahead of the data (e.g. POST /run?asOf=today before the evening bhavcopy lands) leaves every
+   * symbol sitting on the last real bar, reports 100% coverage, sails through the coverage floor
+   * and persists YESTERDAY's rows under TODAY's date — exactly the stale-close-under-a-current-badge
+   * mislabelling this guard exists to prevent, arriving through the one door the floor cannot see.
+   * Resolving the label to the real watermark keeps date and data in agreement by construction.
+   */
+  private LocalDate effectiveScreenDate(LocalDate asOf) {
+    return asOf == null
+        ? latestScreenDate()
+        : jdbc.queryForObject(
+            "SELECT max(trade_date) FROM nse_eod_bhavcopy WHERE series IN ('EQ','BE')"
+                + " AND trade_date <= ?::date",
+            LocalDate.class,
+            java.sql.Date.valueOf(asOf));
+  }
+
   /** Runs the screen as of {@code asOf} (default = latest). Computes gates + RS-rank + Stage. */
   public ScreenResult screen(LocalDate asOf) {
-    LocalDate date = asOf != null ? asOf : latestScreenDate();
+    LocalDate date = effectiveScreenDate(asOf);
     if (date == null) {
       return new ScreenResult(null, 0, List.of());
     }

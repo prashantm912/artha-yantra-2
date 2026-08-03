@@ -189,8 +189,13 @@ jobs:
     # bottleneck — a single serial `verify` is ~23 min) run on parallel
     # runners. Each shard `-am`-builds its upstream libs, so every lib still
     # gets compiled + checkstyle + Error Prone + JaCoCo + unit-tested in at
-    # least one shard; collectively all 4 services + all 5 libs are covered
-    # (black76-math rides market-data/backtest, the rest ride every service).
+    # least one shard; collectively all 4 services + all 5 libs are covered.
+    # (This comment used to add "black76-math rides market-data/backtest, the
+    # rest ride every service" — that is STALE. Measured 2026-08-03 with
+    # `mvnw -o -pl <shard> -am validate`: ALL FIVE libs are in ALL THREE shard
+    # reactors — black76-math included, because strategy-signal-service/pom.xml
+    # declares it DIRECTLY. The per-shard classifier's fan-out rule depends on
+    # this, so do not narrow a `libs/` path to one shard on the old claim.)
     # jacoco-check is bound PER MODULE (not an aggregate root goal), so the
     # >= 60% line gate is enforced unchanged inside whichever shard owns the
     # module. ModularityTest lives in market-data + strategy-signal — both

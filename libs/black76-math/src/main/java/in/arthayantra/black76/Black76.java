@@ -162,3 +162,5 @@ public final class Black76 {
     return NORMAL.density(x);
   }
 }
+
+// scratch: libs fan-out classifier proof (PR #1252)

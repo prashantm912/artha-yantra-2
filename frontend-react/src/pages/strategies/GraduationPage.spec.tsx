@@ -86,6 +86,7 @@ const board = () => within(screen.getByRole('table', { name: 'Graduation board' 
 const graduated = () => within(screen.getByRole('table', { name: 'Graduated strategies' }));
 
 describe('GraduationPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3019ms in a full-suite run.
   it('renders each strategy with its stage badge, metrics and per-criterion dots', () => {
     renderPage();
     expect(screen.getByText('Graduation')).toBeInTheDocument();
@@ -98,7 +99,7 @@ describe('GraduationPage', () => {
     expect(screen.getByText(/PF ≥ 1.30/)).toBeInTheDocument();
     // one dot per criterion, per strategy (4 + 4 = 8)
     expect(board().getAllByLabelText(/pass|fail/).length).toBe(8);
-  });
+  }, 15_000);
 
   // a11y — WCAG 1.4.1 (Use of Color): the criterion dots must not encode pass/fail in COLOUR ALONE,
   // so each carries a glyph (✓/✗) a colour-blind sighted user can read.

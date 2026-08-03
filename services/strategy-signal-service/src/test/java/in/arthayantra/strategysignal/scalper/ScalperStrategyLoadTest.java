@@ -385,6 +385,16 @@ class ScalperStrategyLoadTest {
       assertThat(tags.contains("dot-null-withheld"))
           .as(id + " dot-null-withheld unarmed (the unified null rule is an owner decision)")
           .isFalse();
+      // F5 U4b §5.3 dot-coverage-floor un-armed everywhere. Unlike the policy it guards, the floor is
+      // a pure TIGHTENING — it can only refuse bars — so the standing loosening prior does not apply
+      // to it. It is still an owner arming decision: below the floor the confluence becomes INVALID,
+      // which on an OI-suppressed session (a monthly expiry, a feed outage) silences the whole OI
+      // plane's contribution rather than scoring it low, and no forward session has yet run with it
+      // on. Note the gate arms this from EITHER tag (ScalperConfluenceGate.coverageFloorArmed), so
+      // the assertion above is what keeps this one from being armed by implication.
+      assertThat(tags.contains("dot-coverage-floor"))
+          .as(id + " dot-coverage-floor unarmed (the §5.3 coverage floor is an owner decision)")
+          .isFalse();
 
       // E2 M4/M6 — the two HARD OI gates with NO soft-dot duplicate in the scorer (the flat-OI stand-aside
       // trap §6.5 + the max-standing-OI S/R wall §4.7): armed on the scalp-connect-the-dots family, its

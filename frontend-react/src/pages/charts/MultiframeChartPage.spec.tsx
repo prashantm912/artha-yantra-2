@@ -86,6 +86,7 @@ describe('MultiframeChartPage', () => {
   });
 
   // FG-03
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3024ms in a full-suite run.
   it('gives each pane its own symbol — loading one pane leaves the other three alone', () => {
     renderPage();
     expect(
@@ -104,7 +105,7 @@ describe('MultiframeChartPage', () => {
     expect((screen.getByLabelText('Instrument for pane 2') as HTMLInputElement).value).toBe(
       'NSE:TCS',
     );
-  });
+  }, 15_000);
 
   it('keeps the toolbar idiom — one instrument loads into all four panes', () => {
     renderPage();

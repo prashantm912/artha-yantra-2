@@ -3021,6 +3021,42 @@
         }
       }
     },
+    "/api/v1/paper/attribution" : {
+      "get" : {
+        "tags" : [ "paper-controller" ],
+        "operationId" : "attribution",
+        "parameters" : [ {
+          "name" : "book",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Attribution"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/orders/tradebook" : {
       "get" : {
         "tags" : [ "orders-controller" ],
@@ -5976,6 +6012,86 @@
           }
         },
         "required" : [ "items" ]
+      },
+      "Attribution" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AttributionRow"
+            }
+          },
+          "coverage" : {
+            "$ref" : "#/components/schemas/AttributionCoverage"
+          }
+        },
+        "required" : [ "coverage", "items" ]
+      },
+      "AttributionCoverage" : {
+        "type" : "object",
+        "properties" : {
+          "closedPositions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "closedPositionsTagged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "closedQty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "closedQtyTagged" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "openPositions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openPositionsTagged" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "openQty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "openQtyTagged" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "closedPositions", "closedPositionsTagged", "closedQty", "closedQtyTagged", "openPositions", "openPositionsTagged", "openQty", "openQtyTagged" ]
+      },
+      "AttributionRow" : {
+        "type" : "object",
+        "properties" : {
+          "slug" : {
+            "type" : [ "string", "null" ]
+          },
+          "book" : {
+            "type" : "string"
+          },
+          "closedPositions" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "closedQty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "openQty" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "attributedRealizedPnl" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "attributedRealizedPnl", "book", "closedPositions", "closedQty", "openQty", "slug" ]
       },
       "Tradebook" : {
         "type" : "object",

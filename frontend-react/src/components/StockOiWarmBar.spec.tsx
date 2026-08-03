@@ -49,6 +49,7 @@ describe('StockOiWarmBar', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3452ms in a full-suite run.
   it('offers Load OI data for a cold stock and shows progress while running', () => {
     useSymbolContext.setState({ name: 'RELIANCE' });
     renderBar();
@@ -57,7 +58,7 @@ describe('StockOiWarmBar', () => {
     statusData.current = { ...idle, state: 'RUNNING', totalLegs: 132, fetchedLegs: 40 };
     renderBar();
     expect(screen.getByText('Loading… 40/132 legs')).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('explains the unavailable state instead of offering the button', () => {
     useSymbolContext.setState({ name: 'RELIANCE' });

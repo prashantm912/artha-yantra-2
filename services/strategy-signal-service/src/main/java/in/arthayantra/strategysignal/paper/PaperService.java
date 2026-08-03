@@ -8,7 +8,9 @@ import in.arthayantra.strategyengine.fills.FillSimulator.Fill;
 import in.arthayantra.strategyengine.fills.Side;
 import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperPositionRepository.PositionRow;
+import in.arthayantra.strategysignal.signals.Books;
 import in.arthayantra.strategysignal.signals.SignalRepository;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -29,6 +31,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -234,6 +237,7 @@ public class PaperService {
       BigDecimal previousStopLoss, BigDecimal previousTakeProfit, PositionDetail detail) {}
 
   private final PaperOrderRepository orders;
+  private final PaperPositionLotRepository lots;
   private final PaperPositionRepository positions;
   private final PaperFillService fills;
   private final LastTickReader lastTick;
@@ -248,6 +252,12 @@ public class PaperService {
   private final PaperOrderRejectionRecorder rejections;
   private final ManasGoverningStopCache governingStopCache;
   private final BigDecimal perTradeRiskPct;
+  /** V057 savepoint-scoped template: a failed lot tag rolls back ONLY the tag, never the fill. */
+  private final TransactionTemplate lotTagTemplate;
+  /** V057 fail-soft counter — a non-zero value means attribution has a KNOWN hole. */
+  private final Counter lotTagFailures;
+  /** V057 attribution read: rows + coverage in ONE REPEATABLE_READ snapshot, never two. */
+  private final TransactionTemplate attributionTemplate;
   /** Audit V3: a fill priced off a last tick older than this is fiction — rejected DATA_STALE. */
   private final Duration tickMaxAge;
   /**
@@ -262,6 +272,7 @@ public class PaperService {
   @Autowired
   public PaperService(
       PaperOrderRepository orders,
+      PaperPositionLotRepository lots,
       PaperPositionRepository positions,
       PaperFillService fills,
       LastTickReader lastTick,
@@ -285,6 +296,7 @@ public class PaperService {
           long signalTakeMaxAgeMinutes,
       MeterRegistry meterRegistry) {
     this.orders = orders;
+    this.lots = lots;
     this.positions = positions;
     this.fills = fills;
     this.lastTick = lastTick;
@@ -302,6 +314,18 @@ public class PaperService {
     this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
     this.signalTakeMaxAge = Duration.ofMinutes(signalTakeMaxAgeMinutes);
     this.txTemplate = new TransactionTemplate(transactionManager);
+    this.lotTagTemplate = new TransactionTemplate(transactionManager);
+    // A real JDBC savepoint. DataSourceTransactionManager enables nested transactions by default;
+    // without this a failed insert would poison the OUTER transaction and PostgreSQL would refuse
+    // every later statement in the fill, which is the very outage this fail-soft path prevents.
+    this.lotTagTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+    this.attributionTemplate = new TransactionTemplate(transactionManager);
+    this.attributionTemplate.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+    this.attributionTemplate.setReadOnly(true);
+    this.lotTagFailures =
+        Counter.builder("ay_paper_lot_tag_failures_total")
+            .description("V057 per-signal lot tags that failed; the fill committed without one")
+            .register(meterRegistry);
     // M4 (#128): "how many OPEN positions are structurally MTM-blind (no live tick) RIGHT NOW" —
     // DERIVED, not tracked. A prior transition-tracked Set<Long> design (cross-vendor review round
     // 1) fixed the poll-frequency problem but round 2 found it could permanently retain a closed
@@ -322,6 +346,7 @@ public class PaperService {
    */
   public PaperService(
       PaperOrderRepository orders,
+      PaperPositionLotRepository lots,
       PaperPositionRepository positions,
       PaperFillService fills,
       LastTickReader lastTick,
@@ -340,7 +365,7 @@ public class PaperService {
       long tickMaxAgeSeconds,
       long signalTakeMaxAgeMinutes) {
     this(
-        orders, positions, fills, lastTick, instruments, signals, accountService, books, risk,
+        orders, lots, positions, fills, lastTick, instruments, signals, accountService, books, risk,
         accounts, events, staleTicks, rejections, governingStopCache, transactionManager,
         perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, new SimpleMeterRegistry());
   }
@@ -567,7 +592,12 @@ public class PaperService {
    * normal, not stale. Every other book (scalper / other) is age-gated.
    */
   private static boolean isSwingBook(String book) {
-    return BookResolver.MINERVINI.equals(book) || BookResolver.MANAS_ARORA.equals(book);
+    // Byte-identical to the previous inline test (BookResolver.MINERVINI/MANAS_ARORA ARE
+    // Books.MINERVINI/MANAS_ARORA, BookResolver:20-21), now expressed through the one authority so
+    // this freshness exemption and PaperStaleTickAlerter's eod-managed-books alert suppression
+    // cannot drift apart — the drift that class's own comment warns about, previously unenforced
+    // (PR #1251).
+    return Books.eodManaged().contains(book);
   }
 
   /**
@@ -870,10 +900,11 @@ public class PaperService {
               "rail", "sub_account_allocation",
               "subaccountIdx", effectiveSubAccount));
     }
-    orders.insertFilled(
-        book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
-        fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId(), refSource,
-        refTickAgeMs, signalGeneratedAt);
+    long orderId =
+        orders.insertFilled(
+            book, request.signalId(), exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
+            fills.simulatorId(), fill.slippageApplied(), null, null, request.clientOrderId(), refSource,
+            refTickAgeMs, signalGeneratedAt);
     Long advisedLots = advisedLots(book, fill.fillPrice(), request.stopLoss());
     upsertPosition(
         book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
@@ -884,6 +915,19 @@ public class PaperService {
     Optional<PositionRow> opened = positions.findOpen(book, exchange, tradingsymbol, side);
     if (opened.isPresent()) {
       PositionRow row = opened.get();
+      // V057 per-signal lot tag, written HERE because this is the first point where both ids exist:
+      // the fill's order id (minted three statements up) and the position id (minted or found by
+      // upsertPosition). Everything upstream knows only one of the two.
+      //
+      // This is the whole point of the change. upsertPosition AVERAGES a second open on an already
+      // open key into the existing row and KEEPS its original opening_signal_id, so a position built
+      // by two strategies firing on the same bar credits exactly one — measured live on 2026-08-03,
+      // where all 10 closed scalper positions are 50/50 blends of scalp-golden-crossover-* and
+      // scalp-connect-the-dots-* and a GROUP BY slug reports the latter at n=0. The averaging is
+      // deliberate and is NOT changed here; the lot row simply keeps the per-fill truth it discards.
+      tagLotFailSoft(
+          row.id(), orderId, request.signalId(), book, exchange, tradingsymbol, side, request.qty(),
+          fill.fillPrice());
       events.publishEvent(
           new PaperPositionOpened(row.id(), book, exchange, tradingsymbol, side, row.qty()));
     }
@@ -911,6 +955,57 @@ public class PaperService {
     return !positions.openForSignal(signalId).isEmpty();
   }
 
+  /**
+   * Writes the V057 per-signal lot tag, FAIL-SOFT behind a SAVEPOINT.
+   *
+   * <p>⚠️ This ran inside the opening transaction with no guard in the first cut, and that was a
+   * Critical (cross-vendor review 2). The reasoning was that {@code sum(lots.qty) = position.qty} is
+   * what makes a decomposition trustworthy, so a lost lot must be impossible. The reasoning was
+   * right about the invariant and wrong about the price: a throw here rolls back the order AND the
+   * position, while {@code AutoPaperListener} has ALREADY transitioned the signal to {@code TAKEN}
+   * and {@code PaperSignalListener} only LOGS the failure with no scalper retry. So a failure in a
+   * purely observational table could destroy a real paper trade and strand its signal with nothing
+   * to reopen it. Attribution integrity is not worth a lost position — and the failure mode is not
+   * theoretical: {@code uq_paper_position_lots_order} was tripped by hand during this PR's own
+   * testing.
+   *
+   * <p>{@code PROPAGATION_NESTED} is a real JDBC savepoint, so a failed tag rolls back ONLY the lot
+   * insert and the surrounding fill commits untouched. Plain try/catch would not do: the failed
+   * statement would otherwise poison the outer transaction and PostgreSQL would refuse every
+   * subsequent statement in it.
+   *
+   * <p>Loud, never silent: {@code ay_paper_lot_tag_failures_total} increments and the failure is
+   * logged at ERROR with the ids needed to reconstruct the missing row by hand. The consequence is
+   * stated plainly rather than hidden — {@code sum(lots.qty) = position.qty} is an invariant THAT A
+   * LOGGED FAILURE CAN VIOLATE, and the attribution read's {@code coverage} block is exactly what
+   * surfaces the resulting gap.
+   */
+  private void tagLotFailSoft(
+      long positionId,
+      long orderId,
+      Long signalId,
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal fillPrice) {
+    try {
+      lotTagTemplate.executeWithoutResult(
+          status ->
+              lots.insert(
+                  positionId, orderId, signalId, book, exchange, tradingsymbol, side, qty,
+                  fillPrice));
+    } catch (RuntimeException e) {
+      lotTagFailures.increment();
+      log.error(
+          "V057 lot tag FAILED (fill is committed, attribution row is missing — coverage will report"
+              + " this position as partially untagged): positionId={} orderId={} signalId={} book={}"
+              + " {}:{} {} qty={}",
+          positionId, orderId, signalId, book, exchange, tradingsymbol, side, qty, e);
+    }
+  }
+
   private void upsertPosition(
       String book,
       String exchange,
@@ -928,8 +1023,21 @@ public class PaperService {
       // averaging onto an open position keeps its original bracket levels AND its original
       // sub-account (set at first open) — a later add never re-charges the trade to a new account.
       // It likewise KEEPS its original opening_signal_id (audit H5): a pyramid add of the same
-      // strategy must not re-attribute the position, and it can never span two strategies (the
-      // per-book open-key means only one strategy holds a given key open at a time).
+      // strategy must not re-attribute the position.
+      //
+      // ⚠️ CORRECTED 2026-08-03. This comment used to end "and it can never span two strategies (the
+      // per-book open-key means only one strategy holds a given key open at a time)". That is FALSE,
+      // and the live rows disprove it: the second open does not TAKE the key, it averages into it,
+      // so two different strategies routinely share one position. Measured on live `artha` — signals
+      // 128 (scalp-golden-crossover-nifty) and 129 (scalp-connect-the-dots-nifty) fired on the same
+      // 11:15 bar at the same price ~2s apart, and position 47 carries qty 130 (65 + 65) with
+      // opening_signal_id 128. All 10 closed scalper positions have that shape.
+      //
+      // The averaging itself is correct and unchanged. What the false premise cost was ATTRIBUTION:
+      // opening_signal_id credits one strategy for a trade two of them built, so a GROUP BY slug
+      // reports the other at n=0 and no amount of further accrual separates them. V057's
+      // paper_position_lots records the (signal, qty, price) of each contributing fill instead —
+      // see the lot write in openOrder.
       PositionRow row = existing.get();
       long newQty = row.qty() + qty;
       BigDecimal newAvg =
@@ -1321,6 +1429,67 @@ public class PaperService {
     return positions.listClosed(book, from, to, tradingsymbol, limit, offset).stream()
         .map(this::toTradeDto)
         .toList();
+  }
+
+  /**
+   * The per-strategy decomposition of a book's paper trading ({@code book} null → all books) — V057.
+   *
+   * <p>Answers the question {@code GROUP BY opening_signal_id} cannot: when two strategies fire on
+   * the same bar and the second {@code openPosition} AVERAGES into the first's position, the row
+   * credits only the opener. This walks {@code paper_position_lots} instead, so each contributing
+   * fill is attributed to the signal that actually caused it, on a FILL BASIS — each lot's pro-rata
+   * share of the pooled result plus its own entry edge against the blended basis, so a strategy that
+   * entered better reads better.
+   *
+   * <p><b>Group totals reconstruct the book's realized P&amp;L only over FULLY TAGGED positions</b>,
+   * and then not bit-for-bit: the stored {@code avg_entry_price} is rounded to 4dp, leaving a
+   * residual that {@link PaperPositionLotRepository#attribution} allocates deterministically. A
+   * PARTIALLY tagged position — every position that predates V057, i.e. all of them on launch day —
+   * contributes only its tagged share by design, with the remainder visible in {@code coverage}.
+   *
+   * <p>Always returns {@link PaperViews.Attribution#coverage()} beside the rows, and the coverage is
+   * not decoration — no position opened before V057 carries lots, so the day this ships the rows are
+   * EMPTY while the book holds real trades. Reading the rows without the coverage would turn "not
+   * yet instrumented" into "never traded", which is the exact class of false negative this change
+   * exists to remove.
+   */
+  public PaperViews.Attribution attribution(String book) {
+    // ONE snapshot for both reads (cross-vendor review 3). They are two statements, and under the
+    // default READ_COMMITTED each takes its own snapshot — so an open or close landing between them
+    // yields a response whose rows and coverage describe DIFFERENT database states, e.g. coverage
+    // counting a position whose lots the rows do not include. Since coverage exists precisely to be
+    // read against the rows, an inconsistency between them is worse than either being slightly
+    // stale. REPEATABLE_READ + readOnly makes both statements see one snapshot; the reads are two
+    // small aggregates over a few dozen rows, so the cost is negligible.
+    return attributionTemplate.execute(status -> readAttribution(book));
+  }
+
+  /** The two reads, executed together inside {@link #attributionTemplate}'s single snapshot. */
+  private PaperViews.Attribution readAttribution(String book) {
+    List<PaperViews.AttributionRow> rows =
+        lots.attribution(book).stream()
+            .map(
+                r ->
+                    new PaperViews.AttributionRow(
+                        r.slug(),
+                        r.book(),
+                        r.closedPositions(),
+                        r.closedQty(),
+                        r.openQty(),
+                        r.attributedRealizedPnl()))
+            .toList();
+    PaperPositionLotRepository.Coverage c = lots.coverage(book);
+    return new PaperViews.Attribution(
+        rows,
+        new PaperViews.AttributionCoverage(
+            c.closedPositions(),
+            c.closedPositionsTagged(),
+            c.closedQty(),
+            c.closedQtyTagged(),
+            c.openPositions(),
+            c.openPositionsTagged(),
+            c.openQty(),
+            c.openQtyTagged()));
   }
 
   /** Daily realized-equity curve + win rate / expectancy over a book's closed trades (null → all). */

@@ -96,6 +96,7 @@ describe('JobsPage', () => {
     lastJobsArgs = [];
   });
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3249ms in a full-suite run.
   it('lists jobs with status, version badges, a results link for completed backtests, and cancels a running job', () => {
     renderPage();
     expect(screen.getByText('aaaa1111')).toBeInTheDocument();
@@ -114,8 +115,9 @@ describe('JobsPage', () => {
     const cancels = screen.getAllByText('Cancel');
     fireEvent.click(cancels[1]);
     expect(cancel).toHaveBeenCalledWith('cccc2222-dd');
-  });
+  }, 15_000);
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3050ms in a full-suite run.
   it('"Latest version only" re-queries with the current-version ids (server-side, all pages)', () => {
     renderPage();
     expect(screen.getAllByText('v1.0.0').length).toBeGreaterThan(0); // both versions visible by default
@@ -123,8 +125,9 @@ describe('JobsPage', () => {
     fireEvent.click(screen.getByLabelText('Latest version only'));
     expect(screen.queryAllByText('v1.0.0')).toHaveLength(0); // old-version job dropped by the server filter
     expect(screen.getAllByText('v1.0.1').length).toBeGreaterThan(0); // latest-version job kept
-  });
+  }, 15_000);
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3456ms in a full-suite run.
   it('opens an accessible failure dialog showing jobs.error for a failed run', () => {
     renderPage();
     // Row-level indicator: the failed badge is a button (rendered in the desktop table + mobile card).
@@ -135,8 +138,9 @@ describe('JobsPage', () => {
     // The dialog surfaces the BE-served error text (fetched lazily from the detail endpoint).
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText(/Kaboom: preflight DATA_GAP/)).toBeInTheDocument();
-  });
+  }, 15_000);
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 5825ms in a full-suite run.
   it('reruns a backtest with the exact echoed parameters', () => {
     renderPage();
     fireEvent.click(screen.getAllByRole('button', { name: 'Rerun job aaaa1111' })[0]);
@@ -152,8 +156,9 @@ describe('JobsPage', () => {
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
-  });
+  }, 15_000);
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 6052ms in a full-suite run.
   it('clones a backtest into the runner through router state', () => {
     renderPage();
     fireEvent.click(screen.getAllByRole('button', { name: 'Clone job aaaa1111' })[0]);
@@ -161,7 +166,7 @@ describe('JobsPage', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('"strategyId":"s1"');
     expect(screen.getByTestId('location')).toHaveTextContent('"initialCapital":"100000"');
     expect(screen.getByTestId('location')).toHaveTextContent('"seed":42');
-  });
+  }, 15_000);
 
   // --- D4 P2-2: per-job tags/note + saved views ---
 
@@ -173,6 +178,7 @@ describe('JobsPage', () => {
     expect(lastJobsArgs[5]).toBeNull();
   });
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3231ms in a full-suite run.
   it('edits a run’s tags + note and PATCHes the full annotation set', () => {
     renderPage();
     fireEvent.click(screen.getAllByLabelText(/Edit tags and note for job aaaa1111/)[0]);
@@ -186,8 +192,9 @@ describe('JobsPage', () => {
       expect.objectContaining({ jobId: 'aaaa1111-bb', tags: ['newtag'], note: 'checked' }),
       expect.anything(),
     );
-  });
+  }, 15_000);
 
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 6486ms in a full-suite run.
   it('saves the CURRENT filter set as a named view', () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Save view' })); // toolbar trigger
@@ -202,7 +209,7 @@ describe('JobsPage', () => {
       }),
       expect.anything(),
     );
-  });
+  }, 15_000);
 
   // Explicit budget (2026-08-01, #1061 suite-growth rule): this heavy renderPage + Radix-popover
   // test sits close to the default 5s and tips over whenever added specs elsewhere reshuffle worker

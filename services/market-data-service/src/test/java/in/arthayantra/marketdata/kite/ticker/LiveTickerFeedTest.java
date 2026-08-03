@@ -86,7 +86,7 @@ class LiveTickerFeedTest {
       key ->
           Optional.of(
               new InstrumentTokenResolver.TokenInfo(
-                  key.tradingsymbol().hashCode() & 0xffff, "EQ", "NSE"));
+                  key.tradingsymbol().hashCode() & 0xffff, "FUT", "NFO-FUT"));
 
   // Tue 2026-02-03 11:00 IST — inside the session
   private static final Instant MARKET_OPEN_NOW = OffsetDateTime.parse("2026-02-03T11:00:00+05:30").toInstant();
@@ -143,8 +143,8 @@ class LiveTickerFeedTest {
   @Test
   void onConnectedReplaysTheExactRegistrySetIdempotently() {
     Fixture f = fixture(MARKET_OPEN_NOW);
-    f.registry().subscribe("ui", new InstrumentKey("NSE", "AAA"), SubscriptionMode.FULL, SubscriptionPriority.UI);
-    f.registry().subscribe("ui", new InstrumentKey("NSE", "BBB"), SubscriptionMode.LTP, SubscriptionPriority.UI);
+    f.registry().subscribe("ui", new InstrumentKey("NFO", "AAA"), SubscriptionMode.FULL, SubscriptionPriority.UI);
+    f.registry().subscribe("ui", new InstrumentKey("NFO", "BBB"), SubscriptionMode.LTP, SubscriptionPriority.UI);
 
     f.feed().start(tick -> {});
 
@@ -191,8 +191,8 @@ class LiveTickerFeedTest {
   @Test
   void instrumentsSilentOverTwoMinutesGetBackfilledDuringMarketHours() {
     Fixture f = fixture(MARKET_OPEN_NOW);
-    InstrumentKey stale = new InstrumentKey("NSE", "STALE");
-    InstrumentKey fresh = new InstrumentKey("NSE", "FRESH");
+    InstrumentKey stale = new InstrumentKey("NFO", "STALE");
+    InstrumentKey fresh = new InstrumentKey("NFO", "FRESH");
     f.registry().subscribe("ui", stale, SubscriptionMode.QUOTE, SubscriptionPriority.UI);
     f.registry().subscribe("ui", fresh, SubscriptionMode.QUOTE, SubscriptionPriority.UI);
     f.lastSeen().put(stale, MARKET_OPEN_NOW.minusSeconds(180));
@@ -200,7 +200,7 @@ class LiveTickerFeedTest {
 
     f.feed().start(tick -> {});
 
-    assertThat(f.backfills()).containsExactly("NSE:STALE");
+    assertThat(f.backfills()).containsExactly("NFO:STALE");
   }
 
   @Test
@@ -208,7 +208,7 @@ class LiveTickerFeedTest {
     // Sunday 2026-02-01 11:00 IST
     Instant sunday = OffsetDateTime.parse("2026-02-01T11:00:00+05:30").toInstant();
     Fixture f = fixture(sunday);
-    InstrumentKey stale = new InstrumentKey("NSE", "STALE");
+    InstrumentKey stale = new InstrumentKey("NFO", "STALE");
     f.registry().subscribe("ui", stale, SubscriptionMode.QUOTE, SubscriptionPriority.UI);
     f.lastSeen().put(stale, sunday.minusSeconds(3_600));
 

@@ -27,6 +27,7 @@ function renderPage() {
 }
 
 describe('EquityReturnsPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 6331ms in a full-suite run.
   it('renders the multi-window columns, sector, and Current-Day-desc default order', () => {
     renderPage();
     const table = screen.getByRole('table');
@@ -38,5 +39,5 @@ describe('EquityReturnsPage', () => {
     // Default sort = Current Day desc → the gainer (TRENT, +5.06) sorts above the loser (ONGC).
     const desktop = within(table).getAllByText(/TRENT|ONGC/);
     expect(desktop[0]).toHaveTextContent('TRENT');
-  });
+  }, 15_000);
 });

@@ -27,6 +27,7 @@ function renderPage() {
 }
 
 describe('FuturesOiSpurtPage', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3118ms in a full-suite run.
   it('renders the 4 OI-interpretation quadrants and buckets contracts into them', () => {
     renderPage();
     for (const q of ['Long Build Up', 'Short Build Up', 'Short Covering', 'Long Unwinding']) {
@@ -35,5 +36,5 @@ describe('FuturesOiSpurtPage', () => {
     // The LONG_BUILDUP contract lands in a quadrant table.
     expect(screen.getAllByText('NIFTY26JUNFUT').length).toBeGreaterThan(0);
     expect(screen.getAllByText('BANKNIFTY26JUNFUT').length).toBeGreaterThan(0);
-  });
+  }, 15_000);
 });

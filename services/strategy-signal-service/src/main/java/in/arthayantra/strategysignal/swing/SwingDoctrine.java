@@ -152,11 +152,25 @@ public interface SwingDoctrine {
    * itself should ever reflect the trail is a separate, later, owner decision.
    *
    * <p><b>Deliberately DISTINCT from {@link #trailLevel}</b>, which is a family-specific ADVISORY
-   * display figure that need NOT equal the family's actual enforced exit trigger — Minervini's is the
-   * 50-day-MA, a commonly-watched reference level, NOT its real exit rule (percent/ATR-based per its
-   * own {@code exit_rules}). Caching {@code trailLevel}'s value here for every family would feed the
-   * risk calc an unrelated number for Minervini (moot today since only Manas has an aggregate-risk
-   * consumer, but wrong in principle). The default returns {@code null} (a safe no-op — nothing is
+   * display figure whose CONTRACT does not require it to equal the family's enforced exit trigger.
+   * The distinction is about the guarantee, not about any particular family diverging today —
+   * caching {@code trailLevel} for every family would feed the risk calc a number nothing promises is
+   * the governing stop (moot in practice since only Manas has an aggregate-risk consumer, but wrong
+   * in principle).
+   *
+   * <p>⚠️ This paragraph used to justify itself by claiming Minervini's 50-day-MA is a display-only
+   * reference and its real exit is "percent/ATR-based". BOTH halves were FALSE and the error misled a
+   * live investigation (corrected 2026-08-03, see {@code
+   * docs/signal-analysis/2026-08-03-swing-exit-window-stretch.md}). Measured against all four
+   * published Minervini strategies at version 1.0.1: {@code exit_rules} is {@code
+   * [{stop_loss, basis:percent, value:8}, {trailing_stop, alias:sma50, basis:indicator}]} — there is
+   * NO ATR anywhere in the family's exit rules, and {@code sma50} IS a live exit trigger, second in
+   * precedence behind the 8% stop ({@link SwingBatchEngine} exit pass → {@link
+   * ExitEvaluator#evaluate} → the {@code basis:indicator} branch, which fires {@code
+   * ExitDecision("trailing_stop", …)} on {@code close <= level}). {@code MinerviniDoctrine.trailLevel}
+   * returns {@code bank.valueAt("sma50", lastIndex)} — byte-for-byte the level that branch compares
+   * against. So for Minervini the advisory figure and the enforced trigger DO coincide; the override
+   * is still declined because the contract does not guarantee that, not because they differ. The default returns {@code null} (a safe no-op — nothing is
    * cached) so only a family whose OWN governing exit rule this figure actually mirrors byte-for-byte
    * need override it; today that is Manas alone, via {@code ExitEvaluator#trailStop} — see that
    * method's javadoc for the "equals the price the live exit check uses" guarantee that makes it safe

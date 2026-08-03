@@ -57,6 +57,7 @@ function renderBoard(onOpen = vi.fn()) {
 const grid = () => within(screen.getByRole('table', { name: 'Candidates leaderboard' }));
 
 describe('Leaderboard grid', () => {
+  // Budget 2026-08-03 (#1061 suite-growth rule): measured 3190ms in a full-suite run.
   it('renders the columns in their declared order', () => {
     renderBoard();
     expect(grid().getAllByRole('columnheader').map((h) => h.textContent)).toEqual([
@@ -68,7 +69,7 @@ describe('Leaderboard grid', () => {
       'Gen',
       'Flags',
     ]);
-  });
+  }, 15_000);
 
   it('renders each candidate row cell-for-cell, score-sorted (content preserved)', () => {
     renderBoard();

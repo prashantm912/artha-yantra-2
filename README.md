@@ -122,3 +122,5 @@ Generate one with the helper (CD-13), once it lands with the gateway phase:
 
 Paste the printed PHC string into `.env` with **every `$` escaped as `$$`**
 (docker compose interpolates `$` inside `.env` values).
+
+<!-- scratch: post-rebase docs-only proof (PR #1252) -->

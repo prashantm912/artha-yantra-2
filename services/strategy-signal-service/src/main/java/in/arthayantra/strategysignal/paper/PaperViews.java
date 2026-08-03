@@ -60,4 +60,56 @@ public final class PaperViews {
 
   /** {@code GET /api/v1/paper/pnl} — the daily equity curve plus its summary. */
   public record Pnl(List<EquityPoint> points, PnlSummary summary) {}
+
+  /**
+   * One strategy's measured share of a book, decomposed from the V057 per-signal lots.
+   *
+   * <p>{@code slug} is NULL for fills with no signal (a manual ticket) — reported rather than
+   * dropped, so the rows always sum back to the tagged total instead of quietly losing quantity.
+   *
+   * <p>{@code attributedRealizedPnl} is a FILL-BASIS decomposition over CLOSED positions — each
+   * lot's pro-rata share of the pooled result plus its own entry edge against the blended basis
+   * ({@code R·q/Q + sign·(A−f)·q}), so a strategy that entered better reads better rather than
+   * being averaged into its co-contributor.
+   *
+   * <p>⚠️ <b>This does NOT reconstruct the book's realized P&amp;L bit-for-bit</b>, and two earlier
+   * versions of this javadoc wrongly said the arithmetic was exact. The stored {@code
+   * avg_entry_price} is rounded to 4dp, so the entry-edge terms carry a small residual (measured:
+   * ₹0.0065 on {@code 65 @ 100.00 + 130 @ 100.01}); {@link PaperPositionLotRepository#attribution}
+   * allocates it deterministically to one lot per position. Group totals are therefore accurate to
+   * well under a paisa — treat them as money figures, not as an audit-grade reconciliation.
+   */
+  public record AttributionRow(
+      @Schema(types = {"string", "null"}) String slug,
+      String book,
+      int closedPositions,
+      long closedQty,
+      long openQty,
+      @Schema(type = "string") BigDecimal attributedRealizedPnl) {}
+
+  /**
+   * How much of the book the lots cover — the denominator that makes {@link AttributionRow}
+   * readable.
+   *
+   * <p>Positions opened before V057 have no lots and there is no backfill, so {@code
+   * closedPositionsTagged} starts at 0 against a non-zero {@code closedPositions}. Without this
+   * beside the rows an empty decomposition reads as "this book never traded" rather than "this book
+   * traded before tagging existed" — a false negative of exactly the kind the tagging exists to
+   * remove.
+   *
+   * <p>{@code *QtyTagged} can be LESS than {@code *Qty} for a tagged position too: a position that
+   * predates V057 and later takes an add carries a lot for the add only.
+   */
+  public record AttributionCoverage(
+      int closedPositions,
+      int closedPositionsTagged,
+      long closedQty,
+      long closedQtyTagged,
+      int openPositions,
+      int openPositionsTagged,
+      long openQty,
+      long openQtyTagged) {}
+
+  /** {@code GET /api/v1/paper/attribution} — per-strategy P&amp;L decomposition plus its coverage. */
+  public record Attribution(List<AttributionRow> items, AttributionCoverage coverage) {}
 }

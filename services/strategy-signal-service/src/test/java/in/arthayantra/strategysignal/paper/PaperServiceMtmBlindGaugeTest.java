@@ -90,7 +90,8 @@ class PaperServiceMtmBlindGaugeTest {
                 in.arthayantra.strategyengine.fills.InstrumentClass.EQUITY, new BigDecimal("0.05"), 1));
 
     return new PaperService(
-        mock(PaperOrderRepository.class), positions, new PaperFillService(), lastTick, instruments,
+        mock(PaperOrderRepository.class), mock(PaperPositionLotRepository.class), positions,
+        new PaperFillService(), lastTick, instruments,
         mock(in.arthayantra.strategysignal.signals.SignalRepository.class),
         mock(PaperAccountService.class), mock(BookResolver.class), mock(RiskService.class),
         mock(ScalperAccountModel.class),

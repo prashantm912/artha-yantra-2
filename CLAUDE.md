@@ -496,7 +496,10 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   `npm run test:ci` + `npm run build`. After a rebuild HARD-reload (Ctrl+Shift+R) — a stale cached
   chunk renders the old UI. **Deploy gotcha:** the Dockerfile COPYs the HOST-built `dist/`, so
   `npm run build` on the main checkout FIRST, then `docker compose build frontend-react`.
-- **Full-suite vitest timeouts in UNTOUCHED specs are LOAD CONTENTION, not your bug** (#1061,
+- **Full-suite vitest timeouts in UNTOUCHED specs CAN BE load contention rather than your bug — run the
+  ladder below before blaming the branch** (⚠️ they can also be real: an untouched spec regresses through
+  CHANGED SHARED CODE, and the A/B ladder is what distinguishes the two — do not read "untouched spec" as
+  "not my change") (#1061,
   2026-07-28; ⚠️ **re-measured and CORRECTED 2026-08-03, #1269 — the old "heaviest render specs sit at
   96–99% of the default 5s budget" was ONE moderate-load sample and materially understated this**):
   heavy page-render specs cost **1.2–2.2s in isolation vs 3.0–9.1s under full-suite worker contention —

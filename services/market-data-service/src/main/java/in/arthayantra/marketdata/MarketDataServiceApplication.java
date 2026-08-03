@@ -18,3 +18,5 @@ public class MarketDataServiceApplication {
     SpringApplication.run(MarketDataServiceApplication.class, args);
   }
 }
+
+// scratch: market-data shard targeting proof (PR #1252)

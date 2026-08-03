@@ -32,9 +32,18 @@ class ScalperEntryEnforcementGuardTest {
 
   private static final String SIGNAL_ENGINE =
       "src/main/java/in/arthayantra/strategysignal/signals/SignalEngine.java";
-  // The non-enforcing decision read. The trailing '(' is load-bearing: it excludes the enforcing
-  // evaluateWithDiagnostic( (which reads "evaluate" + "WithDiagnostic(", never "evaluate(").
+  // The non-enforcing ORACLE read. The trailing '(' is load-bearing: it excludes the enforcing
+  // evaluateWithDiagnostic( (which reads "evaluate" + "WithDiagnostic(", never "evaluateOracle(").
+  //
+  // NOTE (V056 exit-oracle shadow): the exit oracle now calls `evaluateOracle(...)` — the SAME
+  // evaluateInternal invocation with enforceOptionSide=false that the bare `evaluate(...)` always
+  // made, differing only in that it returns the Result instead of discarding the diagnostic it had
+  // already built. The invariant this test guards is UNCHANGED in substance: exactly one
+  // NON-ENFORCING gate read in the engine, and it lives in the protective exit oracle. Both
+  // non-enforcing spellings are counted, so reverting to the bare form, or adding either one on a
+  // new path, still turns this red.
   private static final String BARE_EVALUATE = "scalperGate.get().evaluate(";
+  private static final String ORACLE_EVALUATE = "scalperGate.get().evaluateOracle(";
   private static final String ENFORCING_ENTRY = "scalperGate.get().evaluateWithDiagnostic(";
 
   @Test
@@ -46,22 +55,26 @@ class ScalperEntryEnforcementGuardTest {
         .as("SignalEngine ENTRY paths must call the enforcing evaluateWithDiagnostic(...)")
         .isGreaterThanOrEqualTo(1);
 
-    // There is exactly ONE bare, non-enforcing gate read in the whole engine...
-    assertThat(count(src, BARE_EVALUATE))
+    // There is exactly ONE non-enforcing gate read in the whole engine, counting BOTH spellings...
+    int nonEnforcing = count(src, BARE_EVALUATE) + count(src, ORACLE_EVALUATE);
+    assertThat(nonEnforcing)
         .withFailMessage(
-            "a NEW bare scalperGate.get().evaluate(...) appeared in SignalEngine — the non-enforcing"
-                + " decision read SKIPS the #960 option-side ENTRY guard. If this is an entry-emit path"
-                + " it re-opens the -pe-slug-enters-CE parity hole; route it through the enforcing"
+            "a NEW non-enforcing scalperGate read (evaluate(...) or evaluateOracle(...)) appeared in"
+                + " SignalEngine — it SKIPS the #960 option-side ENTRY guard. If this is an entry-emit"
+                + " path it re-opens the -pe-slug-enters-CE parity hole; route it through the enforcing"
                 + " evaluateWithDiagnostic(...). Only confluenceFlipExit (the protective EXIT oracle,"
-                + " which MUST see the opposite side) may read the bare form. Found %s occurrence(s).",
-            count(src, BARE_EVALUATE))
+                + " which MUST see the opposite side) may read a non-enforcing form. Found %s"
+                + " occurrence(s).",
+            nonEnforcing)
         .isEqualTo(1);
 
     // ...and it lives inside confluenceFlipExit — the protective EXIT oracle, never an entry path.
     String flipExitBody = methodBody(src, "private boolean confluenceFlipExit(");
     assertThat(flipExitBody)
-        .as("the single bare evaluate(...) must be confluenceFlipExit's exit-oracle read")
-        .contains(BARE_EVALUATE);
+        .as("the single non-enforcing gate read must be confluenceFlipExit's exit-oracle read")
+        .satisfiesAnyOf(
+            body -> assertThat(body).contains(BARE_EVALUATE),
+            body -> assertThat(body).contains(ORACLE_EVALUATE));
   }
 
   /** A method's source from its declaration to the next 2-space-indented class member. */

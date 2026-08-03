@@ -17,6 +17,7 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 
 /**
@@ -191,13 +192,65 @@ public class ScalperConfluenceGate {
    * was rejected — and, symmetrically, the full condition matrix behind a FIRED entry (§13 row 19).
    */
   public record Result(
-      Optional<Decision> decision, RejectionDiagnostic rejection, FiredDiagnostic fired) {
+      Optional<Decision> decision, RejectionDiagnostic rejection, FiredDiagnostic fired,
+      // MEASUREMENT ONLY (V056). Non-null ONLY on the oracle path, and only when the evaluation got
+      // far enough to score a confluence AND market-data published a level operand. Read by nothing
+      // on the live path.
+      SentimentCounterfactual sentimentCounterfactual) {
+
+    /** Pre-counterfactual 3-arg form: {@code sentimentCounterfactual} defaults to null (= unknown). */
+    public Result(
+        Optional<Decision> decision, RejectionDiagnostic rejection, FiredDiagnostic fired) {
+      this(decision, rejection, fired, null);
+    }
 
     /** True when the gate blocked the entry (a rejection diagnostic is present). */
     public boolean blocked() {
       return decision.isEmpty();
     }
   }
+
+  /**
+   * MEASUREMENT ONLY — the EXACT verdict the oracle would have reached had the sentiment rules read
+   * the LEVEL operand ({@code sentimentLevelPct}) instead of the ΔOI-FLOW one they do read.
+   *
+   * <p><b>Why this is a DECISION and not a pair of operand verdicts.</b> Round-3 cross-vendor review:
+   * recording only "the sentiment dot would have flipped" cannot tell a still-passing bar from one
+   * that fell below threshold, nor a cleared block from one still held by another rail. Those rows
+   * would show operand disagreement while looking like evidence of changed exit timing — the same
+   * bias as the original entry-only sampling gap, one level down, and capable of producing a wrong
+   * money conclusion. So the full verdict is computed and stored.
+   *
+   * <p><b>How it is exact.</b> The sentiment operand reaches the decision through EXACTLY two places:
+   * the {@code sentiment} dot (via {@code ConnectTheDotsScorer.sideSigned}) and the
+   * {@code oi-slope-agree} rail. ({@code ScalperGates.oiQuadrant} also passes {@code sentimentPct} to
+   * its {@code GateOutcome}, but only as the REPORTED operand — its verdict comes from the futures
+   * quadrant.) Every other rail is sentiment-independent, so its LIVE outcome is also its
+   * counterfactual outcome and is read straight off the recorded rail matrix. The two dependent ones
+   * are recomputed by running the REAL predicates over the substituted context — no formula is
+   * re-implemented here, and no second fetch is made.
+   *
+   * <p>{@code side} is sentiment-independent (VWAP-derived), so a counterfactual that fires fires on
+   * the SAME side; {@code oracleSide} is that side when {@link #wouldFire()}, else null.
+   *
+   * @param oracleSide the side the level-based oracle would have CONFIRMED; null when it would not fire
+   * @param wouldFire whether the level-based oracle would have produced a decision at all
+   * @param composite the counterfactual confluence aggregate
+   * @param threshold the composite threshold it was judged against
+   * @param compositeValid whether the counterfactual composite cleared threshold AND its decisive legs
+   * @param slopeGatePass the counterfactual {@code oi-slope-agree} verdict; null when that tag is unarmed
+   * @param blockingRail the first SENTIMENT-INDEPENDENT rail that blocked live — when non-null the
+   *     counterfactual cannot fire whatever the operand says, which is what makes the verdict provable
+   *     from the row alone
+   */
+  public record SentimentCounterfactual(
+      OptionType oracleSide,
+      boolean wouldFire,
+      BigDecimal composite,
+      BigDecimal threshold,
+      boolean compositeValid,
+      Boolean slopeGatePass,
+      String blockingRail) {}
 
   /**
    * Mutable per-evaluation collector: accumulates the rail checks and the resolved state (side, context,
@@ -219,6 +272,30 @@ public class ScalperConfluenceGate {
     private LocalDate expiry;
     private StrikePicker.Pick pick;
     private BigDecimal structuralStop;
+    // V056 measurement-only: set on the ORACLE path once every rail has been recorded. Null means
+    // "no counterfactual" — no level operand, or the gate blocked before a confluence was scored.
+    private SentimentCounterfactual counterfactual;
+
+    /**
+     * The rails whose outcome the sentiment operand can change. Everything else is
+     * sentiment-independent, so its LIVE pass/fail is also its counterfactual pass/fail.
+     */
+    private static final Set<String> SENTIMENT_DEPENDENT_RAILS =
+        Set.of("oi-slope-agree", "confluence-composite");
+
+    /**
+     * The FIRST recorded rail that blocked and that the sentiment operand cannot influence. Non-null
+     * ⇒ the counterfactual cannot fire however the substituted operand reads, and the row can be
+     * verified without re-deriving anything.
+     */
+    String firstSentimentIndependentBlock() {
+      for (RailCheck c : checks) {
+        if (!c.pass() && !SENTIMENT_DEPENDENT_RAILS.contains(c.rail())) {
+          return c.rail();
+        }
+      }
+      return null;
+    }
 
     /** True once any recorded rail has failed — the entry is blocked (checked once, at the end). */
     boolean anyFailed() {
@@ -280,7 +357,8 @@ public class ScalperConfluenceGate {
               confluence == null ? null : confluence.aggregate(), confluenceThreshold,
               List.copyOf(checks), confluence, context, underlying, expiry, pick, structuralStop,
               firstFailureSign),
-          null);
+          null,
+          counterfactual);
     }
 
     /**
@@ -303,12 +381,19 @@ public class ScalperConfluenceGate {
               underlying,
               expiry,
               pick,
-              structuralStop));
+              structuralStop),
+          counterfactual);
     }
   }
 
   /**
    * Confluence-gate one passing chart entry. Empty BLOCKS the signal.
+   *
+   * <p><b>This is the non-enforcing ORACLE read</b> — it does NOT enforce the strategy's declared
+   * {@code option_types}, because its caller is the E9 D4 confluence-flip EXIT oracle, which must see
+   * the TRUE market side including the one the strategy will not ENTER. Thin delegation to
+   * {@link #evaluateOracle}, where that contract is spelled out; entry paths use
+   * {@link #evaluateWithDiagnostic} instead.
    *
    * @param cfg the strategy's scalper knobs (underlying, strike band, threshold)
    * @param bank the engine indicator bank for the index future at this bar
@@ -326,12 +411,35 @@ public class ScalperConfluenceGate {
       Instant barInstant,
       LocalTime istTime,
       LocalDate eodDate) {
-    // Bare-decision ORACLE read (E9 D4 confluence-flip EXIT, SignalEngine.confluenceFlipExit): does NOT
-    // enforce option_types — the flip oracle must see the TRUE market side, including the one the strategy
-    // will not ENTER, so a held single-side position can detect a confluence flip against it.
+    return evaluateOracle(cfg, bank, future, index, barInstant, istTime, eodDate).decision();
+  }
+
+  /**
+   * The ORACLE read as a full {@link Result} — byte-identical evaluation to {@link #evaluate}, which
+   * now delegates here and simply drops everything but the decision.
+   *
+   * <p><b>This is NOT {@link #evaluateWithDiagnostic}.</b> The two differ on {@code enforceOptionSide}
+   * ({@code false} here, {@code true} there), and that difference is load-bearing: the flip oracle must
+   * see the TRUE market side, INCLUDING the one the strategy will not ENTER, so a held single-side
+   * position can detect a confluence flip against it. Calling the entry form from the exit path would
+   * silently change which held positions exit — a money defect. The oracle keeps its own accessor
+   * precisely so nobody has to choose between "I need the diagnostic" and "I need oracle semantics".
+   *
+   * <p>Exists because the diagnostic was ALREADY being computed and discarded: the shared core builds
+   * the full {@link Result} either way, so exposing it costs nothing at runtime and lets the caller
+   * record what the oracle saw (the measurement-only {@code SentimentLevelShadow}) without a second
+   * evaluation and without touching the decision.
+   */
+  public Result evaluateOracle(
+      ScalperConfig cfg,
+      BarValues bank,
+      EngineSeries future,
+      int index,
+      Instant barInstant,
+      LocalTime istTime,
+      LocalDate eodDate) {
     return evaluateInternal(
-            cfg, bank, future, index, barInstant, istTime, eodDate, null, false, false)
-        .decision();
+        cfg, bank, future, index, barInstant, istTime, eodDate, null, false, false, true);
   }
 
   /**
@@ -349,7 +457,7 @@ public class ScalperConfluenceGate {
       LocalDate eodDate) {
     // The ENTRY evaluation the live engine persists — ENFORCES the declared option-side constraint.
     return evaluateInternal(
-        cfg, bank, future, index, barInstant, istTime, eodDate, null, false, true);
+        cfg, bank, future, index, barInstant, istTime, eodDate, null, false, true, false);
   }
 
   /**
@@ -379,7 +487,7 @@ public class ScalperConfluenceGate {
       OptionType forcedSide,
       boolean carryClock) {
     return evaluateInternal(
-        cfg, bank, future, index, barInstant, istTime, eodDate, forcedSide, carryClock, true);
+        cfg, bank, future, index, barInstant, istTime, eodDate, forcedSide, carryClock, true, false);
   }
 
   /**
@@ -400,7 +508,11 @@ public class ScalperConfluenceGate {
       LocalDate eodDate,
       OptionType forcedSide,
       boolean carryClock,
-      boolean enforceOptionSide) {
+      boolean enforceOptionSide,
+      // MEASUREMENT ONLY: compute the level-operand counterfactual verdict. TRUE only from
+      // evaluateOracle (the exit path); every ENTRY path passes false, so the entry hot path does no
+      // extra work and its behaviour is byte-identical.
+      boolean captureSentimentCounterfactual) {
     Diag diag = new Diag();
     // §0B hard pre-flight (§12.1): the time window — the one the YAML session cannot express (the
     // 11:00–13:00 midday block). Blocked early, before the chain fetch, to skip the HTTP fan-out.
@@ -1102,6 +1214,17 @@ public class ScalperConfluenceGate {
     diag.structuralStop = stop;
     // All-eval: EVERY applicable rail (and the composite + strike pick) is now recorded above. The entry
     // fires only when NONE failed; a single failure blocks, but the DB row still carries the full matrix.
+    //
+    // MEASUREMENT ONLY, and ONLY on the oracle path (captureSentimentCounterfactual) so the entry hot
+    // path pays nothing and stays byte-identical. Runs HERE because the rail matrix is complete: every
+    // sentiment-INDEPENDENT rail's live outcome is also its counterfactual outcome, so the exact verdict
+    // needs only the two dependent ones recomputed. Pure arithmetic over the already-fetched immutable
+    // context — no second fetch, so the counterfactual provably saw what the live decision saw.
+    if (captureSentimentCounterfactual) {
+      diag.counterfactual =
+          sentimentCounterfactual(
+              diag, cfg, ctx, side, bank, index, vwapHardGate, effVolFloor, conf);
+    }
     if (diag.anyFailed()) {
       return diag.block();
     }
@@ -1367,6 +1490,55 @@ public class ScalperConfluenceGate {
       out.add(bank.builtin("volume", index - j));
     }
     return out;
+  }
+
+  /**
+   * MEASUREMENT ONLY (V056) — the EXACT verdict the oracle would have reached on the LEVEL operand.
+   *
+   * <p>Called once per ORACLE evaluation, after every rail has been recorded. Returns null when no
+   * counterfactual is computable: market-data published no {@code sentimentLevelPct}, or there is no
+   * scored confluence. Null is "unknown", never "would not fire" — collapsing those would bias the
+   * measurement toward the incumbent operand exactly where the data is thin.
+   *
+   * <p>Exactness rests on a closed argument, not on sampling: the sentiment operand reaches the
+   * decision through EXACTLY two rails ({@code oi-slope-agree} and, via the {@code sentiment} dot,
+   * {@code confluence-composite}). Both are recomputed here by running the REAL predicates —
+   * {@link ConnectTheDotsScorer#score} and {@link ScalperGates#oiSlopeAgree} — over the substituted
+   * context, so no formula is duplicated and a change to either rule moves the counterfactual with
+   * it. Every OTHER rail is sentiment-independent, so its recorded live outcome IS its counterfactual
+   * outcome; {@link Diag#firstSentimentIndependentBlock()} reports the first such block, and when it
+   * is non-null the verdict is false regardless of the operand — which is what makes the stored row
+   * provable on its own rather than something a reader has to re-derive.
+   *
+   * <p>The scorer arguments MIRROR the live call exactly (same threshold, props, vwapHardGate, tag
+   * flags, resolved volume floor and null policy) — the ONLY difference is the substituted operand.
+   * {@code bias60m} is re-read from the same bank rather than threaded through, so the live call site
+   * stays untouched; it is a pure indexed lookup, not a fetch.
+   */
+  private SentimentCounterfactual sentimentCounterfactual(
+      Diag diag, ScalperConfig cfg, ScalperGateContext ctx, OptionType side, BarValues bank,
+      int index, boolean vwapHardGate, BigDecimal effVolFloor, Confluence conf) {
+    ScalperGateContext shadowCtx = SentimentLevelShadow.withLevelAsFlow(ctx);
+    if (shadowCtx == null || conf == null || side == null) {
+      return null;
+    }
+    Confluence shadowConf =
+        ConnectTheDotsScorer.score(
+            shadowCtx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps, vwapHardGate,
+            cfg.has("iv-per-strike"), cfg.has("premium-skew"), cfg.has("dow-confluence"),
+            effVolFloor, cfg.has("iv-rank-dot"),
+            cfg.has("dot-null-withheld") ? NullPolicy.WITHHELD : NullPolicy.LEGACY);
+    boolean compositeValid = side == OptionType.CE ? shadowConf.bullish() : shadowConf.bearish();
+    Boolean slopeGatePass =
+        cfg.has("oi-slope-agree")
+            ? ScalperGates.oiSlopeAgree(shadowCtx.oi(), side).pass()
+            : null;
+    String blockingRail = diag.firstSentimentIndependentBlock();
+    boolean wouldFire =
+        blockingRail == null && compositeValid && (slopeGatePass == null || slopeGatePass);
+    return new SentimentCounterfactual(
+        wouldFire ? side : null, wouldFire, shadowConf.aggregate(), cfg.confluenceThreshold(),
+        compositeValid, slopeGatePass, blockingRail);
   }
 
   private int bias60m(BarValues bank, int index) {

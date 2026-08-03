@@ -252,6 +252,35 @@ class MarketOiClientDerivationTest {
     assertThat(none.slope()).isNull(); // absent series
   }
 
+  /**
+   * The measurement-only LEVEL sibling rides on EVERY branch, series or no series: it is an
+   * independent scalar of the payload, so a short/absent {@code sentimentSeries} must not suppress
+   * it (that would silently blank the shadow on exactly the thin-data bars it is meant to measure).
+   * An older market-data that does not publish the key degrades to null — no verdict, no exception.
+   */
+  @Test
+  void sentimentLevelPctRidesAlongsideOnEveryBranchAndIsNullWhenAbsent() {
+    Sentiment withSeries =
+        client.deriveSentiment(
+            json(
+                "{\"sentimentPct\":\"0.00\",\"sentimentLevelPct\":\"33.33\",\"sentimentSeries\":["
+                    + "{\"sentimentPct\":\"10\"},{\"sentimentPct\":\"25\"}]}"));
+    assertThat(withSeries.levelBased()).isEqualByComparingTo("33.33");
+    assertThat(withSeries.level()).isEqualByComparingTo("0.00"); // the FLOW operand is untouched
+    assertThat(withSeries.slope()).isEqualByComparingTo("15");
+
+    Sentiment shortSeries =
+        client.deriveSentiment(
+            json("{\"sentimentPct\":\"0.00\",\"sentimentLevelPct\":\"33.33\",\"sentimentSeries\":[]}"));
+    assertThat(shortSeries.levelBased()).isEqualByComparingTo("33.33");
+
+    Sentiment noSeries = client.deriveSentiment(json("{\"sentimentPct\":\"0.00\",\"sentimentLevelPct\":\"-5\"}"));
+    assertThat(noSeries.levelBased()).isEqualByComparingTo("-5");
+
+    Sentiment absent = client.deriveSentiment(json("{\"sentimentPct\":\"12.5\"}"));
+    assertThat(absent.levelBased()).isNull();
+  }
+
   // ------------------------------------------------------------------------ E4 per-strike IV slope
 
   @Test

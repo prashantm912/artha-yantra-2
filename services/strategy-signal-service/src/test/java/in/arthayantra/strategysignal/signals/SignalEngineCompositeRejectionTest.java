@@ -156,6 +156,7 @@ class SignalEngineCompositeRejectionTest {
             mock(RejectionWriter.class),
             mock(RiskSuppressionWriter.class),
             writer,
+            mock(ExitOracleShadowWriter.class),
             java.util.Optional.empty(),
             mock(PlatformTransactionManager.class),
             60,

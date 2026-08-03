@@ -1,0 +1,33 @@
+# expect: /exit_rules/0/params/basis
+# `percent` is the cash-equity level basis. On an options_of_underlying strategy it resolves
+# against the INDEX entry price (ExitEvaluator.levelDistance) and builds NO premium bracket — the
+# live bracket chain and the backtest replay all key on the literal `premium_pct`. Worse,
+# ScalperRisk counts `percent` as an engine-fireable §0B bounding stop, so this config would load
+# as "bounded" with no enforceable stop on either plane.
+schema: strategy-schema/v1
+id: reject-options-percent-level-basis
+name: "Options Percent Level Basis"
+version: 1.0.0
+universe:
+  mode: options_of_underlying
+  underlying: { exchange: NSE, tradingsymbol: "NIFTY 50" }
+  options:
+    expiry: nearest_weekly
+    strikes: { selector: atm_window, width: 2 }
+    option_types: [CE, PE]
+timeframes: { primary: 1m }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema_fast"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: stop_loss, params: { basis: percent, value: 25 } }   # cash-equity basis on the option plane
+  - { type: time_stop, params: { max_bars: 15 } }
+risk:
+  position_sizing: { method: premium_budget, params: { budget_inr: 15000 } }
+  max_positions: 1
+  session: { style: intraday }

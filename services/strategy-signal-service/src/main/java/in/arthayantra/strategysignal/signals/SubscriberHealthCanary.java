@@ -73,6 +73,14 @@ public class SubscriberHealthCanary {
   private static final LocalTime SESSION_END = LocalTime.of(15, 30);
   private static final String FEED_HEARTBEAT_KEY = "ticks:last-at"; // epoch millis, written per tick
 
+  /**
+   * The sweep cadence, as a constant so {@link SignalFaultInjector} can derive a detector-capable
+   * drill duration from the SAME number the scheduler uses. A hardcoded copy over there would drift
+   * out of step with this the moment the cadence changes, and the drill would silently stop being
+   * able to reach detection.
+   */
+  static final long SWEEP_INTERVAL_MS = 60_000;
+
   /** In-process alert event — the notifier module listens (signals must not import notifier). */
   public record SubscriberStallAlert(String title, String message) {}
 
@@ -114,8 +122,13 @@ public class SubscriberHealthCanary {
     this.feedFreshMs = feedFreshMs;
   }
 
+  /** The receive-gap threshold, so a drill can tell whether it will run long enough to be detected. */
+  long barGapMs() {
+    return barGapMs;
+  }
+
   /** The per-minute in-session receive-gap + eval-gap check. */
-  @Scheduled(fixedDelay = 60_000, initialDelay = 120_000, scheduler = "monitorTaskScheduler")
+  @Scheduled(fixedDelay = SWEEP_INTERVAL_MS, initialDelay = 120_000, scheduler = "monitorTaskScheduler")
   public void sweep() {
     try {
       if (!enabled) {

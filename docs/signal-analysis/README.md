@@ -612,7 +612,38 @@ Run in order; each answers one question. Canned SQL in §6.
     (c) the freeze is ALSO §3.30's telemetry subject — log frozen-by times per sub and which rail
     (profit-lock vs first-loss) froze each. A profit-lock freeze banking a green day is the design
     working, not starvation.
-32. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+32. **Verify the daily bar against the DERIVATIVE COMPLEX before stamping regime — a single bogus
+    closing tick can rewrite the day** (added 2026-08-03) — the `NIFTY 50` 1m stream froze at
+    24,573.35 for 15:20–15:28, then the 15:29 `TICK_AGG` bar printed **24,774.30 (+200.95 pts in
+    one minute)**; the session high excluding that bar was 24,609.45. Three independent markets
+    refuted the print: the front future ticked freely and closed 24,650 (a real +200 index move
+    cannot leave the future 124 pts UNDER spot), the near-ATM CE closed at intrinsic-plus-time for
+    spot ~24,573, and SENSEX (unfrozen) drifted DOWN across the same minutes. The tick poisoned
+    THREE surfaces: the 1m bar, **the 1d daily bar** (`source=KITE, fetched_at 15:45` — Kite's own
+    REST carried it at fetch time; high AND close), and `options_chain_snapshots.spot_price` for
+    the 15:28–15:30 captures. Consequences: the G15 regime stamp flipped **trend-up 0.778 →
+    chop 0.007** on correction; the swing books' RS benchmark and any backtest window covering the
+    day inherit the bar. ⚠️ **It does NOT self-heal**: cache-first reads re-fetch only the 10-min
+    trailing tail (a present, past bucket is skipped) and bhavcopy is DO-NOTHING — repair needs an
+    authoritative re-fetch or hand UPDATE (ledger G18). **Standing check before writing any regime
+    row:**
+    ```sql
+    -- (a) is the daily close reachable from the 1m series ex-the-last-bar?
+    SELECT max(high) FROM marketdata.candles
+    WHERE tradingsymbol='NIFTY 50' AND exchange='NSE' AND interval='1m'
+      AND EXTRACT(second FROM bucket)=0 AND bucket >= :d0915 AND bucket < :d1529;
+    -- (b) does the future corroborate the close? (index close far above spot-implied future = bad tick)
+    SELECT close FROM marketdata.candles WHERE tradingsymbol=:front_fut AND interval='1m'
+      AND bucket = :d1529 AND EXTRACT(second FROM bucket)=0;
+    -- (c) the option market's verdict: near-ATM CE ltp at 15:30 vs intrinsic under the claimed close
+    SELECT ltp, spot_price FROM marketdata.options_chain_snapshots
+    WHERE underlying=:u AND expiry=:front_exp AND strike=:atm AND option_type='CE'
+      AND ts >= :d1528 ORDER BY ts DESC LIMIT 3;
+    ```
+    A daily high/close that exists ONLY in the final bar, against a flat future and an option chain
+    pricing the old spot, is a bad tick — compute the regime from the 1m series ex-that-bar, state
+    both values, and file the repair.
+33. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

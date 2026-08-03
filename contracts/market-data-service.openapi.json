@@ -1856,6 +1856,43 @@
         }
       }
     },
+    "/api/v1/market/screener/minervini/plane-divergence" : {
+      "get" : {
+        "tags" : [ "minervini-controller" ],
+        "operationId" : "planeDivergence",
+        "parameters" : [ {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MinerviniPlaneDivergence"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/screener/minervini/funnel" : {
       "get" : {
         "tags" : [ "minervini-controller" ],
@@ -8847,6 +8884,71 @@
           }
         },
         "required" : [ "capital", "floorTurnover", "netCagrPct", "netDrawdownPct", "netSharpe", "trades" ]
+      },
+      "MinerviniPlaneDivergence" : {
+        "type" : "object",
+        "properties" : {
+          "screenDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "passersChecked" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "divergentPassers" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "divergentCandidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "alertingCandidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "thresholdPct" : {
+            "type" : "string"
+          },
+          "alertPct" : {
+            "type" : "string"
+          },
+          "lookbackDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "names" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MinerviniPlaneDivergentName"
+            }
+          }
+        },
+        "required" : [ "alertPct", "alertingCandidates", "divergentCandidates", "divergentPassers", "lookbackDays", "names", "passersChecked", "screenDate", "thresholdPct" ]
+      },
+      "MinerviniPlaneDivergentName" : {
+        "type" : "object",
+        "properties" : {
+          "symbol" : {
+            "type" : "string"
+          },
+          "maxDivergencePct" : {
+            "type" : "string"
+          },
+          "worstBar" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "sharedBars" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "candidate" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "candidate", "maxDivergencePct", "sharedBars", "symbol", "worstBar" ]
       },
       "MinerviniFunnel" : {
         "type" : "object",

@@ -28,24 +28,30 @@ public class MinerviniScheduler {
   private final TrendTemplateService screener;
   private final MinerviniScreenRepository repo;
   private final MinerviniGeometryService geometry;
+  private final PlaneDivergenceProbe planeDivergence;
   private final in.arthayantra.marketdata.alerts.NtfyClient ntfy;
   private final IngestRunLedger ledger;
   private final boolean enabled;
+  private final boolean planeDivergenceEnabled;
 
   /** Wires the screener + screen repository + geometry service + the ops ntfy client + ingest ledger. */
   public MinerviniScheduler(
       TrendTemplateService screener,
       MinerviniScreenRepository repo,
       MinerviniGeometryService geometry,
+      PlaneDivergenceProbe planeDivergence,
       in.arthayantra.marketdata.alerts.NtfyClient ntfy,
       IngestRunLedger ledger,
-      @Value("${artha.minervini.screen.enabled:true}") boolean enabled) {
+      @Value("${artha.minervini.screen.enabled:true}") boolean enabled,
+      @Value("${artha.minervini.plane-divergence.enabled:true}") boolean planeDivergenceEnabled) {
     this.screener = screener;
     this.repo = repo;
     this.geometry = geometry;
+    this.planeDivergence = planeDivergence;
     this.ntfy = ntfy;
     this.ledger = ledger;
     this.enabled = enabled;
+    this.planeDivergenceEnabled = planeDivergenceEnabled;
   }
 
   /** Boot one-shot. */
@@ -109,6 +115,7 @@ public class MinerviniScheduler {
       log.info(
           "minervini screen upserted {} rows for {} ({} pass all 8 gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
+      probePlaneDivergence(r.screenDate());
     } catch (Exception e) {
       // Audit P0-4/H10: a failed screen leaves the 20:00 swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
@@ -132,6 +139,50 @@ public class MinerviniScheduler {
     } catch (Exception e) {
       log.warn("minervini geometry failed for {} — non-fatal", r.screenDate(), e);
       return 0;
+    }
+  }
+
+  /**
+   * Two-plane read-back over the screen just persisted (see {@link PlaneDivergenceProbe}). Runs here
+   * rather than on its own cron because this is the ONLY moment the screen + geometry are both fresh
+   * and the funnel is fully formed — a separate job would have to re-derive when that is true.
+   *
+   * <p>Always logs; pages ONLY when a divergent symbol is a SERVED candidate, because a divergence
+   * that never reaches the funnel cannot move money. Fail-soft: the probe never fails a screen.
+   */
+  private void probePlaneDivergence(LocalDate screenDate) {
+    if (!planeDivergenceEnabled) {
+      return;
+    }
+    try {
+      PlaneDivergenceProbe.Report r = planeDivergence.probe(screenDate);
+      if (r.divergentPassers() == 0) {
+        log.info("minervini plane-divergence {}: none of {} passers diverge", screenDate,
+            r.passersChecked());
+        return;
+      }
+      log.info(
+          "minervini plane-divergence {}: {} of {} passers read two ways (>= {}% over {}d), {} are"
+              + " served candidates, {} clear the {}% page floor — {}",
+          screenDate, r.divergentPassers(), r.passersChecked(), r.thresholdPct(), r.lookbackDays(),
+          r.divergentCandidates(), r.alertingCandidates(), r.alertPct(), r.names());
+      if (r.alertingCandidates() > 0) {
+        String who =
+            r.names().stream()
+                .filter(r::isAlerting)
+                .map(n -> n.symbol() + " " + n.maxDivergencePct() + "% (worst " + n.worstBar() + ")")
+                .collect(java.util.stream.Collectors.joining(", "));
+        ntfy.send(
+            "Minervini funnel candidate read off two price planes",
+            "high",
+            screenDate
+                + ": "
+                + who
+                + " — candles@1d is dividend-back-adjusted, nse_eod_bhavcopy is not. The screen"
+                + " admitted a name the engine prices differently; neither plane was changed.");
+      }
+    } catch (Exception e) {
+      log.warn("minervini plane-divergence probe failed for {} — non-fatal", screenDate, e);
     }
   }
 }

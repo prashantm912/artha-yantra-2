@@ -130,6 +130,7 @@ public class MinerviniController {
   private final MinerviniHitRateService hitRateService;
   private final MinerviniBacktestService backtestService;
   private final ScreenerHistoryRepository history;
+  private final PlaneDivergenceProbe planeDivergence;
 
   /** Wires the screener + screen/geometry repositories + the funnel + hit-rate + backtest services. */
   public MinerviniController(
@@ -140,7 +141,8 @@ public class MinerviniController {
       MinerviniFunnelService funnelService,
       MinerviniHitRateService hitRateService,
       MinerviniBacktestService backtestService,
-      ScreenerHistoryRepository history) {
+      ScreenerHistoryRepository history,
+      PlaneDivergenceProbe planeDivergence) {
     this.screener = screener;
     this.repo = repo;
     this.geometryService = geometryService;
@@ -149,6 +151,7 @@ public class MinerviniController {
     this.hitRateService = hitRateService;
     this.backtestService = backtestService;
     this.history = history;
+    this.planeDivergence = planeDivergence;
   }
 
   /**
@@ -318,6 +321,19 @@ public class MinerviniController {
     return new ScreenerHistory.FunnelAttrition(
         date, counts.scanned(), counts.gates(), counts.passesAll(),
         funnel.immediatelyBuyable().size(), funnel.onDeck().size(), funnel.watch().size());
+  }
+
+  /**
+   * Which of the day's passers are being read off TWO price planes — {@code candles}@1d (which is
+   * dividend-back-adjusted, via Kite re-fetch) versus {@code nse_eod_bhavcopy} (which deliberately
+   * is not). {@code divergentCandidates > 0} means a name the funnel actually SERVES is priced
+   * differently by the two readers; the 20:00 batch pages on exactly that. Read-only, changes
+   * neither plane. See {@link PlaneDivergenceProbe}.
+   */
+  @GetMapping("/plane-divergence")
+  public PlaneDivergenceProbe.Report planeDivergence(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+    return planeDivergence.probe(asOf != null ? asOf : defaultReadDate());
   }
 
   /**

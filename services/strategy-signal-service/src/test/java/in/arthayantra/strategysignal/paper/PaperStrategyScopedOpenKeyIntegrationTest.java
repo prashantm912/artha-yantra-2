@@ -8,7 +8,6 @@ import in.arthayantra.strategysignal.paper.InstrumentMetaClient.InstrumentMeta;
 import in.arthayantra.strategysignal.paper.PaperService.OrderRequest;
 import in.arthayantra.strategysignal.paper.ScopedKeyTwinFixture.OpenLot;
 import in.arthayantra.strategysignal.paper.ScopedKeyTwinFixture.Twin;
-import in.arthayantra.strategysignal.signals.Books;
 import in.arthayantra.strategysignal.testsupport.StrategySignalIntegrationTestBase;
 import java.math.BigDecimal;
 import java.util.List;
@@ -40,7 +39,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
     properties = {
       "spring.profiles.active=mock",
       "artha.signals.engine-enabled=false",
-      "artha.paper.strategy-scoped-books=other,scalper"
+      "artha.paper.strategy-scoped-books=scoped-it-key,scoped-it-scalper"
     })
 class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegrationTestBase {
 
@@ -54,12 +53,38 @@ class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegratio
     }
   }
 
+  /**
+   * DEDICATED books, not `other`/`scalper`. {@link PaperStrategyScopeGuard} refuses to boot a
+   * context that ARMS a book already holding unattributed OPEN rows, and the IT database is a shared
+   * singleton that other classes leave rows in — so arming a real book name here would make this
+   * class's context fail to start depending purely on test ORDER. The mechanism is book-agnostic.
+   *
+   * <p>Consequence, stated rather than hidden: the sub-account CEILING rail
+   * ({@code ScalperAccountModel.wouldExceedSubAccount}) is inert on a book with no capital row, so
+   * the sub-account test below pins the INHERITANCE rule only, not the ceiling arithmetic it feeds.
+   */
+  private static final String BOOK = "scoped-it-key";
+
+  private static final String SCALPER_BOOK = "scoped-it-scalper";
+
   private static final String EX = "NFO";
   private static final BigDecimal PX = new BigDecimal("100.00");
 
   @Autowired private PaperService paper;
   @Autowired private PaperPositionRepository positions;
   @Autowired private JdbcTemplate jdbc;
+
+  /**
+   * The IT database is shared with no per-method cleanup and {@link PaperStrategyScopeGuard} refuses
+   * to boot when a book's OPEN rows disagree with the flag — so leaving attributed rows behind would
+   * make every LATER (disarmed) context fail to start. Closing them is also the guard's own remedy.
+   */
+  @org.junit.jupiter.api.AfterEach
+  void leaveNoAttributedOpenRows() {
+    jdbc.update(
+        "UPDATE paper_positions SET status='CLOSED', closed_at=now(), close_reason='IT-CLEANUP'"
+            + " WHERE status='OPEN' AND strategy_id IS NOT NULL");
+  }
 
   /**
    * The headline behaviour: two strategies, one key, one bar, byte-identical price — TWO lots.
@@ -79,7 +104,7 @@ class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegratio
     paper.openOrder(entry(gc.signalId(), sym, new BigDecimal("40.00")));
     paper.openOrder(entry(ctd.signalId(), sym, new BigDecimal("55.00")));
 
-    List<OpenLot> lots = ScopedKeyTwinFixture.openLots(jdbc, Books.OTHER, EX, sym, "BUY");
+    List<OpenLot> lots = ScopedKeyTwinFixture.openLots(jdbc, BOOK, EX, sym, "BUY");
     assertThat(lots).hasSize(2);
     assertThat(lots).allSatisfy(lot -> assertThat(lot.qty()).isEqualTo(10));
     // Each lot carries its OWN opener and its OWN stop — the merge destroyed both.
@@ -109,7 +134,7 @@ class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegratio
     Twin ctd = ScopedKeyTwinFixture.seedTwin(jdbc, "scopedx-ctd", EX, sym, "BUY");
     paper.openOrder(entry(gc.signalId(), sym, new BigDecimal("40.00")));
     paper.openOrder(entry(ctd.signalId(), sym, new BigDecimal("55.00")));
-    List<OpenLot> before = ScopedKeyTwinFixture.openLots(jdbc, Books.OTHER, EX, sym, "BUY");
+    List<OpenLot> before = ScopedKeyTwinFixture.openLots(jdbc, BOOK, EX, sym, "BUY");
     assertThat(before).hasSize(2);
 
     // The exit driver resolves the position through the ENTRY anchor (SignalExited carries it).
@@ -120,7 +145,7 @@ class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegratio
     assertThat(paper.closeForSignal(ctd.signalId(), "TIME_STOP", new BigDecimal("110.00")))
         .isEqualTo(1);
 
-    List<OpenLot> after = ScopedKeyTwinFixture.openLots(jdbc, Books.OTHER, EX, sym, "BUY");
+    List<OpenLot> after = ScopedKeyTwinFixture.openLots(jdbc, BOOK, EX, sym, "BUY");
     assertThat(after).singleElement().satisfies(lot -> {
       assertThat(lot.id()).isEqualTo(before.get(0).id());
       assertThat(lot.strategyId()).isEqualTo(gc.strategyId());
@@ -151,7 +176,7 @@ class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegratio
     paper.openOrder(entry(first, sym, new BigDecimal("40.00")));
     paper.openOrder(entry(second, sym, new BigDecimal("55.00")));
 
-    List<OpenLot> lots = ScopedKeyTwinFixture.openLots(jdbc, Books.OTHER, EX, sym, "BUY");
+    List<OpenLot> lots = ScopedKeyTwinFixture.openLots(jdbc, BOOK, EX, sym, "BUY");
     assertThat(lots).singleElement().satisfies(lot -> {
       assertThat(lot.qty()).isEqualTo(20);
       assertThat(lot.strategyId()).isEqualTo(strategyId);
@@ -179,7 +204,7 @@ class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegratio
     paper.openOrder(scalperEntry(gc.signalId(), sym, 3));
     paper.openOrder(scalperEntry(ctd.signalId(), sym, 5)); // asks for 5, must be charged to 3
 
-    List<OpenLot> lots = ScopedKeyTwinFixture.openLots(jdbc, Books.SCALPER, EX, sym, "BUY");
+    List<OpenLot> lots = ScopedKeyTwinFixture.openLots(jdbc, SCALPER_BOOK, EX, sym, "BUY");
     assertThat(lots).hasSize(2);
     assertThat(lots).allSatisfy(lot -> assertThat(lot.subaccountIdx()).isEqualTo(3));
   }
@@ -212,9 +237,37 @@ class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegratio
         .isInstanceOf(DataIntegrityViolationException.class);
   }
 
+  /**
+   * Critical 3, write side: on a SCOPED book a signal-less hand ticket takes the explicit
+   * {@code UNATTRIBUTED_SCOPE} sentinel, never NULL — and is therefore NOT reachable from another
+   * strategy's exit anchor.
+   *
+   * <p>UNDER THE PRE-FIX WRITE (which left {@code strategy_id} NULL when there was no signal): the
+   * first assertion sees null, and — the part that actually matters — NULL is the WILDCARD arm of
+   * every scoped predicate, so {@code openForSignal(twin)} returns the hand-ticket lot and a
+   * strategy's exit settles a position it never opened. The second assertion is the decisive one;
+   * the first only explains why.
+   */
+  @Test
+  void aSignallessTicketOnAScopedBookTakesTheSentinelAndIsNotClosableByAnotherStrategy() {
+    String sym = "SCOPEDN-" + UUID.randomUUID().toString().substring(0, 8);
+    // A hand ticket: no signal, so nothing to attribute it to.
+    paper.openOrder(
+        new OrderRequest(null, EX, sym, "BUY", 10, PX, null, null, null, BOOK));
+    List<OpenLot> lots = ScopedKeyTwinFixture.openLots(jdbc, BOOK, EX, sym, "BUY");
+    assertThat(lots).singleElement().satisfies(lot ->
+        assertThat(lot.strategyId()).isEqualTo(PaperPositionRepository.UNATTRIBUTED_SCOPE));
+
+    // A real strategy now fires on the SAME key; its exit anchor must not reach the hand ticket.
+    Twin twin = ScopedKeyTwinFixture.seedTwin(jdbc, "scopedn-twin", EX, sym, "BUY");
+    ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, twin.signalId(), EX, sym, "BUY", 10);
+    assertThat(positions.openForSignal(twin.signalId()))
+        .noneSatisfy(row -> assertThat(row.id()).isEqualTo(lots.get(0).id()));
+  }
+
   private long insertLot(String sym, UUID strategyId) {
     return positions.insertOpen(
-        Books.OTHER, EX, sym, "BUY", 10, PX, null, null, null, null, null, strategyId);
+        BOOK, EX, sym, "BUY", 10, PX, null, null, null, null, null, strategyId);
   }
 
   private String closeReasonOf(long positionId) {
@@ -225,13 +278,13 @@ class PaperStrategyScopedOpenKeyIntegrationTest extends StrategySignalIntegratio
   /** A signal-linked entry on the {@code other} book at an explicit price (no tick needed). */
   private OrderRequest entry(long signalId, String sym, BigDecimal stopLoss) {
     return new OrderRequest(
-        signalId, EX, sym, "BUY", 10, PX, stopLoss, new BigDecimal("200.00"), null, Books.OTHER);
+        signalId, EX, sym, "BUY", 10, PX, stopLoss, new BigDecimal("200.00"), null, BOOK);
   }
 
   /** The same, on the scalper book, charged to an explicit sub-account. */
   private OrderRequest scalperEntry(long signalId, String sym, int subaccountIdx) {
     return new OrderRequest(
         signalId, EX, sym, "BUY", 10, PX, new BigDecimal("40.00"), null, subaccountIdx,
-        Books.SCALPER);
+        SCALPER_BOOK);
   }
 }

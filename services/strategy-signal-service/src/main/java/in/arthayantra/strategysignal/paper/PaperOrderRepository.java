@@ -195,6 +195,30 @@ public class PaperOrderRepository {
         .findFirst();
   }
 
+  /**
+   * The STRATEGY that placed a {@code clientOrderId}'s order, via its signal (V058, option D) —
+   * {@code empty} for a hand ticket with no signal linkage. Used to scope the idempotent-replay
+   * read-back so a retry can never resolve to a co-firing sibling's position.
+   */
+  public Optional<java.util.UUID> strategyIdForClientOrderId(String book, String clientOrderId) {
+    return jdbc
+        .query(
+            """
+            SELECT sv.strategy_id
+            FROM paper_orders o
+            JOIN signals s ON s.id = o.signal_id
+            JOIN strategy_versions sv ON sv.id = s.strategy_version_id
+            WHERE o.book=? AND o.client_order_id=?
+            LIMIT 1
+            """,
+            (rs, n) -> rs.getObject("strategy_id", java.util.UUID.class),
+            book,
+            clientOrderId)
+        .stream()
+        .filter(java.util.Objects::nonNull)
+        .findFirst();
+  }
+
   /** Recent orders, newest first (the ledger view). */
   public List<OrderRow> recent(int limit, int offset) {
     return jdbc.query(

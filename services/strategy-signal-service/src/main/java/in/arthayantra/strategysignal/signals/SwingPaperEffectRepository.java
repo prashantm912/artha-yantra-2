@@ -198,12 +198,19 @@ public class SwingPaperEffectRepository {
         connection -> {
           PreparedStatement statement =
               connection.prepareStatement(
+                  // V058: the same strategy predicate PaperPositionRepository.openForSignal
+                  // carries. These ids are CLOSED by SwingBatchEngine (closeForPosition), so on a
+                  // strategy-scoped book the unscoped key join would bind -- and settle -- a
+                  // sibling strategy's lot from this effect's exited signals. NULL = unscoped.
                   "SELECT DISTINCT p.id"
                       + " FROM paper_positions p"
                       + " JOIN paper_orders o"
                       + " ON o.book=p.book AND o.exchange=p.exchange"
                       + " AND o.tradingsymbol=p.tradingsymbol AND o.side=p.side"
+                      + " LEFT JOIN signals sg ON sg.id = o.signal_id"
+                      + " LEFT JOIN strategy_versions sv ON sv.id = sg.strategy_version_id"
                       + " WHERE p.status='OPEN' AND o.signal_id = ANY (?)"
+                      + " AND (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)"
                       + " ORDER BY p.id");
           statement.setArray(1, connection.createArrayOf("bigint", ids.toArray()));
           return statement;

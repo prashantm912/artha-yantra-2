@@ -622,9 +622,20 @@ public class PaperService {
    * PaperPositionRepository#findLatestForKey}). Empty when the key was never filled.
    */
   private Optional<PositionDto> replayFor(String book, String clientOrderId) {
+    // V058 (cross-vendor review Major 4): on a scoped book the key alone resolves to the NEWEST row,
+    // so replaying twin A's ticket after twin B opened would return B's id/qty/brackets as if they
+    // were A's fill — a silently wrong 200, not an error. Scope the read-back to the strategy that
+    // actually placed THIS clientOrderId.
+    java.util.UUID scope =
+        strategyScopedBooks.contains(book)
+            ? orders
+                .strategyIdForClientOrderId(book, clientOrderId)
+                .orElse(PaperPositionRepository.UNATTRIBUTED_SCOPE)
+            : null;
     return orders
         .keyForClientOrderId(book, clientOrderId)
-        .flatMap(k -> positions.findLatestForKey(book, k.exchange(), k.tradingsymbol(), k.side()))
+        .flatMap(
+            k -> positions.findLatestForKey(book, k.exchange(), k.tradingsymbol(), k.side(), scope))
         .map(this::toPositionDto);
   }
 
@@ -839,10 +850,19 @@ public class PaperService {
     // so a co-firing twin opens its OWN row instead of averaging into the first one's. null on every
     // unscoped book AND on a signal-less hand ticket (nothing to attribute) — and a null here makes
     // every path below byte-identical to pre-V058.
+    // Cross-vendor review Critical 3: on a scoped book this is NEVER null. A NULL row there would be
+    // matched by EVERY strategy's exit (NULL is the wildcard arm of each scoped predicate), so a
+    // signal-less hand ticket — or a signal whose strategy cannot be resolved — takes the explicit
+    // UNATTRIBUTED_SCOPE sentinel instead. PaperStrategyScopeGuard refuses to boot if a scoped book
+    // ever holds a NULL row anyway, so the wildcard stays confined to unscoped books.
     java.util.UUID positionStrategyId =
-        strategyScopedBooks.contains(book) && request.signalId() != null
-            ? books.strategyIdForSignal(request.signalId()).orElse(null)
-            : null;
+        !strategyScopedBooks.contains(book)
+            ? null
+            : request.signalId() == null
+                ? PaperPositionRepository.UNATTRIBUTED_SCOPE
+                : books
+                    .strategyIdForSignal(request.signalId())
+                    .orElse(PaperPositionRepository.UNATTRIBUTED_SCOPE);
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
     // The deployment cap, projected against what this fill ACTUALLY costs. Placed here — at the sole

@@ -48,16 +48,79 @@ final class ScopedKeyTwinFixture {
 
   /** A published version of an existing strategy — a REPUBLISH mints a new row with the same strategy_id. */
   static UUID seedVersion(JdbcTemplate jdbc, UUID strategyId, String version) {
+    return seedVersion(jdbc, strategyId, version, "{}");
+  }
+
+  /**
+   * The same, with an explicit {@code config} JSON — used to give a version a
+   * {@code risk.session.style} of {@code intraday} or {@code btst}, which is what
+   * {@code PaperPositionRepository.intradayOpen} classifies on.
+   */
+  static UUID seedVersion(JdbcTemplate jdbc, UUID strategyId, String version, String configJson) {
     return jdbc.queryForObject(
         """
         INSERT INTO strategy_versions
           (strategy_id, version, config_yaml, config, schema_version, checksum, status)
-        VALUES (?, ?, '', '{}'::jsonb, '1', ?, 'published') RETURNING id
+        VALUES (?, ?, '', ?::jsonb, '1', ?, 'published') RETURNING id
         """,
         UUID.class,
         strategyId,
         version,
+        configJson,
         "chk-" + UUID.randomUUID());
+  }
+
+  /** A version whose config declares {@code risk.session.style} (intraday / btst / swing). */
+  static UUID seedVersionWithStyle(JdbcTemplate jdbc, UUID strategyId, String style) {
+    return seedVersion(
+        jdbc, strategyId, "1", "{\"risk\":{\"session\":{\"style\":\"" + style + "\"}}}");
+  }
+
+  /** An ACTIVE ENTRY signal carrying a {@code scalper_detail} (a NEUTRAL one marks a straddle). */
+  static long seedEntryWithDetail(
+      JdbcTemplate jdbc,
+      UUID versionId,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      String scalperDetailJson) {
+    return jdbc.queryForObject(
+        """
+        INSERT INTO signals
+          (strategy_version_id, exchange, tradingsymbol, "interval", signal_type, side,
+           composite_score, score_breakdown, scalper_detail)
+        VALUES (?, ?, ?, '3m', 'ENTRY', ?, 0.7, '{}'::jsonb, ?::jsonb) RETURNING id
+        """,
+        Long.class,
+        versionId,
+        exchange,
+        tradingsymbol,
+        side,
+        scalperDetailJson);
+  }
+
+  /** A FILLED entry order linking a signal to a book+key — what every position join traverses. */
+  static long seedOrder(
+      JdbcTemplate jdbc,
+      String book,
+      Long signalId,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty) {
+    return jdbc.queryForObject(
+        """
+        INSERT INTO paper_orders
+          (book, signal_id, exchange, tradingsymbol, side, qty, status, placed_at, filled_at, fill_price)
+        VALUES (?, ?, ?, ?, ?, ?, 'FILLED', now(), now(), 100.00) RETURNING id
+        """,
+        Long.class,
+        book,
+        signalId,
+        exchange,
+        tradingsymbol,
+        side,
+        qty);
   }
 
   /** An ACTIVE ENTRY signal on a version (status defaults to ACTIVE, generated_at to now()). */

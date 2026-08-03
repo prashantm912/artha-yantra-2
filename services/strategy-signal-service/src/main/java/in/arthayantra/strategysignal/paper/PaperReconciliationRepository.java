@@ -61,6 +61,23 @@ public class PaperReconciliationRepository {
           WHERE o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
             AND o.side = p.side
             AND COALESCE(o.filled_at, o.placed_at) BETWEEN p.opened_at AND p.closed_at
+            -- V058 (cross-vendor review Major 5): on a strategy-scoped book two siblings share this
+            -- key and overlap in lifetime, so the unscoped sum counts BOTH twins' entry legs and
+            -- reports 20 against a 10-unit row: a nightly qty-mismatch alarm on a perfectly valid
+            -- split. An order with no signal maps to UNATTRIBUTED_SCOPE so a hand-ticket lot still
+            -- matches its own orders instead of reporting missing-entry. NULL = unscoped, as before.
+            -- The EXIT leg below is deliberately NOT scoped: settle orders carry no signal_id, so
+            -- scoping it would zero every exit_count and turn missingExit into a mass false alarm.
+            -- An inflated exit_count is harmless -- only exitCount == 0 classifies (V5 missingExit).
+            AND (
+              p.strategy_id IS NULL
+              OR COALESCE(
+                   (SELECT sv2.strategy_id FROM signals sg
+                      JOIN strategy_versions sv2 ON sv2.id = sg.strategy_version_id
+                     WHERE sg.id = o.signal_id),
+                   '00000000-0000-0000-0000-000000000000'::uuid
+                 ) = p.strategy_id
+            )
         ) e ON true
         LEFT JOIN LATERAL (
           SELECT COUNT(*) AS exit_count

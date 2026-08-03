@@ -39,6 +39,25 @@ public class PaperPositionRepository {
   /** Advisory-lock namespace for per-book capital serialization ({@link #lockBookCapital}). */
   private static final int BOOK_CAPITAL_LOCK_NAMESPACE = 4802;
 
+  /**
+   * V058: the explicit scope for a lot on a STRATEGY-SCOPED book that has no strategy to attribute it
+   * to — a signal-less hand ticket. The nil UUID, which {@code gen_random_uuid()} can never produce,
+   * so it can never collide with a real {@code strategies.id}.
+   *
+   * <p><b>Why a sentinel and not NULL (cross-vendor review Critical 3).</b> Every scoped resolution
+   * predicate reads {@code (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)} — NULL is a
+   * WILDCARD there, because that is what keeps an unscoped book behaving exactly as it did before
+   * V058. A NULL row sitting on a SCOPED book would therefore be matched by EVERY strategy's exit,
+   * so one strategy could close an unattributed lot it never opened. Writing the sentinel instead
+   * means a scoped book never contains a NULL row, which confines the wildcard to unscoped books
+   * where it is correct. {@link PaperStrategyScopeGuard} enforces that confinement at boot.
+   *
+   * <p>All sentinel rows on one key collide as one key (a real value, so plain uniqueness applies),
+   * so a scoped book still holds at most ONE unattributed lot per key — same guarantee NULL gave.
+   */
+  public static final java.util.UUID UNATTRIBUTED_SCOPE =
+      java.util.UUID.fromString("00000000-0000-0000-0000-000000000000");
+
   private final JdbcTemplate jdbc;
 
   /** Wires the strategy datasource. */
@@ -263,15 +282,35 @@ public class PaperPositionRepository {
    */
   public Optional<PositionRow> findLatestForKey(
       String book, String exchange, String tradingsymbol, String side) {
+    return findLatestForKey(book, exchange, tradingsymbol, side, null);
+  }
+
+  /**
+   * The V058 scoped form (cross-vendor review Major 4). {@code strategyId} null gives the pre-V058
+   * strategy-blind behaviour; non-null gives the newest position on the key OPENED BY THAT STRATEGY.
+   *
+   * <p>Without the scope an idempotent replay of twin A, retried after twin B opened, resolves the
+   * key to the NEWEST row and hands the caller B's id, quantity and brackets as if they were A's
+   * fill: a silently wrong 200 on the money path, not an error.
+   *
+   * <p>This is key+strategy, NOT the exact {@code order_id -> position_id} linkage PR #1259's V057
+   * lot table will provide. It removes the cross-strategy error but still resolves by key within one
+   * strategy; tighten to the exact linkage once V057 is on main.
+   */
+  public Optional<PositionRow> findLatestForKey(
+      String book, String exchange, String tradingsymbol, String side, java.util.UUID strategyId) {
     return jdbc
         .query(
             "SELECT " + COLUMNS + " FROM paper_positions WHERE book=? AND exchange=? AND tradingsymbol=?"
-                + " AND side=? ORDER BY opened_at DESC, id DESC LIMIT 1",
+                + " AND side=? AND (CAST(? AS uuid) IS NULL OR strategy_id = CAST(? AS uuid))"
+                + " ORDER BY opened_at DESC, id DESC LIMIT 1",
             PaperPositionRepository::map,
             book,
             exchange,
             tradingsymbol,
-            side)
+            side,
+            strategyId,
+            strategyId)
         .stream()
         .findFirst();
   }
@@ -453,6 +492,13 @@ public class PaperPositionRepository {
    * OPEN positions whose originating signal belongs to an {@code session.style: intraday} strategy —
    * the 15:45 mark-to-close set. All joins are SAME-schema (no cross-schema reference).
    */
+  /*
+   * V058 (cross-vendor review Critical 1): the strategy predicate is NOT optional here. This join
+   * classifies a position by ANY matching order's session style, and the scalper book holds BOTH
+   * intraday and btst strategies — so on a scoped book an INTRADAY sibling's order would drag a BTST
+   * sibling on the same key into the 15:45 mark-to-close set and settle a position that is meant to
+   * carry overnight. A wrong CLOSE at a real price, not a mis-label.
+   */
   public List<PositionRow> intradayOpen() {
     return jdbc.query(
         """
@@ -466,6 +512,7 @@ public class PaperPositionRepository {
         JOIN signals s ON s.id = o.signal_id
         JOIN strategy_versions sv ON sv.id = s.strategy_version_id
         WHERE p.status = 'OPEN' AND sv.config->'risk'->'session'->>'style' = 'intraday'
+          AND (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)
         """,
         PaperPositionRepository::map);
   }
@@ -539,7 +586,9 @@ public class PaperPositionRepository {
           ON o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
           AND o.side = p.side AND o.signal_id IS NOT NULL
         JOIN signals s ON s.id = o.signal_id
+        LEFT JOIN strategy_versions sv ON sv.id = s.strategy_version_id
         WHERE p.status = 'OPEN' AND s.scalper_detail->>'side' = 'NEUTRAL'
+          AND (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)
         """,
         (rs, n) ->
             new StraddleLegRow(
@@ -588,6 +637,32 @@ public class PaperPositionRepository {
   public int deleteAll(String book) {
     return jdbc.update(
         "DELETE FROM paper_positions WHERE (?::text IS NULL OR book = ?)", book, book);
+  }
+
+  /**
+   * OPEN rows on {@code book} whose {@code strategy_id} nullness disagrees with {@code scoped} --
+   * the V058 boot-guard probe (cross-vendor review Critical 3).
+   *
+   * <p>{@code scoped=true} counts UNATTRIBUTED (NULL) rows on a book that is now strategy-scoped:
+   * NULL is a WILDCARD in every scoped predicate, so such a row is closable by ANY strategy's exit.
+   * {@code scoped=false} counts ATTRIBUTED rows on a book that is NOT scoped: their siblings would
+   * silently re-merge and one exit would settle several lots. Either state is a mixed mode that no
+   * amount of correct SQL can disambiguate, so {@link PaperStrategyScopeGuard} refuses to boot.
+   */
+  public int countOpenScopeMismatch(String book, boolean scoped) {
+    Integer n =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM paper_positions WHERE book=? AND status='OPEN'"
+                + " AND strategy_id IS " + (scoped ? "NULL" : "NOT NULL"),
+            Integer.class,
+            book);
+    return n == null ? 0 : n;
+  }
+
+  /** The distinct books that currently hold at least one OPEN position. */
+  public List<String> booksWithOpenPositions() {
+    return jdbc.queryForList(
+        "SELECT DISTINCT book FROM paper_positions WHERE status='OPEN' ORDER BY book", String.class);
   }
 
   /** Count of OPEN positions across every book. */

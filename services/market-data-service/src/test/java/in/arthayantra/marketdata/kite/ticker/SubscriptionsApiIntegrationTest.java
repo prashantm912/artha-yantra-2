@@ -54,13 +54,38 @@ class SubscriptionsApiIntegrationTest extends MarketDataIntegrationTestBase {
   }
 
   @Test
-  void subscribeListUnsubscribeRoundTrip() throws Exception {
+  void theApiRefusesToSubscribeACashEquityToTheLiveTicker() throws Exception {
+    // PR #1251 ratchet, exercised through the REAL controller - the bypass a config-level guard
+    // missed. Until this landed, this exact request returned 200 (it is what this class's
+    // round-trip test used to send), which is why the round-trip now uses an NFO future instead.
+    // An equity on ticks:last arms a live money-path exposure: PaperBracketEvaluator prices open
+    // paper positions off that hash against the STORED paper_positions.stop_loss, which is written
+    // once at entry and never re-scaled when a corporate action re-planes the market. See
+    // SwingEquityBracketTripwireIntegrationTest for the four Criticals that stopped it being fixed.
     mockMvc
         .perform(
             post("/api/v1/market/subscriptions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"exchange\":\"NSE\",\"tradingsymbol\":\"RELIANCE\",\"mode\":\"quote\"}"))
+        .andExpect(status().isBadRequest());
+
+    // ...and it never reaches the registry, so no hold is persisted for the replayer to restore.
+    mockMvc
+        .perform(get("/api/v1/market/subscriptions"))
+        .andExpect(
+            jsonPath(
+                "$.items[?(@.tradingsymbol == 'RELIANCE')]", org.hamcrest.Matchers.empty()));
+  }
+
+  @Test
+  void subscribeListUnsubscribeRoundTrip() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/market/subscriptions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY2661618000CE\",\"mode\":\"quote\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.effectiveMode").value("quote"));
 
@@ -70,7 +95,7 @@ class SubscriptionsApiIntegrationTest extends MarketDataIntegrationTestBase {
             post("/api/v1/market/subscriptions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"exchange\":\"NSE\",\"tradingsymbol\":\"RELIANCE\",\"mode\":\"full\","
+                    "{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY2661618000CE\",\"mode\":\"full\","
                         + "\"subscriber\":\"engine\",\"priority\":\"strategy\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.effectiveMode").value("full"));
@@ -79,32 +104,32 @@ class SubscriptionsApiIntegrationTest extends MarketDataIntegrationTestBase {
         .perform(get("/api/v1/market/subscriptions"))
         .andExpect(
             jsonPath(
-                "$.items[?(@.tradingsymbol == 'RELIANCE')].mode",
+                "$.items[?(@.tradingsymbol == 'NIFTY2661618000CE')].mode",
                 org.hamcrest.Matchers.hasItem("FULL")))
         .andExpect(
             jsonPath(
-                "$.items[?(@.tradingsymbol == 'RELIANCE')].subscribers",
+                "$.items[?(@.tradingsymbol == 'NIFTY2661618000CE')].subscribers",
                 org.hamcrest.Matchers.hasItem(2)));
 
     mockMvc
         .perform(
             delete("/api/v1/market/subscriptions")
-                .param("exchange", "NSE")
-                .param("tradingsymbol", "RELIANCE")
+                .param("exchange", "NFO")
+                .param("tradingsymbol", "NIFTY2661618000CE")
                 .param("subscriber", "engine"))
         .andExpect(status().isNoContent());
     mockMvc
         .perform(
             delete("/api/v1/market/subscriptions")
-                .param("exchange", "NSE")
-                .param("tradingsymbol", "RELIANCE"))
+                .param("exchange", "NFO")
+                .param("tradingsymbol", "NIFTY2661618000CE"))
         .andExpect(status().isNoContent());
 
     mockMvc
         .perform(get("/api/v1/market/subscriptions"))
         .andExpect(
             jsonPath(
-                "$.items[?(@.tradingsymbol == 'RELIANCE')]", org.hamcrest.Matchers.empty()));
+                "$.items[?(@.tradingsymbol == 'NIFTY2661618000CE')]", org.hamcrest.Matchers.empty()));
   }
 
   @Test
@@ -113,7 +138,7 @@ class SubscriptionsApiIntegrationTest extends MarketDataIntegrationTestBase {
         .perform(
             post("/api/v1/market/subscriptions")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"exchange\":\"NSE\",\"tradingsymbol\":\"NOPE123\",\"mode\":\"quote\"}"))
+                .content("{\"exchange\":\"NFO\",\"tradingsymbol\":\"NOPE123\",\"mode\":\"quote\"}"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("NOT_FOUND_INSTRUMENT"));
 
@@ -121,7 +146,7 @@ class SubscriptionsApiIntegrationTest extends MarketDataIntegrationTestBase {
         .perform(
             post("/api/v1/market/subscriptions")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"exchange\":\"NSE\",\"tradingsymbol\":\"RELIANCE\",\"mode\":\"depth\"}"))
+                .content("{\"exchange\":\"NFO\",\"tradingsymbol\":\"NIFTY2661618000CE\",\"mode\":\"depth\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
   }

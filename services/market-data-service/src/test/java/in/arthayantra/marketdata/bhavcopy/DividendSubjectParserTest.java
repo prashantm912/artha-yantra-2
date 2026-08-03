@@ -117,6 +117,56 @@ class DividendSubjectParserTest {
     }
   }
 
+  /**
+   * The BSE dash shape. Every subject below is verbatim live {@code marketdata.dividends} text
+   * (queried 2026-08-03), where all 2,574 BSE rows stored a NULL amount because the primary
+   * {@code Rs <num>} pattern cannot cross the dash. All four live prefixes are covered.
+   */
+  @Test
+  void parsesTheBseDashShapeThePrimaryPatternCannotCross() {
+    List<Case> cases =
+        List.of(
+            new Case("Final Dividend - Rs. - 10.0000", true, "10"),
+            new Case("Interim Dividend - Rs. - 1.0000", true, "1"),
+            new Case("Dividend - Rs. - 0.5000", true, "0.5"),
+            new Case("Special Dividend - Rs. - 2.5000", true, "2.5"),
+            // Smallest and largest live values, to pin the fractional/multi-digit ends.
+            new Case("Final Dividend - Rs. - 0.0500", true, "0.05"),
+            new Case("Final Dividend - Rs. - 30.0000", true, "30"));
+
+    for (Case c : cases) {
+      assertThat(DividendSubjectParser.parseAmount(c.subject()).orElseThrow())
+          .as(c.subject())
+          .isEqualByComparingTo(c.amount());
+    }
+  }
+
+  /**
+   * The fallback is reachable ONLY when the primary pattern matched nothing, and it refuses
+   * anything it cannot classify. Together these are why no currently-parsing subject can change
+   * value: a false negative leaves a visibly-absent NULL, a false positive would be a wrong number
+   * indistinguishable from a right one.
+   */
+  @Test
+  void leavesTheAmountNullWhenTheDashShapeIsAmbiguousOrAbsent() {
+    // Two dash amounts: additive or itemised is undecidable, so no number is written.
+    assertThat(
+            DividendSubjectParser.parseAmount(
+                "Final Dividend - Rs. - 1.0000/Special Dividend - Rs. - 2.0000"))
+        .isEmpty();
+    // A percentage-only dividend still states no rupee amount.
+    assertThat(DividendSubjectParser.parseAmount("Final Dividend - 50%")).isEmpty();
+    // A dash with no rupee marker in front of it is not an amount.
+    assertThat(DividendSubjectParser.parseAmount("Final Dividend - 10.0000")).isEmpty();
+    // The primary pattern wins whenever it matches: the dash form here is never consulted, so the
+    // compound sum stands rather than collapsing to a single dash-matched number.
+    assertThat(
+            DividendSubjectParser.parseAmount(
+                    "Dividend - Rs 10 Per Share/Special Dividend - Rs 30 Per Share")
+                .orElseThrow())
+        .isEqualByComparingTo("40");
+  }
+
   @Test
   void nullAndBlankSubjectsAreNotDividends() {
     assertThat(DividendSubjectParser.isDividend(null)).isFalse();

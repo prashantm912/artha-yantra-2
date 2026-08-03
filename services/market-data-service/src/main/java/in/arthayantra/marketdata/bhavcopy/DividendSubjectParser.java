@@ -28,12 +28,26 @@ import java.util.regex.Pattern;
  *
  * <p>Known limitation, unchanged here: for the itemised shape the value is the whole distribution,
  * not the dividend component alone.
+ *
+ * <p><b>BSE dash shape.</b> BSE renders the cash amount as a separate feed field, so its purpose
+ * text reads {@code "Final Dividend - Rs. - 10.0000"} — a dash sits between the rupee marker and the
+ * number, which {@link #RUPEE_AMOUNT} cannot match. Every BSE row ever captured (2,574 of 2,574,
+ * live {@code artha} 2026-08-03) therefore stored a NULL amount. {@link #DASH_AMOUNT} is tried only
+ * as a <em>fallback</em>, when the primary pattern matched nothing at all — so no subject that
+ * already parses can change value, and NSE behaviour is unreachable-by-construction unchanged.
+ *
+ * <p>The fallback accepts only an <em>unambiguous single</em> dash amount. All 2,574 live BSE rows
+ * state exactly one, so a second one is a shape we have never seen and cannot classify as additive
+ * or itemised; refusing leaves the amount NULL. That is the safe failure direction — a NULL is a
+ * visibly absent number, while a wrong number is indistinguishable from a right one.
  */
 public final class DividendSubjectParser {
 
   private static final Pattern DIVIDEND = Pattern.compile("(?i)\\bdividend\\b");
   private static final Pattern RUPEE_AMOUNT =
       Pattern.compile("(?i)\\b(?:rs|re)\\.?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(?:/-)?");
+  private static final Pattern DASH_AMOUNT =
+      Pattern.compile("(?i)\\b(?:rs|re)\\.?\\s*-\\s*([0-9]+(?:\\.[0-9]+)?)");
   private static final Pattern BREAKDOWN = Pattern.compile("(?i)consist|compris");
 
   private DividendSubjectParser() {}
@@ -45,7 +59,9 @@ public final class DividendSubjectParser {
 
   /**
    * The rupee cash amount of a dividend subject: the sum of every {@code Rs|Re} amount for an
-   * additive subject, or the leading stated total for an itemised one. Empty when none is stated.
+   * additive subject, or the leading stated total for an itemised one. Falls back to the BSE
+   * {@code "Rs. - 10.0000"} dash shape when no {@code Rs|Re}-adjacent amount is stated at all.
+   * Empty when none is stated, or when the dash shape states more than one.
    */
   public static Optional<BigDecimal> parseAmount(String subject) {
     if (!isDividend(subject)) {
@@ -53,7 +69,7 @@ public final class DividendSubjectParser {
     }
     Matcher amount = RUPEE_AMOUNT.matcher(subject);
     if (!amount.find()) {
-      return Optional.empty();
+      return parseDashAmount(subject);
     }
     BigDecimal total = new BigDecimal(amount.group(1));
     if (BREAKDOWN.matcher(subject).find()) {
@@ -63,5 +79,18 @@ public final class DividendSubjectParser {
       total = total.add(new BigDecimal(amount.group(1)));
     }
     return Optional.of(total);
+  }
+
+  /** The BSE {@code "Rs. - 10.0000"} shape, accepted only when the subject states exactly one. */
+  private static Optional<BigDecimal> parseDashAmount(String subject) {
+    Matcher dash = DASH_AMOUNT.matcher(subject);
+    if (!dash.find()) {
+      return Optional.empty();
+    }
+    BigDecimal single = new BigDecimal(dash.group(1));
+    if (dash.find()) {
+      return Optional.empty(); // unclassifiable: additive or itemised? leave the amount NULL
+    }
+    return Optional.of(single);
   }
 }

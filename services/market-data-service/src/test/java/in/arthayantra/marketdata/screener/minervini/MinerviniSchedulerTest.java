@@ -131,6 +131,39 @@ class MinerviniSchedulerTest {
     org.mockito.Mockito.verify(ntfy, org.mockito.Mockito.never()).send(any(), any(), any());
   }
 
+  /**
+   * The forced-recompute path must NOT be suppressed by the date's existing completion marker.
+   *
+   * <p>A recompute rewrites {@code computed_at} and can change the candidate set, so the marker
+   * describes a screen that no longer exists. The two halves answer OPPOSITELY on the same marker
+   * state: the scheduled door stands down, the forced door does not.
+   */
+  @Test
+  void aForcedRecomputeProbesEvenWhenTheDateIsAlreadyMarked() {
+    LocalDate day = LocalDate.of(2026, 7, 6);
+    when(screener.screen(day)).thenReturn(new TrendTemplateService.ScreenResult(day, 0, List.of()));
+    when(planeDivergence.probe(day)).thenReturn(report(day));
+    when(planeDivergence.alreadyReported(day)).thenReturn(true); // an earlier evening reported it
+
+    scheduler(true).runOnce(day);
+
+    verify(planeDivergence).probe(day);
+    verify(planeDivergence).markReported(day);
+  }
+
+  /** ...while a SCHEDULED door on the same already-marked date still stands down. */
+  @Test
+  void aScheduledDoorOnAnAlreadyMarkedDateStandsDown() {
+    LocalDate day = LocalDate.of(2026, 7, 6);
+    when(repo.latestScreenDate()).thenReturn(day);
+    when(screener.latestScreenDate()).thenReturn(day);
+    when(planeDivergence.alreadyReported(day)).thenReturn(true);
+
+    scheduler(true).onBhavcopyBackfillCompleted();
+
+    org.mockito.Mockito.verify(planeDivergence, org.mockito.Mockito.never()).probe(any());
+  }
+
   private static PlaneDivergenceProbe.DivergentName name(
       String symbol, String pct, LocalDate worst, boolean candidate) {
     return new PlaneDivergenceProbe.DivergentName(

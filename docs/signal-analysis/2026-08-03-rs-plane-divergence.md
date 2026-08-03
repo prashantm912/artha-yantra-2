@@ -21,7 +21,7 @@ All DB numbers are direct psql output against the LIVE `artha` database on 2026-
 | built | **`PlaneDivergenceProbe`**, riding the existing 20:00-adjacent Minervini screen batch. No new cron, no migration, no plane change |
 | does it land on a candidate, or merely exist | **It lands.** Over the 22 persisted screen dates, **197** divergent passer name-dates on **22 of 22** dates, of which **103 are served funnel candidates** on **20 of 22** dates |
 | is "a divergent symbol was a candidate" the right page trigger | **No, and no threshold fixes it — so the probe does not page at all.** It fires on **20 of 22 evenings**, and it is structurally blind to the one measured casualty (ICEMAKE, which is *not* divergent). Report-only: log + endpoint |
-| are historical results reproducible | **Yes, and only because of the as-of gate.** Both source tables are retro-mutable; every bar pair is gated on both sides' `fetched_at` ≤ the screen's own `computed_at`, and excluded bars are counted, not dropped |
+| are historical results reproducible | **No — as-of-BOUNDED with explicit exclusions, which is weaker and is the honest word.** Every bar pair is gated on both sides' `fetched_at` ≤ the screen's `computed_at`, and excluded bars are counted rather than dropped. But `fetched_at` is an UPSERT timestamp: it bounds *whether* a row was rewritten after the screen, never *what it held then*. Exact history needs the nightly report **persisted**; it is not (§6.9) |
 | did instrumentation require a price change | **No.** Both planes are read-only inputs |
 
 ### Task B — measure the RS legs
@@ -32,7 +32,7 @@ All DB numbers are direct psql output against the LIVE `artha` database on 2026-
 | is the RS gate a cross-plane *comparison* | **No.** `rsRank` is computed wholly inside the bhavcopy plane and compared to a scalar (70). The exposure is the **dividend doctrine**, not a plane split — and unlike the crossover's one session it has a **~252-session tail** |
 | how many name-dates would rank differently | **22,928 of 38,868 (58.99%)** swapping only the 32 measured-divergent symbols; **29,316 (75.42%)** swapping every symbol candles covers |
 | how many rank changes CROSS the `rs>=70` gate | **34 of 38,868 (0.087%)** — exactly 17 gained / 17 lost, because the percentile is positional |
-| how many change the SCREEN OUTCOME (`passes_all`) | **3**, all of them *passive displacement* casualties, all one-way permissive (the live plane admitted them; a dividend-aware plane drops them) |
+| how many change the SCREEN OUTCOME (`passes_all`) | **2 corroborated** by the persisted live record; a 3rd (DIAMONDYD) is **recompute-only** and never passed live. All *passive displacement*, all one-way permissive (the live plane admitted them; a dividend-aware plane drops them) |
 | did any land on a candidate | **YES — ICEMAKE 2026-07-28**, `passes_all=t`, `is_vcp=t`, pivot 899.00, close 855.80 → **ON_DECK, a served funnel candidate**. The first case in this investigation series where the split reaches a candidate |
 | live entries affected | **0** (`strategy.paper_positions` holds no row for any name involved) |
 
@@ -174,8 +174,8 @@ n = **38,868** name-dates (22 screen dates).
 
 | | rank differs | crosses `rs>=70` | of which divergent / passive | changes `passes_all` |
 |---|---|---|---|---|
-| **B32** | **22,928 (58.99%)** | **34** (17 gain, 17 lose) | 17 / 17 | **3** |
-| **BALL** | 29,316 (75.42%) | 54 (27 / 27) | 17 / 37 | 10 |
+| **B32** | **22,928 (58.99%)** | **34** (17 gain, 17 lose) | 17 / 17 | 3 recompute rows → **2 corroborated** (§3.4) |
+| **BALL** | 29,316 (75.42%) | 54 (27 / 27) | 17 / 37 | 10 recompute rows (not corroborated one by one) |
 
 The gain/lose symmetry is structural, not coincidence: `rsRank = i·100/(n−1)` is positional, so a
 divergent name climbing past the 70th percentile displaces exactly one name below it.
@@ -196,9 +196,9 @@ crossover. **[computed]**
 So the universe-relative propagation the owner predicted is real and enormous in *count* (59% of
 name-dates move) but tiny in *magnitude* for the bystanders — never as much as one percentile
 point. A bystander can only flip the gate if it already sits within ~0.4 of 70.00, which is exactly
-what the three outcome-changing rows look like. **[computed]**
+what the outcome-changing rows look like. **[computed]**
 
-### 3.4 The three that change the screen outcome
+### 3.4 The rows that change the screen outcome — 2 corroborated, 1 recompute-only
 
 ```
 2026-07-27 SIEMENS    rsA=70.07 rsB=69.96  passes_all True->False   (passive)
@@ -287,7 +287,9 @@ sides' `fetched_at` being ≤ the screen's own `computed_at`, so a historical re
 screen could have seen rather than what the tables say today. Excluded bars are counted
 (`barsExcludedAsOf`), and a symbol whose every shared bar was rewritten is reported as unjudgeable
 (`symbolsWithNoHonestBars`) rather than clean. On the live nightly path the cutoff is minutes old
-and excludes nothing; the gate exists so the endpoint is reproducible.
+and excludes nothing; the gate exists so a historical read is as-of-BOUNDED rather than a comparison
+against today's bytes. It is not reproducibility: `fetched_at` bounds whether a row changed after
+the screen, never what it held at the time (§6.9).
 
 **Durable and retried.** The screen persists and the ingest ledger succeeds *before* the probe runs,
 and every later trigger hits the "already current" dedup skip — so without a marker of its own, a
@@ -296,6 +298,15 @@ per screen date in the existing `canary_runs` table (no migration) and every doo
 unmarked date, the dedup-skip path included. A probe failure leaves the date unmarked, so it
 retries. No CLAIMED→DONE lease: that protocol exists because a duplicate *page* is harmful, and this
 writes only a log line — if it ever grows an alert it must adopt the lease with it.
+
+⚠️ **One orchestration, four doors — and it was three for a while.** `MinerviniScheduler.runOnce`
+carried the geometry-consistency and plane-divergence guarantees and its javadoc said the controller
+called it. It did not: `POST /run` duplicated the screen → upsert → geometry sequence inline, so
+`runOnce` had **no production caller at all** and every guarantee it carried silently skipped the one
+path a human triggers by hand. Worse, a forced recompute rewrites `computed_at` and can change the
+candidate set, so the stale date marker would have *suppressed* the fresh observation — the
+durability fix destroying the thing it protects. The controller now delegates, and the probe is
+**forced** on that path (marker bypassed, then rewritten). Pinned by `MinerviniRunEndpointTest`.
 
 **Tunable from `.env`, which required more than a `@Value` default.** `artha.minervini.plane-divergence.{enabled,min-pct,lookback-days}`
 each have a matching `deploy/docker-compose.yml` passthrough and a `.env.example` entry. Without the
@@ -333,6 +344,9 @@ separate decision. Recorded here, not built.
 | `MinerviniSchedulerTest.anOutstandingProbeIsRetriedOnTheDedupSkipPathAndOnlyOnce` | both halves on the same path: no marker → the probe re-runs (and the screen still does not); marker → it does not re-run |
 | `MinerviniSchedulerTest.aProbeFailureIsFailSoftAndLeavesTheDateUnmarked` | a throwing probe must not fail the screen, and must not mark the date "done" |
 | `PlaneDivergenceKnobPassthroughTest` | a knob without a compose passthrough / `.env.example` entry (#653) |
+| `MinerviniRunEndpointTest` | **the `POST /run` path**: the endpoint must go THROUGH `MinerviniScheduler.runOnce`, and must not re-run the screen / upsert / geometry itself |
+| `MinerviniSchedulerTest.aForcedRecomputeProbesEvenWhenTheDateIsAlreadyMarked` | a forced recompute suppressed by the stale date marker |
+| `MinerviniSchedulerTest.aScheduledDoorOnAnAlreadyMarkedDateStandsDown` | the opposite half — a scheduled door must still respect the marker |
 
 **Red-proofs** (each through the `test` lifecycle phase, never a bare `surefire:test`):
 
@@ -342,6 +356,8 @@ separate decision. Recorded here, not built.
 | **retry** — drop `probePlaneDivergence(...)` from the dedup-skip path | **RED**: `anOutstandingProbeIsRetriedOnTheDedupSkipPathAndOnlyOnce:107` |
 | **no-page** — re-add an ntfy send on `divergentCandidates > 0` | **RED**: `theProbeNeverPagesEvenOnADivergentServedCandidate:84` |
 | **passthrough** — remove the three compose entries | **RED**: `everyKnobHasAMarketDataComposePassthrough:36` |
+| **`POST /run`** — restore the controller's inline screen/upsert/geometry | **RED**: `postRunDelegatesToTheInstrumentedOrchestration` |
+| **forced probe** — make `runOnce` pass `force=false` | **RED**: `aForcedRecomputeProbesEvenWhenTheDateIsAlreadyMarked` |
 | plane axis — compare plane A against **itself** | **RED**: the IT's `containsExactlyInAnyOrder` (measured on the pre-review revision of the same fixture) |
 | candidate axis — `servedSymbols()` also returns the WATCH bucket | **RED**: the IT's `PDVWATCH.candidate()` assertion (same) |
 

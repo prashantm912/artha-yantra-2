@@ -31,7 +31,8 @@ class MinerviniControllerDefaultDateTest {
         mock(MinerviniHitRateService.class),
         mock(MinerviniBacktestService.class),
         mock(in.arthayantra.marketdata.screener.ScreenerHistoryRepository.class),
-        mock(PlaneDivergenceProbe.class));
+        mock(PlaneDivergenceProbe.class),
+        mock(MinerviniScheduler.class));
   }
 
   @Test

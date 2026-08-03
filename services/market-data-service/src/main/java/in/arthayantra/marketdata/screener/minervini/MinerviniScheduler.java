@@ -72,16 +72,32 @@ public class MinerviniScheduler {
     runQuietly("scheduled");
   }
 
-  /** On-demand run (used by the controller's POST /run). Returns rows written. */
-  public int runOnce(LocalDate asOf) {
+  /**
+   * On-demand forced recompute — the ONE orchestration behind {@code POST /run}.
+   *
+   * <p>⚠️ This method's javadoc used to claim the controller called it while the controller in fact
+   * duplicated the screen/upsert/geometry sequence inline, so {@code runOnce} had no production
+   * caller at all. Every guarantee added here — geometry consistency, and now the plane-divergence
+   * observation — silently did not apply to the one path a human triggers by hand. The controller
+   * now delegates; keep it that way, and {@link MinerviniRunEndpointTest} fails if it stops.
+   *
+   * <p>The probe is FORCED here. A recompute rewrites {@code computed_at} and can change the
+   * candidate set, so the observation the date already carries describes a screen that no longer
+   * exists — letting the existing completion marker suppress a fresh reading would make the
+   * durability marker actively destroy the thing it exists to protect.
+   *
+   * <p>Returns the fresh {@link TrendTemplateService.ScreenResult} so the caller can render exactly
+   * what was persisted without a second read.
+   */
+  public TrendTemplateService.ScreenResult runOnce(LocalDate asOf) {
     TrendTemplateService.ScreenResult r = screener.screen(asOf);
     if (r.screenDate() == null) {
-      return 0;
+      return r;
     }
-    int written = repo.upsertAll(r.screenDate(), r.candidates());
+    repo.upsertAll(r.screenDate(), r.candidates());
     computeGeometry(r);
-    probePlaneDivergence(r.screenDate(), "run-once");
-    return written;
+    probePlaneDivergence(r.screenDate(), "run-once", true);
+    return r;
   }
 
   private void runQuietly(String trigger) {
@@ -104,7 +120,7 @@ public class MinerviniScheduler {
         // probe exception after the screen persisted used to be unrecoverable: every later door
         // hit this skip and returned, so that evening's plane-divergence reading was lost for
         // good. Retry it here instead — the screen stays skipped, only the probe re-runs.
-        probePlaneDivergence(persisted, trigger + "-retry");
+        probePlaneDivergence(persisted, trigger + "-retry", false);
         return;
       }
       runId = ledger.start(IngestRunLedger.SOURCE_MINERVINI_SCREEN);
@@ -121,7 +137,7 @@ public class MinerviniScheduler {
       log.info(
           "minervini screen upserted {} rows for {} ({} pass all 8 gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
-      probePlaneDivergence(r.screenDate(), trigger);
+      probePlaneDivergence(r.screenDate(), trigger, false);
     } catch (Exception e) {
       // Audit P0-4/H10: a failed screen leaves the 20:00 swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
@@ -166,15 +182,18 @@ public class MinerviniScheduler {
    * so a duplicate run is harmless and a single completion marker is the whole requirement. If this
    * ever grows an alert, it must adopt the CLAIMED→DONE protocol with it.
    *
+   * <p>{@code force} is for the recompute path only — see {@link #runOnce}. Every scheduled door
+   * passes false, so a completed date is observed exactly once.
+   *
    * <p>Fail-soft: a probe failure never fails a screen, and it leaves the date UNMARKED so the next
    * door retries rather than inheriting the gap.
    */
-  private void probePlaneDivergence(LocalDate screenDate, String trigger) {
+  private void probePlaneDivergence(LocalDate screenDate, String trigger, boolean force) {
     if (!planeDivergenceEnabled || screenDate == null) {
       return;
     }
     try {
-      if (planeDivergence.alreadyReported(screenDate)) {
+      if (!force && planeDivergence.alreadyReported(screenDate)) {
         return;
       }
       PlaneDivergenceProbe.Report r = planeDivergence.probe(screenDate);

@@ -45,10 +45,15 @@ import org.springframework.stereotype.Service;
  * four false flips in #1272 and dissolved under this same gate. Every bar pair is therefore gated on
  * <b>both</b> sides' {@code fetched_at} being at or before the screen's own {@code computed_at}, and
  * the bars that gate excludes are counted and reported rather than silently dropped. On the live
- * nightly path the cutoff is minutes old and excludes nothing; the gate exists so the historical
- * endpoint is reproducible. {@code fetched_at} is an UPSERT timestamp, so this soundly answers "was
- * this row rewritten after the screen ran" — it cannot recover historical bytes, and a symbol whose
- * every shared bar was rewritten is reported as unjudgeable, never as clean.
+ * nightly path the cutoff is minutes old and excludes nothing; the gate is what makes a historical
+ * read <b>as-of-bounded with explicit exclusions</b>.
+ *
+ * <p>⚠️ That is deliberately weaker than <i>reproducible</i>, and the difference matters. {@code
+ * fetched_at} is an UPSERT timestamp, so it soundly answers "was this row rewritten after the screen
+ * ran" — it cannot recover what the row HELD then, and a row written before the screen and rewritten
+ * again before it reads clean either way. A symbol whose every shared bar was rewritten is reported
+ * as unjudgeable, never as clean. Exact history would need the nightly report persisted rather than
+ * recomputed; the completion marker records only that the probe ran, not what it saw.
  *
  * <p><b>Why a candidate and not merely a divergence.</b> A divergence that never reaches the served
  * funnel cannot move money, and there are always some — 197 divergent passer name-dates over the 22

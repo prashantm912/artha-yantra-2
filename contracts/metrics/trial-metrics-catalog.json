@@ -1,6 +1,6 @@
 {
   "description": "Single source of truth for the rankable per-trial/run metrics the backtest TRIAL worker emits onto each trial's metrics JSON. Both languages consume THIS file so the two never drift: the Python optimizer derives its objective-metric allow-list from it (services/optimizer-service/app/metrics_catalog.py), and the Java backtest side pins it with a consistency test (TrialMetricsCatalogConsistencyTest) that fails if MetricsCalculator / BenchmarkMetrics emit a key the catalog does not carry (or vice versa). Add a metric HERE + at its emit site in the same PR.",
-  "reference": "docs/superpowers/plans/2026-07-02-remaining-items.md §9 candidate 03 (arch-03-trial-metrics-catalog)",
+  "reference": "docs/superpowers/plans/2026-07-02-remaining-items.md §9 candidate 03 (arch-03-trial-metrics-catalog) [rebase re-proof]",
   "version": 1,
   "enums": {
     "unit": ["percent", "ratio", "currency", "count", "bars"],

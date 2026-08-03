@@ -52,7 +52,7 @@ public class OptionsSnapshotReader {
    * back-solves ({@code CandleDerivedChainReader.enrichIv}) — so a null {@code iv} is a SYMPTOM of
    * derivation, never its identity, and nothing may key provenance on it. {@code
    * OptionsAnalyticsController.oiFreshness} used to, and mislabelled both directions; it now asks
-   * {@link #hasCapturedRows} for the row's {@code source} instead.
+   * {@link #allGroupsCaptured} for the winning row's {@code source} instead.
    *
    * <p>Spelled as the 3.1 type union, NOT {@code @Schema(nullable = true)} — the latter is a silent
    * no-op at OpenAPI 3.1 and would publish these as non-nullable, a lie in the generated TS.
@@ -492,40 +492,63 @@ public class OptionsSnapshotReader {
   }
 
   /**
-   * True iff [{@code from}, {@code to}) holds at least one LIVE-CAPTURED, non-quarantined snapshot
-   * row for ({@code underlying}, {@code expiry}) — the provenance discriminator behind the OI reads'
-   * freshness envelope ({@code OptionsAnalyticsController.oiFreshness}).
+   * True iff EVERY (bucket, strike, optionType) group in [{@code from}, {@code to}) resolves to a
+   * LIVE-CAPTURED row — the provenance discriminator behind the OI reads' freshness envelope ({@code
+   * OptionsAnalyticsController.oiFreshness}). False when the window holds no group at all, which is
+   * the candle-derived reader's case (it writes nothing).
    *
-   * <p>"Live-captured" is deliberately the SAME predicate {@code OptionsSnapshotRepository}'s {@code
-   * CAPTURED_ONLY} already uses to decide whether a stored chain may be served back as the live one:
-   * {@code source} is NULL on pre-V023 rows ("read as live by convention", V023's own wording) and
-   * {@code 'LIVE'} on every capture since, while every other label is a DERIVATION rather than a
-   * capture — {@code 'BACKFILL'} (the OI importer's 1m history) and {@code 'UPSTOX_1M'} (the
-   * on-demand stock-chain warm, {@code StockChainWarmService}). Quarantined rows are excluded because
-   * every OI fold excludes them, so they can never be the rows a response was actually built from.
+   * <p><b>Grouped by the SAME key and resolved by the SAME winner as {@link #series}, deliberately.</b>
+   * {@code series} emits one row per (bucket, strike, optionType) whose every value is {@code
+   * last(…, ts)} — the newest row in the group WINS. So the provenance a response actually carries is
+   * the provenance of that winning row, and nothing else. Asking the weaker question "does the window
+   * hold any captured row?" promotes a mixed bucket to {@code live} while serving derived values: a
+   * 09:24 {@code LIVE} row and a 09:25 {@code UPSTOX_1M} row land in the same 5-minute bucket, {@code
+   * last()} takes the 09:25 derived values, and the read is labelled a capture. The same hole opens
+   * across strikes — one derived leg beside captured legs is a partly-derived chain. Cross-vendor
+   * review caught both on #1240; the homogeneous fixtures could not reach either.
    *
-   * <p>The {@code +1s} shift on both bounds mirrors {@link #series}, so the window probed is exactly
-   * the one that produced the rows under the end-of-window labelling this class documents (bucket
-   * {@code B} holds {@code B < ts <= B + interval}).
+   * <p>"Live-captured" is the SAME predicate {@code OptionsSnapshotRepository}'s {@code CAPTURED_ONLY}
+   * already uses to decide whether a stored chain may be served back as the live one: {@code source}
+   * is NULL on pre-V023 rows ("read as live by convention", V023's own wording) and {@code 'LIVE'} on
+   * every capture since, while every other label is a DERIVATION rather than a capture — {@code
+   * 'BACKFILL'} (the OI importer's 1m history) and {@code 'UPSTOX_1M'} (the on-demand stock-chain
+   * warm, {@code StockChainWarmService}). The {@code COALESCE(source, 'LIVE')} INSIDE the aggregate
+   * folds the NULL convention in per row, so the classification never depends on whether {@code
+   * last()} propagates or skips a NULL value. Quarantined rows are excluded because every OI fold
+   * excludes them, so they can never be rows a response was built from.
    *
-   * <p>A bare {@code count(*)} rather than {@code EXISTS}/{@code ORDER BY … LIMIT 1} for the same
-   * reason {@link #latestPair} uses two aggregates: an aggregate carries no pathkey, so TimescaleDB
-   * 2.18.2's compressed-batch sorted-merge planner assertion is never reachable. The window is one
-   * interval bucket wide, so the count is bounded by the chain size.
+   * <p>The {@code +1s} shift on both bounds and the {@code ts - INTERVAL '1 second'} bucket argument
+   * both mirror {@link #series}, so the groups counted here are exactly the groups it returns.
+   *
+   * <p>Shape safety: {@code GROUP BY <expression>, <col>, <col>} is the multi-key form that is SAFE
+   * under TimescaleDB 2.18.2 — identical to {@link #series}, which runs it live — and there is no
+   * {@code ORDER BY}/{@code DISTINCT}/{@code LIMIT} anywhere, so the compressed-batch sorted-merge
+   * planner assertion ({@link #latestPair}) has no pathkey to trip on.
    */
-  public boolean hasCapturedRows(
-      String underlying, LocalDate expiry, OffsetDateTime from, OffsetDateTime to) {
-    Long rows =
-        jdbc.queryForObject(
-            "SELECT count(*) FROM options_chain_snapshots "
-                + "WHERE underlying = ? AND expiry = ? AND ts >= ? AND ts < ? "
-                + "AND (source IS NULL OR source = 'LIVE') AND (quarantined IS NOT TRUE)",
-            Long.class,
+  public boolean allGroupsCaptured(
+      String underlying,
+      LocalDate expiry,
+      OiInterval interval,
+      OffsetDateTime from,
+      OffsetDateTime to) {
+    String sql =
+        "SELECT count(*) AS groups, count(*) FILTER (WHERE won <> 'LIVE') AS derived_groups FROM ("
+            + "SELECT public.last(COALESCE(source, 'LIVE'), ts) AS won "
+            + "FROM options_chain_snapshots "
+            + "WHERE underlying = ? AND expiry = ? AND ts >= ? AND ts < ? "
+            + "  AND (quarantined IS NOT TRUE) "
+            + "GROUP BY public.time_bucket(INTERVAL '"
+            + interval.pgInterval()
+            + "', ts - INTERVAL '1 second', 'Asia/Kolkata'), strike, option_type) g";
+    List<Boolean> out =
+        jdbc.query(
+            sql,
+            (rs, n) -> rs.getLong("groups") > 0 && rs.getLong("derived_groups") == 0,
             underlying,
             java.sql.Date.valueOf(expiry),
             Timestamp.from(from.plusSeconds(1).toInstant()),
             Timestamp.from(to.plusSeconds(1).toInstant()));
-    return rows != null && rows > 0;
+    return !out.isEmpty() && Boolean.TRUE.equals(out.get(0));
   }
 
   /** Runs a single-row bucket aggregate; null when the filtered set is empty. */

@@ -128,6 +128,101 @@ class OptionsAnalyticsControllerIntegrationTest extends MarketDataIntegrationTes
         .andExpect(jsonPath("$.freshness.source").value("capture"));
   }
 
+  /**
+   * MIXED SHAPE 1 (cross-vendor review, #1240) — same bucket, different timestamps, DERIVED wins.
+   * {@code series()} folds each (bucket, strike, optionType) with {@code last(…, ts)}, so the 09:25
+   * warm row wins the 09:20 5-minute bucket over the 09:24 capture and the response carries derived
+   * values. Classifying on "the window holds SOME captured row" answers live here — the same false
+   * live label this PR exists to remove, in a shape a homogeneous fixture cannot reach.
+   */
+  @Test
+  void mixedBucketWhereDerivedRowWinsReadsAsDerived() throws Exception {
+    String u = "FRESHMIXWIN";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    // Both land in bucket [09:20, 09:25) under end-of-window labelling (ts - 1s).
+    OffsetDateTime captured =
+        OffsetDateTime.of(2026, 6, 20, 9, 24, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime warmed = captured.plusMinutes(1); // 09:25 -> still bucket 09:20, and NEWER
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, captured, u, exp, "22500", "CE", "100", 1000L, 0L, "LIVE");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, warmed, u, exp, "22500", "CE", "111", 1111L, 0L, "UPSTOX_1M");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        // the served OI is the 09:25 warm row's -> the label must follow it
+        .andExpect(jsonPath("$.ceOi").value(1111))
+        .andExpect(jsonPath("$.freshness.provenance").value("derived"))
+        .andExpect(jsonPath("$.freshness.source").value("candle-derived"));
+  }
+
+  /**
+   * MIXED SHAPE 2 (cross-vendor review, #1240) — one derived LEG beside captured legs in the SAME
+   * bucket. Every group is its own {@code last()} fold, so a chain whose 22600 CE is warm-derived is a
+   * partly-derived chain however many captured legs sit beside it; only ALL-captured earns {@code live}.
+   */
+  @Test
+  void mixedStrikesWithOneDerivedLegReadsAsDerived() throws Exception {
+    String u = "FRESHMIXLEG";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime t0 =
+        OffsetDateTime.of(2026, 6, 20, 9, 24, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "CE", "100", 1000L, 0L, "LIVE");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22500", "PE", "90", 1500L, 0L, "LIVE");
+    // one warm leg is enough — this strike's group resolves to UPSTOX_1M
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, t0, u, exp, "22600", "CE", "60", 700L, 0L, "UPSTOX_1M");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.ceOi").value(1700)) // both CE legs really are in the fold
+        .andExpect(jsonPath("$.freshness.provenance").value("derived"))
+        .andExpect(jsonPath("$.freshness.source").value("candle-derived"));
+  }
+
+  /**
+   * The over-correction guard, and the reason the rule is "the WINNER of each group", not "any derived
+   * row taints the window": when the capture arrives LAST it wins its group, so {@code series()}
+   * returns captured values and the read genuinely IS a capture. A blunter "any non-captured row =>
+   * derived" rule would answer derived here and start under-reporting live data — the mirror of the
+   * bug this PR fixes.
+   */
+  @Test
+  void mixedBucketWhereCapturedRowWinsReadsAsCapture() throws Exception {
+    String u = "FRESHMIXCAP";
+    LocalDate exp = LocalDate.of(2026, 6, 25);
+    OffsetDateTime warmed =
+        OffsetDateTime.of(2026, 6, 20, 9, 24, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime captured = warmed.plusMinutes(1); // 09:25 -> same bucket, and NEWER
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, warmed, u, exp, "22500", "CE", "111", 1111L, 0L, "UPSTOX_1M");
+    OptionsSnapshotReaderIntegrationTest.insertSourcedRow(
+        jdbc, captured, u, exp, "22500", "CE", "100", 1000L, 0L, "LIVE");
+
+    mockMvc
+        .perform(
+            get("/api/v1/market/options/oi-stats")
+                .param("name", u)
+                .param("expiry", "2026-06-25")
+                .param("interval", "5m"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.ceOi").value(1000)) // the capture won the fold
+        .andExpect(jsonPath("$.freshness.provenance").value("live"))
+        .andExpect(jsonPath("$.freshness.source").value("capture"));
+  }
+
   @Test
   void unsupportedIntervalIs400WithCode() throws Exception {
     mockMvc

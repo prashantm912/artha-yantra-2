@@ -129,8 +129,11 @@ public class OptionsAnalyticsController {
    * / {@code capture} when the buckets those rows span hold a LIVE-captured snapshot row, {@code
    * derived} / {@code candle-derived} otherwise — i.e. when the read came from the candle-derived
    * chain (no snapshot row at all) or from a candle-derived WARM ({@code source='UPSTOX_1M'}, the
-   * on-demand stock chain). {@code asOf} + {@code complete} are supplied by the caller from the rows
-   * it already read.
+   * on-demand stock chain). "Holds a captured row" is not good enough and is not what is asked:
+   * the label tracks the row that WON each {@code last(…, ts)} group, so ONE derived leg, or one
+   * derived row arriving later in an otherwise-captured bucket, makes the whole read derived —
+   * see {@link OptionsSnapshotReader#allGroupsCaptured}. {@code asOf} + {@code complete} are
+   * supplied by the caller from the rows it already read.
    *
    * <p>This used to test {@code !q.live() && rows.stream().allMatch(p -> p.iv() == null)}, which was
    * wrong in BOTH directions. (a) The {@code !q.live()} conjunct made {@code derived} unreachable in
@@ -140,7 +143,7 @@ public class OptionsAnalyticsController {
    * (b) {@code iv == null} is a SYMPTOM of derivation, not its identity: {@code
    * CandleDerivedChainReader.enrichIv} back-solves ATM-band IVs, so derived rows can carry IV, and a
    * genuine live capture whose solver produced nothing carries none. {@code source} is the identity —
-   * see {@link OptionsSnapshotReader#hasCapturedRows}, which reuses the platform's existing
+   * see {@link OptionsSnapshotReader#allGroupsCaptured}, which reuses the platform's existing
    * capture-trust predicate for it.
    */
   private DataFreshness oiFreshness(
@@ -156,7 +159,7 @@ public class OptionsAnalyticsController {
   }
 
   /**
-   * Is at least one LIVE-captured snapshot row behind the buckets {@code rows} span? The window is
+   * Did EVERY group behind the buckets {@code rows} span resolve to a LIVE-captured row? The window is
    * taken from the rows themselves — {@code [oldest bucket, newest bucket + one interval)} — so it is
    * exactly the window the reader served them from, and it holds no snapshot row at all on the
    * candle-derived path (the facade only derives when the snapshot read came back EMPTY for that
@@ -174,7 +177,8 @@ public class OptionsAnalyticsController {
         newest = p.bucket();
       }
     }
-    return reader.hasCapturedRows(q.name(), expiry, oldest, newest.plus(q.interval().bucket()));
+    return reader.allGroupsCaptured(
+        q.name(), expiry, q.interval(), oldest, newest.plus(q.interval().bucket()));
   }
 
   public record OiStats(

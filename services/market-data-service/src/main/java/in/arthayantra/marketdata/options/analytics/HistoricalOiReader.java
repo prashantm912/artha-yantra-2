@@ -121,14 +121,14 @@ public class HistoricalOiReader {
   }
 
   /**
-   * True iff [{@code from}, {@code to}) is backed by at least one LIVE-CAPTURED snapshot row —
-   * {@link OptionsSnapshotReader#hasCapturedRows}, straight through. Deliberately NOT facaded onto
-   * the derived reader: the derived path writes nothing, so a window it served has no snapshot row
-   * at all and this correctly answers false.
+   * True iff every (bucket, strike, optionType) group in [{@code from}, {@code to}) resolves to a
+   * LIVE-CAPTURED row — {@link OptionsSnapshotReader#allGroupsCaptured}, straight through.
+   * Deliberately NOT facaded onto the derived reader: the derived path writes nothing, so a window
+   * it served has no group at all and this correctly answers false.
    */
-  public boolean hasCapturedRows(
-      String name, LocalDate expiry, OffsetDateTime from, OffsetDateTime to) {
-    return snap.hasCapturedRows(name, expiry, from, to);
+  public boolean allGroupsCaptured(
+      String name, LocalDate expiry, OiInterval interval, OffsetDateTime from, OffsetDateTime to) {
+    return snap.allGroupsCaptured(name, expiry, interval, from, to);
   }
 
   public List<PerStrikeSessionStat> sessionStats(

@@ -2992,16 +2992,21 @@ export interface components {
         MinerviniPlaneDivergence: {
             /** Format: date */
             screenDate: string | null;
+            /** Format: date-time */
+            asOfCutoff: string | null;
             /** Format: int32 */
             passersChecked: number;
+            /** Format: int32 */
+            barsCompared: number;
+            /** Format: int32 */
+            barsExcludedAsOf: number;
+            /** Format: int32 */
+            symbolsWithNoHonestBars: number;
             /** Format: int32 */
             divergentPassers: number;
             /** Format: int32 */
             divergentCandidates: number;
-            /** Format: int32 */
-            alertingCandidates: number;
             thresholdPct: string;
-            alertPct: string;
             /** Format: int32 */
             lookbackDays: number;
             names: components["schemas"]["MinerviniPlaneDivergentName"][];
@@ -3013,6 +3018,8 @@ export interface components {
             worstBar: string | null;
             /** Format: int32 */
             sharedBars: number;
+            /** Format: int32 */
+            barsExcludedAsOf: number;
             candidate: boolean;
         };
         MinerviniFunnel: {

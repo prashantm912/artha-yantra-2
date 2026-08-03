@@ -80,6 +80,7 @@ public class MinerviniScheduler {
     }
     int written = repo.upsertAll(r.screenDate(), r.candidates());
     computeGeometry(r);
+    probePlaneDivergence(r.screenDate(), "run-once");
     return written;
   }
 
@@ -99,6 +100,11 @@ public class MinerviniScheduler {
       LocalDate persisted = repo.latestScreenDate();
       if (persisted != null && persisted.equals(screener.latestScreenDate())) {
         log.debug("minervini screen already current for {} — skipped ({})", persisted, trigger);
+        // ...but the probe is a SEPARATE observation with its own durable marker. A crash or a
+        // probe exception after the screen persisted used to be unrecoverable: every later door
+        // hit this skip and returned, so that evening's plane-divergence reading was lost for
+        // good. Retry it here instead — the screen stays skipped, only the probe re-runs.
+        probePlaneDivergence(persisted, trigger + "-retry");
         return;
       }
       runId = ledger.start(IngestRunLedger.SOURCE_MINERVINI_SCREEN);
@@ -115,7 +121,7 @@ public class MinerviniScheduler {
       log.info(
           "minervini screen upserted {} rows for {} ({} pass all 8 gates, {} geometry rows) [{}]",
           written, r.screenDate(), passing, geo, trigger);
-      probePlaneDivergence(r.screenDate());
+      probePlaneDivergence(r.screenDate(), trigger);
     } catch (Exception e) {
       // Audit P0-4/H10: a failed screen leaves the 20:00 swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
@@ -143,46 +149,46 @@ public class MinerviniScheduler {
   }
 
   /**
-   * Two-plane read-back over the screen just persisted (see {@link PlaneDivergenceProbe}). Runs here
-   * rather than on its own cron because this is the ONLY moment the screen + geometry are both fresh
-   * and the funnel is fully formed — a separate job would have to re-derive when that is true.
+   * Two-plane read-back over the screen just persisted (see {@link PlaneDivergenceProbe}). Runs
+   * here rather than on its own cron because this is the ONLY moment the screen, the geometry and
+   * therefore the funnel are all fresh for the date; a separate job would have to re-derive when
+   * that is true.
    *
-   * <p>Always logs; pages ONLY when a divergent symbol is a SERVED candidate, because a divergence
-   * that never reaches the funnel cannot move money. Fail-soft: the probe never fails a screen.
+   * <p><b>Durable, and retried.</b> Completion is recorded per screen date by the probe itself, and
+   * every door into the scheduler retries a date that has no completion row — including the
+   * dedup-skip path above. Without that, the ordering was silently lossy: the screen persists and
+   * the ingest ledger succeeds BEFORE the probe runs, so a crash or a probe exception in between
+   * left the screen "already current" and every later trigger skipped straight past the missing
+   * observation, permanently.
+   *
+   * <p>Unlike {@code IngestCoverageCanary} this needs no two-state claim or lease. That protocol
+   * exists because a duplicate PAGE is harmful; this probe writes only a log line and a marker row,
+   * so a duplicate run is harmless and a single completion marker is the whole requirement. If this
+   * ever grows an alert, it must adopt the CLAIMED→DONE protocol with it.
+   *
+   * <p>Fail-soft: a probe failure never fails a screen, and it leaves the date UNMARKED so the next
+   * door retries rather than inheriting the gap.
    */
-  private void probePlaneDivergence(LocalDate screenDate) {
-    if (!planeDivergenceEnabled) {
+  private void probePlaneDivergence(LocalDate screenDate, String trigger) {
+    if (!planeDivergenceEnabled || screenDate == null) {
       return;
     }
     try {
-      PlaneDivergenceProbe.Report r = planeDivergence.probe(screenDate);
-      if (r.divergentPassers() == 0) {
-        log.info("minervini plane-divergence {}: none of {} passers diverge", screenDate,
-            r.passersChecked());
+      if (planeDivergence.alreadyReported(screenDate)) {
         return;
       }
+      PlaneDivergenceProbe.Report r = planeDivergence.probe(screenDate);
       log.info(
-          "minervini plane-divergence {}: {} of {} passers read two ways (>= {}% over {}d), {} are"
-              + " served candidates, {} clear the {}% page floor — {}",
-          screenDate, r.divergentPassers(), r.passersChecked(), r.thresholdPct(), r.lookbackDays(),
-          r.divergentCandidates(), r.alertingCandidates(), r.alertPct(), r.names());
-      if (r.alertingCandidates() > 0) {
-        String who =
-            r.names().stream()
-                .filter(r::isAlerting)
-                .map(n -> n.symbol() + " " + n.maxDivergencePct() + "% (worst " + n.worstBar() + ")")
-                .collect(java.util.stream.Collectors.joining(", "));
-        ntfy.send(
-            "Minervini funnel candidate read off two price planes",
-            "high",
-            screenDate
-                + ": "
-                + who
-                + " — candles@1d is dividend-back-adjusted, nse_eod_bhavcopy is not. The screen"
-                + " admitted a name the engine prices differently; neither plane was changed.");
-      }
+          "minervini plane-divergence {} [{}]: {} of {} passers read two ways (>= {}% over {}d),"
+              + " {} are served candidates; {} bar-pairs compared, {} excluded as-of (cutoff {}),"
+              + " {} symbols unjudgeable — {}",
+          screenDate, trigger, r.divergentPassers(), r.passersChecked(), r.thresholdPct(),
+          r.lookbackDays(), r.divergentCandidates(), r.barsCompared(), r.barsExcludedAsOf(),
+          r.asOfCutoff(), r.symbolsWithNoHonestBars(), r.names());
+      planeDivergence.markReported(screenDate);
     } catch (Exception e) {
-      log.warn("minervini plane-divergence probe failed for {} — non-fatal", screenDate, e);
+      log.warn(
+          "minervini plane-divergence probe failed for {} — non-fatal, will retry", screenDate, e);
     }
   }
 }

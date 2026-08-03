@@ -66,72 +66,58 @@ class MinerviniSchedulerTest {
   }
 
   /**
-   * The plane-divergence alarm pages ONLY when a divergent symbol is a SERVED funnel candidate AND
-   * its divergence clears the page floor.
-   *
-   * <p>Three runs of the SAME screen through the SAME scheduler, differing only in the probe's
-   * report. They give opposite answers on both axes by construction: (a) a big divergence that is
-   * not a served candidate — an implementation that paged on "a divergence exists" fails here;
-   * (b) a served candidate below the page floor — an implementation with one threshold instead of
-   * two fails here (measured: 4.7 such candidates EVERY evening, so this is the noise case, not a
-   * hypothetical); (c) a served candidate above the floor — the only one that may page.
+   * The probe NEVER pages. A page keyed on the divergent symbol was built, measured and removed:
+   * it fires on 20 of 22 evenings, and it is structurally blind to the one measured casualty
+   * (ICEMAKE 2026-07-28, which was displaced across the rs>=70 cut by ANOTHER symbol's error).
+   * Re-adding a notification here must fail this test rather than ship quietly.
    */
   @Test
-  void pagesOnlyWhenAServedCandidateClearsThePageFloor() {
+  void theProbeNeverPagesEvenOnADivergentServedCandidate() {
     LocalDate day = LocalDate.of(2026, 7, 6);
     when(screener.screen(null))
         .thenReturn(new TrendTemplateService.ScreenResult(day, 0, List.of()));
-
-    // (a) 9% divergence, but WATCH bucket — not served → silent
     when(planeDivergence.probe(day))
-        .thenReturn(report(day, name("WATCHONLY", "9.0", day, false)));
+        .thenReturn(report(day, name("INDOBORAX", "9.3", day, true)));
+
     scheduler(true).onBhavcopyBackfillCompleted();
+
     org.mockito.Mockito.verify(ntfy, org.mockito.Mockito.never()).send(any(), any(), any());
-
-    // (b) a SERVED candidate, but 2.0% — under the 5% page floor → still silent
-    when(planeDivergence.probe(day)).thenReturn(report(day, name("ABSLAMC", "2.0", day, true)));
-    scheduler(true).onBhavcopyBackfillCompleted();
-    org.mockito.Mockito.verify(ntfy, org.mockito.Mockito.never()).send(any(), any(), any());
-
-    // (c) a SERVED candidate at 9.3% → the owner is paged, and the message names it
-    when(planeDivergence.probe(day)).thenReturn(report(day, name("INDOBORAX", "9.3", day, true)));
-    scheduler(true).onBhavcopyBackfillCompleted();
-    org.mockito.Mockito.verify(ntfy)
-        .send(
-            org.mockito.ArgumentMatchers.contains("two price planes"),
-            eq("high"),
-            org.mockito.ArgumentMatchers.contains("INDOBORAX"));
+    verify(planeDivergence).markReported(day);
   }
 
-  private static PlaneDivergenceProbe.DivergentName name(
-      String symbol, String pct, LocalDate worst, boolean candidate) {
-    return new PlaneDivergenceProbe.DivergentName(
-        symbol, new java.math.BigDecimal(pct), worst, 270, candidate);
-  }
-
-  /** Builds a report the way the probe does — the alerting count is DERIVED, never asserted-in. */
-  private static PlaneDivergenceProbe.Report report(
-      LocalDate day, PlaneDivergenceProbe.DivergentName... names) {
-    java.math.BigDecimal reportFloor = new java.math.BigDecimal("0.5");
-    java.math.BigDecimal pageFloor = new java.math.BigDecimal("5.0");
-    List<PlaneDivergenceProbe.DivergentName> list = List.of(names);
-    PlaneDivergenceProbe.Report shell =
-        new PlaneDivergenceProbe.Report(day, 250, 0, 0, 0, reportFloor, pageFloor, 420, List.of());
-    return new PlaneDivergenceProbe.Report(
-        day,
-        250,
-        list.size(),
-        (int) list.stream().filter(PlaneDivergenceProbe.DivergentName::candidate).count(),
-        (int) list.stream().filter(shell::isAlerting).count(),
-        reportFloor,
-        pageFloor,
-        420,
-        list);
-  }
-
-  /** A probe failure must never fail (or silence) the screen it rides on. */
+  /**
+   * The probe is a SEPARATE, durable observation from the screen.
+   *
+   * <p>Screen persistence and the ingest ledger both succeed BEFORE the probe runs, and every later
+   * door hits the "already current" dedup skip. So without a marker of its own, a crash or probe
+   * exception in between lost that evening's reading permanently. Both halves are asserted here and
+   * they answer OPPOSITELY on the same skip path: no marker → the probe re-runs; marker → it does
+   * not, and the screen is not re-run either way.
+   */
   @Test
-  void aProbeFailureIsFailSoft() {
+  void anOutstandingProbeIsRetriedOnTheDedupSkipPathAndOnlyOnce() {
+    LocalDate day = LocalDate.of(2026, 7, 6);
+    when(repo.latestScreenDate()).thenReturn(day);
+    when(screener.latestScreenDate()).thenReturn(day);
+    when(planeDivergence.probe(day)).thenReturn(report(day));
+
+    // no completion marker yet → the skip path still runs the probe
+    when(planeDivergence.alreadyReported(day)).thenReturn(false);
+    scheduler(true).onBhavcopyBackfillCompleted();
+    verify(planeDivergence).probe(day);
+    verify(planeDivergence).markReported(day);
+    // ...and the SCREEN itself is still skipped — the retry is probe-only
+    org.mockito.Mockito.verify(screener, org.mockito.Mockito.never()).screen(any());
+
+    // marker present → no second run
+    when(planeDivergence.alreadyReported(day)).thenReturn(true);
+    scheduler(true).onBhavcopyBackfillCompleted();
+    org.mockito.Mockito.verify(planeDivergence, org.mockito.Mockito.times(1)).probe(day);
+  }
+
+  /** A probe failure must not fail the screen, and must leave the date unmarked so it retries. */
+  @Test
+  void aProbeFailureIsFailSoftAndLeavesTheDateUnmarked() {
     LocalDate day = LocalDate.of(2026, 7, 6);
     when(screener.screen(null))
         .thenReturn(new TrendTemplateService.ScreenResult(day, 0, List.of()));
@@ -141,7 +127,31 @@ class MinerviniSchedulerTest {
 
     verify(repo).upsertAll(eq(day), any());
     verify(ledger).succeed(any(), org.mockito.ArgumentMatchers.anyLong());
+    org.mockito.Mockito.verify(planeDivergence, org.mockito.Mockito.never()).markReported(any());
     org.mockito.Mockito.verify(ntfy, org.mockito.Mockito.never()).send(any(), any(), any());
+  }
+
+  private static PlaneDivergenceProbe.DivergentName name(
+      String symbol, String pct, LocalDate worst, boolean candidate) {
+    return new PlaneDivergenceProbe.DivergentName(
+        symbol, new java.math.BigDecimal(pct), worst, 270, 0, candidate);
+  }
+
+  private static PlaneDivergenceProbe.Report report(
+      LocalDate day, PlaneDivergenceProbe.DivergentName... names) {
+    List<PlaneDivergenceProbe.DivergentName> list = List.of(names);
+    return new PlaneDivergenceProbe.Report(
+        day,
+        day.atTime(19, 55).atOffset(java.time.ZoneOffset.ofHoursMinutes(5, 30)),
+        250,
+        67_500,
+        0,
+        0,
+        list.size(),
+        (int) list.stream().filter(PlaneDivergenceProbe.DivergentName::candidate).count(),
+        new java.math.BigDecimal("0.5"),
+        420,
+        list);
   }
 
   @Test

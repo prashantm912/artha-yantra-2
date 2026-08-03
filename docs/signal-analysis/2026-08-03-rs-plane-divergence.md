@@ -20,7 +20,8 @@ All DB numbers are direct psql output against the LIVE `artha` database on 2026-
 |---|---|
 | built | **`PlaneDivergenceProbe`**, riding the existing 20:00-adjacent Minervini screen batch. No new cron, no migration, no plane change |
 | does it land on a candidate, or merely exist | **It lands.** Over the 22 persisted screen dates, **197** divergent passer name-dates on **22 of 22** dates, of which **103 are served funnel candidates** on **20 of 22** dates |
-| is "a divergent symbol was a candidate" the right page trigger | **No — measured.** That is ~4.7 pages *every evening*. The probe therefore carries **two floors**: a 0.5% REPORT floor (log + endpoint = the visibility fix) and a separate 5% PAGE floor (**7** name-dates on **7** of 22 dates, INDOBORAX + MAHLOG) |
+| is "a divergent symbol was a candidate" the right page trigger | **No, and no threshold fixes it — so the probe does not page at all.** It fires on **20 of 22 evenings**, and it is structurally blind to the one measured casualty (ICEMAKE, which is *not* divergent). Report-only: log + endpoint |
+| are historical results reproducible | **Yes, and only because of the as-of gate.** Both source tables are retro-mutable; every bar pair is gated on both sides' `fetched_at` ≤ the screen's own `computed_at`, and excluded bars are counted, not dropped |
 | did instrumentation require a price change | **No.** Both planes are read-only inputs |
 
 ### Task B — measure the RS legs
@@ -213,9 +214,11 @@ Against the **persisted live record**, not the recompute:
 | **ICEMAKE 07-28** | **70.40** | **t** | **t** | **899.00** | close 855.80 → 0.9520·pivot → **ON_DECK** |
 | DIAMONDYD 07-31 | 69.86 | **f** | — | — | — (did not pass live; recompute artifact) |
 
-So of the three, two agree with what the live screen actually did, one does not, and **ICEMAKE
-2026-07-28 is a genuine served funnel candidate that a dividend-aware RS plane would have dropped.**
-**[computed]**
+**The honest headline is 2, not 3.** SIEMENS and ICEMAKE are corroborated — the persisted record
+shows both passing the live screen. DIAMONDYD is **recompute-only**: the live row says 69.86 /
+`passes_all=f`, so the live screen never admitted it and only my recompute-A does. Of the two
+corroborated, **ICEMAKE 2026-07-28 is a genuine served funnel candidate that a dividend-aware RS
+plane would have dropped.** **[computed]**
 
 `strategy.paper_positions` holds no row for SIEMENS, ICEMAKE, DIAMONDYD, MAHLOG, GLOSTERLTD,
 ABSLAMC, BFINVEST, REDINGTON or DLINKINDIA — so **0 live entries** were affected. **[computed]**
@@ -251,29 +254,55 @@ on the live box for ~250 passers.
 (buyable ∪ on-deck; `watch` is not a candidate) rather than re-deriving the band arithmetic, so the
 two cannot drift.
 
-**Two floors, because one is wrong.** Measured over the 22 screen dates:
+**One floor, and no page.** Measured over the 22 screen dates, divergent *served candidates* by
+magnitude:
 
 | floor | divergent CANDIDATE name-dates | dates hit | symbols |
 |---|---|---|---|
-| ≥ 0.5% (report) | **103** | 20 / 22 | 55 |
+| ≥ 0.5% (the report floor) | **103** | 20 / 22 | 55 |
 | ≥ 1% | 75 | 20 / 22 | 27 |
 | ≥ 2% | 61 | 20 / 22 | 13 |
 | ≥ 3% | 19 | 13 / 22 | 4 |
-| **≥ 5% (page default)** | **7** | **7 / 22** | **INDOBORAX, MAHLOG** |
+| ≥ 5% | 7 | 7 / 22 | INDOBORAX, MAHLOG |
 
-A page on the report floor is ~4.7 alerts every evening — alarm fatigue, not a signal. The 5% page
-floor fires on ~1 evening in 3, on special-dividend-scale distortions only. Both are tunable
-(`artha.minervini.plane-divergence.min-pct` / `.alert-pct` / `.lookback-days` / `.enabled`).
+An earlier revision paged at 5%. It was removed, for two independent reasons and neither is a
+tuning problem:
 
-That MAHLOG is one of the two names the page floor selects is a useful independent check: MAHLOG is
-also the name §3.2's BALL counterfactual finds *gaining* `passes_all` on six separate name-dates.
+- **Frequency.** The scheduler aggregates a date into ONE notification, so the report floor is a
+  page on **20 of 22 evenings** — 91%, not "4.7 per evening". A pager that fires almost nightly
+  trains its reader to ignore it.
+- **Target — the decisive one.** The only measured case where the split changed a screen outcome on
+  a served candidate is **ICEMAKE 2026-07-28, and ICEMAKE is not divergent** (§3.4). It was
+  displaced across the `rs>=70` cut by another symbol's error. Any predicate over the *divergent*
+  symbol is structurally blind to it, at every threshold. An honest detector needs the
+  whole-universe two-plane rerank of §3 — a separate build, not a floor.
 
-**Surfaces.** A structured `log.info` every run; `ntfy` at `high` only on `alertingCandidates > 0`;
-and `GET /api/v1/market/screener/minervini/plane-divergence?asOf=` (typed record, rides the existing
-`/api/v1/market/**` gateway allowlist) for "which names, how much, worst bar".
+So the probe reports and does not alert. That was the real gap anyway: nothing told anyone the 32
+symbols existed.
 
-**No plane's prices changed.** Teaching either plane about dividends stays the HOLD-tier owner
-decision #1272 §6.2 scoped.
+**As-of honesty is enforced, not assumed.** Both source tables are retro-mutable — `candles` series
+are rewritten wholesale days later (ABSLAMC's 07-21 bar carries `fetched_at 2026-07-23`) and
+`nse_eod_bhavcopy` still gains rows for months-old trade dates. Every bar pair is gated on **both**
+sides' `fetched_at` being ≤ the screen's own `computed_at`, so a historical read reports what the
+screen could have seen rather than what the tables say today. Excluded bars are counted
+(`barsExcludedAsOf`), and a symbol whose every shared bar was rewritten is reported as unjudgeable
+(`symbolsWithNoHonestBars`) rather than clean. On the live nightly path the cutoff is minutes old
+and excludes nothing; the gate exists so the endpoint is reproducible.
+
+**Durable and retried.** The screen persists and the ingest ledger succeeds *before* the probe runs,
+and every later trigger hits the "already current" dedup skip — so without a marker of its own, a
+crash or probe exception in between lost that evening's reading permanently. Completion is recorded
+per screen date in the existing `canary_runs` table (no migration) and every door retries an
+unmarked date, the dedup-skip path included. A probe failure leaves the date unmarked, so it
+retries. No CLAIMED→DONE lease: that protocol exists because a duplicate *page* is harmful, and this
+writes only a log line — if it ever grows an alert it must adopt the lease with it.
+
+**Tunable from `.env`, which required more than a `@Value` default.** `artha.minervini.plane-divergence.{enabled,min-pct,lookback-days}`
+each have a matching `deploy/docker-compose.yml` passthrough and a `.env.example` entry. Without the
+passthrough a knob is pinned to its coded default forever and an `.env` edit silently does nothing
+(#653) — which matters most for a default-ON component, since nobody could otherwise turn it off
+without an image rebuild. `PlaneDivergenceKnobPassthroughTest` derives both sides of the relaxed-binding
+name from one string, so renaming one without the other fails.
 
 ### 4.1 This does NOT contradict #1272's "0 were a candidate"
 
@@ -299,33 +328,42 @@ separate decision. Recorded here, not built.
 
 | test | what fails if the mechanism breaks |
 |---|---|
-| `PlaneDivergenceProbeIntegrationTest` | five seeded passers give **opposite** answers on three axes: divergent vs byte-identical planes, served candidate vs WATCH, over vs under the page floor |
-| `MinerviniSchedulerTest.pagesOnlyWhenAServedCandidateClearsThePageFloor` | three runs of the same screen: big-but-not-served → silent, served-but-under-floor → silent, served-and-over-floor → pages |
-| `MinerviniSchedulerTest.aProbeFailureIsFailSoft` | a throwing probe must not fail or silence the screen |
+| `PlaneDivergenceProbeIntegrationTest` | five seeded passers give **opposite** answers on three axes: divergent vs byte-identical planes; served candidate vs WATCH; and — the pair that separates a gated probe from an ungated one — `PDVCAND` (divergent bar fetched **before** the screen) vs `PDVLATE` (identical divergence, bar rewritten **two days after**) |
+| `MinerviniSchedulerTest.theProbeNeverPagesEvenOnADivergentServedCandidate` | re-adding a notification must fail a test, not ship quietly |
+| `MinerviniSchedulerTest.anOutstandingProbeIsRetriedOnTheDedupSkipPathAndOnlyOnce` | both halves on the same path: no marker → the probe re-runs (and the screen still does not); marker → it does not re-run |
+| `MinerviniSchedulerTest.aProbeFailureIsFailSoftAndLeavesTheDateUnmarked` | a throwing probe must not fail the screen, and must not mark the date "done" |
+| `PlaneDivergenceKnobPassthroughTest` | a knob without a compose passthrough / `.env.example` entry (#653) |
 
 **Red-proofs** (each through the `test` lifecycle phase, never a bare `surefire:test`):
 
 | break | result |
 |---|---|
-| plane axis — compare plane A against **itself** (`bp.b_close` → `a.a_close`) | **RED**: `reportsDivergentPassersAndFlagsOnlyTheServedCandidate:114` (`containsExactlyInAnyOrder`) + `alarmCountsOnlyServedCandidates:145` |
-| candidate axis — `servedSymbols()` also returns the WATCH bucket | **RED**: `…:120` (`PDVWATCH.candidate()` isFalse) + `…:146` |
-| page-floor axis — `isAlerting()` drops the `alertPct` comparison | **RED**: `MinerviniSchedulerTest.pagesOnlyWhenAServedCandidateClearsThePageFloor` |
+| **as-of gate** — force `as_of_ok` true for every bar pair | **RED**: `aDivergenceThatAppearedAfterTheScreenRanIsExcludedNotReported:153`, plus `reportsDivergentPassers…:122` and `reportShapeAndFloors:171` |
+| **retry** — drop `probePlaneDivergence(...)` from the dedup-skip path | **RED**: `anOutstandingProbeIsRetriedOnTheDedupSkipPathAndOnlyOnce:107` |
+| **no-page** — re-add an ntfy send on `divergentCandidates > 0` | **RED**: `theProbeNeverPagesEvenOnADivergentServedCandidate:84` |
+| **passthrough** — remove the three compose entries | **RED**: `everyKnobHasAMarketDataComposePassthrough:36` |
+| plane axis — compare plane A against **itself** | **RED**: the IT's `containsExactlyInAnyOrder` (measured on the pre-review revision of the same fixture) |
+| candidate axis — `servedSymbols()` also returns the WATCH bucket | **RED**: the IT's `PDVWATCH.candidate()` assertion (same) |
 
 Contract: spec re-captured with `-Dtest=ContractCaptureTest` **only** (never during a full verify).
-Diff is purely additive — 1 path, 2 schemas, **0** schemas changed, **0** `required` stripped.
-
----
+Against `origin/main` the diff is purely additive — 1 path, 2 schemas, **0** schemas changed, **0**
+`required` stripped.
 
 ## 6. Open doubts
 
 1. **The window is 22 screen dates, all July.** Same bound as #1272. Indian dividend season peaks
    Jun–Aug, so July is arguably the worst month — which cuts in the finding's favour, but that is
    an argument, not a measurement.
-2. **The B32/BALL counterfactual is not Option A.** It substitutes what the *candles plane happens
-   to hold*, which is Kite's dividend adjustment for the 32 names it has re-fetched. A real Option A
-   would adjust **every** dividend in `marketdata.dividends` (4,743 rows, 1,664 symbols) on every
-   symbol, which is a strictly larger perturbation than anything measured here. §3's numbers are a
-   **lower** bound on Option A's rank churn, not an estimate of it.
+2. **The B32/BALL counterfactual is a PARTIAL proxy for Option A, with UNKNOWN direction.** It
+   substitutes what the *candles plane happens to hold* — Kite's dividend adjustment for the 32
+   names it has re-fetched. Option A would adjust **every** dividend in `marketdata.dividends`
+   (4,743 rows, 1,664 symbols). An earlier draft called §3 a **lower bound** on Option A's churn.
+   That is wrong and is withdrawn: a cross-sectional percentile rank is **non-monotonic** in the
+   set of symbols adjusted — adjusting more names can *restore* a relative ordering that the partial
+   adjustment disturbed, so Option A's gate-crossing count can be lower as easily as higher. The
+   compound-dividend parser defect in §1.3 points the same way: the perturbations applied here are
+   not even guaranteed to dominate per-symbol. Treat §3 as a measurement of *this* substitution,
+   not a bound on any other.
 3. **3.31% of bar rows fall back to plane A** because `candles` has no bar on that bhavcopy session.
    Concentrated in 41 thin names, but not decomposed. A fallback on a *lag leg* silently mixes
    planes within one return; I did not measure how many of the 34 crossings involve one.
@@ -347,6 +385,14 @@ Diff is purely additive — 1 path, 2 schemas, **0** schemas changed, **0** `req
 8. **`marketdata.dividends` has both an NSE and a BSE row per event**, with different `amount`
    parsing (the BSE row's `amount` is null on both worked examples). Nothing here depends on it —
    the probe never reads `dividends` — but any future Option A must pick a source deliberately.
-9. **I did not verify the deployed jar.** Java citations are read off `origin/main` @ `23f92ba0`;
+9. **The as-of gate bounds, it does not pin.** `fetched_at` is an UPSERT timestamp, so "≤ the
+   screen's `computed_at`" soundly answers *was this row rewritten after the screen ran*, but it
+   cannot recover what the bytes were at that moment. A row written before the screen and rewritten
+   again before it is judged clean either way. Exact history needs the nightly report persisted, not
+   recomputed — the marker row records only that the probe ran, not what it saw.
+10. **The whole-universe rerank of §3 is not built.** It is the only thing that would catch the
+    ICEMAKE channel, and it is what an honest alert would have to be keyed on. §3 ran it once, by
+    hand, off-line.
+11. **I did not verify the deployed jar.** Java citations are read off `origin/main` @ `23f92ba0`;
    the DB numbers are authoritative live state. Whether `ay-market-data-service` currently runs
    current `main` was not probed.

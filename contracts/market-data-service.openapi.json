@@ -8892,7 +8892,23 @@
             "type" : [ "string", "null" ],
             "format" : "date"
           },
+          "asOfCutoff" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
           "passersChecked" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "barsCompared" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "barsExcludedAsOf" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "symbolsWithNoHonestBars" : {
             "type" : "integer",
             "format" : "int32"
           },
@@ -8904,14 +8920,7 @@
             "type" : "integer",
             "format" : "int32"
           },
-          "alertingCandidates" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
           "thresholdPct" : {
-            "type" : "string"
-          },
-          "alertPct" : {
             "type" : "string"
           },
           "lookbackDays" : {
@@ -8925,7 +8934,7 @@
             }
           }
         },
-        "required" : [ "alertPct", "alertingCandidates", "divergentCandidates", "divergentPassers", "lookbackDays", "names", "passersChecked", "screenDate", "thresholdPct" ]
+        "required" : [ "asOfCutoff", "barsCompared", "barsExcludedAsOf", "divergentCandidates", "divergentPassers", "lookbackDays", "names", "passersChecked", "screenDate", "symbolsWithNoHonestBars", "thresholdPct" ]
       },
       "MinerviniPlaneDivergentName" : {
         "type" : "object",
@@ -8944,11 +8953,15 @@
             "type" : "integer",
             "format" : "int32"
           },
+          "barsExcludedAsOf" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
           "candidate" : {
             "type" : "boolean"
           }
         },
-        "required" : [ "candidate", "maxDivergencePct", "sharedBars", "symbol", "worstBar" ]
+        "required" : [ "barsExcludedAsOf", "candidate", "maxDivergencePct", "sharedBars", "symbol", "worstBar" ]
       },
       "MinerviniFunnel" : {
         "type" : "object",

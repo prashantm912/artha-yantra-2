@@ -19,29 +19,30 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * IT for {@link PlaneDivergenceProbe}: a Minervini passer whose {@code nse_eod_bhavcopy} and
- * {@code candles}@1d closes disagree is reported, and one whose planes agree is not.
+ * {@code candles}@1d closes disagree is reported; one whose planes agree is not; and a divergence
+ * that only appeared AFTER the screen ran is excluded rather than reported.
  *
- * <p><b>The fixture is the gate.</b> Five passers are seeded so that a probe which got ANY of the
- * three axes wrong gives a visibly different answer, rather than agreeing with the correct one:
+ * <p><b>The fixture is the gate.</b> Five passers are seeded so a probe that got ANY of the three
+ * axes wrong gives a visibly different answer, rather than agreeing with the correct one:
  *
  * <ul>
- *   <li>{@code PDVCAND} — planes differ 9%, and it is a SERVED candidate (buyable). The only row
- *       that may raise the alarm.
+ *   <li>{@code PDVCAND} — planes differ 9% on a bar fetched BEFORE the screen ran, and it is a
+ *       SERVED candidate (buyable). The one row that must be reported as a candidate.
  *   <li>{@code PDVCLEAN} — a served candidate too, but the two planes are byte-identical on every
- *       bar. A probe that compared one plane against itself (or ignored the candles source-aware
- *       branch) would report this one as well — it must be absent.
+ *       bar. A probe that compared one plane against itself would report this one as well.
  *   <li>{@code PDVWATCH} — planes differ 9%, but no valid VCP base, so the funnel buckets it WATCH.
- *       A probe that alarmed on "a divergence exists" instead of "a divergence reached a served
- *       candidate" would count it — it must be reported with {@code candidate=false}.
- *   <li>{@code PDVMILD} — a served candidate at 2.0%: over the report floor, under the page floor.
- *       A probe with ONE threshold instead of two would alarm on it. This is the case that actually
- *       occurs — measured at ~4.7 such candidates on every screen date.
- *   <li>{@code PDVTINY} — a served candidate whose planes differ by 0.2%, below the report floor. A
- *       probe with no threshold would report it.
+ *       Must be reported with {@code candidate=false}.
+ *   <li>{@code PDVLATE} — <b>the as-of axis.</b> Identical to {@code PDVCAND} in every way except
+ *       that its divergent candle bar carries {@code fetched_at} AFTER the screen's {@code
+ *       computed_at} — a retro-rewrite the screen never saw. An UNGATED probe reports it exactly
+ *       like {@code PDVCAND}; the gated probe must not report it at all, and must count its bar as
+ *       excluded. This is the trap that produced four false flips in #1272.
+ *   <li>{@code PDVTINY} — a served candidate at 0.2%, below the 0.5% report floor.
  * </ul>
  *
- * The divergent and non-divergent symbols therefore give OPPOSITE answers on all three axes:
- * divergence, served-candidate, and page floor. Shares the singleton DB → purge before AND after.
+ * {@code PDVCAND} and {@code PDVLATE} are the pair a gated and an ungated implementation answer
+ * <b>differently</b>; every other pair separates a different axis. Shares the singleton DB → purge
+ * before AND after.
  */
 @SpringBootTest(
     properties = {
@@ -52,8 +53,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class PlaneDivergenceProbeIntegrationTest extends MarketDataIntegrationTestBase {
 
   private static final LocalDate AS_OF = LocalDate.of(2026, 6, 17);
+
+  /** The screen's own persistence time — the as-of cutoff every bar pair is judged against. */
+  private static final OffsetDateTime SCREEN_AT =
+      OffsetDateTime.of(2026, 6, 17, 19, 55, 0, 0, ZoneOffset.ofHoursMinutes(5, 30));
+
   private static final List<String> SYMS =
-      List.of("PDVCAND", "PDVCLEAN", "PDVWATCH", "PDVTINY", "PDVMILD");
+      List.of("PDVCAND", "PDVCLEAN", "PDVWATCH", "PDVLATE", "PDVTINY");
 
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlaneDivergenceProbe probe;
@@ -79,25 +85,26 @@ class PlaneDivergenceProbeIntegrationTest extends MarketDataIntegrationTestBase 
     passer("PDVCAND", 100.0, true, 100.0);
     passer("PDVCLEAN", 100.0, true, 100.0);
     passer("PDVWATCH", 100.0, false, null);
+    passer("PDVLATE", 100.0, true, 100.0);
     passer("PDVTINY", 100.0, true, 100.0);
-    passer("PDVMILD", 100.0, true, 100.0);
 
-    // Three sessions inside the lookback. Plane A (bhavcopy) is 100 on every bar for every symbol;
-    // plane B (candles) is what differs. No eod_corporate_actions rows exist for these symbols, so
-    // the CA factor is 1 on both sides and the ONLY thing the probe can be measuring is the plane.
+    // Three sessions inside the lookback. Plane A (bhavcopy) is 100 on every bar for every symbol
+    // and always fetched before the screen; plane B (candles) is what differs. No
+    // eod_corporate_actions rows exist for these symbols, so the CA factor is 1 on both sides and
+    // the ONLY things the probe can be measuring are the plane and the as-of gate.
+    OffsetDateTime before = SCREEN_AT.minusHours(3); // the day's data landed at ~16:55 IST
+    OffsetDateTime after = SCREEN_AT.plusDays(2); // a CorporateActionJob rewrite, two days later
     for (int back = 0; back < 3; back++) {
       LocalDate d = AS_OF.minusDays(back);
       for (String s : SYMS) {
-        bhavcopyBar(s, d, 100.0);
+        bhavcopyBar(s, d, 100.0, before);
       }
-      // PDVCAND / PDVWATCH: the middle bar is dividend-back-adjusted on the candles plane (91.00 =
-      // a 9% divergence, the INDOBORAX shape). The other two bars agree, so the probe must be
-      // taking a MAX over the window, not just reading the latest bar.
-      candleBar("PDVCAND", d, back == 1 ? 91.0 : 100.0);
-      candleBar("PDVWATCH", d, back == 1 ? 91.0 : 100.0);
-      candleBar("PDVCLEAN", d, 100.0);
-      candleBar("PDVTINY", d, back == 1 ? 99.8 : 100.0); // 0.2% — under the 0.5% report floor
-      candleBar("PDVMILD", d, back == 1 ? 98.0 : 100.0); // 2.0% — reported, but under the 5% page floor
+      boolean divergentBar = back == 1; // the middle bar carries the dividend adjustment
+      candleBar("PDVCAND", d, divergentBar ? 91.0 : 100.0, before); // 9%, seen by the screen
+      candleBar("PDVWATCH", d, divergentBar ? 91.0 : 100.0, before); // 9%, but WATCH bucket
+      candleBar("PDVLATE", d, divergentBar ? 91.0 : 100.0, divergentBar ? after : before);
+      candleBar("PDVCLEAN", d, 100.0, before);
+      candleBar("PDVTINY", d, divergentBar ? 99.8 : 100.0, before); // 0.2% — under the floor
     }
   }
 
@@ -108,78 +115,136 @@ class PlaneDivergenceProbeIntegrationTest extends MarketDataIntegrationTestBase 
     Map<String, PlaneDivergenceProbe.DivergentName> byName =
         r.names().stream()
             .filter(n -> SYMS.contains(n.symbol()))
-            .collect(Collectors.toMap(PlaneDivergenceProbe.DivergentName::symbol, Function.identity()));
+            .collect(
+                Collectors.toMap(PlaneDivergenceProbe.DivergentName::symbol, Function.identity()));
 
     // divergent vs non-divergent give OPPOSITE answers on the same fixture
-    assertThat(byName.keySet()).containsExactlyInAnyOrder("PDVCAND", "PDVWATCH", "PDVMILD");
+    assertThat(byName.keySet()).containsExactlyInAnyOrder("PDVCAND", "PDVWATCH");
     assertThat(byName).doesNotContainKeys("PDVCLEAN", "PDVTINY");
 
-    // the served candidates are flagged; the WATCH-bucket divergence is reported but not flagged
+    // the served candidate is flagged; the WATCH-bucket divergence is reported but not flagged
     assertThat(byName.get("PDVCAND").candidate()).isTrue();
-    assertThat(byName.get("PDVMILD").candidate()).isTrue();
     assertThat(byName.get("PDVWATCH").candidate()).isFalse();
-
-    // the PAGE floor is a SECOND axis: PDVMILD is a served candidate and is NOT alerting
-    assertThat(r.isAlerting(byName.get("PDVCAND"))).isTrue();
-    assertThat(r.isAlerting(byName.get("PDVMILD"))).isFalse();
-    assertThat(r.isAlerting(byName.get("PDVWATCH"))).isFalse();
 
     // magnitude + worst bar are the ones the fixture planted (max over the window, not last bar)
     assertThat(byName.get("PDVCAND").maxDivergencePct()).isEqualByComparingTo("9.0000");
     assertThat(byName.get("PDVCAND").worstBar()).isEqualTo(AS_OF.minusDays(1));
     assertThat(byName.get("PDVCAND").sharedBars()).isEqualTo(3);
+    assertThat(byName.get("PDVCAND").barsExcludedAsOf()).isZero();
+  }
+
+  /**
+   * The as-of gate. {@code PDVLATE}'s divergence is identical in size and shape to {@code
+   * PDVCAND}'s; the ONLY difference is that its candle bar was rewritten two days after the screen
+   * ran. Reporting it would be reporting a divergence the screen never saw.
+   */
+  @Test
+  void aDivergenceThatAppearedAfterTheScreenRanIsExcludedNotReported() {
+    PlaneDivergenceProbe.Report r = probe.probe(AS_OF);
+
+    assertThat(r.asOfCutoff()).isEqualTo(SCREEN_AT);
+
+    List<String> reported =
+        r.names().stream()
+            .map(PlaneDivergenceProbe.DivergentName::symbol)
+            .filter(SYMS::contains)
+            .toList();
+    // the pair that separates a gated probe from an ungated one
+    assertThat(reported).contains("PDVCAND").doesNotContain("PDVLATE");
+
+    // PDVLATE is still JUDGED — on its two honest bars, which agree — so it is neither reported as
+    // divergent nor counted as unjudgeable; only its rewritten bar is excluded.
+    assertThat(seededExcluded(r)).isEqualTo(1);
+    assertThat(r.barsExcludedAsOf()).isGreaterThanOrEqualTo(1);
   }
 
   @Test
-  void alarmCountsOnlyServedCandidates() {
+  void reportShapeAndFloors() {
     PlaneDivergenceProbe.Report r = probe.probe(AS_OF);
 
     long seededDivergent = r.names().stream().filter(n -> SYMS.contains(n.symbol())).count();
     long seededCandidates =
         r.names().stream().filter(n -> SYMS.contains(n.symbol()) && n.candidate()).count();
-    long seededAlerting =
-        r.names().stream().filter(n -> SYMS.contains(n.symbol()) && r.isAlerting(n)).count();
 
-    // three seeded names diverge; two are served candidates; only ONE clears the page floor.
-    // A probe that alarmed on "a divergence exists" reports 3; one with a single threshold reports 2.
-    assertThat(seededDivergent).isEqualTo(3);
-    assertThat(seededCandidates).isEqualTo(2);
-    assertThat(seededAlerting).isEqualTo(1);
+    // three seeded names carry a >=0.5% divergence in the raw data; only TWO survive the as-of
+    // gate, and only ONE of those is a served candidate.
+    assertThat(seededDivergent).isEqualTo(2);
+    assertThat(seededCandidates).isEqualTo(1);
     assertThat(r.thresholdPct()).isEqualByComparingTo("0.5");
-    assertThat(r.alertPct()).isEqualByComparingTo("5.0");
     assertThat(r.lookbackDays()).isEqualTo(420);
+    assertThat(r.screenDate()).isEqualTo(AS_OF);
+  }
+
+  /** The completion marker the scheduler retries on — recorded once, idempotent. */
+  @Test
+  void completionMarkerIsRecordedAndIdempotent() {
+    jdbc.update(
+        "DELETE FROM canary_runs WHERE canary=? AND run_day=?",
+        PlaneDivergenceProbe.CANARY_KEY,
+        java.sql.Date.valueOf(AS_OF));
+    assertThat(probe.alreadyReported(AS_OF)).isFalse();
+
+    probe.markReported(AS_OF);
+    probe.markReported(AS_OF); // ON CONFLICT DO UPDATE — a retry must not blow up
+
+    assertThat(probe.alreadyReported(AS_OF)).isTrue();
+    jdbc.update(
+        "DELETE FROM canary_runs WHERE canary=? AND run_day=?",
+        PlaneDivergenceProbe.CANARY_KEY,
+        java.sql.Date.valueOf(AS_OF));
+  }
+
+  /** Bar-pairs among the seeded symbols where either side post-dates the screen's cutoff. */
+  private int seededExcluded(PlaneDivergenceProbe.Report r) {
+    Integer n =
+        jdbc.queryForObject(
+            """
+            SELECT count(*) FROM candles c
+            JOIN nse_eod_bhavcopy b
+              ON b.symbol = c.tradingsymbol
+             AND b.trade_date = (c.bucket AT TIME ZONE 'Asia/Kolkata')::date
+            WHERE c.exchange='NSE' AND c."interval"='1d'
+              AND c.tradingsymbol = ANY (?)
+              AND (c.fetched_at > ? OR b.fetched_at > ?)
+            """,
+            Integer.class,
+            SYMS.toArray(new String[0]),
+            r.asOfCutoff(),
+            r.asOfCutoff());
+    return n == null ? 0 : n;
   }
 
   private void passer(String symbol, double close, boolean isVcp, Double pivot) {
     jdbc.update(
         "INSERT INTO minervini_screen_results(screen_date,symbol,exchange,close_price,rs_rank,"
-            + "gate1,gate2,gate3,gate4,gate5,gate6,gate7,gate8,gates_passed,passes_all,stage) "
-            + "VALUES(?,?, 'NSE', ?, 90, TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE, 8, TRUE, 2) "
+            + "gate1,gate2,gate3,gate4,gate5,gate6,gate7,gate8,gates_passed,passes_all,stage,"
+            + "computed_at) "
+            + "VALUES(?,?, 'NSE', ?, 90, TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE, 8, TRUE, 2, ?) "
             + "ON CONFLICT DO NOTHING",
-        java.sql.Date.valueOf(AS_OF), symbol, close);
+        java.sql.Date.valueOf(AS_OF), symbol, close, SCREEN_AT);
     jdbc.update(
         "INSERT INTO minervini_setups(screen_date,symbol,is_vcp,pivot,footprint) "
             + "VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING",
         java.sql.Date.valueOf(AS_OF), symbol, isVcp, pivot, isVcp ? "8W 8/4 2T" : null);
   }
 
-  private void bhavcopyBar(String symbol, LocalDate d, double close) {
+  private void bhavcopyBar(String symbol, LocalDate d, double close, OffsetDateTime fetchedAt) {
     jdbc.update(
         "INSERT INTO nse_eod_bhavcopy(trade_date,symbol,series,open_price,high_price,low_price,"
-            + "close_price,ttl_trd_qnty) VALUES(?,?, 'EQ', ?,?,?,?, 1000000) "
+            + "close_price,ttl_trd_qnty,fetched_at) VALUES(?,?, 'EQ', ?,?,?,?, 1000000, ?) "
             + "ON CONFLICT DO NOTHING",
-        java.sql.Date.valueOf(d), symbol, close, close, close, close);
+        java.sql.Date.valueOf(d), symbol, close, close, close, close, fetchedAt);
   }
 
-  private void candleBar(String symbol, LocalDate d, double close) {
+  private void candleBar(String symbol, LocalDate d, double close, OffsetDateTime fetchedAt) {
     // source='KITE' — the plane that silently acquires the dividend adjustment. Deliberately NOT
     // 'BHAVCOPY': EquitySplitBonusAdjuster (and this probe) scale only BHAVCOPY-sourced bars, so a
     // KITE bar carries whatever the broker sent, which is the whole mechanism under test.
-    OffsetDateTime bucket =
-        d.atStartOfDay().atOffset(ZoneOffset.ofHoursMinutes(5, 30));
+    OffsetDateTime bucket = d.atStartOfDay().atOffset(ZoneOffset.ofHoursMinutes(5, 30));
     jdbc.update(
         "INSERT INTO candles(exchange,tradingsymbol,\"interval\",bucket,open,high,low,close,volume,"
-            + "source) VALUES('NSE',?, '1d', ?, ?,?,?,?, 1000000, 'KITE') ON CONFLICT DO NOTHING",
-        symbol, bucket, close, close, close, close);
+            + "source,fetched_at) VALUES('NSE',?, '1d', ?, ?,?,?,?, 1000000, 'KITE', ?) "
+            + "ON CONFLICT DO NOTHING",
+        symbol, bucket, close, close, close, close, fetchedAt);
   }
 }

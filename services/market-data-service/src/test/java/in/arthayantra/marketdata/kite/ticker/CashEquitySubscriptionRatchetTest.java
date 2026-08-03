@@ -12,10 +12,14 @@ import in.arthayantra.common.web.error.ApiException;
 import in.arthayantra.marketdata.kite.InstrumentKey;
 import in.arthayantra.marketdata.kite.InstrumentTokenResolver;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -49,11 +53,6 @@ class CashEquitySubscriptionRatchetTest {
     return registryWhereEverythingIsA("EQ", "NSE");
   }
 
-  /** Every instrument resolves as an INDEX - the shape the ratchet must let through. */
-  private static SubscriptionRegistry indexRegistry() {
-    return registryWhereEverythingIsA("EQ", "INDICES");
-  }
-
   private static SubscriptionRegistry registryWhereEverythingIsA(String type, String segment) {
     InstrumentTokenResolver resolver = mock(InstrumentTokenResolver.class);
     // Always resolvable - so a refusal can only come from the ratchet, never from an unknown symbol.
@@ -68,6 +67,41 @@ class CashEquitySubscriptionRatchetTest {
 
   private static InstrumentKey key(String exchange, String tradingsymbol) {
     return new InstrumentKey(exchange, tradingsymbol);
+  }
+
+  /**
+   * A registry backed by the REAL {@code instruments-fixture.csv}, so segments come from data rather
+   * than from the test's own opinion.
+   *
+   * <p>This exists because the first version of the YAML check below used a resolver that classified
+   * EVERY symbol as {@code INDICES}. That made the check a tautology: a {@code pinned-indices} value
+   * of {@code NSE:RELIANCE} and the real one produced the identical result, so the guard could never
+   * fail. A fixture-backed resolver reports {@code RELIANCE} in the {@code NSE} segment and
+   * {@code NIFTY 50} in {@code INDICES}, which is what makes the two cases diverge.
+   */
+  private static SubscriptionRegistry fixtureRegistry() {
+    Map<String, InstrumentTokenResolver.TokenInfo> master = new HashMap<>();
+    try (var in = CashEquitySubscriptionRatchetTest.class.getResourceAsStream("/instruments-fixture.csv");
+        var reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (line.startsWith("#") || line.startsWith("instrument_token")) {
+          continue;
+        }
+        String[] c = line.split(",", -1);
+        if (c.length < 6) {
+          continue;
+        }
+        master.put(
+            c[1] + ":" + c[2],
+            new InstrumentTokenResolver.TokenInfo(Long.parseLong(c[0]), c[4], c[5]));
+      }
+    } catch (Exception e) {
+      throw new AssertionError("could not read instruments-fixture.csv", e);
+    }
+    assertThat(master).as("fixture must be loadable, or every assertion below is vacuous").isNotEmpty();
+    return new SubscriptionRegistry(
+        k -> Optional.ofNullable(master.get(k.canonical())), 3000, new SimpleMeterRegistry());
   }
 
   @Test
@@ -125,27 +159,18 @@ class CashEquitySubscriptionRatchetTest {
   }
 
   @Test
-  void everyAllowedIndexStillSubscribes() {
-    // The must-stay-silent half. If this trips, the ratchet has become stricter than the
-    // configuration it guards and the live ticker loses its index spots.
-    SubscriptionRegistry registry = indexRegistry();
-    for (String index :
-        List.of("NIFTY 50", "NIFTY BANK", "NIFTY FIN SERVICE", "NIFTY MID SELECT", "INDIA VIX")) {
+  void aRealIndexOnACashExchangeStillSubscribes() {
+    // The must-stay-silent half, on REAL fixture data: these three carry segment INDICES in
+    // instruments-fixture.csv, so they exercise the guard's allow branch rather than a resolver that
+    // was told to say yes. If this trips, the ratchet has become stricter than the instrument master
+    // and the live ticker loses its index spots.
+    SubscriptionRegistry registry = fixtureRegistry();
+    for (String index : List.of("NIFTY 50", "NIFTY BANK", "INDIA VIX")) {
       assertThatCode(
               () ->
                   registry.subscribe(
                       "system-pinned",
                       key("NSE", index),
-                      SubscriptionMode.QUOTE,
-                      SubscriptionPriority.PINNED_INDEX))
-          .doesNotThrowAnyException();
-    }
-    for (String index : List.of("SENSEX", "BANKEX")) {
-      assertThatCode(
-              () ->
-                  registry.subscribe(
-                      "system-pinned",
-                      key("BSE", index),
                       SubscriptionMode.QUOTE,
                       SubscriptionPriority.PINNED_INDEX))
           .doesNotThrowAnyException();
@@ -177,31 +202,39 @@ class CashEquitySubscriptionRatchetTest {
   }
 
   @Test
-  void theShippedPinnedIndicesConfigSatisfiesTheRatchet() {
-    // Authoring-time collision for the config path. PinnedIndicesSubscriber.ensurePinned() catches
-    // whatever the registry throws and only WARNS, so a bad application.yml value would be dropped
-    // quietly at runtime instead of failing loudly. Asserting the shipped list here puts that
-    // collision back into CI without a second production guard to keep in step.
-    SubscriptionRegistry registry = indexRegistry();
-    for (String entry : shippedPinnedIndices()) {
-      int colon = entry.indexOf(':');
-      assertThat(colon).as("malformed pinned-indices entry '%s'", entry).isPositive();
-      String exchange = entry.substring(0, colon).trim();
-      String symbol = entry.substring(colon + 1).trim();
-      assertThatCode(
-              () ->
-                  registry.subscribe(
-                      "system-pinned",
-                      key(exchange, symbol),
-                      SubscriptionMode.QUOTE,
-                      SubscriptionPriority.PINNED_INDEX))
-          .as(
-              "application.yml pins '%s', which this ratchet refuses - if it is an EQUITY read the"
-                  + " refusal message before going further; if it is another INDEX add it to"
-                  + " SubscriptionRegistry.ALLOWED_CASH_INSTRUMENTS",
-              entry)
-          .doesNotThrowAnyException();
-    }
+  void aCashEquityInThePinnedIndicesConfigFailsTheBootPass() {
+    // DISCRIMINATION FIRST, then the real value - otherwise this decays into a tautology, which is
+    // exactly what the first version of this test did (its resolver called everything an INDEX, so
+    // both YAML values passed). ensurePinned() now catches only NotFoundException, so the registry's
+    // resolved-equity refusal propagates out of the ApplicationReadyEvent listener and fails boot
+    // instead of being reduced to a warning.
+    PinnedIndicesSubscriber bad =
+        new PinnedIndicesSubscriber(fixtureRegistry(), List.of("NSE:NIFTY 50", "NSE:RELIANCE"));
+
+    assertThatThrownBy(bad::ensurePinned)
+        .as(
+            "a cash equity in artha.subscriptions.pinned-indices must fail the boot pass loudly - if"
+                + " this stops throwing, ensurePinned's catch has been widened again and a bad"
+                + " config value is back to being a warning nobody reads")
+        .isInstanceOf(ApiException.class)
+        .hasMessageContaining("NSE:RELIANCE")
+        .hasMessageContaining("PaperBracketEvaluator");
+  }
+
+  @Test
+  void theShippedPinnedIndicesConfigPassesTheSameBootPass() {
+    // Same code path, same resolver, real application.yml value. The four index spots absent from the
+    // fixture resolve to NotFoundException, which ensurePinned still treats as retryable - so this
+    // asserts the shipped config is clean, not that the fixture is complete.
+    PinnedIndicesSubscriber shipped =
+        new PinnedIndicesSubscriber(fixtureRegistry(), shippedPinnedIndices());
+
+    assertThatCode(shipped::ensurePinned)
+        .as(
+            "application.yml pins %s, which the ratchet refuses - if one of these is an EQUITY read"
+                + " the refusal message before going further",
+            shippedPinnedIndices())
+        .doesNotThrowAnyException();
   }
 
   /** The {@code artha.subscriptions.pinned-indices} value as shipped, read from the real YAML. */

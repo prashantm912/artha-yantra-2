@@ -570,8 +570,9 @@ public class PaperService {
   private static boolean isSwingBook(String book) {
     // Byte-identical to the previous inline test (BookResolver.MINERVINI/MANAS_ARORA ARE
     // Books.MINERVINI/MANAS_ARORA, BookResolver:20-21), now expressed through the one authority so
-    // this and PaperBracketEvaluator's skip cannot drift apart — the drift PaperStaleTickAlerter's
-    // own comment warns about, previously unenforced (PR #1251).
+    // this freshness exemption and PaperStaleTickAlerter's eod-managed-books alert suppression
+    // cannot drift apart — the drift that class's own comment warns about, previously unenforced
+    // (PR #1251).
     return Books.eodManaged().contains(book);
   }
 

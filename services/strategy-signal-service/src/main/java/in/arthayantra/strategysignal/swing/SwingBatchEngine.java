@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.swing;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import in.arthayantra.marketcalendar.MarketCalendar;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.eval.EntryEvaluator;
@@ -69,6 +70,15 @@ public class SwingBatchEngine {
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
   private static final String EX = "NSE";
   private static final String IV = "1d";
+
+  /**
+   * The exchange calendar the data-coverage gate measures against. Static, mirroring {@code
+   * ScalperCalendars} / {@code DataHealthFlags} — the swing universe is NSE-only ({@link #EX}), so
+   * the family never varies it. {@link SwingCoverageProbe} coverage-checks the year range before
+   * querying, so a window reaching outside the bundled years degrades to "no claim" rather than
+   * raising CD-2's {@code IllegalArgumentException} on the money path.
+   */
+  private static final MarketCalendar calendar = MarketCalendar.nse();
 
   /**
    * A loaded published swing strategy (identity + compiled definition + neutral setup token). {@code
@@ -454,6 +464,10 @@ public class SwingBatchEngine {
     PyramidPolicy pyramid = doctrine.pyramid();
     int fired = 0;
     List<String> refusalReasons = new ArrayList<>();
+    // Symbols refused this run for incomplete data coverage. Aggregated into ONE ops alert at the end
+    // of the pass — a per-symbol alert would page ~17% of the funnel nightly (measured 2026-08-03).
+    java.util.Set<String> coverageRefused = new java.util.LinkedHashSet<>();
+    try {
     for (SwingCandidate c : candidates) {
       if (deadline.expired()) {
         return new EntryResult(candidates.size(), fired, refusalReasons, true);
@@ -505,6 +519,32 @@ public class SwingBatchEngine {
           continue;
         }
         IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());
+        // Data-coverage gate (2026-08-03 investigation). The ENTRY half is PREVENTIVE by doctrine:
+        // "entries need fresh truth (you can always NOT enter)". A row-based window over a series
+        // with a missing session silently reaches further back than the strategy declares, so the
+        // score is computed off a window that is not the one under test. Refusing costs an
+        // opportunity for one session; entering on a stretched window costs money. The mirror-image
+        // check on the EXIT path deliberately does NOT refuse — see exitPass.
+        //
+        // Deliberately NOT added to refusalReasons. That list is a marker-BLOCKING signal
+        // (SwingBatchRecorder gates the swing_batch_runs completeness marker on it being empty), and
+        // an incomplete window is a NORMAL high-frequency condition, not an exceptional refusal:
+        // measured 2026-08-03, 48 of 278 funnel passers (17.3%) were gapped at batch time. Treating
+        // it as marker-blocking would withhold the completeness marker EVERY night, leaving the
+        // session permanently retryable and the did-not-run canary permanently firing. Evidence is
+        // durable (swing_batch_refusals) and alerting is aggregated once per run instead.
+        SwingCoverageProbe.Coverage coverage =
+            SwingCoverageProbe.probe(
+                series, SwingCoverageProbe.lookbackBars(strat.definition(), bank), calendar);
+        if (coverage.incomplete()) {
+          coverageRefused.add(c.symbol());
+          recordCoverageRow(
+              doctrine, effectSession, c.symbol(), coverageReason(c.symbol()));
+          log.warn(
+              "{} swing entry: {} refused for {} — {}",
+              doctrine.batchName(), c.symbol(), strat.slug(), coverage.describe());
+          continue;
+        }
         Optional<EntryEvaluator.Evaluation> eval =
             EntryEvaluator.evaluate(strat.definition(), bank, series.size() - 1);
         if (eval.isPresent() && eval.get().entry()) {
@@ -571,7 +611,43 @@ public class SwingBatchEngine {
         }
       }
     }
+    } finally {
+      // finally, not a tail call: the pass has four early returns (deadline, mid-run gate trip) and
+      // the coverage summary must reach ops on every one of them.
+      alertCoverageRefusals(doctrine, effectSession(requiredBarDate), coverageRefused);
+    }
     return new EntryResult(candidates.size(), fired, refusalReasons, false);
+  }
+
+  /**
+   * ONE aggregated ops alert for the run's data-coverage entry refusals. Per-symbol alerting was
+   * rejected on measured volume: 48 of 278 funnel passers (17.3%) were gapped on 2026-08-03, so a
+   * per-symbol page would bury the exit-side alerts that actually carry money risk. Fail-soft.
+   */
+  private void alertCoverageRefusals(
+      SwingDoctrine doctrine, LocalDate sessionDate, java.util.Set<String> symbols) {
+    if (symbols.isEmpty()) {
+      return;
+    }
+    List<String> sample = symbols.stream().limit(10).toList();
+    String message =
+        sessionDate
+            + ": "
+            + symbols.size()
+            + " candidate(s) refused — a missing daily session falls inside the window their"
+            + " indicators read, so the score would be computed off a stretched window. No money"
+            + " effect was emitted for them. "
+            + String.join(", ", sample)
+            + (symbols.size() > sample.size() ? " (+" + (symbols.size() - sample.size()) + " more)" : "");
+    try {
+      events.publishEvent(
+          new SwingBatchAlert(
+              doctrine.batchName(),
+              doctrine.alertLabel() + " entries refused — data coverage",
+              message));
+    } catch (RuntimeException e) {
+      log.warn("{} swing coverage alert failed: {}", doctrine.batchName(), e.getMessage());
+    }
   }
 
   /** True when the family book's per-book gate (kill-switch / caps / daily-loss) blocks entry. */
@@ -855,6 +931,41 @@ public class SwingBatchEngine {
         skipped++;
         continue;
       }
+      // Data-coverage gate, EXIT half (2026-08-03 investigation) — DETECTIVE, NEVER PREVENTIVE.
+      //
+      // This deliberately does NOT mirror the entry refusal, and that asymmetry is doctrine, not
+      // preference: "entries need fresh truth (you can always NOT enter), exits need the best
+      // available truth (you cannot refuse to leave forever)." A guard that refused here would
+      // strand a position whose window is short or holed — and that cohort is real, not
+      // hypothetical: 44 symbols (TATASTEEL, WIPRO, TECHM, TRENT, NAUKRI …) currently hold only 44
+      // daily bars after a corporate-action purge. Today they degrade GRACEFULLY — ExitEvaluator's
+      // indicator branch gets a null level from a warming SMA and returns empty, so the sma50 trail
+      // goes inert while the 8% hard stop keeps working. Refusing would replace that graceful
+      // degradation with a hard refusal. So: observe beside the evaluation, never gate it.
+      //
+      // KNOWN AND ACCEPTED FAILURE MODE: this is detection, not prevention. If a gap coincides with
+      // a genuine trail cross, the position still exits at a level computed off a stretched window
+      // and the alert arrives AFTER the fill. That cost is accepted because the only preventive
+      // alternative is a refusal, which is strictly worse on an exit path.
+      SwingCoverageProbe.Coverage exitCoverage =
+          SwingCoverageProbe.probe(
+              series, SwingCoverageProbe.lookbackBars(strat.definition(), bank), calendar);
+      if (exitCoverage.incomplete()) {
+        log.error(
+            "{} swing exit: #{} {} evaluated on INCOMPLETE data — {} — stop/trail level may be"
+                + " computed off a stretched window (evaluation NOT blocked)",
+            doctrine.batchName(), primary.id(), primary.tradingsymbol(), exitCoverage.describe());
+        recordCoverageRow(
+            doctrine,
+            effectSession(requiredBarDate),
+            primary.tradingsymbol(),
+            coverageDegradedReason(primary.tradingsymbol()));
+        alertExitCoverageDegraded(
+            doctrine,
+            effectSession(requiredBarDate),
+            primary.tradingsymbol(),
+            exitCoverage.describe());
+      }
       ExitEvaluator.Position position =
           new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, primary.entryPrice(), entryIndex);
       Optional<ExitEvaluator.ExitDecision> exit =
@@ -949,6 +1060,64 @@ public class SwingBatchEngine {
     } catch (RuntimeException e) {
       log.warn("{} swing refusal alert failed: {}", doctrine.batchName(), e.getMessage());
     }
+  }
+
+  /**
+   * Durable evidence + ops alert for a data-coverage event. Shares {@code swing_batch_refusals} with
+   * the mixed-lot refusal (same evidence shape, distinct reason prefix) rather than adding a table.
+   *
+   * <p>{@code refused} distinguishes the two halves of the 2026-08-03 coverage gate and is the whole
+   * point of the asymmetry: an ENTRY was refused (no money effect emitted), whereas an EXIT was
+   * evaluated ANYWAY and this row is a degradation marker, not a refusal. Fail-soft on both paths —
+   * this batch is each open position's only exit evaluator, so an accounting failure here must never
+   * propagate and skip a later position's stop.
+   */
+  private void recordCoverageRow(
+      SwingDoctrine doctrine, LocalDate sessionDate, String symbol, String reason) {
+    if (refusals == null) {
+      return;
+    }
+    try {
+      refusals.record(doctrine.batchName(), sessionDate, symbol, reason);
+    } catch (RuntimeException e) {
+      log.error(
+          "{} swing: failed to persist coverage event {} for {} {}",
+          doctrine.batchName(), reason, sessionDate, symbol, e);
+    }
+  }
+
+  /**
+   * Per-position ops alert for an exit evaluated on incomplete data. Unlike the entry side this is
+   * NOT aggregated: the held book is small (18 open positions on 2026-08-03) and each degraded exit
+   * carries live money risk, so each one is individually actionable rather than noise. Fail-soft —
+   * this batch is the position's only exit evaluator, so an alerting failure must never propagate.
+   */
+  private void alertExitCoverageDegraded(
+      SwingDoctrine doctrine, LocalDate sessionDate, String symbol, String detail) {
+    try {
+      events.publishEvent(
+          new SwingBatchAlert(
+              doctrine.batchName(),
+              doctrine.alertLabel() + " exit DEGRADED — data coverage",
+              sessionDate
+                  + " "
+                  + symbol
+                  + ": "
+                  + detail
+                  + " — the exit was EVALUATED ANYWAY on the bars present (doctrine: an exit must"
+                  + " never refuse), so the stop/trail level it used may be computed off a stretched"
+                  + " window. Verify before trusting today's level for this position."));
+    } catch (RuntimeException e) {
+      log.warn("{} swing coverage alert failed: {}", doctrine.batchName(), e.getMessage());
+    }
+  }
+
+  private static String coverageReason(String symbol) {
+    return "INCOMPLETE_COVERAGE:" + symbol;
+  }
+
+  private static String coverageDegradedReason(String symbol) {
+    return "EXIT_DEGRADED_COVERAGE:" + symbol;
   }
 
   private static String mixedLotReason(String symbol) {

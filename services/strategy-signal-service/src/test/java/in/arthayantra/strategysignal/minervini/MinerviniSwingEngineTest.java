@@ -482,6 +482,86 @@ class MinerviniSwingEngineTest {
         series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null, null);
   }
 
+  /**
+   * THE DOCTRINE TEST for the 2026-08-03 data-coverage gate. An exit evaluated on a holed series must
+   * still FIRE — "entries need fresh truth (you can always NOT enter), exits need the best available
+   * truth (you cannot refuse to leave forever)". If a future change ever mirrors the entry refusal
+   * onto the exit path, this reddens.
+   *
+   * <p>Concretely guards the 44-symbol corporate-action-purge cohort (TATASTEEL, WIPRO, TECHM …):
+   * they hold only 44 daily bars, so a refusing guard could strand a real position in the most liquid
+   * names in the universe.
+   */
+  @Test
+  void exitStillFiresWhenCoverageIsIncomplete() throws IOException {
+    ExitHarness h = new ExitHarness();
+    // drop 2026-06-18 — a real NSE trading day, and one of the sessions actually missing from
+    // marketdata.candles on 2026-08-03
+    List<EngineCandle> holed = new ArrayList<>(h.series);
+    holed.removeIf(
+        b -> b.bucketStart().toLocalDate().equals(java.time.LocalDate.of(2026, 6, 18)));
+    assertThat(holed).hasSize(h.series.size() - 1);
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
+
+    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine());
+
+    assertThat(run.exits())
+        .as("an incomplete window must DEGRADE the exit, never block it")
+        .isEqualTo(1);
+    assertThat(run.exitSkipped())
+        .as("a coverage hole is not a skip — the stop WAS evaluated")
+        .isZero();
+  }
+
+  /** The degraded exit is not silent: ops gets a per-position alert beside the evaluation. */
+  @Test
+  void degradedExitPublishesAnOpsAlert() throws IOException {
+    ExitHarness h = new ExitHarness();
+    List<EngineCandle> holed = new ArrayList<>(h.series);
+    holed.removeIf(
+        b -> b.bucketStart().toLocalDate().equals(java.time.LocalDate.of(2026, 6, 18)));
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+
+    new SwingBatchEngine(
+            h.registry, h.candles, h.signals, mock(SignalPublisher.class), events,
+            Optional.empty(), passthroughTx(), new ObjectMapper(), Clock.systemUTC())
+        .runDaily(h.doctrine());
+
+    org.mockito.ArgumentCaptor<Object> captor = org.mockito.ArgumentCaptor.forClass(Object.class);
+    verify(events, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
+    assertThat(captor.getAllValues())
+        .filteredOn(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::isInstance)
+        .map(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::cast)
+        .anySatisfy(
+            a -> {
+              assertThat(a.title()).contains("exit DEGRADED");
+              assertThat(a.message()).contains("2026-06-18");
+            });
+  }
+
+  /** A gap-free series must not alert — otherwise the signal is noise. */
+  @Test
+  void completeCoverageRaisesNoDegradationAlert() throws IOException {
+    ExitHarness h = new ExitHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+
+    SwingBatchEngine.SwingRun run =
+        new SwingBatchEngine(
+                h.registry, h.candles, h.signals, mock(SignalPublisher.class), events,
+                Optional.empty(), passthroughTx(), new ObjectMapper(), Clock.systemUTC())
+            .runDaily(h.doctrine());
+
+    assertThat(run.exits()).isEqualTo(1);
+    org.mockito.ArgumentCaptor<Object> captor = org.mockito.ArgumentCaptor.forClass(Object.class);
+    verify(events, org.mockito.Mockito.atLeastOnce()).publishEvent(captor.capture());
+    assertThat(captor.getAllValues())
+        .filteredOn(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::isInstance)
+        .map(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::cast)
+        .noneSatisfy(a -> assertThat(a.title()).contains("DEGRADED"));
+  }
+
   // ---- harness --------------------------------------------------------------------------------
 
   private final class ExitHarness {

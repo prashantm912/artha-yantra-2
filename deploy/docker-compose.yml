@@ -610,6 +610,10 @@ services:
       # External dead-man's-switch for the swing batches (catches a whole-stack/host OUTAGE, which the
       # in-stack P0-4 canary can't). Blank = dormant; paste a healthchecks.io/UptimeRobot heartbeat URL
       # to arm, and set the external check to expect a ping on 15 20 * * 1-5 (TZ Asia/Kolkata).
+      # The ping is EARNED, not unconditional: it is WITHHELD when an ARMED swing family recorded no
+      # swing_batch_runs marker for the IST session, so a stack that is up but whose batch silently
+      # failed now alarms at 20:15 instead of at the 08:30 canary. An NSE holiday, a disarmed family
+      # and a date past the bundled calendar's covered years all still ping (no false alarms).
       ARTHA_HEARTBEAT_URL: "${ARTHA_HEARTBEAT_URL:-}"
       ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 15 20 * * MON-FRI}"
       # Session-cadence dead-man's-switch for the LIVE trading session (the swing ping above proves only

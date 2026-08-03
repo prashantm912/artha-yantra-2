@@ -797,6 +797,128 @@ class ConnectTheDotsScorerTest {
         ctx(c, oi, m), CE, 1, T, P, true, false, false, false, null, false, NullPolicy.WITHHELD);
   }
 
+  // ---------------------------------------------- F5 U4b §5.3: the DEFAULT-OFF data-coverage floor
+
+  /** The all-defaults CE score with the §5.3 coverage floor ARMED, under the given null policy. */
+  private static Confluence floored(Chart c, Oi oi, Macro m, NullPolicy policy) {
+    return ConnectTheDotsScorer.score(
+        ctx(c, oi, m), CE, 1, T, P, true, false, false, false, null, false, policy, true);
+  }
+
+  /** BULL_OI with ONLY the futures quadrant missing — 1.5 of 18.8 gone, coverage 0.9202. */
+  private static final Oi ONE_DOT_GAP_OI =
+      new Oi(
+          OiQuadrant.LONG_BUILDUP, OiQuadrant.NEUTRAL, bd("10"), bd("5"), bd("5"),
+          bd("-60000"), bd("70000"), bd("80"), true, false, bd("5"), bd("60"), bd("60"));
+
+  @Test
+  void coverageFloorIsInertUntilArmed() {
+    // DEFAULT-OFF parity: the 12-arg overload every live caller uses must be byte-identical to the
+    // 13-arg one with the gate false, on a bar the floor WOULD refuse. GAPPY has three dots'
+    // inputs missing (futures_oi 1.5 + vix 1.0 + basis 1.0 of the 18.8 legacy denominator) —
+    // coverage 15.3/18.8 = 0.8138, well under the 0.90 default.
+    Confluence twelveArg =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, GAPPY_OI, GAPPY_MACRO), CE, 1, T, P, true, false, false, false, null,
+            false, NullPolicy.LEGACY);
+    Confluence thirteenArgOff =
+        ConnectTheDotsScorer.score(
+            ctx(BULL_CHART, GAPPY_OI, GAPPY_MACRO), CE, 1, T, P, true, false, false, false, null,
+            false, NullPolicy.LEGACY, false);
+
+    assertThat(thirteenArgOff.aggregate()).isEqualByComparingTo(twelveArg.aggregate());
+    assertThat(thirteenArgOff.decisiveLegsHeld()).isEqualTo(twelveArg.decisiveLegsHeld()).isTrue();
+    assertThat(thirteenArgOff.bullish()).isEqualTo(twelveArg.bullish()).isTrue();
+  }
+
+  @Test
+  void coverageFloorRefusesTheBarWhenAWholeDataPlaneIsGone() {
+    // The §5.3 hazard, made concrete. Same bar, same threshold, floor the ONLY difference:
+    //   unarmed  aggregate 0.9202 >= 0.6, legs held -> FIRES
+    //   armed    coverage  0.8138 <  0.90            -> REFUSED
+    // Under the wrong implementation (the floor left out of `decisiveLegsHeld`) the armed call still
+    // fires, so these two assertions disagree — that is what makes this a test rather than a
+    // description.
+    Confluence unarmed =
+        ConnectTheDotsScorer.score(ctx(BULL_CHART, GAPPY_OI, GAPPY_MACRO), CE, 1, T, P, true);
+    assertThat(unarmed.aggregate()).isEqualByComparingTo("0.9202");
+    assertThat(unarmed.decisiveLegsHeld()).isTrue();
+    assertThat(unarmed.bullish()).isTrue();
+
+    Confluence armed = floored(BULL_CHART, GAPPY_OI, GAPPY_MACRO, NullPolicy.LEGACY);
+    assertThat(armed.aggregate()).as("the floor refuses the bar, it does not rescore it")
+        .isEqualByComparingTo("0.9202");
+    assertThat(armed.decisiveLegsHeld()).isFalse();
+    assertThat(armed.bullish()).isFalse();
+  }
+
+  @Test
+  void coverageFloorStillAdmitsASingleMissingDot() {
+    // The floor must separate "one dot happened to be missing" from "a whole data plane is gone" —
+    // a floor that blocked on ANY gap would be a different, much blunter change than the one the
+    // measured [0.828, 0.947] empty band supports.
+    //
+    // This bar ALSO discriminates the coverage BASELINE, which is the subtle half of §5.3. Only
+    // futures_oi (1.5) is missing, and iv_rank is withheld by LEGACY itself (its tag is unarmed):
+    //   correct  baseline 18.8 (iv_rank normalized out) -> 17.3/18.8 = 0.9202 >= 0.90 -> FIRES
+    //   wrong    baseline 19.6 (iv_rank counted as gap) -> 17.3/19.6 = 0.8827 <  0.90 -> REFUSED
+    // so getting the baseline wrong turns this assertion red rather than passing silently.
+    Confluence armed = floored(BULL_CHART, ONE_DOT_GAP_OI, BULL_MACRO, NullPolicy.LEGACY);
+    assertThat(armed.aggregate()).isEqualByComparingTo("0.9202");
+    assertThat(armed.decisiveLegsHeld()).as("0.9202 coverage clears the 0.90 floor").isTrue();
+    assertThat(armed.bullish()).isTrue();
+
+    // …and the vix-only shape from `withholdingCanLowerTheCompositeToo` (17.8/18.8 = 0.9468) too.
+    Macro noVix = new Macro(bd("14"), bd("30"), bd("12"), null, 40, 10, bd("50"), bd("0.20"), bd("0.05"));
+    assertThat(floored(BULL_CHART, BULL_OI, noVix, NullPolicy.LEGACY).bullish()).isTrue();
+  }
+
+  @Test
+  void theFloorIsWhatKeepsWithholdFromTradingMoreOnBrokenData() {
+    // Why the decision sheet insists the two arm TOGETHER. On the 2026-07-20 / 2026-07-28 shape,
+    // withholding RAISES the aggregate — measured on 1,812 of 1,816 rows, and reproduced here:
+    // GAPPY scores 0.9202 under LEGACY and a perfect 1.0 under WITHHELD, because the 1.5-weight
+    // futures_oi dot stops being counted against the side. Armed alone, the unified rule would fire
+    // this bar MORE confidently the worse the data got.
+    assertThat(withheld(BULL_CHART, GAPPY_OI, GAPPY_MACRO).aggregate()).isEqualByComparingTo("1.0");
+    assertThat(withheld(BULL_CHART, GAPPY_OI, GAPPY_MACRO).bullish()).isTrue();
+
+    // With the floor the policy arms with (ScalperConfluenceGate.coverageFloorArmed), the same bar
+    // is refused outright — a vanished data plane is no evidence, not strong evidence.
+    Confluence armedBoth = floored(BULL_CHART, GAPPY_OI, GAPPY_MACRO, NullPolicy.WITHHELD);
+    assertThat(armedBoth.aggregate()).isEqualByComparingTo("1.0");
+    assertThat(armedBoth.bullish()).isFalse();
+    assertThat(armedBoth.decisiveLegsHeld()).isFalse();
+  }
+
+  @Test
+  void coverageIsIdenticalUnderBothNullPolicies() {
+    // The floor gates the POLICY, so it must not be computed FROM the policy — otherwise arming
+    // WITHHELD (where `absent` swallows every input-missing dot) would drive coverage to 1.000 and
+    // the floor would silently disarm itself exactly when it is needed. Both the surviving weight
+    // and the baseline are policy-independent; this pins the observable consequence on both sides
+    // of the floor.
+    assertThat(floored(BULL_CHART, GAPPY_OI, GAPPY_MACRO, NullPolicy.WITHHELD).decisiveLegsHeld())
+        .as("below the floor under either policy")
+        .isEqualTo(floored(BULL_CHART, GAPPY_OI, GAPPY_MACRO, NullPolicy.LEGACY).decisiveLegsHeld())
+        .isFalse();
+    assertThat(floored(BULL_CHART, ONE_DOT_GAP_OI, BULL_MACRO, NullPolicy.WITHHELD).decisiveLegsHeld())
+        .as("above the floor under either policy")
+        .isEqualTo(floored(BULL_CHART, ONE_DOT_GAP_OI, BULL_MACRO, NullPolicy.LEGACY).decisiveLegsHeld())
+        .isTrue();
+  }
+
+  @Test
+  void aCleanBarIsFullCoverageAndTheFloorNeverBinds() {
+    // The 9,207-of-11,068 case: nothing missing ⇒ coverage 1.000 ⇒ the floor is invisible. Pinned so
+    // a future dot that reads its input as "missing" by accident shows up as a live signal loss here
+    // rather than in production.
+    Confluence clean = floored(BULL_CHART, BULL_OI, BULL_MACRO, NullPolicy.LEGACY);
+    assertThat(clean.dots()).noneMatch(DotScore::inputMissing);
+    assertThat(clean.decisiveLegsHeld()).isTrue();
+    assertThat(clean.bullish()).isTrue();
+  }
+
   // ------------------------------------- U4b review Critical: the scalar is NOT the armed verdict
 
   @Test

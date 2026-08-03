@@ -121,7 +121,7 @@ class AuditGapTests {
         new SubscriptionRegistry(RESOLVER, 3_000, new SimpleMeterRegistry());
     registry.subscribe(
         "ui",
-        new InstrumentKey("NSE", "RELIANCE"),
+        new InstrumentKey("NFO", "NIFTY26AUGFUT"),
         in.arthayantra.marketdata.kite.ticker.SubscriptionMode.QUOTE,
         in.arthayantra.marketdata.kite.ticker.SubscriptionPriority.UI);
 

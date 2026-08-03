@@ -20,9 +20,12 @@ class SubscriptionRegistryTest {
 
   private static final Map<String, InstrumentTokenResolver.TokenInfo> MASTER =
       Map.of(
-          "NSE:AAA", new InstrumentTokenResolver.TokenInfo(1, "EQ", "NSE"),
-          "NSE:BBB", new InstrumentTokenResolver.TokenInfo(2, "EQ", "NSE"),
-          "NSE:CCC", new InstrumentTokenResolver.TokenInfo(3, "EQ", "NSE"),
+          // PR #1251: the generic placeholders are DERIVATIVES. SubscriptionRegistry refuses to
+          // subscribe a tradable cash-exchange instrument (see refuseCashEquity), so an "NSE:AAA"
+          // stubbed in the NSE segment is no longer a legal subject for refcount/eviction mechanics.
+          "NFO:AAA", new InstrumentTokenResolver.TokenInfo(1, "FUT", "NFO-FUT"),
+          "NFO:BBB", new InstrumentTokenResolver.TokenInfo(2, "FUT", "NFO-FUT"),
+          "NFO:CCC", new InstrumentTokenResolver.TokenInfo(3, "FUT", "NFO-FUT"),
           "NSE:NIFTY 50", new InstrumentTokenResolver.TokenInfo(256265, "EQ", "INDICES"));
 
   private static final InstrumentTokenResolver RESOLVER =
@@ -47,8 +50,14 @@ class SubscriptionRegistryTest {
     return new SubscriptionRegistry(RESOLVER, cap, new SimpleMeterRegistry());
   }
 
+  /** The generic derivative placeholders (AAA/BBB/CCC) - see the MASTER note. */
   private static InstrumentKey key(String symbol) {
-    return new InstrumentKey("NSE", symbol);
+    return new InstrumentKey("NFO", symbol);
+  }
+
+  /** The one real index in the fixture, which lives on a cash exchange. */
+  private static InstrumentKey indexKey() {
+    return new InstrumentKey("NSE", "NIFTY 50");
   }
 
   @Test
@@ -84,7 +93,7 @@ class SubscriptionRegistryTest {
 
     // pinned holds self-restore from config on boot — they are never persisted
     registry.subscribe(
-        "system-pinned", key("NIFTY 50"), SubscriptionMode.QUOTE, SubscriptionPriority.PINNED_INDEX);
+        "system-pinned", indexKey(), SubscriptionMode.QUOTE, SubscriptionPriority.PINNED_INDEX);
     registry.subscribe("ui:tab1", key("AAA"), SubscriptionMode.QUOTE, SubscriptionPriority.UI);
 
     assertThat(store.all())
@@ -153,7 +162,7 @@ class SubscriptionRegistryTest {
   void pinnedIndicesAreNeverEvicted() {
     SubscriptionRegistry registry = registry(1);
     registry.subscribe(
-        "system-pinned", key("NIFTY 50"), SubscriptionMode.QUOTE, SubscriptionPriority.PINNED_INDEX);
+        "system-pinned", indexKey(), SubscriptionMode.QUOTE, SubscriptionPriority.PINNED_INDEX);
 
     assertThatThrownBy(
             () ->
@@ -167,7 +176,7 @@ class SubscriptionRegistryTest {
   void layoutLookupUsesModeAndIndexFlag() {
     SubscriptionRegistry registry = registry(10);
     registry.subscribe(
-        "system-pinned", key("NIFTY 50"), SubscriptionMode.QUOTE, SubscriptionPriority.PINNED_INDEX);
+        "system-pinned", indexKey(), SubscriptionMode.QUOTE, SubscriptionPriority.PINNED_INDEX);
     registry.subscribe("ui", key("AAA"), SubscriptionMode.FULL, SubscriptionPriority.UI);
 
     assertThat(registry.layoutFor(256265).orElseThrow().expectedBytes())

@@ -143,7 +143,7 @@ class MinerviniSwingEngineTest {
     List<EngineCandle> series = craftDecline();
     SignalRepository signals = mock(SignalRepository.class);
     when(signals.activeEntries())
-        .thenReturn(List.of(anchor(42L, supersededVersion, new BigDecimal("150"), series)));
+        .thenReturn(List.of(anchor(42L, supersededVersion, new BigDecimal("152"), series)));
     stubInsert(signals, 43L);
 
     MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
@@ -276,66 +276,6 @@ class MinerviniSwingEngineTest {
     assertThat(run.refusalReasons()).containsExactly("MIXED_PRE_POST_LOTS:TESTCO");
     verify(h.signals, org.mockito.Mockito.never()).transition(any(Long.class), any());
     verify(h.candles, org.mockito.Mockito.never()).fetch(any(), any(), any(), any(), any());
-  }
-
-  @Test
-  void aRetroactiveSplitOfTheHeldSeriesDoesNotManufactureASyntheticStopOut() throws IOException {
-    // docs/signal-analysis/2026-08-03-minervini-live-plane-split.md §5.3. The daily series a held
-    // position is compared against is retro-mutable: when a 1:2 split's ex-date lands, every
-    // pre-ex-date bar reads at half — either because EquitySplitBonusAdjuster starts scaling the
-    // BHAVCOPY bars at read time or because CorporateActionJob re-fetched already-adjusted Kite bars
-    // over the stored ones — while NOTHING rewrites signals.entry_price. The position has not moved:
-    // every bar, the entry bar included, is the same money on the new plane. The un-fixed engine
-    // nonetheless compares a close of 75 against entry 150 − 8% = 138 and stops out at a price that
-    // never happened.
-    ExitHarness h = new ExitHarness(craftFlat(75.0), new BigDecimal("150"));
-    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
-
-    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine());
-
-    assertThat(run.exits())
-        .as("a split must not manufacture a stop-out on a position that never moved")
-        .isZero();
-    assertThat(run.exitSkipped())
-        .as("the stop IS still evaluated — re-anchored onto the series plane, not refused")
-        .isZero();
-    verify(h.signals, org.mockito.Mockito.never()).transition(any(Long.class), any());
-  }
-
-  @Test
-  void theReAnchoredStopStillFiresOnARealBreakOfTheSplitAdjustedLevel() throws IOException {
-    // The other half of the same property: re-anchoring must not DISARM the stop. On the post-split
-    // plane the 8% stop sits at 75 − 8% = 69, so a close of 68 is a genuine break and must still exit.
-    ExitHarness h = new ExitHarness(craftFlatEnding(75.0, 68.0), new BigDecimal("150"));
-    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
-
-    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine());
-
-    assertThat(run.exits()).as("a real break of the re-anchored stop still exits").isEqualTo(1);
-    verify(h.signals).transition(42L, "EXPIRED");
-  }
-
-  @Test
-  void theReAnchorIsSkippedWhenTheResolvedBarIsNotTheEntryBar() throws IOException {
-    // Pins the narrowness. When the entry bar itself is absent from the fetched series,
-    // indexAtOrBefore lands on an EARLIER bar whose close was never this position's entry reference —
-    // re-anchoring there would move the stop onto a bar the position did not enter on. So the guard
-    // requires the resolved bar to BE the entry bar (same instant) and otherwise leaves the stored
-    // price alone: identical to the behaviour before this fix, stop-out and all.
-    ExitHarness h = new ExitHarness(craftFlat(75.0), new BigDecimal("150"));
-    when(h.signals.activeEntries())
-        .thenReturn(
-            List.of(
-                anchorGeneratedAt(
-                    42L, h.versionId, new BigDecimal("150"),
-                    h.series.get(0).bucketStart().plusHours(9))));
-    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
-
-    SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine());
-
-    assertThat(run.exits())
-        .as("no bar carries the entry instant, so the stored entry price stands unchanged")
-        .isEqualTo(1);
   }
 
   @Test
@@ -496,18 +436,10 @@ class MinerviniSwingEngineTest {
     final SignalRepository signals = mock(SignalRepository.class);
     final MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
     final MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
-    final List<EngineCandle> series;
+    final List<EngineCandle> series = craftDecline();
     final UUID versionId;
 
-    // 150 == craftDecline()'s first bar close: emitEntry stores entryPrice = bar.close(), so a held
-    // anchor whose entry price differs from its own entry bar is not a state the engine can produce.
     ExitHarness() throws IOException {
-      this(craftDecline(), new BigDecimal("150"));
-    }
-
-    /** A held anchor at {@code entryPrice} over {@code bars}, generated on the FIRST bar's bucket. */
-    ExitHarness(List<EngineCandle> bars, BigDecimal entryPrice) throws IOException {
-      this.series = bars;
       UUID strategyId = UUID.randomUUID();
       versionId = UUID.randomUUID();
       JsonNode config = vcpConfig();
@@ -515,7 +447,7 @@ class MinerviniSwingEngineTest {
       when(registry.findVersionById(versionId))
           .thenReturn(Optional.of(version(versionId, strategyId, "1", config)));
       when(signals.activeEntries())
-          .thenReturn(List.of(anchor(42L, versionId, entryPrice, series)));
+          .thenReturn(List.of(anchor(42L, versionId, new BigDecimal("152"), series)));
       stubInsert(signals, 43L);
       when(funnel.buyableAndOnDeck()).thenReturn(List.of());
     }
@@ -569,15 +501,6 @@ class MinerviniSwingEngineTest {
         series.get(0).bucketStart().plusDays(1), null, null, null, null, null, null, null);
   }
 
-  /** As {@link #anchor} but with an explicit {@code generatedAt} — used to miss every bar instant. */
-  private static SignalRepository.SignalRow anchorGeneratedAt(
-      long id, UUID versionId, BigDecimal entryPrice, OffsetDateTime generatedAt) {
-    return new SignalRepository.SignalRow(
-        id, versionId, "NSE", "TESTCO", "1d", "ENTRY", "BUY", entryPrice, null, null, BigDecimal.ONE,
-        new ObjectMapper().createObjectNode(), "TAKEN", generatedAt, generatedAt.plusDays(1), null,
-        null, null, null, null, null, null);
-  }
-
   private static SignalRepository.SignalRow anchorAt(
       long id, UUID versionId, BigDecimal entryPrice, java.time.LocalDate date) {
     OffsetDateTime generatedAt = date.atStartOfDay(IST).toOffsetDateTime();
@@ -627,22 +550,6 @@ class MinerviniSwingEngineTest {
       bars.add(bar(d, 150.0, 1_000L));
     }
     bars.add(bar(24, 135.0, 1_000L));
-    return bars;
-  }
-
-  /** 25 flat bars at {@code price} — a held position that has not moved at all. */
-  private static List<EngineCandle> craftFlat(double price) {
-    List<EngineCandle> bars = new ArrayList<>();
-    for (int d = 0; d <= 24; d++) {
-      bars.add(bar(d, price, 1_000L));
-    }
-    return bars;
-  }
-
-  /** {@link #craftFlat} with the last bar re-priced to {@code last}. */
-  private static List<EngineCandle> craftFlatEnding(double price, double last) {
-    List<EngineCandle> bars = craftFlat(price);
-    bars.set(bars.size() - 1, bar(bars.size() - 1, last, 1_000L));
     return bars;
   }
 

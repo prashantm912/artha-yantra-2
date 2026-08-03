@@ -32,18 +32,19 @@ public final class Books {
 
   /**
    * The EOD-MANAGED books: swing families whose holdings are cash equities, exited by the daily swing
-   * batch and by nothing else.
+   * batch rather than by any intraday path.
    *
-   * <p>This is the single behavioural authority for that fact. Two surfaces read it — {@code
-   * PaperBracketEvaluator}, which must never price one of these holdings off a live tick (see its
-   * javadoc), and {@code PaperService.isSwingBook}, the signal-freshness exemption — so the two cannot
-   * drift apart. It is deliberately a COMPILE-TIME set and not the operator-tunable {@code
-   * artha.paper.eod-managed-books} property that {@code PaperStaleTickAlerter} reads: that property
-   * suppresses an ALERT, where a blank value costs visibility, and blanking it must never be able to
-   * re-open a money-path exposure. {@code SwingEquityBracketTripwireIntegrationTest} pins the two in step.
+   * <p>The one behavioural authority for that fact, so the surfaces that act on it cannot drift apart.
+   * Today its sole production consumer is {@code PaperService.isSwingBook} (the signal-freshness
+   * exemption), which previously tested the two book constants inline — byte-identical, since
+   * {@code BookResolver.MINERVINI}/{@code MANAS_ARORA} ARE these constants. {@code
+   * PaperStaleTickAlerter}'s comment has long warned that its {@code artha.paper.eod-managed-books}
+   * property must stay in step with that method and nothing enforced it; {@code
+   * SwingEquityBracketTripwireIntegrationTest.theTwoEodManagedBookAuthoritiesAgree} now does.
    *
-   * <p>⚠️ A new swing family MUST be added here, or its holdings become intraday-evaluated against a
-   * stop level the daily batch wrote on a possibly-stale corporate-action plane (PR #1251).
+   * <p>Deliberately a COMPILE-TIME set rather than that property: the property suppresses an ALERT,
+   * where a blank value costs visibility, and a set that gates behaviour must not be blankable by an
+   * operator. A new swing family belongs in both.
    */
   public static Set<String> eodManaged() {
     return Set.of(MINERVINI, MANAS_ARORA);

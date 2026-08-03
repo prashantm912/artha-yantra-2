@@ -94,8 +94,10 @@ artha:
     # DRILL-ONLY fault injection for the watchdog above (SignalFaultInjector). Its receive-stall
     # branch is the one live path no external action can reach: the 2026-08-03 drill proved a
     # transport drop self-heals in ~22ms via Lettuce's ConnectionWatchdog, ~4 orders of magnitude
-    # under bar-gap-ms, so only an in-process listener-container stop reproduces the 2026-07-07
-    # shape. Enabling it lets an operator BREAK this service on purpose.
+    # under bar-gap-ms, so only an in-process listener-container stop produces a DETECTOR-EQUIVALENT
+    # receive stall. It validates the DETECTOR, not the 2026-07-07 DIAGNOSIS — the real incident's
+    # mechanism (socket up, listeners gone) is still unreproduced and remains a hypothesis.
+    # Enabling it lets an operator BREAK this service on purpose.
     # ⚠️ Deliberately has NO compose passthrough (unlike every knob above) — turning it on requires
     # editing the compose env explicitly, which is the intended friction. This is the ONE place the
     # #653 name-mismatch rule is inverted on purpose: there is no .env name to match.

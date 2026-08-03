@@ -286,8 +286,11 @@ class SubscriberFaultInjectionIntegrationTest extends StrategySignalIntegrationT
         .as("the injected stall must stop candle RECEIPT dead")
         .isEqualTo(heartbeatBeforeInjection);
 
-    // ── Assert observable #2: the shared Redis connection is untouched — this is a SUBSCRIPTION
-    // loss, not a transport drop (the shape Lettuce's ConnectionWatchdog would have healed).
+    // ── Assert observable #2: Redis remains available to COMMAND-PLANE clients. Note precisely what
+    // this does and does not prove: it shows the broker and the shared factory still serve commands,
+    // NOT that the stopped pub/sub socket survived — `container.stop()` closes it, so this is a
+    // detector-equivalent receive stall, not a literal socket-up subscription loss. (Cross-vendor
+    // review corrected an earlier comment here that claimed the stronger thing.)
     redis.opsForValue().set("fault-injection-probe", "alive");
     assertThat(redis.opsForValue().get("fault-injection-probe")).isEqualTo("alive");
 

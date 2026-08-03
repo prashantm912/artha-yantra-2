@@ -34,11 +34,23 @@ argue about. [computed]**
 - **M9's named divergence — the ordinal-vs-midpoint rank formula — flips the `rs ≥ 70` gate for 5
   name-dates out of 45,069** (Manas; 0.0111%) and **5 of 37,114** (Minervini; 0.0135%), bounded in
   closed form at **≤ 1 name per screen date, ever**. **[computed]**
-- **But the same code carries an unnamed sibling divergence ~320× larger**: the backtest ranks only
+- **But the same code carries an unnamed sibling divergence ~150× larger**: the backtest ranks only
   at *weekly* rank dates and reuses that rank for up to 4 more sessions, while live re-ranks every
-  session. Holding the population fixed, that flips the same gate for **1,608 of 44,975 name-dates =
-  3.5753%**, rising monotonically 0.000% → 5.603% with staleness. **If the owner ever wants the
+  session. Holding the population fixed, that flips the same gate for **1.7025% of 3,382,316
+  name-dates**, rising monotonically with staleness. **If the owner ever wants the
   backtest's RS gate to match live, the formula is not where the divergence lives.** **[computed]**
+
+> ⚠️ **CORRECTED 2026-08-03, same day, by the follow-up A/B ([#1244](https://github.com/prashantm912/artha-yantra-2/pull/1244)).**
+> This section originally read **1,608 of 44,975 = 3.5753%** and **322×**. Those numbers are an
+> **overstatement by 2.05×** — the arithmetic was sound but the *spec* was not. The SQL here froze the
+> symbol's **own** RS at the stale rank date **as well as** the cross-section. Production does not do
+> that: `perBarRsRank` (`ManasAroraBacktestService.java:717-731`, Minervini identical) recomputes
+> `weightedRs(close, i)` at the **current** bar and percentiles it against the stale `dist.get(rd)` —
+> **only the denominator is stale**. On one fixed 3,376,887-name-date population, production spec
+> measures **1.6957%** against this doc's **3.4845%**. The corrected 11-year figure is **1.7025%**,
+> i.e. **153×** the formula term, not 322×. Both of this doc's headline numbers were independently
+> reproduced exactly before the spec error was found — reproducibility did not catch it, because the
+> flaw was in what was being measured, not in the measuring.
 
 The honest one-line framing: **M6 and M9-as-written are both real, both correctly identified, and
 both economically inert.** The measurement's value is not the verdict (which is "accept") but the
@@ -418,8 +430,10 @@ The 0-stale row returning **exactly 0 flips and exactly 0.000 mean delta** is th
 unchanged comparison reproduces to the decimal, so the 3.58% is a measurement and not an artifact.
 Monotone in staleness, as it must be.
 
-**3.5753% vs 0.0111% — the cadence term is 322× the formula term, in the same code, feeding the same
-gate.** **[computed]**
+~~**3.5753% vs 0.0111% — the cadence term is 322× the formula term**~~ ⚠️ **SUPERSEDED — see the
+correction box in §1.** The measured-here figure encodes a spec production does not have (it stales
+the symbol's own RS as well as the cross-section). Correct statement: **1.7025% vs 0.0111% — the
+cadence term is 153× the formula term**, in the same code, feeding the same gate. **[computed, #1244]**
 
 ### 4.4 Why there is no M9 P&L number here, and what it would take
 

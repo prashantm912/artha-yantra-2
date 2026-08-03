@@ -3,15 +3,22 @@
 # gitleaks -> ruff + pytest (>= 75% line) -> image build -> GHCR push on main only.
 name: ci-optimizer
 
+# contracts/metrics/** is in `paths:` because app/metrics_catalog.py DERIVES the objective
+# allow-list from the shared trial-metrics catalog — a catalog-only edit changes this service's
+# behaviour without touching a file under services/optimizer-service/. Measured 2026-08-03: such
+# an edit triggered neither this workflow nor ci-java, so the one file the cross-language contract
+# exists to protect was covered by no gate at all.
 on:
   push:
     branches: [main]
     paths:
       - "services/optimizer-service/**"
+      - "contracts/metrics/**"
       - ".github/workflows/ci-optimizer.yml"
   pull_request:
     paths:
       - "services/optimizer-service/**"
+      - "contracts/metrics/**"
       - ".github/workflows/ci-optimizer.yml"
 
 concurrency:

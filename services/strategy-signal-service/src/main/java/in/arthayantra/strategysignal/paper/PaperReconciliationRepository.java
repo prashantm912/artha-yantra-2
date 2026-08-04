@@ -61,6 +61,35 @@ public class PaperReconciliationRepository {
           WHERE o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
             AND o.side = p.side
             AND COALESCE(o.filled_at, o.placed_at) BETWEEN p.opened_at AND p.closed_at
+            -- V058 (cross-vendor review Major 5): on a strategy-scoped book two siblings share this
+            -- key and overlap in lifetime, so the unscoped sum counts BOTH twins' entry legs and
+            -- reports 20 against a 10-unit row: a nightly qty-mismatch alarm on a perfectly valid
+            -- split. An order with no signal maps to UNATTRIBUTED_SCOPE so a hand-ticket lot still
+            -- matches its own orders instead of reporting missing-entry. NULL = unscoped, as before.
+            -- The EXIT leg below is NOT scoped, and that is a KNOWN DEFECT, not a design choice.
+            -- ROUND-2 REVIEW MAJOR 1 -- an earlier version of this comment claimed an inflated
+            -- exit_count was "harmless, since only exitCount == 0 classifies". That reasoning is
+            -- WRONG and was overturned: if twin A has a settle order and twin B does not, A's order
+            -- satisfies the exit lateral for BOTH rows, so the zero-only classifier at
+            -- PaperReconciliationService:166-174 never sees B. Inflation does not add a false
+            -- alarm, it DELETES a real one -- missing-exit detection becomes a FALSE NEGATIVE and
+            -- the reconciler silently stops reporting a genuinely unsettled position.
+            -- It is not fixable here: doSettle writes exit orders with signal_id NULL, so nothing
+            -- in today's schema ties a settle leg to ONE of two sibling positions. Scoping it the
+            -- way the entry leg is scoped would zero every exit_count instead -- trading a false
+            -- negative for a mass false alarm. The fix is an exact position_id <-> exit_order_id
+            -- association (PR #1259's V057 lot table plus an exit-side linkage), which is why
+            -- #1275 is HARD-BLOCKED on #1259 rather than merely version-coupled.
+            -- PaperScopedResolutionPathsIntegrationTest pins this gap so it cannot be forgotten.
+            AND (
+              p.strategy_id IS NULL
+              OR COALESCE(
+                   (SELECT sv2.strategy_id FROM signals sg
+                      JOIN strategy_versions sv2 ON sv2.id = sg.strategy_version_id
+                     WHERE sg.id = o.signal_id),
+                   '00000000-0000-0000-0000-000000000000'::uuid
+                 ) = p.strategy_id
+            )
         ) e ON true
         LEFT JOIN LATERAL (
           SELECT COUNT(*) AS exit_count
@@ -328,6 +357,12 @@ public class PaperReconciliationRepository {
                   AND o.exchange      = p.exchange
                   AND o.tradingsymbol = p.tradingsymbol
                   AND o.side          = p.side
+                  -- V058: mirrors PaperPositionRepository.openForSignal's strategy predicate. On a
+                  -- strategy-scoped book a live ENTRY from a SIBLING strategy no longer reaches this
+                  -- position through closeForSignal, so counting it as a healthy anchor here would be
+                  -- a false NEGATIVE in a detector whose whole job is "no exit driver will ever settle
+                  -- this row". Null strategy_id (unscoped/legacy) matches on the key alone, as before.
+                  AND (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)
                   AND a.signal_type   = 'ENTRY'
                   AND a.status IN ('ACTIVE', 'TAKEN')
                   AND (

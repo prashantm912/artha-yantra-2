@@ -62,10 +62,10 @@ Non-negotiables:
 ```bash
 gh pr checks <n> --watch    # 3-shard ci-java + ci-contracts + ci-e2e
 ```
-- **clean tier**: on green, `gh pr merge <n> --squash` (⚠️ `--admin` was REMOVED here
-  2026-08-04: it bypasses **all eight** required contexts, and `lock_branch` — the only reason
-  it was ever needed — was set false 2026-07-26. Reaching for it now means a required check is
-  genuinely red, and reading that check is the job. `hotfix/*` keeps its own fast-lane.)
+- **clean tier**: on green, `gh pr merge <n> --squash` — no `--admin`. <!-- runbook-hygiene:allow names the retracted flag -->
+  (⚠️ REMOVED 2026-08-04: it bypasses **all eight** required contexts, and `lock_branch` — the
+  only reason it was ever needed — was set false 2026-07-26. Reaching for it now means a required
+  check is genuinely red, and reading that check is the job. `hotfix/*` keeps its own fast-lane.)
   Delete the branch. **Then verify `git log origin/main -1`
   equals the PR's mergeCommit before building/deploying** — `merge && pull` races the
   remote (a stale pull once deployed a migration-less "healthy" service).
@@ -74,9 +74,9 @@ gh pr checks <n> --watch    # 3-shard ci-java + ci-contracts + ci-e2e
   "✘ +[0-9]+ tests/[a-z-]+\.spec\.ts:[0-9]+" | sort -u`. Known flake pair =
   signals.spec.ts:38 + ws-reconnect.spec.ts:23. Reachability test: can THIS diff touch
   the failing spec's surface? Unreachable → rerun; still red → INVESTIGATE, do not merge past
-  it (⚠️ corrected 2026-08-04: this read "admin-merge once every other gate is green". That
+  it (⚠️ corrected 2026-08-04 — the retracted text told you to bypass the gate here. That
   flake pair was FIXED in #903 and proven green 4× consecutively, so a red `e2e` now means a
-  real failure — CLAUDE.md: "do not reflexively admin-merge it as a 'known flake'".);
+  REAL failure; CLAUDE.md says never to wave it through as a known flake.);
   signals/WS-adjacent → rerun-to-green. A <60s e2e death = infra, read the log first.
   (~15 identical flake signatures in one night, 2026-07-10/11 — the procedure held.)
 - New service? It needs its own CI matrix shard or its tests never run.

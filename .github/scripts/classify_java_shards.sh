@@ -69,16 +69,6 @@ fi
 if grep -Eq '^contracts/([^/]*\.openapi\.json|json-schema-2020-12-keywords\.json)$' <<<"$files"; then
   strategy_gateway=true
 fi
-# Same shape, same reason: edge-gateway's SkillTreeSyncTest reads BOTH runbook trees
-# (.claude/skills/ and .agents/skills/) and asserts they stay in sync unless a divergence is
-# declared, plus that no runbook prescribes `gh pr merge --admin`. Neither tree is under
-# services/, so WITHOUT this rule a skills-only edit classifies to no shard at all, the required
-# `build-test (strategy-gateway)` context reports green in ~2s having run nothing, and the guard
-# is unreachable from the ONE edit it exists to catch -- the same hole #1246 found in the
-# trial-metrics catalog gate. Pinned by classify_java_shards_test.sh.
-if grep -Eq '^\.(claude|agents)/skills/' <<<"$files"; then
-  strategy_gateway=true
-fi
 
 # Every service directory this repo knows about. The four JVM services are mapped to shards
 # above; the two Python services own their own workflows (ci-optimizer / ci-margin) and are

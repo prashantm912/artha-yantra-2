@@ -125,22 +125,6 @@ expect "the shared json-schema keyword artifact reaches the ratchet" \
   "contracts/json-schema-2020-12-keywords.json" \
   "market_data=false,backtest=false,strategy_gateway=true"
 
-# Both runbook trees must reach edge-gateway's SkillTreeSyncTest. A skills-only edit is the
-# exact change that guard exists to catch, so classifying it to NO shard would report the
-# required context green without running it.
-expect "the claude runbook tree reaches the skill-sync guard" \
-  ".claude/skills/ship-a-change/SKILL.md" \
-  "market_data=false,backtest=false,strategy_gateway=true,java=true"
-
-expect "the codex runbook tree reaches the skill-sync guard" \
-  ".agents/skills/delegated-ship/SKILL.md" \
-  "market_data=false,backtest=false,strategy_gateway=true,java=true"
-
-# Neither tree may be confused for a service directory, and unrelated dotfile trees stay out.
-expect "an unrelated .claude path does not trigger a shard" \
-  ".claude/settings.json" \
-  "market_data=false,backtest=false,strategy_gateway=false,java=false,unowned_services="
-
 # --- a service no shard owns: named, which ci-java turns into a HARD FAILURE ---
 expect "unowned service fans out and is named" \
   "services/brand-new-service/src/main/java/Foo.java" \

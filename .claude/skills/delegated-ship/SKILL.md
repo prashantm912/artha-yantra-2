@@ -122,8 +122,8 @@ appear in `gh pr checks` — read the rollup, not `gh run list` (corrected 2026-
 old "absence ≠ skipped" advice sent check-hunts to the wrong command). CI's ruff can be
 newer than local.
 
-Merge: `gh pr merge --squash --admin`, then **verify `git log origin/main -1` equals
-the PR's mergeCommit BEFORE building** — `merge && pull` races the remote (a stale
+Merge: `gh pr merge --squash`, then **verify `git log origin/main -1` equals
+the PR's mergeCommit BEFORE building** (⚠️ `--admin` was REMOVED here 2026-08-04: it bypasses **all eight** required contexts, and `lock_branch` — the reason it was ever needed — was set false 2026-07-26. CLAUDE.md has said "merge normally; reaching for `--admin` means something is actually wrong" since then, but this runbook kept prescribing it, and it loads into every delegated builder session.) — `merge && pull` races the remote (a stale
 pull once deployed a migration-less "healthy" service).
 
 ## 5. Deploy + probe (per service batch, not per item)

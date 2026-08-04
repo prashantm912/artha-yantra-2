@@ -923,6 +923,42 @@ long-stale mains.
 
 ---
 
+### STATUS 2026-08-04 — 42 PRs merged 08-03/08-04, all deployed and live-probed
+
+**Shipped** (#1239 … #1291). Load-bearing ones: #1259 V057 lot table · #1275 V058 strategy-scoped
+paper key (**disarmed**, `ARTHA_PAPER_STRATEGY_SCOPED_BOOKS=` empty) · #1288 V059 exact
+position↔settle-order link · #1280 screener trailing-bar guard + 80% coverage floor · #1277 both
+dividend-parser gaps + V053 backfill · #1284 refuse `percent` level basis on options · #1282 remove
+the never-evaluated `percent` trailing basis · #1291 position-attribution ratchet (Java + Python) ·
+#1289 swing-family exit-doctrine pin. V053/V057/V058/V059 all applied and probed live.
+
+**Live corrections made this session, not code:** the corporate-action job was **DISARMED**
+(`ARTHA_CORPORATE_ACTIONS_ENABLED=false`) because it purges a symbol's candle history *before*
+proving the Kite re-fetch succeeds — 45 symbols gutted, and the damage is self-sealing
+(`hasNonBhavcopyDaily` returns false after the purge, so the sweep skips its own victims). Six June
+sessions backfilled (deficits 1383/1384/1384/1384/1383/22 → **0**). 21 stale screen rows deleted
+after `JBCHEPHARM` was found serving `passesAll: true` on an 18-day-stale price.
+
+#### OPEN — newly found this session, none of it on any list before 08-03
+
+| id | item | evidence |
+|---|---|---|
+| **N1** | **CorporateActionJob purge-before-fetch** — re-arm blocked until fixed. 175/448 events in a failure state, newest `RESOLVED` six weeks old; 45 symbols hold only bhavcopy-projected 1d and **zero** 1m | `docs/signal-analysis/2026-08-04-*`; job disarmed in `.env` |
+| **N2** | **Symbol-rename blind spot** — **61 symbols invisible now**; a renamed successor cannot re-enter either screen for ~252 sessions. Owner approved `symbol_lineage` **as data, not identity**, seeded with the 66 measured pairs; `BhavcopyBackfillService:486` currently DISCARDS NSE "Change in Name" events *with their ISIN attached* | #1285 |
+| **N3** | **#1283 swing coverage gate** — rework in flight. Review found the entry gate would have refused **~88% of the funnel on night one** (`primary-base`'s 252-bar `w52h` sets the window). ⚠️ **Unresolved: review measured 244/277, builder measures 46/277** — five-fold gap, unexplained | #1283 |
+| **N4** | **`ScalperRisk.ENGINE_SIDE_STOP_BASES` lists `percent`** while excluding `premium_pct` on reasoning that applies to both. Made unreachable by #1284, **not fixed**, and nothing couples the two modules — `ScalperRiskTest` bypasses validation entirely | chip `task_632c9a49` |
+| **N5** | **Attribution set bounded at 12 sites, not proven** — count moved 6→7→8→9→12 across four rounds, each from a *different search unit*. #1291 ratchets it; the detector still misses shapes it does not enumerate | #1287, #1291 |
+| **N6** | **F9 short-premium arms a route V059 does not close** — a SELL position's *entry* leg satisfies a BUY position's `o.side <> p.side` exit predicate; entry orders are never linked. Recorded in the V059 header, the repository javadoc AND the PR body | #1288 |
+| **N7** | **Editing a swing YAML auto-publishes**, and `exitPass` drives off `oldestLot` carrying the *old* version's frozen config — so held lots keep exiting on the pre-edit rule. `manas_arora_funnel` already runs **two versions of one strategy** against open lots | #1289 |
+| **N8** | CLAUDE.md stale on CI: `ci-optimizer` is **no longer** path-filtered and `optimizer-lint-test` **is** a required context; the doc still says "the six required" — there are **eight** | chip |
+| **N9** | 2,574 BSE dividend rows had never parsed (fixed #1277); **41 CA-gutted series** and the **five-June projection hole** are repaired, but nothing detects recurrence | #1277, N1 |
+
+#### Verification owed
+- **Tonight's 20:00 IST screen is the FIRST real execution of #1280's guard + floor.** Today's
+  zero-stale-rows count comes from a MANUAL delete — only a fresh run proves the guard works.
+
+---
+
 ## 1. Net-new code
 
 | id | item | authority | state |

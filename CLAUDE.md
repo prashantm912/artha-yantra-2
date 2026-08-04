@@ -700,7 +700,7 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - **`--admin` is NO LONGER the normal way to merge (2026-07-26).** `main` carried
   `lock_branch: {"enabled": true}` — the branch was READ-ONLY — so with `enforce_admins: false`
   EVERY merge had to use `gh pr merge --admin`, which bypasses ALL required status checks (six at
-  the time; eight since 2026-08-03) including a genuinely red one. It hid behind two unrelated, real
+  the time; nine since 2026-08-04) including a genuinely red one. It hid behind two unrelated, real
   bugs in the same row (task_db8bdf1e): a dead `frontend` required context, and path-filtered
   workflows never reporting — the same never-reports trap that later drove the `paths:` filter out
   of ci-java, ci-optimizer and ci-margin.
@@ -718,10 +718,12 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - **Every non-`hotfix/*` PR body needs the anchored `Cross-vendor review:` verdict line** — the
   `verdict` check (`ci-review-verdict.yml`, reads the body LIVE so an edit + rerun fixes it).
   ⚠️ **`verdict` is NOT in branch protection's required contexts** (re-verified against the protection
-  API 2026-08-04: the **EIGHT** required are `contracts`, `e2e`, `gitleaks`, the three `build-test`
-  shards, and — added 2026-08-03 with #1252 — `optimizer-lint-test` + `margin-lint-test`. It was six
-  when last checked 2026-08-01; `verdict` is in neither list, and it failed red on #1156 and blocked
-  nothing). The discipline is convention enforced by
+  API 2026-08-04: the **NINE** required are `contracts`, `e2e`, `gitleaks`, the three `build-test`
+  shards, `optimizer-lint-test` + `margin-lint-test` (added 2026-08-03 with #1252), and
+  **`runbook-hygiene`** (added 2026-08-04 with #1298 — owner call, applied by the Architect). It was
+  six when last checked 2026-08-01 and eight earlier on 2026-08-04; the count keeps moving, so
+  **re-read the API rather than quoting any number here**. `verdict` is in none of those lists, and
+  it failed red on #1156 and blocked nothing). The discipline is convention enforced by
   the Architect, not by GitHub; promoting it to required is a one-call owner decision. The check
   accepts `APPROVED`/`REQUEST_CHANGES (resolved)`/`NEEDS_REWORK (resolved)` each with
   `— <routed model> (<Vendor>)` model↔vendor PAIRED, or `SKIPPED (<reason>)`. Open builder PRs with

@@ -50,4 +50,29 @@ public class BookResolver {
         .findFirst()
         .orElse(OTHER);
   }
+
+  /**
+   * The STRATEGY (not the version) a signal belongs to — the V058 strategy-scoped position key
+   * (option D). Empty for a missing signal or a version with no strategy.
+   *
+   * <p>The strategy, deliberately, never the {@code strategy_version_id}: a republish mints a new
+   * version row, so a version-keyed position key would refuse to average a genuine same-strategy
+   * pyramid add across a hot-swap and would open a second row instead. {@code strategies.id} is
+   * stable across every publish.
+   */
+  public java.util.Optional<java.util.UUID> strategyIdForSignal(long signalId) {
+    return jdbc
+        .query(
+            """
+            SELECT sv.strategy_id
+            FROM signals s
+            JOIN strategy_versions sv ON sv.id = s.strategy_version_id
+            WHERE s.id = ?
+            """,
+            (rs, n) -> rs.getObject("strategy_id", java.util.UUID.class),
+            signalId)
+        .stream()
+        .filter(java.util.Objects::nonNull)
+        .findFirst();
+  }
 }

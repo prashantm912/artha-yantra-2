@@ -266,6 +266,19 @@ public class PaperService {
    * Zero/negative disables the gate; swing books are always exempt. Separate from {@link #tickMaxAge}.
    */
   private final Duration signalTakeMaxAge;
+  /**
+   * V058 / option D (owner-approved 2026-08-03): the books whose OPEN-position key is STRATEGY-SCOPED
+   * — two strategies entering the same {@code (exchange, tradingsymbol, side)} hold SEPARATE rows with
+   * their own brackets and their own exits instead of averaging into one.
+   *
+   * <p><b>EMPTY BY DEFAULT — the mechanism ships DISARMED.</b> Arming it changes realised P&amp;L on
+   * every co-fired trade (each twin then exits on its own doctrine instead of on the pointwise minimum
+   * of both), which is an owner decision on live money, not a deploy-time default. With the set empty
+   * every fill stamps {@code strategy_id = NULL} and the whole feature — index, joins, sub-account
+   * inheritance — collapses to the pre-V058 behaviour exactly.
+   */
+  private final java.util.Set<String> strategyScopedBooks;
+
   private final TransactionTemplate txTemplate;
 
   /** Wires the ledger collaborators, registering the M4 MTM-blind visibility gauge. */
@@ -294,6 +307,8 @@ public class PaperService {
       @org.springframework.beans.factory.annotation.Value(
               "${artha.paper.signal-take-max-age-minutes:60}")
           long signalTakeMaxAgeMinutes,
+      @org.springframework.beans.factory.annotation.Value("${artha.paper.strategy-scoped-books:}")
+          String strategyScopedBooks,
       MeterRegistry meterRegistry) {
     this.orders = orders;
     this.lots = lots;
@@ -313,6 +328,13 @@ public class PaperService {
     this.perTradeRiskPct = perTradeRiskPct;
     this.tickMaxAge = Duration.ofSeconds(tickMaxAgeSeconds);
     this.signalTakeMaxAge = Duration.ofMinutes(signalTakeMaxAgeMinutes);
+    // Same comma-list parse as PaperStaleTickAlerter's eod-managed-books, blank ⇒ empty ⇒ disarmed.
+    this.strategyScopedBooks =
+        strategyScopedBooks == null || strategyScopedBooks.isBlank()
+            ? java.util.Set.of()
+            : java.util.Arrays.stream(strategyScopedBooks.trim().split("\\s*,\\s*"))
+                .filter(s -> !s.isBlank())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     this.txTemplate = new TransactionTemplate(transactionManager);
     this.lotTagTemplate = new TransactionTemplate(transactionManager);
     // A real JDBC savepoint. DataSourceTransactionManager enables nested transactions by default;
@@ -337,6 +359,38 @@ public class PaperService {
     // tick state directly (see #countMtmBlindPositions), so there is no persistent state to race,
     // purge, or rebuild.
     meterRegistry.gauge("ay_paper_mtm_blind_positions", this, PaperService::countMtmBlindPositions);
+  }
+
+  /**
+   * Test-only convenience (pre-V058 signature): the strategy-scoped-books set defaults to EMPTY —
+   * i.e. DISARMED, pre-V058 behaviour — so every existing direct-construction call site that already
+   * supplies its own registry keeps compiling byte-identical.
+   */
+  public PaperService(
+      PaperOrderRepository orders,
+      PaperPositionLotRepository lots,
+      PaperPositionRepository positions,
+      PaperFillService fills,
+      LastTickReader lastTick,
+      InstrumentMetaClient instruments,
+      SignalRepository signals,
+      PaperAccountService accountService,
+      BookResolver books,
+      RiskService risk,
+      ScalperAccountModel accounts,
+      ApplicationEventPublisher events,
+      PaperStaleTickAlerter staleTicks,
+      PaperOrderRejectionRecorder rejections,
+      ManasGoverningStopCache governingStopCache,
+      PlatformTransactionManager transactionManager,
+      BigDecimal perTradeRiskPct,
+      long tickMaxAgeSeconds,
+      long signalTakeMaxAgeMinutes,
+      MeterRegistry meterRegistry) {
+    this(
+        orders, lots, positions, fills, lastTick, instruments, signals, accountService, books, risk,
+        accounts, events, staleTicks, rejections, governingStopCache, transactionManager,
+        perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, "", meterRegistry);
   }
 
   /**
@@ -367,7 +421,7 @@ public class PaperService {
     this(
         orders, lots, positions, fills, lastTick, instruments, signals, accountService, books, risk,
         accounts, events, staleTicks, rejections, governingStopCache, transactionManager,
-        perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, new SimpleMeterRegistry());
+        perTradeRiskPct, tickMaxAgeSeconds, signalTakeMaxAgeMinutes, "", new SimpleMeterRegistry());
   }
 
   /**
@@ -569,9 +623,20 @@ public class PaperService {
    * PaperPositionRepository#findLatestForKey}). Empty when the key was never filled.
    */
   private Optional<PositionDto> replayFor(String book, String clientOrderId) {
+    // V058 (cross-vendor review Major 4): on a scoped book the key alone resolves to the NEWEST row,
+    // so replaying twin A's ticket after twin B opened would return B's id/qty/brackets as if they
+    // were A's fill — a silently wrong 200, not an error. Scope the read-back to the strategy that
+    // actually placed THIS clientOrderId.
+    java.util.UUID scope =
+        strategyScopedBooks.contains(book)
+            ? orders
+                .strategyIdForClientOrderId(book, clientOrderId)
+                .orElse(PaperPositionRepository.UNATTRIBUTED_SCOPE)
+            : null;
     return orders
         .keyForClientOrderId(book, clientOrderId)
-        .flatMap(k -> positions.findLatestForKey(book, k.exchange(), k.tradingsymbol(), k.side()))
+        .flatMap(
+            k -> positions.findLatestForKey(book, k.exchange(), k.tradingsymbol(), k.side(), scope))
         .map(this::toPositionDto);
   }
 
@@ -782,6 +847,23 @@ public class PaperService {
     }
     // The book to charge: explicit on the request, else the signal's strategy family, else MANUAL.
     String book = bookFor(request);
+    // V058 / option D: on a STRATEGY-SCOPED book, the strategy that owns this fill joins the open key,
+    // so a co-firing twin opens its OWN row instead of averaging into the first one's. null on every
+    // unscoped book AND on a signal-less hand ticket (nothing to attribute) — and a null here makes
+    // every path below byte-identical to pre-V058.
+    // Cross-vendor review Critical 3: on a scoped book this is NEVER null. A NULL row there would be
+    // matched by EVERY strategy's exit (NULL is the wildcard arm of each scoped predicate), so a
+    // signal-less hand ticket — or a signal whose strategy cannot be resolved — takes the explicit
+    // UNATTRIBUTED_SCOPE sentinel instead. PaperStrategyScopeGuard refuses to boot if a scoped book
+    // ever holds a NULL row anyway, so the wildcard stays confined to unscoped books.
+    java.util.UUID positionStrategyId =
+        !strategyScopedBooks.contains(book)
+            ? null
+            : request.signalId() == null
+                ? PaperPositionRepository.UNATTRIBUTED_SCOPE
+                : books
+                    .strategyIdForSignal(request.signalId())
+                    .orElse(PaperPositionRepository.UNATTRIBUTED_SCOPE);
     InstrumentMeta meta = instruments.meta(exchange, tradingsymbol);
     Fill fill = fills.fill(Side.valueOf(side), request.qty(), reference, meta);
     // The deployment cap, projected against what this fill ACTUALLY costs. Placed here — at the sole
@@ -908,11 +990,11 @@ public class PaperService {
     Long advisedLots = advisedLots(book, fill.fillPrice(), request.stopLoss());
     upsertPosition(
         book, exchange, tradingsymbol, side, request.qty(), fill.fillPrice(),
-        request.stopLoss(), request.takeProfit(), request.subaccountIdx(), advisedLots,
-        request.signalId());
+        request.stopLoss(), request.takeProfit(), effectiveSubAccount, advisedLots,
+        request.signalId(), positionStrategyId);
     // F9: after the ledger commits, price the position's SPAN margin (fail-soft, off the txn) and stamp
     // margin_snapshot/margin_pct. The event fires only if a row exists (an averaged add still re-prices).
-    Optional<PositionRow> opened = positions.findOpen(book, exchange, tradingsymbol, side);
+    Optional<PositionRow> opened = openLotFor(book, exchange, tradingsymbol, side, positionStrategyId);
     if (opened.isPresent()) {
       PositionRow row = opened.get();
       // V057 per-signal lot tag, written HERE because this is the first point where both ids exist:
@@ -934,10 +1016,23 @@ public class PaperService {
     // Same projected usage the deployment/sub-account checks above already computed — reused rather
     // than recomputed, so the SPAN client is called once per fill instead of twice.
     String warning = accountService.buyingPowerWarning(book, projectedCost);
-    return positions
-        .findOpen(book, exchange, tradingsymbol, side)
+    return openLotFor(book, exchange, tradingsymbol, side, positionStrategyId)
         .map(row -> toPositionDto(row).withWarning(warning))
         .orElseThrow(() -> new ApiException(500, ErrorCodes.INTERNAL_ERROR, "position not opened"));
+  }
+
+  /**
+   * The open lot this fill landed on: {@code strategyId}'s own row on a strategy-scoped book, else
+   * whatever is open on the key. Read back AFTER the write, so on a scoped book it must resolve the
+   * SAME row {@code upsertPosition} touched — the unscoped read would return the OLDEST sibling and
+   * the caller would get another strategy's position back (its qty, its brackets, its id in the F9
+   * margin event and in the returned DTO).
+   */
+  private Optional<PositionRow> openLotFor(
+      String book, String exchange, String tradingsymbol, String side, java.util.UUID strategyId) {
+    return strategyId == null
+        ? positions.findOpen(book, exchange, tradingsymbol, side)
+        : positions.findOpenForStrategy(book, exchange, tradingsymbol, side, strategyId);
   }
 
   /**
@@ -1017,8 +1112,10 @@ public class PaperService {
       BigDecimal takeProfit,
       Integer subaccountIdx,
       Long advisedLots,
-      Long openingSignalId) {
-    Optional<PositionRow> existing = positions.findOpen(book, exchange, tradingsymbol, side);
+      Long openingSignalId,
+      java.util.UUID strategyId) {
+    Optional<PositionRow> existing =
+        openLotFor(book, exchange, tradingsymbol, side, strategyId);
     if (existing.isPresent()) {
       // averaging onto an open position keeps its original bracket levels AND its original
       // sub-account (set at first open) — a later add never re-charges the trade to a new account.
@@ -1038,6 +1135,17 @@ public class PaperService {
       // reports the other at n=0 and no amount of further accrual separates them. V057's
       // paper_position_lots records the (signal, qty, price) of each contributing fill instead —
       // see the lot write in openOrder.
+      //
+      // V058 / option D goes one step further and makes the original claim TRUE — but only for a
+      // book listed in artha.paper.strategy-scoped-books, where findOpenForStrategy refuses to see a
+      // sibling strategy's lot so a twin INSERTs its own row instead of averaging. Everywhere else
+      // (the DEFAULT, since that property is empty) the claim stays FALSE and V057's lots remain the
+      // only way to decompose the merge. The two are complementary, not alternatives: lots recover
+      // attribution from a merge that already happened; the scoped key prevents the merge, which is
+      // the only thing that also separates the two strategies' EXITS.
+      //
+      // A genuine SAME-strategy pyramid add still averages, on scoped and unscoped books alike:
+      // strategyId is the stable strategies.id (never the version), so it survives a republish.
       PositionRow row = existing.get();
       long newQty = row.qty() + qty;
       BigDecimal newAvg =
@@ -1054,9 +1162,14 @@ public class PaperService {
       // shape — the safe direction for a stale-vs-missing cache entry either way.
       governingStopCache.evict(row.id());
     } else {
+      // `subaccountIdx` is openOrder's EFFECTIVE account — the one an already-open lot on this key
+      // established, else the request's own. Byte-identical to passing the request's idx before
+      // V058 (an INSERT then implied nothing was open on the key, so the two were always equal);
+      // on a scoped book it is the sibling-inheritance rule that keeps a co-firing pair charged to
+      // ONE sub-account, exactly as the merged row was.
       positions.insertOpen(
           book, exchange, tradingsymbol, side, qty, fillPrice, stopLoss, takeProfit, subaccountIdx,
-          advisedLots, openingSignalId);
+          advisedLots, openingSignalId, strategyId);
     }
   }
 
@@ -1326,10 +1439,14 @@ public class PaperService {
         unrealized = move.multiply(BigDecimal.valueOf(row.qty())).setScale(2, RoundingMode.HALF_UP);
       }
     }
+    // V058 (round-2 review Major 2): attribute the trade chain to THIS position's strategy, so a
+    // co-fired sibling's entry fills stop appearing in this position's detail pane. Settle legs
+    // carry no signal and remain shared until #1259's V057 exact linkage — see legsForPosition.
     List<OrderLeg> legs =
         orders
             .legsForPosition(
-                row.book(), row.exchange(), row.tradingsymbol(), row.openedAt(), row.closedAt())
+                row.book(), row.exchange(), row.tradingsymbol(), row.openedAt(), row.closedAt(),
+                positions.strategyIdOf(row.id()).orElse(null))
             .stream()
             .map(o -> toOrderLeg(o, meta))
             .toList();

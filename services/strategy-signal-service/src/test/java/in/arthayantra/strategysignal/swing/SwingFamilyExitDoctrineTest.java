@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import in.arthayantra.strategyengine.config.GateNode;
+import in.arthayantra.strategyengine.config.StrategyCompiler;
+import in.arthayantra.strategyschema.CanonicalJson;
 import in.arthayantra.strategyschema.StrategyDocuments;
 import java.io.IOException;
 import java.io.InputStream;
@@ -193,36 +196,60 @@ class SwingFamilyExitDoctrineTest {
   /**
    * Canonical JSON of everything the exit decision reads: the {@code exit_rules} array in order
    * (precedence is significant — {@code ExitEvaluator} returns the first rule that fires), plus the
-   * declaration of every indicator an exit rule resolves through an {@code alias}.
+   * declaration of every indicator those rules resolve an operand through.
    *
-   * <p>The alias half is not optional. Minervini's trail is
-   * {@code {trailing_stop, basis: indicator, alias: sma50}} — textually identical across all four
-   * strategies while the exit LEVEL is whatever each strategy declares {@code sma50} to be. Comparing
-   * {@code exit_rules} alone would pass a family whose trail silently means SMA(50) in one strategy
-   * and SMA(30) in another.
+   * <p><b>The operand half is not optional, and it has TWO indirections — missing either one makes
+   * this guard pass a family whose exits genuinely differ.</b>
+   *
+   * <ol>
+   *   <li><b>{@code params.alias}</b> — Minervini's trail is
+   *       {@code {trailing_stop, basis: indicator, alias: sma50}}, textually identical across all four
+   *       strategies while the exit LEVEL is whatever each declares {@code sma50} to be
+   *       ({@code ExitEvaluator#indicatorLevel} → {@code bank.valueAt(alias)}).
+   *   <li><b>Operands named INSIDE a {@code signal_exit} rule STRING</b> — {@code
+   *       ExitEvaluator#signalExit:715-732} compiles {@code params.rule} with {@code
+   *       StrategyCompiler.compileLeafText} and evaluates it against the bank, so
+   *       {@code crossunder(ema20, ema50)} resolves {@code ema50} exactly like an alias field would.
+   *       Two strategies with that identical rule string and DIFFERENT {@code ema50} declarations
+   *       produce different exits.
+   * </ol>
+   *
+   * <p>Operands are extracted by compiling the rule with the ENGINE'S OWN parser and walking the
+   * resulting {@link GateNode}, so this cannot drift from what the evaluator actually resolves.
    *
    * <p>Only the fields {@code IndicatorBank} computes a VALUE from are included ({@code name},
    * {@code timeframe}, {@code params}, {@code instrument}). {@code weight} and {@code normalize} are
    * deliberately excluded: they feed entry SCORING, never an exit level, so including them would red
    * this guard on a legitimate entry-only tune.
+   *
+   * <p><b>Built-in operands are folded uniformly rather than filtered.</b> {@code close}/{@code
+   * volume}/{@code vwap} resolve via {@code bank.builtin} and shadow any same-named declaration
+   * ({@code BarValues.isBuiltin}, which is package-private and unreachable from here). Folding them
+   * anyway is safe because a builtin has no declaration in EITHER strategy, so it contributes an
+   * identical empty node on both sides. The only divergence this can invent is a strategy that
+   * declares an indicator aliased {@code close}/{@code volume}/{@code vwap} — none does today
+   * (checked) — and that direction is a loud FALSE RED, never a silent false green.
    */
   private static String exitFingerprint(JsonNode config) {
     JsonNode exitRules = config.path("exit_rules");
 
-    Set<String> aliases = new TreeSet<>(); // sorted → the fingerprint is order-stable
-    exitRules.forEach(
-        rule -> {
-          JsonNode alias = rule.path("params").path("alias");
-          if (alias.isTextual()) {
-            aliases.add(alias.asText());
-          }
-        });
+    Set<String> operands = new TreeSet<>(); // sorted → the fingerprint is order-stable
+    for (JsonNode rule : exitRules) {
+      JsonNode alias = rule.path("params").path("alias");
+      if (alias.isTextual()) {
+        operands.add(alias.asText());
+      }
+      JsonNode ruleText = rule.path("params").path("rule");
+      if (ruleText.isTextual()) {
+        collectOperands(StrategyCompiler.compileLeafText(ruleText.asText()), operands);
+      }
+    }
 
-    ObjectNode aliasIndicators = MAPPER.createObjectNode();
-    for (String alias : aliases) {
+    ObjectNode operandIndicators = MAPPER.createObjectNode();
+    for (String operand : operands) {
       ObjectNode declaration = MAPPER.createObjectNode();
       for (JsonNode indicator : config.path("indicators")) {
-        if (alias.equals(indicator.path("alias").asText())) {
+        if (operand.equals(indicator.path("alias").asText())) {
           declaration.set("name", indicator.path("name"));
           declaration.set("timeframe", indicator.path("timeframe"));
           declaration.set("params", indicator.path("params"));
@@ -230,12 +257,44 @@ class SwingFamilyExitDoctrineTest {
           break;
         }
       }
-      aliasIndicators.set(alias, declaration);
+      operandIndicators.set(operand, declaration);
     }
 
     ObjectNode fingerprint = MAPPER.createObjectNode();
     fingerprint.set("exit_rules", exitRules);
-    fingerprint.set("exit_rule_aliases", aliasIndicators);
-    return fingerprint.toPrettyString();
+    fingerprint.set("exit_rule_operands", operandIndicators);
+    // CanonicalJson (not toPrettyString): key order follows the YAML as authored, so two semantically
+    // identical param maps written in a different order would otherwise fingerprint differently and
+    // red this guard spuriously.
+    return CanonicalJson.write(fingerprint);
+  }
+
+  /**
+   * Every operand name a compiled gate/exit expression resolves against the bank.
+   *
+   * <p>No {@code default} branch on purpose: {@link GateNode} is sealed, so adding a variant makes
+   * this switch fail to COMPILE rather than silently skip the new node's operands at runtime — the
+   * same anti-decay reasoning as the discovered family population.
+   */
+  private static void collectOperands(GateNode node, Set<String> into) {
+    switch (node) {
+      case GateNode.All all -> all.children().forEach(c -> collectOperands(c, into));
+      case GateNode.Any any -> any.children().forEach(c -> collectOperands(c, into));
+      case GateNode.Not not -> collectOperands(not.child(), into);
+      case GateNode.Crossover cross -> {
+        into.add(cross.fast());
+        into.add(cross.slow());
+      }
+      case GateNode.Crossunder cross -> {
+        into.add(cross.fast());
+        into.add(cross.slow());
+      }
+      case GateNode.Expression expression -> {
+        into.add(expression.left());
+        if (expression.rightOperand() != null) {
+          into.add(expression.rightOperand()); // null ⇒ a numeric literal, nothing to resolve
+        }
+      }
+    }
   }
 }

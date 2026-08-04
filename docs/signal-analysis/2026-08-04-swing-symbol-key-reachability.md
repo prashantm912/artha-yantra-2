@@ -314,20 +314,45 @@ cost:
    ✅ **SHIPPED in this PR** — `SwingFamilyExitDoctrineTest` (owner-approved 2026-08-04).
    Two refinements emerged while building it, both material:
 
-   - **Comparing `exit_rules` alone would have been insufficient.** Minervini's trail is
-     `{trailing_stop, basis: indicator, alias: sma50}` — byte-identical across all four strategies
-     while the exit LEVEL is whatever each strategy declares `sma50` to be. The test therefore
-     fingerprints the exit rules **plus the declaration of every indicator an exit rule resolves
-     through an alias**, and only the fields `IndicatorBank` computes a value from (`name`,
-     `timeframe`, `params`, `instrument`) — `weight`/`normalize` feed entry scoring, never an exit
-     level, so including them would red the guard on a legitimate entry-only tune. Red-proved
-     independently: changing `sma50` from SMA(50) to SMA(30) in one strategy, leaving `exit_rules`
-     untouched, reddens the test.
+   - **Comparing `exit_rules` alone would have been insufficient — and there are TWO indirections,
+     not one.** The second was found by cross-vendor review, one level below my own finding:
+     1. `params.alias` — Minervini's trail is `{trailing_stop, basis: indicator, alias: sma50}`,
+        byte-identical across all four strategies while the exit LEVEL is whatever each declares
+        `sma50` to be.
+     2. **Operands named inside a `signal_exit` rule STRING** — `ExitEvaluator.signalExit:715-732`
+        compiles `params.rule` with `StrategyCompiler.compileLeafText` and evaluates it against the
+        bank, so `crossunder(ema20, ema50)` resolves `ema50` exactly as an alias field would. Two
+        strategies with that identical rule string and different `ema50` declarations produce equal
+        fingerprints and different exits.
+
+     The fingerprint now folds both, extracting rule operands with the **engine's own parser**
+     (walking the sealed `GateNode`) so it cannot drift from what the evaluator resolves. Only the
+     fields `IndicatorBank` computes a value from are included (`name`, `timeframe`, `params`,
+     `instrument`) — `weight`/`normalize` feed entry scoring, never an exit level. Each indirection
+     is red-proved independently (§8.2 receipt below).
    - **The family population is DISCOVERED, not listed.** A hardcoded family list is precisely how
      this invariant would decay, so the test scans the classpath for every bundled
      `*-strategies/*.yaml`, keeps the `swing`-session docs, and groups by `universe.mode`. A second
      assertion cross-checks the discovered family count against the number of concrete
      `@Component SwingDoctrine` implementations, so a new swing family cannot appear silently exempt.
+
+   **Red-proof receipt** — five runs, each through the `test` PHASE with `-am`, `compile-errors: 0`:
+
+   | # | perturbation | expected | result |
+   |---|---|---|---|
+   | A | `exit_rules` value 8% → 7% in one strategy | red | ✅ exit-doctrine assertion |
+   | B | **only** `sma50` SMA(50)→SMA(30), `exit_rules` untouched | red | ✅ diff showed `period 50` vs `30` |
+   | C | scan glob narrowed so a family vanishes, doctrine remains | red | ✅ "2 doctrines … scan found 1" |
+   | D-control | identical `signal_exit` rule added to BOTH Manas strategies | **green** | ✅ the addition alone is neutral |
+   | D | `vol` lookback 20→10 in one, `exit_rules` byte-identical | red | ✅ operand extracted from the RULE STRING |
+
+   D pairs with its control deliberately: the green control is what makes D's red attributable to the
+   operand divergence rather than to the rule addition. `vol` is referenced by no `alias` field, so
+   only the rule-string extraction can reach it — the pre-review fingerprint passed this case.
+
+   The `CanonicalJson` fix carries its own counterfactual: reordering param keys in one YAML
+   (semantically identical) stays green, and reverting to `toPrettyString()` reddens that same
+   reordering — so the key-order sensitivity was real, not hypothetical.
 3. Only if the flag is armed: revisit the keying. At that point `openLotsBySymbol` and the
    `strandedCarryPositions` predicate (§6.2) should be fixed **together** — they encode the same
    one-strategy-per-symbol assumption, and fixing one without the other leaves the reconciler blind.

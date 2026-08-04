@@ -4,6 +4,7 @@ import in.arthayantra.marketdata.screener.manas.ManasCandidate;
 import in.arthayantra.marketdata.screener.manas.ManasScreenService;
 import in.arthayantra.marketdata.screener.minervini.TrendCandidate;
 import in.arthayantra.marketdata.screener.minervini.TrendTemplateService;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDate;
 import java.util.List;
@@ -68,6 +69,7 @@ public class LineageScreenImpactController {
   }
 
   /** {@code screen} is {@code minervini} (default) or {@code manas}; {@code asOf} defaults to latest. */
+  @Operation(operationId = "lineageScreenImpact")
   @GetMapping("/lineage-impact")
   public ScreenImpact lineageImpact(
       @RequestParam(defaultValue = "minervini") String screen,

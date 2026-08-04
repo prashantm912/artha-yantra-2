@@ -34,11 +34,36 @@ import org.springframework.stereotype.Service;
  *       S} in the window. Ambiguity is DROPPED, never guessed.
  * </ol>
  *
- * <p>Confidence comes from a signal that is completely independent of the NSE price rule: BSE's
- * {@code scrip_code} is a stable per-listing identifier, so a BSE rename is directly observable as
- * ONE {@code scrip_code} carrying BOTH tickers. Agreement ⇒ {@code confirmed}; price continuity
- * alone ⇒ {@code inferred}. Any {@code symbol_rename_events} row for the successor near the switch
- * (the primary-source NSE "Change in Name" feed) is appended to the evidence string.
+ * <h2>Corroboration, and the refutation tier</h2>
+ *
+ * <p>Confidence comes from a signal completely independent of the NSE price rule: BSE's {@code
+ * scrip_code} is a stable per-listing identifier, so a BSE rename is directly observable as ONE
+ * scrip_code carrying BOTH tickers. Three outcomes, and the third is the one that matters:
+ *
+ * <ul>
+ *   <li>{@code confirmed} — one BSE scrip carried both tickers. Inserted {@code ACTIVE}.
+ *   <li>{@code inferred} — at least one ticker is not on BSE at all, so there is nothing to check.
+ *       Inserted {@code ACTIVE} on price continuity alone.
+ *   <li><b>{@code refuted}</b> — BOTH tickers are on BSE and NO scrip_code carried both. BSE is not
+ *       silent here, it actively CONTRADICTS continuity. Inserted {@code WITHHELD}.
+ * </ul>
+ *
+ * <p><b>Refutation is measured, not assumed.</b> Across all 66 pairs on 2026-08-03: 58 confirmed, 6
+ * unlistable, and exactly <b>2 refuted</b> — {@code CREATIVE→CNL} (scrip 539527→544631) and {@code
+ * WORTH→WORTHPERI} (538451→544577). Zero false positives, because the tier only fires when both
+ * sides are observable. Two further signals agree on those two and on nothing else: the ISIN
+ * changes at the boundary, and — decisively — <b>the predecessor never stopped</b>. CREATIVE and
+ * WORTH still print on BSE through 2026-08-03; they delisted from NSE while continuing to trade
+ * there, which is precisely the concurrent-trading shape listed below as NOT a rename. The NSE-only
+ * view cannot see that, which is why the BSE check earns its place.
+ *
+ * <p>Any {@code symbol_rename_events} row for the successor near the switch (the primary-source NSE
+ * "Change in Name" feed) is appended to the evidence string.
+ *
+ * <p><b>Status is a one-way ratchet.</b> {@link SymbolLineageRepository#upsertDetected} sets {@code
+ * status} on INSERT only, and separately demotes {@code ACTIVE → WITHHELD} when a later run refutes
+ * a pair. It NEVER promotes. So an owner's WITHHELD verdict is permanent, and a pair that BSE data
+ * later contradicts stops being stitched without anyone having to notice.
  *
  * <h2>Which way it is biased, and why</h2>
  *
@@ -52,12 +77,16 @@ import org.springframework.stereotype.Service;
  *   <li><b>Coincidental price collision</b> — two unrelated symbols sharing an exact 4dp boundary
  *       price within the gap cap. Concentrated at penny prices; a measured placebo (below) puts the
  *       rate near zero at gap 1 and the gap cap is what holds it there.
- *   <li><b>A demerger or amalgamation the exchange carried the series through.</b> This is the
- *       irreducible one: {@code TATAMOTORS→TMPV} is a demerger, {@code CREATIVE→CNL} and {@code
- *       WORTH→WORTHPERI} are amalgamations into new legal entities, and NSE's {@code prev_close},
- *       BSE's {@code scrip_code} and (for the demerger) the ISIN all say "continue". NO signal
- *       available to this platform separates them from a pure rename. The escape hatch is data, not
- *       code: {@code status = 'WITHHELD'} on the pair, which this detector never overwrites.
+ *   <li><b>An amalgamation into a new legal entity.</b> {@code CREATIVE→CNL} and {@code
+ *       WORTH→WORTHPERI} carry NSE {@code prev_close} straight through, so the price rule pairs
+ *       them — but they are <b>mechanically refutable</b>, and the detector now refutes them (see
+ *       the refutation tier below). No owner ruling needed.
+ *   <li><b>A demerger the exchange carried through on the SAME listing.</b> This is the irreducible
+ *       one. {@code TATAMOTORS→TMPV} keeps its BSE {@code scrip_code} AND its ISIN AND stops
+ *       printing on the switch date — every signal this platform has says "same listing, renamed",
+ *       and structurally that is true; what changed is the ASSET MIX behind it (the CV arm was spun
+ *       out). Nothing in market data can see that. The escape hatch is data, not code: {@code status
+ *       = 'WITHHELD'} on the pair, seeded by the migration, which this detector never promotes.
  * </ul>
  *
  * <p><b>False-negative directions</b> (what it will miss, accepted):
@@ -101,7 +130,13 @@ public class SymbolLineageDetector {
 
   /** One detection pass: what the rule found and what it changed. */
   public record DetectionResult(
-      LocalDate asOf, int detected, int inserted, int refreshed, int confirmed, int inferred) {}
+      LocalDate asOf,
+      int detected,
+      int inserted,
+      int refreshed,
+      int confirmed,
+      int inferred,
+      int refuted) {}
 
   /**
    * The rule, verbatim.
@@ -160,6 +195,11 @@ public class SymbolLineageDetector {
       SELECT u.predecessor, u.successor, u.switch_date, u.gap_sessions, u.boundary_price,
              EXISTS (SELECT 1 FROM bse b1 JOIN bse b2 USING (scrip_code)
                      WHERE b1.ticker = u.predecessor AND b2.ticker = u.successor) AS bse_confirmed,
+             -- BOTH sides observable on BSE is what makes a non-match a REFUTATION rather than
+             -- silence. Without this guard an NSE-only ETF would be indistinguishable from a pair
+             -- BSE actively contradicts.
+             (EXISTS (SELECT 1 FROM bse WHERE ticker = u.predecessor)
+              AND EXISTS (SELECT 1 FROM bse WHERE ticker = u.successor)) AS both_on_bse,
              EXISTS (SELECT 1 FROM symbol_rename_events e
                      WHERE e.exchange = 'NSE' AND e.symbol = u.successor
                        AND e.ex_date BETWEEN u.switch_date - 30 AND u.switch_date + 30) AS ca_confirmed
@@ -175,7 +215,18 @@ public class SymbolLineageDetector {
       int gapSessions,
       BigDecimal boundaryPrice,
       boolean bseConfirmed,
-      boolean caConfirmed) {}
+      boolean bothOnBse,
+      boolean caConfirmed) {
+
+    /** BSE can see both tickers and says they are DIFFERENT listings — a contradiction, not silence. */
+    boolean refuted() {
+      return bothOnBse && !bseConfirmed;
+    }
+
+    String confidence() {
+      return bseConfirmed ? "confirmed" : refuted() ? "refuted" : "inferred";
+    }
+  }
 
   private final JdbcTemplate jdbc;
   private final SymbolLineageRepository repo;
@@ -212,6 +263,7 @@ public class SymbolLineageDetector {
                     rs.getInt("gap_sessions"),
                     rs.getBigDecimal("boundary_price"),
                     rs.getBoolean("bse_confirmed"),
+                    rs.getBoolean("both_on_bse"),
                     rs.getBoolean("ca_confirmed")),
             windowDays,
             maxGapSessions,
@@ -219,10 +271,13 @@ public class SymbolLineageDetector {
 
     int inserted = 0;
     int confirmed = 0;
+    int refuted = 0;
     for (Match m : matches) {
-      String confidence = m.bseConfirmed() ? "confirmed" : "inferred";
       if (m.bseConfirmed()) {
         confirmed++;
+      }
+      if (m.refuted()) {
+        refuted++;
       }
       if (repo.upsertDetected(
           EXCHANGE,
@@ -231,9 +286,10 @@ public class SymbolLineageDetector {
           m.switchDate(),
           m.gapSessions(),
           m.boundaryPrice(),
-          confidence,
+          m.confidence(),
           evidence(m),
-          SOURCE)) {
+          SOURCE,
+          m.refuted())) {
         inserted++;
       }
     }
@@ -248,10 +304,12 @@ public class SymbolLineageDetector {
             inserted,
             matches.size() - inserted,
             confirmed,
-            matches.size() - confirmed);
+            matches.size() - confirmed - refuted,
+            refuted);
     log.info(
-        "symbol-lineage detect asOf={}: {} pairs ({} confirmed / {} inferred), {} new, {} refreshed",
-        asOf, result.detected(), confirmed, result.inferred(), inserted, result.refreshed());
+        "symbol-lineage detect asOf={}: {} pairs ({} confirmed / {} inferred / {} REFUTED->withheld),"
+            + " {} new, {} refreshed",
+        asOf, result.detected(), confirmed, result.inferred(), refuted, inserted, result.refreshed());
     return result;
   }
 
@@ -264,6 +322,8 @@ public class SymbolLineageDetector {
         .append(" session(s)");
     if (m.bseConfirmed()) {
       sb.append("; bse scrip_code carried both tickers");
+    } else if (m.refuted()) {
+      sb.append("; REFUTED — both tickers on bse under DIFFERENT scrip_codes");
     }
     if (m.caConfirmed()) {
       sb.append("; nse change-in-name corporate action within 30d");

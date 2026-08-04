@@ -47,7 +47,7 @@ CREATE TABLE symbol_lineage (
     PRIMARY KEY (exchange, predecessor_symbol),
     CONSTRAINT symbol_lineage_not_self CHECK (predecessor_symbol <> successor_symbol),
     CONSTRAINT symbol_lineage_confidence_known
-        CHECK (confidence IS NULL OR confidence IN ('confirmed', 'inferred')),
+        CHECK (confidence IS NULL OR confidence IN ('confirmed', 'inferred', 'refuted')),
     CONSTRAINT symbol_lineage_status_known
         CHECK (status IN ('ACTIVE', 'WITHHELD')),
     CONSTRAINT symbol_lineage_gap_positive
@@ -61,9 +61,9 @@ CREATE INDEX idx_symbol_lineage_successor ON symbol_lineage (exchange, successor
 COMMENT ON TABLE symbol_lineage IS
     'Ticker-change continuity as DATA, never identity. Canonical key remains (exchange, tradingsymbol).';
 COMMENT ON COLUMN symbol_lineage.confidence IS
-    'confirmed = one BSE scrip_code carried both tickers (independent of the NSE price rule); inferred = NSE price continuity alone.';
+    'confirmed = one BSE scrip_code carried both tickers (independent of the NSE price rule); inferred = NSE price continuity alone, no BSE data to check; refuted = both tickers ARE on BSE and NO scrip_code carried both, so BSE actively contradicts continuity.';
 COMMENT ON COLUMN symbol_lineage.status IS
-    'ACTIVE = lineage-expanded readers may stitch this pair. WITHHELD = owner judgement that the pre-switch series is a different asset (demerger/amalgamation). Detector never overwrites this.';
+    'ACTIVE = lineage-expanded readers may stitch this pair. WITHHELD = this pair must not be stitched, either because BSE refuted it or by owner judgement. The detector may demote ACTIVE->WITHHELD on refutation but NEVER promotes, so an owner WITHHELD verdict is permanent.';
 
 -- ---------------------------------------------------------------------------------------------
 -- symbol_rename_events — the PRIMARY-SOURCE signal, previously thrown away.
@@ -97,6 +97,17 @@ COMMENT ON TABLE symbol_rename_events IS
     'Raw "Change in Name" corporate actions, kept as evidence. Not a lineage pair on its own — the feed carries company names, not the predecessor ticker.';
 
 -- ---------------------------------------------------------------------------------------------
+-- The one row that needs a human. Everything else on this table is derived.
+--
+-- ⚠️ Two OTHER pairs that look like this are NOT here, because they turned out to be MECHANICALLY
+-- separable and the detector now refutes them on its own: CREATIVE->CNL and WORTH->WORTHPERI are
+-- amalgamations into new legal entities, and BSE says so three ways — the scrip_code changes
+-- (539527->544631, 538451->544577), the ISIN changes, and decisively the PREDECESSOR NEVER STOPPED
+-- (both still print on BSE through 2026-08-03; they delisted from NSE while continuing there, which
+-- is the concurrent-trading shape the rule already declares out of scope). Measured across all 66
+-- pairs, "both tickers on BSE AND no shared scrip_code" fires on exactly those two and nothing else.
+-- They therefore need no seed and no owner ruling; see SymbolLineageDetector's refutation tier.
+--
 -- The one policy row. TATAMOTORS -> TMPV (2025-10-24) is the Tata Motors DEMERGER, not a rename:
 -- NSE carried prev_close across it and BSE carried the scrip_code, so it is indistinguishable from
 -- a rename by every signal this platform can observe — the detector WILL find it. Stitching it

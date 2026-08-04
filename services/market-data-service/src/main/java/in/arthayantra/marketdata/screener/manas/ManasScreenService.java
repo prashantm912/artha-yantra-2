@@ -223,6 +223,13 @@ public class ManasScreenService {
             + AdjustedEquityDailySql.screenerBaseCte(lineageExpanded)
             + "\n),\n"
             + String.format(CALC_AND_SELECT, newHighPreceding);
+    // ⚠️ See TrendTemplateService: the lineage plane binds a THIRD asOf, first. Arity is read from
+    // AdjustedEquityDailySql so it can never drift out of step with the CTE it belongs to.
+    Object[] args =
+        new Object[AdjustedEquityDailySql.screenerBaseCteDateBinds(lineageExpanded) + 2];
+    java.util.Arrays.fill(args, 0, args.length - 2, d);
+    args[args.length - 2] = sma200RisingSessions;
+    args[args.length - 1] = minSessions;
     List<Raw> raws =
         jdbc.query(
             sql,
@@ -246,7 +253,7 @@ public class ManasScreenService {
                     rs.getBigDecimal("ff_mcap"),
                     rs.getBigDecimal("ff_pct"),
                     rs.getBoolean("is_current")),
-            d, d, sma200RisingSessions, minSessions);
+            args);
 
     // Trailing-bar guard + coverage floor. Applied FIRST — before the RS-rank — so the percentile is
     // computed over the surviving universe, exactly as when this was a WHERE filter.

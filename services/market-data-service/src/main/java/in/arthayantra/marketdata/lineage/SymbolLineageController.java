@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.lineage;
 
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -52,7 +53,8 @@ public class SymbolLineageController {
       int inserted,
       int refreshed,
       int confirmed,
-      int inferred) {}
+      int inferred,
+      int refuted) {}
 
   private final SymbolLineageRepository repo;
   private final SymbolLineageDetector detector;
@@ -63,7 +65,15 @@ public class SymbolLineageController {
     this.detector = detector;
   }
 
-  /** Every recorded link for {@code exchange}, or only the stitchable ones with {@code activeOnly}. */
+  /**
+   * Every recorded link for {@code exchange}, or only the stitchable ones with {@code activeOnly}.
+   *
+   * <p>{@code operationId} is PINNED. springdoc auto-names a collision-free handler {@code list},
+   * {@code list_1}, {@code list_2}… in classpath-scan order, so adding this endpoint renumbered
+   * {@code GET /api/v1/instruments} from {@code list_2} to {@code list_3} — a silent break for any
+   * generated client keyed on the operation id, and one openapi-diff does NOT gate.
+   */
+  @Operation(operationId = "listSymbolLineage")
   @GetMapping
   public LineageResponse list(
       @RequestParam(defaultValue = "NSE") String exchange,
@@ -77,11 +87,13 @@ public class SymbolLineageController {
    * Re-derives every link from the EOD tape and upserts. Idempotent, and an owner's {@code WITHHELD}
    * verdict survives it — the upsert deliberately omits {@code status} from its update list.
    */
+  @Operation(operationId = "detectSymbolLineage")
   @PostMapping("/detect")
   public DetectResponse detect() {
     SymbolLineageDetector.DetectionResult r = detector.detect();
     return new DetectResponse(
-        r.asOf(), r.detected(), r.inserted(), r.refreshed(), r.confirmed(), r.inferred());
+        r.asOf(), r.detected(), r.inserted(), r.refreshed(), r.confirmed(), r.inferred(),
+        r.refuted());
   }
 
   private static Row toRow(SymbolLineage l) {

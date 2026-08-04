@@ -81,50 +81,119 @@ public final class AdjustedEquityDailySql {
           + factorLateral("b", "bucket");
 
   /**
-   * The LINEAGE-EXPANDED variant of {@link #SCREENER_BASE_CTE} — identical in every respect except
+   * The CA-adjustment factor for one bar on the LINEAGE-EXPANDED plane. Same multiplicative rule as
+   * {@link #factorLateral}, but BOTH sides of the match are resolved through {@code terminal} first,
+   * so the corporate-action plane is keyed exactly like the price plane.
+   *
+   * <p>WARNING: this exists because keying the plain lateral on the raw symbol reintroduces the
+   * audit H6 / FID P0-4 price cliff the class was written to eliminate.
+   * {@code eod_corporate_actions} records an action under the ticker that was live at its ex-date,
+   * so a split dated AFTER a rename sits under the SUCCESSOR. Match on the raw symbol and the
+   * predecessor's bars get factor 1 while the successor's get the ratio - measured on live data at
+   * the {@code AARVEEDEN} to {@code VGL} join (2025-10-13 switch, VGL SPLIT 0.5 on 2026-03-02):
+   * 151.4200 stays 151.4200 on the last predecessor bar while 147.0500 becomes 73.5250 on the first
+   * successor bar. A ~51% one-day artifact inside the 420-day window, feeding SMA200, both 52-week
+   * extremes and all four RS legs - and it fails NEGATIVE, so the successor reads as crashed and
+   * fails the 52-week gates, which is precisely the "silently drops momentum leaders" signature.
+   * {@code SABTNL} to {@code AQYLON} is the same shape at ratio 0.1, a 10x cliff.
+   *
+   * <p>Resolving both sides means every action anywhere in a lineage chain applies to every bar in
+   * that chain, which is the correct reading of "one continuous instrument, one CA history". For a
+   * symbol with no lineage row both {@code COALESCE}s collapse to the raw symbol and this reduces to
+   * {@link #factorLateral} exactly.
+   *
+   * <p>Requires {@code terminal t} to be joined BEFORE this lateral - a LATERAL may only reference
+   * relations earlier in the {@code FROM} list.
+   */
+  private static final String LINEAGE_FACTOR_LATERAL =
+      """
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(exp(sum(ln(ca.ratio))), 1) AS factor
+        FROM eod_corporate_actions ca
+        LEFT JOIN terminal tca ON tca.orig = ca.tradingsymbol
+        WHERE ca.exchange = 'NSE'
+          AND COALESCE(tca.cur, ca.tradingsymbol) = COALESCE(t.cur, b.symbol)
+          AND ca.ex_date > b.bucket
+      ) caf ON true
+      """;
+
+  /**
+   * The LINEAGE-EXPANDED variant of {@link #SCREENER_BASE_CTE} - identical in every respect except
    * that each bar's {@code symbol} is resolved through {@code symbol_lineage} to the ticker that
-   * carries the series TODAY. A renamed symbol's pre-rename bars therefore accrue to its successor,
-   * which is what lets a successor clear the 252-session gate on history that already exists in the
-   * database under a key nobody joins to (N2 / #1285: 61 symbols invisible, 57 of them already past
-   * 252 sessions once merged).
+   * carries the series TODAY, and the CA plane is resolved the same way. A renamed symbol's
+   * pre-rename bars therefore accrue to its successor, which is what lets a successor clear the
+   * 252-session gate on history that already exists in the database under a key nobody joins to
+   * (N2 / #1285: 61 symbols invisible, 57 of them already past 252 sessions once merged).
    *
-   * <p><b>OPT-IN ONLY.</b> Callers reach this exclusively through {@link #screenerBaseCte(boolean)}
-   * with an explicit {@code true}; every existing caller keeps passing through the untouched
-   * constant above and is byte-identical. If a screen's numbers move without a reader asking for
-   * lineage, that is a defect, not this feature.
+   * <p>OPT-IN ONLY. Callers reach this exclusively through {@link #screenerBaseCte(boolean)} with an
+   * explicit {@code true}; every existing caller keeps passing through the untouched constant above
+   * and is byte-identical. If a screen's numbers move without a reader asking for lineage, that is a
+   * defect, not this feature.
    *
-   * <p><b>Three details that are load-bearing:</b>
+   * <p>Four details that are load-bearing:
    *
    * <ol>
-   *   <li>The CA-adjustment lateral still keys on the ORIGINAL {@code b.symbol}, because {@code
-   *       eod_corporate_actions} records an action under the ticker that was live at its ex-date. It
-   *       runs BEFORE the relabel for exactly that reason.
-   *   <li>The walk is RECURSIVE and terminal — {@code A→B→C} lands A's bars on C, not on a B that no
-   *       longer trades. No chain exists in the data today (measured, 2026-08-03: 66 pairs, all
-   *       1:1, max depth 1), so this is insurance rather than a live requirement; depth is capped at
-   *       8 so a bad row can never loop.
-   *   <li>Only {@code status = 'ACTIVE'} links are walked, and the walk does not traverse THROUGH a
-   *       withheld link — a demerger boundary stops the stitch on both sides.
+   *   <li>The CA lateral is lineage-resolved on BOTH sides and is joined AFTER {@code terminal} so
+   *       it can see it - see {@link #LINEAGE_FACTOR_LATERAL} for the measured cliff that keying on
+   *       the raw symbol produces.
+   *   <li>The walk is bounded by {@code asOf}. A link whose {@code switch_date} is AFTER the screen
+   *       date has not happened yet from that date's point of view, so relabelling through it would
+   *       report a symbol that did not exist - {@code ?asOf=2026-01-31} would surface {@code
+   *       NIFTYAXIS}, first traded 2026-07-03, as a January candidate. 23 of the 65 active links
+   *       have a switch date after 2026-01-31, so this is the common case on any replay, not an
+   *       edge. A link with a NULL {@code switch_date} (a hand-seeded policy row the detector has
+   *       not reached yet) is excluded by the same comparison.
+   *   <li>A bar is relabelled only if it PREDATES its own switch ({@code b.bucket <
+   *       t.first_switch}, the first hop out of that symbol), AND the result is de-duplicated by
+   *       {@code DISTINCT ON (resolved symbol, bucket)}. <b>Both are needed and the first alone is
+   *       not enough</b> — proven by {@code ScreenerLineageOptInIntegrationTest}, which reddened at
+   *       29 duplicate rows with only the date guard in place. The date guard stops a bar from
+   *       jumping FORWARD past its own switch; it cannot stop a hand-written link whose {@code
+   *       switch_date} lands in the MIDDLE of the successor's existing run, which overlaps the two
+   *       series directly. Duplicate {@code (symbol, bucket)} rows silently corrupt every window
+   *       function downstream with no error anywhere, so this is closed structurally rather than
+   *       trusted to the writer. The tie-break {@code (t.cur IS NULL) DESC} keeps a symbol's OWN bar
+   *       over a predecessor bar stitched onto the same day, which is the only defensible
+   *       precedence. Detected pairs never overlap, so this is inert on everything the detector
+   *       writes; it exists because the WITHHELD escape hatch invites hand-written rows.
+   *       <p>The one asymmetry: a predecessor bar dated ON or AFTER its switch keeps its own symbol
+   *       while actions under that symbol resolve to the successor, so such a bar reads unadjusted.
+   *       That fails toward raw prices rather than toward a cliff, and it cannot arise from a
+   *       detected pair at all.
+   *   <li>The walk is RECURSIVE and terminal - {@code A->B->C} lands A's bars on C, not on a B that
+   *       no longer trades. No chain exists today (measured 2026-08-03: 66 pairs, all 1:1, max depth
+   *       1), so this is insurance; depth is capped at 8 so a bad row cannot loop. Only {@code
+   *       status = 'ACTIVE'} links are walked, and the walk does not traverse THROUGH a withheld
+   *       link, so a demerger or a BSE-refuted amalgamation stops the stitch on both sides.
    * </ol>
    *
-   * <p>Binds the same two {@code asOf::date} params in the same order as the plain CTE, so caller
-   * bind order is unchanged.
+   * <p>WARNING: binds THREE {@code ?::date} params, not two - {@code asOf} for the lineage walk
+   * (first, because the {@code asof} CTE is textually first), then the same two the plain CTE binds.
+   * {@link #screenerBaseCteDateBinds(boolean)} is the single source of that arity; a caller that
+   * hardcodes two silently shifts every later param by one.
    */
   public static final String LINEAGE_EXPANDED_SCREENER_BASE_CTE =
       """
-      WITH RECURSIVE lin AS (
-          SELECT predecessor_symbol AS orig, successor_symbol AS cur, 1 AS depth
+      WITH RECURSIVE asof AS (SELECT ?::date AS d),
+      lin AS (
+          SELECT predecessor_symbol AS orig, successor_symbol AS cur, switch_date AS first_switch,
+                 1 AS depth
           FROM symbol_lineage
           WHERE exchange = 'NSE' AND status = 'ACTIVE'
+            AND switch_date <= (SELECT d FROM asof)
         UNION ALL
-          SELECT l.orig, sl.successor_symbol, l.depth + 1
+          SELECT l.orig, sl.successor_symbol, l.first_switch, l.depth + 1
           FROM lin l
           JOIN symbol_lineage sl ON sl.predecessor_symbol = l.cur
                                 AND sl.exchange = 'NSE' AND sl.status = 'ACTIVE'
+                                AND sl.switch_date <= (SELECT d FROM asof)
           WHERE l.depth < 8
       ),
-      terminal AS (SELECT DISTINCT ON (orig) orig, cur FROM lin ORDER BY orig, depth DESC)
-      SELECT COALESCE(t.cur, b.symbol) AS symbol, b.bucket,
+      terminal AS (
+        SELECT DISTINCT ON (orig) orig, cur, first_switch FROM lin ORDER BY orig, depth DESC
+      )
+      SELECT DISTINCT ON (COALESCE(t.cur, b.symbol), b.bucket)
+             COALESCE(t.cur, b.symbol) AS symbol, b.bucket,
              round(b.close * caf.factor, 4) AS close,
              round(b.high  * caf.factor, 4) AS high,
              round(b.low   * caf.factor, 4) AS low,
@@ -138,12 +207,13 @@ public final class AdjustedEquityDailySql {
           AND trade_date <= ?::date
           AND trade_date >  (?::date - 420)
       ) b
+      LEFT JOIN terminal t ON t.orig = b.symbol AND b.bucket < t.first_switch
       """
-          + factorLateral("b", "bucket")
-          + "LEFT JOIN terminal t ON t.orig = b.symbol\n";
+          + LINEAGE_FACTOR_LATERAL
+          + "ORDER BY COALESCE(t.cur, b.symbol), b.bucket, (t.cur IS NULL) DESC\n";
 
   /**
-   * The screener {@code base} CTE body — plain by default, lineage-expanded when the caller asks.
+   * The screener {@code base} CTE body - plain by default, lineage-expanded when the caller asks.
    *
    * <p>{@code false} returns the {@link #SCREENER_BASE_CTE} constant ITSELF, not a rebuilt copy, so
    * "a reader that does not opt in behaves exactly as today" is true by object identity rather than
@@ -151,6 +221,18 @@ public final class AdjustedEquityDailySql {
    */
   public static String screenerBaseCte(boolean lineageExpanded) {
     return lineageExpanded ? LINEAGE_EXPANDED_SCREENER_BASE_CTE : SCREENER_BASE_CTE;
+  }
+
+  /**
+   * How many {@code asOf::date} params the chosen base CTE binds, in textual order, before any the
+   * caller's own tail binds. Two for the plain plane; three for the lineage plane, whose walk needs
+   * the screen date to exclude links that had not happened yet.
+   *
+   * <p>Exists so no caller hardcodes the arity: a positional bind list that is one short does not
+   * fail loudly, it shifts every later parameter and silently screens on the wrong thresholds.
+   */
+  public static int screenerBaseCteDateBinds(boolean lineageExpanded) {
+    return lineageExpanded ? 3 : 2;
   }
 
   /**

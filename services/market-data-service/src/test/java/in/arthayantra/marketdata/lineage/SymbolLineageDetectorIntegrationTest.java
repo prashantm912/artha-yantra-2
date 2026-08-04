@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,23 +28,42 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * <h2>Why it is built this way</h2>
  *
  * A seed test that hand-builds the pairs it asserts proves nothing about the derivation: it would
- * pass with the rule deleted. So the two sides of this test come from two DIFFERENT, independent
- * signals, and neither is the rule under test:
+ * pass with the rule deleted. So the two sides of this test come from two DIFFERENT signals, and
+ * the expectation side never reads an NSE {@code prev_close}:
  *
  * <ul>
  *   <li><b>Input</b> — {@code lineage/bars.csv}: REAL {@code nse_eod_bhavcopy} rows exported from
- *       the live database (the first two and last two bars of every symbol involved, plus a
- *       {@code ZZCALENDAR} filler carrying one bar on each of the 276 real trading days so the
- *       session-gap arithmetic is the real arithmetic, not an artefact of a sparse fixture). Raw
- *       prices and dates only — no pairing information of any kind.
- *   <li><b>Expectation</b> — {@code lineage/expected-pairs.csv}: derived entirely from BSE, where
- *       {@code scrip_code} is a stable per-listing identifier, so a rename is directly observable
- *       as ONE scrip_code carrying TWO tickers. It never looks at an NSE {@code prev_close}.
+ *       the live database (the first two and last two bars of every symbol involved, plus a {@code
+ *       ZZCALENDAR} filler carrying one bar on each of the 276 real trading days so the session-gap
+ *       arithmetic is the real arithmetic, not an artefact of a sparse fixture). Raw prices and
+ *       dates only. {@code lineage/bse-bars.csv} carries the BSE identity rows — one per
+ *       {@code (scrip_code, ticker)}, which is the entire signal the detector reads there.
+ *   <li><b>Expectation</b> — {@code lineage/expected-pairs.csv}: 66 rows, each labelled with the
+ *       ORACLE that produced its expected status, so no row's provenance is implicit.
  * </ul>
  *
- * The detector reads NSE price continuity. If its rule is wrong, it cannot reproduce a BSE-derived
- * answer, and this test fails. The filler symbol is structurally inert: it trades on every date, so
- * it can never be a predecessor (it never stops) nor a successor (its first bar IS the data floor).
+ * <h2>⚠️ The gap this fixture was rebuilt to close (review MEDIUM-2)</h2>
+ *
+ * The first version of this fixture contained ONLY the 58 pairs BSE independently confirms, and its
+ * {@code detected == expected.size()} assertion REQUIRED that exclusion. The selection criterion was
+ * therefore "what the oracle already agrees with", and a rule error confined to the 8
+ * BSE-unconfirmable pairs could not have failed it — a 25% defect rate hid in exactly that tier
+ * (both amalgamations live there). All 66 pairs now carry bars, and the four oracle tiers are:
+ *
+ * <ul>
+ *   <li>{@code bse-scrip} (57) — one BSE scrip_code carried both tickers. Expect ACTIVE/confirmed.
+ *   <li>{@code bse-scrip-refuted} (2) — both tickers ARE on BSE under DIFFERENT scrip_codes, so BSE
+ *       contradicts continuity. Expect WITHHELD/refuted. {@code CREATIVE→CNL} and {@code
+ *       WORTH→WORTHPERI}; both predecessors are still printing on BSE, i.e. they never stopped.
+ *   <li>{@code nse-only} (6) — neither ticker is on BSE, so nothing can be checked. Expect
+ *       ACTIVE/inferred. Three are the Axis ETF rebrand, corroborated OUTSIDE this fixture by
+ *       {@code marketdata.instruments} (tombstoned 2026-07-02, successors first seen 2026-07-03,
+ *       same AMC); the other three ({@code GODHA→AURIGROW}, {@code QUALITY→QUALITY30}, {@code
+ *       SUNDARMHLD→TSFINV}) rest on NSE price continuity ALONE and are the weakest rows here — that
+ *       is a stated limitation of the data, not a hidden one.
+ *   <li>{@code owner-policy} (1) — {@code TATAMOTORS→TMPV}, a demerger no signal can distinguish
+ *       from a rename, seeded WITHHELD by V055. Expect WITHHELD with the migration's own reason.
+ * </ul>
  *
  * <p>The synthetic controls at the bottom are the opposite case and are legitimately hand-built:
  * they assert what the rule REFUSES, which is the direction this rule is deliberately biased in.
@@ -67,17 +87,27 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
   @Autowired private SymbolLineageDetector detector;
 
   private List<String[]> bars;
-  private List<String[]> expectedPairs;
+  private List<String[]> bseBars;
+  /** predecessor -> {successor, expectedStatus, oracle}. */
+  private Map<String, String[]> expected;
 
   @BeforeEach
   void seed() {
     purge();
     bars = readCsv("/lineage/bars.csv");
-    expectedPairs = readCsv("/lineage/expected-pairs.csv");
+    bseBars = readCsv("/lineage/bse-bars.csv");
+    expected = new TreeMap<>();
+    for (String[] r : readCsv("/lineage/expected-pairs.csv")) {
+      expected.put(r[0], new String[] {r[1], r[2], r[3]});
+    }
     jdbc.batchUpdate(
         "INSERT INTO nse_eod_bhavcopy (symbol, series, trade_date, prev_close, close_price)"
             + " VALUES (?, ?, ?::date, ?::numeric, ?::numeric)",
         bars.stream().map(r -> (Object[]) r).toList());
+    jdbc.batchUpdate(
+        "INSERT INTO bse_eod_bhavcopy (trade_date, scrip_code, ticker, isin)"
+            + " VALUES (?::date, ?, ?, ?)",
+        bseBars.stream().map(r -> (Object[]) r).toList());
   }
 
   @AfterEach
@@ -87,7 +117,7 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
 
   private void purge() {
     // Whole-table, deliberately — see the class javadoc. Detected lineage goes too; the WITHHELD
-    // policy row seeded by V054 must NOT (it is what the withheld assertion reads).
+    // policy row seeded by V055 must NOT (it is what the owner-policy assertion reads).
     jdbc.update("DELETE FROM nse_eod_bhavcopy");
     jdbc.update("DELETE FROM bse_eod_bhavcopy");
     jdbc.update("DELETE FROM symbol_lineage WHERE source <> 'owner-policy'");
@@ -96,23 +126,90 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
             + " confidence=NULL, evidence=NULL WHERE source = 'owner-policy'");
   }
 
-  /** THE test: the NSE price-continuity rule must reproduce the BSE-derived pair set exactly. */
+  /** THE test: the NSE price-continuity rule must reproduce the independently-derived pair set. */
   @Test
   void reproducesTheIndependentlyDerivedPairSet() {
     // Precondition — the fixture must actually pose the question. A silently empty or truncated
-    // resource would make every assertion below vacuous.
-    assertThat(expectedPairs).hasSizeGreaterThan(50);
+    // resource would make every assertion below vacuous. 66 pairs, ALL FOUR tiers present.
+    assertThat(expected).hasSize(66);
     assertThat(bars).hasSizeGreaterThan(700);
+    assertThat(bseBars).hasSizeGreaterThan(100);
+    assertThat(oracleCounts())
+        .containsEntry("bse-scrip", 57L)
+        .containsEntry("bse-scrip-refuted", 2L)
+        .containsEntry("nse-only", 6L)
+        .containsEntry("owner-policy", 1L);
 
     SymbolLineageDetector.DetectionResult result = detector.detect();
-    assertThat(result.detected()).isEqualTo(expectedPairs.size());
+    assertThat(result.detected()).isEqualTo(66);
     assertThat(result.asOf()).isEqualTo(LocalDate.of(2026, 8, 3));
 
-    TreeSet<String> expected = new TreeSet<>();
-    for (String[] p : expectedPairs) {
-      expected.add(p[0] + "->" + p[1]);
+    TreeSet<String> want = new TreeSet<>();
+    expected.forEach((pred, e) -> want.add(pred + "->" + e[0]));
+    assertThat(detectedPairs()).isEqualTo(want);
+  }
+
+  /**
+   * Every row's STATUS matches its oracle — the assertion the old 58-pair fixture could not make,
+   * because the two rows it turns on were the two it excluded.
+   */
+  @Test
+  void everyPairLandsInTheStatusItsOracleDictates() {
+    detector.detect();
+
+    Map<String, String> gotStatus = column("status");
+    Map<String, String> gotConfidence = column("confidence");
+    List<String> statusMismatch = new ArrayList<>();
+    List<String> confidenceMismatch = new ArrayList<>();
+    expected.forEach(
+        (pred, e) -> {
+          String wantStatus = e[1];
+          if (!wantStatus.equals(gotStatus.get(pred))) {
+            statusMismatch.add(pred + " want " + wantStatus + " got " + gotStatus.get(pred));
+          }
+          // The owner-policy row is ALSO scrip-continuous on BSE, so it reads 'confirmed' — its
+          // WITHHELD status comes from the seed, not from the evidence tier.
+          String wantConfidence =
+              switch (e[2]) {
+                case "bse-scrip-refuted" -> "refuted";
+                case "nse-only" -> "inferred";
+                default -> "confirmed";
+              };
+          if (!wantConfidence.equals(gotConfidence.get(pred))) {
+            confidenceMismatch.add(
+                pred + " want " + wantConfidence + " got " + gotConfidence.get(pred));
+          }
+        });
+    assertThat(statusMismatch).isEmpty();
+    assertThat(confidenceMismatch).isEmpty();
+
+    assertThat(gotConfidence.values().stream().filter("confirmed"::equals).count()).isEqualTo(58L);
+    assertThat(gotConfidence.values().stream().filter("inferred"::equals).count()).isEqualTo(6L);
+    assertThat(gotConfidence.values().stream().filter("refuted"::equals).count()).isEqualTo(2L);
+  }
+
+  /**
+   * The refutation tier, on the two pairs it exists for. BSE lists BOTH tickers under DIFFERENT
+   * scrip_codes — it is not silent, it CONTRADICTS — so the pair is withheld without an owner
+   * ruling. Guard: an NSE-only pair, where BSE is genuinely silent, must NOT be refuted.
+   */
+  @Test
+  void bseRefutesTheTwoAmalgamationsAndOnlyThose() {
+    detector.detect();
+
+    for (String pred : List.of("CREATIVE", "WORTH")) {
+      Map<String, Object> row =
+          jdbc.queryForMap(
+              "SELECT status, confidence, status_reason, evidence FROM symbol_lineage"
+                  + " WHERE exchange='NSE' AND predecessor_symbol = ?",
+              pred);
+      assertThat(row).containsEntry("status", "WITHHELD").containsEntry("confidence", "refuted");
+      assertThat((String) row.get("status_reason")).contains("DIFFERENT scrip_codes");
+      assertThat((String) row.get("evidence")).contains("REFUTED");
     }
-    assertThat(detectedPairs()).isEqualTo(expected);
+    // Silence is not refutation: neither AXISNIFTY nor NIFTYAXIS is on BSE at all.
+    assertThat(column("status")).containsEntry("AXISNIFTY", "ACTIVE");
+    assertThat(column("confidence")).containsEntry("AXISNIFTY", "inferred");
   }
 
   /**
@@ -127,43 +224,23 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(gapOf("YAARI")).isEqualTo(4);
     assertThat(
             jdbc.queryForObject(
-                "SELECT count(*) FROM symbol_lineage WHERE source = 'nse-price-continuity'"
+                "SELECT count(*) FROM symbol_lineage WHERE switch_date IS NOT NULL"
                     + " AND gap_sessions <> 1",
                 Long.class))
         .isEqualTo(1L);
     assertThat(
             jdbc.queryForObject(
-                "SELECT count(*) FROM symbol_lineage WHERE boundary_price IS NULL"
-                    + " AND source = 'nse-price-continuity'",
+                "SELECT count(*) FROM symbol_lineage WHERE switch_date IS NOT NULL"
+                    + " AND boundary_price IS NULL",
                 Long.class))
         .isZero();
   }
 
   /**
-   * With no BSE rows present every link is {@code inferred}; adding ONE scrip_code that carried both
-   * tickers flips exactly that link to {@code confirmed}. Proves the corroboration is a real second
-   * signal rather than a constant.
-   */
-  @Test
-  void bseScripContinuityIsWhatUpgradesConfidence() {
-    detector.detect();
-    assertThat(confidenceOf("GUJGASLTD")).isEqualTo("inferred");
-
-    jdbc.update(
-        "INSERT INTO bse_eod_bhavcopy (trade_date, scrip_code, ticker, isin)"
-            + " VALUES (date '2026-06-30', '500000', 'GUJGASLTD', 'INEBSE000001'),"
-            + "        (date '2026-07-01', '500000', 'GUJENERGY', 'INEBSE000001')");
-    detector.detect();
-
-    assertThat(confidenceOf("GUJGASLTD")).isEqualTo("confirmed");
-    assertThat(evidenceOf("GUJGASLTD")).contains("bse scrip_code carried both tickers");
-    assertThat(confidenceOf("SELAN")).isEqualTo("inferred"); // untouched by the one BSE scrip
-  }
-
-  /**
    * An owner's WITHHELD verdict survives re-detection. {@code TATAMOTORS→TMPV} is a demerger that
-   * every observable signal reports as a rename, so the detector DOES find it — the guarantee is
-   * that it refreshes the evidence and leaves the verdict and the reason alone.
+   * every observable signal reports as a rename — BSE keeps the scrip AND the ISIN — so the detector
+   * DOES find it and marks it {@code confirmed}. The guarantee is that it refreshes the evidence and
+   * leaves the verdict, the owner's reason and the provenance alone.
    */
   @Test
   void detectionRefreshesEvidenceButNeverOverwritesAWithheldVerdict() {
@@ -174,11 +251,45 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
             "SELECT successor_symbol, status, status_reason, source, confidence, evidence,"
                 + " gap_sessions FROM symbol_lineage"
                 + " WHERE exchange='NSE' AND predecessor_symbol='TATAMOTORS'");
-    assertThat(row).containsEntry("successor_symbol", "TMPV").containsEntry("status", "WITHHELD");
+    assertThat(row)
+        .containsEntry("successor_symbol", "TMPV")
+        .containsEntry("status", "WITHHELD")
+        .containsEntry("confidence", "confirmed")
+        .containsEntry("source", "owner-policy")
+        .containsEntry("gap_sessions", 1);
     assertThat((String) row.get("status_reason")).contains("Demerger");
-    assertThat(row).containsEntry("source", "owner-policy"); // provenance survives too
     assertThat((String) row.get("evidence")).contains("nse prev_close continuity");
-    assertThat(row).containsEntry("gap_sessions", 1);
+  }
+
+  /**
+   * The status ratchet turns ONE WAY only. A row that is ACTIVE today must be DEMOTED when BSE data
+   * arriving later refutes it — otherwise a pair stays stitched forever on evidence that has since
+   * been contradicted — and no run may ever promote a WITHHELD row back.
+   */
+  @Test
+  void statusRatchetsToWithheldOnLaterRefutationAndNeverBack() {
+    // Start with the BSE evidence for CREATIVE/CNL absent: nothing to check, so ACTIVE/inferred.
+    jdbc.update("DELETE FROM bse_eod_bhavcopy WHERE ticker IN ('CREATIVE','CNL')");
+    detector.detect();
+    assertThat(column("status")).containsEntry("CREATIVE", "ACTIVE");
+    assertThat(column("confidence")).containsEntry("CREATIVE", "inferred");
+
+    // BSE data lands and contradicts the pair. The next run must demote it.
+    jdbc.batchUpdate(
+        "INSERT INTO bse_eod_bhavcopy (trade_date, scrip_code, ticker, isin)"
+            + " VALUES (?::date, ?, ?, ?)",
+        bseBars.stream()
+            .filter(r -> "CREATIVE".equals(r[2]) || "CNL".equals(r[2]))
+            .map(r -> (Object[]) r)
+            .toList());
+    detector.detect();
+    assertThat(column("status")).containsEntry("CREATIVE", "WITHHELD");
+
+    // …and it never comes back, even once the refuting evidence is removed again.
+    jdbc.update("DELETE FROM bse_eod_bhavcopy WHERE ticker IN ('CREATIVE','CNL')");
+    detector.detect();
+    assertThat(column("status")).containsEntry("CREATIVE", "WITHHELD");
+    assertThat(column("confidence")).containsEntry("CREATIVE", "inferred"); // evidence DOES refresh
   }
 
   /** Re-running changes nothing: same pairs, zero inserts the second time. */
@@ -190,6 +301,9 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(second.detected()).isEqualTo(first.detected());
     assertThat(second.inserted()).isZero();
     assertThat(second.refreshed()).isEqualTo(second.detected());
+    assertThat(second.confirmed()).isEqualTo(58);
+    assertThat(second.inferred()).isEqualTo(6);
+    assertThat(second.refuted()).isEqualTo(2);
   }
 
   /**
@@ -231,7 +345,7 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
         .noneMatch(p -> p.contains("->LIN"));
     // …and the fixture's real pairs are all still there, so the controls did not simply break the
     // run. Without this the test would pass with the detector returning nothing at all.
-    assertThat(detectedPairs()).hasSize(expectedPairs.size());
+    assertThat(detectedPairs()).hasSize(expected.size());
   }
 
   /** The calendar filler cannot be mistaken for either side of a link. */
@@ -250,6 +364,12 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
         symbol, d, prevClose, close);
   }
 
+  private Map<String, Long> oracleCounts() {
+    Map<String, Long> out = new TreeMap<>();
+    expected.values().forEach(e -> out.merge(e[2], 1L, Long::sum));
+    return out;
+  }
+
   private TreeSet<String> detectedPairs() {
     return new TreeSet<>(
         jdbc.queryForList(
@@ -258,24 +378,21 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
             String.class));
   }
 
+  /** predecessor -> the named column, for every row the detector has touched. */
+  private Map<String, String> column(String name) {
+    Map<String, String> out = new TreeMap<>();
+    jdbc.queryForList(
+            "SELECT predecessor_symbol, "
+                + name
+                + " AS v FROM symbol_lineage WHERE exchange='NSE' AND switch_date IS NOT NULL")
+        .forEach(r -> out.put((String) r.get("predecessor_symbol"), (String) r.get("v")));
+    return out;
+  }
+
   private int gapOf(String predecessor) {
     return jdbc.queryForObject(
         "SELECT gap_sessions FROM symbol_lineage WHERE exchange='NSE' AND predecessor_symbol = ?",
         Integer.class,
-        predecessor);
-  }
-
-  private String confidenceOf(String predecessor) {
-    return jdbc.queryForObject(
-        "SELECT confidence FROM symbol_lineage WHERE exchange='NSE' AND predecessor_symbol = ?",
-        String.class,
-        predecessor);
-  }
-
-  private String evidenceOf(String predecessor) {
-    return jdbc.queryForObject(
-        "SELECT evidence FROM symbol_lineage WHERE exchange='NSE' AND predecessor_symbol = ?",
-        String.class,
         predecessor);
   }
 

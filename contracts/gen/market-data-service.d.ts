@@ -61,7 +61,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["detect"];
+        post: operations["detectSymbolLineage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -539,7 +539,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_2"];
+        get: operations["listSymbolLineage"];
         put?: never;
         post?: never;
         delete?: never;
@@ -859,7 +859,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["lineageImpact"];
+        get: operations["lineageScreenImpact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2251,7 +2251,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_3"];
+        get: operations["list_2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2459,6 +2459,8 @@ export interface components {
             confirmed: number;
             /** Format: int32 */
             inferred: number;
+            /** Format: int32 */
+            refuted: number;
         };
         SubscribeRequest: {
             exchange?: string;
@@ -5460,7 +5462,7 @@ export interface operations {
             };
         };
     };
-    detect: {
+    detectSymbolLineage: {
         parameters: {
             query?: never;
             header?: never;
@@ -6613,7 +6615,7 @@ export interface operations {
             };
         };
     };
-    list_2: {
+    listSymbolLineage: {
         parameters: {
             query?: {
                 exchange?: string;
@@ -7254,7 +7256,7 @@ export interface operations {
             };
         };
     };
-    lineageImpact: {
+    lineageScreenImpact: {
         parameters: {
             query?: {
                 screen?: string;
@@ -10108,7 +10110,7 @@ export interface operations {
             };
         };
     };
-    list_3: {
+    list_2: {
         parameters: {
             query?: {
                 exchange?: string;

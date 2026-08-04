@@ -278,7 +278,7 @@
     "/api/v1/market/symbol-lineage/detect" : {
       "post" : {
         "tags" : [ "symbol-lineage-controller" ],
-        "operationId" : "detect",
+        "operationId" : "detectSymbolLineage",
         "responses" : {
           "200" : {
             "description" : "OK",
@@ -1649,7 +1649,7 @@
     "/api/v1/market/symbol-lineage" : {
       "get" : {
         "tags" : [ "symbol-lineage-controller" ],
-        "operationId" : "list_2",
+        "operationId" : "listSymbolLineage",
         "parameters" : [ {
           "name" : "exchange",
           "in" : "query",
@@ -2561,7 +2561,7 @@
     "/api/v1/market/screener/lineage-impact" : {
       "get" : {
         "tags" : [ "lineage-screen-impact-controller" ],
-        "operationId" : "lineageImpact",
+        "operationId" : "lineageScreenImpact",
         "parameters" : [ {
           "name" : "screen",
           "in" : "query",
@@ -6879,7 +6879,7 @@
     "/api/v1/instruments" : {
       "get" : {
         "tags" : [ "instruments-controller" ],
-        "operationId" : "list_3",
+        "operationId" : "list_2",
         "parameters" : [ {
           "name" : "exchange",
           "in" : "query",
@@ -7408,9 +7408,13 @@
           "inferred" : {
             "type" : "integer",
             "format" : "int32"
+          },
+          "refuted" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         },
-        "required" : [ "asOf", "confirmed", "detected", "inferred", "inserted", "refreshed" ]
+        "required" : [ "asOf", "confirmed", "detected", "inferred", "inserted", "refreshed", "refuted" ]
       },
       "SubscribeRequest" : {
         "type" : "object",

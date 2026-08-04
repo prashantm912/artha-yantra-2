@@ -230,6 +230,17 @@ public class TrendTemplateService {
       return new ScreenResult(null, 0, List.of());
     }
     java.sql.Date d = java.sql.Date.valueOf(date);
+    // ⚠️ The lineage plane binds a THIRD asOf (its walk excludes links that had not switched yet),
+    // and it is bound FIRST because the `asof` CTE is textually first. Arity comes from
+    // AdjustedEquityDailySql rather than being restated here: one param short does not fail, it
+    // shifts minSessions/minPrice/liquidity by one position and screens on the wrong thresholds.
+    Object[] args =
+        new Object[AdjustedEquityDailySql.screenerBaseCteDateBinds(lineageExpanded) + 4];
+    java.util.Arrays.fill(args, 0, args.length - 4, d);
+    args[args.length - 4] = sma200RisingSessions;
+    args[args.length - 3] = minSessions;
+    args[args.length - 2] = minPrice;
+    args[args.length - 1] = liquidityThreshold;
     List<Raw> raws =
         jdbc.query(
             lineageExpanded ? SQL_LINEAGE : SQL,
@@ -251,7 +262,7 @@ public class TrendTemplateService {
                     rs.getBigDecimal("ff_mcap"),
                     rs.getBigDecimal("ff_pct"),
                     rs.getBoolean("is_current")),
-            d, d, sma200RisingSessions, minSessions, minPrice, liquidityThreshold);
+            args);
 
     // Trailing-bar guard + coverage floor. Applied FIRST — before the low-cap gate and the RS-rank —
     // so the percentile is computed over the surviving universe, exactly as when this was a WHERE

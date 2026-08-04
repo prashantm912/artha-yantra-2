@@ -256,6 +256,27 @@ Ordered by what actually changes.
    `exit_rules`, and all four Minervini strategies share a single distinct `exit_rules` value
    (`computed`, `count(DISTINCT config->'exit_rules') = 1`). Entry rules differ; exit rules do not.
    This is a configuration coincidence that a single YAML edit removes — it is not a guarantee.
+
+   ⚠️ **And that measurement is across STRATEGIES at ONE INSTANT, which is weaker than it reads.**
+   The collision keys on `strategy_version_id` (§8.3), so the pair that actually matters is
+   lot-1's version vs lot-2's version — which may be two versions of the SAME strategy. The
+   `count(DISTINCT …) = 1` above is over `published_version_id` only; a superseded version still
+   anchoring an open lot is NOT in that population, and `adoptVersion` runs it from its own frozen
+   config. So "exit rules agree" is established for today's published set, not for the set of
+   versions currently holding lots.
+
+   **So I measured that population directly** — the versions actually anchoring a live lot:
+
+   | family | anchoring versions | distinct strategies | distinct `exit_rules` sets |
+   |---|---|---|---|
+   | `minervini_funnel` | 6 | 4 | **1** |
+   | `manas_arora_funnel` | 2 | **1** | **1** |
+
+   `computed`. Two readings, both worth having. The reassuring one: every version currently holding a
+   swing lot agrees on exit rules, so the exposure is latent on this axis too, not live. The sharper
+   one: **`manas_arora_funnel` is already running two versions of a SINGLE strategy against open
+   lots** — the exact shape §8.3 describes. The multi-version collision is not hypothetical; only its
+   *divergence* is absent, and only pyramiding being off keeps the two versions from sharing a symbol.
 2. **A known-documented reconciler false negative.** `emitExit` writes ONE EXIT row under the oldest
    lot's `strategy_version_id`, so `strandedCarryPositions` looks for an EXIT under the *other*
    version and finds none. Already written down at `PaperReconciliationRepository.java:167-174`,
@@ -342,9 +363,10 @@ cost:
    |---|---|---|---|
    | A | `exit_rules` value 8% → 7% in one strategy | red | ✅ exit-doctrine assertion |
    | B | **only** `sma50` SMA(50)→SMA(30), `exit_rules` untouched | red | ✅ diff showed `period 50` vs `30` |
-   | C | scan glob narrowed so a family vanishes, doctrine remains | red | ✅ "2 doctrines … scan found 1" |
+   | C | scan glob narrowed so a family vanishes, doctrine remains | red | ✅ doctrine cross-check |
    | D-control | identical `signal_exit` rule added to BOTH Manas strategies | **green** | ✅ the addition alone is neutral |
    | D | `vol` lookback 20→10 in one, `exit_rules` byte-identical | red | ✅ operand extracted from the RULE STRING |
+   | E | family `universe.mode` renamed, family COUNT unchanged | red | ✅ membership check; the earlier count-only form passed this |
 
    D pairs with its control deliberately: the green control is what makes D's red attributable to the
    operand divergence rather than to the rule addition. `vol` is referenced by no `alias` field, so
@@ -353,9 +375,39 @@ cost:
    The `CanonicalJson` fix carries its own counterfactual: reordering param keys in one YAML
    (semantically identical) stays green, and reverting to `toPrettyString()` reddens that same
    reordering — so the key-order sensitivity was real, not hypothetical.
-3. Only if the flag is armed: revisit the keying. At that point `openLotsBySymbol` and the
+3. **The residual gap a unit test cannot close — the VERSION axis.** Found in review round 3, and it
+   is sharper than the cross-strategy case §8.2 pins. The collision keys on
+   **`strategy_version_id` per lot, not on strategy**: `SwingBatchEngine:713` stamps
+   `strat.versionId()`, and `AnchorResolution.resolve:351-357` → `adoptVersion:365-408` exit-manages
+   a superseded anchor **with that version's own frozen config**. So the two colliding lots need not
+   belong to two strategies — **two versions of ONE strategy collide identically**. And the swing
+   seeders **auto-publish** on any bundled-YAML change (`ManasAroraStrategySeeder:104-118`, literally
+   `"manas seeder auto-publish"`; the scalper seeder only drafts). `sourced`.
+
+   The reachable sequence, with pyramiding armed:
+
+   ```
+   lot 1 opens under manas-arora-vcp v1.0.0
+   owner tunes arm_pct 9 → 6 in BOTH Manas YAMLs   → §8.2's guard stays GREEN (they still agree)
+   deploy; seeder auto-publishes v1.0.1
+   lot 2 adds under v1.0.1
+   oldestLot = lot 1 @ v1.0.0 → BOTH lots exit on the OLD 9% arm, both expired
+   ```
+
+   **Editing every family member together — the well-behaved thing to do — is exactly what keeps the
+   test green while creating the divergence.** And §5 already measured that multi-version anchors are
+   the normal state, not an edge: 15 live Minervini anchors resolving through **6 version ids**
+   against 4 published strategies. `computed`.
+
+   This needs a check over `strategy_versions` rows (or over the live anchors' resolved configs), not
+   a classpath unit test. **Not built here** — it is a different artifact with a DB dependency, and
+   the owner's approval was scoped to the test. Recorded in `SwingFamilyExitDoctrineTest`'s javadoc as
+   an explicit non-coverage so a green run is not over-read.
+
+4. Only if the flag is armed: revisit the keying. At that point `openLotsBySymbol` and the
    `strandedCarryPositions` predicate (§6.2) should be fixed **together** — they encode the same
    one-strategy-per-symbol assumption, and fixing one without the other leaves the reconciler blind.
+   The version axis in (3) is the same defect and should be fixed in that same pass.
 
 ---
 

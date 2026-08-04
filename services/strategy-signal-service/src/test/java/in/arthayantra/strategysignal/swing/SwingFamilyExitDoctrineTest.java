@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.strategyengine.config.GateNode;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
+import in.arthayantra.strategyengine.eval.BarValues;
 import in.arthayantra.strategyschema.CanonicalJson;
 import in.arthayantra.strategyschema.StrategyDocuments;
 import java.io.IOException;
@@ -20,6 +21,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -33,12 +35,33 @@ import org.springframework.stereotype.Component;
  * <p><b>Why this is a test and not a comment.</b> {@code SwingBatchEngine.openLotsBySymbol:562-570}
  * groups open ENTRY anchors by {@code tradingsymbol} ALONE — no strategy dimension. The exit pass
  * ({@code exitPass:766-800}) then picks {@code oldestLot(lots)} across the WHOLE per-symbol group,
- * evaluates {@link in.arthayantra.strategyengine.eval.ExitEvaluator} with THAT lot's strategy
- * definition, closes the shared paper position and expires EVERY lot in the group
- * ({@code :1052-1054}). So if two strategies of one family ever hold one symbol, the younger lot is
- * exited by the OLDER strategy's rules.
+ * evaluates {@link in.arthayantra.strategyengine.eval.ExitEvaluator} with THAT lot's definition,
+ * closes the shared paper position and expires EVERY lot in the group ({@code :1052-1054}).
  *
- * <p>That collapse is currently unreachable — Minervini's {@code pyramid()} returns the
+ * <p><b>⚠️ The collapse keys on {@code strategy_version_id}, NOT on strategy — and this test compares
+ * STRATEGIES. Read that gap before trusting a green run.</b> Each anchor is stamped with
+ * {@code strat.versionId()} ({@code :713}), and {@code AnchorResolution.resolve:351-357} falls
+ * through to {@code adoptVersion:365-408}, which exit-manages a superseded anchor with <i>that
+ * version's own frozen config</i>. So the two lots that collide need not belong to two strategies —
+ * <b>two versions of ONE strategy collide identically</b>, and the swing seeders AUTO-PUBLISH on any
+ * bundled-YAML change ({@code ManasAroraStrategySeeder:104-118}, unlike the scalper seeder which only
+ * drafts). The reachable shape:
+ *
+ * <pre>
+ *   lot 1 opens under manas-arora-vcp v1.0.0
+ *   owner tunes arm_pct 9 → 6 in BOTH Manas YAMLs   → this test stays GREEN (they still agree)
+ *   deploy; seeder auto-publishes v1.0.1
+ *   lot 2 adds under v1.0.1
+ *   oldestLot = lot 1 @ v1.0.0 → BOTH lots exit on the OLD 9% arm, both expired
+ * </pre>
+ *
+ * <p>That is not exotic: 15 live Minervini anchors currently resolve through <b>6 version ids</b>
+ * against 4 published strategies. A unit test cannot reach it — the version rows live in the database
+ * — so it is recorded here and in the findings doc's §8 rather than silently uncovered. What this
+ * test DOES bound is the cross-strategy axis: a family whose members disagree at one point in time.
+ *
+ * <p>Both shapes — two strategies, or two versions of one — are currently unreachable, because both
+ * need a second lot on a held symbol: Minervini's {@code pyramid()} returns the
  * {@code PyramidPolicy.NONE} literal (compile-time), and Manas's is gated behind
  * {@code artha.manas-arora.pyramid.enabled}, deployed {@code false}. Identical exit rules are the
  * SECOND safety net, the one that makes the collapse harmless rather than merely unreachable. It is
@@ -54,11 +77,23 @@ import org.springframework.stereotype.Component;
  * {@link #everySwingDoctrineHasOneDiscoveredBundledFamily()} fails if a new {@link SwingDoctrine} bean
  * appears whose family this scan did NOT find.
  *
- * <p><b>What this does NOT cover, stated so nobody over-reads a green run:</b> it asserts the BUNDLED
- * YAML, not the {@code strategy_versions} row the live engine actually executes. Those populations
- * legitimately differ — a config change is a silent no-op until republished, so a published version
- * can carry exit rules this test never sees. Covering that needs a live-data check, not a unit test;
- * this guard catches the edit at the moment it is made, in the PR that makes it, which is where it is
+ * <p><b>What this does NOT cover, stated so nobody over-reads a green run.</b> It asserts the BUNDLED
+ * YAML at ONE point in time, so it is blind on two axes:
+ *
+ * <ol>
+ *   <li><b>The VERSION axis (the one that matters — see above).</b> Two lots resolving to different
+ *       {@code strategy_version_id}s of the SAME strategy diverge exactly as two strategies would,
+ *       and editing every family member together — the well-behaved thing to do — keeps this test
+ *       green while creating precisely that divergence across time. Only a check over
+ *       {@code strategy_versions} rows can see it.
+ *   <li><b>The republish-LAG axis.</b> A config change is a silent no-op until republished, so a
+ *       published version can carry exit rules this test never sees.
+ * </ol>
+ *
+ * <p>The two point in OPPOSITE directions and should not be conflated: (2) makes the guard
+ * conservative (it reds on a YAML nobody is running yet), while (1) makes it permissive (it passes a
+ * divergence that is live). Covering either needs a live-data check, not a unit test. What this guard
+ * buys is catching a same-instant cross-strategy edit in the PR that makes it, which is where it is
  * cheapest to catch.
  */
 class SwingFamilyExitDoctrineTest {
@@ -74,12 +109,18 @@ class SwingFamilyExitDoctrineTest {
       WHY IDENTICAL EXIT RULES ARE LOAD-BEARING (do not just "fix the diff" — read this first):
 
         SwingBatchEngine.openLotsBySymbol:562-570 groups a family's open lots by tradingsymbol
-        ALONE, with no strategy dimension. exitPass:766-800 drives the exit off oldestLot(lots)
-        across that whole group, using ONLY that lot's strategy definition, then closes the shared
-        paper position and expires EVERY lot (:1052-1054).
+        ALONE, with no strategy dimension. exitPass:766-800 drives the exit off oldestLot(lots),
+        using ONLY that lot's definition, then closes the shared paper position and expires EVERY
+        lot (:1052-1054).
 
-        Consequence: if two strategies of one family ever hold the same symbol, the younger lot is
-        exited by the OLDER strategy's rules. Identical exit rules are what makes that harmless.
+        Consequence: when two lots of one family share a symbol, the younger lot is exited by the
+        OLDER lot's rules. Identical exit rules are what makes that harmless.
+
+        Note the collision is per strategy_version_id, not per strategy (:713 stamps the version;
+        adoptVersion:365-408 exit-manages a superseded anchor with that version's frozen config).
+        Two versions of ONE strategy collide the same way — so editing every family member
+        together keeps THIS test green while still diverging lot-1 from lot-2 across a republish.
+        This test bounds the cross-strategy axis only; the version axis needs a DB check.
 
         The collapse is unreachable today (Minervini pyramid=NONE at compile time; Manas gated by
         artha.manas-arora.pyramid.enabled=false) — but that flag has been armed before, and 41.9%
@@ -122,23 +163,27 @@ class SwingFamilyExitDoctrineTest {
   /**
    * The anti-decay half: a new swing family must not be able to appear without this guard covering
    * it. Every concrete {@link SwingDoctrine} component IS a swing family by construction (the engine
-   * loads strategies per doctrine), so the doctrine count is the authority on how many families
-   * exist and the scan must find exactly that many.
+   * loads strategies per doctrine), so the doctrines are the authority on WHICH families exist.
+   *
+   * <p>Compares the family NAMES, not just how many there are. Counting alone lets two simultaneous
+   * changes cancel — a new doctrine whose YAML sits outside {@code *-strategies/}, plus an existing
+   * directory splitting into two {@code universe.mode}s — which is exactly the decay this assertion
+   * exists to prevent.
    */
   @Test
   void everySwingDoctrineHasOneDiscoveredBundledFamily() throws IOException {
     Set<String> discovered = discoverSwingFamilies().keySet();
-    List<String> doctrines = swingDoctrineComponents();
+    Map<String, String> doctrines = swingDoctrineFamilies(); // universeMode -> declaring class
 
     assertThat(discovered)
         .as(
-            "%d SwingDoctrine component(s) exist (%s) but the classpath scan found %d bundled swing"
-                + " family/families (%s). A swing family with no bundled YAML directory is SILENTLY"
-                + " EXEMPT from everyStrategyInOneSwingFamilyResolvesTheSameExitDecision — which is the"
-                + " exact way this guard would decay. Either bundle the family's docs under"
-                + " <family>-strategies/ on the classpath, or widen %s to reach them.%s",
-            doctrines.size(), doctrines, discovered.size(), discovered, BUNDLED_STRATEGY_GLOB, WHY)
-        .hasSameSizeAs(doctrines);
+            "the SwingDoctrine components declare families %s but the classpath scan found %s."
+                + " A swing family the scan misses is SILENTLY EXEMPT from"
+                + " everyStrategyInOneSwingFamilyResolvesTheSameExitDecision — the exact way this"
+                + " guard would decay. Either bundle that family's docs under <family>-strategies/"
+                + " on the classpath, or widen %s to reach them.%s",
+            doctrines, discovered, BUNDLED_STRATEGY_GLOB, WHY)
+        .containsExactlyInAnyOrderElementsOf(doctrines.keySet());
   }
 
   // ---- discovery ------------------------------------------------------------------------------
@@ -168,26 +213,42 @@ class SwingFamilyExitDoctrineTest {
     return families;
   }
 
-  /** Concrete {@code @Component} classes implementing {@link SwingDoctrine} — one per family. */
-  private static List<String> swingDoctrineComponents() {
+  /**
+   * The {@code universe.mode} each concrete {@code @Component SwingDoctrine} owns, mapped to its
+   * declaring class.
+   *
+   * <p>Read without a Spring context: {@code CALLS_REAL_METHODS} over an Objenesis-constructed
+   * instance runs the real {@code universeMode()} while bypassing the {@code @Value}-injected
+   * constructor. Sound because {@code universeMode()} is a family DESCRIPTOR — both implementations
+   * return a bare literal and touch no field. A future doctrine that computes it from injected state
+   * would return null here and fail the assertion loudly rather than silently narrowing coverage.
+   */
+  private static Map<String, String> swingDoctrineFamilies() {
     ClassPathScanningCandidateComponentProvider scanner =
         new ClassPathScanningCandidateComponentProvider(false);
     scanner.addIncludeFilter(new AnnotationTypeFilter(Component.class));
-    List<String> found = new ArrayList<>();
-    scanner
-        .findCandidateComponents("in.arthayantra.strategysignal")
-        .forEach(
-            bean -> {
-              try {
-                Class<?> type = Class.forName(bean.getBeanClassName());
-                if (SwingDoctrine.class.isAssignableFrom(type)) {
-                  found.add(type.getSimpleName());
-                }
-              } catch (ClassNotFoundException e) {
-                throw new IllegalStateException("scanned bean not loadable: " + bean, e);
-              }
-            });
-    found.sort(Comparator.naturalOrder());
+    Map<String, String> found = new TreeMap<>();
+    for (var bean : scanner.findCandidateComponents("in.arthayantra.strategysignal")) {
+      Class<?> type;
+      try {
+        type = Class.forName(bean.getBeanClassName());
+      } catch (ClassNotFoundException e) {
+        throw new IllegalStateException("scanned bean not loadable: " + bean, e);
+      }
+      if (!SwingDoctrine.class.isAssignableFrom(type)) {
+        continue;
+      }
+      String mode =
+          ((SwingDoctrine) Mockito.mock(type, Mockito.CALLS_REAL_METHODS)).universeMode();
+      assertThat(mode)
+          .as(
+              "%s.universeMode() read as null — it is expected to return a bare literal so this"
+                  + " guard can enumerate families without a Spring context. If it now derives from"
+                  + " injected state, this cross-check needs a real context instead.",
+              type.getSimpleName())
+          .isNotNull();
+      found.put(mode, type.getSimpleName());
+    }
     return found;
   }
 
@@ -222,13 +283,20 @@ class SwingFamilyExitDoctrineTest {
    * deliberately excluded: they feed entry SCORING, never an exit level, so including them would red
    * this guard on a legitimate entry-only tune.
    *
-   * <p><b>Built-in operands are folded uniformly rather than filtered.</b> {@code close}/{@code
-   * volume}/{@code vwap} resolve via {@code bank.builtin} and shadow any same-named declaration
-   * ({@code BarValues.isBuiltin}, which is package-private and unreachable from here). Folding them
-   * anyway is safe because a builtin has no declaration in EITHER strategy, so it contributes an
-   * identical empty node on both sides. The only divergence this can invent is a strategy that
-   * declares an indicator aliased {@code close}/{@code volume}/{@code vwap} — none does today
-   * (checked) — and that direction is a loud FALSE RED, never a silent false green.
+   * <p><b>Built-in operands are skipped via {@link BarValues#isBuiltin}</b> — the engine's own
+   * predicate, not a copy. Both resolution sites test it FIRST ({@code GateEvaluator:116},
+   * {@code ExitEvaluator.indicatorLevel:686}), so {@code close}/{@code volume}/{@code vwap} shadow
+   * any same-named declaration and folding such a declaration in could only invent a divergence the
+   * engine ignores. Reusing the predicate means this cannot drift if the builtin set grows.
+   *
+   * <p>Only TWO indirections exist, and that is measured rather than assumed: {@code ExitEvaluator}
+   * reads 19 distinct exit-rule param keys ({@code activate_at, alias, arm_pct, atr_basis,
+   * atr_period, basis, breakeven_floor, cap_pct, fast_bars, fast_pct, max_bars, max_holding_days,
+   * min_volume, parabolic_dist_pct, parabolic_ma, rule, tiers, trail_by, value}). Every one except
+   * {@code alias} and {@code rule} is consumed as an in-place numeric or string literal —
+   * {@code tiers} reads only {@code profit_pct}/{@code qty_pct}, {@code atr_basis} is compared to
+   * {@code "rolling"}, {@code trail_by}/{@code activate_at} go through {@code decimal(...)} — so
+   * none of them can name an indicator.
    */
   private static String exitFingerprint(JsonNode config) {
     JsonNode exitRules = config.path("exit_rules");
@@ -247,6 +315,9 @@ class SwingFamilyExitDoctrineTest {
 
     ObjectNode operandIndicators = MAPPER.createObjectNode();
     for (String operand : operands) {
+      if (BarValues.isBuiltin(operand)) {
+        continue; // resolves via bank.builtin and shadows any same-named declaration
+      }
       ObjectNode declaration = MAPPER.createObjectNode();
       for (JsonNode indicator : config.path("indicators")) {
         if (operand.equals(indicator.path("alias").asText())) {

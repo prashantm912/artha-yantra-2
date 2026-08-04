@@ -967,6 +967,126 @@ after `JBCHEPHARM` was found serving `passesAll: true` on an 18-day-stale price.
 
 ---
 
+### STATUS 2026-08-04 EVENING — session close. Nothing below is started; this is the next-session queue.
+
+**Merged this evening (49 total for the day):** #1292 ledger closeout · #1298 runbook-hygiene guard
++ Stage D ci-optimizer correction · #1300 CAS blast radius · #1301 swing-backtest universe exclusion.
+
+**Repo setting changed (owner call):** `runbook-hygiene` promoted to a **required** status check —
+**NINE** required contexts now. Applied by mirroring the live protection GET field-by-field; diff
+proved exactly 2 fields moved (`contexts` + its `checks` mirror), 14 others byte-identical,
+`rulesets` still `[]`. **Do not quote a context COUNT anywhere — it has been 6, 8 and 9 inside four
+days. Read the API.**
+
+#### Open PRs, exact state (all left OPEN deliberately)
+
+| PR | State | What it needs next |
+|---|---|---|
+| **#1296** ScalperRisk §0B stop-basis coupling | review RESOLVED; **Golden 9/9 + Parity 9/9 + OptionsPremiumGolden 2/2 re-run by the main loop itself** | HOLD — owner merge call only |
+| **#1297** CA stage→verify→swap | round 3 fixes pushed (M-A observability, M-B cooldown/recovery contradiction) | **round 4 review** |
+| **#1299** `symbol_lineage` | REQUEST_CHANGES — 3 HIGH open | fixes, then re-review |
+| **#1302** required-contexts doc | mine, docs-only | rebase + merge |
+| **#1303** futures-roller refresh window | review in flight at session close | collect verdict |
+| **#1283** swing data-coverage gate | rework pushed | review round |
+| **#1075** scalper budget ₹15k→₹20k | parked | owner, 2026-08-12 |
+
+#### ⚠️ MIGRATION COLLISION — check this BEFORE writing any marketdata migration
+`origin/main` tops at **V053**. **#1297 claims V054** (`V054__candle_rebuild_staging.sql`) and
+**#1299 also claims V054** (`V054__symbol_lineage.sql`). Same lineage, same version, different
+filenames ⇒ **no git conflict**, both merge clean, and flyway-init dies only at DEPLOY where it
+fails validation and blocks *every* subsequent migration. Resolution: **#1297 keeps V054, #1299
+renumbers to V055**, next free is **V056** — re-check at commit time against `origin/main` AND
+every open PR, because the free version moves.
+
+#### Next-session queue — NOT STARTED, documented only
+
+- **N10 · CA sweep re-arm — SEQUENCED, do not re-arm first.** 13 symbols sit at `REFRESH_FAILED`,
+  `refresh_attempts=1` of 3, sweep disarmed since 2026-08-03 22:37, nothing retrying. **Root cause
+  measured, and it is deterministic, not a sizing accident:** `MAX_REFRESH_WINDOW_DAYS = 92` +
+  `REFRESH_WINDOW_OVERLAP_DAYS = 8` + `refresh()`'s own ±8-day padding ⇒ ~100-day windows, against
+  `candles_5m` chunks that are **~70 days wide, compressed, global across all symbols** at
+  3.9–4.7M rows each (`_hyper_3_1909` 3,892,265 · `_hyper_3_1910` 4,706,633 · whole cagg ≈49.6M).
+  Every window straddles two chunks ⇒ ~8.6M decompressed against a **5M** ceiling. It died at
+  ~2025-05-08, inside chunk 1909, exactly where the next window crosses into 1910. **Order: land
+  #1297 → land the window-sizing fix → then re-arm.** Re-arming first burns attempt 2 of 3 for
+  nothing.
+- **N11 · Cagg repair scope (owner-decided 2026-08-04): 5m + 15m + 1h only.** 1d is mitigated by
+  the native dense `candles`@1d path (`readDailyWithWarmup`); 1w is rarely a gate input. The 5m hole
+  spans **2025-06 → 2026-04** for all 13 (shared boundary — cagg refresh is a global time-window
+  operation); 15m/1h/1d/1w were never refreshed at all and hold live-tail rows only.
+- **N12 · ⚠️ Equity CA adjustment basis — the largest open data finding, backtest-fidelity, SEVERE.**
+  Not a live money-path defect: live screeners read CA-adjusted bhavcopy and `SwingBatchEngine` goes
+  over REST through the adjuster; all 18 open swing paper positions were checked and only KAPSTON has
+  a recorded CA (KITE-sourced, smooth across ex-date). The defect is on the **backtest** plane:
+  - `EquitySplitBonusAdjuster` is **source-aware** — it scales ONLY `source='BHAVCOPY'` bars
+    (`:41`), by design, because broker history arrives back-adjusted. `KITE`+`BACKFILL` are
+    **85% of the NSE 1d plane**. So the axis is not adjusted-vs-raw, it is *which adjustment basis
+    a bar carries*.
+  - Its only production call site is `CandlesController:80`, gated on `interval='1d' && adjust=back`.
+    **Both swing deep-sims read `candles`@1d raw via JDBC with no adjuster**
+    (`MinerviniBacktestService:864,886,900,933,956`; `ManasAroraBacktestService:684,813,837,851,884,907`),
+    plus `MinerviniHitRateService:114`, the backtest-service `CandleReader` chain, and
+    `ScreenerService:103` (a THIRD plane — the `candles_1d` cagg).
+  - **`eod_corporate_actions` is a rolling 420-day window** (`ca-lookback-days:420`) sized to the
+    live screener; ex-dates 2025-04-29 → 2026-07-31 and it can never reach deeper. The swing backtest
+    reads **~11 years**. `kind` is CHECK-constrained to SPLIT/BONUS, so **dividends and demergers are
+    unrepresentable**.
+  - **It reaches a verdict undiminished:** `MinerviniSwingBacktest:205` computes raw percent return
+    with no clamp, and the 8% stop is **close-evaluated, not an intrabar fill** (`:247`) — a 50% cliff
+    trips `STOP_LOSS` and then fills at the post-cliff price, so the full spurious ~−50% is booked
+    into avg/best/worst/profitFactor.
+  - Exposure: 64 clean CA-shaped cliffs across 62 symbols, **29 in pre-CA-table BACKFILL history**
+    (SHRJAGP 2017-11-02 exactly 10:1, FINCABLES, OCCL). Ledger row B4 (#757) closed
+    "backtest adjusted vs live raw" in July; `candles` has since gained 639k raw BHAVCOPY bars from
+    2025-06-19 — **the polarity inverted and nobody re-checked the backtest side.**
+  - **VRLLOG** — recorded 1:1 BONUS ex-date 2025-08-14 that Upstox did NOT adjust; its BACKFILL rows
+    were fetched 2026-08-04, a year later, and are still raw. Same mechanism as the 29 deep-history
+    cliffs; it is only the sole CA-table-era instance because the table sees 15 months.
+  - **DBEIL is the proof case that mixing is an ACTIVE hazard**, not theoretical: 106 BACKFILL bars
+    fetched 2026-06-18, one day before a 10:1 split. They cannot be broker-adjusted (fetch predates
+    the split) and the adjuster skips non-BHAVCOPY by design, so on the GET path it scales that
+    symbol's BHAVCOPY bars by 0.1 while leaving BACKFILL at 10× — **actively creating** the step.
+    **This one needs an owner call: the fix touches the adjuster's contract, not data.**
+- **N13 · CAS (Closing Auction Session) — G18 rescope.** CAS did not freeze the platform; it **split
+  it into two regimes**. Cash/index freezes 15:15–15:30 and takes an auction print; every derivative
+  keeps trading, and all 38 scalpers signal off `NIFTY-FUT-CONT`, so the engine's gate/fill plane is
+  untouched. The exposure is the **daily** plane: the auction print now sets the day's HIGH, and
+  `max(high) OVER w252 AS high_52w` is a direct hard-gate input to both swing screens
+  (`ManasScreenService:123`, `TrendTemplateService:122` → `MinerviniGates:44`, `ManasGates:69,89-90`),
+  which persist rows and open paper positions at 20:00. Natural control, reproduced independently by
+  the main loop: 2026-08-03 F&O `close==high` **25.59%** / `close==last` **98.58%** (n=211) against
+  **0.00%** on 07-28/07-30/07-31, non-F&O control flat at 1.14–1.63% across all four.
+  Intraday is LATENT not realised — evaluation stops after the 15:18 bucket, the traded strike is
+  immune (`spot + (forward − spot)` cancels), but `futuresBasis` swings 146.65 points and changes
+  sign into a persisted `score_breakdown`. **Post-CAS backtest parity is not answerable yet** —
+  `expired_contracts` stops at 2026-07-30. Two sessions only, one an expiry; **no outcome has been
+  shown to change.** Also found: `candles_1d` cagg and native daily now disagree *semantically*
+  (24463.45 vs 24614.90) — worth its own look.
+- **N14 · 668 near-zero-weight symbols in the `scanned` denominator.** 1,030 of 2,927 NSE EQ symbols
+  have no `candles`@1d beyond the ≤276-bar bhavcopy projection; **668 clear `MIN_BARS = 260` and then
+  yield only 1–39 candidate bars** while counting as `scanned` — 1,042 of 2,927 (36%) contribute
+  essentially nothing, 668 of them invisibly. Eight passed the live Minervini screen this month at
+  exactly 276 bars. **Deliberately NOT claimed material** — that is arithmetic on loop bounds, not an
+  observed trade count. Chip `task_35e7045b`. `MIN_BARS` feeds golden vectors, so **prefer a
+  reporting-only split of `evaluable` from `scanned`** over touching it.
+- **N15 · The 374-symbol exclusion is CORRECT — closed, do not reopen.** The live screen enforces its
+  own 252-session floor (`artha.minervini.min-sessions:252`, verified deployed — no container
+  override), so 357 of 374 are excluded from the screen too and **zero** backtest-excluded symbols
+  have passed either screen on any persisted date. Aligning 252 vs 260 would touch a parity surface
+  for an 8-session band empirically empty of passers and self-draining. **Recommend not doing it.**
+- **N16 · Promote `verdict` to a required context?** One owner call. It has been convention enforced
+  by the Architect, not GitHub — it failed red on #1156 and blocked nothing.
+- **N17 · ETF question, pre-existing but newly surfaced.** ~25 of the 66 lineage rename pairs are ETF
+  sponsor rebrands, and `HEALTHAXIS` (ex-`AXISHCETF`) is one of the surviving entering candidates.
+  Whether an ETF belongs in a Minervini SEPA funnel at all is not #1299's to answer.
+- **N18 · Restored-symbol depth caveat.** The 45 CA-gutted symbols were restored 1d-only (Upstox caps
+  `day` at ~a decade — `days=4200` returns `UDAPI1148` and writes nothing; `days=3600` works). Depth
+  bottoms at 2016-09-26, **shallower than the earlier BACKFILL cohort**, and ~81,000 of the 93,528
+  restored bars have **no bhavcopy counterpart at all**, so their adjustment basis is unverified.
+  1m bars were NOT restored, by scope.
+
+---
+
 ## 1. Net-new code
 
 | id | item | authority | state |

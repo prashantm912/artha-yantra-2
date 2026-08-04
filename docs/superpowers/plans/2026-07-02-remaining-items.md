@@ -1001,15 +1001,37 @@ every open PR, because the free version moves.
 #### Next-session queue — NOT STARTED, documented only
 
 - **N10 · CA sweep re-arm — SEQUENCED, do not re-arm first.** 13 symbols sit at `REFRESH_FAILED`,
-  `refresh_attempts=1` of 3, sweep disarmed since 2026-08-03 22:37, nothing retrying. **Root cause
-  measured, and it is deterministic, not a sizing accident:** `MAX_REFRESH_WINDOW_DAYS = 92` +
-  `REFRESH_WINDOW_OVERLAP_DAYS = 8` + `refresh()`'s own ±8-day padding ⇒ ~100-day windows, against
-  `candles_5m` chunks that are **~70 days wide, compressed, global across all symbols** at
-  3.9–4.7M rows each (`_hyper_3_1909` 3,892,265 · `_hyper_3_1910` 4,706,633 · whole cagg ≈49.6M).
-  Every window straddles two chunks ⇒ ~8.6M decompressed against a **5M** ceiling. It died at
-  ~2025-05-08, inside chunk 1909, exactly where the next window crosses into 1910. **Order: land
-  #1297 → land the window-sizing fix → then re-arm.** Re-arming first burns attempt 2 of 3 for
-  nothing.
+  `refresh_attempts=1` of 3, sweep disarmed since 2026-08-03 22:37, nothing retrying.
+  **Order: land #1297 → land #1305 (window sizing) → then re-arm.** Re-arming first burns attempt
+  2 of 3 for nothing.
+  - ⚠️ **The MECHANISM the Architect briefed was WRONG, and the correction matters for any future
+    fix here.** I said "a ~100-day window straddles two ~70-day chunks ⇒ ~8.6M decompressed."
+    Right in magnitude, wrong in cause. **Decompression is per matching BATCH, not per chunk
+    touched.** All five materialization hypertables are `segmentby (exchange, tradingsymbol),
+    orderby bucket`; a refresh's DELETE carries **no symbol predicate**, so `segmentby` prunes
+    nothing and batches are pruned by `orderby` min/max metadata alone. Proof: a **chunk-aligned**
+    70-day window decompresses *exactly* that chunk's count (4 exact matches), while an unaligned
+    one costs up to 7.4M.
+  - **Decisive numbers** (worst case over every window start, `candles_5m`, computed): 14 d =
+    2,990,258 · 30 d = 4,476,813 · 70 d = 7,396,205 · **100 d = 9,543,253 = 191% of the 5M
+    ceiling.** Deterministic.
+  - **All three forks I offered were wrong or insufficient.** *Chunk-align alone FAILS* — two chunks
+    exceed the whole ceiling by themselves (5,112,833 and 5,558,488). *Narrowing the constant
+    decays* — 22 d is 76.4% today and dense chunks grew ~40% year-on-year. *Raising the ceiling*
+    stays declined (~1 GB churn on a 4 GB DB). My worry that the five caggs might have differing
+    chunk widths is **falsified**: all five are uniform 70-day, 61 chunks, identically aligned.
+  - **#1305's answer: size windows in TUPLES, per view, from the current chunk load.**
+    `MAX_REFRESH_WINDOW_DAYS` stays as an outer bound — tuples bound decompression, days bound
+    materialization, neither substitutes. ~1.9M of *every* window is edge spill regardless of span,
+    which is why the budget is a quarter of the ceiling. Per-view planning also retires two
+    accidents free: `candles_1w`'s 8-day overlap no longer costs `candles_5m` ~630k redundant
+    tuples per window, and a sparse cagg no longer pays the dense one's window count.
+  - **An IT caught what no mock could:** `approximate_row_count(regclass) does not exist` — services
+    connect with a `currentSchema` excluding `public`, which is exactly why the existing code says
+    `public.refresh_continuous_aggregate`. That would have failed the rebuild at the moment it was
+    needed. Open doubt to carry: window count rises ~48 → ~85 per rebuild (cheaper each, wall-clock
+    unmeasured end-to-end since the sweep is disarmed), and the invariant is proven at planning and
+    IT scale, **not on a live 12-year run**.
 - **N11 · Cagg repair scope (owner-decided 2026-08-04): 5m + 15m + 1h only.** 1d is mitigated by
   the native dense `candles`@1d path (`readDailyWithWarmup`); 1w is rarely a gate input. The 5m hole
   spans **2025-06 → 2026-04** for all 13 (shared boundary — cagg refresh is a global time-window
@@ -1110,6 +1132,30 @@ every open PR, because the free version moves.
 - **N20 · `eqSymbols()`'s `SELECT DISTINCT … FROM candles` spans 1,050 chunks** and died once with
   `out of shared memory / max_locks_per_transaction` under concurrent load — a fragility in the
   deep-sim's FIRST query. Same class as the 5-way `UNION ALL` cagg probe that started failing today.
+- **N21 · ⚠️ HISTORICAL CAGG INVALIDATIONS HAVE NO SWEEPER, AND NOTHING ALARMS ON IT.** Surfaced by
+  #1303's review, upgraded from the builder's `assumed` open doubt to **computed**:
+  `_timescaledb_catalog.continuous_aggs_materialization_invalidation_log` currently holds **50
+  unprocessed entries**, spanning (IST) **2016-09-26 → 2026-08-03** on `candles_5m`, 2006-06-28 →
+  2026-08-02 on 15m, 2006-06-28 → 2026-07-18 on 1d, 2015-02-02 → 2026-04-26 on 1w. The caggs' own
+  refresh policies cover only `start_offset` 1d/2d/7d/14d/60d, so the futures roller's accidental
+  **epoch-wide nightly refresh was the only global consumer of historical invalidations, for every
+  symbol** — and `CandleQueryService:106` serves 5m/15m/1h/1w reads from those caggs, so history
+  reads are the exposed consumer.
+  **Not a blocker for #1303 and not caused by it:** that sweep has been dead since V049 first
+  compressed a cagg chunk, the backlog exists today pre-merge, and keeping the wide window is not an
+  option because it now hard-fails. #1303 removes a guarantee that was already gone. A bounded probe
+  (NSE `NIFTY 50`, 2026-06-15) found cagg 5m buckets == 1m-derived buckets == 75, i.e. **no
+  divergence in that sample** — so no pending invalidation has been shown to correspond to an
+  actually-wrong value. A real divergence sweep is DB-expensive and was deliberately not run.
+- **N22 · #1303's narrowing bounds the common case but not the worst one** (`ContinuousFuturesRoller
+  :172`, MEDIUM-LOW, latent). If CONT is ever missing buckets older than the 30-day compression
+  horizon that the currently-listed front contract can fill — a multi-day stack outage a month+ ago,
+  adding a root to `artha.futures.underlyings` (its first roll stitches the front contract's whole
+  ~3-month listed history), or a `purgeSymbol` on a CONT symbol — the next live roll re-widens into
+  compressed chunks and reproduces today's exact failure for that root. **Not armed today**:
+  `NIFTY-FUT-CONT` has 79/79 trading days covered over the last 100, zero holes. Failure mode is a
+  bare `log.warn` with no alerting. Optional hardening: clamp `from` to `max(firstBucket, today −
+  25d)`, or warn when the span exceeds the compression horizon.
 - **N15 · The 374-symbol exclusion is CORRECT — closed, do not reopen.** The live screen enforces its
   own 252-session floor (`artha.minervini.min-sessions:252`, verified deployed — no container
   override), so 357 of 374 are excluded from the screen too and **zero** backtest-excluded symbols

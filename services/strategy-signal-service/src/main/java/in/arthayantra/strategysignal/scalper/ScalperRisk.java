@@ -55,13 +55,21 @@ public final class ScalperRisk {
    *       index points and fires normally, {@code {percent, 25}} is ~6,000 and never does). What
    *       disqualifies it here is that on an options config the name does not say which plane it
    *       means — which is why {@code SemanticValidator.checkOptionsPlaneLevelBases} refuses it
-   *       there (#1284), making it unreachable by this method. It is removed rather than left as
-   *       unreachable-but-inconsistent because the two modules are coupled by nothing but that
-   *       shared {@code "options_of_underlying"} literal: were the refusal widened or relaxed,
+   *       there (#1284). ⚠️ That refusal is <b>publish-time only</b>: {@code SignalEngine} compiles
+   *       the STORED config at load without re-validating, so it does not make {@code percent}
+   *       unreachable here — a scalper published BEFORE #1284 would still carry it, and that
+   *       residual is the real reachability path (measured 0 such rows live, 2026-08-04). Removing
+   *       it makes that residual fail SAFE (refuse to load) instead of open. It is removed rather
+   *       than left as unreachable-but-inconsistent because the two modules are coupled by nothing
+   *       but that shared {@code "options_of_underlying"} literal: were the refusal widened or
+   *       relaxed,
    *       keeping {@code percent} here would silently restore the §0B hole (a config whose only
    *       stop is {@code {percent, 25}} loading as BOUNDED with no enforceable stop on either
    *       plane). Removed, the same drift merely refuses to load a {@code {percent, 0.3}} scalper
-   *       that would in fact have been bounded — the safe failure direction.
+   *       that would in fact have been bounded — and that direction is not just safer, it is
+   *       <b>loud</b>: the refusal logs a warn AND records {@code Classification.NO_BOUNDING_EXIT}
+   *       on the coverage snapshot, which {@code StrategyCoverageWatchdog} alerts on. The retained
+   *       case was silent and unbounded; the removed case is noisy and flat.
    *   <li>{@code r_multiple} — derives its distance from ANOTHER stop's initial risk, so it is not
    *       self-sufficient as the only stop.
    *   <li>unknown/absent bases — null distance, so the rule never fires.

@@ -3,10 +3,12 @@ package in.arthayantra.strategysignal.scalper;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyschema.StrategyDocuments;
+import in.arthayantra.strategyschema.StrategySchemaV1;
 import in.arthayantra.strategyschema.ValidationResult;
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,7 +17,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -51,6 +52,11 @@ class ScalperStopBasisCouplingTest {
   /**
    * The frozen joint verdict of the two modules for every basis the schema's {@code
    * levelParams.basis} enum admits. A cell moves only by a deliberate edit to one of them.
+   *
+   * <p>The DOMAIN is read out of the schema itself ({@link #schemaLevelBases()}), never from this
+   * map's key set — a hardcoded search space decays exactly like the manual count it replaces, and
+   * a basis added to the enum but not to this table would otherwise be evaluated by neither test:
+   * the precise drift this class exists to prevent, reopening with every test green.
    */
   private record Verdict(boolean acceptedOnOptions, boolean countsAsBoundingExit) {}
 
@@ -85,11 +91,22 @@ class ScalperStopBasisCouplingTest {
   private static final List<Double> VALUES = List.of(0.3, 25.0);
 
   @Test
+  void theFrozenTableCoversExactlyTheBasesTheSchemaAdmits() {
+    // The guard on the guard. Add a basis to the schema enum without a row here and this fails,
+    // rather than the new basis silently escaping both checks below.
+    assertThat(FROZEN.keySet())
+        .as(
+            "every level basis in the schema's levelParams.basis enum needs a frozen verdict —"
+                + " add the row, do not widen the enum alone")
+        .containsExactlyInAnyOrderElementsOf(schemaLevelBases());
+  }
+
+  @Test
   void everyLevelBasisKeepsItsFrozenVerdictFromBothModules() throws IOException {
     ObjectNode base = baseScalperConfig();
-    for (Map.Entry<String, Verdict> entry : FROZEN.entrySet()) {
-      String basis = entry.getKey();
-      Verdict expected = entry.getValue();
+    for (String basis : schemaLevelBases()) {
+      Verdict expected = FROZEN.get(basis);
+      assertThat(expected).as("no frozen verdict for schema basis '" + basis + "'").isNotNull();
       for (double value : VALUES) {
         ObjectNode config = withSingleStop(base, basis, value);
         String where = basis + " (value=" + value + ")";
@@ -104,10 +121,18 @@ class ScalperStopBasisCouplingTest {
 
         if (!expected.acceptedOnOptions()) {
           // A refusal only counts if it came from the PLANE check. Without this, a fixture that
-          // broke for some unrelated reason would read as the safety rule working.
-          assertThat(result.errors().stream().map(i -> i.path()))
-              .as(where + ": must be refused BY the level-basis check, not by an unrelated rule")
-              .contains("/exit_rules/0/params/basis");
+          // broke for some unrelated reason would read as the safety rule working. The pointer
+          // ALONE is not enough: StrategySchemaV1 emits the same instance location, and
+          // validateTree short-circuits the semantic pass on any schema error — so a basis refused
+          // by the ENUM would satisfy a pointer-only assertion and look like the plane check
+          // running. Match the message too.
+          assertThat(result.errors())
+              .as(where + ": must be refused BY the options-plane check, not by an unrelated rule")
+              .anySatisfy(
+                  issue -> {
+                    assertThat(issue.path()).isEqualTo("/exit_rules/0/params/basis");
+                    assertThat(issue.message()).contains("ambiguous on an options strategy");
+                  });
         }
 
         assertThat(ScalperRisk.hasBoundingExit(StrategyCompiler.compile(config).exitRules()))
@@ -122,11 +147,12 @@ class ScalperStopBasisCouplingTest {
     // ScalperRisk is consulted ONLY for options_of_underlying strategies, and only for configs
     // that already passed publish validation. A basis it counts as the §0B bound but that
     // validation refuses on that plane is a rule about configs which cannot exist — dead, and
-    // actively misleading to the next editor about what bounds a scalper. Derived from the sweep
-    // below, NOT from the frozen table, so it holds for any basis either side gains later.
+    // actively misleading to the next editor about what bounds a scalper. Both the domain (the
+    // schema enum) and the verdicts are read from production code, never from the frozen table, so
+    // this holds for any basis either side gains later.
     ObjectNode base = baseScalperConfig();
     List<String> countedButRefused = new ArrayList<>();
-    for (String basis : new TreeSet<>(FROZEN.keySet())) {
+    for (String basis : schemaLevelBases()) {
       ObjectNode config = withSingleStop(base, basis, 25.0);
       boolean accepted = StrategyDocuments.validateTree(config).valid();
       boolean counted = ScalperRisk.hasBoundingExit(StrategyCompiler.compile(config).exitRules());
@@ -139,6 +165,35 @@ class ScalperStopBasisCouplingTest {
             "bases ScalperRisk.ENGINE_SIDE_STOP_BASES counts as a §0B bound that SemanticValidator"
                 + " refuses on the options plane — the two modules have drifted apart")
         .isEmpty();
+  }
+
+  /**
+   * The level-rule bases the SCHEMA admits, read out of the served schema document itself
+   * ({@code StrategySchemaV1.documentText()} returns the classpath resource verbatim). This is the
+   * test's search space — deriving it is what keeps the frozen table from rotting: a basis added
+   * to the enum alone would otherwise be evaluated by neither check here, which is exactly the
+   * drift this class exists to catch.
+   */
+  private static List<String> schemaLevelBases() {
+    JsonNode enumNode;
+    try {
+      enumNode =
+          new ObjectMapper()
+              .readTree(StrategySchemaV1.documentText())
+              .path("$defs")
+              .path("levelParams")
+              .path("properties")
+              .path("basis")
+              .path("enum");
+    } catch (IOException e) {
+      throw new AssertionError("could not read the strategy schema document", e);
+    }
+    assertThat(enumNode.isArray() && !enumNode.isEmpty())
+        .as("$defs.levelParams.properties.basis.enum must exist — did the schema shape move?")
+        .isTrue();
+    List<String> bases = new ArrayList<>();
+    enumNode.forEach(n -> bases.add(n.asText()));
+    return bases;
   }
 
   /** The seeded scalper config, parsed but NOT modified — the fixture's starting point. */

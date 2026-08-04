@@ -494,3 +494,24 @@ reproduction (rec NO); G12/G13/G9/G8 unchanged; T1 seventh rejection.**
   in-container actuator/health GETs. No restart, deploy, write, or config change; no strategy knob
   altered; nothing republished. Docs edits in this PR: findings + rollup + README §3.32 + ledger
   G18 row.
+
+---
+
+## ADDENDUM 2026-08-04 — §0.1/§6.1's "bogus tick" verdict RETRACTED: the print was the new CAS official close
+
+NSE/BSE launched the **Closing Auction Session (CAS)** on 2026-08-03 — this file's data date was
+its FIRST day. Continuous trading in F&O (Category I) stocks now ends 15:15 IST; a call auction
+15:15–15:30 sets the official close. The "frozen 1m closes then a +200.95 jump" shape §6.1 read as
+a poisoned tick is the auction mechanism: the freeze is continuous trading ending, the 15:29 print
+is the CAS equilibrium close, and the official NIFTY close for 2026-08-03 **is 24,774.30**
+(publicly confirmed; Kite has nothing to correct, which is why the bar was unchanged on 08-04).
+The "three-market refutation" actually measured the auction-vs-continuous divergence: futures and
+non-expiring options price the continuous market; the official close comes from constituent
+auction prices. Decisive cross-check from the next session: on 08-04 the EXPIRING NIFTY chain
+converged at 15:30 to settlement 24,613–24,615 = that day's identical-shape "jump print" exactly.
+
+**Consequently:** T31(a) repair and T31(b) capture guard are RETRACTED (ledger G18 rescoped); the
+1d bar must NOT be hand-updated. **The `chop 0.007` regime stamp STANDS** — recharacterised as the
+CONTINUOUS-SESSION read (what an intraday stop can trade), per the new README §3.33 doctrine; the
+G11 second-chop-observation evidence in §0.2/§5.0 is unaffected. Full evidence:
+`2026-08-04-session-findings.md` §6.1.

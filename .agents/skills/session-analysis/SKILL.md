@@ -37,7 +37,8 @@ Arguments: `post [YYYY-MM-DD]` (default: the most recent completed session) · `
    sitting and fill it.
 7. If you found a NEW analysis dimension or data point, append it to README §3 (numbered,
    append-only) with its SQL in §6 — that is how the method is designed to grow.
-8. Ship as a docs-only PR (squash, admin-merge allowed for docs). Report the headline verdict +
+8. Ship as a docs-only PR (squash-merge normally — ⚠️ corrected 2026-08-04: docs PRs used to be
+   told they could bypass the gate; retracted when `lock_branch` was lifted 2026-07-26). Report the headline verdict +
    tuning candidates to the owner. **Propose tunes; never arm/change a strategy knob without the
    owner's explicit OK.**
 

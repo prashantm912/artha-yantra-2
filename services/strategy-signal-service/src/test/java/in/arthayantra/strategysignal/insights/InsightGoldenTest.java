@@ -217,12 +217,21 @@ class InsightGoldenTest {
         java.time.LocalDate.parse("2026-07-14"), "Test Holiday");
   }
 
-  /** A stale-tick snapshot: one bracketed position over a stalled instrument. */
+  /**
+   * A stale-tick snapshot: TWO bracketed positions over the SAME stalled instrument, held in
+   * different books. This is the live shape (measured 2026-08-04: NSE:AVALON / NSE:KANORICHEM /
+   * NSE:PRECOT each open in both {@code manas-arora} and {@code minervini}) and it is deliberately
+   * a twin — the previous single-position fixture could not fail, so it never noticed that both
+   * candidates carried the same {@code (instrument, IST-day)} dedupe key and the second was folded
+   * away by the OPEN-key upsert. The golden now pins two DISTINCT keys and two distinct titles.
+   */
   private StaleTickSnapshot fixtureStaleTick() {
     return new StaleTickSnapshot(
         List.of(
             new StaleTickSnapshot.StaleBracket(3001L, "scalper", "NFO", "NIFTY25JUL25200CE", "BUY",
-                true, true, "NFO:NIFTY25JUL25200CE", "ticks flowing but no 1m bar closed for 240s")));
+                true, true, "NFO:NIFTY25JUL25200CE", "ticks flowing but no 1m bar closed for 240s"),
+            new StaleTickSnapshot.StaleBracket(3002L, "manual", "NFO", "NIFTY25JUL25200CE", "BUY",
+                true, false, "NFO:NIFTY25JUL25200CE", "ticks flowing but no 1m bar closed for 240s")));
   }
 
   /** A quality-stats fixture: below-target act rate + a high-dismiss retirement candidate. */

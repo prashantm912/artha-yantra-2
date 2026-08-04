@@ -643,7 +643,44 @@ Run in order; each answers one question. Canned SQL in §6.
     A daily high/close that exists ONLY in the final bar, against a flat future and an option chain
     pricing the old spot, is a bad tick — compute the regime from the 1m series ex-that-bar, state
     both values, and file the repair.
-33. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+    ⚠️⚠️ **AMENDED 2026-08-04 — the 2026-08-03 print this section was written about was NOT a bad
+    tick, and the "file the repair" instruction above is RETRACTED for that class.** The shape it
+    describes (1m closes frozen near 15:15, a large final print, futures basis "breaking" at the
+    close) is the **CAS official close** (§3.33) — NSE/BSE's Closing Auction Session launched
+    2026-08-03, the very day this section was written, which is why the shape had never been seen
+    before. The three SQL discriminators above remain USEFUL — but they now DETECT the CAS shape;
+    they no longer prove poison. A genuine bad tick (the class this section should still catch)
+    would appear MID-session, not in the 15:15–15:30 auction window. Do not repair an official
+    close; do not quarantine it at capture. Full evidence: `2026-08-04-session-findings.md` §6.1.
+33. **CAS-era close semantics — continuous close vs official auction close** (added 2026-08-04) —
+    since **2026-08-03**, NSE/BSE run a **Closing Auction Session**: continuous trading in
+    F&O-enabled (Category I) stocks ends **15:15 IST**, a call auction 15:15–15:30 sets the
+    official closing price (finalised 15:30–15:35), and the index official close derives from CAS
+    constituent closes. Every session now has **TWO closes**, and the data shows both:
+    - the **continuous close** — the last level before the ~15:14/15:15 freeze in the index 1m
+      stream (the freeze IS continuous trading ending; both indices pin simultaneously);
+    - the **official (CAS) close** — arrives as a late 1m print ~15:28–15:29 (measured +151.45 on
+      08-04, +200.95 on 08-03), lands in the 1d daily bar, and flips
+      `options_chain_snapshots.spot_price` from 15:28 onward. The two can differ by 150–200 pts,
+      and the futures (which trade continuously to 15:30) track the continuous market, so the
+      apparent close-time basis inverts — that is mechanics, not corruption.
+    **Rules:** (a) the **G15 regime stamp uses the CONTINUOUS session** (open → continuous close) —
+    an intraday time stop cannot trade the auction; stamp both values in the rollup row. (b) daily
+    bars, RS-rank and backtests keep the OFFICIAL close — never "repair" it. (c) expiry-day option
+    settlement follows the official close — measured 08-04: five expiring strikes converged to
+    settlement 24,613–24,615 against an official close of 24,614.90 while the last continuous
+    level was 24,463.45. (d) session-TAIL analytics (VWAP, last-30-min reads, 3m rollups touching
+    15:15+) now mix two price regimes — bound them at 15:15 or say which close they use. Ledger
+    row **G18** (rescoped) tracks any build fallout (e.g. parity on post-CAS replay data).
+    ```sql
+    -- the two closes, side by side (freeze detector + official print)
+    SELECT to_char(bucket AT TIME ZONE 'Asia/Kolkata','HH24:MI') t, close, source
+    FROM marketdata.candles
+    WHERE tradingsymbol='NIFTY 50' AND exchange='NSE' AND interval='1m'
+      AND EXTRACT(second FROM bucket)=0 AND bucket >= :d1510 AND bucket < :d1530 ORDER BY bucket;
+    -- continuous close = the pinned value before the late jump; official = the 1d bar's close.
+    ```
+34. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

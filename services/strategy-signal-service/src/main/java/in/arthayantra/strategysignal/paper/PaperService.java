@@ -1400,9 +1400,22 @@ public class PaperService {
     if (staleAge != null) {
       staleTicks.staleSettleUsed(pos, closeReason, staleAge);
     }
+    // V059 exit linkage, stamped HERE because this is the only place the settle leg and its position
+    // are both known: the CAS above proved this thread owns the close, so pos.id() is the position
+    // this order settles — not merely a position sharing its (book, exchange, tradingsymbol, side)
+    // key. Without it the nightly reconciliation matches exit legs by that key over the position
+    // lifetime, so two positions sharing the key with overlapping lifetimes let ONE settle order
+    // satisfy BOTH, and the exit_count == 0 classifier silently stops reporting the one that never
+    // settled. An inflated count DELETES a real finding rather than adding a false one.
+    //
+    // Rides this INSERT rather than a follow-up write, which is what makes it safe on a money-path
+    // close: unlike V057's lot tag there is no separate statement that could fail, so this cannot
+    // strand a position mid-settle and needs no fail-soft wrapper. The value is discarded exactly as
+    // before — insertFilled has always returned the id, and the exit leg still has no use for it.
     orders.insertFilled(
         pos.book(), null, pos.exchange(), pos.tradingsymbol(), exitSide.name(), pos.qty(), exit.fillPrice(),
-        fills.simulatorId(), exit.slippageApplied(), null, null, null, refSource, refTickAgeMs, null);
+        fills.simulatorId(), exit.slippageApplied(), null, null, null, refSource, refTickAgeMs, null,
+        PaperOrderRepository.EXIT_LEG, pos.id());
     // Auto-journal hook: the journal module listens AFTER_COMMIT (so a journal failure can never
     // roll back the close). Publishing inside the close tx is fine — delivery is deferred to commit.
     events.publishEvent(new PaperPositionClosed(pos.id(), realized, closeReason));
@@ -1440,13 +1453,17 @@ public class PaperService {
       }
     }
     // V058 (round-2 review Major 2): attribute the trade chain to THIS position's strategy, so a
-    // co-fired sibling's entry fills stop appearing in this position's detail pane. Settle legs
-    // carry no signal and remain shared until #1259's V057 exact linkage — see legsForPosition.
+    // co-fired sibling's entry fills stop appearing in this position's detail pane.
+    //
+    // V059 closes the settle half V058 had to leave open. Its note said settle legs "remain shared
+    // until #1259's V057 exact linkage"; that linkage is now `settles_position_id`, so passing the
+    // position id renders a sibling's settle in its OWN chain only. Pre-V059 orders carry no link and
+    // still match on lifetime, so no historical detail pane loses its exit row.
     List<OrderLeg> legs =
         orders
             .legsForPosition(
                 row.book(), row.exchange(), row.tradingsymbol(), row.openedAt(), row.closedAt(),
-                positions.strategyIdOf(row.id()).orElse(null))
+                positions.strategyIdOf(row.id()).orElse(null), row.id())
             .stream()
             .map(o -> toOrderLeg(o, meta))
             .toList();

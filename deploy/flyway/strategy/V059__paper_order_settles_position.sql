@@ -1,0 +1,149 @@
+-- Exact position ↔ settle-order association, so the nightly reconciliation's missing-exit check can
+-- attribute an exit leg to ONE position instead of to every position that shares its open key.
+--
+-- WHY. `PaperReconciliationRepository.closedPositionReconciliation`'s exit lateral counts orders by
+-- the §F.6 open key (book, exchange, tradingsymbol, side) time-scoped to [opened_at, closed_at].
+-- Where two positions share that key with OVERLAPPING lifetimes, ONE settle order satisfies the exit
+-- lateral for BOTH rows, and `PaperReconciliationService.reconcile` classifies on `exit_count == 0`
+-- ONLY. So a position that genuinely never settled reads as settled.
+--
+-- (Citations in this file name METHODS, not line numbers, and deliberately: a migration is
+-- checksum-locked the moment Flyway applies it, so a line number here can never be corrected in
+-- place — only superseded by a whole new migration. An earlier draft cited three line ranges that
+-- were already 82-125 lines stale before this even merged, one of them excluding the very line it
+-- pointed at. Method names survive edits; line numbers in a one-way-door file do not.)
+--
+-- ⚠️ THE FAILURE DIRECTION IS WHAT MAKES THIS WORTH A MIGRATION. Inflating a count usually costs a
+-- false ALARM, which is annoying but self-announcing. Here it costs a false NEGATIVE: the inflation
+-- DELETES a real finding, and the reconciler goes quiet about a genuinely unsettled money position.
+-- A detector that under-reports is worse than one that over-reports, because nothing tells you.
+--
+-- REACHABILITY TODAY — stated honestly rather than overclaimed. On `main` as of 2026-08-04 this is a
+-- LATENT defect, not an active one. Two overlapping same-key lifetimes need one of:
+--   (a) #1275's strategy-scoped open key (V058), which is precisely what lets two strategies hold the
+--       same (book, exchange, tradingsymbol, side) concurrently. Its
+--       `PaperScopedResolutionPathsIntegrationTest` pins this gap on purpose, asserting the WRONG
+--       value with a note to flip it once an exact linkage exists. ⚠️ Flipping it needs TWO edits,
+--       not one: that fixture seeds `paper_orders` rows directly and never runs `doSettle`, so its
+--       settle order carries no link and still falls back to the key rule. The fixture must seed
+--       `settles_position_id` as well as the assertion being flipped — measured, not assumed.
+--   (b) a BUY and a SELL position coexisting on one instrument, which `uq_paper_positions_open`
+--       permits because `side` is in the key. (That index is V021's originally, but V058 DROPped and
+--       recreated it with `strategy_id` + NULLS NOT DISTINCT — read V058 for the live definition.
+--       Both claims made off it here hold under either version, since `side` is in both.)
+--       ⚠️ This is reachable in PRODUCTION TODAY
+--       via the MANUAL order path — not gated on F9, not gated on anything. See the SELL-entry note
+--       at the bottom, which also records why an earlier version of this comment got that wrong.
+-- (a) is live as of #1275; (b) has always been live. The fix is not speculative.
+--
+-- WHY A COLUMN ON paper_orders AND NOT A SECOND TABLE, given V057 argued the opposite. V057's
+-- objection to a `position_id` column was specific and correct FOR THE ENTRY LEG: the entry order is
+-- inserted BEFORE the position exists (`PaperService.openOrder` mints the order id via
+-- `orders.insertFilled`, and `upsertPosition` mints or finds the position id three statements
+-- later), so a column would mean INSERT-then-UPDATE on the money path. THE EXIT LEG IS THE EXACT
+-- REVERSE: `PaperService.doSettle` CAS-closes the position FIRST (`positions.close(pos.id(), ...)`)
+-- and only THEN inserts the settle order, so the position id is already in hand and the link is
+-- written by the INSERT that has to happen anyway. The objection does not transfer, and inverting it
+-- buys the property below.
+--
+-- WHY THAT MATTERS MORE THAN TIDINESS: A COLUMN CANNOT FAIL SEPARATELY. V057's lot write is its own
+-- statement, so it can trip its own unique index, which is why it had to be made fail-soft
+-- (PROPAGATION_NESTED + catch) — a hard failure there would roll back a real paper trade to protect
+-- an observational row. This link adds NO NEW STATEMENT, and NOTHING REACHABLE CAN FAIL: it is one
+-- more value on an INSERT that must succeed for the settle to be recorded at all. There is no
+-- fail-soft decision to make because there is nothing that can independently fail.
+--
+-- "Nothing reachable" rather than "no new failure mode", which was the earlier and slightly
+-- overstated wording: an INSERT that now carries a FK and a CHECK is strictly more constraint-bearing
+-- than one that does not. Both are unreachable here rather than merely unlikely. The CHECK takes one
+-- of two compile-time constants. The FK targets a row THIS transaction already holds exclusively
+-- (the CAS above updated it two statements earlier), so its FOR KEY SHARE lock is already owned —
+-- it can neither fail nor deadlock against a concurrent closer, which is the non-obvious half.
+--
+-- LEGACY ROWS: EXACTLY UNCHANGED, AND THAT IS PROVABLE RATHER THAN HOPED FOR. The reconciler treats
+-- an order with a NULL link by the old key+lifetime rule, so every pre-existing row keeps today's
+-- behaviour and no backfill is needed. Stronger: a position already CLOSED when this migration runs
+-- can never be affected AT ALL, because its window ends at its `closed_at`, every linked order is
+-- written after this migration, and `closed_at < migration < filled_at` — so no linked order can
+-- fall inside a historical window. There is no first-night alert burst by construction.
+-- (A position OPEN across the deploy and closed afterwards gets its own link from `doSettle`, which
+-- is the only caller of `PaperPositionRepository.close` — so it cannot lose an exit it really had.)
+--
+-- ⚠️⚠️ THE SELL-ENTRY MASKING ROUTE — REACHABLE IN PRODUCTION TODAY, AND CLOSED HERE.
+--
+-- The masking order does NOT have to be a settle leg. A SELL position's ENTRY leg is a SELL order,
+-- which satisfies a BUY position's `o.side <> p.side` exit predicate. An entry order carries no
+-- `settles_position_id`, so under a NULL-link fallback it matched by key+lifetime and could mask a
+-- BUY position's genuinely missing exit — the identical false negative, through a different door.
+--
+-- ⚠️ AN EARLIER VERSION OF THIS COMMENT CLAIMED F9 SHORT-PREMIUM WOULD "ARM" THIS, i.e. that it was a
+-- future state. THAT WAS WRONG, and the error is worth recording because it is a repeatable one: the
+-- claim was written after checking only the AUTOMATED path (every engine-emitted ENTRY is BUY) and
+-- never the manual one. Manual SELL entries are reachable RIGHT NOW —
+--   * `PaperController.OrderBody.side` is a free string with no BUY-only whitelist, and
+--     `POST /api/v1/paper/orders` routes any side straight to `openManualOrder`;
+--   * the scalper cockpit exposes a BUY/SELL selector on the hand-ticket form;
+--   * `PaperLedgerIntegrationTest` already opens AND closes manual SELL positions over HTTP.
+-- Since `uq_paper_positions_open` keys on side, a manual BUY and a manual SELL can hold the same
+-- instrument concurrently on one book today. GENERAL LESSON: "reachable only under <flag>" is
+-- usually FALSE wherever a manual or admin HTTP path exists — check the controller surface and the
+-- UI, not just the engine, before writing a containment claim.
+--
+-- CLOSED BY `leg_kind`: the fallback below fires ONLY for `leg_kind IS NULL` (a true pre-migration
+-- row). Every order written after this migration is stamped ENTRY or EXIT, so a manual SELL entry can
+-- never be counted as some other position's exit, and an EXIT is counted only for the position its
+-- link names. Note this is strictly stronger than excluding via `paper_position_lots`, which cannot
+-- work at all — see the fail-soft note on the column above.
+--
+-- STILL OPEN, deliberately: the V5 ENTRY lateral is key-scoped plus #1275's signal → strategy scoping,
+-- so it still inflates across overlapping twins that share a strategy. That is an over-counting
+-- (false-ALARM) direction on `entryQtyMismatch`, not the silent under-counting this migration exists
+-- to kill, and closing it belongs with the entry-side attribution work rather than here.
+
+ALTER TABLE paper_orders ADD COLUMN settles_position_id BIGINT
+  REFERENCES paper_positions (id) ON DELETE SET NULL;
+
+-- The leg DISCRIMINATOR, and it is load-bearing rather than descriptive: it is what lets the
+-- reconciler tell a genuine pre-migration LEGACY row from a post-migration ENTRY fill. Both have a
+-- NULL `settles_position_id`, so without this column the fallback below cannot distinguish them and
+-- an ENTRY leg keeps masking a missing exit (see the SELL-entry route in the SCOPE note).
+--
+-- ⚠️ IT MUST BE A STORED FACT, NOT AN INFERENCE, AND ONE OBVIOUS INFERENCE IS ALREADY KNOWN-BAD:
+-- "an order with a row in `paper_position_lots` is an entry" is UNSOUND, because V057's lot tag is
+-- deliberately FAIL-SOFT (`PaperService.tagLotFailSoft` catches, increments
+-- `ay_paper_lot_tag_failures_total` and logs) precisely so a lost lot cannot roll back a real paper
+-- trade. A missing lot is therefore an EXPECTED state, and treating "no lot" as "not an entry" would
+-- reintroduce the same false negative through a different door. Stamped on the INSERT instead, where
+-- the caller knows which leg it is writing.
+--
+-- NULL = not written by a leg-aware writer. Every row written BY THE NEW JAR carries ENTRY or EXIT,
+-- so NULL is an exact, non-widening test for "legacy" that needs no timestamp watermark.
+--
+-- ⚠️ DELIBERATELY "new jar", NOT "after this migration" — flyway-init runs BEFORE the new jar is up,
+-- so for the few minutes of a deploy the OLD jar keeps inserting rows with leg_kind NULL. Those are
+-- classified as legacy, i.e. they get exactly the PRE-V059 behaviour — the old bug for a few minutes,
+-- never a new one — and they need no repair afterwards. Sequence the deploy so the window is short;
+-- nothing breaks if it is not.
+ALTER TABLE paper_orders ADD COLUMN leg_kind TEXT
+  CHECK (leg_kind IN ('ENTRY', 'EXIT'));
+
+-- ON DELETE SET NULL, not CASCADE, and the asymmetry with V057 is deliberate. A lot DESCRIBES a
+-- fill, so V057 cascades it away with either parent — delete the fill and the lot records nothing.
+-- An order row IS the money record of the fill; losing the position must never delete it. This
+-- matches `paper_positions.opening_signal_id` and `paper_position_lots.signal_id`, both SET NULL for
+-- the same reason. `PaperService.reset()` deletes positions before orders, so the nulling fires
+-- harmlessly there; a nulled link simply degrades that order to the legacy key+lifetime rule.
+
+-- Only NON-NULL links are ever probed (the reconciler's exact branch is `settles_position_id = p.id`;
+-- the fallback branch tests IS NULL and is served by the existing key predicates), so a partial index
+-- indexes the settle legs and nothing else. Every entry fill stays out of it.
+CREATE INDEX ix_paper_orders_settles_position ON paper_orders (settles_position_id)
+  WHERE settles_position_id IS NOT NULL;
+
+-- No new GRANT: the V005 table-level GRANT (SELECT, INSERT, UPDATE, DELETE ON paper_orders TO
+-- ay_strategy) already covers every column, including ones added later — the same note V028 carries.
+-- The FK's referential action runs with the REFERENCING table's owner privileges, not the invoking
+-- role's, so `ay_strategy` needs nothing on paper_positions for the SET NULL to fire.
+
+COMMENT ON COLUMN paper_orders.settles_position_id IS
+  'The position this order SETTLES (closes), stamped by PaperService.doSettle, which already holds the id because it CAS-closes the position before inserting the exit leg. ENTRY fills leave this NULL — their order row predates the position id, and their per-signal attribution lives in paper_position_lots (V057) instead. Exists because the nightly reconciliation matched exit legs by the (book, exchange, tradingsymbol, side) open key over the position lifetime, so where two positions share that key with overlapping lifetimes ONE settle order satisfied BOTH rows and the exit_count == 0 classifier never reported the one that genuinely never settled — an inflated count DELETING a real finding rather than adding a false one. The reconciler now attributes a linked order to exactly its own position and falls back to the old key+lifetime rule only for orders with a NULL link, so pre-existing rows keep their previous classification with no backfill; a position closed before this column existed cannot be affected at all, since its window ends before any linked order was written.';

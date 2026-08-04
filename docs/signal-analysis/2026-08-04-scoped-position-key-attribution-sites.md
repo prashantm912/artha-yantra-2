@@ -24,6 +24,22 @@ closed rather than assumed.**
 | Already discriminating (keys on `id` or `opening_signal_id`) | ~20 |
 | Count-granularity only (no wrong row selected; row count changes) | 7 |
 
+> ### ⚠️ STATUS UPDATE 2026-08-04, later same day — read before enumerating from this doc
+>
+> Two of this document's premises have moved since it was written. The body below is left as the
+> dated investigation it was; this block is the current state.
+>
+> - **#1275 is MERGED** (`060bbaf1`), so §0's "PREMISE CORRECTION (STEP 0)" — *"It is not — PR #1275
+>   is OPEN"* — and the live-DB observations under it are no longer current. V058 is on `main`.
+> - **A10 is CLOSED and A7's settle half is done**, by #1288 (`V059`, `paper_orders.settles_position_id`
+>   + `leg_kind`). The count table's *"knowingly leaves open (documented + pinned) — 1"* row refers to
+>   A10 and is therefore spent. **A7 remains PARTIAL** for a different reason than it says (manual,
+>   signal-less entry fills), and **A11 + A12 are still UNFIXED** — those are the live open items.
+>
+> This matters because this table is the bounding authority for the #1275 mis-attribution set and
+> feeds the six-location enumeration recipe. Reading A10 as open dispatches a builder against
+> already-shipped code — the five-false-dispatch pattern of 2026-08-02.
+
 Three corrections to the standing account, in descending order of consequence:
 
 1. **The "eight sites" figure is inconsistent with the branch's own diff, which scopes TEN.**
@@ -199,10 +215,10 @@ All file paths relative to `services/strategy-signal-service/src/main/java/in/ar
 | A4 | `paper/PaperPositionRepository.java:304` `findLatestForKey` | `PaperService.replayFor:639` returns a sibling's id/qty/brackets on an idempotent retry — a silently wrong **200** | scoped ✅ (M4) |
 | A5 | `paper/PaperReconciliationRepository.java:60` entry LATERAL | doubles `entry_qty` → nightly false `qtyMismatch` | scoped ✅ (M5) |
 | A6 | `signals/SwingPaperEffectRepository.java:206` `openPositionIdsForSignals` | ids bound at `SwingBatchEngine:1032`, closed via `closeForPosition` → **wrong close** | scoped ✅ (#6) |
-| A7 | `paper/PaperOrderRepository.java:286` `legsForPosition` | `GET /paper/positions/{id}` renders a sibling's entry fills | scoped ✅ **PARTIAL** — settle legs carry `signal_id = NULL` and remain shared |
+| A7 | `paper/PaperOrderRepository.java:361` `legsForPosition` | `GET /paper/positions/{id}` renders a sibling's entry fills | scoped ✅ · settle half CLOSED by V059 (#1288) — legs now filter on `settles_position_id`, unlinked pre-V059 legs keep the lifetime match · ⚠️ **still PARTIAL**: `signal_id IS NULL` passes unconditionally, so a **manual** sibling's ENTRY fill is still shared. Remedy is `paper_position_lots.position_id`, usable only as a POSITIVE exclusion (the lot write is fail-soft, so "no lot" is never evidence) |
 | A8 | `paper/PaperPositionRepository.java:612` `notifyTargetFor` | one twin's expiry pages the other twin's channel | scoped ✅ — **not in any round's enumeration** |
 | A9 | `paper/PaperReconciliationRepository.java:352` `deadAnchorOrphanPositions` | a sibling's live ENTRY counted as a healthy anchor → false negative in an orphan detector | scoped ✅ — **not in any round's enumeration** |
-| A10 | `paper/PaperReconciliationRepository.java:96` exit LATERAL | twin A's settle order satisfies the lateral for twin B → **missing-exit detection becomes a false negative**; a genuinely unsettled position stops being reported | **UNFIXED** — known, documented in-line, pinned by `PaperScopedResolutionPathsIntegrationTest` |
+| A10 | `paper/PaperReconciliationRepository.java:117` exit LATERAL | twin A's settle order satisfies the lateral for twin B → **missing-exit detection becomes a false negative**; a genuinely unsettled position stops being reported | **CLOSED by V059 (#1288)** — `paper_orders.settles_position_id` + `leg_kind`; the lateral takes the exact link, and the key+lifetime fallback fires only for `leg_kind IS NULL` (true pre-V059 rows). The pinned assertion in `PaperScopedResolutionPathsIntegrationTest` is FLIPPED from `> 0` to `isZero()`. ⚠️ Its scope was **wider than this row stated**: the masking order need not be a settle leg at all — a **manual SELL entry** masks a BUY position's missing exit with no twin and no flag involved, reachable via `POST /paper/orders` today |
 | A11 | `paper/RiskService.java:328-336` | `stream().filter(exchange/tradingsymbol/side).findFirst()` picks one twin; `projectedTotal` then subtracts that twin's risk and adds a projection built on **its** qty/avg/stop while the fill belongs to the other → risk cap computed against the wrong row | **UNFIXED** — book-gated, see §5 |
 | A12 | `services/optimizer-service/app/reconciliation.py:424` | `key = (_norm_symbol(tradingsymbol), _ist_date(openedAt))` then `live_by_key.setdefault(key, price)` — **first-wins**, so `entryPriceDelta` silently takes one twin's entry price and discards the other. No secondary `ORDER BY` on identical `opened_at`, so which twin wins is arbitrary | **UNFIXED — never enumerated by any round** |
 

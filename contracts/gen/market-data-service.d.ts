@@ -580,6 +580,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/screener/minervini/plane-divergence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["planeDivergence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/screener/minervini/funnel": {
         parameters: {
             query?: never;
@@ -2972,6 +2988,39 @@ export interface components {
             netCagrPct: string;
             netDrawdownPct: string;
             netSharpe: string;
+        };
+        MinerviniPlaneDivergence: {
+            /** Format: date */
+            screenDate: string | null;
+            /** Format: date-time */
+            asOfCutoff: string | null;
+            /** Format: int32 */
+            passersChecked: number;
+            /** Format: int32 */
+            barsCompared: number;
+            /** Format: int32 */
+            barsExcludedAsOf: number;
+            /** Format: int32 */
+            symbolsWithNoHonestBars: number;
+            /** Format: int32 */
+            divergentPassers: number;
+            /** Format: int32 */
+            divergentCandidates: number;
+            thresholdPct: string;
+            /** Format: int32 */
+            lookbackDays: number;
+            names: components["schemas"]["MinerviniPlaneDivergentName"][];
+        };
+        MinerviniPlaneDivergentName: {
+            symbol: string;
+            maxDivergencePct: string;
+            /** Format: date */
+            worstBar: string | null;
+            /** Format: int32 */
+            sharedBars: number;
+            /** Format: int32 */
+            barsExcludedAsOf: number;
+            candidate: boolean;
         };
         MinerviniFunnel: {
             /** Format: date */
@@ -6559,6 +6608,37 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["MinerviniBacktestResult"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    planeDivergence: {
+        parameters: {
+            query?: {
+                asOf?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["MinerviniPlaneDivergence"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */

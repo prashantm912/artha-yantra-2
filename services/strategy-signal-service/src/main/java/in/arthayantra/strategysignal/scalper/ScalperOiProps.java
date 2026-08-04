@@ -41,7 +41,8 @@ public record ScalperOiProps(
     BigDecimal relativeVolumeWindow,
     BigDecimal relativeVolumeMinBars,
     BigDecimal timeOfDayProfileSessions,
-    BigDecimal vwapMinDistanceBps) {
+    BigDecimal vwapMinDistanceBps,
+    BigDecimal dotCoverageFloor) {
 
   // T2.1: the #5 call-put delta-imbalance HARD pre-gate floor (>= 50% of the larger leg).
   private static final BigDecimal DEFAULT_CROSS_FILTER_PCT = new BigDecimal("50");
@@ -117,6 +118,14 @@ public record ScalperOiProps(
   // hard gate (Confluence.vwapAligned) is untouched — this floors the DOT only. Ops-tunable via
   // ARTHA_SCALPER_OI_VWAP_MIN_DISTANCE_BPS.
   private static final BigDecimal DEFAULT_VWAP_MIN_DISTANCE_BPS = new BigDecimal("15");
+  // F5 U4b §5.3: the dot-plane data-coverage floor, read ONLY when the DEFAULT-OFF
+  // `dot-coverage-floor` / `dot-null-withheld` tag arms it. 0.90 is an EMPIRICAL natural break, not
+  // a fitted knob: over 11,068 post-P3 scored evaluations the measured coverage distribution is
+  // 9,207 rows at 1.000, 45 at 0.947-0.961 (one dot missing), ZERO rows in [0.828, 0.947], then the
+  // 748 Timescale-outage rows and the 1,068 monthly-expiry rows below. Any floor in [0.85, 0.94]
+  // separates "one dot happened to be missing" from "a whole data plane is gone" with no row in the
+  // gap; 0.90 sits dead centre. Ops-tunable via ARTHA_SCALPER_OI_DOT_COVERAGE_FLOOR.
+  private static final BigDecimal DEFAULT_DOT_COVERAGE_FLOOR = new BigDecimal("0.90");
 
   /** Fills any unset field with its documented default (so a partial yaml override is honoured). */
   public ScalperOiProps {
@@ -157,12 +166,13 @@ public record ScalperOiProps(
             : timeOfDayProfileSessions;
     vwapMinDistanceBps =
         vwapMinDistanceBps == null ? DEFAULT_VWAP_MIN_DISTANCE_BPS : vwapMinDistanceBps;
+    dotCoverageFloor = dotCoverageFloor == null ? DEFAULT_DOT_COVERAGE_FLOOR : dotCoverageFloor;
   }
 
   /** The all-defaults instance (used where config is absent — tests, the pure-scorer fallback). */
   public static ScalperOiProps defaults() {
     return new ScalperOiProps(
         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-        null, null, null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null, null, null);
   }
 }

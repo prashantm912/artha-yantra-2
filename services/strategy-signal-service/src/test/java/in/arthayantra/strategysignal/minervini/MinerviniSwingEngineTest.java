@@ -498,9 +498,16 @@ class MinerviniSwingEngineTest {
     // drop 2026-06-18 — a real NSE trading day, and one of the sessions actually missing from
     // marketdata.candles on 2026-08-03
     List<EngineCandle> holed = new ArrayList<>(h.series);
+    // three sessions, not one: materiality requires >5% of the probed span, so a single hole is
+    // deliberately BELOW the refusal/alert bar (that is the Critical fix, not an oversight)
     holed.removeIf(
-        b -> b.bucketStart().toLocalDate().equals(java.time.LocalDate.of(2026, 6, 18)));
-    assertThat(holed).hasSize(h.series.size() - 1);
+        b ->
+            java.util.Set.of(
+                    java.time.LocalDate.of(2026, 6, 16),
+                    java.time.LocalDate.of(2026, 6, 18),
+                    java.time.LocalDate.of(2026, 6, 19))
+                .contains(b.bucketStart().toLocalDate()));
+    assertThat(holed).hasSize(h.series.size() - 3);
     when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
 
     SwingBatchEngine.SwingRun run = h.engine().runDaily(h.doctrine());
@@ -518,8 +525,15 @@ class MinerviniSwingEngineTest {
   void degradedExitPublishesAnOpsAlert() throws IOException {
     ExitHarness h = new ExitHarness();
     List<EngineCandle> holed = new ArrayList<>(h.series);
+    // three sessions, not one: materiality requires >5% of the probed span, so a single hole is
+    // deliberately BELOW the refusal/alert bar (that is the Critical fix, not an oversight)
     holed.removeIf(
-        b -> b.bucketStart().toLocalDate().equals(java.time.LocalDate.of(2026, 6, 18)));
+        b ->
+            java.util.Set.of(
+                    java.time.LocalDate.of(2026, 6, 16),
+                    java.time.LocalDate.of(2026, 6, 18),
+                    java.time.LocalDate.of(2026, 6, 19))
+                .contains(b.bucketStart().toLocalDate()));
     when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(holed);
     ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
 
@@ -536,7 +550,9 @@ class MinerviniSwingEngineTest {
         .anySatisfy(
             a -> {
               assertThat(a.title()).contains("exit DEGRADED");
-              assertThat(a.message()).contains("2026-06-18");
+              // the message renders the hole as a RANGE (first..last), not every date
+              assertThat(a.message()).contains("2026-06-16..2026-06-19");
+              assertThat(a.message()).contains("3 of 25 sessions missing");
             });
   }
 
@@ -562,7 +578,123 @@ class MinerviniSwingEngineTest {
         .noneSatisfy(a -> assertThat(a.title()).contains("DEGRADED"));
   }
 
+  /**
+   * ENTRY half, which the first round left entirely untested (cross-vendor review Major). A
+   * materially holed window must refuse the entry — the mirror image of {@link
+   * #exitStillFiresWhenCoverageIsIncomplete}, and the asymmetry is the design.
+   */
+  @Test
+  void entryIsRefusedWhenTheGateWindowIsMateriallyHoled() throws IOException {
+    EntryHarness h = new EntryHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
+        .thenReturn(holed(h.series, 6, 16, 18, 19));
+
+    SwingBatchEngine.SwingRun run = h.engine(h.events).runDaily(h.doctrine());
+
+    assertThat(run.entries()).as("a materially stretched entry window must refuse").isZero();
+    assertThat(alerts(h.events))
+        .anySatisfy(a -> assertThat(a.title()).contains("entries refused"));
+  }
+
+  /** The same series with the holes filled must still enter — proving the refusal is the cause. */
+  @Test
+  void entryFiresWhenCoverageIsComplete() throws IOException {
+    EntryHarness h = new EntryHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any())).thenReturn(h.series);
+
+    SwingBatchEngine.SwingRun run = h.engine(h.events).runDaily(h.doctrine());
+
+    assertThat(run.entries()).as("the control: complete coverage enters").isEqualTo(1);
+    assertThat(alerts(h.events)).noneSatisfy(a -> assertThat(a.title()).contains("entries refused"));
+  }
+
+  /**
+   * The F3 admission probe must apply the same coverage gate as the emitting pass. Otherwise a
+   * coverage-refused candidate still counts as {@code wouldEnter}, never becomes held, and is
+   * persisted as a slot-cap drop — recording a DATA refusal as a CAPITAL-cap drop and corrupting the
+   * ledger-F3 measurement (cross-vendor review Major).
+   */
+  @Test
+  void aCoverageRefusedCandidateIsNotCountedAsASlotCapDrop() throws IOException {
+    EntryHarness h = new EntryHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
+        .thenReturn(holed(h.series, 6, 16, 18, 19));
+
+    SwingBatchEngine.SwingRun run = h.engine(h.events).runDaily(h.doctrine());
+
+    assertThat(run.entries()).isZero();
+    assertThat(run.admission().wouldEnter())
+        .as("a DATA refusal must not be attributed to the capital cap")
+        .isZero();
+    assertThat(run.admission().capExceedance()).isZero();
+    assertThat(run.admission().capBound()).isFalse();
+    assertThat(run.admission().droppedByCap()).isEmpty();
+  }
+
+  // NOTE: the depth-relative materiality assertion for the Critical (the same hole refusing a
+  // 50-bar reader but not a 252-bar one) is a probe-level property and lives in
+  // SwingCoverageProbeTest#materialityIsDepthRelative, not here.
+
+  private static List<EngineCandle> holed(List<EngineCandle> series, int month, int... days) {
+    java.util.Set<java.time.LocalDate> drop = new java.util.HashSet<>();
+    for (int d : days) {
+      drop.add(java.time.LocalDate.of(2026, month, d));
+    }
+    List<EngineCandle> out = new ArrayList<>(series);
+    out.removeIf(b -> drop.contains(b.bucketStart().toLocalDate()));
+    return out;
+  }
+
+  private static List<in.arthayantra.strategysignal.signals.SwingBatchAlert> alerts(
+      ApplicationEventPublisher events) {
+    org.mockito.ArgumentCaptor<Object> captor = org.mockito.ArgumentCaptor.forClass(Object.class);
+    verify(events, org.mockito.Mockito.atLeast(0)).publishEvent(captor.capture());
+    return captor.getAllValues().stream()
+        .filter(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::isInstance)
+        .map(in.arthayantra.strategysignal.signals.SwingBatchAlert.class::cast)
+        .toList();
+  }
+
   // ---- harness --------------------------------------------------------------------------------
+
+  /** Mirror of {@link ExitHarness} for the entry pass: one funnel candidate on a firing series. */
+  private final class EntryHarness {
+    final StrategyRepository registry = mock(StrategyRepository.class);
+    final SignalRepository signals = mock(SignalRepository.class);
+    final MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
+    final MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    final EmissionGuard guard = mock(EmissionGuard.class);
+    final List<EngineCandle> series = craft(3_000L);
+
+    EntryHarness() throws IOException {
+      UUID strategyId = UUID.randomUUID();
+      UUID publishedVersion = UUID.randomUUID();
+      when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+      when(registry.findVersionById(publishedVersion))
+          .thenReturn(Optional.of(version(publishedVersion, strategyId, "1", vcpConfig())));
+      when(funnel.buyableAndOnDeck())
+          .thenReturn(
+              List.of(
+                  new MinerviniFunnelClient.Candidate(
+                      "TESTCO", new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T", false)));
+      when(signals.activeEntries()).thenReturn(List.of());
+      stubInsert(signals, 1L);
+      when(guard.entryAllowed(Books.MINERVINI)).thenReturn(true);
+      when(guard.suggestedQty(any(), any(), any(), any(), any(), any()))
+          .thenReturn(new BigDecimal("10"));
+    }
+
+    SwingBatchEngine engine(ApplicationEventPublisher publisher) {
+      return new SwingBatchEngine(
+          registry, candles, signals, mock(SignalPublisher.class), publisher, Optional.of(guard),
+          passthroughTx(), new ObjectMapper(), Clock.systemUTC());
+    }
+
+    MinerviniDoctrine doctrine() {
+      return MinerviniSwingEngineTest.this.doctrine(funnel, signals, true, 10);
+    }
+  }
 
   private final class ExitHarness {
     final StrategyRepository registry = mock(StrategyRepository.class);

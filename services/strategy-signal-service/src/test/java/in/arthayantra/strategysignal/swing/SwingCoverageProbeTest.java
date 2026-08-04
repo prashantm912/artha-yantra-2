@@ -157,43 +157,29 @@ class SwingCoverageProbeTest {
   }
 
   @Test
-  @DisplayName("lookback takes the max across indicators AND exit rules")
-  void lookbackSpansIndicatorsAndExitRules() {
-    // Minervini's live shape: sma50 is the deepest, and it lives in the INDICATORS list.
-    StrategyDefinition minervini =
-        definition(
-            List.of(
-                indicator("px", Map.of("period", 1)),
-                indicator("sma20", Map.of("period", 20)),
-                indicator("sma50", Map.of("period", 50))),
-            List.of(
-                new StrategyDefinition.ExitRuleSpec("stop_loss", Map.of("basis", "percent", "value", 8)),
-                new StrategyDefinition.ExitRuleSpec(
-                    "trailing_stop", Map.of("basis", "indicator", "alias", "sma50"))));
-    assertThat(SwingCoverageProbe.lookbackBars(minervini)).isEqualTo(50);
-
-    // Manas's live shape: the deepest window lives ONLY in the EXIT RULES (atr_period 20) — invisible
-    // to the indicator bank, which is why exit rules must be scanned too.
-    StrategyDefinition manas =
+  @DisplayName("exit depth takes the max across indicators AND exit rules")
+  void exitDepthSpansIndicatorsAndExitRules() {
+    // NOTE: real-config assertions live in SwingCoverageDepthRatchetTest, which reads the seeded
+    // YAMLs. These fixtures test the ARITHMETIC only and are deliberately not labelled as any live
+    // strategy's shape — the deleted version of this test claimed to be "Manas's live shape" while
+    // omitting the sma50 both Manas YAMLs declare, and asserted 20 where the truth is 50.
+    StrategyDefinition depthInExitRuleOnly =
         definition(
             List.of(indicator("px", Map.of("period", 1))),
             List.of(
                 new StrategyDefinition.ExitRuleSpec(
-                    "stop_loss", Map.of("basis", "atr_multiple", "value", 2, "cap_pct", 10, "atr_period", 20)),
-                new StrategyDefinition.ExitRuleSpec(
-                    "square_off",
-                    Map.of("fast_pct", 35, "fast_bars", 3, "parabolic_ma", 10, "parabolic_dist_pct", 40))));
-    assertThat(SwingCoverageProbe.lookbackBars(manas)).isEqualTo(20);
+                    "stop_loss", Map.of("basis", "atr_multiple", "value", 2, "cap_pct", 10, "atr_period", 20))));
+    assertThat(SwingCoverageProbe.exitLookbackBars(depthInExitRuleOnly, null))
+        .as("an exit-rule depth is invisible to the bank, so it must be scanned")
+        .isEqualTo(20);
   }
 
   @Test
   @DisplayName("percentage params are not mistaken for bar depths")
   void percentParamsAreNotDepths() {
-    // The reason DEPTH_PARAMS is a whitelist rather than "max over all numeric params": Manas's
-    // non-depth params (parabolic_dist_pct 40, fast_pct 35) are numerically LARGER than its true
-    // depth of 20. A max-over-all rule would report 40 and would have wrongly flagged Manas as
-    // gap-exposed on 2026-08-03, destroying the precision this probe exists to give.
-    StrategyDefinition manas =
+    // Why DEPTH_PARAMS is a whitelist rather than "max over all numeric params": the non-depth
+    // params sit in the same map and are numerically LARGER than the real depth.
+    StrategyDefinition d =
         definition(
             List.of(),
             List.of(
@@ -201,22 +187,64 @@ class SwingCoverageProbeTest {
                     "square_off",
                     Map.of("fast_pct", 35, "fast_bars", 3, "parabolic_ma", 10, "parabolic_dist_pct", 40))));
 
-    assertThat(SwingCoverageProbe.lookbackBars(manas))
+    assertThat(SwingCoverageProbe.exitLookbackBars(d, null))
         .as("10 (parabolic_ma), not 40 (parabolic_dist_pct)")
         .isEqualTo(10);
   }
 
   @Test
+  @DisplayName("entry depth ignores exit rules entirely")
+  void entryDepthIgnoresExitRules() {
+    // The Major: sma50 reachable ONLY as a trailing_stop basis must not widen the ENTRY window.
+    StrategyDefinition d =
+        definition(
+            List.of(indicator("px", Map.of("period", 1)), indicator("sma50", Map.of("period", 50))),
+            List.of(
+                new StrategyDefinition.ExitRuleSpec(
+                    "trailing_stop", Map.of("basis", "indicator", "alias", "sma50"))));
+
+    assertThat(SwingCoverageProbe.entryLookbackBars(d))
+        .as("sma50 is exit-only and unscored — the entry gate never reads it")
+        .isZero();
+    assertThat(SwingCoverageProbe.exitLookbackBars(d, null)).isEqualTo(50);
+  }
+
+  @Test
+  @DisplayName("MATERIALITY: refusal probability must not scale with declared depth")
+  void materialityIsDepthRelative() {
+    // The Critical. The SAME 5-session hole is material inside a 50-bar window and immaterial inside
+    // a 252-bar one, because 5/252 cannot move a 52-week extreme.
+    List<EngineCandle> bars =
+        series(LocalDate.of(2025, 3, 1), LocalDate.of(2026, 8, 3),
+            LocalDate.of(2026, 6, 12), LocalDate.of(2026, 6, 15), LocalDate.of(2026, 6, 16),
+            LocalDate.of(2026, 6, 18), LocalDate.of(2026, 6, 19));
+
+    SwingCoverageProbe.Coverage shallow = SwingCoverageProbe.probe(bars, 50, NSE);
+    SwingCoverageProbe.Coverage deep = SwingCoverageProbe.probe(bars, 252, NSE);
+
+    assertThat(shallow.missing()).hasSize(5);
+    assertThat(shallow.materiallyIncomplete()).as("5 of 50 = 10% — refuse").isTrue();
+
+    assertThat(deep.missing()).hasSize(5);
+    assertThat(deep.incomplete()).as("the hole is still SEEN at depth 252").isTrue();
+    assertThat(deep.materiallyIncomplete())
+        .as("5 of 252 = 2% — must NOT refuse, or primary-base stops entering nightly")
+        .isFalse();
+  }
+
+  @Test
   @DisplayName("a strategy declaring no depth reads no window")
   void noDepthMeansNoWindow() {
-    assertThat(SwingCoverageProbe.lookbackBars(null)).isZero();
+    assertThat(SwingCoverageProbe.entryLookbackBars(null)).isZero();
+    assertThat(SwingCoverageProbe.exitLookbackBars(null, null)).isZero();
     assertThat(
-            SwingCoverageProbe.lookbackBars(
+            SwingCoverageProbe.exitLookbackBars(
                 definition(
                     List.of(),
                     List.of(
                         new StrategyDefinition.ExitRuleSpec(
-                            "stop_loss", Map.of("basis", "percent", "value", 8))))))
+                            "stop_loss", Map.of("basis", "percent", "value", 8)))),
+                null))
         .isZero();
   }
 }

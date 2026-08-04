@@ -533,10 +533,8 @@ public class SwingBatchEngine {
         // it as marker-blocking would withhold the completeness marker EVERY night, leaving the
         // session permanently retryable and the did-not-run canary permanently firing. Evidence is
         // durable (swing_batch_refusals) and alerting is aggregated once per run instead.
-        SwingCoverageProbe.Coverage coverage =
-            SwingCoverageProbe.probe(
-                series, SwingCoverageProbe.lookbackBars(strat.definition(), bank), calendar);
-        if (coverage.incomplete()) {
+        SwingCoverageProbe.Coverage coverage = entryCoverage(strat, series);
+        if (coverage.materiallyIncomplete()) {
           coverageRefused.add(c.symbol());
           recordCoverageRow(
               doctrine, effectSession, c.symbol(), coverageReason(c.symbol()));
@@ -634,9 +632,10 @@ public class SwingBatchEngine {
         sessionDate
             + ": "
             + symbols.size()
-            + " candidate(s) refused — a missing daily session falls inside the window their"
-            + " indicators read, so the score would be computed off a stretched window. No money"
-            + " effect was emitted for them. "
+            + " (strategy, candidate) pair(s) refused — a material share of the window the entry"
+            + " gate reads is missing, so the score would be computed off a stretched window. NOTE:"
+            + " this is PER STRATEGY, and the family runs several with different depths in one pass,"
+            + " so a name refused by one strategy may still have been entered by another. "
             + String.join(", ", sample)
             + (symbols.size() > sample.size() ? " (+" + (symbols.size() - sample.size()) + " more)" : "");
     try {
@@ -745,6 +744,13 @@ public class SwingBatchEngine {
         continue;
       }
       if (c.onDeck() && !strat.includesOnDeck()) {
+        continue;
+      }
+      // The data-coverage gate is part of "could the entry pass admit this", so the F3 probe must
+      // apply it too (cross-vendor review Major): otherwise a coverage-refused candidate still
+      // increments wouldEnter, never becomes held, and is persisted as a slot-cap drop —
+      // mis-attributing a DATA refusal to the capital cap and corrupting the ledger-F3 measurement.
+      if (entryCoverage(strat, series).materiallyIncomplete()) {
         continue;
       }
       IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());
@@ -949,8 +955,8 @@ public class SwingBatchEngine {
       // alternative is a refusal, which is strictly worse on an exit path.
       SwingCoverageProbe.Coverage exitCoverage =
           SwingCoverageProbe.probe(
-              series, SwingCoverageProbe.lookbackBars(strat.definition(), bank), calendar);
-      if (exitCoverage.incomplete()) {
+              series, SwingCoverageProbe.exitLookbackBars(strat.definition(), bank), calendar);
+      if (exitCoverage.materiallyIncomplete()) {
         log.error(
             "{} swing exit: #{} {} evaluated on INCOMPLETE data — {} — stop/trail level may be"
                 + " computed off a stretched window (evaluation NOT blocked)",
@@ -1072,6 +1078,18 @@ public class SwingBatchEngine {
    * this batch is each open position's only exit evaluator, so an accounting failure here must never
    * propagate and skip a later position's stop.
    */
+  /**
+   * The ENTRY-scoped coverage reading for one strategy over one symbol's series. Single definition
+   * so the emitting pass and the F3 admission probe can never disagree about which candidates the
+   * coverage gate refuses — they were allowed to diverge in the first draft, and the probe then
+   * recorded data refusals as slot-cap drops.
+   */
+  private static SwingCoverageProbe.Coverage entryCoverage(
+      SwingStrategy strat, List<EngineCandle> series) {
+    return SwingCoverageProbe.probe(
+        series, SwingCoverageProbe.entryLookbackBars(strat.definition()), calendar);
+  }
+
   private void recordCoverageRow(
       SwingDoctrine doctrine, LocalDate sessionDate, String symbol, String reason) {
     if (refusals == null) {

@@ -1,9 +1,9 @@
 package in.arthayantra.strategysignal.swing;
 
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.strategyengine.config.GateNode;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.eval.IndicatorBank;
-import in.arthayantra.strategyengine.indicators.EngineIndicator;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -22,37 +22,78 @@ import java.util.Set;
  * <p><b>Why a {@code minBars} floor cannot detect this</b> (the naive fix, deliberately not built):
  * {@code warmupDays = 520} yields roughly 350 bars against a 60-bar floor, so the floor never fires
  * for a normally-covered symbol. It counts rows, and this defect <em>preserves row count</em> while
- * changing what those rows span. Measured on 2026-08-03: three held Minervini positions computed
- * {@code sma50} over a window reaching back to 2026-05-15 instead of 2026-05-22 — five extra
- * sessions, trail off by ₹0.42–₹2.41/share — while the row count stayed 50 throughout.
+ * changing what those rows span.
  *
- * <p><b>The discriminator is window LENGTH versus gap DISTANCE.</b> The same five-bar gap sat 30–35
- * rows back, so it fell inside {@code sma50} (50 rows) and outside Manas's ATR-20, {@code
- * parabolic_ma} 10, {@code fast_bars} 3 and the 8% entry-price stop — all verified unaffected. That
- * is why this probe measures a window scoped to {@link #lookbackBars} rather than the whole fetched
- * series: probing the full 520-day window would fire on every symbol with any historical hole and
- * drown the real signal.
+ * <p><b>The discriminator is window LENGTH versus gap DISTANCE</b>, which is why the probe measures a
+ * window scoped to the reader's declared depth rather than the whole 520-day fetch.
+ *
+ * <h2>Two depths, because the two callers ask different questions</h2>
+ *
+ * The first draft used ONE max-over-everything depth for both passes, and cross-vendor review found
+ * it would have refused most of the funnel nightly. Two independent defects composed:
+ *
+ * <ul>
+ *   <li><b>The entry gate was scoped to indicators it never reads.</b> In {@code minervini-vcp} /
+ *       {@code cheat-3c} / {@code power-play}, {@code sma50} appears only as a {@code trailing_stop}
+ *       basis, and in both Manas strategies it is declared but read by nothing. Maxing over exit
+ *       rules and unread indicators refused entries on a stretch that provably could not change the
+ *       entry computation. {@link #entryLookbackBars} therefore scopes to the gate + scoring closure
+ *       — exactly what {@code EntryEvaluator} reads — while {@link #exitLookbackBars} keeps
+ *       max-over-everything for the detective alert.
+ *   <li><b>Refusal probability rose with declared depth while the harm rises with shallowness.</b>
+ *       {@code minervini-primary-base} reads {@code w52h} at {@code period: 252} IN ITS ENTRY GATE,
+ *       so entry-scoping alone does not save it: one missing row inside a 252-row 52-week MAX almost
+ *       never moves {@code crossover(px, w52h)}, yet an any-gap rule refuses absolutely. {@link
+ *       Coverage#materiallyIncomplete()} fixes that — see its measured threshold.
+ * </ul>
  *
  * <p><b>Contract: this class is pure and MUST NOT throw.</b> It sits on the live money path, in a
  * batch that is each open position's only exit evaluator, so an exception here would abort the run
- * and skip stops. Every uncertain input degrades to {@code determinable = false} — an explicit "no
- * claim" — never an exception and never a false "complete".
+ * and skip stops. Every entry point is wrapped and every uncertain input degrades to {@code
+ * determinable = false} — an explicit "no claim" — never an exception and never a false "complete".
  */
 public final class SwingCoverageProbe {
 
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
 
   /**
-   * Params whose value is a BAR COUNT, so a missing session shifts what the rule reads. Pinned by
-   * {@code SwingCoverageProbeTest#everyLiveParamKeyIsClassified}, a ratchet over the seeded swing
-   * configs: a new depth-bearing key that lands here unclassified fails that test rather than
-   * silently under-reporting depth.
+   * Refuse only when more than 1-in-{@value} of the probed window is missing. NOT an invented
+   * number — measured against the 2026-08-03 Minervini funnel (277 {@code passes_all}), with each
+   * symbol's absence at batch time reconstructed from {@code candles.fetched_at > 20:00}, and
+   * excluding the session's own bar (the batch's own fetch writes it at 20:01, so counting it marks
+   * every symbol absent):
    *
-   * <p>A whitelist (rather than "max over all numeric params") is deliberate. The non-depth params
+   * <pre>
+   *   missing   as % of a 50-window   as % of a 252-window   symbols
+   *         5                 10.0%                   2.0%        38
+   *         6                 12.0%                   2.4%         7
+   *         3                  0.0%                   1.2%         1
+   * </pre>
+   *
+   * <p>5% sits in the empty band between 2.4% and 10.0% with roughly 4x clearance on both sides: it
+   * refuses the real harm (a 5-bar hole inside a 50-bar window, the shape that mis-computed three
+   * held positions' {@code sma50}) and permits the same hole inside a 252-bar window, where it
+   * cannot move a 52-week extreme. Because the test is a FRACTION, refusal probability no longer
+   * scales with declared depth — the defect review caught.
+   *
+   * <p><b>Limitation:</b> a fraction is a proxy for sensitivity, not a measure of it. A mean-based
+   * indicator moves roughly proportionally to the missing fraction, but a MAX/MIN barely moves at
+   * all, so this is conservative for extremes and about right for averages. A per-indicator-type
+   * sensitivity model would be more precise and is deliberately not built.
+   */
+  private static final int MATERIALITY_DENOMINATOR = 20;
+
+  /**
+   * Params whose value is a BAR COUNT, so a missing session shifts what the rule reads. Pinned by
+   * {@code SwingCoverageProbeTest#everyDepthParamInTheSeededConfigsIsClassified}, a ratchet that
+   * reads the SEEDED YAMLs rather than hand-built fixtures — the first draft cited a ratchet of this
+   * name that was never written, and a hand-built "Manas" fixture in its place asserted a depth of
+   * 20 when the real config declares {@code sma50} and yields 50.
+   *
+   * <p>A whitelist (rather than "max over all numeric params") is deliberate: the non-depth params
    * live in the same maps and are numerically LARGER than the real depths — Manas carries {@code
-   * parabolic_dist_pct: 40} and {@code fast_pct: 35} beside a true max depth of 20 — so a max-over-
-   * all-numerics rule would have reported Manas as gap-exposed on 2026-08-03 when it demonstrably
-   * was not. That false positive would destroy exactly the precision this probe exists to provide.
+   * parabolic_dist_pct: 40} and {@code fast_pct: 35} — so a max-over-all-numerics rule would report
+   * 40 where the true exit depth is 20.
    */
   private static final Set<String> DEPTH_PARAMS =
       Set.of(
@@ -61,28 +102,47 @@ public final class SwingCoverageProbe {
 
   private SwingCoverageProbe() {}
 
+  /** Package-visible for the ratchet test, which asserts the seeded configs declare nothing else. */
+  static Set<String> depthParams() {
+    return DEPTH_PARAMS;
+  }
+
   /**
-   * One coverage reading over the last {@link #lookbackBars} bars.
+   * One coverage reading over the last {@code lookbackBars} bars.
    *
    * @param lookbackBars the window depth probed (bars)
    * @param windowStart first session in the probed window, {@code null} when not determinable
    * @param missing calendar trading days inside the window with no bar, ascending
-   * @param determinable false when no claim can be made (empty series, or a year the bundled
-   *     calendar does not cover) — callers MUST treat this as "unknown", never as "complete"
+   * @param determinable false when no claim can be made (empty series, zero depth, or a year the
+   *     bundled calendar does not cover) — callers MUST treat this as "unknown", never "complete"
    */
   public record Coverage(
-      int lookbackBars, LocalDate windowStart, List<LocalDate> missing, boolean determinable) {
+      int lookbackBars, int windowSessions, LocalDate windowStart, List<LocalDate> missing,
+      boolean determinable) {
 
     public Coverage {
       missing = missing == null ? List.of() : List.copyOf(missing);
     }
 
-    /** True only when a positive claim of incompleteness can be made. */
+    /** Any hole at all. Diagnostic; {@link #materiallyIncomplete()} is what decisions key on. */
     public boolean incomplete() {
       return determinable && !missing.isEmpty();
     }
 
-    /** Compact ops rendering, e.g. {@code "5 of 50-bar window (2026-06-12..2026-06-19)"}. */
+    /**
+     * A hole big enough to plausibly move the value — see {@link #MATERIALITY_DENOMINATOR}.
+     *
+     * <p>Measured against {@code windowSessions} (bars held + holes, i.e. the sessions the probed
+     * span actually covers) rather than the DECLARED {@code lookbackBars}. The two differ whenever
+     * the series is shorter than the declared depth — a warming symbol with 25 bars under a 50-bar
+     * SMA — and using the declared depth there would halve the apparent fraction and silently
+     * under-report exactly the thin-history symbols most sensitive to a missing bar.
+     */
+    public boolean materiallyIncomplete() {
+      return incomplete() && missing.size() * MATERIALITY_DENOMINATOR > windowSessions;
+    }
+
+    /** Compact ops rendering including the fraction, so an alert shows WHY it tripped. */
     public String describe() {
       if (!determinable) {
         return "coverage undeterminable";
@@ -91,9 +151,13 @@ public final class SwingCoverageProbe {
         return "complete over " + lookbackBars + "-bar window";
       }
       return missing.size()
-          + " session(s) missing inside the "
+          + " of "
+          + windowSessions
+          + " sessions missing ("
+          + (missing.size() * 100 / Math.max(1, windowSessions))
+          + "% of the probed span, declared depth "
           + lookbackBars
-          + "-bar window ("
+          + ", "
           + missing.get(0)
           + ".."
           + missing.get(missing.size() - 1)
@@ -103,67 +167,103 @@ public final class SwingCoverageProbe {
 
   /** A reading that makes no claim — the safe default for every uncertain input. */
   public static Coverage undeterminable(int lookbackBars) {
-    return new Coverage(lookbackBars, null, List.of(), false);
+    return new Coverage(lookbackBars, 0, null, List.of(), false);
   }
 
   /**
-   * The deepest BAR-COUNT window this definition reads: the max {@link #DEPTH_PARAMS} value across
-   * every declared indicator and every exit rule. Alias indirection needs no special handling — a
-   * {@code trailing_stop basis:indicator alias:sma50} resolves to an {@code IndicatorSpec} that is
-   * itself in {@code indicators}, so scanning both lists covers it.
+   * The deepest window the ENTRY decision actually reads: the max depth across only those indicators
+   * reachable from the gate expression plus those participating in scoring — precisely {@code
+   * EntryEvaluator}'s inputs. Exit rules are excluded BY DESIGN; a stretched window under a {@code
+   * trailing_stop} cannot change whether an entry fires, and refusing on it would contradict the
+   * exit-side ruling that a stretched window is never grounds to refuse.
    *
-   * <p>Returns 0 when nothing depth-bearing is declared, which callers treat as "no window to
-   * probe" — a strategy reading only the current bar and the entry price cannot be gap-stretched.
+   * <p>Returns 0 when nothing depth-bearing is read, which callers treat as "no window to probe".
    */
-  public static int lookbackBars(StrategyDefinition definition) {
-    if (definition == null) {
+  public static int entryLookbackBars(StrategyDefinition definition) {
+    try {
+      if (definition == null || definition.indicators() == null) {
+        return 0;
+      }
+      Set<String> read = new HashSet<>();
+      collectGateAliases(definition.gate(), read);
+      int deepest = 0;
+      for (StrategyDefinition.IndicatorSpec spec : definition.indicators()) {
+        if (spec == null || spec.alias() == null) {
+          continue;
+        }
+        // scoring() == the indicator carries a normalize mapping, i.e. it feeds the composite
+        if (read.contains(spec.alias()) || spec.scoring()) {
+          deepest = Math.max(deepest, deepestParam(spec.params()));
+        }
+      }
+      return deepest;
+    } catch (RuntimeException e) {
       return 0;
     }
-    int deepest = 0;
-    if (definition.indicators() != null) {
-      for (StrategyDefinition.IndicatorSpec spec : definition.indicators()) {
-        deepest = Math.max(deepest, deepestParam(spec == null ? null : spec.params()));
+  }
+
+  private static void collectGateAliases(GateNode node, Set<String> out) {
+    switch (node) {
+      case null -> {
+        return;
+      }
+      case GateNode.All all -> all.children().forEach(child -> collectGateAliases(child, out));
+      case GateNode.Any any -> any.children().forEach(child -> collectGateAliases(child, out));
+      case GateNode.Not not -> collectGateAliases(not.child(), out);
+      case GateNode.Crossover x -> {
+        out.add(x.fast());
+        out.add(x.slow());
+      }
+      case GateNode.Crossunder x -> {
+        out.add(x.fast());
+        out.add(x.slow());
+      }
+      case GateNode.Expression e -> {
+        out.add(e.left());
+        if (e.rightOperand() != null) {
+          out.add(e.rightOperand());
+        }
       }
     }
-    if (definition.exitRules() != null) {
-      for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
-        deepest = Math.max(deepest, deepestParam(rule == null ? null : rule.params()));
-      }
-    }
-    return deepest;
   }
 
   /**
-   * The deepest window in DAILY BARS, taking the max of the declared-param estimate and the built
-   * bank's own warm-up. Both inputs are needed and neither subsumes the other:
+   * The deepest window ANY rule reads — every declared indicator plus every exit rule, plus the built
+   * bank's own normalized warm-up. Used by the EXIT pass, whose output is a detective alert rather
+   * than a refusal, so over-scoping costs a little alert precision and never a stranded position.
    *
-   * <ul>
-   *   <li>{@link EngineIndicator#unstableBars()} is the precise, already-normalized warm-up for an
-   *       INDICATOR ({@code SMA -> period-1}, {@code ADX -> 2*period}, {@code MACD_HIST -> slow +
-   *       signal - 2}) — a composite whose true depth exceeds any single param, which the param
-   *       estimate alone under-counts.
-   *   <li>Exit-rule depths are invisible to the bank. Manas's {@code atr_period: 20} and {@code
-   *       parabolic_ma: 10} build an ATR/SMA INSIDE {@code ExitEvaluator}, never as a bank alias, so
-   *       {@code unstableBars} alone would miss the entire Manas exit surface.
-   * </ul>
+   * <p>Both inputs are needed and neither subsumes the other: {@code unstableBars()} is precise for
+   * composites ({@code MACD_HIST -> slow + signal - 2}) that the param estimate under-counts, while
+   * exit-rule depths are invisible to the bank entirely — Manas's {@code atr_period: 20} builds an
+   * ATR INSIDE {@code ExitEvaluator}, never as a bank alias.
    *
-   * <p>{@code unstableBars()} had zero production callers when this was written, so it is treated as
-   * unproven: any failure reading the bank degrades to the param estimate rather than propagating.
+   * <p>{@code unstableBars()} had zero production callers when this was written, so any failure
+   * reading the bank degrades to the param estimate rather than propagating.
    *
-   * <p><b>Known limitation:</b> both inputs are expressed in the indicator's OWN timeframe. A {@code
-   * 1w} SMA(50) is 50 weeks (~250 daily sessions) but contributes 49 here, so a multi-timeframe
-   * strategy under-states its daily depth. Every live swing indicator is {@code 1d} today, so this
-   * is latent; closing it needs a timeframe-ratio conversion, deliberately not built.
+   * <p><b>Known limitation:</b> depths are expressed in the indicator's OWN timeframe, so a {@code
+   * 1w} SMA(50) contributes 49 rather than ~250 daily sessions. Every live swing indicator is {@code
+   * 1d}; closing this needs a timeframe-ratio conversion, deliberately not built.
    */
-  public static int lookbackBars(StrategyDefinition definition, IndicatorBank bank) {
-    int deepest = lookbackBars(definition);
-    if (bank == null) {
-      return deepest;
-    }
+  public static int exitLookbackBars(StrategyDefinition definition, IndicatorBank bank) {
+    int deepest = 0;
     try {
-      for (IndicatorBank.Bound bound : bank.all().values()) {
-        if (bound != null && bound.indicator() != null) {
-          deepest = Math.max(deepest, bound.indicator().unstableBars());
+      if (definition != null) {
+        if (definition.indicators() != null) {
+          for (StrategyDefinition.IndicatorSpec spec : definition.indicators()) {
+            deepest = Math.max(deepest, deepestParam(spec == null ? null : spec.params()));
+          }
+        }
+        if (definition.exitRules() != null) {
+          for (StrategyDefinition.ExitRuleSpec rule : definition.exitRules()) {
+            deepest = Math.max(deepest, deepestParam(rule == null ? null : rule.params()));
+          }
+        }
+      }
+      if (bank != null) {
+        for (IndicatorBank.Bound bound : bank.all().values()) {
+          if (bound != null && bound.indicator() != null) {
+            deepest = Math.max(deepest, bound.indicator().unstableBars());
+          }
         }
       }
     } catch (RuntimeException e) {
@@ -199,11 +299,15 @@ public final class SwingCoverageProbe {
    * {@code [first.date, last.date]}, and any trading day in that span without a bar is a hole the
    * row-based window silently reached past.
    *
+   * <p><b>Deliberate blind spot:</b> the span starts at the OLDEST bar held, so absence at the
+   * LEADING edge is invisible — a contiguous 100-bar series probed at depth 252 reports complete
+   * rather than "152 short". That is the correct call here: a short history is a warm-up condition
+   * the indicators already handle by returning null, not a hole punched through a window, and
+   * treating it as a hole would refuse every newly-listed symbol.
+   *
    * <p>Never throws. {@link MarketCalendar#isTradingDay} raises on a year outside the bundled
-   * resource (CD-2), and the 520-day warmup window will cross that boundary every January, so the
-   * span is coverage-checked FIRST and any uncovered year degrades the whole reading to
-   * undeterminable. A blanket {@code catch (RuntimeException)} backstops it — on this path a wrong
-   * answer is recoverable, an exception is not.
+   * resource (CD-2), and the 520-day warmup window crosses that boundary every January, so the span
+   * is coverage-checked FIRST and any uncovered year degrades the whole reading to undeterminable.
    */
   public static Coverage probe(
       List<EngineCandle> series, int lookbackBars, MarketCalendar calendar) {
@@ -234,7 +338,7 @@ public final class SwingCoverageProbe {
           missing.add(d);
         }
       }
-      return new Coverage(lookbackBars, first, missing, true);
+      return new Coverage(lookbackBars, dates.size() + missing.size(), first, missing, true);
     } catch (RuntimeException e) {
       return undeterminable(lookbackBars);
     }

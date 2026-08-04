@@ -18,7 +18,7 @@ ever recommended (it changes which names the screen admits). Nothing to build to
 | the brief's question | answer |
 |---|---|
 | Is the "~100 names" coverage claim stale? | **YES — decisively.** 1,759 of 1,813 screened symbols carry ≥252 daily candle bars. The javadoc is wrong by a factor of ~17 **[computed]** |
-| Does that make the planes interchangeable? | **NO.** Coverage ≠ completeness. Only **429 of 1,813** have a *complete* trailing-252-session candle window; 1,384 are short, mean 8.47 sessions **[computed]** |
+| Does that make the planes interchangeable? | **NO.** Coverage ≠ completeness — but see the correction below: the **429** figure in this row is wrong, and the DEFER verdict does not rest on it **[computed]** |
 | Is the only other difference the dividend doctrine? | **NO** — six differences, §2. The decisive one is not dividends **[computed]** / **[sourced]** |
 | Verdict | **DEFER.** Re-ask when §4's two repairs have landed and held |
 
@@ -313,3 +313,42 @@ only after repairs 1 and 2 have landed and held for a full 252-session window.
    for a specific symbol. The correlation is total, which is strong, but I did not watch it happen.
 7. **I did not probe the deployed jars.** Java citations are read off `origin/main` @ `d0ae26b9` and
    assume `ay-market-data-service` is current on main.
+
+---
+
+## Correction, 2026-08-04 — the "429 of 1,813 complete" figure is wrong
+
+**The DEFER verdict stands.** It rests on the dividend-asymmetry argument in §2 (a *differential*
+bias across 132 Kite-sourced names versus a *uniform* one across ~1,638 bhavcopy projections, and
+RS-rank being universe-relative), not on any coverage count. Nothing below changes it.
+
+But the completeness row in the verdict table conflated two different measurements, and a later
+investigation caught it:
+
+- **429 is a PER-DATE candle count on the gap dates** — the number of screened symbols that had a
+  1d bar on 2026-06-12 / 06-15 / 06-16 / 06-18 / 06-19. It appears correctly in that role in the
+  per-date table further down this document.
+- It is **not** the number of symbols holding a complete trailing-252-session window. Those are
+  different quantities and this document used one as the other.
+
+**What the correct figure is has not been settled**, and that is deliberate rather than lazy. Three
+independent measurements disagree because each used a different window definition — 429 here, **295**
+from the corporate-action investigation, and **133** from a last-252-*sessions* query run by the
+Architect. Substituting any one of them without re-deriving it would repeat the original error in a
+new place. Whoever needs this number next should define the window explicitly before measuring it.
+
+**Two things that make the original numbers unreproducible anyway:**
+
+1. **The six-date gap they measured has since been repaired.** On 2026-08-04 the five June dates
+   plus 2026-06-29 were backfilled via targeted `eod-backfill/refetch` calls; the per-date deficits
+   went 1383 / 1384 / 1384 / 1384 / 1383 / 22 → **all zero**, verified with the same query before
+   and after. Every coverage figure in this document therefore describes a state that no longer
+   exists.
+2. **Both equity source tables are retro-mutable.** `candles` is rewritten retroactively and
+   `nse_eod_bhavcopy` was still gaining rows for April–June trade dates months later, so a coverage
+   count is only meaningful gated on `fetched_at` — which bounds rather than pins, since it is an
+   upsert timestamp and not first-seen.
+
+**Carry-forward:** the coverage claim was never the load-bearing part of this analysis. The finding
+that survives is §2's — that collapsing the planes trades a uniform bias for a differential one, and
+is therefore strictly worse for a universe-relative ranking.

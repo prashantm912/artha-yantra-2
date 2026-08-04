@@ -81,7 +81,14 @@ public class PortfolioReader {
                 ON o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
                 AND o.side = p.side AND o.signal_id IS NOT NULL
               JOIN signals s ON s.id = o.signal_id
+              LEFT JOIN strategy_versions sv ON sv.id = s.strategy_version_id
               WHERE p.status = 'OPEN' AND s.scalper_detail->>'expiry' IS NOT NULL
+                -- V058: same key-join shape as intradayOpen/openStraddleLegs, scoped for
+                -- consistency. Benign in EFFECT -- the attributed value (expiry) is a function of
+                -- tradingsymbol, which is itself part of the join key, so two siblings can never
+                -- disagree on it -- but leaving one unscoped instance of this shape behind is how
+                -- the next reader concludes the pattern is optional.
+                AND (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)
               """,
               (rs, i) ->
                   new Object[] {

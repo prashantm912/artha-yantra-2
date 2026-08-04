@@ -44,7 +44,13 @@ a hotfix.
    regression in the blast radius.
 
 6. **PR → admin-merge.** `gh pr create` (state the incident + fix + verify in the body), then
-   `gh pr merge <#> --squash --admin` past unrelated e2e flakes (the change can't touch signals/WS).
+   `gh pr merge <#> --squash --admin`. ⚠️ **The justification is the LIVE INCIDENT, not a flaky
+   check** (corrected 2026-08-04): this step used to justify itself as merging "past unrelated e2e
+   flakes", and that reasoning is retracted — the signals/WS flake pair was FIXED in #903, and
+   CLAUDE.md now says a red `e2e` means a real failure. What survives is narrower and is the only
+   reason this lane exists: **under a live incident, a required check that is genuinely red on
+   something the hotfix cannot touch must not hold production down.** Confirm the red check is
+   unreachable from this diff before using it; if it IS reachable, you have a second incident.
    **Verify `git log origin/main -1` == the mergeCommit BEFORE deploying** (the pull-races-remote trap).
 
 7. **Deploy** (Architect only). Host-build the artifact first, then rebuild+recreate the one service —

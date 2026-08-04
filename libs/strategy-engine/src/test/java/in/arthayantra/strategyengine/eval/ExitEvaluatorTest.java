@@ -2,19 +2,24 @@ package in.arthayantra.strategyengine.eval;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import in.arthayantra.strategyengine.config.StrategyCompiler;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import in.arthayantra.strategyengine.series.EngineSeries;
 import in.arthayantra.strategyengine.series.SeriesKey;
 import in.arthayantra.strategyschema.StrategyDocuments;
+import in.arthayantra.strategyschema.StrategySchemaV1;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /** Exit-rule semantics + the documented precedence (stops always beat softer exits). */
@@ -193,6 +198,76 @@ class ExitEvaluatorTest {
     assertThat(ExitEvaluator.evaluate(def, bank(def, s), position, 3))
         .as("never activated - a 6.4% pullback off the 110 peak does not exit")
         .isEmpty();
+  }
+
+  /**
+   * ANTI-DRIFT: every trailing basis the SCHEMA declares must actually be evaluated by
+   * {@link ExitEvaluator}. The schema enum and the evaluator's basis switch are two independent
+   * lists with nothing coupling them, and they DID drift — {@code percent} was added to the
+   * trailing enum in #539 alongside the LEVEL-basis alias it really belonged to, but no trailing
+   * branch was ever written. A strategy declaring a percent trail therefore got a trail that
+   * silently never fired: no exception, no log, no validation error, on a money path.
+   *
+   * <p>The scenario is one price path on which EVERY honest trailing basis must fire: entry 100 at
+   * index 4 (ATR warm by then), a rally to a 115.05 peak, then a 90.00 collapse that breaks any
+   * trail level a basis could compute. That the implemented bases all return a decision on this
+   * exact path is the internal control — the scenario proving itself sound — so a basis that
+   * returns empty here is a real coverage gap and not a mis-built fixture.
+   */
+  @Test
+  void everyTrailingBasisTheSchemaDeclaresIsActuallyEvaluated() throws Exception {
+    EngineSeries s = series(10000, 10100, 10000, 10100, 10000, 11000, 11500, 9000);
+    ExitEvaluator.Position pos =
+        new ExitEvaluator.Position(ExitEvaluator.Direction.LONG, new BigDecimal("100.00"), 4);
+
+    Set<String> declared = declaredTrailingBases();
+    assertThat(declared)
+        .as("guard against a vacuous pass: a broken pointer walk must not yield an empty loop")
+        .contains("atr_multiple", "indicator");
+
+    for (String basis : declared) {
+      StrategyDefinition def =
+          definitionWith("  - { type: trailing_stop, params: %s }%n".formatted(paramsFor(basis)));
+
+      Optional<ExitEvaluator.ExitDecision> decision =
+          ExitEvaluator.evaluate(def, bank(def, s), pos, 7);
+
+      assertThat(decision)
+          .as(
+              "schema declares trailing basis '%s' but ExitEvaluator never evaluates it - a"
+                  + " strategy using it gets a trail that silently never fires",
+              basis)
+          .isPresent();
+      assertThat(decision.orElseThrow().type()).isEqualTo("trailing_stop");
+    }
+  }
+
+  /** Params that arm each trailing basis on the shared rally-then-collapse path above. */
+  private static String paramsFor(String basis) {
+    return switch (basis) {
+      case "indicator" -> "{ basis: indicator, alias: ema_fast }";
+      case "atr_multiple" -> "{ basis: atr_multiple, value: 1, atr_period: 3 }";
+      default -> "{ basis: %s, value: 5 }".formatted(basis);
+    };
+  }
+
+  /** The {@code trailing_stop} branch's declared basis enum, read from the committed schema. */
+  private static Set<String> declaredTrailingBases() throws Exception {
+    JsonNode schema = new ObjectMapper().readTree(StrategySchemaV1.documentText());
+    for (JsonNode branch : schema.path("$defs").path("exitRule").path("oneOf")) {
+      if ("trailing_stop".equals(branch.path("properties").path("type").path("const").asText())) {
+        Set<String> bases = new LinkedHashSet<>();
+        branch
+            .path("properties")
+            .path("params")
+            .path("properties")
+            .path("basis")
+            .path("enum")
+            .forEach(node -> bases.add(node.asText()));
+        return bases;
+      }
+    }
+    throw new IllegalStateException("no trailing_stop branch in the schema's exitRule oneOf");
   }
 
   @Test

@@ -584,6 +584,12 @@ services:
       # whose SIGNAL is older than this (minutes) on a NON-swing book is rejected SIGNAL_STALE. Swing
       # books (minervini / manas-arora) are exempt; 0/negative disables. Default MIRRORS application.yml.
       ARTHA_PAPER_SIGNAL_TAKE_MAX_AGE_MINUTES: ${ARTHA_PAPER_SIGNAL_TAKE_MAX_AGE_MINUTES:-60}
+      # V058 / option D (HOLD, owner-approved 2026-08-03): comma list of books whose OPEN-position key
+      # is STRATEGY-SCOPED, so two strategies entering the same contract hold SEPARATE rows with their
+      # own exits instead of averaging into one. EMPTY = DISARMED = pre-V058 behaviour byte-for-byte;
+      # arming a book CHANGES REALISED P&L on every co-fired trade (owner decision). No capital fork:
+      # one book, one capital row, one kill switch; a sibling inherits the key's sub-account.
+      ARTHA_PAPER_STRATEGY_SCOPED_BOOKS: ${ARTHA_PAPER_STRATEGY_SCOPED_BOOKS:-}
       # F7 auto-promotion: the daily 21:00-IST evaluator that marks a strategy GRADUATED (measurement +
       # ntfy only, never a live action). Default off; flip true to arm the marker pass.
       ARTHA_GRADUATION_PROMOTION_ENABLED: ${ARTHA_GRADUATION_PROMOTION_ENABLED:-false}

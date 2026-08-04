@@ -1,0 +1,27 @@
+# expect: /exit_rules/0/params
+# `percent` is a LEVEL basis (stop_loss/take_profit, ExitEvaluator.levelDistance) — it is NOT a
+# trailing basis. It was never evaluated by ExitEvaluator.trailing(), so accepting it here handed a
+# strategy a trail that silently never fired. Use `premium_pct` for a percent-off-the-peak trail.
+schema: strategy-schema/v1
+id: reject-trailing-percent-basis
+name: "Trailing Percent Basis"
+version: 1.0.0
+universe:
+  mode: explicit
+  instruments:
+    - { exchange: NSE, tradingsymbol: RELIANCE }
+timeframes: { primary: 1m }
+indicators:
+  - { name: EMA, alias: ema_fast, timeframe: 1m, params: { period: 9 }, weight: 1.0 }
+entry_rules:
+  direction: long
+  gate:
+    all:
+      - "close > ema_fast"
+  scoring: { threshold: 0.5 }
+exit_rules:
+  - { type: trailing_stop, params: { basis: percent, value: 5 } }   # unevaluated trailing basis
+risk:
+  position_sizing: { method: fixed_quantity, params: { quantity: 1 } }
+  max_positions: 1
+  session: { style: intraday }

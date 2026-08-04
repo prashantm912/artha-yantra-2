@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Persists + reads the daily Minervini screen. Stores EVERY scanned candidate (not just the
@@ -46,9 +47,22 @@ public class MinerviniScreenRepository {
     this.jdbc = jdbc;
   }
 
-  /** Batch-upserts the full scanned candidate set for a screen date. Returns rows written. */
-  public int upsertAll(LocalDate screenDate, List<TrendCandidate> candidates) {
+  /**
+   * Atomically REPLACES the scanned candidate set for a screen date: deletes every row for the date
+   * and writes the new set, in one transaction. Returns rows written.
+   *
+   * <p>This must not be a bare upsert. The trailing-bar guard removes symbols whose latest bar
+   * trails the universe (a delisted/renamed name computed on a weeks-old close), but an upsert only
+   * stops such a row being RE-INSERTED — it leaves any row a previous run already wrote, so the
+   * stale symbol stays queryable at the same {@code screen_date} and the observable owner-facing
+   * state never changes. The scheduler's watermark dedup then prevents the recompute that might
+   * otherwise have overwritten it. Deleting by date is what makes the guard actually remove
+   * anything.
+   */
+  @Transactional
+  public int replaceAll(LocalDate screenDate, List<TrendCandidate> candidates) {
     Date d = Date.valueOf(screenDate);
+    jdbc.update("DELETE FROM minervini_screen_results WHERE screen_date = ?", d);
     List<Object[]> batch = new ArrayList<>(candidates.size());
     for (TrendCandidate c : candidates) {
       batch.add(

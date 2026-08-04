@@ -130,6 +130,8 @@ public class MinerviniController {
   private final MinerviniHitRateService hitRateService;
   private final MinerviniBacktestService backtestService;
   private final ScreenerHistoryRepository history;
+  private final PlaneDivergenceProbe planeDivergence;
+  private final MinerviniScheduler scheduler;
 
   /** Wires the screener + screen/geometry repositories + the funnel + hit-rate + backtest services. */
   public MinerviniController(
@@ -140,7 +142,9 @@ public class MinerviniController {
       MinerviniFunnelService funnelService,
       MinerviniHitRateService hitRateService,
       MinerviniBacktestService backtestService,
-      ScreenerHistoryRepository history) {
+      ScreenerHistoryRepository history,
+      PlaneDivergenceProbe planeDivergence,
+      MinerviniScheduler scheduler) {
     this.screener = screener;
     this.repo = repo;
     this.geometryService = geometryService;
@@ -149,6 +153,8 @@ public class MinerviniController {
     this.hitRateService = hitRateService;
     this.backtestService = backtestService;
     this.history = history;
+    this.planeDivergence = planeDivergence;
+    this.scheduler = scheduler;
   }
 
   /**
@@ -182,7 +188,14 @@ public class MinerviniController {
         date, repo.coverage(date), cappedLimit, offset);
   }
 
-  /** Recomputes the screen now, persists it, and returns the fresh result. */
+  /**
+   * Recomputes the screen now, persists it, and returns the fresh result.
+   *
+   * <p>Delegates to {@link MinerviniScheduler#runOnce} rather than repeating the
+   * screen/upsert/geometry sequence inline. It used to repeat it, which meant this — the path a
+   * human triggers by hand — silently skipped whatever the scheduler had gained since, most
+   * recently the plane-divergence observation. One orchestration, four doors.
+   */
   @PostMapping("/run")
   public ScreenResponse run(
       @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf,
@@ -190,17 +203,9 @@ public class MinerviniController {
       @RequestParam(required = false) BigDecimal minRsRank,
       @RequestParam(defaultValue = "50") int limit) {
     int cappedLimit = Math.min(Math.max(1, limit), 500);
-    TrendTemplateService.ScreenResult res = screener.screen(asOf);
+    TrendTemplateService.ScreenResult res = scheduler.runOnce(asOf);
     if (res.screenDate() == null) {
       return new ScreenResponse(List.of(), null, 0, cappedLimit, 0);
-    }
-    repo.upsertAll(res.screenDate(), res.candidates());
-    // Persist geometry for the passers too, so POST /run leaves minervini_setups consistent with the
-    // screen (matches the scheduled/boot paths). Best-effort — a geometry hiccup must not 5xx the run.
-    try {
-      geometryService.persistForPassers(res.screenDate(), res.candidates());
-    } catch (RuntimeException ignored) {
-      // geometry is a diagnostic side-channel; the screen result is still authoritative
     }
     List<Row> items =
         res.candidates().stream()
@@ -318,6 +323,21 @@ public class MinerviniController {
     return new ScreenerHistory.FunnelAttrition(
         date, counts.scanned(), counts.gates(), counts.passesAll(),
         funnel.immediatelyBuyable().size(), funnel.onDeck().size(), funnel.watch().size());
+  }
+
+  /**
+   * Which of the day's passers are being read off TWO price planes — {@code candles}@1d (which is
+   * dividend-back-adjusted, via Kite re-fetch) versus {@code nse_eod_bhavcopy} (which deliberately
+   * is not). {@code divergentCandidates > 0} means a name the funnel actually SERVES is priced
+   * differently by the two readers. <b>Report-only</b> — the probe never pages (a page keyed on the
+   * divergent symbol fires on 20 of 22 evenings and is blind to the one measured casualty, which was
+   * displaced rather than divergent); the evening batch logs the same reading. Read-only, changes
+   * neither plane. See {@link PlaneDivergenceProbe}.
+   */
+  @GetMapping("/plane-divergence")
+  public PlaneDivergenceProbe.Report planeDivergence(
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
+    return planeDivergence.probe(asOf != null ? asOf : defaultReadDate());
   }
 
   /**

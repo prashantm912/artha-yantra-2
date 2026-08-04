@@ -120,14 +120,71 @@ public class PaperOrderRepository {
       String refSource,
       Long refTickAgeMs,
       OffsetDateTime signalGeneratedAt) {
+    return insertFilled(
+        book, signalId, exchange, tradingsymbol, side, qty, fillPrice, fillSimulator, slippageApplied,
+        quoteBid, quoteAsk, clientOrderId, refSource, refTickAgeMs, signalGeneratedAt, ENTRY_LEG, null);
+  }
+
+  /**
+   * {@code leg_kind} for an ENTRY fill. Every overload above this one delegates with it, which is a
+   * FACT rather than a convention: {@code PaperService.doSettle} is the only exit writer in the
+   * service and it calls the widest form directly with {@link #EXIT_LEG}. A future third writer must
+   * pick explicitly — that is why the widest form takes the value instead of deriving it from
+   * {@code settlesPositionId != null}, which would silently mislabel any new caller.
+   */
+  static final String ENTRY_LEG = "ENTRY";
+
+  /** {@code leg_kind} for a SETTLE fill — {@code doSettle} only. */
+  static final String EXIT_LEG = "EXIT";
+
+  /**
+   * The full form, adding the V059 exit linkage and leg discriminator. {@code settlesPositionId} is
+   * the position this order closes, non-null on the settle path ONLY ({@code PaperService.doSettle},
+   * which CAS-closes the position before inserting this row and therefore already holds the id).
+   * Every ENTRY fill passes null — its order row is minted before the position exists, and its
+   * per-signal attribution lives in {@code paper_position_lots} (V057) instead.
+   *
+   * <p>{@code legKind} is the separate, load-bearing half: it is what distinguishes a post-migration
+   * ENTRY fill from a genuine pre-migration LEGACY row, since both carry a null link. Without it the
+   * reconciler's fallback cannot tell them apart and a manual SELL entry keeps masking a BUY
+   * position's missing exit — reachable today through {@code POST /api/v1/paper/orders}, which
+   * accepts a caller-chosen side. It is a STORED FACT on purpose: the tempting inference "an order
+   * with a {@code paper_position_lots} row is an entry" is unsound, because that lot write is
+   * deliberately fail-soft, so a missing lot is an expected state rather than evidence.
+   *
+   * <p>Both values ride the INSERT rather than a follow-up statement, so they add no failure mode of
+   * their own: unlike V057's lot write they cannot fail independently of the fill they describe, and
+   * there is consequently no fail-soft/hard decision to take on the money-path close. The FK cannot
+   * reject the link either — the referenced row was CAS-updated by this same transaction two
+   * statements earlier.
+   */
+  public long insertFilled(
+      String book,
+      Long signalId,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal fillPrice,
+      String fillSimulator,
+      BigDecimal slippageApplied,
+      BigDecimal quoteBid,
+      BigDecimal quoteAsk,
+      String clientOrderId,
+      String refSource,
+      Long refTickAgeMs,
+      OffsetDateTime signalGeneratedAt,
+      String legKind,
+      Long settlesPositionId) {
     InsertedOrder inserted =
         jdbc.queryForObject(
             """
             INSERT INTO paper_orders
               (book, signal_id, exchange, tradingsymbol, side, qty, order_type, status, placed_at,
                 filled_at, fill_price, fill_simulator, slippage_applied, quote_bid, quote_ask,
-                client_order_id, ref_source, ref_tick_age_ms, tick_to_fill_ms)
-            VALUES (?,?,?,?,?,?, 'MARKET', 'FILLED', now(), now(), ?,?,?,?,?,?,?,?,
+                client_order_id, ref_source, ref_tick_age_ms, leg_kind, settles_position_id,
+                tick_to_fill_ms)
+            VALUES (?,?,?,?,?,?, 'MARKET', 'FILLED', now(), now(), ?,?,?,?,?,?,?,?,?,?,
                     (floor(extract(epoch FROM now()) * 1000)
                      - floor(extract(epoch FROM ?::timestamptz) * 1000))::bigint)
             RETURNING id, tick_to_fill_ms
@@ -147,6 +204,8 @@ public class PaperOrderRepository {
             clientOrderId,
             refSource,
             refTickAgeMs,
+            legKind,
+            settlesPositionId,
             signalGeneratedAt);
     if (inserted != null && inserted.tickToFillMs() != null && inserted.tickToFillMs() >= 0) {
       recordSignalToFillAfterCommit(inserted.tickToFillMs());
@@ -263,13 +322,30 @@ public class PaperOrderRepository {
    * SIBLING's entry fills as part of this position's trade chain — an externally observable
    * attribution error on exactly the co-fired input this feature enables.
    *
-   * <p>⚠️ <b>PARTIAL, and the remainder is blocked on PR #1259's V057.</b> Entry legs carry a
-   * {@code signal_id} and can be attributed; SETTLE legs carry none ({@code doSettle} writes no
-   * signal), so a signal-less order cannot be tied to one of two sibling positions by anything in
-   * the schema today. Those legs are therefore still shared between siblings, deliberately and
-   * visibly, rather than dropped — dropping them would blank the exit row of every position's detail
-   * pane. Read entries through {@code paper_position_lots.position_id} and add an exact linkage for
-   * exit orders once V057 is on main.
+   * <p><b>V059 completes the settle half that V058 had to leave shared.</b> V058's note here said the
+   * remainder was "blocked on PR #1259's V057 … add an exact linkage for exit orders once V057 is on
+   * main" — that linkage now exists as {@code settles_position_id}, so a settle leg is rendered in
+   * the trade chain of the position it actually closed and nowhere else. Passing {@code positionId}
+   * null keeps the pre-V059 shape for any caller that has no id in hand.
+   *
+   * <p>The legacy fallback is deliberate and is why the filter reads "no link OR my link" rather than
+   * "my link": every settle order written before V059 carries no link, and demanding one would blank
+   * the exit row of every historical position's detail pane — trading a shared leg for a missing one.
+   *
+   * <p>⚠️ <b>STILL OPEN — the ENTRY half of V058's instruction, which V059 did NOT do.</b> V058's note
+   * asked for two things: an exact linkage for exit orders (done above) and entry attribution read
+   * "through {@code paper_position_lots.position_id}" (NOT done). The strategy filter below passes
+   * {@code signal_id IS NULL} UNCONDITIONALLY, and a MANUAL hand ticket carries no signal — so on a
+   * scoped book a manual sibling's ENTRY fill still renders inside this position's trade chain. That
+   * is reachable today through {@code POST /api/v1/paper/orders}, the same surface that makes the
+   * SELL-entry route live, and it is a DIFFERENT query from the reconciliation entry lateral this
+   * PR's notes also list as open — do not read one as covering the other.
+   *
+   * <p>This pin is restored deliberately: V059 replaced V058's note with a "closes the settle half"
+   * heading, which deleted the only record of the entry half while reading as completeness. The
+   * remedy is the one V058 named — {@code paper_position_lots.position_id} — and it must be used as a
+   * POSITIVE exclusion only (exclude an entry whose lot names ANOTHER position; keep one with no lot),
+   * because the lot write is fail-soft and "no lot" is an expected state, never evidence.
    */
   public List<OrderRow> legsForPosition(
       String book,
@@ -278,6 +354,18 @@ public class PaperOrderRepository {
       OffsetDateTime openedAt,
       OffsetDateTime closedAt,
       java.util.UUID strategyId) {
+    return legsForPosition(book, exchange, tradingsymbol, openedAt, closedAt, strategyId, null);
+  }
+
+  /** The V059 form: additionally attributes LINKED settle legs to {@code positionId} alone. */
+  public List<OrderRow> legsForPosition(
+      String book,
+      String exchange,
+      String tradingsymbol,
+      OffsetDateTime openedAt,
+      OffsetDateTime closedAt,
+      java.util.UUID strategyId,
+      Long positionId) {
     return jdbc.query(
         """
         SELECT id, signal_id, exchange, tradingsymbol, side, qty, status, placed_at, filled_at,
@@ -295,6 +383,15 @@ public class PaperOrderRepository {
                  JOIN strategy_versions sv ON sv.id = sg.strategy_version_id
                  WHERE sg.id = paper_orders.signal_id AND sv.strategy_id = CAST(? AS uuid))
           )
+          -- V059: a settle leg that carries an exact link belongs to exactly ONE position, so a
+          -- sibling's settle no longer appears in this position's trade chain. Unlinked rows (every
+          -- pre-V059 order) still match on book + instrument + lifetime, so no historical detail pane
+          -- loses its exit leg.
+          AND (
+            CAST(? AS bigint) IS NULL
+            OR settles_position_id IS NULL
+            OR settles_position_id = CAST(? AS bigint)
+          )
         ORDER BY COALESCE(filled_at, placed_at) ASC, id ASC
         """,
         PaperOrderRepository::mapOrder,
@@ -304,7 +401,9 @@ public class PaperOrderRepository {
         openedAt,
         closedAt,
         strategyId,
-        strategyId);
+        strategyId,
+        positionId,
+        positionId);
   }
 
   private static OrderRow mapOrder(java.sql.ResultSet rs, int n) throws java.sql.SQLException {

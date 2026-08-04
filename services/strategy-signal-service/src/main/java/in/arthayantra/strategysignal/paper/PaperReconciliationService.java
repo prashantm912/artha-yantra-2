@@ -28,8 +28,12 @@ import org.springframework.stereotype.Service;
  *
  * <ul>
  *   <li><b>V5</b> — every CLOSED position's lifecycle is explicable by its order legs: Σ(entry-leg qty)
- *       == position qty AND ≥ 1 opposite-side exit leg exists (both matched on the §F.6 open key,
- *       time-scoped to the position lifetime). Classes: missing-entry / entry-qty-mismatch / missing-exit.
+ *       == position qty AND ≥ 1 opposite-side exit leg exists. Entry legs are matched on the §F.6 open
+ *       key time-scoped to the position lifetime; exit legs prefer V059's exact
+ *       {@code paper_orders.settles_position_id} link and fall back to that same key rule only for an
+ *       unlinked (pre-V059) order — without which one settle order satisfied every position sharing the
+ *       key, and the {@code exitCount() == 0} test below turned a real missing exit into a FALSE
+ *       NEGATIVE. Classes: missing-entry / entry-qty-mismatch / missing-exit.
  *   <li><b>V16</b> — every TAKEN signal expected to open a position ({@code suggested_qty > 0}) has ≥ 1
  *       {@code paper_orders.signal_id} row (the A1 "taken-but-never-opened" residual), plus the inverse:
  *       a position on an auto-paper book with no {@code opening_signal_id}.

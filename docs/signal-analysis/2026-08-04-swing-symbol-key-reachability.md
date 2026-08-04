@@ -310,6 +310,24 @@ cost:
    family share one `exit_rules` value. That converts the silent dependency into a red build if
    someone edits one family member's exit rules, which is the actual trigger for the exit-pass
    exposure.
+
+   ✅ **SHIPPED in this PR** — `SwingFamilyExitDoctrineTest` (owner-approved 2026-08-04).
+   Two refinements emerged while building it, both material:
+
+   - **Comparing `exit_rules` alone would have been insufficient.** Minervini's trail is
+     `{trailing_stop, basis: indicator, alias: sma50}` — byte-identical across all four strategies
+     while the exit LEVEL is whatever each strategy declares `sma50` to be. The test therefore
+     fingerprints the exit rules **plus the declaration of every indicator an exit rule resolves
+     through an alias**, and only the fields `IndicatorBank` computes a value from (`name`,
+     `timeframe`, `params`, `instrument`) — `weight`/`normalize` feed entry scoring, never an exit
+     level, so including them would red the guard on a legitimate entry-only tune. Red-proved
+     independently: changing `sma50` from SMA(50) to SMA(30) in one strategy, leaving `exit_rules`
+     untouched, reddens the test.
+   - **The family population is DISCOVERED, not listed.** A hardcoded family list is precisely how
+     this invariant would decay, so the test scans the classpath for every bundled
+     `*-strategies/*.yaml`, keeps the `swing`-session docs, and groups by `universe.mode`. A second
+     assertion cross-checks the discovered family count against the number of concrete
+     `@Component SwingDoctrine` implementations, so a new swing family cannot appear silently exempt.
 3. Only if the flag is armed: revisit the keying. At that point `openLotsBySymbol` and the
    `strandedCarryPositions` predicate (§6.2) should be fixed **together** — they encode the same
    one-strategy-per-symbol assumption, and fixing one without the other leaves the reconciler blind.
@@ -318,13 +336,14 @@ cost:
 
 ## 9. Open doubts
 
-1. **`ExitEvaluator` may not be a pure function of `exit_rules` alone.** §6.1 rests on the two
-   strategies' `exit_rules` being byte-identical, but the evaluator also receives an `IndicatorBank`
-   built from each strategy's own `indicators` block. Both families' rules use `atr_multiple` with an
-   explicit `atr_period: 20` (no alias indirection), so I believe the decision is identical — but I
-   did not diff the `indicators` blocks or trace every alias resolution. `assumed`. If an exit rule
-   in some future config resolves through an alias whose definition differs per strategy, §6.1's
-   "inert by data" weakens further.
+1. **`ExitEvaluator` is not a pure function of `exit_rules` alone — CONFIRMED, and now partly
+   covered.** This doubt was right, and building the §8.2 test resolved half of it. Minervini's trail
+   *does* resolve through an `alias: sma50`, so identical `exit_rules` genuinely does not imply an
+   identical exit level. `computed` — all four Minervini strategies declare `sma50` as `SMA(period:
+   50)`, so they agree today, and `SwingFamilyExitDoctrineTest` now pins that. **Still uncovered:** an
+   exit rule whose behaviour depends on something outside `exit_rules` and outside an aliased
+   indicator declaration — e.g. a future `basis` that reads a series the fingerprint does not include.
+   The guard covers the two indirections that exist today, not a proof that no third one can arise.
 2. **I did not test the armed path.** The whole §4.2 trace is read from source with the flag off. I
    did not flip it in mock and observe a dual-strategy add. The trace is `computed` from code, not
    `computed` from execution, and a real run could hit a gate I did not model — the funnel's

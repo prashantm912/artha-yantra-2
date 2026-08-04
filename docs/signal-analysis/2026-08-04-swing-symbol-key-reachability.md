@@ -124,6 +124,13 @@ even if a swing book were listed in it, it could not merge two families into one
 `openLotsBySymbol` list — that map never sees `paper_positions` at all. The two mechanisms are
 orthogonal.
 
+> **Status note, 2026-08-04 (added at round-3 rebase).** #1275 **merged** while this doc was in
+> review — `main` now carries V058, `PaperStrategyScopeGuard` and the `artha.paper.strategy-scoped-books`
+> flag, where the predecessor doc recorded it as OPEN and unarmable. That changes nothing above: the
+> orthogonality argument is structural (this map reads signal anchors, never `paper_positions`), so it
+> holds whether the flag ships or not. Flagged only so a reader does not carry the predecessor's
+> "cannot be armed today" forward — that clause has expired.
+
 ---
 
 ## 4. Within one family — the decisive gate

@@ -967,6 +967,239 @@ after `JBCHEPHARM` was found serving `passesAll: true` on an 18-day-stale price.
 
 ---
 
+### STATUS 2026-08-04 EVENING — session close. Nothing below is started; this is the next-session queue.
+
+**Merged this evening (49 total for the day):** #1292 ledger closeout · #1298 runbook-hygiene guard
++ Stage D ci-optimizer correction · #1300 CAS blast radius · #1301 swing-backtest universe exclusion.
+
+**Repo setting changed (owner call):** `runbook-hygiene` promoted to a **required** status check —
+**NINE** required contexts now. Applied by mirroring the live protection GET field-by-field; diff
+proved exactly 2 fields moved (`contexts` + its `checks` mirror), 14 others byte-identical,
+`rulesets` still `[]`. **Do not quote a context COUNT anywhere — it has been 6, 8 and 9 inside four
+days. Read the API.**
+
+#### Open PRs, exact state (all left OPEN deliberately)
+
+| PR | State | What it needs next |
+|---|---|---|
+| **#1296** ScalperRisk §0B stop-basis coupling | review RESOLVED; **Golden 9/9 + Parity 9/9 + OptionsPremiumGolden 2/2 re-run by the main loop itself** | HOLD — owner merge call only |
+| **#1297** CA stage→verify→swap | round 3 fixes pushed (M-A observability, M-B cooldown/recovery contradiction) | **round 4 review** |
+| **#1299** `symbol_lineage` | all 4 must-fix items CLOSED; **renumbered to V055**; headline corrected to **1809 / 284, +7 entering, 0 leaving** (`CNL` refuted out); 1261 tests green, **14 red-proofs** | **re-review round** |
+| **#1302** required-contexts doc | mine, docs-only | rebase + merge |
+| **#1303** futures-roller refresh window | review in flight at session close | collect verdict |
+| **#1283** swing data-coverage gate | rework pushed | review round |
+| **#1075** scalper budget ₹15k→₹20k | parked | owner, 2026-08-12 |
+
+#### ⚠️ MIGRATION COLLISION — check this BEFORE writing any marketdata migration
+`origin/main` tops at **V053**. **#1297 claims V054** (`V054__candle_rebuild_staging.sql`) and
+**#1299 also claims V054** (`V054__symbol_lineage.sql`). Same lineage, same version, different
+filenames ⇒ **no git conflict**, both merge clean, and flyway-init dies only at DEPLOY where it
+fails validation and blocks *every* subsequent migration. **RESOLVED 2026-08-04: #1297 keeps V054,
+#1299 renumbered to V055** (re-checked across every remote branch at push time). Next free is
+**V056** — re-check at commit time against `origin/main` AND every open PR, because the free
+version moves. #1303 and #1305 add no migration.
+
+#### Nightly verification 21:26 IST — ALL FOUR PASS, and it closes the "verification owed" above
+
+| check | verdict | evidence |
+|---|---|---|
+| #1280 trailing-bar guard + coverage floor — **first genuine execution** | **PASS** | **0 stale rows in either screen.** Minervini 1772/1772 and Manas 2264/2264 carry a bar dated exactly 2026-08-04. Minervini 1772 rows / 272 passing (vs 1767/277 on 08-03); Manas 2264 / 131 (vs 2262/124) |
+| `MINERVINI_PLANE_DIVERGENCE` cron path | **PASS** | run_day 2026-08-04, source `MINERVINI_SCHEDULER`, claimed **19:35:01** — the SCHEDULED path, not catch-up. The 08-03 row (claimed 00:10:22 on 08-04) was a genuine one-off recovery |
+| paper reconcilers | **PASS** | ran 21:14:59; `positions_checked=0`, `taken_signals_checked=0`, **`total_discrepancies=0`** (zero-checked because no swing entries opened — clean, not an error) |
+| ingest + containers + CA flag | **PASS** | **11 sources, every one SUCCESS, zero failures**; 13/13 healthy; `ARTHA_CORPORATE_ACTIONS_ENABLED=false` still |
+
+⚠️ **The first pass of check 1 reported 129 stale rows and it was the QUERY, not the guard.** Filtering
+`series='EQ'` dropped every `BE`-series symbol — 53 screen names showed "no bar at all", including
+BODALCHEM, AUTOIND and BGRENERGY. Series-agnostic (`EQ`+`BE`) the count is 0/0/1772. Recorded in
+CLAUDE.md next to the `exchange=` filter rule. **Tell: a "missing data" result containing liquid,
+obviously-trading names is a filter artifact.**
+
+⚠️ **Two corrections to this document's own earlier claims, both from reading a YAML DEFAULT as a
+deployed value:** the swing screens run at **19:31**, not 20:00, and the plane-divergence probe at
+**19:35**, not 19:50 (`${artha.minervini.cron:0 50 19 * * MON-FRI}` is overridden in deployment).
+The wrong times reached four separate reports the same evening. The measured evening order is now in
+CLAUDE.md; read `ingest_runs` / `canary_runs`, never the defaults.
+
+**#1303 MERGED** at `20d927e6` (roller refresh window), after the verification prompt was written —
+so the "open, unmerged" note in that prompt was already stale. **Still not deployed**, so a ~16:15
+roller failure remains expected until the next deploy.
+
+#### Next-session queue — NOT STARTED, documented only
+
+- **N10 · CA sweep re-arm — SEQUENCED, do not re-arm first.** 13 symbols sit at `REFRESH_FAILED`,
+  `refresh_attempts=1` of 3, sweep disarmed since 2026-08-03 22:37, nothing retrying.
+  **Order: land #1297 → land #1305 (window sizing) → then re-arm.** Re-arming first burns attempt
+  2 of 3 for nothing.
+  - ⚠️ **The MECHANISM the Architect briefed was WRONG, and the correction matters for any future
+    fix here.** I said "a ~100-day window straddles two ~70-day chunks ⇒ ~8.6M decompressed."
+    Right in magnitude, wrong in cause. **Decompression is per matching BATCH, not per chunk
+    touched.** All five materialization hypertables are `segmentby (exchange, tradingsymbol),
+    orderby bucket`; a refresh's DELETE carries **no symbol predicate**, so `segmentby` prunes
+    nothing and batches are pruned by `orderby` min/max metadata alone. Proof: a **chunk-aligned**
+    70-day window decompresses *exactly* that chunk's count (4 exact matches), while an unaligned
+    one costs up to 7.4M.
+  - **Decisive numbers** (worst case over every window start, `candles_5m`, computed): 14 d =
+    2,990,258 · 30 d = 4,476,813 · 70 d = 7,396,205 · **100 d = 9,543,253 = 191% of the 5M
+    ceiling.** Deterministic.
+  - **All three forks I offered were wrong or insufficient.** *Chunk-align alone FAILS* — two chunks
+    exceed the whole ceiling by themselves (5,112,833 and 5,558,488). *Narrowing the constant
+    decays* — 22 d is 76.4% today and dense chunks grew ~40% year-on-year. *Raising the ceiling*
+    stays declined (~1 GB churn on a 4 GB DB). My worry that the five caggs might have differing
+    chunk widths is **falsified**: all five are uniform 70-day, 61 chunks, identically aligned.
+  - **#1305's answer: size windows in TUPLES, per view, from the current chunk load.**
+    `MAX_REFRESH_WINDOW_DAYS` stays as an outer bound — tuples bound decompression, days bound
+    materialization, neither substitutes. ~1.9M of *every* window is edge spill regardless of span,
+    which is why the budget is a quarter of the ceiling. Per-view planning also retires two
+    accidents free: `candles_1w`'s 8-day overlap no longer costs `candles_5m` ~630k redundant
+    tuples per window, and a sparse cagg no longer pays the dense one's window count.
+  - **An IT caught what no mock could:** `approximate_row_count(regclass) does not exist` — services
+    connect with a `currentSchema` excluding `public`, which is exactly why the existing code says
+    `public.refresh_continuous_aggregate`. That would have failed the rebuild at the moment it was
+    needed. Open doubt to carry: window count rises ~48 → ~85 per rebuild (cheaper each, wall-clock
+    unmeasured end-to-end since the sweep is disarmed), and the invariant is proven at planning and
+    IT scale, **not on a live 12-year run**.
+- **N11 · Cagg repair scope (owner-decided 2026-08-04): 5m + 15m + 1h only.** 1d is mitigated by
+  the native dense `candles`@1d path (`readDailyWithWarmup`); 1w is rarely a gate input. The 5m hole
+  spans **2025-06 → 2026-04** for all 13 (shared boundary — cagg refresh is a global time-window
+  operation); 15m/1h/1d/1w were never refreshed at all and hold live-tail rows only.
+- **N12 · ⚠️ Equity CA adjustment basis — the largest open data finding, backtest-fidelity, SEVERE.**
+  Not a live money-path defect: live screeners read CA-adjusted bhavcopy and `SwingBatchEngine` goes
+  over REST through the adjuster; all 18 open swing paper positions were checked and only KAPSTON has
+  a recorded CA (KITE-sourced, smooth across ex-date). The defect is on the **backtest** plane:
+  - `EquitySplitBonusAdjuster` is **source-aware** — it scales ONLY `source='BHAVCOPY'` bars
+    (`:41`), by design, because broker history arrives back-adjusted. `KITE`+`BACKFILL` are
+    **85% of the NSE 1d plane**. So the axis is not adjusted-vs-raw, it is *which adjustment basis
+    a bar carries*.
+  - Its only production call site is `CandlesController:80`, gated on `interval='1d' && adjust=back`.
+    **Both swing deep-sims read `candles`@1d raw via JDBC with no adjuster**
+    (`MinerviniBacktestService:864,886,900,933,956`; `ManasAroraBacktestService:684,813,837,851,884,907`),
+    plus `MinerviniHitRateService:114`, the backtest-service `CandleReader` chain, and
+    `ScreenerService:103` (a THIRD plane — the `candles_1d` cagg).
+  - **`eod_corporate_actions` is a rolling 420-day window** (`ca-lookback-days:420`) sized to the
+    live screener; ex-dates 2025-04-29 → 2026-07-31 and it can never reach deeper. The swing backtest
+    reads **~11 years**. `kind` is CHECK-constrained to SPLIT/BONUS, so **dividends and demergers are
+    unrepresentable**.
+  - **It reaches a verdict undiminished:** `MinerviniSwingBacktest:205` computes raw percent return
+    with no clamp, and the 8% stop is **close-evaluated, not an intrabar fill** (`:247`) — a 50% cliff
+    trips `STOP_LOSS` and then fills at the post-cliff price, so the full spurious ~−50% is booked
+    into avg/best/worst/profitFactor.
+  - Exposure: 64 clean CA-shaped cliffs across 62 symbols, **29 in pre-CA-table BACKFILL history**
+    (SHRJAGP 2017-11-02 exactly 10:1, FINCABLES, OCCL). Ledger row B4 (#757) closed
+    "backtest adjusted vs live raw" in July; `candles` has since gained 639k raw BHAVCOPY bars from
+    2025-06-19 — **the polarity inverted and nobody re-checked the backtest side.**
+  - **VRLLOG** — recorded 1:1 BONUS ex-date 2025-08-14 that Upstox did NOT adjust; its BACKFILL rows
+    were fetched 2026-08-04, a year later, and are still raw. Same mechanism as the 29 deep-history
+    cliffs; it is only the sole CA-table-era instance because the table sees 15 months.
+  - **DBEIL is the proof case that mixing is an ACTIVE hazard**, not theoretical: 106 BACKFILL bars
+    fetched 2026-06-18, one day before a 10:1 split. They cannot be broker-adjusted (fetch predates
+    the split) and the adjuster skips non-BHAVCOPY by design, so on the GET path it scales that
+    symbol's BHAVCOPY bars by 0.1 while leaving BACKFILL at 10× — **actively creating** the step.
+    **This one needs an owner call: the fix touches the adjuster's contract, not data.**
+- **N13 · CAS (Closing Auction Session) — G18 rescope.** CAS did not freeze the platform; it **split
+  it into two regimes**. Cash/index freezes 15:15–15:30 and takes an auction print; every derivative
+  keeps trading, and all 38 scalpers signal off `NIFTY-FUT-CONT`, so the engine's gate/fill plane is
+  untouched. The exposure is the **daily** plane: the auction print now sets the day's HIGH, and
+  `max(high) OVER w252 AS high_52w` is a direct hard-gate input to both swing screens
+  (`ManasScreenService:123`, `TrendTemplateService:122` → `MinerviniGates:44`, `ManasGates:69,89-90`),
+  which persist rows and open paper positions at 20:00. Natural control, reproduced independently by
+  the main loop: 2026-08-03 F&O `close==high` **25.59%** / `close==last` **98.58%** (n=211) against
+  **0.00%** on 07-28/07-30/07-31, non-F&O control flat at 1.14–1.63% across all four.
+  Intraday is LATENT not realised — evaluation stops after the 15:18 bucket, the traded strike is
+  immune (`spot + (forward − spot)` cancels), but `futuresBasis` swings 146.65 points and changes
+  sign into a persisted `score_breakdown`. **Post-CAS backtest parity is not answerable yet** —
+  `expired_contracts` stops at 2026-07-30. Two sessions only, one an expiry; **no outcome has been
+  shown to change.** Also found: `candles_1d` cagg and native daily now disagree *semantically*
+  (24463.45 vs 24614.90) — worth its own look.
+- **N14 · 668 near-zero-weight symbols — MEASURED 2026-08-04, verdict (b) MATERIAL for the
+  DENOMINATOR ONLY; fix must be reporting-only.** No longer arithmetic on loop bounds; this is an
+  observed trade count.
+  - **0 of 668 produced a trade**, both families — 0 of 13,568 Manas trades, 0 of 23,765 Minervini.
+    Every P&L metric is *exactly* unchanged by them. But they are **26.2% of `scanned`**, and
+    `scanned` moved **1,806 → 2,553 (+41.4%) in 24 days** while trade count moved +2.5%. The number
+    an owner reads grew 41% for a pure data-plane reason with zero trade contribution.
+  - **Not the tautological half.** Their first evaluable bar lands in 2026-07 for **658 of 668**,
+    fully inside the measured window. At the deep tier's own base rate the cohort's 10,385 candidate
+    bars predict **~11 entries; observed 0**. Not a mechanical impossibility either — the frozen
+    golden panel is 30 symbols × **280 days**, inside the band, and produces 19 trades. And not
+    liquidity: **357 of 668 clear the ₹37.5L Manas turnover floor.**
+  - ⚠️ **DO NOT exclude them from the universe.** The cohort sits in the **RS cross-section** under
+    the same `MIN_SERIES` membership (`MinerviniBacktestService:439`, whose comment makes the
+    one-threshold coupling deliberate). Removing them shifts every other symbol's RS percentile and
+    touches **0.48% (Manas) / 0.56% (Minervini)** of raw trades — i.e. excluding is a BEHAVIOURAL
+    change. Only additive reporting is safe.
+  - **Parity is clear for the reporting route:** the swing goldens assert
+    `totalTrades`/`tradesTaken`/`cagrPct`/`maxDrawdownPct`/`sharpe` — **not `symbolsScanned`**. A
+    sibling `symbolsEvaluable` (symbols with ≥1 candidate bar in-window) leaves goldens
+    byte-identical. **`MIN_BARS` must not move.** Sole render site:
+    `ManasAroraBacktestPage.tsx:224`.
+  - Corrections to the numbers previously recorded here: candidate bars are **0–33** (median 16), not
+    1–39; max is **293**, not 299; and **a symbol at exactly 260 bars gets ZERO iterations**.
+  - ⚠️ **A premise in the dispatch brief was impossible and the agent was right to refuse it:**
+    "run a window ending before ~2026-07-15 and one ending today" is **not expressible** —
+    `DeepSwingRunRequest` is `(family, from, variant)` with **no `to`**, and both readers are
+    `bucket >= ?` with no upper bound. Every deep-sim run ends at "now". There is no end-date axis.
+  - No production code changed, no PR opened — the RS-cross-section coupling makes this an owner
+    decision first. Reproduce: runs `ee8562fe` / `5fba09dd` (today), `b928d38f` (archived).
+- **N19 · ⚠️ MANAS HEADLINE FELL 3.3× BETWEEN TWO RUNS OF THE SAME CONFIG — needs its own
+  investigation, and it is the largest unexplained number found on 2026-08-04.** Same family, same
+  variant, same `from=2015-07-01`:
+
+  | run | date | return | Sharpe | maxDD | trades | mds sha |
+  |---|---|---|---|---|---|---|
+  | `b928d38f` | 2026-07-12 | **2214.35%** | 0.88 | 51% | 1,337 | `c7a52842` |
+  | `ee8562fe` | 2026-08-04 | **662.86%** | 0.66 | 69% | 1,371 | `10765298` |
+
+  **Proven NOT to be the 668 cohort** — they contributed 0 trades to either run. Attributable to
+  **16 market-data screener commits** since `c7a52842`, two of which (**#1215, #843**) edited *both*
+  `*SwingBacktest.java` files, plus **retro-mutated `candles`**. An unchanged deterministic sim
+  should re-run to the decimal; this one did not, so **the sim changed, not the market** — that is
+  the surprising-result rule, and the harness is the suspect. Bisecting those 16 commits against a
+  pinned `fetched_at` snapshot is the obvious first step.
+- **N20 · `eqSymbols()`'s `SELECT DISTINCT … FROM candles` spans 1,050 chunks** and died once with
+  `out of shared memory / max_locks_per_transaction` under concurrent load — a fragility in the
+  deep-sim's FIRST query. Same class as the 5-way `UNION ALL` cagg probe that started failing today.
+- **N21 · ⚠️ HISTORICAL CAGG INVALIDATIONS HAVE NO SWEEPER, AND NOTHING ALARMS ON IT.** Surfaced by
+  #1303's review, upgraded from the builder's `assumed` open doubt to **computed**:
+  `_timescaledb_catalog.continuous_aggs_materialization_invalidation_log` currently holds **50
+  unprocessed entries**, spanning (IST) **2016-09-26 → 2026-08-03** on `candles_5m`, 2006-06-28 →
+  2026-08-02 on 15m, 2006-06-28 → 2026-07-18 on 1d, 2015-02-02 → 2026-04-26 on 1w. The caggs' own
+  refresh policies cover only `start_offset` 1d/2d/7d/14d/60d, so the futures roller's accidental
+  **epoch-wide nightly refresh was the only global consumer of historical invalidations, for every
+  symbol** — and `CandleQueryService:106` serves 5m/15m/1h/1w reads from those caggs, so history
+  reads are the exposed consumer.
+  **Not a blocker for #1303 and not caused by it:** that sweep has been dead since V049 first
+  compressed a cagg chunk, the backlog exists today pre-merge, and keeping the wide window is not an
+  option because it now hard-fails. #1303 removes a guarantee that was already gone. A bounded probe
+  (NSE `NIFTY 50`, 2026-06-15) found cagg 5m buckets == 1m-derived buckets == 75, i.e. **no
+  divergence in that sample** — so no pending invalidation has been shown to correspond to an
+  actually-wrong value. A real divergence sweep is DB-expensive and was deliberately not run.
+- **N22 · #1303's narrowing bounds the common case but not the worst one** (`ContinuousFuturesRoller
+  :172`, MEDIUM-LOW, latent). If CONT is ever missing buckets older than the 30-day compression
+  horizon that the currently-listed front contract can fill — a multi-day stack outage a month+ ago,
+  adding a root to `artha.futures.underlyings` (its first roll stitches the front contract's whole
+  ~3-month listed history), or a `purgeSymbol` on a CONT symbol — the next live roll re-widens into
+  compressed chunks and reproduces today's exact failure for that root. **Not armed today**:
+  `NIFTY-FUT-CONT` has 79/79 trading days covered over the last 100, zero holes. Failure mode is a
+  bare `log.warn` with no alerting. Optional hardening: clamp `from` to `max(firstBucket, today −
+  25d)`, or warn when the span exceeds the compression horizon.
+- **N15 · The 374-symbol exclusion is CORRECT — closed, do not reopen.** The live screen enforces its
+  own 252-session floor (`artha.minervini.min-sessions:252`, verified deployed — no container
+  override), so 357 of 374 are excluded from the screen too and **zero** backtest-excluded symbols
+  have passed either screen on any persisted date. Aligning 252 vs 260 would touch a parity surface
+  for an 8-session band empirically empty of passers and self-draining. **Recommend not doing it.**
+- **N16 · Promote `verdict` to a required context?** One owner call. It has been convention enforced
+  by the Architect, not GitHub — it failed red on #1156 and blocked nothing.
+- **N17 · ETF question, pre-existing but newly surfaced.** ~25 of the 66 lineage rename pairs are ETF
+  sponsor rebrands, and `HEALTHAXIS` (ex-`AXISHCETF`) is one of the surviving entering candidates.
+  Whether an ETF belongs in a Minervini SEPA funnel at all is not #1299's to answer.
+- **N18 · Restored-symbol depth caveat.** The 45 CA-gutted symbols were restored 1d-only (Upstox caps
+  `day` at ~a decade — `days=4200` returns `UDAPI1148` and writes nothing; `days=3600` works). Depth
+  bottoms at 2016-09-26, **shallower than the earlier BACKFILL cohort**, and ~81,000 of the 93,528
+  restored bars have **no bhavcopy counterpart at all**, so their adjustment basis is unverified.
+  1m bars were NOT restored, by scope.
+
+---
+
 ## 1. Net-new code
 
 | id | item | authority | state |

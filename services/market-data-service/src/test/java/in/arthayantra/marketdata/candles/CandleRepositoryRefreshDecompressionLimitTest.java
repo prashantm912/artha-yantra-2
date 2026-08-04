@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.OffsetDateTime;
@@ -52,8 +53,19 @@ class CandleRepositoryRefreshDecompressionLimitTest {
     private boolean aborted;
 
     RecordingConnection(Predicate<String> failOn) throws SQLException {
+      this(failOn, List.of());
+    }
+
+    RecordingConnection(Predicate<String> failOn, List<long[]> chunkDayOffsetsAndTuples)
+        throws SQLException {
       Statement st = mock(Statement.class);
       when(connection.createStatement()).thenReturn(st);
+      // The rebuild path reads the cagg's chunk load through executeQuery on THIS statement. A
+      // FRESH result set per call, because each of the five views issues its own read. An empty
+      // one is the honest "nothing compressed here" answer and plans the plain day-count windows —
+      // which is what keeps EXPECTED_CALLS the same grid these tests have always pinned.
+      when(st.executeQuery(anyString()))
+          .thenAnswer(invocation -> chunkResultSet(chunkDayOffsetsAndTuples));
       when(st.execute(anyString()))
           .thenAnswer(
               invocation -> {
@@ -74,16 +86,36 @@ class CandleRepositoryRefreshDecompressionLimitTest {
     }
   }
 
+  /**
+   * A chunk-load result set: {@code {dayOffsetFromFrom, spanDays, tuples}} per materialization
+   * chunk, as {@code CandleRepository.chunkLoad} reads it.
+   */
+  private static ResultSet chunkResultSet(List<long[]> chunks) throws SQLException {
+    ResultSet rs = mock(ResultSet.class);
+    int[] row = {-1};
+    when(rs.next()).thenAnswer(invocation -> ++row[0] < chunks.size());
+    when(rs.getObject(1, OffsetDateTime.class))
+        .thenAnswer(invocation -> FROM.plusDays(chunks.get(row[0])[0]));
+    when(rs.getObject(2, OffsetDateTime.class))
+        .thenAnswer(invocation -> FROM.plusDays(chunks.get(row[0])[0] + chunks.get(row[0])[1]));
+    when(rs.getLong(3)).thenAnswer(invocation -> chunks.get(row[0])[2]);
+    return rs;
+  }
+
   /** A DataSource handing out a FRESH recording connection per {@code getConnection()}. */
   private static final class RecordingDataSource {
     private final List<RecordingConnection> handedOut = new ArrayList<>();
     private final DataSource dataSource = mock(DataSource.class);
 
     RecordingDataSource(Predicate<String> failOn) throws SQLException {
+      this(failOn, List.of());
+    }
+
+    RecordingDataSource(Predicate<String> failOn, List<long[]> chunks) throws SQLException {
       when(dataSource.getConnection())
           .thenAnswer(
               invocation -> {
-                RecordingConnection fresh = new RecordingConnection(failOn);
+                RecordingConnection fresh = new RecordingConnection(failOn, chunks);
                 handedOut.add(fresh);
                 return fresh.connection;
               });
@@ -133,6 +165,102 @@ class CandleRepositoryRefreshDecompressionLimitTest {
     assertThat(executed.subList(1, executed.size() - 1))
         .as("every cagg CALL sits BETWEEN the raise and the reset, on this one connection")
         .allMatch(s -> s.startsWith(CALL_PREFIX));
+  }
+
+  // ---- the defect itself: a DENSE cagg must be sliced FINER than the day cap alone would
+
+  @Test
+  void rebuildRefreshSlicesADenseCaggFinerThanTheDayCapAlone() throws SQLException {
+    // one 70-day materialization chunk at the live 2026-08-04 candles_5m peak (5,558,488 tuples).
+    // Against the 1.25M budget that is ~5 windows; the 92-day day-cap alone would give this
+    // 116-day range just 2. If the rebuild ever stops planning from the measured chunk load, this
+    // count falls back to 2 and the window is back over the decompression ceiling.
+    RecordingDataSource ds =
+        new RecordingDataSource(sql -> false, List.of(new long[] {0, 70, 5_558_488}));
+
+    ds.repository()
+        .refreshDerivedAggregatesForRebuild(
+            FROM, TO, List.of(CandleRepository.DerivedAggregate.CANDLES_5M));
+
+    List<String> calls =
+        ds.onlyConnection().sql.stream().filter(s -> s.startsWith(CALL_PREFIX)).toList();
+    assertThat(calls)
+        .as("a 5.5M-tuple chunk must be split by the TUPLE budget, not just the 92-day span cap")
+        .hasSizeGreaterThan(EXPECTED_CALLS / 5);
+    assertThat(calls).allMatch(s -> s.contains("candles_5m"));
+  }
+
+  @Test
+  void rebuildRefreshLeavesASparseCaggOnTheDayCap() throws SQLException {
+    // candles_1w's densest live chunk is 19,076 tuples — nothing to split, so the sparse cagg must
+    // NOT inherit the dense one's window count
+    RecordingDataSource ds =
+        new RecordingDataSource(sql -> false, List.of(new long[] {0, 70, 19_076}));
+
+    ds.repository()
+        .refreshDerivedAggregatesForRebuild(
+            FROM, TO, List.of(CandleRepository.DerivedAggregate.CANDLES_1W));
+
+    List<String> calls =
+        ds.onlyConnection().sql.stream().filter(s -> s.startsWith(CALL_PREFIX)).toList();
+    assertThat(calls).hasSize(EXPECTED_CALLS / 5); // the same 2 windows the day cap gives
+  }
+
+  // ---- the selectable subset: explicit, ordered, and byte-identical by default
+
+  @Test
+  void rebuildRefreshDefaultsToEveryCaggSoExistingCallersAreUnchanged() throws SQLException {
+    RecordingDataSource ds = new RecordingDataSource(sql -> false);
+
+    ds.repository().refreshDerivedAggregatesForRebuild(FROM, TO);
+
+    assertThat(ds.onlyConnection().sql)
+        .as("the two-argument form still refreshes all five caggs")
+        .hasSize(1 + EXPECTED_CALLS + 1);
+  }
+
+  @Test
+  void rebuildRefreshHonoursTheRequestedSubsetAndSkipsTheRest() throws SQLException {
+    RecordingDataSource ds = new RecordingDataSource(sql -> false);
+
+    // the owner-scoped repair subset: the intraday planes only (1d is served by the dense native
+    // candles@1d path, 1w is rarely a gate input)
+    ds.repository()
+        .refreshDerivedAggregatesForRebuild(
+            FROM,
+            TO,
+            List.of(
+                CandleRepository.DerivedAggregate.CANDLES_5M,
+                CandleRepository.DerivedAggregate.CANDLES_15M,
+                CandleRepository.DerivedAggregate.CANDLES_1H));
+
+    List<String> calls =
+        ds.onlyConnection().sql.stream().filter(s -> s.startsWith(CALL_PREFIX)).toList();
+    assertThat(calls).hasSize(3 * 2);
+    assertThat(calls).allMatch(s -> !s.contains("candles_1d") && !s.contains("candles_1w"));
+    assertThat(calls.get(0)).contains("candles_5m");
+    assertThat(calls.get(calls.size() - 1)).contains("candles_1h");
+  }
+
+  @Test
+  void rebuildRefreshRefreshesParentsBeforeChildrenWhateverOrderTheSubsetIsGivenIn()
+      throws SQLException {
+    RecordingDataSource ds = new RecordingDataSource(sql -> false);
+
+    // 1w reads candles_1d (V004) — asking for it first must NOT refresh it from a stale parent
+    ds.repository()
+        .refreshDerivedAggregatesForRebuild(
+            FROM,
+            TO,
+            List.of(
+                CandleRepository.DerivedAggregate.CANDLES_1W,
+                CandleRepository.DerivedAggregate.CANDLES_1D));
+
+    List<String> calls =
+        ds.onlyConnection().sql.stream().filter(s -> s.startsWith(CALL_PREFIX)).toList();
+    assertThat(calls).hasSize(2 * 2);
+    assertThat(calls.get(0)).contains("candles_1d");
+    assertThat(calls.get(calls.size() - 1)).contains("candles_1w");
   }
 
   @Test

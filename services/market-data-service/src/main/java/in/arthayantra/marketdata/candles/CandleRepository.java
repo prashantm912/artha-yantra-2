@@ -3,12 +3,15 @@ package in.arthayantra.marketdata.candles;
 import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.Period;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +36,12 @@ public class CandleRepository {
    * action re-backfill ({@code rebackfill-days-1m=4400}) issued as a SINGLE
    * {@code CALL('candles_5m', 2014→2026)} SIGKILLed the 4GB live TimescaleDB backend 3× on
    * 2026-07-10 (crash-recovery each). Slicing the range into ≤92-day (~3-month) windows bounds the
-   * decompression + materialization each CALL performs.
+   * materialization each CALL performs.
+   *
+   * <p>This bounds TIME only. It is the sole window bound on the DEFAULT path (which refreshes
+   * recent, uncompressed windows and so decompresses nothing) and an OUTER bound on the rebuild
+   * path, where {@link #REBUILD_WINDOW_TUPLE_BUDGET} additionally bounds tuples — 92 days of a dense
+   * {@code candles_5m} region is ~7.4M tuples, comfortably past what any DML may decompress.
    */
   static final int MAX_REFRESH_WINDOW_DAYS = 92;
 
@@ -87,24 +95,61 @@ public class CandleRepository {
    * re-materialized (the procedure commits across several transactions), i.e. an empty cagg range:
    * exactly the damage being repaired.
    *
-   * <p>Sized from the densest CALL. Every cagg is ULTIMATELY sourced from 1m candles, so only
-   * symbols with 1m history count — four read {@code candles WHERE "interval" = '1m'} directly,
-   * while {@code candles_1w} reads {@code candles_1d} (V004), which inherits the same restriction
-   * transitively. (Cross-vendor review corrected an earlier "every cagg reads candles directly"
-   * here; the symbol-cardinality conclusion is unchanged, the derivation is just honest now.) {@code candles_5m} dominates at 375 trading minutes / 5 = 75
-   * buckets per symbol per session × ~69 sessions in a 100-day window ≈ 5175 rows per symbol, so
-   * 5000000 covers ~960 such symbols in one window — comfortably past the deep-history (2015)
-   * windows that actually failed, where only CA-remediated equities carry 1m bars at all. At ~100
-   * bytes per cagg row that is ~500 MB of decompression churn per DML, survivable on the 4 GB
-   * database.
+   * <p>⚠️ The original sizing argument for this number was WRONG, and it is kept here only because
+   * the correction is the whole point of {@link #REBUILD_WINDOW_TUPLE_BUDGET}. It read: {@code
+   * candles_5m} dominates at 75 buckets per symbol per session × ~69 sessions in a 100-day window ≈
+   * 5175 rows per symbol, so 5000000 covers ~960 such symbols — and closed by admitting the symbol
+   * count in a DENSE recent window was NOT measured, on the theory that TimescaleDB's {@code
+   * errdetail("… tuples decompressed: %lld")} would hand us the real figure on the first trip. The
+   * first trip came (13 symbols REFRESH_FAILED, 2026-07-21..07-31) and the errdetail did NOT
+   * survive it — containers were recreated and {@code corporate_action_events.details} carries no
+   * error text. Measured instead against the live materialization hypertables (2026-08-04): a
+   * 100-day window over {@code candles_5m} decompresses up to 9,543,253 tuples — 191% of this
+   * ceiling — because the live universe is ~6164 symbols per chunk, not ~960. The ceiling was never
+   * the defect; the window was.
    *
-   * <p>The symbol count in a DENSE recent window is NOT measured — that number is not derivable from
-   * the repo, and this ceiling is deliberately the kind that fails loudly rather than churns
-   * silently: TimescaleDB's error carries {@code errdetail("… tuples decompressed: %lld")}, so the
-   * first trip hands us the real figure to re-size against, with the rebuild's existing FAILED
-   * status + urgent ntfy already surfacing it.
+   * <p>The ceiling itself is DELIBERATELY NOT raised. At ~100 bytes per cagg row 5000000 is already
+   * ~500 MB of decompression churn per DML on a 4 GB database, and the covering-the-worst-case
+   * figure would be ~1 GB. Windows are made to fit the ceiling instead — see {@link
+   * #REBUILD_WINDOW_TUPLE_BUDGET}.
    */
   static final int REBUILD_DECOMPRESSED_TUPLE_CEILING = 5_000_000;
+
+  /**
+   * Per-window tuple budget the rebuild plans its refresh windows AGAINST — a quarter of {@link
+   * #REBUILD_DECOMPRESSED_TUPLE_CEILING}, because the budget covers only the tuples INSIDE the
+   * window and a real DML also pays edge spill.
+   *
+   * <p>Spill is the load-bearing measurement here and it is not obvious. Decompression is per
+   * matching BATCH, not per chunk touched: the five cagg materialization hypertables are all {@code
+   * segmentby (exchange, tradingsymbol), orderby bucket}, so a refresh's window-scoped DELETE
+   * (which carries NO symbol predicate — a refresh re-materializes every symbol) prunes batches by
+   * the {@code orderby} min/max metadata alone. A batch STRADDLING a window edge therefore
+   * decompresses IN FULL for the sake of the few rows inside. Measured on the live {@code
+   * candles_5m} materialization hypertable 2026-08-04, worst case over every window start:
+   *
+   * <pre>
+   *   span     tuples decompressed   % of ceiling
+   *    14 d          2,990,258           59.8
+   *    22 d          3,818,126           76.4
+   *    30 d          4,476,813           89.5
+   *    38 d          4,967,129           99.3
+   *    70 d          7,396,205          147.9
+   *   100 d          9,543,253          190.9   ← what this class used to generate
+   * </pre>
+   *
+   * A 14-day window holds only ~1.1M tuples of content yet costs ~3.0M, so ~1.9M of every window is
+   * spill — which is why the budget is a QUARTER of the ceiling rather than all of it, and why
+   * simply narrowing a fixed day-count has sharply diminishing returns.
+   *
+   * <p>A tuple budget, unlike a day count, does not decay as the universe grows: {@link
+   * #planRebuildWindows} re-derives the cut points from the CURRENT chunk load on every rebuild, so
+   * windows tighten automatically. At the 2026-08-04 load the densest {@code candles_5m} chunk
+   * (5,558,488 tuples over 70 days) plans into 5 windows of ~14 days — 59.8% of the ceiling — while
+   * {@code candles_1w} (19,076 tuples in its densest chunk, 60,769 in TOTAL across 12 years) plans
+   * into a single window instead of paying {@code candles_5m}'s window count for nothing.
+   */
+  static final long REBUILD_WINDOW_TUPLE_BUDGET = REBUILD_DECOMPRESSED_TUPLE_CEILING / 4;
 
   /**
    * Purge DELETE window span. A naive {@code DELETE FROM candles WHERE exchange=? AND
@@ -119,6 +164,61 @@ public class CandleRepository {
 
   /** A half-open time window {@code [from, to)} — the unit of a chunked refresh / windowed purge. */
   record Window(OffsetDateTime from, OffsetDateTime to) {}
+
+  /**
+   * The derived candle aggregates, in REFRESH ORDER — parents before children, because {@code
+   * candles_1w} reads {@code candles_1d} (V004) and would otherwise re-materialize from a stale
+   * parent. Declaration order IS the contract; a subset preserves it.
+   */
+  public enum DerivedAggregate {
+    /** 5-minute buckets — by far the densest cagg (46.3M materialized rows on 2026-08-04). */
+    CANDLES_5M("candles_5m", 1),
+    /** 15-minute buckets. */
+    CANDLES_15M("candles_15m", 1),
+    /** 1-hour buckets (V027 moved 3m to a read-time rollup; 1h is the coarsest intraday cagg). */
+    CANDLES_1H("candles_1h", 1),
+    /** Daily buckets — the parent of {@link #CANDLES_1W}. */
+    CANDLES_1D("candles_1d", 1),
+    /** Weekly buckets, read from {@code candles_1d} — the only cagg needing a multi-day overlap. */
+    CANDLES_1W("candles_1w", REFRESH_WINDOW_OVERLAP_DAYS);
+
+    private final String viewName;
+    private final int overlapDays;
+
+    DerivedAggregate(String viewName, int overlapDays) {
+      this.viewName = viewName;
+      this.overlapDays = overlapDays;
+    }
+
+    /** The cagg's view name as {@code refresh_continuous_aggregate} takes it. */
+    public String viewName() {
+      return viewName;
+    }
+
+    /**
+     * Days of overlap this cagg's windows need at an interior cut, ≥ its own bucket width.
+     *
+     * <p>{@link #REFRESH_WINDOW_OVERLAP_DAYS} is 8 because ONE shared window list had to satisfy
+     * the COARSEST bucket. Planning per view retires that: a 5-minute bucket cannot straddle a cut
+     * by more than 5 minutes, so a single day is already generous, and the 7 days it used to carry
+     * were pure re-materialization — on {@code candles_5m} 8 days of overlap is ~630,000 extra
+     * tuples decompressed per window, half the budget spent re-refreshing what the previous window
+     * had just written. Only {@code candles_1w}, whose bucket really is 7 days, keeps the 8.
+     */
+    int overlapDays() {
+      return overlapDays;
+    }
+  }
+
+  /** Every derived aggregate, in refresh order — the default subset, unchanged behaviour. */
+  public static final List<DerivedAggregate> ALL_DERIVED_AGGREGATES =
+      List.of(DerivedAggregate.values());
+
+  /**
+   * One materialization-hypertable chunk of a cagg, clipped to the refresh range: the span a window
+   * cut may fall inside, and the tuples a DML touching that span must decompress.
+   */
+  record ChunkLoad(OffsetDateTime from, OffsetDateTime to, long tuples) {}
 
   private static final String UPSERT =
       """
@@ -378,7 +478,7 @@ public class CandleRepository {
    * caller is the only layer that knows the difference, so this method cannot defend itself.
    */
   public void refreshDerivedAggregates(OffsetDateTime from, OffsetDateTime to) {
-    refresh(from, to, false);
+    refresh(from, to, false, ALL_DERIVED_AGGREGATES);
   }
 
   /**
@@ -387,9 +487,34 @@ public class CandleRepository {
    * default and aborting the rebuild (CHEVIOT + ULTRACEMCO, 2026-07-30). The EXPLICIT opt-in raises
    * the cap to {@link #REBUILD_DECOMPRESSED_TUPLE_CEILING} for this refresh only; every other caller
    * keeps the database guard.
+   *
+   * <p>Raising the cap was NOT ENOUGH, which is the second thing this path does differently: the
+   * fixed 100-day windows decompressed up to 9,543,253 tuples — 191% of the raised ceiling — so the
+   * rebuild aborted anyway for 13 symbols over 2026-07-21..07-31, deterministically rather than by
+   * bad luck. Windows here are therefore planned per view from the CURRENT chunk load ({@link
+   * #planRebuildWindows}) instead of a day count.
    */
   public void refreshDerivedAggregatesForRebuild(OffsetDateTime from, OffsetDateTime to) {
-    refresh(from, to, true);
+    refreshDerivedAggregatesForRebuild(from, to, ALL_DERIVED_AGGREGATES);
+  }
+
+  /**
+   * {@link #refreshDerivedAggregatesForRebuild} over a SUBSET of the caggs. A repair that only needs
+   * the intraday planes back (5m/15m/1h) should not pay for {@code candles_1d} — whose dense native
+   * counterpart {@code candles}@1d is what {@code readDailyWithWarmup} actually serves — nor for
+   * {@code candles_1w}. Callers that want everything keep the two-argument form and behave
+   * byte-identically to before this overload existed.
+   *
+   * <p>An EXPLICIT argument, deliberately: routing this through a config property would let a
+   * rebuild silently refresh less than the caller believed, and the resulting hole in a cagg is
+   * indistinguishable from the failure this whole path exists to repair.
+   *
+   * @param views the caggs to refresh; refreshed in {@link DerivedAggregate} declaration order
+   *     (parents before children) regardless of the order given
+   */
+  public void refreshDerivedAggregatesForRebuild(
+      OffsetDateTime from, OffsetDateTime to, Collection<DerivedAggregate> views) {
+    refresh(from, to, true, views);
   }
 
   /**
@@ -400,24 +525,28 @@ public class CandleRepository {
    * session-level {@code SET} (never {@code SET LOCAL} — {@code refresh_continuous_aggregate}
    * commits internally) survives those internal transactions.
    */
-  private void refresh(OffsetDateTime from, OffsetDateTime to, boolean raiseDecompressionCap) {
+  private void refresh(
+      OffsetDateTime from,
+      OffsetDateTime to,
+      boolean raiseDecompressionCap,
+      Collection<DerivedAggregate> views) {
     OffsetDateTime start = from.minusDays(8);
     OffsetDateTime end = to.plusDays(8);
-    List<Window> windows =
-        refreshWindows(start, end, MAX_REFRESH_WINDOW_DAYS, REFRESH_WINDOW_OVERLAP_DAYS);
+    List<DerivedAggregate> ordered =
+        ALL_DERIVED_AGGREGATES.stream().filter(views::contains).toList();
     jdbc.execute(
         (ConnectionCallback<Void>)
             connection -> {
               try (Statement st = connection.createStatement()) {
                 if (!raiseDecompressionCap) {
-                  refreshEachView(st, windows, start, end);
+                  refreshEachView(st, ordered, start, end, false);
                   return null;
                 }
                 st.execute(
                     "SET " + MAX_TUPLES_DECOMPRESSED_GUC + " = " + REBUILD_DECOMPRESSED_TUPLE_CEILING);
                 Exception primary = null;
                 try {
-                  refreshEachView(st, windows, start, end);
+                  refreshEachView(st, ordered, start, end, true);
                 } catch (SQLException | RuntimeException e) {
                   primary = e;
                   throw e;
@@ -449,15 +578,36 @@ public class CandleRepository {
     }
   }
 
-  /** The view × window CALL grid, on the caller's pinned statement. */
+  /**
+   * The view × window CALL grid, on the caller's pinned statement. Window PLANNING is per view when
+   * {@code planFromChunkLoad}: the five caggs differ in density by three orders of magnitude
+   * (2026-08-04: {@code candles_5m} 46.3M materialized rows, {@code candles_1w} 60,769), so one
+   * shared day-count either starves the dense view or wastes CALLs on the sparse ones.
+   */
   private static void refreshEachView(
-      Statement st, List<Window> windows, OffsetDateTime start, OffsetDateTime end)
+      Statement st,
+      List<DerivedAggregate> views,
+      OffsetDateTime start,
+      OffsetDateTime end,
+      boolean planFromChunkLoad)
       throws SQLException {
-    for (String view : List.of("candles_5m", "candles_15m", "candles_1h", "candles_1d", "candles_1w")) {
+    List<Window> shared =
+        refreshWindows(start, end, MAX_REFRESH_WINDOW_DAYS, REFRESH_WINDOW_OVERLAP_DAYS);
+    for (DerivedAggregate view : views) {
+      List<Window> windows =
+          planFromChunkLoad
+              ? planRebuildWindows(
+                  chunkLoad(st, view, start, end),
+                  start,
+                  end,
+                  REBUILD_WINDOW_TUPLE_BUDGET,
+                  MAX_REFRESH_WINDOW_DAYS,
+                  view.overlapDays())
+              : shared;
       for (Window w : windows) {
         st.execute(
             "CALL public.refresh_continuous_aggregate('"
-                + view
+                + view.viewName()
                 + "', '"
                 + w.from().toInstant()
                 + "'::timestamptz, '"
@@ -467,8 +617,171 @@ public class CandleRepository {
       // one line per view, not per window: a 12-yr rebuild is ~48 windows × 5 views (2026-07-10 OOM)
       log.info(
           "refreshed derived aggregate {} over {} window(s) [{} .. {}]",
-          view, windows.size(), start.toInstant(), end.toInstant());
+          view.viewName(), windows.size(), start.toInstant(), end.toInstant());
     }
+  }
+
+  /**
+   * The chunk load of ONE cagg's materialization hypertable over {@code [start, end)} — the input
+   * {@link #planRebuildWindows} sizes windows from. Read on the caller's pinned statement via
+   * {@code executeQuery}, so it neither takes a second pooled connection nor disturbs the session
+   * {@code SET} that must cover the CALLs.
+   *
+   * <p>{@code approximate_row_count} on a COMPRESSED chunk is exact, not an estimate — it sums the
+   * per-batch {@code _ts_meta_count}. Verified against the live database 2026-08-04: it returned
+   * 4706633 and 5112833 for two {@code candles_5m} chunks whose batch-metadata sums are the same
+   * two numbers to the digit. On an UNCOMPRESSED chunk it reads {@code reltuples} and so reports 0
+   * until something ANALYZEs it — which is the CORRECT input for this budget rather than a bug to
+   * work around: an uncompressed chunk decompresses nothing, so it should contribute nothing to a
+   * decompression budget, and {@link #MAX_REFRESH_WINDOW_DAYS} still bounds its materialization.
+   *
+   * <p>An EMPTY result is the honest "no chunks here" answer (a fresh database, or a range ahead of
+   * the data) and plans the plain day-count windows. A query that FAILS is left to propagate,
+   * because silently falling back would restore exactly the 100-day window this method exists to
+   * replace.
+   */
+  static List<ChunkLoad> chunkLoad(
+      Statement st, DerivedAggregate view, OffsetDateTime start, OffsetDateTime end)
+      throws SQLException {
+    String sql =
+        // public-qualified for the same reason the CALL above is: services connect with a
+        // currentSchema that does NOT include public, so the bare name resolves to nothing
+        "SELECT c.range_start, c.range_end,"
+            + " public.approximate_row_count("
+            + "format('%I.%I', c.chunk_schema, c.chunk_name)::regclass)"
+            + " FROM timescaledb_information.continuous_aggregates a"
+            + " JOIN timescaledb_information.chunks c"
+            + " ON c.hypertable_schema = a.materialization_hypertable_schema"
+            + " AND c.hypertable_name = a.materialization_hypertable_name"
+            + " WHERE a.view_name = '" + view.viewName() + "'"
+            + " AND c.range_end > '" + start.toInstant() + "'::timestamptz"
+            + " AND c.range_start < '" + end.toInstant() + "'::timestamptz"
+            + " ORDER BY c.range_start";
+    List<ChunkLoad> loads = new ArrayList<>();
+    try (ResultSet rs = st.executeQuery(sql)) {
+      while (rs != null && rs.next()) {
+        loads.add(
+            new ChunkLoad(
+                rs.getObject(1, OffsetDateTime.class),
+                rs.getObject(2, OffsetDateTime.class),
+                rs.getLong(3)));
+      }
+    }
+    return loads;
+  }
+
+  /**
+   * Refresh windows for {@code [start, end)} sized so NO single {@code refresh_continuous_aggregate}
+   * DML decompresses more than {@code tupleBudget} tuples of window CONTENT, and no window spans
+   * more than {@code maxSpanDays}.
+   *
+   * <p>Two independent bounds, and both are load-bearing. The TUPLE bound is what the 2026-07-30
+   * failure needed: {@code chunks} carries the CURRENT materialized load, so a chunk denser than the
+   * budget is cut into equal parts and consecutive chunks cheaper than it SHARE a window. The DAY
+   * bound is the original 2026-07-10 protection and must survive: a range with no chunks at all
+   * (nothing compressed, so zero tuples) would otherwise plan as ONE window spanning the whole
+   * rebuild — the 12-year single CALL that SIGKILLed the backend. Tuples bound decompression; days
+   * bound materialization; neither substitutes for the other.
+   *
+   * <p>The result keeps {@link #refreshWindows}' contract exactly: the union covers {@code [start,
+   * end)}, every interior cut is followed by {@code overlapDays} of overlap so a bucket straddling
+   * it is fully contained in the earlier window, and the last window is clamped at {@code end}.
+   */
+  static List<Window> planRebuildWindows(
+      List<ChunkLoad> chunks,
+      OffsetDateTime start,
+      OffsetDateTime end,
+      long tupleBudget,
+      int maxSpanDays,
+      int overlapDays) {
+    if (!start.isBefore(end)) {
+      return List.of(new Window(start, end)); // degenerate — same guard as refreshWindows
+    }
+    List<OffsetDateTime> cuts = new ArrayList<>();
+    cuts.add(start);
+    // A window's overlap spills PAST its cut, i.e. into the NEXT chunk — which may be denser than
+    // the one being sliced (live 2026-08-04: chunk 1909 is 56,165 tuples/day, 1910 is 67,238). The
+    // overlap is therefore charged at the range's PEAK density, never the local one; sizing it
+    // locally under-charges exactly at a rising boundary and puts the window back over budget.
+    double peakPerDay = 0;
+    for (ChunkLoad chunk : chunks) {
+      long span = Math.max(1, Duration.between(chunk.from(), chunk.to()).toDays());
+      peakPerDay = Math.max(peakPerDay, (double) chunk.tuples() / span);
+    }
+    long overlapCost = Math.round(peakPerDay * overlapDays);
+    long carried = 0;
+    for (ChunkLoad chunk : chunks) {
+      OffsetDateTime from = chunk.from().isBefore(start) ? start : chunk.from();
+      OffsetDateTime to = chunk.to().isAfter(end) ? end : chunk.to();
+      if (!from.isBefore(to)) {
+        continue;
+      }
+      long tuples = clippedTuples(chunk, from, to);
+      long days = Math.max(1, Duration.between(from, to).toDays());
+      double perDay = (double) tuples / days;
+      if (carried + tuples + overlapCost <= tupleBudget) {
+        carried += tuples; // cheap enough to ride the window already open
+        continue;
+      }
+      if (from.isAfter(cuts.get(cuts.size() - 1))) {
+        cuts.add(from); // this chunk starts a window of its own
+      }
+      // widest span whose content PLUS the overlap still fits; ≤0 means the overlap alone exceeds
+      // the budget, which no amount of splitting can fix — fall back to the 1-day floor
+      double affordableDays = (tupleBudget - overlapCost) / perDay;
+      int parts =
+          affordableDays <= 0
+              ? (int) days
+              : (int) Math.min(days, Math.max(1, Math.ceil(days / affordableDays)));
+      long spanSeconds = Duration.between(from, to).getSeconds();
+      for (int k = 1; k < parts; k++) {
+        cuts.add(from.plusSeconds(spanSeconds * k / parts));
+      }
+      carried = tuples / parts; // the tail part is what the NEXT chunk may share a window with
+    }
+    if (end.isAfter(cuts.get(cuts.size() - 1))) {
+      cuts.add(end);
+    }
+    return windowsFrom(capSpan(cuts, maxSpanDays), end, overlapDays);
+  }
+
+  /** A partially-covered chunk contributes its tuples pro-rata to the covered fraction. */
+  private static long clippedTuples(ChunkLoad chunk, OffsetDateTime from, OffsetDateTime to) {
+    long whole = Duration.between(chunk.from(), chunk.to()).getSeconds();
+    long clipped = Duration.between(from, to).getSeconds();
+    return whole <= 0 || clipped >= whole ? chunk.tuples() : chunk.tuples() * clipped / whole;
+  }
+
+  private static long ceilDiv(long numerator, long denominator) {
+    return (numerator + denominator - 1) / denominator;
+  }
+
+  /** Subdivides any segment longer than {@code maxSpanDays} into equal parts within the bound. */
+  private static List<OffsetDateTime> capSpan(List<OffsetDateTime> cuts, int maxSpanDays) {
+    List<OffsetDateTime> capped = new ArrayList<>();
+    for (int i = 0; i < cuts.size() - 1; i++) {
+      OffsetDateTime from = cuts.get(i);
+      OffsetDateTime to = cuts.get(i + 1);
+      capped.add(from);
+      long seconds = Duration.between(from, to).getSeconds();
+      long parts = ceilDiv(seconds, Duration.ofDays(maxSpanDays).getSeconds());
+      for (long k = 1; k < parts; k++) {
+        capped.add(from.plusSeconds(seconds * k / parts));
+      }
+    }
+    capped.add(cuts.get(cuts.size() - 1));
+    return capped;
+  }
+
+  /** Contiguous cuts → OVERLAPPING windows, each extended {@code overlapDays} past its cut. */
+  private static List<Window> windowsFrom(
+      List<OffsetDateTime> cuts, OffsetDateTime end, int overlapDays) {
+    List<Window> windows = new ArrayList<>();
+    for (int i = 0; i < cuts.size() - 1; i++) {
+      OffsetDateTime to = cuts.get(i + 1).plusDays(overlapDays);
+      windows.add(new Window(cuts.get(i), to.isAfter(end) ? end : to));
+    }
+    return windows;
   }
 
   /**

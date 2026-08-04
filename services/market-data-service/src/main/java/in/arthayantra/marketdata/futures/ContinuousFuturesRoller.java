@@ -107,7 +107,13 @@ public class ContinuousFuturesRoller {
    * expired+live roster to reconstruct history for backtests. Idempotent — re-runs append nothing new.
    *
    * <p>{@code refreshAggregates} drives the continuous-aggregate refresh after each stitched segment.
-   * The live path passes {@code true} (a narrow daily invalidation → cheap). The historical backfill
+   * The live path passes {@code true} — a narrow daily invalidation → cheap, but only since
+   * 2026-08-04: the refresh used to be handed this method's {@code [from, to)}, whose first segment
+   * starts at {@link #STITCH_EPOCH}, so "narrow daily invalidation" described the INTENT while the
+   * code asked for ~26 years. It now refreshes the range {@code stitchInto} reports having actually
+   * inserted.
+   *
+   * <p>The historical backfill
    * passes {@code false}: stitching months of bars at once invalidates a WIDE cagg range, and because
    * the expired-OI backfill never materialised the mid-interval caggs over history, a refresh there
    * re-aggregates ~106k expired contracts' buckets in one call — minutes-long, lock-holding (it blocks
@@ -153,11 +159,17 @@ public class ContinuousFuturesRoller {
       if (!segmentStart.isAfter(segmentEnd)) {
         OffsetDateTime from = segmentStart.atStartOfDay().atOffset(Ist.OFFSET);
         OffsetDateTime to = segmentEnd.plusDays(1).atStartOfDay().atOffset(Ist.OFFSET);
-        int stitched = candles.stitchInto(contSymbol, exchange, contract.tradingsymbol(), from, to);
-        if (stitched > 0 && refreshAggregates) {
+        CandleRepository.StitchedRange stitched =
+            candles.stitchInto(contSymbol, exchange, contract.tradingsymbol(), from, to);
+        if (stitched.rows() > 0 && refreshAggregates) {
           // stitched 1m/1d rows behind a cagg watermark are invisible until refreshed —
-          // CONT mid-interval reads (5m/15m/1h/1w) must see the new segment (live path only)
-          candles.refreshDerivedAggregates(from, to);
+          // CONT mid-interval reads (5m/15m/1h/1w) must see the new segment (live path only).
+          // Refresh the range actually INSERTED, never [from, to): this segment's `from` is
+          // STITCH_EPOCH, so passing the request window re-materialized ~26 years of caggs nightly
+          // to publish one day of bars — and once V049 compressed them that aborted the whole roll
+          // (2026-08-04, all six roots). The inserted range is a normal day on a normal day, which
+          // is what CandleRepository's cap doctrine assumed the roller was already doing.
+          candles.refreshDerivedAggregates(stitched.firstBucket(), stitched.lastBucket());
         }
       }
       previousRoll = roll;

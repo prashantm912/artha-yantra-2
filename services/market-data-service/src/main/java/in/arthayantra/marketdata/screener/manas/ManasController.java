@@ -193,7 +193,7 @@ public class ManasController {
     if (res.screenDate() == null) {
       return new ScreenResponse(List.of(), null, 0, cappedLimit, 0);
     }
-    repo.upsertAll(res.screenDate(), res.candidates());
+    repo.replaceAll(res.screenDate(), res.candidates());
     // Persist geometry for the passers too, so POST /run leaves manas_arora_setups consistent with the
     // screen (matches the scheduled/boot paths). Best-effort — a geometry hiccup must not 5xx the run.
     try {

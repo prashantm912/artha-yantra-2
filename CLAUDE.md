@@ -244,6 +244,13 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   coverage over `marketdata.ingest_runs`, #686/#699), and the scheduled canaries (ingest-coverage
   08:45, notifier-health 08:30, paper reconcilers 21:15, PartialBucketCanary every 60s — all IST)
   — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
+  **Measured evening order, 2026-08-04** (do NOT quote the YAML cron defaults — they differ from
+  what is deployed, and reading `${artha.minervini.cron:0 50 19 * * MON-FRI}` as "19:50" put a wrong
+  time into four separate reports the same night): **19:30** CA refresh rides the nightly BHAVCOPY
+  job · **19:31** `MINERVINI_SCREEN` + `MANAS_SCREEN` · **19:35** `MINERVINI_PLANE_DIVERGENCE`
+  (source `MINERVINI_SCHEDULER`) · **19:45** market-context · **19:50** data-quality · **19:55**
+  equity-breadth · **21:15** paper reconcilers. Read `marketdata.ingest_runs` +
+  `marketdata.canary_runs`/`strategy.canary_runs` for the real times, never the defaults.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.
@@ -594,6 +601,15 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   rather than pins. Concretely: this is why a "CA-plane split" investigation found **46 of 47**
   exposures had no corporate action anywhere near them and all 38 clean cases had **byte-identical
   closes** — the disagreement was entirely in a 50-bar mean computed over retro-mutated history.
+- ⚠️ **`nse_eod_bhavcopy` is MULTI-SERIES — filtering `series='EQ'` silently drops real screen
+  symbols** (measured 2026-08-04, and it manufactured a false "the guard FAILED" reading). The screen
+  universe spans **`EQ` AND `BE`** (13 series exist overall: EQ, BE, BZ, E1, GB, GS, IV, MF, N1, RR,
+  SM, ST, SZ). A staleness probe written as `series='EQ'` reported **53 screen symbols with no bar at
+  all and 76 more stale** — BODALCHEM, AUTOIND, BGRENERGY and 50 others trade `BE`, so their bars
+  were simply outside the filter. Series-agnostic (`series IN ('EQ','BE')`) the same probe returns
+  **0 / 0 / 1772 fresh**. **Tell: a "missing data" result that includes liquid, obviously-trading
+  names.** That is a join or filter artifact, not an outage — check one symbol across ALL series
+  before believing it. Same family as the equity `exchange=` filter rule.
 - ⚠️ **A YAML default is NOT a deployed value.** `application.yml`'s `${ENV:default}` says what happens
   when the env var is absent — it says nothing about production. Reading the default as the live
   setting put a wrong "still on `native`, needs flipping" claim into **four** documents for ~28 days

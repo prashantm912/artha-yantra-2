@@ -999,6 +999,31 @@ fails validation and blocks *every* subsequent migration. **RESOLVED 2026-08-04:
 **V056** — re-check at commit time against `origin/main` AND every open PR, because the free
 version moves. #1303 and #1305 add no migration.
 
+#### Nightly verification 21:26 IST — ALL FOUR PASS, and it closes the "verification owed" above
+
+| check | verdict | evidence |
+|---|---|---|
+| #1280 trailing-bar guard + coverage floor — **first genuine execution** | **PASS** | **0 stale rows in either screen.** Minervini 1772/1772 and Manas 2264/2264 carry a bar dated exactly 2026-08-04. Minervini 1772 rows / 272 passing (vs 1767/277 on 08-03); Manas 2264 / 131 (vs 2262/124) |
+| `MINERVINI_PLANE_DIVERGENCE` cron path | **PASS** | run_day 2026-08-04, source `MINERVINI_SCHEDULER`, claimed **19:35:01** — the SCHEDULED path, not catch-up. The 08-03 row (claimed 00:10:22 on 08-04) was a genuine one-off recovery |
+| paper reconcilers | **PASS** | ran 21:14:59; `positions_checked=0`, `taken_signals_checked=0`, **`total_discrepancies=0`** (zero-checked because no swing entries opened — clean, not an error) |
+| ingest + containers + CA flag | **PASS** | **11 sources, every one SUCCESS, zero failures**; 13/13 healthy; `ARTHA_CORPORATE_ACTIONS_ENABLED=false` still |
+
+⚠️ **The first pass of check 1 reported 129 stale rows and it was the QUERY, not the guard.** Filtering
+`series='EQ'` dropped every `BE`-series symbol — 53 screen names showed "no bar at all", including
+BODALCHEM, AUTOIND and BGRENERGY. Series-agnostic (`EQ`+`BE`) the count is 0/0/1772. Recorded in
+CLAUDE.md next to the `exchange=` filter rule. **Tell: a "missing data" result containing liquid,
+obviously-trading names is a filter artifact.**
+
+⚠️ **Two corrections to this document's own earlier claims, both from reading a YAML DEFAULT as a
+deployed value:** the swing screens run at **19:31**, not 20:00, and the plane-divergence probe at
+**19:35**, not 19:50 (`${artha.minervini.cron:0 50 19 * * MON-FRI}` is overridden in deployment).
+The wrong times reached four separate reports the same evening. The measured evening order is now in
+CLAUDE.md; read `ingest_runs` / `canary_runs`, never the defaults.
+
+**#1303 MERGED** at `20d927e6` (roller refresh window), after the verification prompt was written —
+so the "open, unmerged" note in that prompt was already stale. **Still not deployed**, so a ~16:15
+roller failure remains expected until the next deploy.
+
 #### Next-session queue — NOT STARTED, documented only
 
 - **N10 · CA sweep re-arm — SEQUENCED, do not re-arm first.** 13 symbols sit at `REFRESH_FAILED`,

@@ -81,7 +81,7 @@ public class CorporateActionJob {
    * it threw mid-refresh. Everything else either has no rebuilt base ({@code FAILED},
    * {@code REBACKFILL_RUNNING}) or wants no more work ({@code RESOLVED},
    * {@code REFRESH_ABANDONED}), and resuming refresh-only over an incomplete base would materialise
-   * aggregates from half-purged data — strictly worse than leaving it alone.
+   * aggregates over an incomplete base — strictly worse than leaving it alone.
    */
   private static final Set<String> BASE_COMMITTED = Set.of("BASE_REBUILT", "REFRESH_FAILED");
 
@@ -107,6 +107,7 @@ public class CorporateActionJob {
   private final int rebackfillDays1d;
   private final List<String> symbolOverride;
   private final int maxRefreshAttempts;
+  private final int rebuildRetryCooldownDays;
   private final Counter anchorNoise;
 
   /**
@@ -152,6 +153,10 @@ public class CorporateActionJob {
       // how many cagg-refresh attempts ONE event gets before it is abandoned to an operator; the
       // sweep is daily, so this is also the backoff — 3 spends three calendar days before paging
       @Value("${artha.corporate-actions.max-refresh-attempts:3}") int maxRefreshAttempts,
+      // how long a FAILED rebuild waits before the sweep will re-detect the symbol. Bounds the Kite
+      // page cost of a symbol that can never pass staged verification (V054) without ever sealing
+      // it out of the sweep the way the pre-V054 purge did.
+      @Value("${artha.corporate-actions.rebuild-retry-cooldown-days:7}") int rebuildRetryCooldownDays,
       MeterRegistry meterRegistry) {
     this.instruments = instruments;
     this.candles = candles;
@@ -169,6 +174,7 @@ public class CorporateActionJob {
     this.rebackfillDays1d = rebackfillDays1d;
     this.symbolOverride = symbolOverride;
     this.maxRefreshAttempts = maxRefreshAttempts;
+    this.rebuildRetryCooldownDays = rebuildRetryCooldownDays;
     this.anchorNoise = meterRegistry.counter("ay_corporate_action_anchor_noise_total");
   }
 
@@ -216,7 +222,7 @@ public class CorporateActionJob {
     InstrumentKey key = new InstrumentKey(equity.exchange(), equity.tradingsymbol());
     // A14 resume: a symbol whose MOST-RECENT event RECORDS a committed base rebuild got its base
     // re-fetched but never finished the chunked cagg refresh — resume the refresh only, never
-    // re-purge ~12 years. Detection would NOT re-fire this (post-rebuild the cache == Kite ⇒ no
+    // redo the ~12-year staged rebuild. Detection would NOT re-fire this (post-rebuild cache == Kite ⇒ no
     // divergence, so no fresh DETECTED row + no double-remediation), so this checkpoint scan is the
     // SOLE resume trigger. Reuses the existing event row.
     //
@@ -230,8 +236,35 @@ public class CorporateActionJob {
       resumeOrAbandon(latest.get(), equity, today, key);
       return java.util.Optional.empty(); // a resume, not a fresh detection
     }
+    // The rebuild path's retry BOUND (V054). Before this PR a failed rebuild gutted the symbol, and
+    // the hasNonBhavcopyDaily pre-filter below then sealed it out of the sweep forever — which
+    // accidentally bounded the cost of a symbol that could not be rebuilt. Leaving the cache intact
+    // deliberately breaks that seal, so the divergence stays visible and the next sweep re-detects:
+    // the natural retry this PR exists to restore. Unbounded, that same property is a nightly
+    // ~196-page Kite re-fetch (1d + 1m at 60-day paging) against the SHARED rate limiter, plus a
+    // nightly urgent page, for any symbol whose rebuild can never pass verification.
+    //
+    // So a recent FAILED rebuild cools off rather than retrying every night. A cooldown, not a
+    // strike count: a count that reaches its bound re-seals the symbol permanently, which is the
+    // failure mode this PR is closing, whereas a cooldown bounds the COST without ever making the
+    // state unrecoverable. It is deliberately NOT applied to any other status — a resumable
+    // refresh keeps its own separate, count-based bound (maxRefreshAttempts → REFRESH_ABANDONED).
+    if (latest.isPresent()
+        && "FAILED".equals(latest.get().status())
+        && latest.get().detectedAt() != null
+        && latest
+            .get()
+            .detectedAt()
+            .toLocalDate()
+            .isAfter(today.minusDays(rebuildRetryCooldownDays))) {
+      log.debug(
+          "corporate-action rebuild for {} failed within the {}-day cooldown — not retrying tonight",
+          key.canonical(),
+          rebuildRetryCooldownDays);
+      return java.util.Optional.empty();
+    }
     // Skip BHAVCOPY-only equities (Phase C): the bulk universe is split/bonus-adjusted on read by
-    // EquitySplitBonusAdjuster, not by this purge+Kite-refetch path. Without this gate, projecting
+    // EquitySplitBonusAdjuster, not by this staged Kite-refetch path. Without this gate, projecting
     // bhavcopy 1d candles for the whole ~22k equity universe would fire one Kite fetch per symbol
     // on every sweep.
     if (!candles.hasNonBhavcopyDaily(equity.exchange(), equity.tradingsymbol())) {
@@ -373,8 +406,26 @@ public class CorporateActionJob {
       // change exists to prevent.
       verifyStagedRebuild(equity, "1d");
       verifyStagedRebuild(equity, "1m");
-      candles.swapStaged(exchange, symbol, "1d");
+      // ⚠️ 1m SWAPS FIRST AND 1d LAST, AND THE ORDER IS LOAD-BEARING — do not "tidy" it back into
+      // the 1d-then-1m order the staging above uses.
+      //
+      // The two swaps are separate autocommitted statements (nothing in this chain is
+      // @Transactional, and making a ~1.1M-row DELETE+INSERT pair transactional is exactly the
+      // memory profile that OOM'd this instance 3× — see PURGE_WINDOW_MONTHS). So an ORDINARY
+      // catchable DB error on the second swap — decompression cap, lock or statement timeout, disk
+      // — commits the first and abandons the second.
+      //
+      // Detection reads ONLY the 1d series (the anchor diff above). So if 1d went first and 1m
+      // failed, the cache's 1d would now EQUAL Kite: the next sweep would find no divergence, never
+      // re-detect, and the symbol would sit forever on adjusted 1d + unadjusted 1m + stale caggs —
+      // the self-sealing class this whole PR exists to close, rebuilt in a new place.
+      //
+      // Swapping the detection input LAST inverts that: the same failure leaves 1d unadjusted, so
+      // the divergence is still visible, the next sweep re-detects, and the rebuild redoes both
+      // legs idempotently (a re-stage + re-verify + re-swap over an already-adjusted 1m is a no-op
+      // in value terms).
       candles.swapStaged(exchange, symbol, "1m");
+      candles.swapStaged(exchange, symbol, "1d");
     } finally {
       candles.clearStaging(exchange, symbol);
     }
@@ -432,8 +483,8 @@ public class CorporateActionJob {
 
   /**
    * Resume path (A14): the base was already re-fetched (committed) in a prior remediation that
-   * crashed or errored mid-refresh — redo the CHUNKED cagg refresh ONLY, then RESOLVED. Skips purge
-   * + prefetch entirely. Status is LEFT as it was during the refresh (not downgraded to
+   * crashed or errored mid-refresh — redo the CHUNKED cagg refresh ONLY, then RESOLVED. Skips the
+   * staged re-backfill and the swap entirely. Status is LEFT as it was during the refresh (not downgraded to
    * REBACKFILL_RUNNING) so a hard crash here re-resumes on the next sweep instead of stranding a
    * REBACKFILL_RUNNING row; a soft (catchable) failure re-records the same resumable class, which
    * the next sweep picks up again until the attempt bound is spent.
@@ -532,8 +583,9 @@ public class CorporateActionJob {
    * lambda believes — {@code status} is one overwritten column, so "did this run commit its base?"
    * is only answerable by reading it back. Base committed ⇒ REFRESH_FAILED, which the next sweep
    * resumes (redoing a cagg refresh cannot corrupt anything). Base NOT committed ⇒ plain FAILED,
-   * which the checkpoint deliberately does NOT resume: the purge ran but the re-backfill did not
-   * finish, so a refresh-only retry would materialise aggregates over incomplete base data.
+   * which the checkpoint deliberately does NOT resume: since V054 the run failed at or before the
+   * staged swap, so the base is either untouched or half-swapped — never the completed rebuild a
+   * refresh-only retry assumes, and materialising aggregates over it would bake in that state.
    *
    * <p>Alerts fire on the state CHANGE only. With retries armed, an alert per attempt would page the
    * operator every night for the same symbol; the transitions that matter are the FIRST failure and

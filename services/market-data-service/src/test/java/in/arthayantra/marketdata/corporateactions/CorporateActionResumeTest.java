@@ -66,6 +66,7 @@ class CorporateActionResumeTest {
       new Instrument(
           "NSE", "TCS", 1L, "TCS", "NSE", "EQ", null, null, null, null, null, null, true);
   private static final int MAX_ATTEMPTS = 3;
+  private static final int COOLDOWN_DAYS = 7;
 
   private InstrumentRepository instruments;
   private CandleRepository candles;
@@ -112,6 +113,7 @@ class CorporateActionResumeTest {
             400,
             List.of(),
             MAX_ATTEMPTS,
+            COOLDOWN_DAYS,
             new SimpleMeterRegistry());
   }
 
@@ -197,20 +199,86 @@ class CorporateActionResumeTest {
 
     await()
         .atMost(Duration.ofSeconds(10))
-        .untilAsserted(() -> verify(candles).swapStaged("NSE", "TCS", "1m"));
+        .untilAsserted(() -> verify(candles).swapStaged("NSE", "TCS", "1d"));
 
     // BOTH legs are staged and BOTH are verified before EITHER is swapped — a per-interval
     // verify/swap would let a good 1d swap land and a bad 1m refusal abort, leaving the symbol
     // half-adjusted: a series that looks complete and is silently wrong.
+    //
+    // …and the SWAPS run 1m FIRST, 1d LAST. See theDetectionInputIsSwappedLast below: this is not
+    // cosmetic ordering, it is what stops a half-completed swap from sealing the symbol out of
+    // detection forever.
     InOrder order = inOrder(queryService, candles);
     order.verify(queryService).stageFullRange(eq("NSE"), eq("TCS"), eq("1d"), any(), any());
     order.verify(queryService).stageFullRange(eq("NSE"), eq("TCS"), eq("1m"), any(), any());
     order.verify(candles).stagedCoverage("NSE", "TCS", "1d");
     order.verify(candles).stagedCoverage("NSE", "TCS", "1m");
-    order.verify(candles).swapStaged("NSE", "TCS", "1d");
     order.verify(candles).swapStaged("NSE", "TCS", "1m");
+    order.verify(candles).swapStaged("NSE", "TCS", "1d");
     // the unguarded whole-symbol delete is gone from this path entirely
     verify(candles, never()).purgeSymbol(anyString(), anyString());
+  }
+
+  @Test
+  void theDetectionInputIsSwappedLastSoAPartialSwapStaysDetectable() {
+    // The two swaps are separate autocommitted statements — nothing in the chain is @Transactional
+    // — so an ORDINARY catchable DB error (decompression cap, lock/statement timeout, disk) on the
+    // SECOND swap commits the first and abandons the second. Detection reads only the 1d series, so
+    // if 1d were swapped first the cache's 1d would then EQUAL Kite: no divergence, no re-detection,
+    // and the symbol strands on adjusted 1d + unadjusted 1m forever — the self-sealing class this
+    // PR closes, rebuilt one layer up.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    doThrow(new RuntimeException("max_tuples_decompressed_per_dml_transaction"))
+        .when(candles)
+        .swapStaged("NSE", "TCS", "1d");
+
+    assertThat(job.sweepNow()).containsExactly(id);
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "FAILED"));
+    // 1m committed, 1d did not — which is the RECOVERABLE half. The cached 1d still diverges from
+    // Kite, so the next sweep re-detects and redoes both legs idempotently.
+    verify(candles).swapStaged("NSE", "TCS", "1m");
+    verify(events, never()).updateStatus(id, "BASE_REBUILT");
+  }
+
+  @Test
+  void aFetchThatSilentlyReturnsNothingIsRefusedRatherThanSwappedIn() {
+    // Check 1 of verifyStagedRebuild, which the other refusal tests do not reach: the gateway threw
+    // nothing and returned no rows at all. Swapping an empty staging buffer in would delete the
+    // symbol's live span and refill it with nothing — a purge wearing a rebuild's clothes, i.e. the
+    // exact outcome this PR exists to make impossible.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    when(candles.stagedCoverage("NSE", "TCS", "1m"))
+        .thenReturn(new CandleRepository.StagedCoverage(0, null, null, 0, null));
+
+    assertThat(job.sweepNow()).containsExactly(id);
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "FAILED"));
+    verify(candles, never()).swapStaged(anyString(), anyString(), anyString());
+    verify(candles, never()).purgeSymbol(anyString(), anyString());
+  }
+
+  @Test
+  void aRecentlyFailedRebuildCoolsOffInsteadOfRetryingEveryNight() {
+    // The rebuild path's retry bound. Leaving the cache intact deliberately restores re-detection,
+    // which unbounded would re-fetch ~196 Kite pages per symbol per night against the shared
+    // limiter, forever, for any symbol that can never pass verification.
+    UUID id = UUID.randomUUID();
+    when(events.latestEvent("NSE", "TCS")).thenReturn(Optional.of(row(id, "FAILED", 0)));
+    when(candles.hasNonBhavcopyDaily("NSE", "TCS")).thenReturn(true);
+
+    assertThat(job.sweepNow()).isEmpty();
+
+    // it never even reached the anchor diff, so no Kite page was spent
+    verify(gateway, never()).fetch(any(), anyString(), any(), any());
+    verify(events, never()).insertDetected(
+        anyString(), anyString(), any(), any(), anyInt(), anyInt(), anyString());
   }
 
   @Test
@@ -390,8 +458,9 @@ class CorporateActionResumeTest {
     verify(events, never()).updateStatus(id, "BASE_REBUILT");
     verify(events, never()).updateStatusIf(eq(id), anyString(), eq("REFRESH_FAILED"));
 
-    // the next sweep sees that FAILED row and must leave it alone: refreshing the caggs now would
-    // materialise aggregates over a purged-but-not-refilled base
+    // the next sweep sees that FAILED row and must leave it alone: the run died before its base
+    // was committed, so refreshing the caggs now would materialise aggregates over a base that was
+    // never rebuilt (and, since V054, was also never destroyed — the cooldown then holds it off)
     when(events.latestEvent("NSE", "TCS")).thenReturn(Optional.of(row(id, "FAILED", 0)));
     job.sweepNow();
     verify(candles, never()).refreshDerivedAggregatesForRebuild(any(), any());

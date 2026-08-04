@@ -5,8 +5,16 @@
 -- A re-fetch that threw (rate limit, auth, network, OOM) therefore left the symbol GUTTED, and the
 -- damage self-sealed: the sweep's own `hasNonBhavcopyDaily` pre-filter reads `source <> 'BHAVCOPY'`,
 -- which a purged symbol fails forever once the daily bhavcopy job refills its 1d bars, so the sweep
--- skipped its own victims before it ever reached detection. 45 symbols sat in that state (measured
--- 2026-08-04), each holding only BHAVCOPY 1d bars with zero 1m base rows.
+-- skipped its own victims before it ever reached detection.
+--
+-- ⚠️ NO SYMBOL COUNT IS RECORDED HERE ON PURPOSE, and the reason is worth more than the number.
+-- The affected population was measured three times on 2026-08-04 — 45, then 38, then 0 — under one
+-- definition (latest event FAILED, no non-BHAVCOPY 1d bar, zero 1m bars). All three were correct
+-- when taken: an out-of-band operator restore was refilling these symbols DURING the measurements
+-- (91,405 `source='BACKFILL'` rows landed in a single 40-minute window against exactly this symbol
+-- set). A migration comment is checksum-locked forever, so freezing any one reading of a
+-- concurrently-mutating population would preserve a number that was never stable. The durable fact
+-- is the failure CLASS and its definition; the census belongs in the PR and the ledger.
 --
 -- This table is the staging buffer that lets the order become fetch -> verify -> swap. The whole
 -- re-fetch lands here first; only once it is proven to cover what it is about to overwrite does the
@@ -25,10 +33,17 @@
 -- refill would have no surviving copy of either side.
 --
 -- The PK mirrors the `candles` PK so the swap is a key-for-key anti-join and DELETE/INSERT pair, and
--- so a re-fetched page can be re-staged idempotently (ON CONFLICT DO UPDATE) after a retry. Column
--- types and NULLability mirror `candles` exactly (including `fetched_at`, which the swap stamps
--- rather than copies): a staged row that could not be inserted into `candles` must fail HERE, while
--- the live series is still intact, not halfway through the swap that has already deleted it.
+-- so a re-fetched page can be re-staged idempotently (ON CONFLICT DO UPDATE) after a retry.
+--
+-- ⚠️ The CHECK constraints below are NOT decoration — they are the load-bearing half of "a staged
+-- row that could not be inserted into `candles` must fail HERE, while the live series is still
+-- intact". Mirroring only types and NULLability is NOT enough: `candles` also carries
+-- `candles_interval_check` (V003) and `candles_source_check` (V020, eight allowed values), so
+-- without these an out-of-enum `source` would stage cleanly and then fail at the swap's INSERT —
+-- AFTER that window's DELETE had already committed, which is precisely the half-swapped state the
+-- staging design exists to prevent. They are copied at their V003/V020 values rather than derived,
+-- because a migration cannot follow a constraint that changes later; if `candles_source_check` ever
+-- widens again, widen this alongside it in the same migration.
 CREATE TABLE IF NOT EXISTS marketdata.candle_rebuild_staging (
   exchange      TEXT           NOT NULL,
   tradingsymbol TEXT           NOT NULL,
@@ -41,9 +56,16 @@ CREATE TABLE IF NOT EXISTS marketdata.candle_rebuild_staging (
   volume        BIGINT         NOT NULL,
   oi            BIGINT,
   source        TEXT           NOT NULL,
-  PRIMARY KEY (exchange, tradingsymbol, "interval", bucket)
+  PRIMARY KEY (exchange, tradingsymbol, "interval", bucket),
+  CONSTRAINT candle_rebuild_staging_interval_check
+    CHECK ("interval" IN ('1m', '5m', '15m', '1h', '1d')),
+  CONSTRAINT candle_rebuild_staging_source_check
+    CHECK (source IN ('KITE', 'TICK_AGG', 'MOCK', 'BACKFILL', 'OPENALGO', 'EXPIRYTRACK',
+                      'OPENCHART', 'BHAVCOPY'))
 );
 
--- The marketdata schema is owned by `artha` and V052 established that
--- `ALTER DEFAULT PRIVILEGES FOR ROLE artha IN SCHEMA marketdata GRANT SELECT ... TO ay_backtest`
--- already covers newly created tables, so no explicit GRANT belongs here.
+-- No explicit GRANT belongs here: the marketdata schema is owned by `ay_marketdata` (admin V001)
+-- and an `ALTER DEFAULT PRIVILEGES ... GRANT SELECT ... TO ay_backtest` already covers newly
+-- created tables. (V052's tail is the authority on this; it also records that V040/V044/V047
+-- attribute the schema to `artha`, and that that attribution is wrong. Stating it correctly here
+-- rather than repeating the error — those files are applied and checksum-locked, this one is not.)

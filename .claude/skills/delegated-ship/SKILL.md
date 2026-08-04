@@ -116,8 +116,11 @@ test: can THIS diff touch the failing spec's surface? (Read the spec's flow if
 unsure — the take-flow uses /signals/{id}/taken, and the flake fails PRE-take.)
 Signals/WS-adjacent diff → rerun-to-green; unreachable diff → admin-merge once every
 other gate is green. A <60s e2e death = infra (read the log; one was a runner
-Maven-fetch), not specs. ci-optimizer/ci-margin are SEPARATE path-filtered workflows —
-absence from `gh pr checks` ≠ skipped; CI's ruff can be newer than local.
+Maven-fetch), not specs. ci-optimizer/ci-margin are NO LONGER path-filtered (#1252,
+2026-08-03): `optimizer-lint-test` + `margin-lint-test` are REQUIRED contexts and DO
+appear in `gh pr checks` — read the rollup, not `gh run list` (corrected 2026-08-04; the
+old "absence ≠ skipped" advice sent check-hunts to the wrong command). CI's ruff can be
+newer than local.
 
 Merge: `gh pr merge --squash --admin`, then **verify `git log origin/main -1` equals
 the PR's mergeCommit BEFORE building** — `merge && pull` races the remote (a stale

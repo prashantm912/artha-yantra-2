@@ -984,7 +984,7 @@ days. Read the API.**
 |---|---|---|
 | **#1296** ScalperRisk §0B stop-basis coupling | review RESOLVED; **Golden 9/9 + Parity 9/9 + OptionsPremiumGolden 2/2 re-run by the main loop itself** | HOLD — owner merge call only |
 | **#1297** CA stage→verify→swap | round 3 fixes pushed (M-A observability, M-B cooldown/recovery contradiction) | **round 4 review** |
-| **#1299** `symbol_lineage` | REQUEST_CHANGES — 3 HIGH open | fixes, then re-review |
+| **#1299** `symbol_lineage` | all 4 must-fix items CLOSED; **renumbered to V055**; headline corrected to **1809 / 284, +7 entering, 0 leaving** (`CNL` refuted out); 1261 tests green, **14 red-proofs** | **re-review round** |
 | **#1302** required-contexts doc | mine, docs-only | rebase + merge |
 | **#1303** futures-roller refresh window | review in flight at session close | collect verdict |
 | **#1283** swing data-coverage gate | rework pushed | review round |
@@ -994,9 +994,10 @@ days. Read the API.**
 `origin/main` tops at **V053**. **#1297 claims V054** (`V054__candle_rebuild_staging.sql`) and
 **#1299 also claims V054** (`V054__symbol_lineage.sql`). Same lineage, same version, different
 filenames ⇒ **no git conflict**, both merge clean, and flyway-init dies only at DEPLOY where it
-fails validation and blocks *every* subsequent migration. Resolution: **#1297 keeps V054, #1299
-renumbers to V055**, next free is **V056** — re-check at commit time against `origin/main` AND
-every open PR, because the free version moves.
+fails validation and blocks *every* subsequent migration. **RESOLVED 2026-08-04: #1297 keeps V054,
+#1299 renumbered to V055** (re-checked across every remote branch at push time). Next free is
+**V056** — re-check at commit time against `origin/main` AND every open PR, because the free
+version moves. #1303 and #1305 add no migration.
 
 #### Next-session queue — NOT STARTED, documented only
 

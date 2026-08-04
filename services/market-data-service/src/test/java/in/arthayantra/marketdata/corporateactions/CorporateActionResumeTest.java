@@ -3,7 +3,6 @@ package in.arthayantra.marketdata.corporateactions;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
@@ -11,6 +10,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -44,6 +44,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -167,11 +168,98 @@ class CorporateActionResumeTest {
               null));
     }
     when(gateway.fetch(any(), eq("1d"), any(), any())).thenReturn(kiteBars);
+    // a HEALTHY staged coverage by default (V054): non-empty, nothing left unreplaced, and reaching
+    // the cached series' end — so a test that wants the rebuild to proceed does not have to say so,
+    // and a test about a REFUSAL has to state which of the three properties it breaks
+    when(candles.stagedCoverage(eq("NSE"), eq("TCS"), anyString()))
+        .thenReturn(
+            new CandleRepository.StagedCoverage(
+                500,
+                OffsetDateTime.ofInstant(NOW, IST).minusYears(5),
+                OffsetDateTime.ofInstant(NOW, IST),
+                0,
+                OffsetDateTime.ofInstant(NOW, IST)));
     UUID id = UUID.randomUUID();
     when(events.insertDetected(
             anyString(), anyString(), any(), any(), anyInt(), anyInt(), anyString()))
         .thenReturn(id);
     return id;
+  }
+
+  @Test
+  void theReBackfillFetchesAndVerifiesBeforeItDeletesAnything() {
+    // The ordering fix itself (V054). The old body ran purgeSymbol FIRST and only then re-fetched,
+    // so every failure mode of a multi-hour ~12-year Kite fetch landed after the destruction.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+
+    assertThat(job.sweepNow()).containsExactly(id);
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> verify(candles).swapStaged("NSE", "TCS", "1m"));
+
+    // BOTH legs are staged and BOTH are verified before EITHER is swapped — a per-interval
+    // verify/swap would let a good 1d swap land and a bad 1m refusal abort, leaving the symbol
+    // half-adjusted: a series that looks complete and is silently wrong.
+    InOrder order = inOrder(queryService, candles);
+    order.verify(queryService).stageFullRange(eq("NSE"), eq("TCS"), eq("1d"), any(), any());
+    order.verify(queryService).stageFullRange(eq("NSE"), eq("TCS"), eq("1m"), any(), any());
+    order.verify(candles).stagedCoverage("NSE", "TCS", "1d");
+    order.verify(candles).stagedCoverage("NSE", "TCS", "1m");
+    order.verify(candles).swapStaged("NSE", "TCS", "1d");
+    order.verify(candles).swapStaged("NSE", "TCS", "1m");
+    // the unguarded whole-symbol delete is gone from this path entirely
+    verify(candles, never()).purgeSymbol(anyString(), anyString());
+  }
+
+  @Test
+  void aReBackfillThatDiesPartWayDeletesNothing() {
+    // The discriminating case: the fetch fails on its SECOND leg, i.e. past the point the old order
+    // had already purged the symbol. Nothing may have been deleted.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    doThrow(new RuntimeException("kite 1m re-backfill died"))
+        .when(queryService)
+        .stageFullRange(anyString(), anyString(), eq("1m"), any(), any());
+
+    assertThat(job.sweepNow()).containsExactly(id);
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "FAILED"));
+    verify(candles, never()).purgeSymbol(anyString(), anyString());
+    verify(candles, never()).swapStaged(anyString(), anyString(), anyString());
+    // the 1d leg staged fine, but a partial fetch must never be swapped in on the strength of it
+    verify(candles, never()).swapStaged("NSE", "TCS", "1d");
+    verify(events, never()).updateStatus(id, "BASE_REBUILT");
+    // staging is emptied on the way out so the next attempt cannot inherit a partial fetch
+    verify(candles, atLeast(2)).clearStaging("NSE", "TCS");
+  }
+
+  @Test
+  void aStagedSeriesThatCannotReplaceWhatItOverwritesIsRefused() {
+    // The silent-truncation case: the fetch THREW nothing, it just came back short. Only the
+    // coverage check can catch this, and a swap that accepts it is the original defect with extra
+    // steps — 4 cached bars would be deleted with no staged row to replace them.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    when(candles.stagedCoverage("NSE", "TCS", "1m"))
+        .thenReturn(
+            new CandleRepository.StagedCoverage(
+                500,
+                OffsetDateTime.ofInstant(NOW, IST).minusYears(5),
+                OffsetDateTime.ofInstant(NOW, IST),
+                4,
+                OffsetDateTime.ofInstant(NOW, IST)));
+
+    assertThat(job.sweepNow()).containsExactly(id);
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "FAILED"));
+    verify(candles, never()).swapStaged(anyString(), anyString(), anyString());
+    verify(candles, never()).purgeSymbol(anyString(), anyString());
   }
 
   @Test
@@ -203,9 +291,12 @@ class CorporateActionResumeTest {
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(() -> verify(events).updateStatusIf(id, "REFRESH_FAILED", "RESOLVED"));
     verify(candles).refreshDerivedAggregatesForRebuild(any(), any());
-    // refresh-ONLY: the ~12-year purge + re-backfill are exactly what a resume must not redo
+    // refresh-ONLY: the ~12-year re-backfill and the swap that follows it are exactly what a resume
+    // must not redo
     verify(candles, never()).purgeSymbol(anyString(), anyString());
     verify(queryService, never()).prefetch(anyString(), anyString(), anyString(), any(), any());
+    verify(queryService, never()).stageFullRange(anyString(), anyString(), anyString(), any(), any());
+    verify(candles, never()).swapStaged(anyString(), anyString(), anyString());
   }
 
   @Test
@@ -286,9 +377,11 @@ class CorporateActionResumeTest {
     when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
     doThrow(new RuntimeException("kite 1m re-backfill died"))
         .when(queryService)
-        .prefetch(anyString(), anyString(), eq("1m"), any(), any(), anyBoolean());
+        .stageFullRange(anyString(), anyString(), eq("1m"), any(), any());
 
-    // detect → REBACKFILL_RUNNING → purge → 1d prefetch → 1m prefetch THROWS: base is half-rebuilt
+    // detect → REBACKFILL_RUNNING → stage 1d → stage 1m THROWS: no base was committed. (Since V054
+    // no base was DESTROYED either — that property is pinned by aReBackfillThatDiesPartWayDeletesNothing;
+    // what this test still owns is that the FAILED row is not treated as refresh-resumable.)
     assertThat(job.sweepNow()).containsExactly(id);
 
     await()

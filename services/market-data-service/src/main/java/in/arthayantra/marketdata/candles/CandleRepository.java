@@ -521,8 +521,15 @@ public class CandleRepository {
   }
 
   /**
-   * Purges every cached bar of one symbol — ONLY the Phase-16A corporate-action remediation may
-   * call this (amendment A8, the single sanctioned exception to closed-bars-immutable).
+   * Purges every cached bar of one symbol, every interval.
+   *
+   * <p>This WAS the Phase-16A corporate-action remediation's first step (amendment A8, the single
+   * sanctioned exception to closed-bars-immutable). It is not any more: the remediation destroyed
+   * ~12 years of history before proving it could re-fetch a replacement, so it now stages the
+   * re-fetch and swaps it in through {@link #swapStaged}, whose delete is scoped to the verified
+   * staged span. Nothing on the production path calls this today — it survives as a test fixture
+   * helper (seeding a symbol from empty), and any new production caller would be reintroducing
+   * exactly the unguarded destruction that V054 exists to prevent.
    */
   public int purgeSymbol(String exchange, String tradingsymbol) {
     // bucket span for this symbol; +1 day on the high side so the DELETE's exclusive upper bound
@@ -557,6 +564,188 @@ public class CandleRepository {
               Timestamp.from(w.to().toInstant()));
     }
     return deleted;
+  }
+
+  private static final String STAGE_INSERT =
+      """
+      INSERT INTO candle_rebuild_staging
+        (exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi, source)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO UPDATE SET
+        open = EXCLUDED.open,
+        high = EXCLUDED.high,
+        low = EXCLUDED.low,
+        close = EXCLUDED.close,
+        volume = EXCLUDED.volume,
+        oi = EXCLUDED.oi,
+        source = EXCLUDED.source
+      """;
+
+  /**
+   * Batched insert into the corporate-action rebuild STAGING buffer (V054). Plain replace-on-conflict
+   * — the staged rows are one authoritative Kite re-fetch, so a re-fetched overlapping page simply
+   * supersedes itself; there is no provenance rule to preserve because nothing here is live data yet.
+   */
+  public void stageAll(List<Candle> bars) {
+    jdbc.batchUpdate(
+        STAGE_INSERT,
+        bars,
+        500,
+        (ps, bar) -> {
+          ps.setString(1, bar.exchange());
+          ps.setString(2, bar.tradingsymbol());
+          ps.setString(3, bar.interval());
+          ps.setTimestamp(4, Timestamp.from(bar.bucket().toInstant()));
+          ps.setBigDecimal(5, bar.open());
+          ps.setBigDecimal(6, bar.high());
+          ps.setBigDecimal(7, bar.low());
+          ps.setBigDecimal(8, bar.close());
+          ps.setLong(9, bar.volume());
+          ps.setObject(10, bar.oi());
+          ps.setString(11, bar.source());
+        });
+  }
+
+  /** Empties one symbol's rebuild staging buffer; run at the start AND the end of every attempt. */
+  public int clearStaging(String exchange, String tradingsymbol) {
+    return jdbc.update(
+        "DELETE FROM candle_rebuild_staging WHERE exchange = ? AND tradingsymbol = ?",
+        exchange,
+        tradingsymbol);
+  }
+
+  /**
+   * What a staged re-fetch covers, measured against the live series it is about to replace — the
+   * evidence {@code CorporateActionJob} judges BEFORE it deletes anything.
+   *
+   * @param stagedBars staged row count for this interval; {@code 0} means the fetch returned nothing
+   * @param stagedFrom oldest staged bucket, {@code null} iff {@code stagedBars == 0}
+   * @param stagedTo newest staged bucket, {@code null} iff {@code stagedBars == 0}
+   * @param cachedBarsNotStaged live buckets INSIDE {@code [stagedFrom, stagedTo]} that the staged
+   *     series does not carry — every one of these would be deleted with no replacement
+   * @param cachedTo newest live bucket, {@code null} iff the symbol has nothing cached
+   */
+  public record StagedCoverage(
+      long stagedBars,
+      OffsetDateTime stagedFrom,
+      OffsetDateTime stagedTo,
+      long cachedBarsNotStaged,
+      OffsetDateTime cachedTo) {}
+
+  /**
+   * Measures {@link StagedCoverage} for one (symbol, interval).
+   *
+   * <p>Every aggregate here is a bare-column {@code min}/{@code max} with no {@code ORDER BY} /
+   * {@code DISTINCT} / {@code LIMIT} over a computed expression — deliberately the shape that is
+   * SAFE on a compressed hypertable under TimescaleDB 2.18.2, whose sorted-merge planner assertion
+   * took the OI chain pages down on 2026-07-20.
+   */
+  public StagedCoverage stagedCoverage(String exchange, String tradingsymbol, String interval) {
+    return jdbc.query(
+        """
+        SELECT s.n AS staged_n, s.lo AS staged_lo, s.hi AS staged_hi, c.hi AS cached_hi,
+               (SELECT count(*) FROM candles k
+                 WHERE k.exchange = ? AND k.tradingsymbol = ? AND k."interval" = ?
+                   AND k.bucket >= s.lo AND k.bucket <= s.hi
+                   AND NOT EXISTS (SELECT 1 FROM candle_rebuild_staging g
+                                    WHERE g.exchange = k.exchange
+                                      AND g.tradingsymbol = k.tradingsymbol
+                                      AND g."interval" = k."interval"
+                                      AND g.bucket = k.bucket)) AS not_staged
+        FROM (SELECT count(*) AS n, min(bucket) AS lo, max(bucket) AS hi
+                FROM candle_rebuild_staging
+               WHERE exchange = ? AND tradingsymbol = ? AND "interval" = ?) s,
+             (SELECT max(bucket) AS hi FROM candles
+               WHERE exchange = ? AND tradingsymbol = ? AND "interval" = ?) c
+        """,
+        rs -> {
+          if (!rs.next()) {
+            return new StagedCoverage(0, null, null, 0, null);
+          }
+          return new StagedCoverage(
+              rs.getLong("staged_n"),
+              rs.getObject("staged_lo", OffsetDateTime.class),
+              rs.getObject("staged_hi", OffsetDateTime.class),
+              rs.getLong("not_staged"),
+              rs.getObject("cached_hi", OffsetDateTime.class));
+        },
+        exchange, tradingsymbol, interval,
+        exchange, tradingsymbol, interval,
+        exchange, tradingsymbol, interval);
+  }
+
+  /**
+   * The SWAP: replaces one (symbol, interval)'s live bars over EXACTLY the staged span with the
+   * staged ones. Returns the rows inserted.
+   *
+   * <p>Scoped to the staged span rather than the whole symbol on purpose — the invariant this whole
+   * change buys is "every bucket deleted has a verified replacement", and outside the staged span
+   * there is none. That is also strictly less destructive than the {@link #purgeSymbol} it replaces
+   * on this path, which deleted bars older than Kite's serving depth that nothing could ever restore.
+   *
+   * <p>Windowed at {@link #PURGE_WINDOW_MONTHS} for the same reason the purge is: {@code candles} is
+   * segmentby {@code (exchange, tradingsymbol, interval)}, so an unwindowed DELETE over a fully
+   * compressed liquid equity decompresses the whole symbol in one DML and blows
+   * {@code max_tuples_decompressed_per_dml_transaction}. Adding {@code "interval" = ?} to the
+   * predicate narrows the touched segments FURTHER than the all-interval purge did, so this
+   * decompresses strictly less per window than the code it replaces. No continuous aggregate is
+   * touched here: the caller still refreshes them afterwards through the existing chunked
+   * {@link #refreshDerivedAggregatesForRebuild}, at its unchanged
+   * {@link #MAX_REFRESH_WINDOW_DAYS}-day per-CALL bound.
+   */
+  public int swapStaged(String exchange, String tradingsymbol, String interval) {
+    Window bounds =
+        jdbc.query(
+            "SELECT min(bucket) AS lo, max(bucket) AS hi FROM candle_rebuild_staging"
+                + " WHERE exchange = ? AND tradingsymbol = ? AND \"interval\" = ?",
+            rs -> {
+              if (!rs.next()) {
+                return null;
+              }
+              OffsetDateTime lo = rs.getObject("lo", OffsetDateTime.class);
+              OffsetDateTime hi = rs.getObject("hi", OffsetDateTime.class);
+              return lo == null ? null : new Window(lo, hi.plusDays(1));
+            },
+            exchange,
+            tradingsymbol,
+            interval);
+    if (bounds == null) {
+      return 0; // nothing staged for this interval
+    }
+    int inserted = 0;
+    for (Window w : purgeWindows(bounds.from(), bounds.to(), Period.ofMonths(PURGE_WINDOW_MONTHS))) {
+      Timestamp from = Timestamp.from(w.from().toInstant());
+      Timestamp to = Timestamp.from(w.to().toInstant());
+      jdbc.update(
+          "DELETE FROM candles WHERE exchange = ? AND tradingsymbol = ? AND \"interval\" = ?"
+              + " AND bucket >= ? AND bucket < ?",
+          exchange, tradingsymbol, interval, from, to);
+      inserted +=
+          jdbc.update(
+              """
+              INSERT INTO candles
+                (exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi,
+                 source, fetched_at)
+              SELECT exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi,
+                     source, now()
+              FROM candle_rebuild_staging
+              WHERE exchange = ? AND tradingsymbol = ? AND "interval" = ?
+                AND bucket >= ? AND bucket < ?
+              ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO UPDATE SET
+                open = EXCLUDED.open,
+                high = EXCLUDED.high,
+                low = EXCLUDED.low,
+                close = EXCLUDED.close,
+                volume = EXCLUDED.volume,
+                oi = EXCLUDED.oi,
+                source = EXCLUDED.source,
+                fetched_at = now()
+              """,
+              exchange, tradingsymbol, interval, from, to);
+    }
+    // fetched_at is stamped now() rather than copied: the Stage-D dataHash reads it to flag
+    // pre-event backtest runs as not-like-for-like, which is exactly what a rebuild must trigger.
+    return inserted;
   }
 
   /** {@code candles} hypertable size in bytes (the {@code ay_hypertable_bytes} gauge). */

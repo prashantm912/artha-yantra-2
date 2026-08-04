@@ -37,10 +37,15 @@ import org.springframework.stereotype.Service;
 /**
  * The 16:30 IST corporate-action anchor-close integrity job (B-17 / amendment A8): per active
  * equity, ONE ranged 1d fetch through the rate-limited gateway, ~8 sparse anchor closes diffed
- * against the cache; uniform-ratio divergence on ≥ 2 anchors ⇒ DETECTED → purge → full
- * rate-limited re-backfill → cagg refresh (rewritten rows carry fresh {@code fetched_at}, so the
- * Stage-D dataHash flags pre-event runs not-like-for-like) → RESOLVED. Single-anchor noise only
- * counts {@code ay_corporate_action_anchor_noise_total}. Kite-diff is the SOLE detection input.
+ * against the cache; uniform-ratio divergence on ≥ 2 anchors ⇒ DETECTED → full rate-limited
+ * re-backfill into STAGING → verify → swap → cagg refresh (swapped-in rows carry fresh
+ * {@code fetched_at}, so the Stage-D dataHash flags pre-event runs not-like-for-like) → RESOLVED.
+ * Single-anchor noise only counts {@code ay_corporate_action_anchor_noise_total}. Kite-diff is the
+ * SOLE detection input.
+ *
+ * <p>The re-backfill runs BEFORE any deletion (V054, see {@link #rebuildBaseByStagedSwap}) — it used
+ * to run after a full purge, so a failed fetch left the symbol gutted with nothing that would ever
+ * retry it.
  *
  * <p>Kill switch (A14, 2026-07-10): {@code artha.corporate-actions.enabled=false} un-registers this
  * bean entirely (default-armed via {@code matchIfMissing}) — the remediation OOM-crashed live
@@ -137,8 +142,10 @@ public class CorporateActionJob {
       ObjectMapper objectMapper,
       @Value("${artha.corporate-actions.tolerance:0.005}") double tolerance,
       @Value("${artha.corporate-actions.uniformity-epsilon:0.01}") double uniformityEpsilon,
-      // defaults exceed Kite's serving depth (~2015 for 1m) so the FULL purge is always
-      // matched by a full re-backfill — anything deeper cannot be re-fetched anyway
+      // defaults exceed Kite's serving depth (~2015 for 1m) so the staged re-backfill spans the
+      // whole re-fetchable history — anything deeper cannot be re-fetched anyway, and since V054
+      // the swap deletes only the span it actually staged, such bars are now LEFT ALONE rather
+      // than purged with no replacement
       @Value("${artha.corporate-actions.rebackfill-days-1m:4400}") int rebackfillDays1m,
       @Value("${artha.corporate-actions.rebackfill-days-1d:7300}") int rebackfillDays1d,
       @Value("${artha.corporate-actions.symbols:}") List<String> symbolOverride,
@@ -307,20 +314,8 @@ public class CorporateActionJob {
         () -> {
           try {
             events.updateStatus(id, "REBACKFILL_RUNNING");
-            // purge (compressed-safe WINDOWED delete) → full re-backfill THROUGH the rate-limited
-            // gateway (prefetch = ensureCoverage = limiter path); rewritten rows carry fresh
-            // fetched_at (the dataHash bump). The 1m prefetch DEFERS its cagg refresh
-            // (refreshAggregates=false) so we can checkpoint BASE_REBUILT once the base commits but
-            // BEFORE the (chunked) refresh — a hard crash mid-refresh then RESUMES on the next sweep
-            // instead of re-purging ~12 years for nothing (A14, 2026-07-10 3× live-Postgres OOM).
-            candles.purgeSymbol(equity.exchange(), equity.tradingsymbol());
             OffsetDateTime now = OffsetDateTime.now(clock);
-            queryService.prefetch(
-                equity.exchange(), equity.tradingsymbol(), "1d",
-                today.minusDays(rebackfillDays1d).atStartOfDay().atOffset(Ist.OFFSET), now);
-            queryService.prefetch(
-                equity.exchange(), equity.tradingsymbol(), "1m",
-                today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now, false);
+            rebuildBaseByStagedSwap(equity, today, now);
             events.updateStatus(id, "BASE_REBUILT");
             refreshRebuiltAggregates(id, today, now);
             recordResolved(id, "BASE_REBUILT", equity, " cache rebuilt");
@@ -331,6 +326,108 @@ public class CorporateActionJob {
             inFlight.remove(id);
           }
         });
+  }
+
+  /**
+   * FETCH → VERIFY → SWAP: the base rebuild, ordered so that a failed re-fetch leaves the existing
+   * series INTACT.
+   *
+   * <p>It used to be purge → re-fetch, and it had to be, because the re-fetch went through the
+   * GAP-AWARE {@code prefetch}/{@code ensureCoverage}: that only fetches buckets the cache misses,
+   * so against an intact series it fetches nothing — the purge was what manufactured the gaps. The
+   * cost of that bargain was that every failure mode of a multi-hour, ~12-year, rate-limited Kite
+   * fetch (rate limit, auth, network, OOM) landed AFTER the destruction, and nothing ever re-fired:
+   * a purged symbol fails the sweep's own {@code hasNonBhavcopyDaily} pre-filter forever once the
+   * daily bhavcopy job refills its 1d bars, so the sweep skipped its own victims before reaching
+   * detection. 45 symbols were measured in that state on 2026-08-04, each holding only BHAVCOPY 1d
+   * bars and zero 1m base rows.
+   *
+   * <p>{@code stageFullRange} ignores present coverage instead, so no purge is needed to force the
+   * re-fetch, and the whole fetch lands in the V054 staging buffer. Only once
+   * {@link #verifyStagedRebuild} proves the staged series covers what it is about to overwrite does
+   * {@code swapStaged} delete and refill — a delete scoped to exactly the staged span, so every
+   * bucket removed provably has a replacement row waiting.
+   *
+   * <p>Staging is cleared on the way IN as well as out: an attempt must never swap in rows a
+   * previous failed attempt left behind, and the {@code finally} bounds the buffer's disk footprint.
+   *
+   * <p>The 1m stage still defers the cagg refresh to the caller (it writes no aggregates at all
+   * now), so the {@code BASE_REBUILT} checkpoint still lands after the base commits and BEFORE the
+   * chunked refresh — a hard crash mid-refresh RESUMES on the next sweep instead of redoing ~12
+   * years for nothing (A14, 2026-07-10 3× live-Postgres OOM).
+   */
+  private void rebuildBaseByStagedSwap(Instrument equity, LocalDate today, OffsetDateTime now) {
+    String exchange = equity.exchange();
+    String symbol = equity.tradingsymbol();
+    try {
+      candles.clearStaging(exchange, symbol);
+      queryService.stageFullRange(
+          exchange, symbol, "1d",
+          today.minusDays(rebackfillDays1d).atStartOfDay().atOffset(Ist.OFFSET), now);
+      queryService.stageFullRange(
+          exchange, symbol, "1m",
+          today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now);
+      // BOTH intervals are verified BEFORE EITHER is swapped: verifying and swapping per-interval
+      // would let a good 1d swap land and a bad 1m refusal abort, leaving the symbol half-adjusted
+      // — a series that looks complete and is silently wrong, which is worse than the gutting this
+      // change exists to prevent.
+      verifyStagedRebuild(equity, "1d");
+      verifyStagedRebuild(equity, "1m");
+      candles.swapStaged(exchange, symbol, "1d");
+      candles.swapStaged(exchange, symbol, "1m");
+    } finally {
+      candles.clearStaging(exchange, symbol);
+    }
+  }
+
+  /**
+   * Refuses a staged series that is not a safe replacement, BEFORE anything is deleted. Throwing
+   * here lands the event in {@code FAILED} exactly as any other pre-base-commit failure does — and
+   * because the cache is now untouched, it still diverges from Kite, so the NEXT sweep re-detects
+   * the symbol and tries again. That natural retry is the property the old order destroyed.
+   *
+   * <p>Three checks, no tolerances — a swap that accepts a truncated fetch is the original defect
+   * with extra steps:
+   *
+   * <ul>
+   *   <li>NON-EMPTY. Guards a fetch that returned nothing without throwing; swapping it in would be
+   *       a purge wearing a rebuild's clothes.
+   *   <li>NO UNREPLACED BUCKET inside the staged span. This is the invariant that makes the swap
+   *       safe at all: every live bucket the delete will remove has a staged row to replace it.
+   *       Catches an interior hole and a mid-range truncation.
+   *   <li>REACHES AT LEAST AS FAR FORWARD as the live series. {@code GapDetector} pages
+   *       oldest-first, so a fetch that dies partway is truncated at the RECENT end — where the
+   *       staged span simply stops short and the previous check, which only judges inside that
+   *       span, would not see it.
+   * </ul>
+   */
+  private void verifyStagedRebuild(Instrument equity, String interval) {
+    CandleRepository.StagedCoverage staged =
+        candles.stagedCoverage(equity.exchange(), equity.tradingsymbol(), interval);
+    String key = equity.exchange() + ":" + equity.tradingsymbol() + " " + interval;
+    if (staged.stagedBars() == 0) {
+      throw new IllegalStateException("staged rebuild for " + key + " fetched no bars");
+    }
+    if (staged.cachedBarsNotStaged() > 0) {
+      throw new IllegalStateException(
+          "staged rebuild for "
+              + key
+              + " would delete "
+              + staged.cachedBarsNotStaged()
+              + " cached bar(s) it cannot replace");
+    }
+    if (staged.cachedTo() != null && staged.stagedTo().isBefore(staged.cachedTo())) {
+      throw new IllegalStateException(
+          "staged rebuild for "
+              + key
+              + " stops at "
+              + staged.stagedTo()
+              + ", short of the cached series at "
+              + staged.cachedTo());
+    }
+    log.info(
+        "staged rebuild for {} verified: {} bar(s) covering [{} .. {}]",
+        key, staged.stagedBars(), staged.stagedFrom(), staged.stagedTo());
   }
 
   /**

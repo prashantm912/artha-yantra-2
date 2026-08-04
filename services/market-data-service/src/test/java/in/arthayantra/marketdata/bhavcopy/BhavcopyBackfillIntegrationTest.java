@@ -10,6 +10,7 @@ import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.candles.EodCorporateActionRepository;
 import in.arthayantra.marketdata.candles.EquitySplitBonusAdjuster;
 import in.arthayantra.marketdata.dividends.DividendRepository;
+import in.arthayantra.marketdata.lineage.SymbolRenameEventRepository;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher;
 import in.arthayantra.marketdata.nse.NseCorporateActionFetcher;
 import in.arthayantra.marketdata.nse.NseEodBhavcopyRepository;
@@ -61,6 +62,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired BseEodBhavcopyRepository bseRepo;
   @Autowired EodCorporateActionRepository caRepo;
   @Autowired DividendRepository dividendRepo;
+  @Autowired SymbolRenameEventRepository renameRepo;
   @Autowired EquitySplitBonusAdjuster adjuster;
   @Autowired in.arthayantra.marketdata.ingest.IngestRunLedger ledger;
   @Autowired JdbcTemplate jdbc;
@@ -73,7 +75,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             nseStub(), nseRepo, bseStub(), bseRepo, caStub(), bseCaStub(), caRepo, dividendRepo,
-            candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+            renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     // A Kite-owned 1d bar must survive the bhavcopy projection (DO NOTHING; source not in PK).
     candles.upsertAuthoritativeAll(
@@ -155,7 +157,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             flaky, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo,
-            candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+            renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     // Run 1: trd2 missed; the watermark must NOT advance past it.
     svc.runNse();
@@ -180,7 +182,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo,
-            dividendRepo, candles, CLOCK, published::add, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
+            dividendRepo, renameRepo, candles, CLOCK, published::add, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
             420);
 
     svc.runIfFree(); // the scheduler/startup entry — submits runLocked to the service's executor
@@ -205,7 +207,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo,
-            dividendRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
+            dividendRepo, renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
             420);
 
     svc.runIfFree(); // scheduler/startup entry — submits runLocked to the service's executor
@@ -258,7 +260,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             full, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo,
-            candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+            renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     BhavcopyBackfillService.RefetchResult result = svc.refetchDate(day);
 
@@ -294,7 +296,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             emptyNse(), nseRepo, emptyBse(), bseRepo, nseActions, bseActions, caRepo,
-            dividendRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
+            dividendRepo, renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
             420);
 
     assertThat(svc.runRatios()).isEqualTo(2); // only the split + bonus ratio writes are counted
@@ -346,6 +348,83 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     assertThat(
             jdbc.queryForObject(
                 "SELECT count(*) FROM candles WHERE tradingsymbol LIKE 'DIVIT%'", Long.class))
+        .isZero();
+  }
+
+  /**
+   * N2 / #1285: a "Change in Name" corporate action used to fall through the non-price-adjustment
+   * {@code continue} and vanish — not logged, not counted, not stored — even though it arrives WITH
+   * its ISIN attached and is the best rename signal available. It must now land in {@code
+   * symbol_rename_events} with the from/to names split out, while still writing NO ratio, NO
+   * dividend and NO candle. The bare-subject variant proves the row is kept even when the feed does
+   * not spell the names (the ex-date + ISIN are the useful part), and the "Change of Name … Face
+   * Value Split" variant pins the KNOWN precedence hole: the split parser claims it first, so no
+   * rename event is recorded for it.
+   */
+  @Test
+  @Order(7)
+  void changeInNameIsCapturedInsteadOfDiscarded() {
+    jdbc.update("DELETE FROM symbol_rename_events WHERE symbol LIKE 'RENAM%'");
+    NseCorporateActionFetcher nseActions =
+        (from, to) ->
+            List.of(
+                new NseCorporateActionFetcher.CaRecord(
+                    "RENAMFULL",
+                    "INERENAM0001",
+                    D2,
+                    "Change In Name From Gujarat Gas Limited To Gujarat Energy Limited"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "RENAMBARE", "INERENAM0002", D2, "Change in Name"),
+                new NseCorporateActionFetcher.CaRecord(
+                    "RENAMSPLIT",
+                    "INERENAM0003",
+                    D2,
+                    "Change of Name & Face Value Split From Rs 10/- To Rs 2/-"));
+    BhavcopyBackfillService svc =
+        new BhavcopyBackfillService(
+            emptyNse(), nseRepo, emptyBse(), bseRepo, nseActions, emptyBseCa(), caRepo,
+            dividendRepo, renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10,
+            90, 7, 420);
+
+    assertThat(svc.runRatios()).isEqualTo(1); // only RENAMSPLIT's face-value split writes a ratio
+    assertThat(svc.runRatios()).isEqualTo(1); // replay is idempotent for the rename side table too
+
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT isin, from_name, to_name, subject, source FROM symbol_rename_events"
+                    + " WHERE exchange = 'NSE' AND symbol = 'RENAMFULL' AND ex_date = ?",
+                D2))
+        .containsEntry("isin", "INERENAM0001")
+        .containsEntry("from_name", "Gujarat Gas Limited")
+        .containsEntry("to_name", "Gujarat Energy Limited")
+        .containsEntry("source", "NSE");
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT isin, from_name, to_name FROM symbol_rename_events"
+                    + " WHERE exchange = 'NSE' AND symbol = 'RENAMBARE' AND ex_date = ?",
+                D2))
+        .containsEntry("isin", "INERENAM0002")
+        .containsEntry("from_name", null)
+        .containsEntry("to_name", null);
+    // Precedence hole, asserted so it stays visible: the split parser wins, so no rename row.
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM symbol_rename_events WHERE symbol = 'RENAMSPLIT'",
+                Long.class))
+        .isZero();
+
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM symbol_rename_events WHERE symbol LIKE 'RENAM%'", Long.class))
+        .isEqualTo(2L);
+    assertThat(caRepo.ratiosFor("NSE", "RENAMFULL")).isEmpty();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM dividends WHERE tradingsymbol LIKE 'RENAM%'", Long.class))
+        .isZero();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM candles WHERE tradingsymbol LIKE 'RENAM%'", Long.class))
         .isZero();
   }
 

@@ -180,7 +180,8 @@ class CorporateActionResumeTest {
                 OffsetDateTime.ofInstant(NOW, IST).minusYears(5),
                 OffsetDateTime.ofInstant(NOW, IST),
                 0,
-                OffsetDateTime.ofInstant(NOW, IST)));
+                OffsetDateTime.ofInstant(NOW, IST),
+                0));
     UUID id = UUID.randomUUID();
     when(events.insertDetected(
             anyString(), anyString(), any(), any(), anyInt(), anyInt(), anyString()))
@@ -245,6 +246,67 @@ class CorporateActionResumeTest {
   }
 
   @Test
+  void aPartialSwapFailureIsHeldByTheCooldownNotRetriedNextSweep() {
+    // The CONSEQUENCE of the swap-order fix, executed rather than argued — and it is NOT the
+    // consequence the ordering rationale originally claimed.
+    //
+    // theDetectionInputIsSwappedLast... proves the mechanism (1m committed, 1d not), which was then
+    // reasoned forward to "so the next sweep re-detects". Traced end-to-end that is FALSE: the run
+    // records FAILED with detected_at = today, and the rebuild cooldown then suppresses the very
+    // next sweep. Recovery is rebuildRetryCooldownDays away, not one night. Pinning the real
+    // behaviour here so the gap is visible in the suite instead of only in prose.
+    UUID first = armDetection();
+    when(events.statusOf(first)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    doThrow(new RuntimeException("max_tuples_decompressed_per_dml_transaction"))
+        .when(candles)
+        .swapStaged("NSE", "TCS", "1d");
+
+    assertThat(job.sweepNow()).containsExactly(first);
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> verify(events).updateStatusIf(first, "REBACKFILL_RUNNING", "FAILED"));
+
+    // the row the failing run left behind: FAILED, stamped today
+    when(events.latestEvent("NSE", "TCS")).thenReturn(Optional.of(row(first, "FAILED", 0)));
+
+    assertThat(job.sweepNow()).as("the next sweep does NOT re-detect — the cooldown holds it").isEmpty();
+    verify(events, times(1))
+        .insertDetected(anyString(), anyString(), any(), any(), anyInt(), anyInt(), anyString());
+    // …and the symbol sits on adjusted 1m + unadjusted 1d for the whole cooldown. It is paged, not
+    // silent: recordFailure alerts on the REBACKFILL_RUNNING -> FAILED transition.
+    verify(candles, times(1)).swapStaged("NSE", "TCS", "1m");
+    verify(ntfy).send(contains("FAILED"), eq("urgent"), anyString());
+  }
+
+  @Test
+  void barsOlderThanTheStagedSpanAreAlertedButNeverBlockTheSwap() {
+    // The fourth measurement (M-A). Bars below the staged span keep PRE-event prices while
+    // everything above is adjusted — a silent discontinuity no other signal can reach: the deepest
+    // anchor is 5 years, and check 2 is span-scoped by construction. It is deliberately NOT a
+    // refusal, because refusing would permanently strand the 49 live symbols that hold such bars
+    // (1,276 1d rows measured 2026-08-04). This pins "alerted, not blocked" — get it wrong in the
+    // refusing direction and those symbols never remediate again.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    when(candles.stagedCoverage("NSE", "TCS", "1d"))
+        .thenReturn(
+            new CandleRepository.StagedCoverage(
+                500,
+                OffsetDateTime.ofInstant(NOW, IST).minusYears(5),
+                OffsetDateTime.ofInstant(NOW, IST),
+                0,
+                OffsetDateTime.ofInstant(NOW, IST),
+                1_276));
+
+    assertThat(job.sweepNow()).containsExactly(id);
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> verify(candles).swapStaged("NSE", "TCS", "1d"));
+    verify(events, never()).updateStatusIf(eq(id), anyString(), eq("FAILED"));
+  }
+
+  @Test
   void aFetchThatSilentlyReturnsNothingIsRefusedRatherThanSwappedIn() {
     // Check 1 of verifyStagedRebuild, which the other refusal tests do not reach: the gateway threw
     // nothing and returned no rows at all. Swapping an empty staging buffer in would delete the
@@ -253,7 +315,7 @@ class CorporateActionResumeTest {
     UUID id = armDetection();
     when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
     when(candles.stagedCoverage("NSE", "TCS", "1m"))
-        .thenReturn(new CandleRepository.StagedCoverage(0, null, null, 0, null));
+        .thenReturn(new CandleRepository.StagedCoverage(0, null, null, 0, null, 0));
 
     assertThat(job.sweepNow()).containsExactly(id);
 
@@ -269,9 +331,13 @@ class CorporateActionResumeTest {
     // The rebuild path's retry bound. Leaving the cache intact deliberately restores re-detection,
     // which unbounded would re-fetch ~196 Kite pages per symbol per night against the shared
     // limiter, forever, for any symbol that can never pass verification.
-    UUID id = UUID.randomUUID();
-    when(events.latestEvent("NSE", "TCS")).thenReturn(Optional.of(row(id, "FAILED", 0)));
-    when(candles.hasNonBhavcopyDaily("NSE", "TCS")).thenReturn(true);
+    // ⚠️ armDetection() is load-bearing here, not scene-setting. Without it the sweep exits at the
+    // "fewer than 2 comparable cached closes" branch, so the test passes whether the cooldown gate
+    // exists or not — it would be asserting nothing. (Caught by red-proofing this very test: with
+    // the gate deleted it stayed GREEN.) Armed, the ONLY thing standing between this sweep and a
+    // fresh detection is the cooldown.
+    UUID detected = armDetection();
+    when(events.latestEvent("NSE", "TCS")).thenReturn(Optional.of(row(detected, "FAILED", 0)));
 
     assertThat(job.sweepNow()).isEmpty();
 
@@ -319,7 +385,8 @@ class CorporateActionResumeTest {
                 OffsetDateTime.ofInstant(NOW, IST).minusYears(5),
                 OffsetDateTime.ofInstant(NOW, IST),
                 4,
-                OffsetDateTime.ofInstant(NOW, IST)));
+                OffsetDateTime.ofInstant(NOW, IST),
+                0));
 
     assertThat(job.sweepNow()).containsExactly(id);
 

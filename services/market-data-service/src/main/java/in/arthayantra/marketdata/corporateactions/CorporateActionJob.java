@@ -109,6 +109,7 @@ public class CorporateActionJob {
   private final int maxRefreshAttempts;
   private final int rebuildRetryCooldownDays;
   private final Counter anchorNoise;
+  private final Counter unadjustedTail;
 
   /**
    * Events with an attempt QUEUED OR RUNNING. The executor serialises EXECUTION but does nothing
@@ -176,6 +177,9 @@ public class CorporateActionJob {
     this.maxRefreshAttempts = maxRefreshAttempts;
     this.rebuildRetryCooldownDays = rebuildRetryCooldownDays;
     this.anchorNoise = meterRegistry.counter("ay_corporate_action_anchor_noise_total");
+    // bars left at PRE-event prices below the staged span — a silent discontinuity, so it needs
+    // a standing signal rather than only a log line
+    this.unadjustedTail = meterRegistry.counter("ay_corporate_action_unadjusted_tail_bars_total");
   }
 
   /** 16:30 IST daily — six-field cron, IST zone, calendar-gated (B-12). */
@@ -249,12 +253,16 @@ public class CorporateActionJob {
     // failure mode this PR is closing, whereas a cooldown bounds the COST without ever making the
     // state unrecoverable. It is deliberately NOT applied to any other status — a resumable
     // refresh keeps its own separate, count-based bound (maxRefreshAttempts → REFRESH_ABANDONED).
+    // detected_at is NOT NULL (V006_2), so there is no null branch to guard. The IST conversion IS
+    // needed: `today` is an IST date and detectedAt is a UTC-offset instant, so a bare toLocalDate()
+    // compares a UTC date against an IST one — agreeing for the 16:30-IST cron (11:00 UTC) but
+    // silently granting an 8-day cooldown to a manual sweepNow() after 18:30 IST.
     if (latest.isPresent()
         && "FAILED".equals(latest.get().status())
-        && latest.get().detectedAt() != null
         && latest
             .get()
             .detectedAt()
+            .atZoneSameInstant(Ist.ZONE)
             .toLocalDate()
             .isAfter(today.minusDays(rebuildRetryCooldownDays))) {
       log.debug(
@@ -421,9 +429,20 @@ public class CorporateActionJob {
       // the self-sealing class this whole PR exists to close, rebuilt in a new place.
       //
       // Swapping the detection input LAST inverts that: the same failure leaves 1d unadjusted, so
-      // the divergence is still visible, the next sweep re-detects, and the rebuild redoes both
-      // legs idempotently (a re-stage + re-verify + re-swap over an already-adjusted 1m is a no-op
-      // in value terms).
+      // the divergence stays VISIBLE and the rebuild can redo both legs idempotently (a re-stage +
+      // re-verify + re-swap over an already-adjusted 1m is a no-op in value terms).
+      //
+      // ⚠️ "Visible" is NOT "recovered on the next sweep", and an earlier draft of this comment
+      // claimed the stronger thing. A failure here records FAILED with detected_at = today, which
+      // the rebuild cooldown gate above then holds off for rebuildRetryCooldownDays — so recovery
+      // is that many days later, not the next night, with the symbol on adjusted 1m + unadjusted 1d
+      // + stale caggs throughout. It is PAGED urgently the whole time (recordFailure alerts on the
+      // REBACKFILL_RUNNING -> FAILED transition), and it is still strictly better than the pre-V054
+      // permanent seal, but it is not next-night recovery. Distinguishing "failed before any swap"
+      // (a livelock candidate the cooldown is FOR) from "failed after a partial swap" (a transient
+      // DB error the cooldown should skip) needs a recorded status that does not exist yet, so it
+      // is a follow-up, not something to infer at read time. Pinned by
+      // aPartialSwapFailureIsHeldByTheCooldownNotRetriedNextSweep.
       candles.swapStaged(exchange, symbol, "1m");
       candles.swapStaged(exchange, symbol, "1d");
     } finally {
@@ -446,11 +465,19 @@ public class CorporateActionJob {
    *   <li>NO UNREPLACED BUCKET inside the staged span. This is the invariant that makes the swap
    *       safe at all: every live bucket the delete will remove has a staged row to replace it.
    *       Catches an interior hole and a mid-range truncation.
-   *   <li>REACHES AT LEAST AS FAR FORWARD as the live series. {@code GapDetector} pages
-   *       oldest-first, so a fetch that dies partway is truncated at the RECENT end — where the
-   *       staged span simply stops short and the previous check, which only judges inside that
-   *       span, would not see it.
+   *   <li>REACHES AT LEAST AS FAR FORWARD as the live series. Its real trigger is a fetch that came
+   *       back SHORT WITHOUT THROWING — a fetch that dies throws, and never reaches verification at
+   *       all. {@code GapDetector} pages oldest-first, so such a fetch is short at the RECENT end,
+   *       where the staged span simply stops early and the previous check, which only judges INSIDE
+   *       that span, cannot see it.
    * </ul>
+   *
+   * <p>A fourth measurement is taken but does NOT refuse: bars OLDER than the staged span. The swap
+   * leaves them untouched, so after a corporate action they keep pre-event prices while everything
+   * above is adjusted — a silent discontinuity no other signal can reach (the deepest anchor is 5
+   * years; check 2 is span-scoped by construction). Refusing on it would permanently strand the 49
+   * live symbols that hold such bars, so it is alerted rather than blocked, and the operator's
+   * remedy is to widen {@code rebackfill-days-1d} until the count reaches zero.
    */
   private void verifyStagedRebuild(Instrument equity, String interval) {
     CandleRepository.StagedCoverage staged =
@@ -475,6 +502,16 @@ public class CorporateActionJob {
               + staged.stagedTo()
               + ", short of the cached series at "
               + staged.cachedTo());
+    }
+    if (staged.cachedBarsBelowSpan() > 0) {
+      unadjustedTail.increment(staged.cachedBarsBelowSpan());
+      log.warn(
+          "staged rebuild for {} leaves {} cached bar(s) older than {} UNADJUSTED — the series will"
+              + " carry a price discontinuity at that boundary; widen"
+              + " artha.corporate-actions.rebackfill-days-1d to cover them",
+          key,
+          staged.cachedBarsBelowSpan(),
+          staged.stagedFrom());
     }
     log.info(
         "staged rebuild for {} verified: {} bar(s) covering [{} .. {}]",

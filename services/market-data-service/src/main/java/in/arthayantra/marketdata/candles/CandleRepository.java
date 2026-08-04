@@ -624,13 +624,21 @@ public class CandleRepository {
    * @param cachedBarsNotStaged live buckets INSIDE {@code [stagedFrom, stagedTo]} that the staged
    *     series does not carry — every one of these would be deleted with no replacement
    * @param cachedTo newest live bucket, {@code null} iff the symbol has nothing cached
+   * @param cachedBarsBelowSpan live buckets OLDER than {@code stagedFrom}. The swap does not touch
+   *     them, so after a corporate action they keep PRE-event prices while everything from
+   *     {@code stagedFrom} forward is adjusted — a ratio-sized discontinuity with no gap marking
+   *     it. Nothing else can see this: the detector's deepest anchor is 5 years, so it cannot reach
+   *     the splice, and {@code cachedBarsNotStaged} is scoped inside the span by construction.
+   *     Measured live 2026-08-04: 1,276 1d rows across 49 symbols sit older than the default
+   *     {@code rebackfill-days-1d} window, and every one of those symbols is in the sweep's scope
    */
   public record StagedCoverage(
       long stagedBars,
       OffsetDateTime stagedFrom,
       OffsetDateTime stagedTo,
       long cachedBarsNotStaged,
-      OffsetDateTime cachedTo) {}
+      OffsetDateTime cachedTo,
+      long cachedBarsBelowSpan) {}
 
   /**
    * Measures {@link StagedCoverage} for one (symbol, interval).
@@ -651,7 +659,10 @@ public class CandleRepository {
                                     WHERE g.exchange = k.exchange
                                       AND g.tradingsymbol = k.tradingsymbol
                                       AND g."interval" = k."interval"
-                                      AND g.bucket = k.bucket)) AS not_staged
+                                      AND g.bucket = k.bucket)) AS not_staged,
+               (SELECT count(*) FROM candles b
+                 WHERE b.exchange = ? AND b.tradingsymbol = ? AND b."interval" = ?
+                   AND b.bucket < s.lo) AS below_span
         FROM (SELECT count(*) AS n, min(bucket) AS lo, max(bucket) AS hi
                 FROM candle_rebuild_staging
                WHERE exchange = ? AND tradingsymbol = ? AND "interval" = ?) s,
@@ -660,15 +671,17 @@ public class CandleRepository {
         """,
         rs -> {
           if (!rs.next()) {
-            return new StagedCoverage(0, null, null, 0, null);
+            return new StagedCoverage(0, null, null, 0, null, 0);
           }
           return new StagedCoverage(
               rs.getLong("staged_n"),
               rs.getObject("staged_lo", OffsetDateTime.class),
               rs.getObject("staged_hi", OffsetDateTime.class),
               rs.getLong("not_staged"),
-              rs.getObject("cached_hi", OffsetDateTime.class));
+              rs.getObject("cached_hi", OffsetDateTime.class),
+              rs.getLong("below_span"));
         },
+        exchange, tradingsymbol, interval,
         exchange, tradingsymbol, interval,
         exchange, tradingsymbol, interval,
         exchange, tradingsymbol, interval);
@@ -678,10 +691,27 @@ public class CandleRepository {
    * The SWAP: replaces one (symbol, interval)'s live bars over EXACTLY the staged span with the
    * staged ones. Returns the rows inserted.
    *
+   * <p>⚠️ The window loop runs OLDEST → NEWEST ({@link #purgeWindows} advances a cursor from
+   * {@code start}), and that direction is load-bearing, not incidental. A failure part-way through
+   * therefore leaves a RECENT SUFFIX unswapped, which keeps the detector's short-dated anchors
+   * (7d/1m/3m) diverged — two or more, so the next sweep re-detects. Newest-first would leave the
+   * OLD end unswapped, and the deepest anchors alone can be a SINGLE diverged anchor, which
+   * {@code CorporateActionDetector} classifies as {@code anchorNoise} and never remediates. Nothing
+   * else pins this direction; reversing it would strand symbols silently.
+   *
    * <p>Scoped to the staged span rather than the whole symbol on purpose — the invariant this whole
    * change buys is "every bucket deleted has a verified replacement", and outside the staged span
-   * there is none. That is also strictly less destructive than the {@link #purgeSymbol} it replaces
-   * on this path, which deleted bars older than Kite's serving depth that nothing could ever restore.
+   * there is none.
+   *
+   * <p>⚠️ That is less DESTRUCTIVE than the {@link #purgeSymbol} it replaces on this path — which
+   * deleted bars older than Kite's serving depth that nothing could restore — but less destructive
+   * is NOT the same as safer, and reading it that way would be the wrong inference. The old purge
+   * produced a visible TRUNCATION; this produces a silent WRONG PRICE, because bars below the
+   * staged span survive at pre-event levels while everything above is adjusted. On the same data
+   * that is arguably the worse failure mode: a gap is obvious to every consumer, a discontinuity is
+   * obvious to none. It is deliberately accepted rather than fixed here (refusing would strand the
+   * 49 live symbols that have such bars), and it is made OBSERVABLE instead — see
+   * {@link StagedCoverage#cachedBarsBelowSpan}, which the caller counts and alerts on.
    *
    * <p>Windowed at {@link #PURGE_WINDOW_MONTHS} for the same reason the purge is: {@code candles} is
    * segmentby {@code (exchange, tradingsymbol, interval)}, so an unwindowed DELETE over a fully

@@ -39,6 +39,25 @@ public class PaperPositionRepository {
   /** Advisory-lock namespace for per-book capital serialization ({@link #lockBookCapital}). */
   private static final int BOOK_CAPITAL_LOCK_NAMESPACE = 4802;
 
+  /**
+   * V058: the explicit scope for a lot on a STRATEGY-SCOPED book that has no strategy to attribute it
+   * to — a signal-less hand ticket. The nil UUID, which {@code gen_random_uuid()} can never produce,
+   * so it can never collide with a real {@code strategies.id}.
+   *
+   * <p><b>Why a sentinel and not NULL (cross-vendor review Critical 3).</b> Every scoped resolution
+   * predicate reads {@code (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)} — NULL is a
+   * WILDCARD there, because that is what keeps an unscoped book behaving exactly as it did before
+   * V058. A NULL row sitting on a SCOPED book would therefore be matched by EVERY strategy's exit,
+   * so one strategy could close an unattributed lot it never opened. Writing the sentinel instead
+   * means a scoped book never contains a NULL row, which confines the wildcard to unscoped books
+   * where it is correct. {@link PaperStrategyScopeGuard} enforces that confinement at boot.
+   *
+   * <p>All sentinel rows on one key collide as one key (a real value, so plain uniqueness applies),
+   * so a scoped book still holds at most ONE unattributed lot per key — same guarantee NULL gave.
+   */
+  public static final java.util.UUID UNATTRIBUTED_SCOPE =
+      java.util.UUID.fromString("00000000-0000-0000-0000-000000000000");
+
   private final JdbcTemplate jdbc;
 
   /** Wires the strategy datasource. */
@@ -64,18 +83,71 @@ public class PaperPositionRepository {
         rs.getString("book"));
   }
 
-  /** The OPEN position for a book+key+side, if any (the per-book §F.6 averaging key). */
+  /**
+   * ANY OPEN position for a book+key+side (the per-book §F.6 averaging key), oldest first.
+   *
+   * <p><b>Deliberately STRATEGY-BLIND.</b> Since V058 a book listed in {@code
+   * artha.paper.strategy-scoped-books} can hold SEVERAL open rows on one key — one per opening
+   * strategy — so this returns the OLDEST of them. Entry paths that must average onto their OWN
+   * strategy's lot use {@link #findOpenForStrategy}; this overload is for callers that legitimately
+   * mean "whatever is open on this key" (an unattributed hand ticket, and every unscoped book, where
+   * the key can still hold at most one row).
+   *
+   * <p>{@code ORDER BY id} is a no-op for an unscoped book (at most one row can match) and makes the
+   * scoped case deterministic instead of leaving it to the plan.
+   */
   public Optional<PositionRow> findOpen(String book, String exchange, String tradingsymbol, String side) {
     return jdbc
         .query(
             "SELECT " + COLUMNS + " FROM paper_positions WHERE book=? AND exchange=? AND tradingsymbol=?"
-                + " AND side=? AND status='OPEN'",
+                + " AND side=? AND status='OPEN' ORDER BY id",
             PaperPositionRepository::map,
             book,
             exchange,
             tradingsymbol,
             side)
         .stream()
+        .findFirst();
+  }
+
+  /**
+   * The OPEN position for a book+key+side opened by exactly {@code strategyId} (V058, option D) —
+   * the averaging key on a STRATEGY-SCOPED book.
+   *
+   * <p>Empty when that strategy holds nothing open on the key, even if a SIBLING strategy does, and
+   * empty for a legacy {@code strategy_id IS NULL} row: a scoped entry must never average into
+   * another strategy's lot, and it must never adopt an un-attributed pre-V058 row either. Both cases
+   * make {@code PaperService.upsertPosition} INSERT a fresh row, which the widened {@code
+   * uq_paper_positions_open} permits.
+   *
+   * <p>{@code strategyId} is non-null by construction (the caller only reaches here when the book is
+   * scoped AND the fill carries a signal), so this needs no null-key handling.
+   */
+  public Optional<PositionRow> findOpenForStrategy(
+      String book, String exchange, String tradingsymbol, String side, java.util.UUID strategyId) {
+    return jdbc
+        .query(
+            "SELECT " + COLUMNS + " FROM paper_positions WHERE book=? AND exchange=? AND tradingsymbol=?"
+                + " AND side=? AND status='OPEN' AND strategy_id = ? ORDER BY id",
+            PaperPositionRepository::map,
+            book,
+            exchange,
+            tradingsymbol,
+            side,
+            strategyId)
+        .stream()
+        .findFirst();
+  }
+
+  /** The strategy stamped on a position at open ({@code empty} for an unscoped / legacy row). */
+  public Optional<java.util.UUID> strategyIdOf(long positionId) {
+    return jdbc
+        .query(
+            "SELECT strategy_id FROM paper_positions WHERE id=?",
+            (rs, n) -> rs.getObject("strategy_id", java.util.UUID.class),
+            positionId)
+        .stream()
+        .filter(java.util.Objects::nonNull)
         .findFirst();
   }
 
@@ -210,15 +282,35 @@ public class PaperPositionRepository {
    */
   public Optional<PositionRow> findLatestForKey(
       String book, String exchange, String tradingsymbol, String side) {
+    return findLatestForKey(book, exchange, tradingsymbol, side, null);
+  }
+
+  /**
+   * The V058 scoped form (cross-vendor review Major 4). {@code strategyId} null gives the pre-V058
+   * strategy-blind behaviour; non-null gives the newest position on the key OPENED BY THAT STRATEGY.
+   *
+   * <p>Without the scope an idempotent replay of twin A, retried after twin B opened, resolves the
+   * key to the NEWEST row and hands the caller B's id, quantity and brackets as if they were A's
+   * fill: a silently wrong 200 on the money path, not an error.
+   *
+   * <p>This is key+strategy, NOT the exact {@code order_id -> position_id} linkage PR #1259's V057
+   * lot table will provide. It removes the cross-strategy error but still resolves by key within one
+   * strategy; tighten to the exact linkage once V057 is on main.
+   */
+  public Optional<PositionRow> findLatestForKey(
+      String book, String exchange, String tradingsymbol, String side, java.util.UUID strategyId) {
     return jdbc
         .query(
             "SELECT " + COLUMNS + " FROM paper_positions WHERE book=? AND exchange=? AND tradingsymbol=?"
-                + " AND side=? ORDER BY opened_at DESC, id DESC LIMIT 1",
+                + " AND side=? AND (CAST(? AS uuid) IS NULL OR strategy_id = CAST(? AS uuid))"
+                + " ORDER BY opened_at DESC, id DESC LIMIT 1",
             PaperPositionRepository::map,
             book,
             exchange,
             tradingsymbol,
-            side)
+            side,
+            strategyId,
+            strategyId)
         .stream()
         .findFirst();
   }
@@ -272,12 +364,36 @@ public class PaperPositionRepository {
       Integer subaccountIdx,
       Long advisedLots,
       Long openingSignalId) {
+    return insertOpen(
+        book, exchange, tradingsymbol, side, qty, avgEntryPrice, stopLoss, takeProfit, subaccountIdx,
+        advisedLots, openingSignalId, null);
+  }
+
+  /**
+   * The V058 form: additionally stamps {@code strategyId} — the strategy this position belongs to on
+   * a STRATEGY-SCOPED book (option D). {@code null} on every unscoped book and on an unattributed
+   * hand ticket, which is what keeps the widened {@code uq_paper_positions_open} equivalent to the
+   * pre-V058 index there (all NULLs collide, {@code NULLS NOT DISTINCT}).
+   */
+  public long insertOpen(
+      String book,
+      String exchange,
+      String tradingsymbol,
+      String side,
+      long qty,
+      BigDecimal avgEntryPrice,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit,
+      Integer subaccountIdx,
+      Long advisedLots,
+      Long openingSignalId,
+      java.util.UUID strategyId) {
     Long id =
         jdbc.queryForObject(
             """
             INSERT INTO paper_positions
-              (book, exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, stop_loss, take_profit, subaccount_idx, advised_lots, opening_signal_id)
-            VALUES (?,?,?,?,?,?, 'OPEN', now(), ?, ?, ?, ?, ?) RETURNING id
+              (book, exchange, tradingsymbol, side, qty, avg_entry_price, status, opened_at, stop_loss, take_profit, subaccount_idx, advised_lots, opening_signal_id, strategy_id)
+            VALUES (?,?,?,?,?,?, 'OPEN', now(), ?, ?, ?, ?, ?, CAST(? AS uuid)) RETURNING id
             """,
             Long.class,
             book,
@@ -290,7 +406,8 @@ public class PaperPositionRepository {
             takeProfit,
             subaccountIdx,
             advisedLots,
-            openingSignalId);
+            openingSignalId,
+            strategyId);
     return id == null ? 0 : id;
   }
 
@@ -375,6 +492,13 @@ public class PaperPositionRepository {
    * OPEN positions whose originating signal belongs to an {@code session.style: intraday} strategy —
    * the 15:45 mark-to-close set. All joins are SAME-schema (no cross-schema reference).
    */
+  /*
+   * V058 (cross-vendor review Critical 1): the strategy predicate is NOT optional here. This join
+   * classifies a position by ANY matching order's session style, and the scalper book holds BOTH
+   * intraday and btst strategies — so on a scoped book an INTRADAY sibling's order would drag a BTST
+   * sibling on the same key into the 15:45 mark-to-close set and settle a position that is meant to
+   * carry overnight. A wrong CLOSE at a real price, not a mis-label.
+   */
   public List<PositionRow> intradayOpen() {
     return jdbc.query(
         """
@@ -388,11 +512,28 @@ public class PaperPositionRepository {
         JOIN signals s ON s.id = o.signal_id
         JOIN strategy_versions sv ON sv.id = s.strategy_version_id
         WHERE p.status = 'OPEN' AND sv.config->'risk'->'session'->>'style' = 'intraday'
+          AND (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)
         """,
         PaperPositionRepository::map);
   }
 
-  /** OPEN positions linked (via a signal-carrying order) to one signal — straddles yield both legs. */
+  /**
+   * OPEN positions linked (via a signal-carrying order) to one signal — straddles yield both legs.
+   *
+   * <p><b>V058 (option D): STRATEGY-SCOPED.</b> The order join is on {@code (book, exchange,
+   * tradingsymbol, side)} and carries no strategy of its own, so on a scoped book — where two
+   * strategies can hold two rows on ONE key — the unqualified join reaches BOTH siblings and one
+   * twin's exit would settle the other twin's lot as well. That is precisely the merge this feature
+   * exists to undo, and it is invisible at the index layer: splitting the rows without splitting this
+   * join buys nothing at all. The added predicate keeps a position reachable only from a signal
+   * emitted by the SAME strategy that opened it.
+   *
+   * <p>{@code p.strategy_id IS NULL} is the legacy/unscoped arm and it is what makes this change
+   * behaviourally inert everywhere the feature is not armed: an unscoped row matches on the key alone,
+   * exactly as before. The joins to {@code signals}/{@code strategy_versions} are LEFT so an order
+   * whose signal row is gone still reaches its unscoped position (the pre-V058 reach), rather than
+   * silently dropping out of every close path.
+   */
   public List<PositionRow> openForSignal(long signalId) {
     return jdbc.query(
         """
@@ -403,7 +544,10 @@ public class PaperPositionRepository {
         JOIN paper_orders o
           ON o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
           AND o.side = p.side
+        LEFT JOIN signals s ON s.id = o.signal_id
+        LEFT JOIN strategy_versions sv ON sv.id = s.strategy_version_id
         WHERE p.status = 'OPEN' AND o.signal_id = ?
+          AND (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)
         """,
         PaperPositionRepository::map,
         signalId);
@@ -442,16 +586,25 @@ public class PaperPositionRepository {
           ON o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
           AND o.side = p.side AND o.signal_id IS NOT NULL
         JOIN signals s ON s.id = o.signal_id
+        LEFT JOIN strategy_versions sv ON sv.id = s.strategy_version_id
         WHERE p.status = 'OPEN' AND s.scalper_detail->>'side' = 'NEUTRAL'
+          AND (p.strategy_id IS NULL OR p.strategy_id = sv.strategy_id)
         """,
         (rs, n) ->
             new StraddleLegRow(
                 rs.getLong("id"), rs.getLong("signal_id"), rs.getString("scalper_detail")));
   }
 
-  /** The strategy that opened a position in a book (via its first signal-linked order), for T-1. */
+  /**
+   * The strategy that opened a position in a book (via its first signal-linked order), for T-1.
+   *
+   * <p>V058: {@code strategyId} is the position's own {@code strategy_id} when it has one, and it
+   * DISAMBIGUATES the key. Without it, two scoped siblings on one key would both resolve to the
+   * FIRST order's strategy ({@code ORDER BY o.id}) and one twin's expiry would page the other twin's
+   * channel. {@code null} (unscoped / legacy row) keeps the pre-V058 first-order behaviour exactly.
+   */
   public java.util.Optional<NotifyTarget> notifyTargetFor(
-      String book, String exchange, String tradingsymbol, String side) {
+      String book, String exchange, String tradingsymbol, String side, java.util.UUID strategyId) {
     return jdbc
         .query(
             """
@@ -461,6 +614,7 @@ public class PaperPositionRepository {
             JOIN strategy_versions sv ON sv.id = sg.strategy_version_id
             JOIN strategies s2 ON s2.id = sv.strategy_id
             WHERE o.book=? AND o.exchange=? AND o.tradingsymbol=? AND o.side=? AND o.signal_id IS NOT NULL
+              AND (CAST(? AS uuid) IS NULL OR s2.id = CAST(? AS uuid))
             ORDER BY o.id LIMIT 1
             """,
             (rs, n) ->
@@ -469,7 +623,9 @@ public class PaperPositionRepository {
             book,
             exchange,
             tradingsymbol,
-            side)
+            side,
+            strategyId,
+            strategyId)
         .stream()
         .findFirst();
   }
@@ -481,6 +637,32 @@ public class PaperPositionRepository {
   public int deleteAll(String book) {
     return jdbc.update(
         "DELETE FROM paper_positions WHERE (?::text IS NULL OR book = ?)", book, book);
+  }
+
+  /**
+   * OPEN rows on {@code book} whose {@code strategy_id} nullness disagrees with {@code scoped} --
+   * the V058 boot-guard probe (cross-vendor review Critical 3).
+   *
+   * <p>{@code scoped=true} counts UNATTRIBUTED (NULL) rows on a book that is now strategy-scoped:
+   * NULL is a WILDCARD in every scoped predicate, so such a row is closable by ANY strategy's exit.
+   * {@code scoped=false} counts ATTRIBUTED rows on a book that is NOT scoped: their siblings would
+   * silently re-merge and one exit would settle several lots. Either state is a mixed mode that no
+   * amount of correct SQL can disambiguate, so {@link PaperStrategyScopeGuard} refuses to boot.
+   */
+  public int countOpenScopeMismatch(String book, boolean scoped) {
+    Integer n =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM paper_positions WHERE book=? AND status='OPEN'"
+                + " AND strategy_id IS " + (scoped ? "NULL" : "NOT NULL"),
+            Integer.class,
+            book);
+    return n == null ? 0 : n;
+  }
+
+  /** The distinct books that currently hold at least one OPEN position. */
+  public List<String> booksWithOpenPositions() {
+    return jdbc.queryForList(
+        "SELECT DISTINCT book FROM paper_positions WHERE status='OPEN' ORDER BY book", String.class);
   }
 
   /** Count of OPEN positions across every book. */
@@ -635,13 +817,28 @@ public class PaperPositionRepository {
    * <p>A dedicated query rather than a field on {@link PositionRow}: the compact row deliberately omits
    * the provenance columns, and widening it would touch every mapper for one caller. Empty means no
    * open position on the key — the fill will INSERT, so the request's own idx applies.
+   *
+   * <p><b>V058: deliberately NOT strategy-scoped, and that is the whole point.</b> On a scoped book a
+   * co-firing sibling INHERITS this idx instead of being assigned a fresh account, so a pair still
+   * charges 2 x budget_inr to ONE sub-account exactly as the merged row did — the per-account
+   * allocation arithmetic, the {@code >}-not-{@code >=} ceiling test and the first-loss freeze
+   * topology are all bit-for-bit unchanged. Scoping this query instead would return empty for the
+   * sibling, route it to a second account, and silently halve the capital each pair consumes per
+   * account while doubling the accounts a losing pair freezes — a capital-governor change smuggled in
+   * as a lookup detail. The precedent is {@code PaperService.openScalperPair}, which already assigns
+   * one sub-account and charges BOTH straddle legs to it.
+   *
+   * <p>{@code ORDER BY id} makes "the account this key established" the OLDEST open row's, rather
+   * than whichever the plan happened to emit first. Siblings all carry the same idx by construction
+   * (each inherits from the first), so this is a determinism guarantee, not a tie-break with
+   * consequences.
    */
   public Optional<Integer> openSubAccountIdx(
       String book, String exchange, String tradingsymbol, String side) {
     return jdbc
         .query(
             "SELECT subaccount_idx FROM paper_positions WHERE book=? AND exchange=? AND tradingsymbol=?"
-                + " AND side=? AND status='OPEN'",
+                + " AND side=? AND status='OPEN' ORDER BY id",
             (rs, n) -> rs.getObject("subaccount_idx", Integer.class),
             book,
             exchange,

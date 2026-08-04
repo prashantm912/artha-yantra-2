@@ -73,6 +73,55 @@ class PaperForensicsIntegrationTest extends StrategySignalIntegrationTestBase {
     assertThat(snap.get("flags_hash").toString()).isNotBlank();
   }
 
+  /**
+   * V059: the settle leg carries the exact id of the position it closes, and the ENTRY leg does not.
+   *
+   * <p>The asymmetry is the design, not an oversight. {@code doSettle} CAS-closes the position and
+   * only THEN inserts the exit order, so the id is already in hand and the link rides the INSERT that
+   * has to happen anyway — no second statement, so nothing new can fail on the money-path close.
+   * {@code openOrder} runs the other way round (the order id is minted before {@code upsertPosition}
+   * exists), which is exactly why V057 put entry attribution in {@code paper_position_lots} rather
+   * than in a column, and why this column must stay NULL there instead of being back-filled by an
+   * UPDATE.
+   *
+   * <p>Asserting the entry leg's NULL is the half that discriminates: a change that stamped every
+   * fill would satisfy the exit assertion alone while reintroducing precisely the INSERT-then-UPDATE
+   * shape V057 rejected.
+   */
+  @Test
+  void theSettleLegCarriesItsPositionIdAndTheEntryLegDoesNot() {
+    String sym = "TESTOPT-" + UUID.randomUUID();
+    PaperService.PositionDto pos =
+        paper.openOrder(
+            new PaperService.OrderRequest(null, "NFO", sym, "BUY", 50, new BigDecimal("100.00"), null, null));
+    paper.closePosition(pos.id(), new BigDecimal("101.00"));
+
+    Map<String, Object> exit =
+        jdbc.queryForMap(
+            "SELECT side, leg_kind, settles_position_id FROM paper_orders WHERE tradingsymbol=?"
+                + " ORDER BY id DESC LIMIT 1",
+            sym);
+    assertThat(exit.get("side")).isEqualTo("SELL");
+    assertThat(exit.get("leg_kind")).isEqualTo("EXIT");
+    assertThat(exit.get("settles_position_id")).isEqualTo(pos.id());
+
+    Map<String, Object> entry =
+        jdbc.queryForMap(
+            "SELECT side, leg_kind, settles_position_id FROM paper_orders WHERE tradingsymbol=?"
+                + " ORDER BY id ASC LIMIT 1",
+            sym);
+    assertThat(entry.get("side")).isEqualTo("BUY");
+    // ⚠️ THE ASSERTION THAT KEEPS THE SELL-ENTRY CRITICAL CLOSED, and it must read a row the WRITER
+    // produced. The reconciliation test that proves that Critical closed hand-seeds 'ENTRY' via raw
+    // JDBC, so it builds its own sample and cannot observe the writer at all. If a future overload of
+    // insertFilled delegates null instead of ENTRY_LEG — the copy-paste this repository's javadoc
+    // warns about — every manual and engine entry would land (leg_kind NULL, settles_position_id
+    // NULL), byte-identical to a legacy row. The reconciler's `leg_kind IS NULL` fallback would then
+    // re-admit it and the masking route would reopen silently, with every other test still green.
+    assertThat(entry.get("leg_kind")).isEqualTo("ENTRY");
+    assertThat(entry.get("settles_position_id")).isNull();
+  }
+
   @Test
   void liveTickFillStampsRefSourceLiveTickWithTheTickAge() {
     String sym = "TESTOPT-" + UUID.randomUUID();

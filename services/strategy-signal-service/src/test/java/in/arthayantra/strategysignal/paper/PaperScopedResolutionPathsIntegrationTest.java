@@ -51,6 +51,11 @@ class PaperScopedResolutionPathsIntegrationTest extends StrategySignalIntegratio
 
   @Autowired private PaperPositionRepository positions;
   @Autowired private PaperOrderRepository orders;
+  // The SERVICE, not just the repository: the Major this pins is that GET /paper/positions/{id}
+  // renders a sibling's settle leg, and only positionDetail proves the production wiring passes the
+  // position id down. A repository-only assertion leaves the call site untested — measured: reverting
+  // positionDetail's argument left a repository-only test GREEN.
+  @Autowired private PaperService paper;
   @Autowired private PaperReconciliationRepository recon;
   @Autowired private SwingPaperEffectRepository swingEffects;
   @Autowired private JdbcTemplate jdbc;
@@ -245,23 +250,28 @@ class PaperScopedResolutionPathsIntegrationTest extends StrategySignalIntegratio
    * behaviour on purpose, because the right behaviour is not reachable in this branch.</b>
    *
    * <p>Twin A settles; twin B is closed with NO settle leg of its own — a genuinely missing exit
-   * that reconciliation exists to report. Because settle orders carry {@code signal_id = NULL},
-   * nothing in today's schema ties A's exit order to A rather than to B, so the unscoped exit
-   * lateral hands B a non-zero {@code exit_count} and the zero-only classifier at
-   * {@code PaperReconciliationService:166-174} never reports it. The inflation is not inert: it
+   * that reconciliation exists to report. Before V059, settle orders carried {@code signal_id = NULL}
+   * and nothing in the schema tied A's exit order to A rather than to B, so the unscoped exit lateral
+   * handed B a non-zero {@code exit_count} and the zero-only classifier in
+   * {@code PaperReconciliationService.reconcile} never reported it. The inflation is not inert: it
    * converts missing-exit detection into a FALSE NEGATIVE.
    *
-   * <p>My original justification for leaving the exit leg unscoped ("only exitCount == 0
-   * classifies, so inflation is harmless") was exactly this error, and the first version of the
-   * test above demonstrated the hole while claiming to prove the fix.
+   * <p><b>FLIPPED BY V059, as its own note instructed.</b> This test previously asserted
+   * {@code exitCount() > 0} on purpose, with the instruction: "when exit orders gain an exact
+   * position linkage, this test MUST FAIL — flip the assertion then; do not repair it by loosening."
+   * {@code paper_orders.settles_position_id} is that linkage, and the assertion is flipped to
+   * {@code isZero()} rather than loosened.
    *
-   * <p><b>When PR #1259's V057 lands and exit orders gain an exact position linkage, this test MUST
-   * FAIL</b> — {@code exitCount()} will correctly become 0 for B. Flip the assertion then; do not
-   * "repair" it by loosening. That deliberate future failure is the point: it makes the gap
-   * machine-visible instead of prose-only.
+   * <p>⚠️ <b>The FIXTURE had to change too, and that is the substantive half.</b> V059's column alone
+   * does NOT redden this test: {@code ScopedKeyTwinFixture.seedOrder} INSERTs straight into
+   * {@code paper_orders} and never runs {@code doSettle}, so the seeded settle leg carried no link
+   * and still fell through the legacy branch. Measured, not assumed — the unmodified test stayed 7/7
+   * green against the fix. A pinned test whose fixture bypasses the writer cannot observe the writer;
+   * the link is seeded explicitly below so the assertion is about the QUERY, which is what it was
+   * always meant to pin.
    */
   @Test
-  void exitReconciliationCannotSeeAMissingSettleLegOnAScopedBook() {
+  void exitReconciliationSeesAMissingSettleLegOnAScopedBook() {
     String sym = "RCNGAP-" + UUID.randomUUID().toString().substring(0, 8);
     UUID aStrategy = ScopedKeyTwinFixture.seedStrategy(jdbc, "rcngap-a");
     UUID bStrategy = ScopedKeyTwinFixture.seedStrategy(jdbc, "rcngap-b");
@@ -275,25 +285,33 @@ class PaperScopedResolutionPathsIntegrationTest extends StrategySignalIntegratio
     long bLot = lot(BOOK, sym, bStrategy);
     ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, aSignal, EX, sym, "BUY", 10);
     ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, bSignal, EX, sym, "BUY", 10);
-    ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, null, EX, sym, "SELL", 10); // A's settle only
+    long aSettle = ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, null, EX, sym, "SELL", 10);
+    // V059: stamp what doSettle stamps. Seeding raw rows bypasses the writer, so without this the
+    // leg looks like a pre-V059 legacy order and legitimately still falls back to the key rule.
+    jdbc.update(
+        "UPDATE paper_orders SET leg_kind = 'EXIT', settles_position_id = ? WHERE id = ?",
+        aLot, aSettle);
 
     OffsetDateTime from = OffsetDateTime.now().minusMinutes(5);
     positions.close(aLot, BigDecimal.ZERO, "TEST");
     positions.close(bLot, BigDecimal.ZERO, "TEST"); // closed WITHOUT its own settle order
     OffsetDateTime to = OffsetDateTime.now().plusMinutes(5);
 
+    var rows = recon.closedPositionReconciliation(from, to);
     var bRow =
-        recon.closedPositionReconciliation(from, to).stream()
-            .filter(r -> r.positionId() == bLot)
-            .findFirst()
-            .orElseThrow();
+        rows.stream().filter(r -> r.positionId() == bLot).findFirst().orElseThrow();
+    var aRow =
+        rows.stream().filter(r -> r.positionId() == aLot).findFirst().orElseThrow();
     // The entry side IS correctly scoped, so B's own entry is attributed to B.
     assertThat(bRow.entryQty()).isEqualTo(10);
-    // ⚠️ WRONG-BY-DESIGN: B has no settle leg, yet borrows A's and reports "exit present".
     assertThat(bRow.exitCount())
-        .as("KNOWN GAP (Major 1): B's missing exit is masked by A's settle order — must become 0"
-            + " once V057 gives exit orders an exact position linkage")
-        .isGreaterThan(0);
+        .as("V059: B never settled, and A's linked settle leg no longer covers it")
+        .isZero();
+    // The discriminating half — the fix must SEPARATE the twins, not flag both. A change that
+    // reported every row as missing-exit would satisfy the B assertion while being just as wrong.
+    assertThat(aRow.exitCount())
+        .as("A's own settle leg is still attributed to A")
+        .isEqualTo(1);
   }
 
   /**
@@ -308,11 +326,15 @@ class PaperScopedResolutionPathsIntegrationTest extends StrategySignalIntegratio
    * {@code GET /api/v1/paper/positions/{id}} renders the sibling's entry inside this position's
    * trade chain: `hasSize(2)` fails with 3, and the sibling's order id is present.
    *
-   * <p>The settle leg is asserted PRESENT for both, which is the documented remaining gap: a
-   * signal-less order cannot be tied to one of two siblings until V057.
+   * <p><b>V059 closes the settle half.</b> This test used to assert the settle leg PRESENT for both
+   * twins and called it "the documented remaining gap". ⚠️ That made it a test which PASSED BY
+   * ASSERTING THE DEFECT — so its staying green across V059 would have been no evidence at all, only
+   * the fixture agreeing with itself. With {@code settles_position_id} the leg belongs to A, and B's
+   * chain must NOT contain it; the unlinked-legacy case keeps the old reach, asserted separately so
+   * historical detail panes are proven not to lose their exit row.
    */
   @Test
-  void thePositionDetailTradeChainExcludesASiblingsEntryFills() {
+  void thePositionDetailTradeChainExcludesASiblingsEntryAndSettleFills() {
     String sym = "LEGSCOPE-" + UUID.randomUUID().toString().substring(0, 8);
     UUID aStrategy = ScopedKeyTwinFixture.seedStrategy(jdbc, "leg-a");
     UUID bStrategy = ScopedKeyTwinFixture.seedStrategy(jdbc, "leg-b");
@@ -323,27 +345,57 @@ class PaperScopedResolutionPathsIntegrationTest extends StrategySignalIntegratio
         ScopedKeyTwinFixture.seedEntry(
             jdbc, ScopedKeyTwinFixture.seedVersion(jdbc, bStrategy, "1"), EX, sym, "BUY");
     long aLot = lot(BOOK, sym, aStrategy);
-    lot(BOOK, sym, bStrategy);
+    long bLot = lot(BOOK, sym, bStrategy);
     long aOrder = ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, aSignal, EX, sym, "BUY", 10);
     long bOrder = ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, bSignal, EX, sym, "BUY", 10);
     long settle = ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, null, EX, sym, "SELL", 10);
+    long legacySettle = ScopedKeyTwinFixture.seedOrder(jdbc, BOOK, null, EX, sym, "SELL", 10);
+    // A's settle, linked as doSettle would link it. `legacySettle` stays unlinked — a pre-V059 row.
+    jdbc.update(
+        "UPDATE paper_orders SET leg_kind = 'EXIT', settles_position_id = ? WHERE id = ?",
+        aLot, settle);
 
     var opened = positions.find(aLot).orElseThrow().openedAt();
-    List<Long> legs =
+    List<Long> aLegs =
         orders
-            .legsForPosition(BOOK, EX, sym, opened.minusMinutes(5), null, aStrategy)
+            .legsForPosition(BOOK, EX, sym, opened.minusMinutes(5), null, aStrategy, aLot)
             .stream()
             .map(o -> o.id())
             .toList();
-    assertThat(legs).contains(aOrder, settle);
-    assertThat(legs).doesNotContain(bOrder);
+    assertThat(aLegs).contains(aOrder, settle);
+    assertThat(aLegs).doesNotContain(bOrder);
 
-    // Unscoped (null) keeps the pre-V058 reach for every unscoped book.
+    // V059 — B's chain must NOT show A's settle leg. This is the assertion the pre-V059 version of
+    // this test had inverted: it asserted the shared leg PRESENT and so passed on the defect.
+    List<Long> bLegs =
+        orders
+            .legsForPosition(BOOK, EX, sym, opened.minusMinutes(5), null, bStrategy, bLot)
+            .stream()
+            .map(o -> o.id())
+            .toList();
+    assertThat(bLegs).contains(bOrder).doesNotContain(aOrder, settle);
+    // The legacy unlinked settle still reaches BOTH — no historical detail pane loses its exit row.
+    assertThat(bLegs).contains(legacySettle);
+    assertThat(aLegs).contains(legacySettle);
+
+    // ⚠️ THROUGH THE SERVICE, which is the assertion that actually pins the Major. The repository
+    // assertions above pass the id explicitly, so they cannot detect `positionDetail` FAILING to pass
+    // it — measured: reverting that call site left every repository-only assertion green. This is the
+    // shape a user hits on GET /api/v1/paper/positions/{id}.
+    assertThat(
+            paper.positionDetail(bLot).orders().stream()
+                .map(PaperService.OrderLeg::orderId)
+                .toList())
+        .as("the sibling's settle leg is not in B's rendered trade chain")
+        .contains(bOrder, legacySettle)
+        .doesNotContain(aOrder, settle);
+
+    // Unscoped (null strategy, null position) keeps the pre-V058 reach for every unscoped book.
     assertThat(
             orders.legsForPosition(BOOK, EX, sym, opened.minusMinutes(5), null, null).stream()
                 .map(o -> o.id())
                 .toList())
-        .contains(aOrder, bOrder, settle);
+        .contains(aOrder, bOrder, settle, legacySettle);
   }
 
   private long lot(String book, String sym, UUID strategyId) {

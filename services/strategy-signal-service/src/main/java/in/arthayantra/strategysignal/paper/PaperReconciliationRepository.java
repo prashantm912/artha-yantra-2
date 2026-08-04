@@ -16,21 +16,52 @@ import org.springframework.stereotype.Repository;
  * {@code ::date = CURRENT_DATE} predicate (in-container {@code now()} is UTC — off-by-one across IST
  * midnight).
  *
- * <p><b>Positions ↔ orders join (V5).</b> There is no position-id FK on order rows. An order is tied
- * to a position by the §F.6 open key {@code (book, exchange, tradingsymbol, side)} — the exact join the
- * live paths use ({@link PaperPositionRepository#signalIdsFor}, {@code intradayOpen}, {@code
- * openForSignal}) — and TIME-SCOPED to the position's own lifetime {@code [opened_at, closed_at]} (the
- * V026 backfill's rule, so a re-opened key is attributed to the right lifetime). The ENTRY legs carry
- * the position's own side ({@code PaperService.openOrder}); the EXIT leg carries the OPPOSITE side and a
- * NULL {@code signal_id} ({@code PaperService.doSettle}). So per closed position: Σ(same-side leg qty)
- * must equal the position qty, and ≥ 1 opposite-side leg must exist.
+ * <p><b>Positions ↔ orders join (V5).</b> An order is tied to a position by the §F.6 open key
+ * {@code (book, exchange, tradingsymbol, side)} — the exact join the live paths use
+ * ({@link PaperPositionRepository#signalIdsFor}, {@code intradayOpen}, {@code openForSignal}) — and
+ * TIME-SCOPED to the position's own lifetime {@code [opened_at, closed_at]} (the V026 backfill's rule,
+ * so a re-opened key is attributed to the right lifetime). The ENTRY legs carry the position's own side
+ * ({@code PaperService.openOrder}); the EXIT leg carries the OPPOSITE side and a NULL
+ * {@code signal_id} ({@code PaperService.doSettle}). So per closed position: Σ(same-side leg qty) must
+ * equal the position qty, and ≥ 1 opposite-side leg must exist.
+ *
+ * <p><b>EXIT legs are matched by V059's exact link first, the key second.</b> The key+lifetime rule
+ * cannot separate two positions that share the key with OVERLAPPING lifetimes: ONE settle order then
+ * satisfies the exit lateral for BOTH, and {@code PaperReconciliationService} classifies on
+ * {@code exit_count == 0} only — so the position that genuinely never settled is never reported.
+ * ⚠️ <b>That is a false NEGATIVE, not a false alarm: the inflation DELETES a real finding</b>, and a
+ * safety net that quietly under-reports is worse than one that over-reports. {@code doSettle} now
+ * stamps {@code paper_orders.settles_position_id} with the position it closes (it CAS-closes the
+ * position before inserting the leg, so the id is already in hand), and the exit lateral claims a
+ * linked order for THAT position alone. An order with a NULL link — every row written before V059,
+ * and every ENTRY fill — falls back to the pre-V059 key+lifetime predicate unchanged, so history keeps
+ * its previous classification with no backfill. A position already CLOSED when V059 ran cannot change
+ * at all: its window ends at its {@code closed_at}, and every linked order is written after that.
+ *
+ * <p><b>The masking order need not be a settle leg — the SELL-entry route, closed by {@code
+ * leg_kind}.</b> A SELL position's ENTRY leg is a SELL order, which satisfies a BUY position's
+ * {@code o.side <> p.side} exit predicate, and an entry carries no link. A fallback keyed on "no link"
+ * alone therefore kept masking. ⚠️ This is reachable in production TODAY, not gated on F9:
+ * {@code PaperController.OrderBody.side} is a free string with no BUY-only whitelist, the cockpit
+ * exposes a BUY/SELL hand ticket, and {@code PaperLedgerIntegrationTest} already opens and closes
+ * manual SELL positions — and {@code uq_paper_positions_open} keys on side, so a manual BUY and SELL
+ * hold one instrument concurrently. The fallback is gated on {@code leg_kind IS NULL} instead, which
+ * is TRUE only for pre-V059 rows. Note the tempting alternative — excluding orders that have a
+ * {@code paper_position_lots} row — is UNSOUND: that lot write is deliberately fail-soft, so a
+ * missing lot is an expected state, not evidence the order was not an entry.
+ *
+ * <p><b>Still open, deliberately:</b> the ENTRY lateral is key-scoped (plus #1275's signal → strategy
+ * scoping), so it still inflates across overlapping twins of the SAME strategy. That direction
+ * over-counts into {@code entryQtyMismatch} — a false ALARM, which announces itself — rather than the
+ * silent under-counting this class exists to kill.
  */
 @Repository
 public class PaperReconciliationRepository {
 
   /**
-   * One CLOSED position's V5 reconciliation tallies: the summed ENTRY-leg qty and the EXIT-leg count,
-   * both time-scoped to {@code [opened_at, closed_at]}, against the position's own qty.
+   * One CLOSED position's V5 reconciliation tallies against the position's own qty: the summed
+   * ENTRY-leg qty (key-matched, time-scoped to {@code [opened_at, closed_at]}) and the EXIT-leg count
+   * (V059-linked where the order carries a link, key+lifetime-matched where it does not).
    */
   public record ClosedPositionRecon(long positionId, long entryQty, long positionQty, long exitCount) {}
 
@@ -42,10 +73,11 @@ public class PaperReconciliationRepository {
   }
 
   /**
-   * Every CLOSED position closed within the window, with its ENTRY-leg qty sum and EXIT-leg count
-   * (both time-scoped to the position lifetime, matched on the §F.6 open key). Only CLOSED positions
-   * are checked — an OPEN position legitimately has no exit leg yet. The caller classifies each row
-   * into the V5 discrepancy classes (missing-entry / qty-mismatch / missing-exit).
+   * Every CLOSED position closed within the window, with its ENTRY-leg qty sum (matched on the §F.6
+   * open key, time-scoped to the position lifetime) and its EXIT-leg count (V059's exact
+   * {@code settles_position_id} link where the order carries one, else that same key+lifetime rule).
+   * Only CLOSED positions are checked — an OPEN position legitimately has no exit leg yet. The caller
+   * classifies each row into the V5 discrepancy classes (missing-entry / qty-mismatch / missing-exit).
    */
   public List<ClosedPositionRecon> closedPositionReconciliation(OffsetDateTime from, OffsetDateTime to) {
     return jdbc.query(
@@ -66,21 +98,11 @@ public class PaperReconciliationRepository {
             -- reports 20 against a 10-unit row: a nightly qty-mismatch alarm on a perfectly valid
             -- split. An order with no signal maps to UNATTRIBUTED_SCOPE so a hand-ticket lot still
             -- matches its own orders instead of reporting missing-entry. NULL = unscoped, as before.
-            -- The EXIT leg below is NOT scoped, and that is a KNOWN DEFECT, not a design choice.
-            -- ROUND-2 REVIEW MAJOR 1 -- an earlier version of this comment claimed an inflated
-            -- exit_count was "harmless, since only exitCount == 0 classifies". That reasoning is
-            -- WRONG and was overturned: if twin A has a settle order and twin B does not, A's order
-            -- satisfies the exit lateral for BOTH rows, so the zero-only classifier at
-            -- PaperReconciliationService:166-174 never sees B. Inflation does not add a false
-            -- alarm, it DELETES a real one -- missing-exit detection becomes a FALSE NEGATIVE and
-            -- the reconciler silently stops reporting a genuinely unsettled position.
-            -- It is not fixable here: doSettle writes exit orders with signal_id NULL, so nothing
-            -- in today's schema ties a settle leg to ONE of two sibling positions. Scoping it the
-            -- way the entry leg is scoped would zero every exit_count instead -- trading a false
-            -- negative for a mass false alarm. The fix is an exact position_id <-> exit_order_id
-            -- association (PR #1259's V057 lot table plus an exit-side linkage), which is why
-            -- #1275 is HARD-BLOCKED on #1259 rather than merely version-coupled.
-            -- PaperScopedResolutionPathsIntegrationTest pins this gap so it cannot be forgotten.
+            -- ⚠️ THIS ENTRY LATERAL IS NOT FIXED BY V059 and still inflates across twins that share a
+            -- strategy: both report 20 against a 10-unit row. That direction over-counts into
+            -- entryQtyMismatch -- a false ALARM, which announces itself -- rather than the silent
+            -- under-counting V059 exists to kill, which is why it is left. The V059 note is on the
+            -- EXIT lateral below; do not read it as covering this one.
             AND (
               p.strategy_id IS NULL
               OR COALESCE(
@@ -94,9 +116,52 @@ public class PaperReconciliationRepository {
         LEFT JOIN LATERAL (
           SELECT COUNT(*) AS exit_count
           FROM paper_orders o
-          WHERE o.book = p.book AND o.exchange = p.exchange AND o.tradingsymbol = p.tradingsymbol
-            AND o.side <> p.side
-            AND COALESCE(o.filled_at, o.placed_at) BETWEEN p.opened_at AND p.closed_at
+          WHERE o.side <> p.side
+            AND (
+              -- V059 EXACT branch (and the fix for round-2 review Major 1, which used to be recorded
+              -- as unfixable on the entry lateral above): doSettle stamped this order with the
+              -- position it settles, so the link IS the attribution and no key/lifetime guard is
+              -- needed or wanted. Dropping the lifetime bound here is deliberate: a settle leg
+              -- written outside its own position's [opened_at, closed_at] window would still be that
+              -- position's exit, and the link says so directly instead of inferring it from
+              -- timestamps. PaperScopedResolutionPathsIntegrationTest's pinned assertion is FLIPPED
+              -- from "> 0" to isZero() accordingly, as its own note instructed.
+              --
+              -- leg_kind is cross-checked rather than trusted from the link alone: today the two are
+              -- redundant for any row doSettle wrote, so this costs nothing, and it means a future
+              -- writer that stamped a link onto a non-exit leg could not silently inflate this count.
+              --
+              -- ⚠️ PaperOrderRepository.legsForPosition matches on the LINK ALONE and deliberately does
+              -- NOT add this guard -- the asymmetry is intended, not an oversight in one of the two.
+              -- The defaults are opposite: this query COUNTS and must be exact, so an ambiguous row is
+              -- safest excluded; that one RENDERS a detail pane, where excluding an ambiguous row
+              -- blanks a leg the user can see. Count-exact tightens, render-inclusive does not.
+              (o.settles_position_id = p.id AND o.leg_kind = 'EXIT')
+              -- LEGACY branch — gated on `leg_kind IS NULL`, i.e. a TRUE pre-V059 row, and that gate
+              -- is the whole point rather than a detail. Falling back on `settles_position_id IS
+              -- NULL` alone also swept in every post-V059 ENTRY fill, and a SELL position's entry leg
+              -- satisfies a BUY position's `o.side <> p.side` test — so a manual SELL entry went on
+              -- masking a BUY position's missing exit, the same false negative through another door.
+              -- That route is NOT hypothetical and NOT gated on F9: POST /api/v1/paper/orders takes a
+              -- caller-chosen side (`PaperController.OrderBody.side`, no whitelist), the cockpit
+              -- exposes BUY/SELL, and PaperLedgerIntegrationTest already opens and closes manual SELL
+              -- positions. Since the open key includes side, both can be held at once today.
+              --
+              -- Every row written BY THE NEW JAR carries ENTRY or EXIT, so NULL is an exact test for
+              -- "legacy" needing no timestamp watermark. Deliberately "new jar", not "after V059":
+              -- flyway-init applies the migration before the new jar is up, so for the few minutes of
+              -- a deploy the OLD jar writes leg_kind NULL rows. Those behave as legacy — i.e. exactly
+              -- the pre-V059 behaviour, not a new regression — which is the correct degradation.
+              -- Note an EXIT whose link were somehow null is excluded here too, rather than silently
+              -- rejoining the key-matched pool. The converse (a link with no ENTRY/EXIT stamp) is
+              -- matched by NEITHER branch by construction: no writer produces one, and the old jar
+              -- leaves both columns null together.
+              OR (o.leg_kind IS NULL
+                  AND o.settles_position_id IS NULL
+                  AND o.book = p.book AND o.exchange = p.exchange
+                  AND o.tradingsymbol = p.tradingsymbol
+                  AND COALESCE(o.filled_at, o.placed_at) BETWEEN p.opened_at AND p.closed_at)
+            )
         ) x ON true
         WHERE p.status = 'CLOSED' AND p.closed_at >= ? AND p.closed_at <= ?
         """,

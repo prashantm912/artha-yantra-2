@@ -551,7 +551,10 @@
       "additionalProperties": false,
       "required": ["basis", "value"],
       "properties": {
-        "basis": { "enum": ["premium_pct", "percent", "atr_multiple", "r_multiple", "index_points"] },
+        "basis": {
+          "enum": ["premium_pct", "percent", "atr_multiple", "r_multiple", "index_points"],
+          "description": "Level basis for stop_loss/take_profit. NOTE: `percent` is REFUSED on options strategies (universe.mode = options_of_underlying) and validation returns 422. On the options plane `premium_pct` means percent of the OPTION PREMIUM while `percent` resolves against the INDEX entry price, so the name is the only thing distinguishing the two planes and an ambiguous one cannot be honoured. Use `premium_pct` for a premium-relative stop, or `index_points`/`atr_multiple` for an index-side one. On cash-equity strategies there is one plane, so `percent` is valid and unchanged."
+        },
         "value": { "type": "number", "exclusiveMinimum": 0 },
         "atr_period": { "type": "integer", "minimum": 1, "maximum": 200 },
         "cap_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 100, "description": "Manas §3.5A: caps an atr_multiple stop DISTANCE at cap_pct% of entry (the tighter of value×ATR and the cap wins), so a wide-ATR stop never exceeds ~10%. Ignored by non-ATR bases." }

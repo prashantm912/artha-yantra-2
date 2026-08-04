@@ -179,7 +179,12 @@ class ScalperStrategyLoadTest {
       assertThat(def.primaryTimeframe()).as(id + " scalps on 3m").isEqualTo("3m");
 
       // §0B hardened bounding-exit rule (T21 #990 round-3): every scalper must carry an exit the
-      // ENGINE can fire — a time_stop or an index-side stop_loss (index_points/percent/atr_multiple).
+      // ENGINE can fire — a time_stop or an index-side stop_loss (index_points/atr_multiple).
+      // NOTE: `percent` was a fourth option here until this PR. Every scalper is
+      // `options_of_underlying` (SignalEngine:813-814), and SemanticValidator now REFUSES a
+      // `percent` level basis on that plane, so it can no longer reach a scalper at all —
+      // do not reintroduce it here. `ScalperRisk.ENGINE_SIDE_STOP_BASES` still lists it, which is
+      // now unreachable-but-inconsistent rather than wrong; chipped separately.
       // A premium_pct stop is option-leg-only (paper bracket path) and does not count; a future
       // family declaring premium_pct-only exits with no time_stop must fail HERE, at load shape,
       // not ship with no live engine-side floor.

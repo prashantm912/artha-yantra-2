@@ -275,6 +275,34 @@
         }
       }
     },
+    "/api/v1/market/symbol-lineage/detect" : {
+      "post" : {
+        "tags" : [ "symbol-lineage-controller" ],
+        "operationId" : "detect",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SymbolLineageDetectResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/subscriptions" : {
       "get" : {
         "tags" : [ "subscriptions-controller" ],
@@ -1618,6 +1646,51 @@
         }
       }
     },
+    "/api/v1/market/symbol-lineage" : {
+      "get" : {
+        "tags" : [ "symbol-lineage-controller" ],
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "name" : "exchange",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "NSE"
+          }
+        }, {
+          "name" : "activeOnly",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : false
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SymbolLineageResponse"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/status" : {
       "get" : {
         "tags" : [ "market-surface-controller" ],
@@ -2468,6 +2541,51 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/FunnelAttrition"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/screener/lineage-impact" : {
+      "get" : {
+        "tags" : [ "lineage-screen-impact-controller" ],
+        "operationId" : "lineageImpact",
+        "parameters" : [ {
+          "name" : "screen",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "default" : "minervini"
+          }
+        }, {
+          "name" : "asOf",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LineageScreenImpact"
                 }
               }
             }
@@ -6761,7 +6879,7 @@
     "/api/v1/instruments" : {
       "get" : {
         "tags" : [ "instruments-controller" ],
-        "operationId" : "list_2",
+        "operationId" : "list_3",
         "parameters" : [ {
           "name" : "exchange",
           "in" : "query",
@@ -7263,6 +7381,36 @@
           }
         },
         "required" : [ "id", "name" ]
+      },
+      "SymbolLineageDetectResponse" : {
+        "type" : "object",
+        "properties" : {
+          "asOf" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "detected" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "inserted" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "refreshed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "confirmed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "inferred" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "asOf", "confirmed", "detected", "inferred", "inserted", "refreshed" ]
       },
       "SubscribeRequest" : {
         "type" : "object",
@@ -8656,6 +8804,63 @@
         },
         "required" : [ "cumulativeDayVolume", "exchange", "lastPrice", "openInterest", "seq", "timestamp", "tradingsymbol" ]
       },
+      "SymbolLineageResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SymbolLineageRow"
+            }
+          },
+          "count" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        },
+        "required" : [ "count", "items" ]
+      },
+      "SymbolLineageRow" : {
+        "type" : "object",
+        "properties" : {
+          "exchange" : {
+            "type" : "string"
+          },
+          "predecessorSymbol" : {
+            "type" : "string"
+          },
+          "successorSymbol" : {
+            "type" : "string"
+          },
+          "switchDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "gapSessions" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "boundaryPrice" : {
+            "type" : [ "string", "null" ]
+          },
+          "confidence" : {
+            "type" : [ "string", "null" ]
+          },
+          "evidence" : {
+            "type" : [ "string", "null" ]
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "statusReason" : {
+            "type" : [ "string", "null" ]
+          },
+          "source" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "boundaryPrice", "confidence", "evidence", "exchange", "gapSessions", "predecessorSymbol", "source", "status", "statusReason", "successorSymbol", "switchDate" ]
+      },
       "SubscriptionView" : {
         "type" : "object",
         "properties" : {
@@ -9541,6 +9746,47 @@
           }
         },
         "required" : [ "baseWeeks", "footprint", "pivot", "rejectReason", "setupType", "valid" ]
+      },
+      "LineageScreenImpact" : {
+        "type" : "object",
+        "properties" : {
+          "screen" : {
+            "type" : "string"
+          },
+          "screenDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "coverage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "candidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "lineageCoverage" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "lineageCandidates" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "entering" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "leaving" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        },
+        "required" : [ "candidates", "coverage", "entering", "leaving", "lineageCandidates", "lineageCoverage", "screen", "screenDate" ]
       },
       "PreOpen" : {
         "type" : "object",

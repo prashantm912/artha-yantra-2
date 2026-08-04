@@ -52,6 +52,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/symbol-lineage/detect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["detect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/subscriptions": {
         parameters: {
             query?: never;
@@ -516,6 +532,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/symbol-lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_2"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/status": {
         parameters: {
             query?: never;
@@ -812,6 +844,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["attrition_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/screener/lineage-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["lineageImpact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2203,7 +2251,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["list_2"];
+        get: operations["list_3"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2397,6 +2445,20 @@ export interface components {
             /** Format: uuid */
             id: string;
             name: string;
+        };
+        SymbolLineageDetectResponse: {
+            /** Format: date */
+            asOf: string | null;
+            /** Format: int32 */
+            detected: number;
+            /** Format: int32 */
+            inserted: number;
+            /** Format: int32 */
+            refreshed: number;
+            /** Format: int32 */
+            confirmed: number;
+            /** Format: int32 */
+            inferred: number;
         };
         SubscribeRequest: {
             exchange?: string;
@@ -2908,6 +2970,26 @@ export interface components {
             /** Format: int64 */
             seq: number;
         };
+        SymbolLineageResponse: {
+            items: components["schemas"]["SymbolLineageRow"][];
+            /** Format: int32 */
+            count: number;
+        };
+        SymbolLineageRow: {
+            exchange: string;
+            predecessorSymbol: string;
+            successorSymbol: string;
+            /** Format: date */
+            switchDate: string | null;
+            /** Format: int32 */
+            gapSessions: number | null;
+            boundaryPrice: string | null;
+            confidence: string | null;
+            evidence: string | null;
+            status: string;
+            statusReason: string | null;
+            source: string;
+        };
         SubscriptionView: {
             exchange: string;
             tradingsymbol: string;
@@ -3221,6 +3303,21 @@ export interface components {
             /** Format: int32 */
             baseWeeks: number | null;
             rejectReason: string | null;
+        };
+        LineageScreenImpact: {
+            screen: string;
+            /** Format: date */
+            screenDate: string | null;
+            /** Format: int32 */
+            coverage: number;
+            /** Format: int32 */
+            candidates: number;
+            /** Format: int32 */
+            lineageCoverage: number;
+            /** Format: int32 */
+            lineageCandidates: number;
+            entering: string[];
+            leaving: string[];
         };
         PreOpen: {
             phase: string;
@@ -5363,6 +5460,35 @@ export interface operations {
             };
         };
     };
+    detect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SymbolLineageDetectResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_1: {
         parameters: {
             query?: never;
@@ -6487,6 +6613,38 @@ export interface operations {
             };
         };
     };
+    list_2: {
+        parameters: {
+            query?: {
+                exchange?: string;
+                activeOnly?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["SymbolLineageResponse"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     status_1: {
         parameters: {
             query?: never;
@@ -7083,6 +7241,38 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["FunnelAttrition"];
+                };
+            };
+            /** @description Error envelope (COMMON 8.3) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    lineageImpact: {
+        parameters: {
+            query?: {
+                screen?: string;
+                asOf?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["LineageScreenImpact"];
                 };
             };
             /** @description Error envelope (COMMON 8.3) */
@@ -9918,7 +10108,7 @@ export interface operations {
             };
         };
     };
-    list_2: {
+    list_3: {
         parameters: {
             query?: {
                 exchange?: string;

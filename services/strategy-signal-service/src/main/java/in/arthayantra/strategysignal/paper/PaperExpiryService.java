@@ -282,8 +282,15 @@ public class PaperExpiryService {
     String title = "Paper position expires tomorrow";
     String message =
         pos.side() + " " + pos.qty() + " " + pos.exchange() + ":" + pos.tradingsymbol() + " — roll or close?";
+    // V058: pass the position's OWN strategy so two scoped siblings on one key each page their own
+    // channel; null (unscoped/legacy row) keeps the pre-V058 first-signal-linked-order resolution.
     Optional<NotifyTarget> target =
-        positions.notifyTargetFor(pos.book(), pos.exchange(), pos.tradingsymbol(), pos.side());
+        positions.notifyTargetFor(
+            pos.book(),
+            pos.exchange(),
+            pos.tradingsymbol(),
+            pos.side(),
+            positions.strategyIdOf(pos.id()).orElse(null));
     String channel = target.map(NotifyTarget::channel).orElse("NTFY");
     try {
       if (notifier.configured(channel)) {

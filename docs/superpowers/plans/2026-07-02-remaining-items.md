@@ -1062,13 +1062,54 @@ every open PR, because the free version moves.
   `expired_contracts` stops at 2026-07-30. Two sessions only, one an expiry; **no outcome has been
   shown to change.** Also found: `candles_1d` cagg and native daily now disagree *semantically*
   (24463.45 vs 24614.90) — worth its own look.
-- **N14 · 668 near-zero-weight symbols in the `scanned` denominator.** 1,030 of 2,927 NSE EQ symbols
-  have no `candles`@1d beyond the ≤276-bar bhavcopy projection; **668 clear `MIN_BARS = 260` and then
-  yield only 1–39 candidate bars** while counting as `scanned` — 1,042 of 2,927 (36%) contribute
-  essentially nothing, 668 of them invisibly. Eight passed the live Minervini screen this month at
-  exactly 276 bars. **Deliberately NOT claimed material** — that is arithmetic on loop bounds, not an
-  observed trade count. Chip `task_35e7045b`. `MIN_BARS` feeds golden vectors, so **prefer a
-  reporting-only split of `evaluable` from `scanned`** over touching it.
+- **N14 · 668 near-zero-weight symbols — MEASURED 2026-08-04, verdict (b) MATERIAL for the
+  DENOMINATOR ONLY; fix must be reporting-only.** No longer arithmetic on loop bounds; this is an
+  observed trade count.
+  - **0 of 668 produced a trade**, both families — 0 of 13,568 Manas trades, 0 of 23,765 Minervini.
+    Every P&L metric is *exactly* unchanged by them. But they are **26.2% of `scanned`**, and
+    `scanned` moved **1,806 → 2,553 (+41.4%) in 24 days** while trade count moved +2.5%. The number
+    an owner reads grew 41% for a pure data-plane reason with zero trade contribution.
+  - **Not the tautological half.** Their first evaluable bar lands in 2026-07 for **658 of 668**,
+    fully inside the measured window. At the deep tier's own base rate the cohort's 10,385 candidate
+    bars predict **~11 entries; observed 0**. Not a mechanical impossibility either — the frozen
+    golden panel is 30 symbols × **280 days**, inside the band, and produces 19 trades. And not
+    liquidity: **357 of 668 clear the ₹37.5L Manas turnover floor.**
+  - ⚠️ **DO NOT exclude them from the universe.** The cohort sits in the **RS cross-section** under
+    the same `MIN_SERIES` membership (`MinerviniBacktestService:439`, whose comment makes the
+    one-threshold coupling deliberate). Removing them shifts every other symbol's RS percentile and
+    touches **0.48% (Manas) / 0.56% (Minervini)** of raw trades — i.e. excluding is a BEHAVIOURAL
+    change. Only additive reporting is safe.
+  - **Parity is clear for the reporting route:** the swing goldens assert
+    `totalTrades`/`tradesTaken`/`cagrPct`/`maxDrawdownPct`/`sharpe` — **not `symbolsScanned`**. A
+    sibling `symbolsEvaluable` (symbols with ≥1 candidate bar in-window) leaves goldens
+    byte-identical. **`MIN_BARS` must not move.** Sole render site:
+    `ManasAroraBacktestPage.tsx:224`.
+  - Corrections to the numbers previously recorded here: candidate bars are **0–33** (median 16), not
+    1–39; max is **293**, not 299; and **a symbol at exactly 260 bars gets ZERO iterations**.
+  - ⚠️ **A premise in the dispatch brief was impossible and the agent was right to refuse it:**
+    "run a window ending before ~2026-07-15 and one ending today" is **not expressible** —
+    `DeepSwingRunRequest` is `(family, from, variant)` with **no `to`**, and both readers are
+    `bucket >= ?` with no upper bound. Every deep-sim run ends at "now". There is no end-date axis.
+  - No production code changed, no PR opened — the RS-cross-section coupling makes this an owner
+    decision first. Reproduce: runs `ee8562fe` / `5fba09dd` (today), `b928d38f` (archived).
+- **N19 · ⚠️ MANAS HEADLINE FELL 3.3× BETWEEN TWO RUNS OF THE SAME CONFIG — needs its own
+  investigation, and it is the largest unexplained number found on 2026-08-04.** Same family, same
+  variant, same `from=2015-07-01`:
+
+  | run | date | return | Sharpe | maxDD | trades | mds sha |
+  |---|---|---|---|---|---|---|
+  | `b928d38f` | 2026-07-12 | **2214.35%** | 0.88 | 51% | 1,337 | `c7a52842` |
+  | `ee8562fe` | 2026-08-04 | **662.86%** | 0.66 | 69% | 1,371 | `10765298` |
+
+  **Proven NOT to be the 668 cohort** — they contributed 0 trades to either run. Attributable to
+  **16 market-data screener commits** since `c7a52842`, two of which (**#1215, #843**) edited *both*
+  `*SwingBacktest.java` files, plus **retro-mutated `candles`**. An unchanged deterministic sim
+  should re-run to the decimal; this one did not, so **the sim changed, not the market** — that is
+  the surprising-result rule, and the harness is the suspect. Bisecting those 16 commits against a
+  pinned `fetched_at` snapshot is the obvious first step.
+- **N20 · `eqSymbols()`'s `SELECT DISTINCT … FROM candles` spans 1,050 chunks** and died once with
+  `out of shared memory / max_locks_per_transaction` under concurrent load — a fragility in the
+  deep-sim's FIRST query. Same class as the 5-way `UNION ALL` cagg probe that started failing today.
 - **N15 · The 374-symbol exclusion is CORRECT — closed, do not reopen.** The live screen enforces its
   own 252-session floor (`artha.minervini.min-sessions:252`, verified deployed — no container
   override), so 357 of 374 are excluded from the screen too and **zero** backtest-excluded symbols

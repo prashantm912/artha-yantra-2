@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Persists + reads per-candidate VCP / base geometry ({@code minervini_setups}, MV-5.4). One row per
@@ -42,9 +43,16 @@ public class MinerviniSetupsRepository {
     this.jdbc = jdbc;
   }
 
-  /** Batch-upserts geometry for a screen date. {@code geometry} maps symbol → footprint. */
-  public int upsertAll(LocalDate screenDate, Map<String, VcpFootprint> geometry) {
+  /**
+   * Atomically REPLACES geometry for a screen date (delete-by-date then write), so a setup row for
+   * a symbol the guard has since dropped cannot survive a recompute. {@code geometry} maps symbol →
+   * footprint; an EMPTY map is a valid input meaning "no passers today" and correctly clears the
+   * date.
+   */
+  @Transactional
+  public int replaceAll(LocalDate screenDate, Map<String, VcpFootprint> geometry) {
     Date d = Date.valueOf(screenDate);
+    jdbc.update("DELETE FROM minervini_setups WHERE screen_date = ?", d);
     List<Object[]> batch = new ArrayList<>(geometry.size());
     for (Map.Entry<String, VcpFootprint> e : geometry.entrySet()) {
       VcpFootprint f = e.getValue();

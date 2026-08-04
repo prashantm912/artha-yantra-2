@@ -1178,13 +1178,16 @@ public class ScalperConfluenceGate {
             // unarmed LEGACY policy leaves the dot list and the aggregate byte-identical, and only the
             // never-read `withheldAggregate` shadow rides along. Arming changes which signals fire and
             // needs a REPUBLISH (the engine reads the PUBLISHED config).
-            cfg.has("dot-null-withheld") ? NullPolicy.WITHHELD : NullPolicy.LEGACY);
+            cfg.has("dot-null-withheld") ? NullPolicy.WITHHELD : NullPolicy.LEGACY,
+            coverageFloorArmed(cfg));
     diag.confluence = conf;
     diag.confluenceThreshold = cfg.confluenceThreshold();
     boolean valid = side == OptionType.CE ? conf.bullish() : conf.bearish();
     diag.failsScore(
         "confluence-composite", valid, conf.aggregate(), cfg.confluenceThreshold(),
-        compositeReason(conf, cfg.confluenceThreshold(), vwapHardGate));
+        compositeReason(
+            conf, cfg.confluenceThreshold(), vwapHardGate,
+            coverageFloorArmed(cfg) ? oiProps.dotCoverageFloor() : null));
     BigDecimal stop = structuralStop;
     // #7 (section 7) Hero-Zero buys the option ONE STRIKE INSIDE the short-covering strike (a CALL one
     // strike below the max-CE-OI strike for a bullish break, a PUT one above the max-PE-OI strike for a
@@ -1261,9 +1264,22 @@ public class ScalperConfluenceGate {
    * A human reason for a blocked confluence composite: which of the decisive legs failed (VWAP side
    * — decisive only while {@code vwapHardGate} holds; the #9 opening-tick path degrades it to a soft
    * dot before 10:30, where naming it "decisive" would be the exact T14 contradiction — the 60m
-   * bias, the 40/40 stand-aside) or, when all held, the aggregate falling short of the threshold.
+   * bias, the 40/40 stand-aside, the §5.3 data-coverage floor) or, when all held, the aggregate
+   * falling short of the threshold.
+   *
+   * <p>{@code coverageFloor} is the ARMED floor value or NULL when the strategy has not armed it.
+   * Without this branch a coverage-floor block fell through to the scalar sentence and persisted
+   * <b>"aggregate 0.9202 below threshold 0.60"</b> — a statement that is false on its own face, with
+   * the real reason (a vanished data plane) recorded nowhere. It is the same T14 class of defect the
+   * margin fix above addresses: a diagnostic column asserting something the numbers contradict is
+   * worse than an empty one, because every later §3 query believes it.
+   *
+   * <p>The coverage branch sits LAST among the legs so the three original ones keep their exact
+   * precedence — an unarmed strategy, or an armed one whose coverage held, produces a byte-identical
+   * string.
    */
-  static String compositeReason(Confluence conf, BigDecimal threshold, boolean vwapHardGate) {
+  static String compositeReason(
+      Confluence conf, BigDecimal threshold, boolean vwapHardGate, BigDecimal coverageFloor) {
     if (conf.standAside()) {
       return "stand-aside (both-IV-high 40/40 suppression)";
     }
@@ -1272,6 +1288,10 @@ public class ScalperConfluenceGate {
     }
     if (!conf.biasAligned()) {
       return "60m bias opposes the side";
+    }
+    if (coverageFloor != null && !conf.coverageFloorHeld()) {
+      return "dot data coverage " + conf.coverage() + " below floor " + coverageFloor
+          + " (decisive)";
     }
     return "aggregate " + conf.aggregate() + " below threshold " + threshold;
   }
@@ -1527,7 +1547,8 @@ public class ScalperConfluenceGate {
             shadowCtx, side, bias60m(bank, index), cfg.confluenceThreshold(), oiProps, vwapHardGate,
             cfg.has("iv-per-strike"), cfg.has("premium-skew"), cfg.has("dow-confluence"),
             effVolFloor, cfg.has("iv-rank-dot"),
-            cfg.has("dot-null-withheld") ? NullPolicy.WITHHELD : NullPolicy.LEGACY);
+            cfg.has("dot-null-withheld") ? NullPolicy.WITHHELD : NullPolicy.LEGACY,
+            coverageFloorArmed(cfg));
     boolean compositeValid = side == OptionType.CE ? shadowConf.bullish() : shadowConf.bearish();
     Boolean slopeGatePass =
         cfg.has("oi-slope-agree")
@@ -1539,6 +1560,23 @@ public class ScalperConfluenceGate {
     return new SentimentCounterfactual(
         wouldFire ? side : null, wouldFire, shadowConf.aggregate(), cfg.confluenceThreshold(),
         compositeValid, slopeGatePass, blockingRail);
+  }
+
+  /**
+   * F5 U4b §5.3: whether the DEFAULT-OFF dot-plane data-coverage floor applies to this strategy.
+   *
+   * <p><b>{@code dot-null-withheld} IMPLIES the floor</b> — that is the point of the {@code ||}, not
+   * a convenience. Unifying the null rule to "withhold" is measured near-inert on a normal tape
+   * (zero bar-side flips over 11,068 post-P3 evaluations) but is overwhelmingly LOOSENING on the two
+   * sessions where the data was actually broken: withholding would have RAISED the aggregate on
+   * 1,812 of 1,816 rows across the 2026-07-20 Timescale outage and the 2026-07-28 monthly expiry.
+   * The decision sheet's rule is "arm the floor TOGETHER with the policy — never the policy alone";
+   * making the policy tag arm the floor enforces that structurally, so no future republish can
+   * separate them by omission. The floor tag ALONE (with the LEGACY policy) is a pure tightening and
+   * is the safe way to measure the floor on its own first.
+   */
+  private static boolean coverageFloorArmed(ScalperConfig cfg) {
+    return cfg.has("dot-coverage-floor") || cfg.has("dot-null-withheld");
   }
 
   private int bias60m(BarValues bank, int index) {

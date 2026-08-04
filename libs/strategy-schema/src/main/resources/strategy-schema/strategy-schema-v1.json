@@ -433,7 +433,7 @@
               "additionalProperties": false,
               "required": ["basis"],
               "properties": {
-                "basis": { "enum": ["premium_pct", "percent", "atr_multiple", "index_points", "indicator"] },
+                "basis": { "enum": ["premium_pct", "atr_multiple", "index_points", "indicator"], "description": "The trailing bases the engine actually evaluates. `percent` is deliberately absent: it is a LEVEL basis (stop_loss/take_profit) and was never evaluated as a trail, so declaring it bought a trailing stop that silently never fired. Use `premium_pct` for a percent-off-the-peak trail." },
                 "value": { "type": "number", "exclusiveMinimum": 0 },
                 "activate_at": { "type": "number", "exclusiveMinimum": 0 },
                 "trail_by": { "type": "number", "exclusiveMinimum": 0 },

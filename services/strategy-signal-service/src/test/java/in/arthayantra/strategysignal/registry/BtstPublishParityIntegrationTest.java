@@ -68,7 +68,7 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
   void rejectsBtstTrailingStopAtPublish() {
     assertPublishRejected(
         "trailing-stop",
-        "- { type: trailing_stop, params: { basis: percent, value: 5 } }",
+        "- { type: trailing_stop, params: { basis: premium_pct, value: 5 } }",
         "trailing_stop");
   }
 
@@ -150,7 +150,7 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
             "intraday-" + suffix,
             "Intraday " + suffix,
             "intraday",
-            "- { type: trailing_stop, params: { basis: percent, value: 5 } }");
+            "- { type: trailing_stop, params: { basis: premium_pct, value: 5 } }");
 
     UUID id = create("Intraday " + suffix, yaml);
 
@@ -174,7 +174,7 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
                 "precustom-" + suffix,
                 "Pre-close custom " + suffix,
                 "btst",
-                "- { type: trailing_stop, params: { basis: percent, value: 5 } }")
+                "- { type: trailing_stop, params: { basis: premium_pct, value: 5 } }")
             .replace("session: { style: btst }", "session: { style: btst, pre_close_at: \"15:15\" }");
 
     UUID id = create("Pre-close custom " + suffix, yaml);
@@ -198,7 +198,7 @@ class BtstPublishParityIntegrationTest extends StrategySignalIntegrationTestBase
             slug,
             "Reload " + suffix,
             "btst",
-            "- { type: trailing_stop, params: { basis: percent, value: 5 } }"));
+            "- { type: trailing_stop, params: { basis: premium_pct, value: 5 } }"));
     StrategyRepository.VersionRow version =
         repository.findVersion(id, "1.0.0").orElseThrow();
 

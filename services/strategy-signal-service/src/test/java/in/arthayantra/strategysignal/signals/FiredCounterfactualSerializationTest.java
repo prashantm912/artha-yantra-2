@@ -152,6 +152,75 @@ class FiredCounterfactualSerializationTest {
   }
 
   /**
+   * Codex review Major 1 — the counterfactual was INCOMPLETE, and this very fixture is the proof.
+   *
+   * <p>The bar has four missing inputs, so §5.3 coverage is 15.3/18.8 = 0.8138, below the 0.90 floor
+   * that the only armable form of {@code dot-null-withheld} implies. Yet the champion has the floor
+   * UNARMED, so {@code decisiveLegsHeld} is TRUE and {@code withheldAggregate} 1.0 clears the 0.6
+   * threshold: the OLD two-key reading concludes "the armed policy would have fired this bar", and
+   * the row keeps its fired status in the tightening-half subtraction. The armed policy would in fact
+   * have REFUSED it — the data plane it scored 1.0 on had largely vanished.
+   *
+   * <p>So the two readings DISAGREE on this row, which is what makes this a test rather than a
+   * description. Dropping either new {@code c.put} fails at {@code get(...)}; emitting a constant
+   * {@code true} for {@code coverageFloorHeld} fails on the first assertion.
+   */
+  @Test
+  void theCounterfactualIsIncompleteWithoutTheCoverageFloor() {
+    JsonNode conf = firedConfluence(1);
+
+    assertThat(conf.get("coverage").decimalValue())
+        .as("15.3 surviving of the 18.8 legacy baseline")
+        .isEqualByComparingTo("0.8138");
+    assertThat(conf.get("coverageFloorHeld").asBoolean())
+        .as("below the 0.90 floor the armable policy implies")
+        .isFalse();
+
+    boolean oldReading =
+        conf.get("decisiveLegsHeld").asBoolean()
+            && conf.get("withheldAggregate").decimalValue().compareTo(T) >= 0;
+    boolean completeReading = oldReading && conf.get("coverageFloorHeld").asBoolean();
+
+    assertThat(oldReading).as("the two-key reading credits the armed policy with this bar").isTrue();
+    assertThat(completeReading).as("the complete reading refuses it").isFalse();
+  }
+
+  /**
+   * The other half of the discriminating pair: {@code coverageFloorHeld} is a real per-bar fact, not
+   * a constant {@code false} that would make the test above pass for the wrong reason. Every input
+   * present ⇒ coverage 1.0000 ⇒ the floor holds and the armed policy's verdict is unchanged.
+   */
+  @Test
+  void coverageIsAPerBarFactNotAConstant() {
+    Oi cleanOi =
+        new Oi(
+            OiQuadrant.LONG_BUILDUP, OiQuadrant.LONG_BUILDUP, bd("10"), bd("5"), bd("5"),
+            bd("-60000"), bd("70000"), bd("80"), true, false, bd("5"), bd("60"), bd("60"));
+    Macro cleanMacro =
+        new Macro(bd("14"), bd("30"), bd("12"), Boolean.FALSE, 40, 10, bd("50"), bd("0.20"), bd("0.05"));
+    ScalperGateContext clean =
+        new ScalperGateContext(
+            "NIFTY 50", "NIFTY 50", LocalTime.of(10, 30), BULL_CHART, cleanOi, cleanMacro);
+    Confluence c = ConnectTheDotsScorer.score(clean, CE, 1, T, P, true);
+    ScalperConfluenceGate.FiredDiagnostic d =
+        new ScalperConfluenceGate.FiredDiagnostic(
+            CE, c.aggregate(), T, List.of(), c, clean, "NIFTY 50", LocalDate.of(2026, 8, 27),
+            pick(), null);
+    JsonNode conf;
+    try {
+      conf = OM.readTree(FiredDiagnosticJson.write(OM, d)).get("confluence");
+    } catch (Exception e) {
+      throw new AssertionError(e);
+    }
+
+    assertThat(conf.get("coverage").decimalValue()).isEqualByComparingTo("1.0000");
+    assertThat(conf.get("coverageFloorHeld").asBoolean()).isTrue();
+    // …and it genuinely differs from the gappy bar, so neither value is hard-coded.
+    assertThat(conf.get("coverage").decimalValue())
+        .isNotEqualByComparingTo(firedConfluence(1).get("coverage").decimalValue());
+  }
+
+  /**
    * The NUMERIC side is unchanged — this PR records a fact, it does not alter one. Same aggregate,
    * same dot list (names, order, weights, supports, absent). Only the two counterfactual keys appear,
    * asserted as an EXACT key set so an accidental extra or dropped key fails.
@@ -164,7 +233,8 @@ class FiredCounterfactualSerializationTest {
         .isEqualTo(
             Set.of(
                 "aggregate", "threshold", "bullish", "bearish", "vwapAligned", "biasAligned",
-                "standAside", "withheldAggregate", "decisiveLegsHeld", "dots"));
+                "standAside", "withheldAggregate", "decisiveLegsHeld", "coverage",
+                "coverageFloorHeld", "dots"));
 
     // The dot array is byte-for-byte the same shape and content it was before.
     Confluence source = confluence(1);

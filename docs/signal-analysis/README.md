@@ -687,16 +687,26 @@ Run in order; each answers one question. Canned SQL in §6.
     through. That is the designed degrade — but it means a wire defect silently disables a
     money-path guard, and NOTHING else surfaces it. First live instance 2026-08-05 11:04: the
     session's ONLY funded entry got `Error while extracting response ... content type
-    [application/octet-stream]` (not an unpriced-margin case — the reply was not the typed JSON at
-    all), twice (entry path + notifier). Standing check on every session WITH a funded fire:
+    [application/octet-stream]`, twice (entry path + notifier). Standing check on every session WITH
+    a funded fire:
     ```bash
     docker logs ay-strategy-signal-service --since <open-UTC> 2>&1 \
       | grep -cE "heat call failed|heat unassessable"
     ```
-    Zero on a fired session = the gate evaluated; non-zero = the F9 heat check never ran on those
-    entries — report it, count it against the fire count, and keep the defect row open until the
-    content-type cause is fixed. (On a zero-fire session the grep proves nothing — the gate only
-    runs at entry.)
+    Non-zero = the F9 heat check never ran on those entries — report it and count it against the fire
+    count. (On a zero-fire session the grep proves nothing — the gate only runs at entry.)
+
+    ⚠️ **CORRECTED 2026-08-05 (same day, after the finding was written) — read
+    [`2026-08-05-f9-heat-cap-inert.md`](2026-08-05-f9-heat-cap-inert.md) before acting on this row.**
+    Two things above are wrong. **(1) The cause is not a content-type/wire defect.** It is
+    `PaperMarginClient`'s 2000 ms read timeout against `UpstoxFnoMasterClient`'s lazy 5 MB+ gzip
+    master load, which is itself budgeted 60 s — the day's first `keyFor()`. Both WARNs fired at
+    exactly 2000 ms and the master completed 535 ms later. Deterministic per container start / per
+    12 h refresh lapse. **(2) A ZERO grep does NOT mean the cap covered the entry.** Heat is computed
+    as `spanMargin / equity`, and every scalper position is a long option BUY, which carries no SPAN
+    — 10 of 10 priced snapshots are `0.00`, so the normal path yields `0.00%` against a `60%` cap and
+    blocks nothing. Zero here means "the call succeeded", not "the control worked". Treat this §3.34
+    row as an evaluability probe only; **coverage is an open owner question (ledger N23-A)**.
 35. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis

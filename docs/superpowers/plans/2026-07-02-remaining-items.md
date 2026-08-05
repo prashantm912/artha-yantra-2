@@ -985,10 +985,18 @@ days. Read the API.**
 | **#1296** ScalperRisk §0B stop-basis coupling | review RESOLVED; **Golden 9/9 + Parity 9/9 + OptionsPremiumGolden 2/2 re-run by the main loop itself** | HOLD — owner merge call only |
 | **#1297** CA stage→verify→swap | round 3 fixes pushed (M-A observability, M-B cooldown/recovery contradiction) | **round 4 review** |
 | **#1299** `symbol_lineage` | all 4 must-fix items CLOSED; **renumbered to V055**; headline corrected to **1809 / 284, +7 entering, 0 leaving** (`CNL` refuted out); 1261 tests green, **14 red-proofs** | **re-review round** |
-| **#1302** required-contexts doc | mine, docs-only | rebase + merge |
-| **#1303** futures-roller refresh window | review in flight at session close | collect verdict |
+| ~~**#1302**~~ required-contexts doc | **MERGED** `bd024805` | — |
+| ~~**#1303**~~ futures-roller refresh window | **MERGED** `20d927e6`, deployed + jar-fingerprinted 2026-08-05 08:35 IST | — |
 | **#1283** swing data-coverage gate | rework pushed | review round |
 | **#1075** scalper budget ₹15k→₹20k | parked | owner, 2026-08-12 |
+
+**Re-measured 2026-08-05 16:40 IST — 7 open, and `mergeStateStatus` is `BEHIND` on every one of the
+six that report** (`#1075` reads `UNKNOWN`). Main moved 3× since they were opened and `strict: true`
+is on, so each needs
+`gh api -X PUT repos/{o}/{r}/pulls/<n>/update-branch` before CI can go green — server-side, no local
+checkout needed. Two NEW since the 08-04 table: **#1305** (CA rebuild cagg refresh window sized in
+tuples — needs a review round) and **#1306** (CLAUDE.md checkout-currency trap — mine, docs-only, CI
+was green pre-drift, needs update-branch + merge).
 
 #### ⚠️ MIGRATION COLLISION — check this BEFORE writing any marketdata migration
 `origin/main` tops at **V053**. **#1297 claims V054** (`V054__candle_rebuild_staging.sql`) and
@@ -1197,6 +1205,65 @@ roller failure remains expected until the next deploy.
   bottoms at 2016-09-26, **shallower than the earlier BACKFILL cohort**, and ~81,000 of the 93,528
   restored bars have **no bhavcopy counterpart at all**, so their adjustment basis is unverified.
   1m bars were NOT restored, by scope.
+
+#### 2026-08-05 — from the day's four routines. Nothing below is started.
+
+All four routines ran and reported: 09:35 open-liveness gate **PASS**, 09:47 data-health **GREEN**,
+12:35 midday liveness **PASS**, 15:53 post-market → [`#1307`](https://github.com/prashantm912/artha-yantra-2/pull/1307)
+merged (`af2bfdff`). The three intraday runs need no action. Everything below comes from the
+post-market run's NEW-1 row plus the Architect's follow-up on it.
+
+- **N23 · ⚠️ THE F9 HEAT CAP HAS NEVER BEEN ABLE TO FIRE — armed 2026-07-05, structurally inert.**
+  Full investigation: [`docs/signal-analysis/2026-08-05-f9-heat-cap-inert.md`](../../signal-analysis/2026-08-05-f9-heat-cap-inert.md).
+  Not a loss and not a live money defect — a safety control that reports healthy while measuring the
+  wrong quantity. **Three distinct defects, do not collapse them:**
+  - **(A) STRUCTURAL, the real one.** `RiskService:503-510` computes heat as `spanMargin / equity`.
+    **Every scalper position ever opened is a long option BUY (11/11), which carries no SPAN** — 10 of
+    10 priced `margin_snapshot` rows are exactly `0.00`, so heat is `0.00%` against a `60%` cap and
+    `RiskService:468`'s blocking branch is unreachable for this book's position type. Upstox is right
+    to return `span_margin: 0` for a long basket; the capital at risk is the premium outlay, which the
+    gate never looks at. **HOLD-tier / owner** — arming it for real will start refusing entries on a
+    ₹1.5 L book. Options (a)–(e) are in the doc's §4; recommendation is (c)+(d) clean now, (a) owner.
+  - **(B) TRANSIENT, today's WARN.** `PaperMarginClient`'s **2000 ms** read timeout vs
+    `UpstoxFnoMasterClient`'s **lazy 5 MB+ gzip master load** budgeted **60 s** — the first `keyFor()`
+    of the day. Both WARNs fired at exactly 2000 ms; the master completed 535 ms later. Deterministic
+    per container start / per 12 h `REFRESH` lapse, **not** a wire defect. Fix = warm the master
+    (option d); do NOT lengthen the 2 s timeout — it protects the tick thread by design (#694).
+  - **(C) LATENT drift.** `PaperMarginClient.Quote` has 7 components, `MarginController.MarginResponse`
+    has 10 — the client cannot see `equityMargin`, `netBuyPremium`, `additionalMargin`. `netBuyPremium`
+    is exactly the field (A) needs. Silent (Jackson matches by name); prerequisite for (A).
+  - ⚠️ **The post-market routine diagnosed this as a "wire/content-negotiation defect" and proposed
+    reproducing the octet-stream reply** (`2026-08-05-session-findings.md` §6.1, §7 NEW-1). That
+    investigation points at a component behaving correctly and would never have reached (A). The dated
+    file is immutable; the correction lives here and in the linked doc. **Read N23 before actioning
+    NEW-1.**
+- **N24 · Routine follow-ups that need no build, only the next run to look.** Carried so the next
+  post-market run does not re-derive them:
+  - **`strike-pick` discriminator lands Thu 2026-08-06** — BSE weekly expiry, so the expiry-eve/day-of
+    mechanism predicts SENSEX-rooted fails. The 235 → 604 → **0** series (Mon/Tue/Wed) already favours
+    it over a persistent CAS-era chain degradation. The daily routine covers this automatically; no
+    action beyond reading the result. NB the 08-04 file's "Fri 08-07 SENSEX" watch row is wrong — the
+    BSE weekly is Thursday; corrected in the 08-05 file.
+  - **T23 opening-bucket WARN has a NEW SIGN** — 1 unpaired `PartialBucketCanary` WARN at the 09:15
+    bucket, 3m bar 246,870 vs Σ(3×1m) 241,150, shortfall **−5,720** (2.3%). Same locus as the pre-B2
+    opening defect, opposite direction (tick-agg UNDER-counting). Single sub-3% event; watch the
+    opening bucket, do not escalate on one.
+  - **G16/T30 `breadth` produced its FIRST mid-range session in 12** — PE 286/830 = 34.5% while CE
+    stayed 0/206. The "never in between" step-function claim is broken **on one side**. Sharpens the
+    evidence; the design question (a market-wide scalar in a per-bar composite) is unchanged and still
+    **OWNER**.
+  - **`minervini-cheat-3c` / `minervini-primary-base` STALE-PUBLISH, 3rd consecutive session**
+    (1.0.2 drafts, name+description only). Cheap ops republish; still not done. Apply the #1016 rule —
+    pick by "latest version row ≠ `published_version_id`", never "latest DRAFT ≠ published".
+  - **T10 stale OPEN swing positions now 18** (was 17). Chronic, owner, unchanged class.
+  - **`tools/ledger-consistency-check.py` [C] false positives now 3**, all "T18 promotion", the third
+    being the 08-04 file's own §6.3 quoting the second — the predicted self-quote accumulation.
+    **If a 4th accrues, teach the checker to skip quoted dispositions.** Conditional, not yet due.
+- **N25 · Cosmetic: the 09:35 open-liveness routine printed "Trading day: Tue 2026-08-05".**
+  2026-08-05 is a **Wednesday**. That routine runs no expiry logic so nothing was decided on it, and
+  the post-market run had the weekday right — but NSE weekly is Tuesday and BSE weekly is Thursday, so
+  a wrong weekday in a routine that later gains expiry awareness would matter. One-line fix in
+  `market-open-signal-liveness-gate/SKILL.md`'s date handling when that file is next touched.
 
 ---
 

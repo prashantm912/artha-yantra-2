@@ -680,7 +680,24 @@ Run in order; each answers one question. Canned SQL in §6.
       AND EXTRACT(second FROM bucket)=0 AND bucket >= :d1510 AND bucket < :d1530 ORDER BY bucket;
     -- continuous close = the pinned value before the late jump; official = the 1d bar's close.
     ```
-34. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+34. **Heat-gate evaluability on every funded fire** (added 2026-08-05) — the paper book's F9
+    heat-cap is FAIL-SOFT: `PaperMarginClient.margin()` (→ market-data `POST /api/v1/market/margin`)
+    returns an `unpriced` quote on ANY failure and `RiskService` logs
+    `heat-cap enforcement ON but heat unassessable — gate inert this entry` and lets the entry
+    through. That is the designed degrade — but it means a wire defect silently disables a
+    money-path guard, and NOTHING else surfaces it. First live instance 2026-08-05 11:04: the
+    session's ONLY funded entry got `Error while extracting response ... content type
+    [application/octet-stream]` (not an unpriced-margin case — the reply was not the typed JSON at
+    all), twice (entry path + notifier). Standing check on every session WITH a funded fire:
+    ```bash
+    docker logs ay-strategy-signal-service --since <open-UTC> 2>&1 \
+      | grep -cE "heat call failed|heat unassessable"
+    ```
+    Zero on a fired session = the gate evaluated; non-zero = the F9 heat check never ran on those
+    entries — report it, count it against the fire count, and keep the defect row open until the
+    content-type cause is fixed. (On a zero-fire session the grep proves nothing — the gate only
+    runs at entry.)
+35. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

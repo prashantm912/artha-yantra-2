@@ -1255,7 +1255,9 @@ post-market run's NEW-1 row plus the Architect's follow-up on it.
   - **`minervini-cheat-3c` / `minervini-primary-base` STALE-PUBLISH, 3rd consecutive session**
     (1.0.2 drafts, name+description only). Cheap ops republish; still not done. Apply the #1016 rule —
     pick by "latest version row ≠ `published_version_id`", never "latest DRAFT ≠ published".
-  - **T10 stale OPEN swing positions now 18** (was 17). Chronic, owner, unchanged class.
+  - ~~**T10 stale OPEN swing positions now 18** (was 17). Chronic, owner, unchanged class.~~
+    ⚠️ **"unchanged class" is WRONG — corrected the same evening. See N26: T10 is not housekeeping,
+    it is what has frozen both swing books' entries.**
   - **`tools/ledger-consistency-check.py` [C] false positives now 3**, all "T18 promotion", the third
     being the 08-04 file's own §6.3 quoting the second — the predicted self-quote accumulation.
     **If a 4th accrues, teach the checker to skip quoted dispositions.** Conditional, not yet due.
@@ -1264,6 +1266,65 @@ post-market run's NEW-1 row plus the Architect's follow-up on it.
   the post-market run had the weekday right — but NSE weekly is Tuesday and BSE weekly is Thursday, so
   a wrong weekday in a routine that later gains expiry awareness would matter. One-line fix in
   `market-open-signal-liveness-gate/SKILL.md`'s date handling when that file is next touched.
+
+#### 2026-08-05 evening batch — all eleven jobs ran, and the swing books are starving
+
+**Every scheduled job fired and reported SUCCESS** (measured, `marketdata.ingest_runs` /
+`marketdata.canary_runs` / `strategy.swing_batch_runs`, IST): 18:59:58 + 19:00:07 the FII/DII +
+participant-OI + FII-derivative trio · 19:29:59 `BHAVCOPY` · 19:31:13 `MANAS_SCREEN` + 19:31:42
+`MINERVINI_SCREEN` · 19:32:28 `MINERVINI_PLANE_DIVERGENCE` · 19:44:58 `MARKET_CONTEXT_DAY` · 19:49:58
+`DATA_QUALITY` · 19:54:58 `EQUITY_BREADTH` · 20:00:48 minervini swing · 20:05:34 manas-arora swing ·
+21:14:58 paper reconcilers **clean, 0 discrepancies**. **0 ERROR lines** in market-data and
+strategy-signal across the whole evening. The CA sweep correctly did NOT run
+(`ARTHA_CORPORATE_ACTIONS_ENABLED=false`, disarmed per N10).
+
+- **N26 · ⚠️ BOTH SWING BOOKS HAVE ADMITTED ZERO FRESH ENTRIES FOR THREE SESSIONS — the cap refuses
+  every candidate, and the 18 stale positions are why.** This is T10, restated correctly: it is not
+  bookkeeping, it is **entry starvation of the forward-paper record** the owner's §0.5 #12 reliability
+  sign-off is accumulating.
+  - Measured, `strategy.swing_batch_runs` (`cap_exceedance` **equals** `would_enter` on every row
+    since 08-03):
+
+    | date | batch | candidates | would_enter | **admitted** | cap_exceedance | open_at_start |
+    |---|---|---|---|---|---|---|
+    | 07-30 | minervini | 106 | 6 | 1 | 5 | 15 |
+    | 07-31 | minervini | 111 | 20 | 1 | 19 | 14 |
+    | 08-03 | minervini | 139 | 23 | **1** | 22 | 14 |
+    | 08-04 | minervini | **0** | 17 | **0** | 17 | 15 |
+    | 08-05 | minervini | **0** | 17 | **0** | 17 | 15 |
+    | 08-03 | manas-arora | 93 | 10 | **0** | 10 | 6 |
+    | 08-04 | manas-arora | 100 | 4 | **0** | 4 | 6 |
+    | 08-05 | manas-arora | 111 | 11 | **0** | 11 | 6 |
+
+  - **One entry in five sessions, zero in the last three.** Tonight 28 qualifying setups across both
+    books were found and all 28 refused.
+  - **manas-arora's bound is named explicitly in the log** — `risk pyramid-cap manas-arora tripped for
+    KABRAEXTRU (fresh entry for KABRAEXTRU blocked by the 6.0% portfolio open-risk cap)`, repeated for
+    RRKABEL, TDPOWERSYS, SANGHVIMOV, APOLLOPIPE, RPTECH, HFCL, NRBBEARING, PRECWIRE, NETWEB,
+    JAYNECOIND (11 of 11).
+  - ⚠️ **minervini logs NO `RiskService` trip at all** — `cap_bound=t` and 17 dropped, but nothing
+    names which cap. **Its 17 are refused silently.** Identifying that cap is step one; do not assume
+    it is the same 6% rail.
+  - **The capacity is held by stale inventory:** 18 OPEN — **12 minervini (oldest 2026-07-07)** and
+    **6 manas-arora (oldest 2026-07-10)**, ~4 weeks old.
+  - **NOT the screen, and not a market drought.** `minervini_screen_results` is healthy and improving:
+    08-03 1767 scanned / 277 passing · 08-04 1772 / 272 · **08-05 1778 / 280**. `minervini_setups`
+    tracks it (277/272/280). The funnel is producing; the gate is refusing.
+  - **Owner call, two independent levers** — (i) age out / square off the stale inventory so capacity
+    frees, and (ii) decide whether a 6% portfolio open-risk cap that blocks 100% of fresh entries is
+    the intended steady state or a mis-sized rail. Ledger row #37 already holds M40 (the fresh-entry
+    6% cap) as HOLD with its PR open; **this is that rail observed live, and it is binding
+    absolutely.** Do not re-tune it from this row alone — one session's refusals are not a sizing
+    study.
+- **N27 · minervini's `candidates` counter collapsed 139 → 0 on 08-04 and has stayed 0, while
+  `would_enter` held at 17.** manas-arora's same counter is healthy and rising (93 → 100 → 111) over
+  the identical window, and the screen behind both is fine (above). So `candidates` counts something
+  other than the funnel, and for minervini only it reads zero while the batch demonstrably still finds
+  17 entry candidates. **It is NOT the cause of N26's zero admissions** — that is the cap — but a
+  headline counter that silently reads 0 while work is happening will mislead every future session
+  report, and it already misled this one. Unexplained; nothing investigated beyond establishing it is
+  not the screen. Start at `SwingBatchEngine`'s candidate accounting vs `SwingBatchRecorder`'s
+  persisted column.
 
 ---
 

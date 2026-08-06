@@ -1371,9 +1371,10 @@ that needs an action — it is regime, and the routine read it correctly.
   expiring-today SENSEX legs all session. §3.27 now splits by exchange+cycle: monthlies (both roots)
   and NSE-weekly eve/day-of (235 → 604) saturate; **the first observed BSE weekly does not.** README
   §3.27 amended by the run. Next discriminators: **Mon/Tue 08-10/11 (NIFTY weekly)**.
-- **N26 continuity — nothing has changed and tonight is session 4.** Swing batches had not yet run at
-  the time of this check (they fire 20:00/20:05); open inventory is **unchanged at 18** (12 minervini
-  + 6 manas-arora). The post-market run independently logs T10 as "18 OPEN (unchanged)".
+- **N26 continuity — session 4 landed, still zero.** Measured 21:23 IST: **minervini 0 candidates /
+  18 would-enter / 0 admitted / 18 cap-exceedance** (open_at_start 15); **manas-arora 103 / 7 / 0 / 7**
+  (open_at_start 6). **Four consecutive sessions, both books, zero admissions**, and minervini's
+  would-enter grew 17 → 18. Open inventory unchanged at 18. N26 stands exactly as written.
 - **Carried, no movement:** minervini republish now **4th consecutive session** (`minervini-cheat-3c`
   / `minervini-primary-base`, 1.0.2 drafts, name+description only) · T1 **10th** consecutive no-pay
   (2-leg sole-blocker set, both real shadow losers) · T7 **3rd** adverse marginal-trade reading
@@ -1381,6 +1382,52 @@ that needs an action — it is regime, and the routine read it correctly.
   **Improved:** T23/G9 recorded its **first fully-quiet session** (0 WARNs + 0 straddles) — 08-05's
   opening-bucket watch point did not recur; and the 08-05 ledger-checker `[C]` self-quote class did
   **not** accrue a 4th (the findings window rolled past it), so that conditional fix is not due.
+
+#### 2026-08-06 evening batch — all jobs completed; two things to look at
+
+**Everything ran and reported SUCCESS**, with an unusual shape (see N31): 18:40:55 `BHAVCOPY` + the
+FII trio (restart catch-up) · 18:42 both screens · 18:43:41 `MINERVINI_PLANE_DIVERGENCE` · 18:59:59 +
+19:00:00 FII trio (scheduled) · 19:30:04 `BHAVCOPY` (scheduled) · 19:44:59 `MARKET_CONTEXT_DAY` ·
+19:49:59 `DATA_QUALITY` · 19:54:59 `EQUITY_BREADTH` · 20:00:48 + 20:05:31 swing batches · 21:14:59
+paper reconcilers **clean, 2 positions, 0 discrepancies**. **0 ERROR lines** in both services. The
+screens correctly did NOT re-run at 19:31 — same `run_day`, deduped.
+
+- **N30 · The nightly bhavcopy catch-up rescans a FULL YEAR every run, re-fetches the same 13
+  historical dates, and retro-stamps their `fetched_at`.** Measured tonight, both runs:
+  - `bhavcopy watermark 2026-08-05 is older than the 365-day cap; starting from 2025-08-06` — **the
+    watermark was ONE DAY old.** Either the message is misworded or the comparison mis-triggers; the
+    effect either way is a 365-day rescan on every catch-up.
+  - Both runs then reported the identical `NSE bhavcopy catch-up 2025-08-06..2026-08-06: 13 days` —
+    18:41 (41,059 rows) and 19:30 (40,862 rows). **The same 13 dates recur; the gap never closes.**
+    Dates: 2025-10-21, 11-04, 12-24, 2026-01-14, 01-23, 03-02, 03-25, 03-30, 04-02, 04-13, 04-30,
+    05-27, 06-25 — all weekdays, scattered, no obvious pattern.
+  - **The consequence that matters:** the 19:30 run moved `fetched_at` forward on **40,862 rows across
+    those 13 historical trade dates** (measured: `GROUP BY fetched_at` shows `18:41 → 3,287 rows /
+    1 date` = today only, then `19:30 → 40,862 rows / 13 dates`). CLAUDE.md mandates gating every
+    historical A-vs-B on `fetched_at` precisely because these tables are retro-mutable — **and a
+    routine nightly job is silently churning that very timestamp on year-old rows.** An analysis
+    gated on `fetched_at < X` would read these 13 dates as freshly fetched.
+  - **Cause NOT established.** Bhavcopy rows and 1d candles both exist for all 13 (2,432–2,674 candles
+    each), so it is not missing data. What the gap detector keys on is unread. Start at the watermark/
+    365-day-cap comparison and `BhavcopyBackfillService`'s per-date completeness test.
+  - ⚠️ **Retracted mid-investigation, recorded because the false version was convincing:** I first
+    measured "0 candles on all 13" and nearly filed a much larger finding. The query used
+    `d.dt::timestamptz`, and a bare date cast resolves in the SESSION timezone — **UTC in-container** —
+    so the window straddled the wrong side of the 00:00-IST daily bucket. With explicit
+    `+05:30` bounds every date has candles. **CLAUDE.md already carries this exact rule and I hit it
+    anyway**; the contrast query against neighbouring dates is what exposed it. Bound with explicit
+    `+05:30` literals, never a bare `::date`/`::timestamptz` cast.
+- **N31 · Unexplained full-stack restart at 18:40:38 IST.** All four containers report
+  `StartedAt = 2026-08-06T13:10:38Z` **to the same second** with `RestartCount = 0` — that is a
+  compose recreate or a Docker Desktop restart, **not** a crash loop. Not performed by this session,
+  and the routines are read-only. It landed 16 minutes after a clean 18:24 check.
+  - **Nothing was lost:** boot catch-up re-ran the missed evening jobs (18:40–18:43), the scheduled
+    jobs then ran normally, screens deduped correctly, and the reconcilers were clean.
+  - **But nothing would have alarmed either.** `SwingBatchHeartbeat` pings only after the 20:15 swing
+    batches, so an outage at 18:40 that self-healed before 20:00 is invisible to the external
+    dead-man's-switch — the exact blind spot `external-batch-liveness-watchdog` names. If the restart
+    had happened at 19:50 instead, `EQUITY_BREADTH` would have been skipped silently.
+  - **Owner question: was this you?** If not, it wants a cause before it recurs during a batch window.
 
 ---
 

@@ -469,6 +469,15 @@ Run in order; each answers one question. Canned SQL in §6.
     WHERE r.generated_at >= :d0 AND c->>'rail'='strike-pick' AND (c->>'pass')::boolean=false
     GROUP BY 1,2 ORDER BY 1,2;
     ```
+    ⚠️ **AMENDED 2026-08-06 — the rule does NOT generalize to every expiry cycle.** The first
+    observed **BSE WEEKLY** expiry (Thu 2026-08-06, SENSEX weeklies expiring) produced **ZERO
+    `strike-pick` fails on either root**, and the shadow book traded expiring-today SENSEX legs
+    all session — falsifying the carried prediction. The observed saturations are the two
+    MONTHLIES (07-28 NSE → NIFTY 534; 07-30 BSE → SENSEX 405) and the **NSE-weekly eve/day-of**
+    pair (08-03 → 235, 08-04 → 604, both NIFTY-rooted; 08-05 non-expiry control → 0). Read the
+    claim as *monthly expiries and NSE weeklies have saturated the expiring root; the BSE weekly
+    has not (n=1)* — check the day's cycle before predicting fails, and keep 07-24's
+    no-expiry 550 as the standing reminder that non-expiry causes exist too.
 28. **A dot at 0% (or 100%) on a LIVE, MOVING operand is a FOURTH state — "never crosses" — that neither
     the alive/dead nor the frozen probe can see; check the operand's own min/max against the dot's
     threshold before classifying** (added 2026-07-30) — `breadth` (w **1.0**, the canary's only required

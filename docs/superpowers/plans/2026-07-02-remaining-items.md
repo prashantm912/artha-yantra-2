@@ -1326,6 +1326,62 @@ strategy-signal across the whole evening. The CA sweep correctly did NOT run
   not the screen. Start at `SwingBatchEngine`'s candidate accounting vs `SwingBatchRecorder`'s
   persisted column.
 
+#### 2026-08-06 — four routines, all clean; two of yesterday's claims moved
+
+All four ran and passed: 09:36 open-liveness **PASS** (counters 28→32, gauges 6.17 s) · 09:50
+data-health **GREEN** (both canaries, Σ 36→108 in 6 min, 0 failures) · 12:36 midday **PASS** (four
+reads, Σ 1860→1924) · 15:53 post-market →
+[`#1310`](https://github.com/prashantm912/artha-yantra-2/pull/1310) `e9083ee9`. Session was a
+**VWAP-pin chop day**: the `vwap` dot (weight **2.5**, the composite's largest) read **0/989 on both
+sides — its first-ever 0% session** — because max |close−VWAP| was **13.2 bps against its ≥15 bps
+rule** on a 0.30%-range tape. With `iv_pair` also dead, 3.3 of 18.80 weight was silent ⇒ cap 0.8245
+and the pass share collapsed to **62/989 = 6.3%**, a series low. Engine fired into it and lost
+(−₹1,784.15); shadow champion had its worst day on record (−₹40,671.30, all-time past −₹1L). None of
+that needs an action — it is regime, and the routine read it correctly.
+
+- **N28 · ⚠️ N23-B's "deterministic" is FALSIFIED, and N23-A is CONFIRMED — both by today's single
+  funded entry.** Correct N23 before anyone acts on it.
+  - **N23-A CONFIRMED, and on stronger evidence than the finding was built on.** Position **58**
+    (`SENSEX2680678200CE`, opened 08-06 11:16) carries `margin_snapshot = 0.00`, `margin_pct = 0.00`
+    — and today the margin call **SUCCEEDED** (§3.34 grep = 0 on a funded-fire day). Yesterday's zero
+    came from a *failed* call; today's comes from a *successful* one. That is the difference between
+    "the number was missing" and "the number is genuinely zero". **The heat operand is structurally
+    zero on a long-option book — settled, two independent days, one of them a clean call.**
+  - ⚠️ **N23-B overclaimed. It is a RACE, not deterministic.** Measured today: the F&O master loaded
+    at **11:16:21 IST** — i.e. the day's first `keyFor()` was again the entry's own margin call, the
+    same cold-load shape as 08-05 — **and it completed inside the 2000 ms budget, so nothing failed.**
+    Master sizes were comparable (37,363 legs today vs 37,028 on 08-05), so the difference is CDN/
+    network latency, not payload. My ledger text said "deterministic per container start / per 12 h
+    REFRESH lapse"; that is wrong. It fires when the cold load happens to exceed 2 s. **Practical
+    consequence: it will recur unpredictably and a single clean session proves nothing** — do not
+    read 08-06's clean grep as the defect being gone. Fix (warming the master, N23 option d) is
+    unchanged and still the right one; only the frequency claim moves.
+- **N29 · `DotHealthCanary` cannot see a CHART operand go dead — known boundary, deliberately not
+  closed.** The canary's probe registry mirrors §3.7's **macro** fields, so today's `vwap` 0/989 —
+  §3.28's fourth state ("live, moving, never crosses") on the highest-weighted dot in the composite —
+  was structurally invisible to `neverCrossing`. The post-market run declined to propose a probe with
+  reasons worth preserving: VWAP distance is **per-bar/per-root**, not a session-wide scalar like
+  `breadth`; a 15-bps pin day is self-evidently regime; and the dot recovers the moment the tape
+  moves. **Recorded so a future 0% `vwap` reading is checked against session RANGE first and not
+  filed as a defect** — the §3.28 min/max-vs-threshold SQL applies verbatim with the chart fields.
+  No action proposed; this is a boundary note, not a queue item.
+- **N24 update — the `strike-pick` BSE-weekly prediction is FALSIFIED, cleanly.** The carried watch
+  expected SENSEX-rooted fails on Thu 08-06's BSE weekly expiry if the saturation mechanism
+  generalized across exchanges. **Zero fails on either root**, and the shadow book traded
+  expiring-today SENSEX legs all session. §3.27 now splits by exchange+cycle: monthlies (both roots)
+  and NSE-weekly eve/day-of (235 → 604) saturate; **the first observed BSE weekly does not.** README
+  §3.27 amended by the run. Next discriminators: **Mon/Tue 08-10/11 (NIFTY weekly)**.
+- **N26 continuity — nothing has changed and tonight is session 4.** Swing batches had not yet run at
+  the time of this check (they fire 20:00/20:05); open inventory is **unchanged at 18** (12 minervini
+  + 6 manas-arora). The post-market run independently logs T10 as "18 OPEN (unchanged)".
+- **Carried, no movement:** minervini republish now **4th consecutive session** (`minervini-cheat-3c`
+  / `minervini-primary-base`, 1.0.2 drafts, name+description only) · T1 **10th** consecutive no-pay
+  (2-leg sole-blocker set, both real shadow losers) · T7 **3rd** adverse marginal-trade reading
+  (composite-055 challenger-only 0/4, −₹3,340.20) · T28 10th frozen `atmIv` · T3 14th zero `iv_pair`.
+  **Improved:** T23/G9 recorded its **first fully-quiet session** (0 WARNs + 0 straddles) — 08-05's
+  opening-bucket watch point did not recur; and the 08-05 ledger-checker `[C]` self-quote class did
+  **not** accrue a 4th (the findings window rolled past it), so that conditional fix is not due.
+
 ---
 
 ## 1. Net-new code

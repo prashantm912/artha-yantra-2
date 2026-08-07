@@ -1044,7 +1044,7 @@ enumeration recipe at the top of §0 still governs.
 | # | decision | why it is yours, not the Architect's |
 |---|---|---|
 | **N23-A** | Re-base the F9 heat cap on premium outlay, **or** accept + re-label it a short-option control | It changes live behaviour: on a ₹1.5 L book a real 60% cap **will start refusing entries**. Today it measures `spanMargin`, structurally `0.00` on a long-only book, so the gate cannot fire. Confirmed twice, once on a *successful* margin call |
-| **N26** | Free swing capacity — age out the 18 (now 17) stale positions, **and/or** re-size the 6% open-risk cap | Four sessions, both books, **zero admissions**; 28 qualifying setups refused in one night. The forward-paper record the §0.5 #12 sign-off needs is frozen. M40 (ledger #37) is that rail, HOLD with its PR open |
+| **N26** | Free swing capacity — age out the stale positions, **and/or** re-size the 6% open-risk cap | **PROVEN by natural experiment 08-07, see N36:** one close freed a slot, the next batch admitted exactly one entry, then refused five more. Capacity-bound, not signal-bound — so ageing out N positions buys exactly N entries, while re-sizing changes the ceiling; **the two levers are not equivalent.** minervini remains fully saturated (5 sessions, 0 admitted) and its cap is still unnamed in the logs. M40 (ledger #37) is manas-arora's rail, HOLD with its PR open |
 | **N12** | The `EquitySplitBonusAdjuster` source-aware contract (DBEIL case) | Fixing it touches the adjuster's contract, not data — backtest-fidelity, SEVERE |
 | **N32** | Should a multi-minute OI capture hole alarm? | Fail-soft worked perfectly and **that is the problem** — a 4-minute hole in the OI bloc's only input is invisible to every oracle. Whether that deserves paging is a risk-appetite call |
 | **N31** | Was the 2026-08-06 18:40 full-stack restart you? | If not, it needs a cause before it lands inside a batch window |
@@ -1559,6 +1559,37 @@ open swing inventory ticked **18 → 17**.
     floor inside `confluence-composite` (aggregate ≥ 0.600 via optional dots only, NULL margin). The
     standing prior — every measured loosening of the entry gate has lost money — gains a
     required-floor data point. Fourth post-07-27 chop day.
+
+#### 2026-08-07 evening batch — clean, and N26 got PROVEN by a natural experiment
+
+**All nine jobs SUCCESS** (IST): 18:59:58 FII trio · 19:30:02 `BHAVCOPY` · 19:31:11 `MANAS_SCREEN` +
+19:31:41 `MINERVINI_SCREEN` · 19:32:52 `MINERVINI_PLANE_DIVERGENCE` · 19:44:58 `MARKET_CONTEXT_DAY` ·
+19:49:58 `DATA_QUALITY` · 19:54:58 `EQUITY_BREADTH` · 20:00:45 + 20:05:31 swing batches · 21:14:57
+paper reconcilers **clean (0 positions, 1 taken signal, 0 discrepancies)**. **0 ERROR lines** in both
+services, 11/11 healthy.
+
+- **N36 · ⚠️ N26 IS NO LONGER AN INFERENCE — one freed slot converted to exactly one entry, and the
+  cap resumed refusing immediately.** This is the cleanest evidence the item will ever get, and it
+  arrived by accident rather than by test.
+  - **The experiment, unplanned:** `GRWRHITECH` (manas-arora) **CLOSED 08-06 20:05**, taking that
+    book's open count 6 → 5. The **very next batch**, 08-07 20:05, ran with `open_at_start = 5` and
+    **admitted 1** — `manas-arora swing ENTRY #169 manas-arora-vcp SKYGOLD at 723.0000 (composite
+    0.73576168)`, now position id 59. Then, in the same run and within seconds, **MTARTECH,
+    BHARATFORG, GTECJAINX, UNIMECH and BHARATSE were all skipped** — `fresh entry … would breach the
+    open-risk cap`, with `risk pyramid-cap manas-arora tripped for MTARTECH` naming the **6.0%**
+    rail explicitly. Final row: `105 candidates, would-enter 6, admitted 1, cap-exceedance 5`.
+  - **What that settles:** the binding constraint is **capacity, not signal quality**. One slot
+    opened, one entry went in, the sixth candidate hit the wall. The book re-saturated at 6 within a
+    single batch. Nothing about the signals changed — 105 candidates against 100/103/111 on the
+    preceding sessions.
+  - **It sharpens the owner decision (triage row A/N26) rather than changing it:** freeing inventory
+    converts to entries **one-for-one and immediately**, so the two levers are not equivalent —
+    ageing out N stale positions buys exactly N entries, whereas re-sizing the cap changes the
+    steady-state ceiling. **Both are still owner calls; neither is started.**
+  - **minervini is unchanged and still fully saturated:** `open_at_start 15`, would-enter **18**,
+    **admitted 0**, cap-exceedance 18 — five consecutive sessions at zero, and its refusal is still
+    the SILENT one (no `RiskService` trip line names its cap). That half of N26 remains undiagnosed:
+    **do not assume it is the same 6% rail** — manas-arora's is named in the log, minervini's is not.
 
 ---
 

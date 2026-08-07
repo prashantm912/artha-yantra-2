@@ -1588,8 +1588,33 @@ services, 11/11 healthy.
     steady-state ceiling. **Both are still owner calls; neither is started.**
   - **minervini is unchanged and still fully saturated:** `open_at_start 15`, would-enter **18**,
     **admitted 0**, cap-exceedance 18 — five consecutive sessions at zero, and its refusal is still
-    the SILENT one (no `RiskService` trip line names its cap). That half of N26 remains undiagnosed:
-    **do not assume it is the same 6% rail** — manas-arora's is named in the log, minervini's is not.
+    the SILENT one (no `RiskService` trip line names its cap). ~~That half of N26 remains
+    undiagnosed~~ — **DIAGNOSED, see N37.**
+- **N37 · ✅ minervini's silent refusal is SOLVED — three phantom anchors from 2026-07-03 are holding
+  slots, and the book reads 15/12.** Found by running the §0 seven-location enumeration, not by
+  looking at N26. **H4 predicted this exact residue and nobody connected it to the entry starvation.**
+  - **Measured, all this session:**
+    - `strategy.risk_settings` → `minervini / max_open_paper_positions = {"value": 12, "enabled": true}` (**sourced**)
+    - `paper_positions WHERE book='minervini' AND status='OPEN'` = **12** (**computed**)
+    - `signals WHERE status='TAKEN' AND signal_type='ENTRY' AND book='minervini'` = **15** (**computed**)
+    - the three with no open position: **signal 20 `SENORES`, 23 `TMB`, 26 `INDUSINDBK`, all generated
+      2026-07-03** (**computed**) — exactly the residue H4's closeout spun out and left as owner-tier
+    - the batch's `open_at_start` reads **15**, i.e. it counts **TAKEN anchors, not open positions**
+  - **So the book presents as 15 against a cap of 12 — three OVER — and refuses every candidate.**
+    The phantoms can never resolve on their own: there is no position to exit, so nothing will ever
+    close them. **This is a permanent, self-sustaining block, not a transient saturation.**
+  - **It explains the 08-07 asymmetry precisely.** manas-arora sat at 5 against 6, one close freed a
+    slot, and the next batch admitted one (N36). minervini would need **four** closes to admit one —
+    three to work off the phantom overhang, then one for an actual slot. That is why five sessions of
+    closes produced nothing.
+  - **This makes the N26 lever much cheaper than "re-size the cap".** Clearing three stale 2026-07-03
+    signal rows restores three slots immediately. **Still owner-tier** — it mutates signal status on a
+    money-adjacent path, and the correct terminal status (EXPIRED? CANCELLED? a new state?) is a
+    doctrine call, not a cleanup detail. **Not started; nothing was mutated by this investigation.**
+  - **Open doubt:** whether `open_at_start` counting TAKEN anchors rather than open positions is
+    intended (it is what makes a phantom cost a slot) or is itself the defect. Settle that before
+    choosing between "clear the rows" and "change the counter" — they are different fixes with
+    different blast radii.
 
 ---
 

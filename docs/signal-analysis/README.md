@@ -478,6 +478,16 @@ Run in order; each answers one question. Canned SQL in §6.
     claim as *monthly expiries and NSE weeklies have saturated the expiring root; the BSE weekly
     has not (n=1)* — check the day's cycle before predicting fails, and keep 07-24's
     no-expiry 550 as the standing reminder that non-expiry causes exist too.
+    ⚠️ **AMENDED AGAIN 2026-08-07 — the full 15-session history reframes the mechanism from
+    "expiry day" to CHAIN PROXIMITY-TO-EXPIRY/ROLL.** Querying all sessions since 07-20 (table in
+    `2026-08-07-session-findings.md` §2.2): SENSEX saturation clusters **Thu–Mon around the BSE
+    Thursday expiry** — including **three consecutive post-expiry Fridays (07-24: 550, 07-31: 374,
+    08-07: 350)** — NIFTY saturation clusters Mon–Tue around the NSE Tuesday expiry, and
+    **Wednesdays are always clean** (07-22 / 07-29 / 08-05: zero on both roots). The 08-06 BSE
+    weekly's zero (the amendment above) is the OUTLIER among day-of observations, not the
+    falsifier: 07-23 (BSE weekly day-of) saturated with 390. Read the fails as *the front weekly
+    sitting outside the delta/premium band when freshly rolled or at expiry*, and expect them on
+    the cluster days, not only the expiry date itself.
 28. **A dot at 0% (or 100%) on a LIVE, MOVING operand is a FOURTH state — "never crosses" — that neither
     the alive/dead nor the frozen probe can see; check the operand's own min/max against the dot's
     threshold before classifying** (added 2026-07-30) — `breadth` (w **1.0**, the canary's only required

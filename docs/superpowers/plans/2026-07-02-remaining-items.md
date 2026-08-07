@@ -1458,22 +1458,61 @@ open swing inventory ticked **18 → 17**.
     deserves an alert is an owner call; that it is currently silent is measured fact.
   - **Not investigated:** why Kite served HTML, whether it recurs at fixed times (two events ~4.6 h
     apart), and whether the breaker's open duration is configured or adaptive.
-- **N33 · ⚠️ THE FRIDAY POST-MARKET ROUTINE DID NOT RUN — and `nextRunAt` has already rolled to
-  Monday.** `post-market-session-analysis` shows `lastRunAt 2026-08-06T10:23:26Z` with
-  **`nextRunAt 2026-08-10T10:23:22Z`**, checked at 15:53:37 IST, past its 15:47+382 s due time; no
-  session exists for today. The other three routines fired normally on the same scheduler, so this is
-  specific to that task, not a scheduler outage.
-  - **Consequence: 2026-08-07 has no session-findings doc**, breaking a daily chain that runs back
-    weeks — and it is missing **on the one day this week with a real in-session degradation** (N32).
-    The intraday routines structurally cannot cover it: they run 09:36 / 09:50 / 12:36, and the
-    second circuit event was at **14:13**.
-  - **This is the batch-liveness gap in a new place.** `SwingBatchHeartbeat` watches the swing batch;
-    nothing watches whether the *analysis routines themselves* ran. A skipped routine is silent and
-    self-erasing — `nextRunAt` moves on and the missed slot leaves no trace.
-  - **Next session, in order:** (1) run `session-analysis post` manually for the 08-07 data date to
-    close the chain before the data ages; (2) find why the Friday slot was skipped — the run record
-    is the only evidence and it is thin; (3) decide whether a missed-routine detector is worth
-    building, given this is the second liveness blind spot found in two days (N31 was the first).
+- ~~**N33 · ⚠️ THE FRIDAY POST-MARKET ROUTINE DID NOT RUN**~~ **— RETRACTED IN FULL, same day. IT
+  RAN.** Session `local_022964d1` executed ~16:00–16:45 IST and produced
+  [`2026-08-07-session-findings.md`](../../signal-analysis/2026-08-07-session-findings.md) via
+  [`#1315`](https://github.com/prashantm912/artha-yantra-2/pull/1315) `6c9466cf`. **Every consequence
+  N33 drew is void** — no missing findings doc, no broken chain, no second liveness blind spot.
+  - **How the error was made, because the mechanism matters:** I checked at **15:53:37**, saw
+    `lastRunAt = 2026-08-06` with `nextRunAt` already reading Monday 08-10, and read that pair as
+    "today's slot was skipped". **`nextRunAt` advances at dispatch/scheduling time, not on
+    completion**, so during the firing window the pair legitimately reads
+    `lastRunAt = yesterday, nextRunAt = next occurrence`. That is the NORMAL in-flight state, not
+    evidence of a skip.
+  - **The reading was 15 SECONDS past a due time carrying 382 s of jitter.** The session list showing
+    no post-market entry proved only "not started at 15:53:37" — I converted "hasn't started yet"
+    into "will never start". Textbook
+    [[pattern-match-instead-of-distinguishing-check]]: the distinguishing check was to re-look a few
+    minutes later, or to treat `nextRunAt` as uninformative and wait for the artifact.
+  - **Rule for next time: a scheduled task is proven skipped ONLY by the absence of its ARTIFACT
+    well after the window** (no session, no doc, no PR), never by the `lastRunAt`/`nextRunAt` pair.
+    Same family as every other entry here — measure the artifact, not the machinery that claims to
+    produce it.
+- **N34 · The 08-07 post-market run corrects N32's ROOT CAUSE and found blast radius I missed.**
+  Its §6.1 measured the same two Kite blips independently and went further:
+  - ⚠️ **It is NOT a Kite-side defect.** In the 14:13–14:16 window the kite session probe
+    (`HTTP connect timed out`) **and an Upstox quote batch** (`Connect timed out`) failed together —
+    **both vendors ⇒ a local network-egress blip.** N32 attributed the cause to "Kite returned HTML";
+    the HTML parse error is the *symptom that tripped the breaker*, not the origin. I pattern-matched
+    on the first error text without checking whether other vendors were affected in the same window
+    — the one check that separates "vendor fault" from "our egress".
+  - **Blast radius was larger than I measured: 24 `chain-unavailable` rejections** (12 PE slugs ×
+    bars 14:12 + 14:15) — the honest gate outcome, blocking entries rather than trading a missing
+    chain. I found the OI minutes and missed the rejections entirely. Its OI cadence figure is
+    **370/375**, mine was 369; take the run's, it reconciled the attribution fully.
+  - **Verdict unchanged and now better evidenced: no action proposed.** Breaker, cached-data serving,
+    the `chain-unavailable` gate and the STALE visibility WARN all behaved per design; self-healed by
+    14:17. **N32's "nothing alarms on a 4-minute OI hole" observation still stands** — that is an
+    owner call, not a defect.
+- **N35 · Two genuinely new findings from the 08-07 run, neither previously on any list.**
+  - **First live `neverCrossing` firing — the G16 probe worked on its first real opportunity.**
+    `dot-health` reported `breadth neverCrossing: true` ("live and moving, yet supported 1/56 distinct
+    (bar,side) verdicts; session max 33 hugs the line advances/declines > 32, distance 1 ≤ 3").
+    Raw: CE 0/16, PE 16/692 = 2.3%. T30's per-session-bias case gains a third observation, and the
+    instrument built for it earned its keep. No action; evidence for the standing OWNER question.
+  - ⚠️ **`strike-pick`: the mechanism is reframed, and N24's "falsified" reading was premature.**
+    350 fails, **all SENSEX-rooted, on a NON-expiry Friday** — the **third consecutive
+    Friday-after-BSE-Thursday-expiry saturation** (07-24: 550 → 07-31: 374 → 08-07: 350) — and
+    back-history shows 07-23 (a BSE weekly day-of) saturated too at 390. **So 08-06's zero is the
+    OUTLIER among day-of observations, not the rule**, and N24's "BSE weekly does not saturate"
+    generalisation was drawn from a single sample. Mechanism candidate shifts from "expiry day
+    saturates" to **chain proximity-to-expiry/roll**. Watch row live; next NIFTY discriminators
+    Mon/Tue 08-10/11.
+  - Session context: **zero fires**, and the gate was right every time it was tested — the day's only
+    sole-blocker set (5 composite-passing PE rows) went **0W/5L**, all blocked by the required-dot
+    floor inside `confluence-composite` (aggregate ≥ 0.600 via optional dots only, NULL margin). The
+    standing prior — every measured loosening of the entry gate has lost money — gains a
+    required-floor data point. Fourth post-07-27 chop day.
 
 ---
 

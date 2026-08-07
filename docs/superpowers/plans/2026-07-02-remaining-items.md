@@ -1429,6 +1429,52 @@ screens correctly did NOT re-run at 19:31 — same `run_day`, deduped.
     had happened at 19:50 instead, `EQUITY_BREADTH` would have been skipped silently.
   - **Owner question: was this you?** If not, it wants a cause before it recurs during a batch window.
 
+#### 2026-08-07 (Fri) — an in-session degradation, and the routine that would have caught it did not run
+
+Three of four routines ran and passed: 09:36 open-liveness **PASS** (Σ 28→32, gauges matched, 0
+failures) · 09:50 data-health **GREEN** (canary GREEN, 91 ticked tokens) · 12:36 midday **PASS**
+(Σ 2040→2104, +64 over 4m24s). Session was quiet: **1,066 rejections, 0 signals, 0 paper opens**;
+open swing inventory ticked **18 → 17**.
+
+- **N32 · ⚠️ The Kite REST circuit breaker OPENED TWICE during the live session and cost 6 minutes of
+  OI capture.** Measured, not inferred.
+  - **Root cause is in the first error of the day:** `09:35:12 quote response parse failed:
+    Unexpected character ('<' (code 60)): expected a valid value` — **Kite REST returned HTML, not
+    JSON.** That tripped the breaker, which then correctly shed load (`kite-rest circuit open; serving
+    cached data`). This is exactly the drift class the `kite/wire/` mirror + `ContractCanary` exist for,
+    except the payload was not JSON at all — an error/maintenance page, not a schema change.
+  - **Two windows:** 09:35 (options snapshots + all six chain broadcasts failed) and **14:13–14:16**
+    (SENSEX + BANKEX + NIFTY MID SELECT snapshots, NIFTY 50 / NIFTY BANK chain broadcasts, and
+    `CandleQueryService: gap fetch failed for NFO:NIFTY26AUGFUT 3m — serving cached data stale`).
+    **That last one is the signal contract's own 3m gap-fill degrading.**
+  - **Measured cost — `futures_oi_snapshots` minute coverage: 369 of 375.** Missing minutes cluster
+    exactly on the events: **09:34** and **14:12–14:15** (69 rows/minute either side, zero rows
+    inside). **Tick-driven 1m candles were UNAFFECTED** — 20/20 minutes present for
+    `NIFTY26AUGFUT` across 14:05–14:24 — so the loss is confined to the REST-dependent OI path,
+    which is the correct blast radius for a REST breaker but is also the OI bloc's only input.
+  - **Fail-soft worked; the gap is that nothing alarms.** Every failure logged WARN + served cached
+    data, the stack stayed healthy, `strategy-signal` logged **0 ERRORs**, and the market-data canary
+    read GREEN at 09:50. **A 4-minute OI hole is invisible to every oracle we run.** Whether that
+    deserves an alert is an owner call; that it is currently silent is measured fact.
+  - **Not investigated:** why Kite served HTML, whether it recurs at fixed times (two events ~4.6 h
+    apart), and whether the breaker's open duration is configured or adaptive.
+- **N33 · ⚠️ THE FRIDAY POST-MARKET ROUTINE DID NOT RUN — and `nextRunAt` has already rolled to
+  Monday.** `post-market-session-analysis` shows `lastRunAt 2026-08-06T10:23:26Z` with
+  **`nextRunAt 2026-08-10T10:23:22Z`**, checked at 15:53:37 IST, past its 15:47+382 s due time; no
+  session exists for today. The other three routines fired normally on the same scheduler, so this is
+  specific to that task, not a scheduler outage.
+  - **Consequence: 2026-08-07 has no session-findings doc**, breaking a daily chain that runs back
+    weeks — and it is missing **on the one day this week with a real in-session degradation** (N32).
+    The intraday routines structurally cannot cover it: they run 09:36 / 09:50 / 12:36, and the
+    second circuit event was at **14:13**.
+  - **This is the batch-liveness gap in a new place.** `SwingBatchHeartbeat` watches the swing batch;
+    nothing watches whether the *analysis routines themselves* ran. A skipped routine is silent and
+    self-erasing — `nextRunAt` moves on and the missed slot leaves no trace.
+  - **Next session, in order:** (1) run `session-analysis post` manually for the 08-07 data date to
+    close the chain before the data ages; (2) find why the Friday slot was skipped — the run record
+    is the only evidence and it is thin; (3) decide whether a missed-routine detector is worth
+    building, given this is the second liveness blind spot found in two days (N31 was the first).
+
 ---
 
 ## 1. Net-new code

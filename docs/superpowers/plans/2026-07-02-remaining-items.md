@@ -1032,6 +1032,52 @@ CLAUDE.md; read `ingest_runs` / `canary_runs`, never the defaults.
 so the "open, unmerged" note in that prompt was already stale. **Still not deployed**, so a ~16:15
 roller failure remains expected until the next deploy.
 
+#### ⚠️ ACTION TRIAGE (written 2026-08-07 18:20 IST) — READ THIS BEFORE THE N-ROWS BELOW
+
+N10–N35 accumulated over four days and are written as *findings*, not as a work list. Most are
+observations that need no action. **This table is the actionable subset.** Every row points at its
+N-row for evidence; nothing here restates it. Re-derive this triage whenever it goes stale — the
+enumeration recipe at the top of §0 still governs.
+
+**A · Owner decision required — do NOT start these**
+
+| # | decision | why it is yours, not the Architect's |
+|---|---|---|
+| **N23-A** | Re-base the F9 heat cap on premium outlay, **or** accept + re-label it a short-option control | It changes live behaviour: on a ₹1.5 L book a real 60% cap **will start refusing entries**. Today it measures `spanMargin`, structurally `0.00` on a long-only book, so the gate cannot fire. Confirmed twice, once on a *successful* margin call |
+| **N26** | Free swing capacity — age out the 18 (now 17) stale positions, **and/or** re-size the 6% open-risk cap | Four sessions, both books, **zero admissions**; 28 qualifying setups refused in one night. The forward-paper record the §0.5 #12 sign-off needs is frozen. M40 (ledger #37) is that rail, HOLD with its PR open |
+| **N12** | The `EquitySplitBonusAdjuster` source-aware contract (DBEIL case) | Fixing it touches the adjuster's contract, not data — backtest-fidelity, SEVERE |
+| **N32** | Should a multi-minute OI capture hole alarm? | Fail-soft worked perfectly and **that is the problem** — a 4-minute hole in the OI bloc's only input is invisible to every oracle. Whether that deserves paging is a risk-appetite call |
+| **N31** | Was the 2026-08-06 18:40 full-stack restart you? | If not, it needs a cause before it lands inside a batch window |
+
+**B · Clean and buildable now — no owner gate, no parity surface**
+
+| # | work | note |
+|---|---|---|
+| **N23-C** | Widen `PaperMarginClient.Quote` 7 → 10 components to mirror `MarginResponse` | Prerequisite for N23-A; harmless alone. The client cannot currently see `netBuyPremium`, the field a long book actually needs |
+| **N23-D** | Warm the Upstox F&O master (boot preload or a scheduled touch inside the 12 h window) | Kills the N23-B race without touching the 2 s timeout, which exists to protect the tick thread (#694). **Do not lengthen the timeout** |
+| **N30** | Investigate the bhavcopy 365-day rescan + `fetched_at` churn | **Investigate before fixing** — cause is not established. Start at the watermark/365-day-cap comparison |
+| **N27** | minervini's `candidates` counter reads 0 while the batch finds 17–18 | Start at `SwingBatchEngine`'s accounting vs `SwingBatchRecorder`'s persisted column |
+| — | `check_runbook_hygiene.sh`: walk `git ls-files`, not `find` (it fails locally on gitignored state CI never sees); and its message says "ALL EIGHT" required contexts when there are **nine** | Surfaced 2026-08-05, never queued. Local-only noise + stale text |
+| — | Republish `minervini-cheat-3c` / `minervini-primary-base` (1.0.2 drafts, name+description only) | **5th consecutive session carried.** Apply the #1016 rule — pick by "latest version row ≠ `published_version_id`", never "latest DRAFT ≠ published" |
+
+**C · Blocked or sequenced — do not start out of order**
+
+- **N10 · CA sweep re-arm** — land [#1297](https://github.com/prashantm912/artha-yantra-2/pull/1297)
+  → land [#1305](https://github.com/prashantm912/artha-yantra-2/pull/1305) → *then* re-arm. Re-arming
+  first burns attempt 2 of 3 for nothing.
+- **Seven open PRs, and every one that reports is `BEHIND`** (#1306, #1305, #1299, #1297, #1296,
+  #1283; #1075 reads UNKNOWN, parked to 08-12). `strict: true` + a moving main. Fix server-side with
+  `gh api -X PUT repos/{o}/{r}/pulls/<n>/update-branch`, no local checkout needed — **that is the
+  gate on B and C both**, since nothing else can land until these clear.
+
+**D · Watch only — explicitly NOT work**
+
+N29 (canary is blind to chart operands — boundary note, reasons preserved) · N35 `neverCrossing`
+first firing (the probe worked; evidence for the standing T30 owner question) · `strike-pick`
+mechanism now **chain proximity-to-expiry/roll**, next NIFTY discriminators Mon/Tue 08-10/11 ·
+T1 (10th no-pay) and T7 (3rd adverse) both REJECTED and reconfirmed · T23/G9 quiet · T28/T3/T2
+carried structural.
+
 #### Next-session queue — NOT STARTED, documented only
 
 - **N10 · CA sweep re-arm — SEQUENCED, do not re-arm first.** 13 symbols sit at `REFRESH_FAILED`,

@@ -59,6 +59,20 @@ public class CandleRepository {
    * inside every cagg's uncompressed hot window (5m/15m/1h compress after 30d, 1d 90d, 1w 180d) and
    * so decompress nothing. Raising it for them would weaken the same guard
    * {@link #PURGE_WINDOW_MONTHS} deliberately preserves, on the far more frequent caller.
+   *
+   * <p><b>That paragraph was an ASSUMPTION, not an invariant, and the futures roller violated it
+   * for as long as it existed</b> (found 2026-08-04). {@code ContinuousFuturesRoller.stitch} passed
+   * its REQUESTED window — which begins at its {@code STITCH_EPOCH} of 2000-01-01 — rather than the
+   * range it had actually stitched, so the nightly roll asked for a ~26-year refresh and died on
+   * this cap for all six index roots ({@code tuples decompressed: 341820} on {@code candles_5m}).
+   * The premise was restored by narrowing the window at the caller ({@link #stitchInto} now returns
+   * the inserted range) — deliberately NOT by adding the roller to the raised-cap path, which would
+   * have bought a passing roll at the price of the guard this paragraph is arguing for. The
+   * compression half of the claim was re-verified live and is accurate: {@code compress_after} on
+   * the 5m/15m/1h materialization hypertables really is 30 days. What was never true is "the
+   * futures roller refreshes recent windows" — nothing enforced it, so nothing caught it. Something
+   * does now: {@code ContinuousFuturesStitchRefreshTest} asserts the refresh window the roller
+   * passes, not merely that it passes one.
    */
   static final String MAX_TUPLES_DECOMPRESSED_GUC =
       "timescaledb.max_tuples_decompressed_per_dml_transaction";
@@ -357,7 +371,10 @@ public class CandleRepository {
    * <p>Leaves {@link #MAX_TUPLES_DECOMPRESSED_GUC} at the database default: this path serves gap
    * backfill and the futures roller over RECENT windows, which decompress nothing. Only the
    * corporate-action rebuild reaches back into compressed chunks — see
-   * {@link #refreshDerivedAggregatesForRebuild}.
+   * {@link #refreshDerivedAggregatesForRebuild}. <b>Callers own that "recent" claim</b>: pass the
+   * range you actually INVALIDATED, never a nominal request window that merely contains it. The
+   * futures roller passed the latter and turned this into a ~26-year refresh (2026-08-04) — the
+   * caller is the only layer that knows the difference, so this method cannot defend itself.
    */
   public void refreshDerivedAggregates(OffsetDateTime from, OffsetDateTime to) {
     refresh(from, to, false);
@@ -500,24 +517,69 @@ public class CandleRepository {
   }
 
   /**
+   * What a {@link #stitchInto} call actually INSERTED: the row count and the bucket range those
+   * rows span ({@code null} bounds when {@code rows == 0}). The range is the stitch's real cagg
+   * invalidation — it is NOT the requested window, and the gap between the two is the whole point
+   * (see {@link #stitchInto}).
+   */
+  public record StitchedRange(int rows, OffsetDateTime firstBucket, OffsetDateTime lastBucket) {
+
+    /** Nothing was inserted — nothing was invalidated, so nothing needs refreshing. */
+    static final StitchedRange NONE = new StitchedRange(0, null, null);
+  }
+
+  /**
    * Copies one contract's bars (1m + 1d) into a CONT synthetic symbol for a date window —
    * UNADJUSTED, idempotent (B-19: the stitch is local arithmetic, never Kite's roll-unaware
    * {@code continuous=true} concatenation).
+   *
+   * <p>Returns the range it INSERTED rather than a bare count, because the caller's requested
+   * window is a wildly unsafe proxy for it. {@code ContinuousFuturesRoller.stitch} asks for the
+   * front contract's whole nominal segment, which starts at its {@code STITCH_EPOCH} of 2000-01-01;
+   * the contract itself only has a few months of bars, and {@code ON CONFLICT DO NOTHING} makes a
+   * daily re-run insert just TODAY's. Refreshing the requested window therefore re-materialized ~26
+   * years of continuous aggregates every evening to publish one day of new buckets. Once V049
+   * compressed the caggs that stopped being merely wasteful and started FAILING: the roll aborted
+   * for all six index roots on 2026-08-04 with {@code tuple decompression limit exceeded by
+   * operation … tuples decompressed: 341820} on {@code candles_5m}'s materialization hypertable,
+   * because the window reached back into chunks compressed years ago.
+   *
+   * <p>{@code RETURNING} inside a data-modifying CTE yields ONLY the rows that were really
+   * inserted — a bucket skipped by {@code DO NOTHING} never appears — so the aggregate over it is
+   * exactly the invalidated span. Pinned by {@code ContinuousFuturesStitchRangeIntegrationTest}.
    */
-  public int stitchInto(
+  public StitchedRange stitchInto(
       String contSymbol, String exchange, String fromSymbol, OffsetDateTime from, OffsetDateTime to) {
-    return jdbc.update(
-        """
-        INSERT INTO candles
-          (exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi, source, fetched_at)
-        SELECT exchange, ?, "interval", bucket, open, high, low, close, volume, oi, source, now()
-        FROM candles
-        WHERE exchange = ? AND tradingsymbol = ? AND "interval" IN ('1m','1d')
-          AND bucket >= ? AND bucket < ?
-        ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO NOTHING
-        """,
-        contSymbol, exchange, fromSymbol,
-        Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
+    StitchedRange stitched =
+        jdbc.query(
+            """
+            WITH stitched AS (
+              INSERT INTO candles
+                (exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi, source, fetched_at)
+              SELECT exchange, ?, "interval", bucket, open, high, low, close, volume, oi, source, now()
+              FROM candles
+              WHERE exchange = ? AND tradingsymbol = ? AND "interval" IN ('1m','1d')
+                AND bucket >= ? AND bucket < ?
+              ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO NOTHING
+              RETURNING bucket
+            )
+            SELECT count(*) AS rows, min(bucket) AS lo, max(bucket) AS hi FROM stitched
+            """,
+            rs -> {
+              if (!rs.next()) {
+                return StitchedRange.NONE;
+              }
+              int rows = rs.getInt("rows");
+              return rows == 0
+                  ? StitchedRange.NONE
+                  : new StitchedRange(
+                      rows,
+                      rs.getObject("lo", OffsetDateTime.class),
+                      rs.getObject("hi", OffsetDateTime.class));
+            },
+            contSymbol, exchange, fromSymbol,
+            Timestamp.from(from.toInstant()), Timestamp.from(to.toInstant()));
+    return stitched == null ? StitchedRange.NONE : stitched;
   }
 
   /**

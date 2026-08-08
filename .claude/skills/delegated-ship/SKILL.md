@@ -114,13 +114,18 @@ gh run view <run-id> --log-failed | grep -oE "✘ +[0-9]+ tests/[a-z-]+\.spec\.t
 Known pair = signals.spec.ts:38 + ws-reconnect.spec.ts:23. Then the reachability
 test: can THIS diff touch the failing spec's surface? (Read the spec's flow if
 unsure — the take-flow uses /signals/{id}/taken, and the flake fails PRE-take.)
-Signals/WS-adjacent diff → rerun-to-green; unreachable diff → admin-merge once every
-other gate is green. A <60s e2e death = infra (read the log; one was a runner
-Maven-fetch), not specs. ci-optimizer/ci-margin are SEPARATE path-filtered workflows —
-absence from `gh pr checks` ≠ skipped; CI's ruff can be newer than local.
+Signals/WS-adjacent diff → rerun-to-green; unreachable diff → rerun, then INVESTIGATE —
+do NOT bypass the gate (⚠️ corrected 2026-08-04: the retracted text prescribed exactly that,
+and it survived #1294 four lines above the #1252 note below. The flake pair was FIXED in #903,
+so a red `e2e` now means a real failure). A <60s e2e death = infra (read the log; one was a runner
+Maven-fetch), not specs. ci-optimizer/ci-margin are NO LONGER path-filtered (#1252,
+2026-08-03): `optimizer-lint-test` + `margin-lint-test` are REQUIRED contexts and DO
+appear in `gh pr checks` — read the rollup, not `gh run list` (corrected 2026-08-04; the
+old "absence ≠ skipped" advice sent check-hunts to the wrong command). CI's ruff can be
+newer than local.
 
-Merge: `gh pr merge --squash --admin`, then **verify `git log origin/main -1` equals
-the PR's mergeCommit BEFORE building** — `merge && pull` races the remote (a stale
+Merge: `gh pr merge --squash`, then **verify `git log origin/main -1` equals
+the PR's mergeCommit BEFORE building** (⚠️ `--admin` was REMOVED here 2026-08-04: it bypasses **all nine** required contexts, and `lock_branch` — the reason it was ever needed — was set false 2026-07-26. CLAUDE.md has said "merge normally; reaching for `--admin` means something is actually wrong" since then, but this runbook kept prescribing it, and it loads into every delegated builder session.) — `merge && pull` races the remote (a stale
 pull once deployed a migration-less "healthy" service).
 
 ## 5. Deploy + probe (per service batch, not per item)
@@ -137,7 +142,9 @@ Batch consecutive merges touching the same services into ONE deploy round. Follo
 ## 6. Closeout per item, not per session
 
 Ledger row flipped (PR#+SHA+one-line outcome) BEFORE picking the next item; docs-only
-ledger PRs admin-merge past the e2e flakes freely. Out-of-scope findings → spawn_task
+ledger PRs merge normally, `--squash`, no bypass (⚠️ corrected 2026-08-04: they used to be told
+to merge past the e2e flakes freely; those flakes were fixed in #903 and the `lock_branch` that
+forced bypassing was lifted 2026-07-26). Out-of-scope findings → spawn_task
 chips with self-contained prompts. Memory topic append when a pattern/trap is new.
 End of run: fix-log entries in the source audit docs + a state note in the queue
 header so a NEW session starts accurate.

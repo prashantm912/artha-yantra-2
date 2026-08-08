@@ -138,7 +138,12 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   each runs `mvnw -pl <svc> -am verify` on its own runner (Testcontainers ITs are the
   2-core bottleneck; serial reactor was ~23m, sharded ~5m). Safe because `jacoco-check`
   binds PER MODULE, not an aggregate root goal. **Adding a new service?** Add a matrix
-  shard or its tests NEVER run in CI. Libs ride upstream via `-am` (covered in ≥1 shard).
+  shard or its tests NEVER run in CI, **and add it to `KNOWN_SERVICES` +
+  the path mapping in `.github/scripts/classify_java_shards.sh`** (since #1252, 2026-08-03, each leg
+  gates on its OWN classifier boolean — a `services/<new>/` path no shard claims is reported as
+  `unowned_services` and HARD-FAILS the run, deliberately, because fanning out to three existing
+  shards only looks busy and builds nothing new). Libs ride upstream via `-am` (covered in ≥1 shard),
+  and a `libs/` edit sets all three booleans so shared-lib breaks still fan out.
 - IT harness: singleton Testcontainers (Timescale 2.18.2-pg17 + redis 7.4), real
   Flyway lineages, `@DynamicPropertySource` for `currentSchema`. Services connect to
   Postgres as `artha` (D10 single-writer by convention); per-schema roles like
@@ -239,6 +244,13 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   coverage over `marketdata.ingest_runs`, #686/#699), and the scheduled canaries (ingest-coverage
   08:45, notifier-health 08:30, paper reconcilers 21:15, PartialBucketCanary every 60s — all IST)
   — check these BEFORE hand-digging a "feed looks dead" / "batch missed" report.
+  **Measured evening order, 2026-08-04** (do NOT quote the YAML cron defaults — they differ from
+  what is deployed, and reading `${artha.minervini.cron:0 50 19 * * MON-FRI}` as "19:50" put a wrong
+  time into four separate reports the same night): **19:30** CA refresh rides the nightly BHAVCOPY
+  job · **19:31** `MINERVINI_SCREEN` + `MANAS_SCREEN` · **19:35** `MINERVINI_PLANE_DIVERGENCE`
+  (source `MINERVINI_SCHEDULER`) · **19:45** market-context · **19:50** data-quality · **19:55**
+  equity-breadth · **21:15** paper reconcilers. Read `marketdata.ingest_runs` +
+  `marketdata.canary_runs`/`strategy.canary_runs` for the real times, never the defaults.
 - **3m reads are a read-time 1m→3m rollup** (`CandleRepository.rangeRolledFromOneMinute`, #365): the
   live SignalEngine 3m-primary depends on this rollup. The unused `candles_3m` cagg + its refresh
   policy were DROPPED (V027, #427) — 3m has no materialized view; only the 1m base feeds it.
@@ -327,9 +339,17 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   pytest tests/ -q)` + `python -m ruff check app tests` (Python 3.14 global, no venv). A sweep needs
   the strategy to carry a `backtest.optimize` block (`method`+`max_trials`+`objective`+`parameters`,
   all required) else 422 "no tunable parameters in the optimize block". **ci-optimizer / ci-margin are
-  SEPARATE path-filtered workflows** (`.github/workflows/ci-optimizer.yml`, trigger `paths:
-  services/optimizer-service/**`) — NOT in the default `gh pr checks` rollup; a Python PR's ruff+pytest
-  gate shows under `gh run list --workflow ci-optimizer.yml`, so don't read its absence as "skipped".
+  separate workflows, but their `optimizer-lint-test` / `margin-lint-test` jobs ARE required contexts
+  and DO appear in the default `gh pr checks` rollup** (corrected 2026-08-04 — this bullet asserted the
+  exact opposite, and the stale form sent three separate check-hunts off to `gh run list` for a gate
+  that was in the rollup all along). It was true until 2026-08-03: both workflows were then
+  `paths:`-filtered and genuinely absent. #1252 removed that filter precisely so the jobs could be
+  promoted, because a `paths:`-filtered workflow can NEVER be a required check — a path-skipped
+  workflow's checks stay PENDING forever, while a job or step skipped by an `if:` reports SUCCESS.
+  Both now ALWAYS trigger; a cheap `changes` classifier decides whether real work runs, and the
+  required job carries `if: always()` + a fail-closed first step (measured: `optimizer-lint-test` 33s
+  on #1291, which touched Python, vs 3s on #1290, which did not — both PASS, both in the rollup).
+  **Read the rollup, not `gh run list`.**
   ⚠️ **The "Python 3.14 global, no venv" line above NO LONGER HOLDS for the CONTRACT tests** (#1209,
   2026-08-02): `test_openapi_contract.py` in BOTH optimizer- and margin-service now asserts the running
   interpreter matches `requirements-dev.lock`, so a plain `python -m pytest` on the ambient interpreter
@@ -581,6 +601,15 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   rather than pins. Concretely: this is why a "CA-plane split" investigation found **46 of 47**
   exposures had no corporate action anywhere near them and all 38 clean cases had **byte-identical
   closes** — the disagreement was entirely in a 50-bar mean computed over retro-mutated history.
+- ⚠️ **`nse_eod_bhavcopy` is MULTI-SERIES — filtering `series='EQ'` silently drops real screen
+  symbols** (measured 2026-08-04, and it manufactured a false "the guard FAILED" reading). The screen
+  universe spans **`EQ` AND `BE`** (13 series exist overall: EQ, BE, BZ, E1, GB, GS, IV, MF, N1, RR,
+  SM, ST, SZ). A staleness probe written as `series='EQ'` reported **53 screen symbols with no bar at
+  all and 76 more stale** — BODALCHEM, AUTOIND, BGRENERGY and 50 others trade `BE`, so their bars
+  were simply outside the filter. Series-agnostic (`series IN ('EQ','BE')`) the same probe returns
+  **0 / 0 / 1772 fresh**. **Tell: a "missing data" result that includes liquid, obviously-trading
+  names.** That is a join or filter artifact, not an outage — check one symbol across ALL series
+  before believing it. Same family as the equity `exchange=` filter rule.
 - ⚠️ **A YAML default is NOT a deployed value.** `application.yml`'s `${ENV:default}` says what happens
   when the env var is absent — it says nothing about production. Reading the default as the live
   setting put a wrong "still on `native`, needs flipping" claim into **four** documents for ~28 days
@@ -686,9 +715,11 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   upstream readiness).
 - **`--admin` is NO LONGER the normal way to merge (2026-07-26).** `main` carried
   `lock_branch: {"enabled": true}` — the branch was READ-ONLY — so with `enforce_admins: false`
-  EVERY merge had to use `gh pr merge --admin`, which bypasses ALL six required status checks
-  including a genuinely red one. It hid behind two unrelated, real bugs in the same row
-  (task_db8bdf1e): a dead `frontend` required context, and path-filtered workflows never reporting.
+  EVERY merge had to use `gh pr merge --admin`, which bypasses ALL required status checks (six at
+  the time; nine since 2026-08-04) including a genuinely red one. It hid behind two unrelated, real
+  bugs in the same row (task_db8bdf1e): a dead `frontend` required context, and path-filtered
+  workflows never reporting — the same never-reports trap that later drove the `paths:` filter out
+  of ci-java, ci-optimizer and ci-margin.
   Both were fixed first, and a plain `--squash` STILL returned `the base branch policy prohibits the
   merge` with every required context SUCCESS and `mergeable: MERGEABLE` — that mismatch (MERGEABLE
   but BLOCKED, no failing check) is the fingerprint of a branch-level lock, not a check problem.
@@ -702,9 +733,13 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
   merge with classic protection looking clean (ours is `[]`).
 - **Every non-`hotfix/*` PR body needs the anchored `Cross-vendor review:` verdict line** — the
   `verdict` check (`ci-review-verdict.yml`, reads the body LIVE so an edit + rerun fixes it).
-  ⚠️ **`verdict` is NOT in branch protection's required contexts** (verified against the protection
-  API 2026-08-01: the six required are `contracts`, `e2e`, `gitleaks`, and the three `build-test`
-  shards — it failed red on #1156 and blocked nothing). The discipline is convention enforced by
+  ⚠️ **`verdict` is NOT in branch protection's required contexts** (re-verified against the protection
+  API 2026-08-04: the **NINE** required are `contracts`, `e2e`, `gitleaks`, the three `build-test`
+  shards, `optimizer-lint-test` + `margin-lint-test` (added 2026-08-03 with #1252), and
+  **`runbook-hygiene`** (added 2026-08-04 with #1298 — owner call, applied by the Architect). It was
+  six when last checked 2026-08-01 and eight earlier on 2026-08-04; the count keeps moving, so
+  **re-read the API rather than quoting any number here**. `verdict` is in none of those lists, and
+  it failed red on #1156 and blocked nothing). The discipline is convention enforced by
   the Architect, not by GitHub; promoting it to required is a one-call owner decision. The check
   accepts `APPROVED`/`REQUEST_CHANGES (resolved)`/`NEEDS_REWORK (resolved)` each with
   `— <routed model> (<Vendor>)` model↔vendor PAIRED, or `SKIPPED (<reason>)`. Open builder PRs with
@@ -723,9 +758,14 @@ per-theme `--ay-*` CSS vars. Mobile target S24 Ultra ~480px. a11y gated by axe +
 - **`build-images` is skipped on `pull_request` (#903)** — on a PR it only VALIDATED that the Dockerfiles
   build (the push is main-only), yet `needs: build-test` made it wait out the ~8 m market-data shard first;
   ~2.5 m of serial tail off every PR. The Dockerfile build still runs on the main-push (pre-deploy); it is
-  NOT a required check. **The ~8 m `build-test (market-data)` shard is now the PR floor** — a source-level
-  module split (breaks the per-module JaCoCo BUNDLE gate as one shard) or a larger runner is the only way
-  under it, both owner decisions.
+  NOT a required check. ⚠️ **"the ~8 m `build-test (market-data)` shard is the PR floor" held only until
+  2026-08-03** (corrected 2026-08-04): #1252 gave the classifier one boolean PER SHARD, so a leg with no
+  work runs zero steps and reports SUCCESS in seconds rather than running the suite. The floor is now
+  whichever shard the PR actually touches — measured: #1290 (strategy-signal) paid `strategy-gateway`
+  5m51s while `market-data` reported in 2s, and docs-only #1293 cleared all three in 2–6s. A `libs/` edit
+  still sets ALL three booleans (the fail-safe direction is RUN), so a shared-lib PR does still pay the
+  ~8 m market-data shard — and for that case a source-level module split (breaks the per-module JaCoCo
+  BUNDLE gate as one shard) or a larger runner remain the only ways under it, both owner decisions.
 
 ## Where things live
 - `services/` services · `libs/` shared libs · `deploy/` compose + flyway · `e2e/`

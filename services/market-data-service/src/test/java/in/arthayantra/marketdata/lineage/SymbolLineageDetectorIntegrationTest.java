@@ -150,7 +150,23 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(detectedPairs()).isEqualTo(want);
   }
 
-  /** A below-span run must exercise the clipped floor rather than the table's historical floor. */
+  /**
+   * A below-span run must exercise the clipped floor rather than the table's historical floor.
+   *
+   * <p>⚠️ <b>Read what this proves, and what it does NOT.</b> It reddens on the WINDOW EDGE — the
+   * {@code >} to {@code >=} widening — because {@code LINCLIPP}'s only bar sits exactly on
+   * {@code latest − 200}, which the pre-fix strict {@code >} excluded. It does <b>not</b> discriminate
+   * rule 3's floor comparison: measured 2026-08-08 on live data at {@code windowDays=200}, deleting
+   * rule 3 ENTIRELY returns the same 25 pairs as leaving it comparing against the unclipped table
+   * min. A match already requires {@code p.last_dn < s.first_dn} with {@code p} drawn from the
+   * clipped window, which forces {@code s.first_d > floor_d} on its own — so rule 3's floor test is
+   * implied by the session-number join and is structurally unreachable.
+   *
+   * <p>That is why the original "six-day fuse" framing was too strong: the clip made the guard mean
+   * what its javadoc claimed, but the unclipped form was never producing a wrong answer. Do not
+   * treat this test as coverage of rule 3 — a half-fixed variant that clips the window and leaves
+   * rule 3 at the table min passes it.
+   */
   @Test
   void belowSpanWindowUsesOwnFloorForBoundaryChecks() {
     int windowDays = 200;
@@ -267,6 +283,45 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
         jdbc.queryForMap(
             "SELECT status, confidence FROM symbol_lineage"
                 + " WHERE exchange='NSE' AND predecessor_symbol = 'LINCOLD'");
+    assertThat(row).containsEntry("status", "ACTIVE").containsEntry("confidence", "inferred");
+  }
+
+  /**
+   * The OTHER half of {@code bse_unambiguous}: a ticker with a NULL (or blank) ISIN is not
+   * unambiguous evidence either, so it must not refute.
+   *
+   * <p>⚠️ This case exists because the null half is a STRUCTURALLY-ZERO operand on live data —
+   * measured 2026-08-08: 0 of 8843 window tickers carry a NULL or blank ISIN, so {@code count(*)
+   * FILTER (WHERE isin IS NULL) = 0} cannot fire in production and nothing would notice if it were
+   * deleted. An armed clause whose operand is always zero is the repo's most-hit defect shape; the
+   * only defence is a test that supplies the operand deliberately. Without this, the sibling above
+   * exercises only the multi-ISIN branch and the null branch ships unproven.
+   */
+  @Test
+  void nullIsinEvidenceAlsoStaysInferred() {
+    List<LocalDate> cal =
+        jdbc.queryForList(
+            "SELECT DISTINCT trade_date FROM nse_eod_bhavcopy ORDER BY trade_date",
+            LocalDate.class);
+    LocalDate predecessorDate = cal.get(130);
+    LocalDate successorDate = cal.get(131);
+    bar("LINNULLO", predecessorDate, "703.0000", "703.0000");
+    bar("LINNULLN", successorDate, "703.0000", "704.0000");
+    // Both sides ARE on BSE, and each has exactly ONE row — the multi-ISIN guard alone would let
+    // this refute. Only the null-ISIN clause stops it.
+    jdbc.batchUpdate(
+        "INSERT INTO bse_eod_bhavcopy (trade_date, scrip_code, ticker, isin)"
+            + " VALUES (?::date, ?, ?, ?)",
+        List.of(
+            new Object[] {predecessorDate, "900011", "LINNULLO", null},
+            new Object[] {successorDate, "900012", "LINNULLN", "INEX44444444"}));
+
+    detector.detect();
+
+    Map<String, Object> row =
+        jdbc.queryForMap(
+            "SELECT status, confidence FROM symbol_lineage"
+                + " WHERE exchange='NSE' AND predecessor_symbol = 'LINNULLO'");
     assertThat(row).containsEntry("status", "ACTIVE").containsEntry("confidence", "inferred");
   }
 

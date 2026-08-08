@@ -84,7 +84,7 @@ screens, which require 252 sessions over a trailing 420-day window: a successor 
 cannot re-enter for ~a year, even though the history exists in the database under the retired key.
 61 symbols were invisible for that reason on 2026-08-03 (N2 / #1285).
 
-`marketdata.symbol_lineage` (V054) records those links — **as DATA, never as identity**:
+`marketdata.symbol_lineage` (V055) records those links — **as DATA, never as identity**:
 
 - **The canonical key is unchanged.** It is still `(exchange, tradingsymbol)`. Lineage is a
   *view-time join* a reader opts into when it wants depth; it is not consulted by the live feed, the

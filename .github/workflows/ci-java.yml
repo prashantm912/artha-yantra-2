@@ -180,7 +180,8 @@ jobs:
   # Guards the two skill trees (.claude/skills, .agents/skills) that load into agent sessions.
   # It deliberately does NOT ride a build-test shard: a guard whose whole purpose is "never merge
   # past a red check with --admin" must not itself be the slowest, flakiest required context.
-  # See the script header for the full trade, including that this job is not (yet) required.
+  # See the script header for the full trade. This job WAS promoted to a required context on
+  # 2026-08-04 (#1298) and is now binding — the header's original "not required" caveat is resolved.
   runbook-hygiene:
     runs-on: ubuntu-latest
     steps:

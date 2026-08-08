@@ -78,8 +78,8 @@ class RiskServiceHeatCapTest {
 
   private static PaperMarginClient.Quote priced(String span) {
     return new PaperMarginClient.Quote(
-        true, null, new BigDecimal(span), BigDecimal.ZERO, new BigDecimal(span), new BigDecimal(span),
-        new BigDecimal(span));
+        true, null, new BigDecimal(span), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+        BigDecimal.ZERO, new BigDecimal(span), new BigDecimal(span), new BigDecimal(span));
   }
 
   @Test

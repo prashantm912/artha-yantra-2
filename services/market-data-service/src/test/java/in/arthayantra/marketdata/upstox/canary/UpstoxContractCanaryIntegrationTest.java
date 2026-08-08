@@ -53,7 +53,12 @@ import org.springframework.test.context.DynamicPropertySource;
       // binds UpstoxFnoMasterClient (the margin probe resolves the NIFTY key off it) + the margin beans
       "artha.upstox.analytics.enabled=true",
       // ...but keep the (now-bound) expired-backfill from firing its boot auto-resume at WireMock
-      "artha.marketdata.expired-backfill.auto-resume=false"
+      "artha.marketdata.expired-backfill.auto-resume=false",
+      // ...and likewise the F&O-master warm: it would fetch the master at startup, BEFORE @BeforeEach
+      // stubs WireMock, caching an EMPTY map with a fresh loadedAt — which then suppresses the lazy
+      // load the margin probe below depends on, so keyFor would return null and the probe would report
+      // "no Upstox instrument" instead of exercising the drift assertions.
+      "artha.upstox.fno-master.warm-enabled=false"
     })
 class UpstoxContractCanaryIntegrationTest extends MarketDataIntegrationTestBase {
 

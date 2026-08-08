@@ -42,18 +42,32 @@ public class PaperMarginClient {
   /** One basket leg by symbol (the structured tuple is resolved market-data-side). */
   public record Leg(String exchange, String tradingsymbol, int quantity, String side, String product) {}
 
-  /** The margin aggregate mirrored from market-data ({@code priced=false} carries a reason). */
+  /**
+   * The margin aggregate mirrored from market-data ({@code priced=false} carries a reason). Mirrors
+   * ALL ten components of market-data's {@code MarginController.MarginResponse} — Jackson matches by
+   * name, so the three added here ({@code equityMargin} / {@code netBuyPremium} / {@code
+   * additionalMargin}) were previously silently DROPPED on the wire rather than absent upstream.
+   *
+   * <p>{@code netBuyPremium} is the one that matters for this book: a LONG option basket ties up its
+   * capital as debit premium, not SPAN, so a long-only book's {@code spanMargin} is structurally
+   * near-zero while {@code netBuyPremium} carries the real requirement. Making the field VISIBLE is
+   * the whole point of this record change — no consumer re-bases onto it here ({@code RiskService}'s
+   * heat still reads {@code spanMargin}); that re-base is a deferred owner decision.
+   */
   public record Quote(
       boolean priced,
       String unpricedReason,
       BigDecimal spanMargin,
       BigDecimal exposureMargin,
+      BigDecimal equityMargin,
+      BigDecimal netBuyPremium,
+      BigDecimal additionalMargin,
       BigDecimal totalMargin,
       BigDecimal requiredMargin,
       BigDecimal finalMargin) {
 
     static Quote unpriced(String reason) {
-      return new Quote(false, reason, null, null, null, null, null);
+      return new Quote(false, reason, null, null, null, null, null, null, null, null);
     }
   }
 

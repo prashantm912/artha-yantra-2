@@ -5,6 +5,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -184,6 +185,39 @@ class UpstoxFnoMasterClientTest {
 
     // The master is loaded ONCE and reused — no per-lookup re-fetch.
     assertThat(wireMock.getAllServeEvents()).hasSize(1);
+  }
+
+  @Test
+  void warmLoadsTheMasterSoTheNextLookupPaysNothing() {
+    // The point of the warm: the 5MB cold load happens OFF the caller's path, so the lookup that a
+    // live margin call makes (through a 2000ms budget) finds the cache already populated.
+    UpstoxFnoMasterClient client = client();
+
+    client.warm();
+    assertThat(wireMock.getAllServeEvents()).as("the warm itself fetched the master").hasSize(1);
+
+    String key = client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null);
+
+    assertThat(key).isEqualTo("NSE_FO|61093");
+    assertThat(wireMock.getAllServeEvents())
+        .as("the lookup re-used the warmed cache — no second fetch on the caller's thread")
+        .hasSize(1);
+  }
+
+  @Test
+  void failedWarmNeverThrowsAndLeavesTheLookupWorking() {
+    // The assets CDN is auth-free but can be down. A failed warm must cost nothing beyond the
+    // pre-existing lazy behaviour — never propagate out of startup or the scheduler.
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(aResponse().withStatus(503).withBody("cdn down")));
+    UpstoxFnoMasterClient client = client();
+
+    assertThatCode(client::warm).doesNotThrowAnyException();
+
+    // ...and the client still answers, degrading to null exactly as it did before the warm existed.
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null)).isNull();
   }
 
   private static byte[] gzip(String json) {

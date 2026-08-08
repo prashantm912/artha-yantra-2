@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.upstox;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -56,5 +57,23 @@ public class UpstoxQuoteConfig {
   public UpstoxFnoMasterClient upstoxFnoMasterClient(
       RestClient.Builder restClientBuilder, ObjectMapper mapper, UpstoxAnalyticsProperties properties) {
     return new UpstoxFnoMasterClient(restClientBuilder, mapper, properties);
+  }
+
+  /**
+   * Keeps the F&amp;O master warm so a live margin call never pays its 5MB cold load inside {@code
+   * PaperMarginClient}'s 2000ms budget (see {@link UpstoxFnoMasterWarmer}). Takes the client through
+   * an {@link ObjectProvider}, so this bean is inert — not a wiring failure — when none of the three
+   * conditions above bound one. Off switch: {@code artha.upstox.fno-master.warm-enabled=false}, which
+   * {@code UpstoxContractCanaryIntegrationTest} sets because a startup warm would otherwise load the
+   * master from WireMock BEFORE that test stubs it, caching an empty map and suppressing the lazy load
+   * its margin probe depends on.
+   */
+  @Bean
+  @ConditionalOnProperty(
+      name = "artha.upstox.fno-master.warm-enabled",
+      havingValue = "true",
+      matchIfMissing = true)
+  public UpstoxFnoMasterWarmer upstoxFnoMasterWarmer(ObjectProvider<UpstoxFnoMasterClient> master) {
+    return new UpstoxFnoMasterWarmer(master);
   }
 }

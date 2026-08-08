@@ -99,6 +99,29 @@ public final class UpstoxFnoMasterClient {
         .get(new FnoKey(segment, underlying.trim().toUpperCase(), type, expiry, normalizeStrike(strike)));
   }
 
+  /**
+   * Forces a master (re)load NOW, off any caller's critical path — the {@link UpstoxFnoMasterWarmer}
+   * hook. Its whole purpose is that a LIVE lookup never pays the cold load: the master is a 5MB+ gzip
+   * fetched on this client's own generous timeouts (connect 15s / read 60s), while the F9 heat read
+   * reaching {@code keyFor} through market-data allows the caller only 2000ms end-to-end. Measured
+   * 2026-08-05: two WARNs at exactly 2000ms with the master landing 535ms later, so the heat gate went
+   * inert on that session's only funded entry; the same cold-load shape on 2026-08-06 completed inside
+   * budget. It is a RACE, not a deterministic failure — warming removes the race rather than fixing a
+   * constant break.
+   *
+   * <p>Unconditional by design: the warmer runs on a period STRICTLY SHORTER than {@link #REFRESH}, so
+   * the cache is always inside its window when a caller arrives and {@link #cache()}'s lazy branch —
+   * the one that would run the download on the caller's thread, under this monitor — never fires in a
+   * long-running service. Takes the same lock as that branch so a warm and a lazy load can never
+   * double-fetch. Fail-soft: {@link #reload()} swallows transport/gunzip/parse failure and keeps the
+   * prior cache, so this NEVER throws.
+   */
+  public void warm() {
+    synchronized (this) {
+      reload();
+    }
+  }
+
   /** ArthaYantra F&amp;O exchange → Upstox segment; {@code null} (skip) for a non-F&amp;O exchange. */
   private static String segmentFor(String exchange) {
     return switch (exchange) {

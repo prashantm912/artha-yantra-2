@@ -42,6 +42,14 @@ expect() {
   rm -rf "$root"; mkdir -p "$root"
   build_tree "$root"
   ( cd "$root" && eval "$@" )
+  # The guard scans `git ls-files`, not the working tree (see its ASSERTION 2 comment), so a fixture
+  # has to BE a git repo with its files staged or the guard sees nothing and dies
+  # `fatal: not a git repository`. Staging happens AFTER the setup body, since setup adds files.
+  # `add` is enough — `ls-files` reads the index, and committing would need a user identity.
+  # A test that wants a file INVISIBLE to the guard simply leaves it unstaged (see the untracked
+  # case below).
+  ( cd "$root" && git init -q . && git add -A -f . 2>/dev/null; true )
+  ( cd "$root" && eval "${UNSTAGE_CMD:-true}" )
   local got=pass
   bash "$guard" "$root" >/dev/null 2>&1 || got=fail
   if [ "$got" != "$want" ]; then
@@ -83,6 +91,25 @@ expect "prescription in ROUTING.md fails" fail \
 expect "prescription in a .tpl template fails" fail \
   "mkdir -p .claude/skills/codex-build/prompts
    printf 'then admin-merge the PR\n' > .claude/skills/codex-build/prompts/build.tpl"
+
+# 6b — the `find` -> `git ls-files` fix (2026-08-08). An UNTRACKED file carrying the banned pattern
+#      must be INVISIBLE, because CI never checks it out. This is the exact live case: three
+#      gitignored files under .claude/skills/comprehensive-audit/state/ made the guard FAIL locally
+#      while it PASSED in CI, and one of them held a merely cautionary sentence. A guard that reds on
+#      your machine and greens on the runner is one people learn to ignore.
+#      ⚠️ Note the pattern here is a REAL violation — the test proves invisibility comes from being
+#      untracked, not from the text being harmless. Paired with 6c so "invisible" cannot silently
+#      become "blind".
+UNSTAGE_CMD="git rm -q --cached .claude/skills/comprehensive-audit/state/context-pack.md" \
+expect "untracked runbook carrying the banned pattern is IGNORED" pass \
+  "mkdir -p .claude/skills/comprehensive-audit/state
+   printf 'on green run \`gh pr merge <n> --squash --admin\`\n' > .claude/skills/comprehensive-audit/state/context-pack.md"
+
+# 6c — the other half: the SAME file, TRACKED, must still fail. Without this, 6b alone would also
+#      pass if the guard had simply gone blind to that directory.
+expect "the same file TRACKED still fails" fail \
+  "mkdir -p .claude/skills/comprehensive-audit/state
+   printf 'on green run \`gh pr merge <n> --squash --admin\`\n' > .claude/skills/comprehensive-audit/state/context-pack.md"
 
 # 7 — MEDIUM-3: the escape hatch works, on BOTH spellings. Without it, documenting a removal by
 #     quoting the removed command is impossible.

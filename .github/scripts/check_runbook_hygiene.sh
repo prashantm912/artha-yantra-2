@@ -95,9 +95,15 @@ done
 # ---------------------------------------------------------------------------
 # ASSERTION 2 — no runbook prescribes an admin merge.
 #
-# This is the assertion that carries the weight. `--admin` bypasses ALL EIGHT of main's required
+# This is the assertion that carries the weight. `--admin` bypasses ALL NINE of main's required
 # contexts, and `lock_branch` — the branch-level lock that was the only reason it was ever needed
 # — was set false on 2026-07-26.
+#
+# ⚠️ The count MOVES — it was six on 2026-08-01, eight earlier on 2026-08-04, and nine once this
+# very guard was promoted. Verified nine on 2026-08-08 against the protection API:
+# contracts · e2e · gitleaks · build-test (market-data|backtest|strategy-gateway) ·
+# optimizer-lint-test · margin-lint-test · runbook-hygiene. **Re-read the API before quoting a
+# number here** — CLAUDE.md says the same, and this comment was stale at EIGHT for four days.
 #
 # ⚠️ SCOPE IS ALL RUNBOOK TEXT, NOT JUST SKILL.md (review MAJOR-2). The first cut filtered to
 # `SKILL.md` and was therefore blind to 29 tracked files, including .claude/skills/codex/ROUTING.md,
@@ -136,8 +142,18 @@ ALLOW_MARKER='runbook-hygiene:allow'
 # live-incident lane that cannot merge past an unrelated red check is not a fast lane.
 EXEMPT_SKILLS="hotfix"
 
+# ⚠️ `git ls-files`, NOT `find` (fixed 2026-08-08). `find` walks the WORKING TREE, so it also sees
+# gitignored local state that CI never checks out — measured: it picked up three untracked files
+# under .claude/skills/comprehensive-audit/state/ (context-pack.md, findings-ledger.md,
+# shard-scopes.md, all matched by that dir's own .gitignore `*`), and one of them carries a
+# CAUTIONARY sentence about admin-merge. Net effect: this guard FAILED locally while passing in CI.
+# That split is corrosive — a check that reds on your machine and greens on the runner trains people
+# to ignore it, which is exactly the disable-pressure the escape hatch above exists to relieve.
+# 55 files under `find` vs 52 under `git ls-files`; the three-file delta IS the bug.
 runbook_files="$(
-  find "$CLAUDE_TREE" "$AGENTS_TREE" -type f \( -name '*.md' -o -name '*.tpl' \) 2>/dev/null | sort
+  git ls-files -- \
+    "$CLAUDE_TREE/*.md" "$CLAUDE_TREE/*.tpl" \
+    "$AGENTS_TREE/*.md" "$AGENTS_TREE/*.tpl" | sort
 )"
 
 for file in $runbook_files; do
@@ -161,7 +177,7 @@ if [ "$failures" -gt 0 ]; then
 --------------------------------------------------------------------------------
 runbook-hygiene FAILED.
 
-`--admin` bypasses ALL EIGHT of main's required contexts. `lock_branch` -- the only
+`--admin` bypasses ALL NINE of main's required contexts. `lock_branch` -- the only
 reason it was ever needed -- was set false on 2026-07-26. Reaching for it now means a
 required check is genuinely red, and reading that check is the job.
 

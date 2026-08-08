@@ -216,31 +216,48 @@ class SwingCoverageProbeTest {
   void depth20CatchesOneSessionAndDepth50KeepsTheBoundary() {
     LocalDate end = LocalDate.of(2026, 8, 3);
 
+    // ⚠️ EVERY series here is LONGER than the depth it is probed at, because that is the ONLY shape
+    // production presents: SwingBatchEngine drops any symbol under doctrine.minBars() (60), then
+    // probe() slices the last `lookbackBars`. windowSessions is dates.size() + missing.size(), so a
+    // long series probed at depth 20 with one hole yields 21 — NOT 20.
+    //
+    // The first cut of this test built exactly 20 sessions and DELETED one, handing the probe 19
+    // bars and windowSessions 20. It asserted windowSessions()==20 and went green, so it looked
+    // rigorously pinned — to a population that cannot occur. Under it, MATERIALITY_DENOMINATOR=21
+    // passed while production computed 1*21 > 21 = false and refused nothing. Caught by review, not
+    // by this suite. Pinning the population is worth nothing if it is pinned to the wrong one.
     SwingCoverageProbe.Coverage complete20 =
-        SwingCoverageProbe.probe(tradingWindow(20, end), 20, NSE);
+        SwingCoverageProbe.probe(tradingWindow(60, end), 20, NSE);
     assertThat(complete20.windowSessions()).isEqualTo(20);
     assertThat(complete20.materiallyIncomplete())
         .as("zero missing sessions is the largest gap that passes at depth 20")
         .isFalse();
 
+    // A hole at index 50 of 60 sits INSIDE the last 20 bars, so it lands in the probed slice.
     SwingCoverageProbe.Coverage oneMissing20 =
-        SwingCoverageProbe.probe(tradingWindow(20, end, 10), 20, NSE);
-    assertThat(oneMissing20.windowSessions()).isEqualTo(20);
+        SwingCoverageProbe.probe(tradingWindow(60, end, 50), 20, NSE);
+    assertThat(oneMissing20.windowSessions())
+        .as("20 present bars spanning 21 trading sessions — the production shape")
+        .isEqualTo(21);
     assertThat(oneMissing20.missing()).hasSize(1);
     assertThat(oneMissing20.materiallyIncomplete())
-        .as("one missing session is 1/20 = 5%, above the fixed ~4.76% band")
+        .as("one missing session is 1/21 = 4.76%, above the fixed 1/22 = 4.545% band")
         .isTrue();
 
     SwingCoverageProbe.Coverage twoMissing50 =
-        SwingCoverageProbe.probe(tradingWindow(50, end, 10, 30), 50, NSE);
+        SwingCoverageProbe.probe(tradingWindow(100, end, 60, 80), 50, NSE);
+    assertThat(twoMissing50.windowSessions()).isEqualTo(52);
+    assertThat(twoMissing50.missing()).hasSize(2);
     assertThat(twoMissing50.materiallyIncomplete())
-        .as("two missing sessions are 2/50 = 4%, the largest depth-50 gap that passes")
+        .as("two missing sessions are 2/52 = 3.85%, the largest depth-50 gap that passes")
         .isFalse();
 
     SwingCoverageProbe.Coverage threeMissing50 =
-        SwingCoverageProbe.probe(tradingWindow(50, end, 10, 20, 30), 50, NSE);
+        SwingCoverageProbe.probe(tradingWindow(100, end, 60, 70, 80), 50, NSE);
+    assertThat(threeMissing50.windowSessions()).isEqualTo(53);
+    assertThat(threeMissing50.missing()).hasSize(3);
     assertThat(threeMissing50.materiallyIncomplete())
-        .as("three missing sessions are 3/50 = 6%, the smallest depth-50 gap that refuses")
+        .as("three missing sessions are 3/53 = 5.66%, the smallest depth-50 gap that refuses")
         .isTrue();
   }
 

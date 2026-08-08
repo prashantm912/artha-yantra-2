@@ -65,14 +65,22 @@ public final class SwingCoverageProbe {
    *
    * <pre>
    *   missing   as % of a 50-window   as % of a 252-window   symbols
-   *         5                 10.0%                   2.0%        38
-   *         6                 12.0%                   2.4%         7
-   *         3                  0.0%                   1.2%         1
+   *         5                  9.1%                  1.95%        38
+   *         6                 10.7%                  2.33%         7
+   *         3                  0.0%                  1.18%         1
    * </pre>
    *
-   * <p>4.7619% sits in the empty band between 2.4% and 10.0% with roughly 2x clearance on both sides: it
-   * refuses the real harm (a 5-bar hole inside a 50-bar window, the shape that mis-computed three
-   * held positions' {@code sma50}) and permits the same hole inside a 252-bar window, where it
+   * ⚠️ <b>Those percentages are {@code m / (L + m)}, NOT {@code m / L}</b> — the denominator is
+   * {@link Coverage#windowSessions()}, which is {@code dates.size() + missing.size()}, i.e. the
+   * TRADING SESSIONS SPANNED, not the declared depth. An earlier draft of this table quoted
+   * {@code m / L} (10.0% / 12.0% / 2.0% / 2.4%) and that mismatch is exactly what produced the
+   * wrong denominator in the first recalibration: read as {@code m / L}, one missing session at
+   * depth 20 looks like 1/20 = 5%; the code actually computes 1/21 = 4.7619%. Recalibrate from the
+   * numbers ABOVE, never from a depth-relative reading.
+   *
+   * <p>1/22 = 4.545% sits in the empty band between 2.33% and 9.1% with roughly 2x clearance on both
+   * sides: it refuses the real harm (a 5-bar hole inside a 50-bar window, the shape that mis-computed
+   * three held positions' {@code sma50}) and permits the same hole inside a 252-bar window, where it
    * cannot move a 52-week extreme. Because the test is a FRACTION, refusal probability no longer
    * scales with declared depth — the defect review caught.
    *
@@ -81,9 +89,22 @@ public final class SwingCoverageProbe {
    * all, so this is conservative for extremes and about right for averages. A per-indicator-type
    * sensitivity model would be more precise and is deliberately not built.
    */
-  // Fixed 1/21 = 4.7619% band: 1/20 = 5% at depth 20 is caught with a 0.2381pp margin;
-  // 2/50 = 4% still passes at depth 50 while 3/50 = 6% refuses.
-  private static final int MATERIALITY_DENOMINATOR = 21;
+  // ⚠️ 22, NOT 21 (corrected 2026-08-08 by review, before merge). The rule is
+  // `m * D > windowSessions` with `windowSessions = L + m`, so it fires iff `m * (D - 1) > L`.
+  // At L=20, m=1 that needs D-1 > 20, i.e. D >= 22. The first cut chose 21 by reading the window as
+  // `m / L`, which made the depth-20 case `1*21 > 21` — FALSE, the exact case the recalibration was
+  // for, unchanged. Its test passed only because the fixture built 20 sessions and DELETED one,
+  // handing the probe 19 bars (windowSessions 20); production hands it ~350 and takes the last 20
+  // (windowSessions 21). Boundary tests here MUST use a series longer than the depth.
+  //
+  // Effect at D=22, per live strategy (m = smallest missing count that refuses):
+  //   L=20  (5 of 6 strategies)  1/21 = 4.76% > 4.545%  -> refuses at m=1   [was m=2, this is the fix]
+  //   L=50  (exit windows)       m >= 3                 -> unchanged from D=20
+  //   L=252 (minervini-primary-base) m >= 13            -> was 14; ONE session tighter, accepted
+  // The 252 tightening is a real, unrequested behaviour change on the one strategy the band exists
+  // to keep entering. It rides because the owner chose a FIXED band over a depth-relative one, and
+  // 13/265 = 4.9% is still a large hole; the direction is a refused entry, never a stranded exit.
+  private static final int MATERIALITY_DENOMINATOR = 22;
 
   /**
    * Params whose value is a BAR COUNT, so a missing session shifts what the rule reads. Pinned by

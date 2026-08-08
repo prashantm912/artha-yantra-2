@@ -35,7 +35,6 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -643,7 +642,7 @@ class MinerviniSwingEngineTest {
 
   // NOTE: the depth-relative materiality assertion for the Critical (the same hole refusing a
   // 50-bar reader but not a 252-bar one) is a probe-level property and lives in
-  // SwingCoverageProbeTest#materialityIsDepthRelative, not here.
+  // SwingCoverageProbeTest#materialityUsesWindowFraction, not here.
 
   private static List<EngineCandle> holed(List<EngineCandle> series, int month, int... days) {
     java.util.Set<java.time.LocalDate> drop = new java.util.HashSet<>();

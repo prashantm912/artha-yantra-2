@@ -53,6 +53,20 @@ class LiveBhavcopyFetcherTest {
     assertThat(be.delivPer()).isNull();
   }
 
+  /**
+   * NSE answers 200 with the PREVIOUS trading day's file under most holiday URLs, and the row's
+   * trade date comes from the CSV's own DATE1 column — so an unchecked payload is stored under
+   * H-1 while the requested day H stays missing and is re-probed (and H-1 re-stamped) forever.
+   */
+  @Test
+  void refusesAPayloadDatedForADifferentDayThanTheOneRequested() {
+    BhavcopyFetcher fetcher = new LiveBhavcopyFetcher(new StubClient(CSV), "https://archives", CLOCK);
+
+    // The stub serves the same 12-Jun rows for EVERY archive URL.
+    assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 15))).isEmpty();
+    assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 12))).hasSize(2);
+  }
+
   /** NseHttpClient stub returning canned CSV for any archive URL. */
   static class StubClient extends NseHttpClient {
     private final String body;

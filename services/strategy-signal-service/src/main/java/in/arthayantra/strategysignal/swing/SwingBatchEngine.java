@@ -91,9 +91,13 @@ public class SwingBatchEngine {
    * slot cap reports its full funnel with {@code entries} 0, and the probe's {@code capExceedance}
    * carries what the governor shed. Reading 0 WITH {@code strategies} &gt; 0 and entries enabled means
    * the screen genuinely returned nothing — but 0 is also correct and NOT a screen verdict on the
-   * paths that never reach the funnel: an expired deadline, {@code executionArmed} false, and the
+   * paths that never reach the funnel: an expired deadline, {@code executionArmed} false, the
    * catch-up path's {@code entriesEnabled} false (a screenDate that is not the session), which passes
-   * an empty list while a candidate snapshot is present.
+   * an empty list while a candidate snapshot is present, and a FUNNEL FETCH FAILURE — an empty
+   * {@code snapshot()} means the fetch failed, not that the screen was empty, and it lands here as 0
+   * via {@code orElse(List.of())}. That third state has a third remedy (market-data unreachable, not
+   * an empty screen); the marker write is suppressed because {@code snapshotAvailable} is false, so
+   * it reaches the alert text but never a {@code swing_batch_runs} row.
    */
   public record SwingRun(
       int strategies, int candidates, int entries, int exits, int exitSkipped,

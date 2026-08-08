@@ -9,6 +9,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -23,6 +25,7 @@ import org.springframework.stereotype.Component;
 @Profile("live")
 public class LiveBhavcopyFetcher implements BhavcopyFetcher {
 
+  private static final Logger log = LoggerFactory.getLogger(LiveBhavcopyFetcher.class);
   private static final int MAX_LOOKBACK_DAYS = 5;
   private static final ZoneOffset IST = ZoneOffset.ofHoursMinutes(5, 30);
   private static final DateTimeFormatter URL_DATE = DateTimeFormatter.ofPattern("ddMMyyyy");
@@ -63,7 +66,27 @@ public class LiveBhavcopyFetcher implements BhavcopyFetcher {
       String csv = client.getAbsolute(url);
       // A real file carries the DELIV_PER header; anything else (an HTML error page, an empty body)
       // is treated as "not published" so the catch-up just skips that day.
-      return csv != null && csv.contains("DELIV_PER") ? parse(csv) : List.of();
+      if (csv == null || !csv.contains("DELIV_PER")) {
+        return List.of();
+      }
+      List<BhavcopyRow> rows = parse(csv);
+      // The archive answers 200 with the PREVIOUS trading day's file under many holiday URLs, and
+      // the trade date comes from the CSV's own DATE1 column — so an unchecked payload stores H-1's
+      // rows, leaves the requested day H permanently missing, and makes the anti-join re-probe (and
+      // re-stamp fetched_at on) H-1 every run forever. A mis-dated payload is "not published".
+      // allMatch, not a first-row check, and deliberately REJECT rather than filter: filtering to
+      // the correctly-dated rows would store a PARTIAL day, and the anti-join treats "any row for
+      // this date" as present — so a partial write is never re-probed and the hole becomes silent
+      // and permanent. Refusing is loud (WARN + re-probe next run). Less destructive is not safer.
+      if (!rows.isEmpty() && !rows.stream().allMatch(r -> date.equals(r.date()))) {
+        log.warn(
+            "NSE bhavcopy {}: archive served {} row(s) dated {} — discarding as not published",
+            date,
+            rows.size(),
+            rows.stream().map(BhavcopyRow::date).distinct().sorted().toList());
+        return List.of();
+      }
+      return rows;
     } catch (RuntimeException miss) {
       // 404 on a weekend/holiday (or a not-yet-posted file) is the expected non-trading-day signal.
       return List.of();

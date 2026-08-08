@@ -42,6 +42,14 @@ expect() {
   rm -rf "$root"; mkdir -p "$root"
   build_tree "$root"
   ( cd "$root" && eval "$@" )
+  # The guard scans `git ls-files`, not the working tree (see its ASSERTION 2 comment), so a fixture
+  # has to BE a git repo with its files staged or the guard sees nothing and dies
+  # `fatal: not a git repository`. Staging happens AFTER the setup body, since setup adds files.
+  # `add` is enough — `ls-files` reads the index, and committing would need a user identity.
+  # A test that wants a file INVISIBLE to the guard simply leaves it unstaged (see the untracked
+  # case below).
+  ( cd "$root" && git init -q . && git add -A -f . 2>/dev/null; true )
+  ( cd "$root" && eval "${UNSTAGE_CMD:-true}" )
   local got=pass
   bash "$guard" "$root" >/dev/null 2>&1 || got=fail
   if [ "$got" != "$want" ]; then
@@ -84,6 +92,25 @@ expect "prescription in a .tpl template fails" fail \
   "mkdir -p .claude/skills/codex-build/prompts
    printf 'then admin-merge the PR\n' > .claude/skills/codex-build/prompts/build.tpl"
 
+# 6b — the `find` -> `git ls-files` fix (2026-08-08). An UNTRACKED file carrying the banned pattern
+#      must be INVISIBLE, because CI never checks it out. This is the exact live case: three
+#      gitignored files under .claude/skills/comprehensive-audit/state/ made the guard FAIL locally
+#      while it PASSED in CI, and one of them held a merely cautionary sentence. A guard that reds on
+#      your machine and greens on the runner is one people learn to ignore.
+#      ⚠️ Note the pattern here is a REAL violation — the test proves invisibility comes from being
+#      untracked, not from the text being harmless. Paired with 6c so "invisible" cannot silently
+#      become "blind".
+UNSTAGE_CMD="git rm -q --cached .claude/skills/comprehensive-audit/state/context-pack.md" \
+expect "untracked runbook carrying the banned pattern is IGNORED" pass \
+  "mkdir -p .claude/skills/comprehensive-audit/state
+   printf 'on green run \`gh pr merge <n> --squash --admin\`\n' > .claude/skills/comprehensive-audit/state/context-pack.md"
+
+# 6c — the other half: the SAME file, TRACKED, must still fail. Without this, 6b alone would also
+#      pass if the guard had simply gone blind to that directory.
+expect "the same file TRACKED still fails" fail \
+  "mkdir -p .claude/skills/comprehensive-audit/state
+   printf 'on green run \`gh pr merge <n> --squash --admin\`\n' > .claude/skills/comprehensive-audit/state/context-pack.md"
+
 # 7 — MEDIUM-3: the escape hatch works, on BOTH spellings. Without it, documenting a removal by
 #     quoting the removed command is impossible.
 expect "marker exempts a quoted command" pass \
@@ -104,6 +131,28 @@ expect "exemption does not leak to another skill" fail \
 
 # 10 — an empty intersection must FAIL, never silently pass.
 expect "empty shared intersection fails" fail "rm -rf .agents/skills"
+
+# 11 — RED-PROOF for the review's Critical: assertion 2 must ALSO fail closed. `git ls-files` can
+#      SUCCEED and return nothing — a pathspec that stops matching after a tree move, a partial
+#      sparse checkout, a rename of CLAUDE_TREE. Before the fix that scanned zero files and printed
+#      "all assertions passed". Here the whole index is emptied while the worktree keeps every file,
+#      which is exactly the index-vs-worktree split that switching to `git ls-files` created and
+#      `find` could not produce. Assertion 1 walks the WORKTREE, so it still sees its pairs and stays
+#      green — that is what makes this a proof of assertion 2 specifically, not a restatement of
+#      case 10. The fixture is otherwise clean, so pre-fix the guard passes and post-fix it fails on
+#      the empty list alone.
+UNSTAGE_CMD="git rm -r -q --cached .claude .agents" \
+  expect "empty tracked-file list fails closed" fail "true"
+
+# 12 — RED-PROOF for the same Critical, one file at a time: a file that is TRACKED but ABSENT from
+#      the checkout (sparse-checkout cone exclusion, partial clone) must fail, not be silently
+#      treated as clean — before the fix `grep … 2>/dev/null || true` turned "cannot read it" into
+#      "it has no hits". ROUTING.md is deliberately the victim: it is a runbook file assertion 2
+#      scans but NOT a SKILL.md, so assertion 1's `find`-based pair comparison never looks at it and
+#      cannot redden this case for an unrelated reason. (Deleting a SKILL.md instead would fail via
+#      `cmp -s` on a missing file — a mechanically-red proof that never reaches the new assertion.)
+UNSTAGE_CMD="rm -f .claude/skills/codex/ROUTING.md" \
+  expect "tracked-but-unreadable file fails closed" fail "true"
 
 if [ "$failures" -gt 0 ]; then
   echo "check_runbook_hygiene_test: $failures case(s) failed"

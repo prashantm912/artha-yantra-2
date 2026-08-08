@@ -189,6 +189,7 @@ public class SwingBatchRecorder {
     doctrine.pyramid().describe().forEach((k, v) -> flags.put("pyramid." + k, v));
     flagSnapshots.capture(
         FlagSnapshotService.SWING_BATCH, doctrine.batchName() + ":" + runDate, doctrine.book(), flags);
+    SwingBatchEngine.AdmissionProbe probe = result.admission();
     boolean markerRecorded = false;
     boolean snapshotAvailable = candidateSnapshot == null || candidateSnapshot.isPresent();
     if (snapshotAvailable
@@ -196,7 +197,6 @@ public class SwingBatchRecorder {
         && result.refusalReasons().isEmpty()
         && (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0)) {
       try {
-        SwingBatchEngine.AdmissionProbe probe = result.admission();
         markerRecorded =
             runs.record(
                 doctrine.batchName(), runDate, result.strategies(), result.candidates(),
@@ -216,10 +216,17 @@ public class SwingBatchRecorder {
     } catch (RuntimeException e) {
       log.warn("{} swing sell-decision persist failed: {}", doctrine.batchName(), e.getMessage());
     }
+    // A cap-bound run reads as "N candidates, 0 entries" — indistinguishable from a dead batch unless the
+    // probe is spelled out. Appended only when the cap actually shed a would-be entrant, so an ordinary
+    // run's alert text is unchanged.
     String summary =
         result.candidates() + " candidates, " + result.entries() + " entries, " + result.exits()
             + " exits, " + result.exitSkipped() + " exit-skipped ("
-            + result.strategies() + " strategies)";
+            + result.strategies() + " strategies)"
+            + (probe.capBound()
+                ? " — slot cap bound: " + probe.wouldEnter() + " would-enter, " + probe.admitted()
+                    + " admitted, " + probe.capExceedance() + " dropped"
+                : "");
     publishQuietly(
         doctrine.batchName(),
         !result.refusalReasons().isEmpty()

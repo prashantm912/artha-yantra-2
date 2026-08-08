@@ -85,6 +85,11 @@ public class SwingBatchEngine {
    * held anchors whose stop/trail could NOT be evaluated this run (no daily series even after a retry)
    * — this batch is the position's ONLY exit evaluator, so a non-zero value is an ops signal. {@code
    * admission} is the ledger-F3 slot-cap probe (measurement-only; see {@link AdmissionProbe}).
+   *
+   * <p>{@code candidates} is the SIZE OF THE FUNNEL this run was handed — not how many survived any
+   * gate. It stays honest when the book's risk governor blocks the entry pass outright: a book at its
+   * slot cap reports its full funnel with {@code entries} 0, and the probe's {@code capExceedance}
+   * carries what the cap shed. Reading 0 here means the screen genuinely returned nothing.
    */
   public record SwingRun(
       int strategies, int candidates, int entries, int exits, int exitSkipped,
@@ -413,10 +418,22 @@ public class SwingBatchEngine {
       SwingDoctrine doctrine, List<SwingStrategy> swings, AnchorResolution resolution,
       Map<String, List<EngineCandle>> seriesCache, List<SwingCandidate> candidates,
       LocalDate requiredBarDate, RunDeadline deadline) {
-    // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped at the START
-    // of the run takes no entries at all (cheap — skips the whole candidate scan).
+    // Per-book risk governor early-out: a book already kill-switched / daily-loss-tripped / at its slot
+    // cap at the START of the run takes no entries at all (cheap — skips the whole candidate scan). The
+    // candidate COUNT is still reported, and the skip is logged: this branch used to return 0 and say
+    // nothing, so a capped book published "0 candidates" to swing_batch_runs, the summary alert and every
+    // session report built off them — the screen reading as empty while the F3 probe on the SAME row
+    // counted 17-18 would-be entrants (measured: minervini 2026-08-04..08-07, collapsed from 139 the day
+    // the book stuck at its cap). The zero was refactor residue, not a distinct quantity: this method
+    // fetched the funnel ITSELF, BELOW this branch, until #751 hoisted it to a parameter — so nothing was
+    // scanned OR fetched then, and 0 was literally true. Every other return below already reports
+    // candidates.size(), including the SAME gate tripping MID-run.
     if (entryBlocked(doctrine)) {
-      return new EntryResult(0, 0, List.of(), false);
+      log.info(
+          "{} swing: entry pass skipped — the {} book gate blocks entry at run start; {} funnel"
+              + " candidate(s) not scanned",
+          doctrine.batchName(), doctrine.book(), candidates.size());
+      return new EntryResult(candidates.size(), 0, List.of(), false);
     }
     if (candidates.isEmpty()) {
       return new EntryResult(0, 0, List.of(), false);

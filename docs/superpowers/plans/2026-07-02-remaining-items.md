@@ -1045,7 +1045,7 @@ enumeration recipe at the top of §0 still governs.
 |---|---|---|
 | **N23-A** | Re-base the F9 heat cap on premium outlay, **or** accept + re-label it a short-option control | It changes live behaviour: on a ₹1.5 L book a real 60% cap **will start refusing entries**. Today it measures `spanMargin`, structurally `0.00` on a long-only book, so the gate cannot fire. Confirmed twice, once on a *successful* margin call |
 | **N26** | Free swing capacity — age out stale positions and/or re-size the caps. **There is no cheap phantom-anchor shortcut; see N38.** | **Diagnosis complete and SIMPLER than N37 claimed.** BOTH books are plainly capacity-bound on REAL open positions: the `max_open` gate is `positions.openCount(book) >= cap` (`RiskService:412-415`), so minervini sits at **12/12** and manas-arora was at **6/6**. **Each needs exactly ONE close to admit ONE entry** — manas-arora demonstrated it live (N36: one close → one admission → five refusals). ⚠️ **N37's "minervini needs four closes" and "clearing three rows frees three slots" are RETRACTED (N38)** — the 3 phantom anchors are measurement noise in `open_at_start`, they hold no slots, and two of their siblings already self-resolved. minervini's refusal is silent because the max-open rail **writes no audit by design**, not because of phantoms. M40 (ledger #37 task) is manas-arora's 6% rail, HOLD with its PR open |
-| **T21** | Premium exits on the 30 bracket-less scalpers — accept indicator-exit-only, or add a `premium_pct` band | Decision pack **DELIVERED 2026-07-25** (§0a row B11, `2026-07-25-weekly-bug-queue.md`) with **rec = (b) add bands**. Awaiting the call ever since; it is not blocked on anything |
+| ~~**T21**~~ | ~~Premium exits on the 30 bracket-less scalpers~~ | ⚠️ **THIS ROW WAS FALSE AND IT CAUSED A REAL FALSE DISPATCH ON 2026-08-08.** It said the decision pack was "awaiting the call ever since". **T21 SHIPPED THE SAME NIGHT the pack was written** — [#990](https://github.com/prashantm912/artha-yantra-2/pull/990) `64f9caaa`, closed out in [#994](https://github.com/prashantm912/artha-yantra-2/pull/994), republished 2026-07-25 ~23:00 IST. **Verified 2026-08-08: 63 of 63 scalper YAMLs carry `take_profit premium_pct 35` + `stop_loss premium_pct 25`; `grep -L premium_pct` returns ZERO files.** The owner was shown this row, said "build it", and it was already built — the item went to a planner before anyone re-checked. **How it happened, because the mechanism is the lesson:** I lifted T21 from the weekly bug queue's closing bullets (a SOURCE doc) and promoted it to the triage without reading the ledger's own **D1** row, which said DONE. **That is precisely what the single-status rule at the top of §0 forbids** — "an item's status is authoritative in THIS FILE's row and nowhere else… when they disagree, the ledger row wins". The irony is exact: the false dispatch was manufactured *by the triage table whose entire purpose is to prevent false dispatches.* **Corollary for anyone building the next triage: promoting an item from a source doc REQUIRES grepping this file for an existing row first.** Full falsification with evidence: [`2026-08-08-t21-premium-exit-bands.md`](2026-08-08-t21-premium-exit-bands.md) |
 | **N12** | The `EquitySplitBonusAdjuster` source-aware contract (DBEIL case) | Fixing it touches the adjuster's contract, not data — backtest-fidelity, SEVERE |
 | **N32** | Should a multi-minute OI capture hole alarm? | Fail-soft worked perfectly and **that is the problem** — a 4-minute hole in the OI bloc's only input is invisible to every oracle. Whether that deserves paging is a risk-appetite call |
 | **N31** | Was the 2026-08-06 18:40 full-stack restart you? | If not, it needs a cause before it lands inside a batch window |
@@ -1578,6 +1578,44 @@ open swing inventory ticked **18 → 17**.
     floor inside `confluence-composite` (aggregate ≥ 0.600 via optional dots only, NULL margin). The
     standing prior — every measured loosening of the entry gate has lost money — gains a
     required-floor data point. Fourth post-07-27 chop day.
+
+#### 2026-08-08 — four review rounds, ALL REQUEST_CHANGES; plus two corrections to my own merged rows
+
+**N39 · ⚠️ ONE FINDING HAS A SIX-DAY FUSE — #1299 M1 breaks on 2026-08-14.**
+`SymbolLineageDetector.java:157,163,180`: `bounds.floor_d` is `min(trade_date)` over the WHOLE
+`nse_eod_bhavcopy`, but `firstrow`/`lastrow` are computed over the trailing `windowDays` slice. Rule 3
+therefore asks "is this symbol's first IN-WINDOW bar after the TABLE's first bar" — only the intended
+question while `windowDays ≥ table span`. **Measured: span 2025-06-20 → 2026-08-07 = 413 days,
+`windowDays` default 420. The clip begins at max(trade_date) = 2025-06-20 + 420 = 2026-08-14.**
+Reviewer simulated the post-clip regime by shrinking `windowDays` to 300 and 200 → **zero spurious
+pairs today**, so blast radius is currently nil — but the guard has stopped meaning what its javadoc
+says, and every placebo statistic quoted in it was taken in the un-clipped regime. Fix direction:
+`GREATEST(floor_d, latest_d - windowDays)`, plus a test that sets `window-days` below the fixture span.
+
+**Review verdicts — none approved, and each found something CI could not:**
+
+| PR | verdict | the finding that matters |
+|---|---|---|
+| **#1299** `symbol_lineage` | REQUEST_CHANGES | M1 above (six-day fuse) · M2 the schema permits N→1 but the reader resolves it **non-deterministically** (`DISTINCT ON` without a total order — two stitched rows tie and Postgres picks arbitrarily, plan-dependent) · M3 a **detector** refutation is as permanent as an owner verdict, keyed on an NSE-tradingsymbol-vs-BSE-ticker string match with no ISIN corroboration — **113 BSE tickers carry ≥2 distinct ISINs** in the window · M4 V055/V054 order. ✅ All 7 must-fix items independently verified fixed; the reviewer **re-derived the headline against the live DB and reproduced the deployed service exactly** (coverage 1783 / 285 both ways). **Δcoverage +42 reproduces; entering moved 7 → 5** — the moving-population effect the PR's own open doubt predicted, and nothing is armed on those figures |
+| **#1297** CA stage→verify→swap | REQUEST_CHANGES | M-A — the round-3 deliverable — **emits its alert before the swap it reports on**, so a run that verifies 1d then fails 1m reports 1,276 unadjusted bars when nothing was adjusted; and its test constructs the meter registry inline, so **deleting the metric leaves the test green**. Plus the per-window `DELETE`→`INSERT` is two autocommits, and the next attempt truncates the staged replacement first |
+| **#1305** cagg window sizing | REQUEST_CHANGES | The `/4` budget divisor — **the number the whole PR turns on — is pinned by nothing**; every test passes it in and asserts against it, so any divisor satisfies them. At `/1` the 2026-07-30 failure returns with the suite green. Also: "a tuple budget does not decay" is false for **spill**, which is ~60% of the cost and invariant to window width |
+| **#1283** swing coverage gate | REQUEST_CHANGES | Asymmetry and parity verified clean, but the **durable-evidence half has zero red-proof** — both engine tests use the 9-arg seam that nulls the repository, so deleting both `recordCoverageRow` calls leaves the suite green. Also the 5% materiality band was calibrated at depth 50 while **5 of 6 live strategies run at depth 20**, where one missing session sits 0.24pp under the threshold |
+
+⚠️ **All four reviewers were Opus — same vendor as the builders.** Codex was available (my "Codex is down" call was wrong; see below) but these were already in flight. **Re-run at least #1297 and #1305 through `codex-code-review` before merging** — those two carry the most consequential logic.
+
+**N40 · Two corrections to rows I merged myself.**
+- ⚠️ **N36 said manas-arora "re-saturated at 6", implying a cap of 6. The cap is 7** (`risk_settings`,
+  read 2026-08-08), and it holds 6 — **it had a free slot and still refused five candidates.** So the
+  two books are bound by **DIFFERENT RAILS**: minervini by `max_open` (12/12, silent — `entryVeto`
+  writes no audit), manas-arora by the **6% portfolio open-risk cap** (logged explicitly). N36's
+  "one close → one admission" observation stands, but it works through **risk headroom**, not slot
+  count — so freeing a manas slot does not free manas capacity. N26's owner decision is unchanged in
+  substance; the levers differ per book.
+- **"Codex is down" was wrong.** `codex exec` returns fine. Two misreads: the
+  "Subagent dispatch requires multi-agent support" text was the CONTENT of a plugin markdown file
+  Codex had read, not an error; and both runs were killed by **my own `timeout 280`**, which CLAUDE.md
+  explicitly warns about ("run reviews via `run_in_background`"). Both threads were salvaged from
+  their events files per the documented recovery and resumed with context intact.
 
 #### 2026-08-07 evening batch — clean, and N26 got PROVEN by a natural experiment
 

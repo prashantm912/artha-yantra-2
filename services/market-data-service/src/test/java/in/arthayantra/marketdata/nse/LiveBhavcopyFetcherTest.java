@@ -3,6 +3,7 @@ package in.arthayantra.marketdata.nse;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.nse.BhavcopyFetcher.BhavcopyRow;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -29,7 +30,8 @@ class LiveBhavcopyFetcherTest {
 
   @Test
   void parsesSecBhavdataFullCsv() {
-    BhavcopyFetcher fetcher = new LiveBhavcopyFetcher(new StubClient(CSV), "https://archives", CLOCK);
+    BhavcopyFetcher fetcher =
+        new LiveBhavcopyFetcher(new StubClient(CSV), "https://archives", CLOCK, new SimpleMeterRegistry());
 
     List<BhavcopyRow> rows = fetcher.fetchLatest();
 
@@ -60,11 +62,25 @@ class LiveBhavcopyFetcherTest {
    */
   @Test
   void refusesAPayloadDatedForADifferentDayThanTheOneRequested() {
-    BhavcopyFetcher fetcher = new LiveBhavcopyFetcher(new StubClient(CSV), "https://archives", CLOCK);
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    BhavcopyFetcher fetcher =
+        new LiveBhavcopyFetcher(new StubClient(CSV), "https://archives", CLOCK, registry);
 
     // The stub serves the same 12-Jun rows for EVERY archive URL.
     assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 15))).isEmpty();
     assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 12))).hasSize(2);
+
+    // The refusal is otherwise INVISIBLE downstream: the backfill still records a SUCCESS ingest run,
+    // so a systematic false positive would stall the feed forever and still report green. The counter
+    // is the only signal that distinguishes "the guard is refusing" from "the fetch came back empty".
+    // Registered by the FETCHER, not by this test — the assertion reads production's own meter.
+    assertThat(misdated(registry))
+        .as("one refusal, and exactly one — the correctly-dated fetch must not increment it")
+        .isEqualTo(1.0);
+  }
+
+  private static double misdated(SimpleMeterRegistry registry) {
+    return registry.get("ay_bhavcopy_misdated_payload_total").tag("exchange", "NSE").counter().count();
   }
 
   /** NseHttpClient stub returning canned CSV for any archive URL. */

@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.nse;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -36,13 +38,28 @@ public class LiveBhavcopyFetcher implements BhavcopyFetcher {
   private final String archivesUrl;
   private final Clock clock;
 
+  /**
+   * Counts payloads refused by the mis-dated guard below, tagged by exchange. A WARN alone was not
+   * enough: the refusal path is SILENT to every downstream health surface, because {@code
+   * BhavcopyBackfillService} still records a SUCCESS ingest run (with the real, zero row count) and
+   * {@code IngestCoverageCanary} judges bhavcopy on "≥1 SUCCESS run". So a SYSTEMATIC false positive
+   * — NSE changing {@code DATE1} semantics, say — would discard every payload forever, stall {@code
+   * nse_eod_bhavcopy}, and still report green. The counter is the diagnosis (which exchange, how
+   * many); the row-count floor added to that canary in the same change is the alarm.
+   *
+   * <p>Zero on a healthy feed, by construction: it increments only where the guard refuses.
+   */
+  private final Counter misdatedCounter;
+
   public LiveBhavcopyFetcher(
       NseHttpClient client,
       @Value("${artha.nse.archives-url:https://nsearchives.nseindia.com}") String archivesUrl,
-      Clock clock) {
+      Clock clock,
+      MeterRegistry meterRegistry) {
     this.client = client;
     this.archivesUrl = archivesUrl;
     this.clock = clock;
+    this.misdatedCounter = meterRegistry.counter("ay_bhavcopy_misdated_payload_total", "exchange", "NSE");
   }
 
   @Override
@@ -79,6 +96,7 @@ public class LiveBhavcopyFetcher implements BhavcopyFetcher {
       // this date" as present — so a partial write is never re-probed and the hole becomes silent
       // and permanent. Refusing is loud (WARN + re-probe next run). Less destructive is not safer.
       if (!rows.isEmpty() && !rows.stream().allMatch(r -> date.equals(r.date()))) {
+        misdatedCounter.increment();
         log.warn(
             "NSE bhavcopy {}: archive served {} row(s) dated {} — discarding as not published",
             date,

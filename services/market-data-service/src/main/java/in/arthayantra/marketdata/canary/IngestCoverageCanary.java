@@ -82,6 +82,30 @@ public class IngestCoverageCanary {
   public enum Policy {
     /** ≥1 SUCCESS row required (latest-only pulls + full dumps). */
     REQUIRE_SUCCESS,
+    /**
+     * ≥1 SUCCESS run AND that run wrote rows; SUCCESS with 0 rows is YELLOW.
+     *
+     * <p>Added 2026-08-08 for bhavcopy, after review of the mis-dated-payload guard (#1327). That
+     * guard REFUSES a payload NSE dated wrongly and returns an empty list — correct — but the refusal
+     * is invisible here: {@code BhavcopyBackfillService} still records a SUCCESS run, and plain
+     * {@link #REQUIRE_SUCCESS} asks only whether a SUCCESS row exists. So a SYSTEMATIC false positive
+     * (NSE changing {@code DATE1} semantics, or stamping a settlement date) would discard every
+     * payload, stall {@code nse_eod_bhavcopy} indefinitely, and still report GREEN here — the only
+     * signal being a WARN nobody reads. A total outage already reaches the same state through the
+     * fetcher's 404 path, but that route is transient and self-heals; the guard's is permanent.
+     *
+     * <p><b>Why a bare row floor is safe here and would NOT be elsewhere.</b> The sweep only ever
+     * evaluates the PREVIOUS TRADING DAY — {@code targetDay} returns null on a non-trading day, so a
+     * holiday is never assessed and cannot alarm. The floor therefore needs no calendar logic of its
+     * own. {@code maxRows} is the MAX across the day's SUCCESS runs, so a legitimate no-op re-run
+     * after a successful one does not trip it either.
+     *
+     * <p>YELLOW rather than RED, deliberately: it still sends an ntfy alert (default priority) and
+     * shows in the report, but a single quiet day is a degradation to look at, not a page. The
+     * {@code ay_bhavcopy_misdated_payload_total} counter distinguishes the two causes — a rising
+     * counter means the guard is refusing; a flat counter with 0 rows means the fetch itself is dry.
+     */
+    REQUIRE_SUCCESS_WITH_ROWS,
     /** SUCCESS with rows &gt; 0 is green; SUCCESS with 0 rows is a data-starved YELLOW. */
     SCREENER,
     /** Exactly one accumulating per-day row; green only when it captured rows. */
@@ -172,7 +196,7 @@ public class IngestCoverageCanary {
           new ExpectedSource(IngestRunLedger.SOURCE_NSE_FII_DII, Policy.REQUIRE_SUCCESS),
           new ExpectedSource(IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI, Policy.REQUIRE_SUCCESS),
           new ExpectedSource(IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE, Policy.REQUIRE_SUCCESS),
-          new ExpectedSource(IngestRunLedger.SOURCE_BHAVCOPY, Policy.REQUIRE_SUCCESS),
+          new ExpectedSource(IngestRunLedger.SOURCE_BHAVCOPY, Policy.REQUIRE_SUCCESS_WITH_ROWS),
           new ExpectedSource(IngestRunLedger.SOURCE_INSTRUMENT_SYNC, Policy.REQUIRE_SUCCESS),
           new ExpectedSource(IngestRunLedger.SOURCE_MINERVINI_SCREEN, Policy.SCREENER),
           new ExpectedSource(IngestRunLedger.SOURCE_MANAS_SCREEN, Policy.SCREENER),
@@ -588,6 +612,16 @@ public class IngestCoverageCanary {
           success.stream().mapToLong(r -> r.rowsWritten() == null ? 0 : r.rowsWritten()).max().orElse(0);
       return switch (expected.policy()) {
         case REQUIRE_SUCCESS -> green(expected, success.size() + " SUCCESS run(s), " + maxRows + " rows");
+        case REQUIRE_SUCCESS_WITH_ROWS ->
+            maxRows > 0
+                ? green(expected, success.size() + " SUCCESS run(s), " + maxRows + " rows")
+                : yellow(
+                    expected,
+                    success.size()
+                        + " SUCCESS run(s) but 0 rows written on a trading day — the feed did not"
+                        + " advance. Check ay_bhavcopy_misdated_payload_total: rising means the"
+                        + " mis-dated-payload guard is refusing every file, flat means the fetch"
+                        + " itself came back empty");
         case SCREENER ->
             maxRows > 0
                 ? green(expected, "screen wrote " + maxRows + " rows")

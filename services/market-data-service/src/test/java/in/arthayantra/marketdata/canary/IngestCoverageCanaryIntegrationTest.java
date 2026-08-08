@@ -181,6 +181,53 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     assertThat(cov.detail()).contains("data-starved");
   }
 
+  /**
+   * The hole this closes (review of #1327): the mis-dated-payload guard REFUSES a payload NSE dated
+   * wrongly and returns an empty list, but {@code BhavcopyBackfillService} still records a SUCCESS
+   * run. Under the old {@code REQUIRE_SUCCESS} policy that was GREEN — so a SYSTEMATIC false positive
+   * (NSE changing {@code DATE1} semantics) would discard every payload, stall {@code
+   * nse_eod_bhavcopy} indefinitely, and never alarm. The only signal was a WARN line.
+   *
+   * <p>A bare row floor is safe here BECAUSE the sweep only ever evaluates the previous TRADING day —
+   * a holiday is never assessed, so it cannot alarm on a legitimately empty non-trading day.
+   */
+  @Test
+  void aBhavcopySuccessWithZeroRowsIsYellowNotGreen() {
+    LocalDate target = LocalDate.of(2026, 3, 10);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    // The fetchers refused every payload as mis-dated: the run SUCCEEDS, and writes nothing.
+    deleteSource(target, IngestRunLedger.SOURCE_BHAVCOPY);
+    seedBatch(target, IngestRunLedger.SOURCE_BHAVCOPY, "SUCCESS", 0L, true);
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    assertThat(report.status()).isEqualTo("YELLOW");
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_BHAVCOPY);
+    assertThat(cov.status()).isEqualTo("YELLOW");
+    assertThat(cov.detail()).contains("0 rows written on a trading day");
+    // The detail must name the metric, so the reader can tell a refusing guard from a dry fetch.
+    assertThat(cov.detail()).contains("ay_bhavcopy_misdated_payload_total");
+  }
+
+  /** The floor must not redden the NORMAL path: a bhavcopy run that wrote rows stays GREEN. */
+  @Test
+  void aBhavcopySuccessWithRowsStaysGreen() {
+    LocalDate target = LocalDate.of(2026, 3, 17);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    deleteSource(target, IngestRunLedger.SOURCE_BHAVCOPY);
+    seedBatch(target, IngestRunLedger.SOURCE_BHAVCOPY, "SUCCESS", 3102L, true);
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_BHAVCOPY);
+    assertThat(cov.status()).isEqualTo("GREEN");
+    assertThat(cov.detail()).contains("3102 rows");
+  }
+
   @Test
   void anOptionsCaptureWithZeroRowsIsRed() {
     LocalDate target = LocalDate.of(2026, 3, 3);

@@ -1,5 +1,7 @@
 package in.arthayantra.marketdata.bse;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -33,10 +35,16 @@ public class LiveBseBhavcopyFetcher implements BseBhavcopyFetcher {
   private final BseHttpClient client;
   private final String baseUrl;
 
+  /** Counts payloads refused by the mis-dated guard below. See the NSE twin for the full rationale. */
+  private final Counter misdatedCounter;
+
   public LiveBseBhavcopyFetcher(
-      BseHttpClient client, @Value("${artha.bse.base-url:https://www.bseindia.com}") String baseUrl) {
+      BseHttpClient client,
+      @Value("${artha.bse.base-url:https://www.bseindia.com}") String baseUrl,
+      MeterRegistry meterRegistry) {
     this.client = client;
     this.baseUrl = baseUrl;
+    this.misdatedCounter = meterRegistry.counter("ay_bhavcopy_misdated_payload_total", "exchange", "BSE");
   }
 
   @Override
@@ -59,7 +67,9 @@ public class LiveBseBhavcopyFetcher implements BseBhavcopyFetcher {
     return parse(body, date);
   }
 
-  private static List<BseBhavRow> parse(String csv, LocalDate expected) {
+  // Instance, not static: the mis-dated guard below increments the per-exchange counter, and the
+  // single caller is already an instance method. Nothing outside this class calls it.
+  private List<BseBhavRow> parse(String csv, LocalDate expected) {
     String[] lines = csv.split("\\r?\\n");
     if (lines.length < 2 || !lines[0].startsWith("TradDt,")) {
       return List.of(); // not the expected UDiFF header
@@ -107,6 +117,7 @@ public class LiveBseBhavcopyFetcher implements BseBhavcopyFetcher {
     // 200 with a DIFFERENT day's file would store that day's rows and leave the requested one
     // permanently missing. Refuse the payload rather than mis-file it.
     if (!rows.isEmpty() && !rows.stream().allMatch(r -> expected.equals(r.date()))) {
+      misdatedCounter.increment();
       log.warn(
           "BSE bhavcopy {}: file served {} row(s) dated {} — discarding as not published",
           expected,

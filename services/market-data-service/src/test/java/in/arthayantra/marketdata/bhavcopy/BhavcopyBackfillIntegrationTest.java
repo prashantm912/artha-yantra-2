@@ -426,7 +426,10 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
   private BhavcopyBackfillService liveNseBackfill() {
     return new BhavcopyBackfillService(
         new LiveBhavcopyFetcher(
-            new NseHttpClient(RestClient.builder(), wireMock.baseUrl()), wireMock.baseUrl(), CLOCK),
+            new NseHttpClient(RestClient.builder(), wireMock.baseUrl()),
+            wireMock.baseUrl(),
+            CLOCK,
+            new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
         nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo, renameRepo, candles,
         CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
   }

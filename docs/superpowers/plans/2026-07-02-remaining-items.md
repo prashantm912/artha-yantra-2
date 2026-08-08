@@ -790,7 +790,7 @@ than carried.
 
 | # | id | what (1 line) | source | tier | status |
 |---|---|---|---|---|---|
-| H1 | `session-heartbeat-arming` | `SessionLivenessHeartbeat` ([#941](https://github.com/prashantm912/artha-yantra-2/pull/941)) — the ONLY detector for a stack that dies MID-SESSION — was dormant because `ARTHA_HEARTBEAT_SESSION_URL` was empty, and read as armed because the sibling batch var `ARTHA_HEARTBEAT_URL` IS set | shard C Part 1 #1; ledger §0 prose ×3 | owner (flag arm) | ⚠️ **ARMED-UNVERIFIED 2026-08-02 — NOT "armed".** Unarmed for **14 days** (#941 merged 2026-07-19). Owner supplied a URL 2026-08-02; appended to `.env` **in place** (ACL verified unchanged — see the `.env` ACL trap) and strategy-signal recreated. `ARTHA_HEARTBEAT_SESSION_URL` now SET in-container (len 56). **Construction could NOT be confirmed and the negative proves nothing:** actuator exposure is `health,info,prometheus` only (`application.yml:289`) so `/actuator/beans` 404s; `SessionLivenessHeartbeat` logs nothing at construction (only `pingIfHealthy:119`/`:121`), and **the KNOWN-ARMED sibling is equally silent.** A ping fires only inside a live NSE session (`@Scheduled` cron `0 */10 9-15 * * MON-FRI` + `MarketCalendar.isOpen` + the narrowed window), so the first provable evidence is Monday. **Gate: scheduled task `verify-session-heartbeat-armed-20260803`, 2026-08-03 10:00 IST.** Flip this row only on that task's evidence |
+| H1 | `session-heartbeat-arming` | `SessionLivenessHeartbeat` ([#941](https://github.com/prashantm912/artha-yantra-2/pull/941)) — the ONLY detector for a stack that dies MID-SESSION — was dormant because `ARTHA_HEARTBEAT_SESSION_URL` was empty, and read as armed because the sibling batch var `ARTHA_HEARTBEAT_URL` IS set | shard C Part 1 #1; ledger §0 prose ×3 | owner (flag arm) | ✅ **CLOSED 2026-08-07 — ARMED AND PROVEN PINGING. This row read `ARMED-UNVERIFIED` for five days after the evidence existed; the drift is the lesson.** `computed` 2026-08-07: `docker logs ay-strategy-signal-service` for the session carries **37 heartbeat lines, ALL `INFO`, zero WARN/ERROR** — `session liveness heartbeat: pinged the external dead-man's-switch (bars flowing)` on the 10-minute cadence from 09:30 through the close, plus `SwingBatchHeartbeat … pinged` at 20:14:58. Both dead-man's-switches are live. The old cell's caution ("construction could NOT be confirmed and the negative proves nothing") was correct at the time and is now superseded by positive proof — **the ping log, not bean introspection, is the oracle**; `/actuator/beans` is unavailable by design (`application.yml:289` exposes `health,info,prometheus` only) so it was never going to answer. ⚠️ Note this does NOT cover the N31/N33 class: the session heartbeat proves the STACK is alive during a session, and the swing heartbeat proves the 20:15 batch ran — **neither watches whether the analysis ROUTINES ran**, which is why a mid-evening restart (N31) and a suspected skipped routine (N33, later retracted) both looked invisible. Prior state, kept for the record: ⚠️ **ARMED-UNVERIFIED 2026-08-02 — NOT "armed".** Unarmed for **14 days** (#941 merged 2026-07-19). Owner supplied a URL 2026-08-02; appended to `.env` **in place** (ACL verified unchanged — see the `.env` ACL trap) and strategy-signal recreated. `ARTHA_HEARTBEAT_SESSION_URL` now SET in-container (len 56). **Construction could NOT be confirmed and the negative proves nothing:** actuator exposure is `health,info,prometheus` only (`application.yml:289`) so `/actuator/beans` 404s; `SessionLivenessHeartbeat` logs nothing at construction (only `pingIfHealthy:119`/`:121`), and **the KNOWN-ARMED sibling is equally silent.** A ping fires only inside a live NSE session (`@Scheduled` cron `0 */10 9-15 * * MON-FRI` + `MarketCalendar.isOpen` + the narrowed window), so the first provable evidence is Monday. **Gate: scheduled task `verify-session-heartbeat-armed-20260803`, 2026-08-03 10:00 IST.** Flip this row only on that task's evidence |
 | H2 | `pe-forward-paper-verdict` | Do the `-pe` scalpers actually fire after #959's composite inversion? #959's own note says "NECESSARY, NOT SUFFICIENT — judge on forward paper", and nobody has | shard C Part 1 #2; ledger §0 prose, 2026-07-20 STATE | data (answerable now) | **OPEN — and the measurement is one query, re-run at closeout 2026-08-02 and UNCHANGED.** `computed`: **27** `-pe` strategies exist, **all 27 published**, **18 LIVE** (`enabled AND published_version_id IS NOT NULL`) split 9 NIFTY + 9 SENSEX; the other 9 are SENSEX explicitly `enabled=false`, so **no publish gap confounds this**. Those 18 fired **0** signals since 2026-07-21 against **69** non-PE over the identical window. Both indices are represented among the live 18, so the zero is not a one-index artifact. **11+ sessions of a live money-path fix sitting unvalidated.** Not diagnosed — the finding is the observation, not a defect claim. ✅ **DIAGNOSED 2026-08-03 — and the answer is "the gate is working as designed", not a defect.** `computed`: the **60-minute SuperTrend bias veto** (`biasAligned`, `ConnectTheDotsScorer.java:428`) blocks **942 of 942 (100%)** PE confluence-composite evaluations since 07-27, versus **1.2%** (54/4344) for the CE twins — spread over **16 slugs × 4 sessions**, so not one stuck strategy. It is a DECISIVE LEG (`:440` — `decisiveLegsHeld = (!vwapHardGate OR vwapSide) AND biasAligned AND !standAside`, checked OUTSIDE the aggregate), so it vetoes regardless of how good the confluence is: **3 PE bars cleared the 0.600 threshold and were blocked anyway** (`scalp-connect-the-dots-nifty-pe` 07-30 10:33 aggregate 0.7255, 10:30 and 14:27 both 0.6029). Cause is the tape, not the code — NIFTY ran 24,238.50 → 24,592.55 (**+1.46%**, 8 of 11 sessions green) with no bearish 1h SuperTrend since 07-27. **#959 is deployed, published and functioning**: all 18/18 live PE published configs carry both normalizers, and PE now genuinely reaches the confluence stage **1,398 times in 6 sessions** (vs CE 5,454 → 1,153 passes → 50 signals). Funnel 07-27→08-03: PE 630 chart-blocked / 1,398 reached confluence / **0** passed / **0** signals. So **#959 remains UNFALSIFIED rather than validated** — the forward window has contained no PE-favourable 60m regime. Two rails also asymmetric-but-secondary: `rsi-band` fails PE 66.5% vs CE 12.6% (band is CE (50,75) / PE (25,40) — 25 RSI points vs 15); and the 07-21→07-24 volume-floor anomaly (PE 100% on the 125,000 static fallback) **self-resolved on 07-27 and is KILLED as a current cause**, mechanism still unknown. **OWNER DECIDED 2026-08-03: WAIT for a bearish 60m regime — do nothing.** Relaxing `biasAligned` would have admitted only 3 entries in 6 sessions and is exactly the loosening the standing prior warns against (T1/T7/G13/G10 all lost money). Open doubt: the 1h SuperTrend direction was INFERRED from the complementary veto rates of two disjoint bar populations, not read — settle by computing `SUPERTREND(7, 3.0)` on the live dated front contract's 1h series |
 | H3 | `bhavcopy-20260702-refetch` | 2026-07-02 NSE bhavcopy was captured PARTIAL, and its stated blocker ("needs a targeted re-fetch endpoint — small build") had been discharged by #744 | shard C Part 1 #3; ledger §8b "Data action" + §8d | — | ✅ **CLOSED 2026-08-02, after shard C measured it.** Shard C read **266** rows for 07-02 (vs 3,268 on 07-01 and 3,283 on 07-03). At closeout the same query returns **3,269**, and `min/max(fetched_at)` on those rows is **2026-08-02 18:31:48–49 IST** — i.e. the targeted re-fetch (`POST /api/v1/market/eod-backfill/refetch?date=`, shipped #744) ran that evening and every 07-02 row was written by it. Series breakdown is now normal (EQ 2,396 · BE 281 · GS 44 · …). **Recorded as closed rather than carried, because the shard-C doc still reads "STILL OPEN" — that doc was correct when written and is now stale on this one row** |
 | H4 | `t10-stale-open-swing-positions` | 17 stale OPEN swing paper positions — carried as "OWNER — chronic" in every session tune table and as bug-queue B11c, with **no §0 row anywhere** | shard C Part 1 #4; `2026-07-25-weekly-bug-queue.md` B11c | OWNER | **OPEN — re-measured at closeout 2026-08-02, unchanged.** `computed`: `strategy.paper_positions WHERE status='OPEN'` = **11 minervini (oldest 2026-07-07) + 6 manas-arora (oldest 2026-07-10) = 17**, 0 scalper — exactly the 2026-07-31 count, now 9 days flat. #992 downgraded the ALERT; the positions were never squared off. ⚠️ **The remedy is an OWNER call and must not be read as a cleanup task** (shard C's own open doubt #1): "subscribe the holdings" / "square them off" / "accept EOD-only and stop counting them as debt" are three different decisions, and the risk of a builder picking one is that it closes live money positions. A one-time audit task `zombie-paper-position-audit-20260804` is scheduled 2026-08-04 08:30 IST and squares off **only provably-unmanaged zombies**. ⚠️✅ **RE-FRAMED 2026-08-03 — "stale" is the WRONG WORD, and a proposed build off this row was REFUTED at STEP 0 before any code was written.** The Architect's own premise — that `paper_positions.stop_loss` is set once at open and never ratcheted, so a +40% position sits protected only by its entry-time stop — was **half right and wholly misleading**: the column IS static (`updateBrackets`' only caller is `PaperService.editBrackets`, a MANUAL admin edit), but it is an inert BACKSTOP, not the governing exit. `sourced` — the real chain is `manas-arora-breakout.yaml` / `minervini-primary-base.yaml` declaring `trailing_stop` → `ExitEvaluator.java:338` (`rollingAtrTrailLevel` at `:519`) → `SwingBatchEngine.java:836` `exitPass` evaluating **every held anchor every session** → `emitExit:1006` → `SignalExited(reason="TRAILING_STOP")` at `:1072` → `EngineExitListener.java:68` `paper.closeForSignal`. `computed` proof it fires: **11 closed positions carry `close_reason='TRAILING_STOP'`** (vs 5 STOP_LOSS, 2 MANUAL), all at 20:00/20:05 IST — the EOD batch. The batch is current, not historical: `swing_batch_runs` shows both families ran 07-28/29/30/31 with **`exit_skipped = 0` on every run**, and 07-31 `sell_decisions` carries a computed `trail_level` for **14 of 14** held minervini positions. `PaperBracketEvaluator` is **structurally inert on these rows** — Redis `ticks:last` holds 181 fields (88 BFO, 86 NFO, 5 NSE indices, 2 BSE indices) and **zero equities**, so it reads `stop_loss` every 15 s and discards it. The cited DIACABS case is not a gap: minervini trails on **close below sma50**, and DIACABS' last close 323.97 sits ~44% ABOVE its 50-bar mean (~225.46); its `stop_loss` 212.82 is just `entry × 0.92`. **All 17 open positions were re-measured 2026-08-03 and every one is above its stop.** This same question was already settled and merged the day before — [#1227](https://github.com/prashantm912/artha-yantra-2/pull/1227) @ `19e943be`, `docs/signal-analysis/2026-08-02-manas-exit-stop-doctrine.md`, verdict HIGH confidence: *"Do not persist the Chandelier trail into `paper_positions.stop_loss`, and do not add a second column for it either"* — and building it anyway would have re-landed M40 round 1, explicitly reverted by owner ruling on 2026-08-02. **Lesson recorded: a static DB column is not evidence of a missing mechanism when the mechanism lives in a different evaluation path.** What remains under this row is genuinely only the count question (should long-held swing positions be counted as debt at all), which the 08-04 audit addresses. ✅ **CLOSED 2026-08-04 — the scheduled audit ran (08:31 IST, read-only) and the verdict is 18/18 MANAGED, zero zombies, zero closes** (`docs/signal-analysis/2026-08-04-zombie-position-audit.md`). `computed`: 18 open (was 17 — 08-03 batch entered HFCL), all anchored on `TAKEN` ENTRY signals which `activeEntries()` (`SignalRepository.java:177`, status IN ACTIVE/TAKEN, no version filter) always selects; the one archived-version anchor (manas PRECOT, sig 59 on vcp 1.0.3) is exit-managed via `adoptVersion` (`SwingBatchEngine.java:365`), proven live by manas `open_at_start=6` covering all 6 symbols; bulk expiry touches only `ACTIVE` so a TAKEN anchor can never be time-orphaned; `exit_skipped > 0` has **zero rows all-time**; only books open are the two swing families. The "stale positions" were never debt — they are managed multi-week holds by design. Residue spun out, opposite polarity: **3 phantom TAKEN minervini anchors from 2026-07-03 (signals 20 SENORES / 23 TMB / 26 INDUSINDBK) with no paper position ever** — they inflate held-count and eat slot-cap/re-entry headroom; owner-tier cleanup decision, not touched by the audit |
@@ -965,6 +965,676 @@ after `JBCHEPHARM` was found serving `passesAll: true` on an 18-day-stale price.
 #### Verification owed
 - **Tonight's 20:00 IST screen is the FIRST real execution of #1280's guard + floor.** Today's
   zero-stale-rows count comes from a MANUAL delete — only a fresh run proves the guard works.
+
+---
+
+### STATUS 2026-08-04 EVENING — session close. Nothing below is started; this is the next-session queue.
+
+**Merged this evening (49 total for the day):** #1292 ledger closeout · #1298 runbook-hygiene guard
++ Stage D ci-optimizer correction · #1300 CAS blast radius · #1301 swing-backtest universe exclusion.
+
+**Repo setting changed (owner call):** `runbook-hygiene` promoted to a **required** status check —
+**NINE** required contexts now. Applied by mirroring the live protection GET field-by-field; diff
+proved exactly 2 fields moved (`contexts` + its `checks` mirror), 14 others byte-identical,
+`rulesets` still `[]`. **Do not quote a context COUNT anywhere — it has been 6, 8 and 9 inside four
+days. Read the API.**
+
+#### Open PRs, exact state (all left OPEN deliberately)
+
+| PR | State | What it needs next |
+|---|---|---|
+| **#1296** ScalperRisk §0B stop-basis coupling | review RESOLVED; **Golden 9/9 + Parity 9/9 + OptionsPremiumGolden 2/2 re-run by the main loop itself** | HOLD — owner merge call only |
+| **#1297** CA stage→verify→swap | round 3 fixes pushed (M-A observability, M-B cooldown/recovery contradiction) | **round 4 review** |
+| **#1299** `symbol_lineage` | all 4 must-fix items CLOSED; **renumbered to V055**; headline corrected to **1809 / 284, +7 entering, 0 leaving** (`CNL` refuted out); 1261 tests green, **14 red-proofs** | **re-review round** |
+| ~~**#1302**~~ required-contexts doc | **MERGED** `bd024805` | — |
+| ~~**#1303**~~ futures-roller refresh window | **MERGED** `20d927e6`, deployed + jar-fingerprinted 2026-08-05 08:35 IST | — |
+| **#1283** swing data-coverage gate | rework pushed | review round |
+| **#1075** scalper budget ₹15k→₹20k | parked | owner, 2026-08-12 |
+
+**Re-measured 2026-08-05 16:40 IST — 7 open, and `mergeStateStatus` is `BEHIND` on every one of the
+six that report** (`#1075` reads `UNKNOWN`). Main moved 3× since they were opened and `strict: true`
+is on, so each needs
+`gh api -X PUT repos/{o}/{r}/pulls/<n>/update-branch` before CI can go green — server-side, no local
+checkout needed. Two NEW since the 08-04 table: **#1305** (CA rebuild cagg refresh window sized in
+tuples — needs a review round) and **#1306** (CLAUDE.md checkout-currency trap — mine, docs-only, CI
+was green pre-drift, needs update-branch + merge).
+
+#### ⚠️ MIGRATION COLLISION — check this BEFORE writing any marketdata migration
+`origin/main` tops at **V053**. **#1297 claims V054** (`V054__candle_rebuild_staging.sql`) and
+**#1299 also claims V054** (`V054__symbol_lineage.sql`). Same lineage, same version, different
+filenames ⇒ **no git conflict**, both merge clean, and flyway-init dies only at DEPLOY where it
+fails validation and blocks *every* subsequent migration. **RESOLVED 2026-08-04: #1297 keeps V054,
+#1299 renumbered to V055** (re-checked across every remote branch at push time). Next free is
+**V056** — re-check at commit time against `origin/main` AND every open PR, because the free
+version moves. #1303 and #1305 add no migration.
+
+#### Nightly verification 21:26 IST — ALL FOUR PASS, and it closes the "verification owed" above
+
+| check | verdict | evidence |
+|---|---|---|
+| #1280 trailing-bar guard + coverage floor — **first genuine execution** | **PASS** | **0 stale rows in either screen.** Minervini 1772/1772 and Manas 2264/2264 carry a bar dated exactly 2026-08-04. Minervini 1772 rows / 272 passing (vs 1767/277 on 08-03); Manas 2264 / 131 (vs 2262/124) |
+| `MINERVINI_PLANE_DIVERGENCE` cron path | **PASS** | run_day 2026-08-04, source `MINERVINI_SCHEDULER`, claimed **19:35:01** — the SCHEDULED path, not catch-up. The 08-03 row (claimed 00:10:22 on 08-04) was a genuine one-off recovery |
+| paper reconcilers | **PASS** | ran 21:14:59; `positions_checked=0`, `taken_signals_checked=0`, **`total_discrepancies=0`** (zero-checked because no swing entries opened — clean, not an error) |
+| ingest + containers + CA flag | **PASS** | **11 sources, every one SUCCESS, zero failures**; 13/13 healthy; `ARTHA_CORPORATE_ACTIONS_ENABLED=false` still |
+
+⚠️ **The first pass of check 1 reported 129 stale rows and it was the QUERY, not the guard.** Filtering
+`series='EQ'` dropped every `BE`-series symbol — 53 screen names showed "no bar at all", including
+BODALCHEM, AUTOIND and BGRENERGY. Series-agnostic (`EQ`+`BE`) the count is 0/0/1772. Recorded in
+CLAUDE.md next to the `exchange=` filter rule. **Tell: a "missing data" result containing liquid,
+obviously-trading names is a filter artifact.**
+
+⚠️ **Two corrections to this document's own earlier claims, both from reading a YAML DEFAULT as a
+deployed value:** the swing screens run at **19:31**, not 20:00, and the plane-divergence probe at
+**19:35**, not 19:50 (`${artha.minervini.cron:0 50 19 * * MON-FRI}` is overridden in deployment).
+The wrong times reached four separate reports the same evening. The measured evening order is now in
+CLAUDE.md; read `ingest_runs` / `canary_runs`, never the defaults.
+
+**#1303 MERGED** at `20d927e6` (roller refresh window), after the verification prompt was written —
+so the "open, unmerged" note in that prompt was already stale. **Still not deployed**, so a ~16:15
+roller failure remains expected until the next deploy.
+
+#### ⚠️ ACTION TRIAGE (written 2026-08-07 18:20 IST) — READ THIS BEFORE THE N-ROWS BELOW
+
+N10–N35 accumulated over four days and are written as *findings*, not as a work list. Most are
+observations that need no action. **This table is the actionable subset.** Every row points at its
+N-row for evidence; nothing here restates it. Re-derive this triage whenever it goes stale — the
+enumeration recipe at the top of §0 still governs.
+
+**A · Owner decision required — do NOT start these**
+
+| # | decision | why it is yours, not the Architect's |
+|---|---|---|
+| **N23-A** | Re-base the F9 heat cap on premium outlay, **or** accept + re-label it a short-option control | It changes live behaviour: on a ₹1.5 L book a real 60% cap **will start refusing entries**. Today it measures `spanMargin`, structurally `0.00` on a long-only book, so the gate cannot fire. Confirmed twice, once on a *successful* margin call |
+| **N26** | Free swing capacity. **Cheapest lever first: clear the 3 phantom anchors (N37).** Then age out stale positions and/or re-size the 6% rail | **PROVEN, both books, and the diagnosis is complete.** manas-arora: **N36** — one close freed a slot, the next batch admitted exactly one entry, then refused five more (capacity-bound, not signal-bound). minervini: **N37** — 12 open positions but **15 TAKEN anchors** against a cap of 12, because three 2026-07-03 anchors (`SENORES`/`TMB`/`INDUSINDBK`) hold slots with no position behind them and **can never self-resolve**. So minervini needs **four** closes to admit one; manas-arora needed **one**. Clearing three stale rows restores three slots — far cheaper than re-sizing. Still owner-tier (mutates signal status on a money-adjacent path; the correct terminal status is a doctrine call). M40 (ledger #37 task) is manas-arora's rail, HOLD with its PR open |
+| **T21** | Premium exits on the 30 bracket-less scalpers — accept indicator-exit-only, or add a `premium_pct` band | Decision pack **DELIVERED 2026-07-25** (§0a row B11, `2026-07-25-weekly-bug-queue.md`) with **rec = (b) add bands**. Awaiting the call ever since; it is not blocked on anything |
+| **N12** | The `EquitySplitBonusAdjuster` source-aware contract (DBEIL case) | Fixing it touches the adjuster's contract, not data — backtest-fidelity, SEVERE |
+| **N32** | Should a multi-minute OI capture hole alarm? | Fail-soft worked perfectly and **that is the problem** — a 4-minute hole in the OI bloc's only input is invisible to every oracle. Whether that deserves paging is a risk-appetite call |
+| **N31** | Was the 2026-08-06 18:40 full-stack restart you? | If not, it needs a cause before it lands inside a batch window |
+
+**B · Clean and buildable now — no owner gate, no parity surface**
+
+| # | work | note |
+|---|---|---|
+| **N23-C** | Widen `PaperMarginClient.Quote` 7 → 10 components to mirror `MarginResponse` | Prerequisite for N23-A; harmless alone. The client cannot currently see `netBuyPremium`, the field a long book actually needs |
+| **N23-D** | Warm the Upstox F&O master (boot preload or a scheduled touch inside the 12 h window) | Kills the N23-B race without touching the 2 s timeout, which exists to protect the tick thread (#694). **Do not lengthen the timeout** |
+| **N30** | Investigate the bhavcopy 365-day rescan + `fetched_at` churn | **Investigate before fixing** — cause is not established. Start at the watermark/365-day-cap comparison |
+| **N27** | minervini's `candidates` counter reads 0 while the batch finds 17–18 | Start at `SwingBatchEngine`'s accounting vs `SwingBatchRecorder`'s persisted column |
+| — | `check_runbook_hygiene.sh`: walk `git ls-files`, not `find` (it fails locally on gitignored state CI never sees); and its message says "ALL EIGHT" required contexts when there are **nine** | Surfaced 2026-08-05, never queued. Local-only noise + stale text |
+| — | Republish `minervini-cheat-3c` / `minervini-primary-base` (1.0.2 drafts, name+description only) | **5th consecutive session carried.** Apply the #1016 rule — pick by "latest version row ≠ `published_version_id`", never "latest DRAFT ≠ published" |
+| `task_53ce441b` | **Equity BREADTH metrics computed over CA-UNADJUSTED closes** (`EquityBreadthDailyRepository:43-61`, `EquityContextRepository.aboveMa:91-117`) — same defect class as audit H6 / §9-02, in two consumers those fixes never covered | **§4b row, status OPEN — surfaced by the 08-07 enumeration, absent from every prior triage.** ⚠️ **First task is NOT the fix — it is establishing live reachability** (is breadth display-only, or does it gate anything?), because that decides clean vs HOLD. Two further sites were sub-agent-reported and only spot-checked; confirm independently before scoping them in |
+| `task_f624fca7` (H8) | Should an empty `contracts` array on an INDEX ladder be a FAULT? (#877 residue) | **OPEN and UNREGISTERED — it has no §4b row, so the register's own awk cannot see it.** Proven live rather than forgotten: routed around explicitly by `2026-07-26-t9-strategy-coverage-watchdog-design.md` §3.7. **Give it a §4b row when it is next touched** |
+| §9b | `IndicatorBank.positionAt(timestamp)` — the one-derivation fix for the `ExitEvaluator` index-convention leak | **Deliberately NOT done at zero defects** (2026-07-30 investigation found no live defect; a written "hardening" was reviewed and REVERTED for suppressing Minervini's 8% stop). Right shape only if a fifth caller appears. **Parity-adjacent, HOLD-tier — do not pick this up as routine cleanup** |
+| task #26 | OpenAlgo live: broker login + freshness + Dow arm | Long-standing `pending` in the session task list, not represented in §0. Confirm it is still wanted before scoping |
+
+**C · Blocked or sequenced — do not start out of order**
+
+- **N10 · CA sweep re-arm** — land [#1297](https://github.com/prashantm912/artha-yantra-2/pull/1297)
+  → land [#1305](https://github.com/prashantm912/artha-yantra-2/pull/1305) → *then* re-arm. Re-arming
+  first burns attempt 2 of 3 for nothing.
+- **Seven open PRs — BUILT WORK THAT STOPPED MID-PIPELINE. This is the restart list; every one that
+  reports is `BEHIND`** (`strict: true` + a moving main). **Step 0 for all of them is the same
+  server-side call, no local checkout needed:**
+  `gh api -X PUT repos/{o}/{r}/pulls/<n>/update-branch`. **This gates B and C both** — nothing else
+  lands until they clear.
+
+  | PR | where it stopped | what it needs NEXT |
+  |---|---|---|
+  | [#1297](https://github.com/prashantm912/artha-yantra-2/pull/1297) CA stage→verify→swap (**V054**) | round 3 fixes pushed (M-A observability, M-B cooldown/recovery) | **round 4 review** |
+  | [#1299](https://github.com/prashantm912/artha-yantra-2/pull/1299) `symbol_lineage` (**V055**) | all 4 must-fix closed; 1261 tests, 14 red-proofs | **re-review round** |
+  | [#1305](https://github.com/prashantm912/artha-yantra-2/pull/1305) CA cagg refresh windows in tuples | built, never reviewed | **first review round** |
+  | [#1283](https://github.com/prashantm912/artha-yantra-2/pull/1283) swing data-coverage gate | rework pushed | **review round** |
+  | [#1296](https://github.com/prashantm912/artha-yantra-2/pull/1296) ScalperRisk §0B coupling | HOLD; review resolved, **Golden 9/9 + Parity 9/9 + OptionsPremiumGolden 2/2 re-run by the main loop itself** | **owner merge call only** |
+  | [#1306](https://github.com/prashantm912/artha-yantra-2/pull/1306) CLAUDE.md checkout-currency trap | docs-only, CI was green before main moved | rebase + merge |
+  | [#1075](https://github.com/prashantm912/artha-yantra-2/pull/1075) scalper budget ₹15k→₹20k | owner-parked | **2026-08-12** (`revisit-scalper-budget-inr-2026-08-12`) |
+
+  ⚠️ **#1297 and #1299 carry migrations (V054 / V055) — deploy IN VERSION ORDER**, and re-read the
+  migration-collision note above before writing any new marketdata migration.
+
+**D · Watch only — explicitly NOT work**
+
+N29 (canary is blind to chart operands — boundary note, reasons preserved) · N35 `neverCrossing`
+first firing (the probe worked; evidence for the standing T30 owner question) · `strike-pick`
+mechanism now **chain proximity-to-expiry/roll**, next NIFTY discriminators Mon/Tue 08-10/11 ·
+T1 (10th no-pay) and T7 (3rd adverse) both REJECTED and reconfirmed · T23/G9 quiet · T28/T3/T2
+carried structural.
+
+#### Next-session queue — NOT STARTED, documented only
+
+- **N10 · CA sweep re-arm — SEQUENCED, do not re-arm first.** 13 symbols sit at `REFRESH_FAILED`,
+  `refresh_attempts=1` of 3, sweep disarmed since 2026-08-03 22:37, nothing retrying.
+  **Order: land #1297 → land #1305 (window sizing) → then re-arm.** Re-arming first burns attempt
+  2 of 3 for nothing.
+  - ⚠️ **The MECHANISM the Architect briefed was WRONG, and the correction matters for any future
+    fix here.** I said "a ~100-day window straddles two ~70-day chunks ⇒ ~8.6M decompressed."
+    Right in magnitude, wrong in cause. **Decompression is per matching BATCH, not per chunk
+    touched.** All five materialization hypertables are `segmentby (exchange, tradingsymbol),
+    orderby bucket`; a refresh's DELETE carries **no symbol predicate**, so `segmentby` prunes
+    nothing and batches are pruned by `orderby` min/max metadata alone. Proof: a **chunk-aligned**
+    70-day window decompresses *exactly* that chunk's count (4 exact matches), while an unaligned
+    one costs up to 7.4M.
+  - **Decisive numbers** (worst case over every window start, `candles_5m`, computed): 14 d =
+    2,990,258 · 30 d = 4,476,813 · 70 d = 7,396,205 · **100 d = 9,543,253 = 191% of the 5M
+    ceiling.** Deterministic.
+  - **All three forks I offered were wrong or insufficient.** *Chunk-align alone FAILS* — two chunks
+    exceed the whole ceiling by themselves (5,112,833 and 5,558,488). *Narrowing the constant
+    decays* — 22 d is 76.4% today and dense chunks grew ~40% year-on-year. *Raising the ceiling*
+    stays declined (~1 GB churn on a 4 GB DB). My worry that the five caggs might have differing
+    chunk widths is **falsified**: all five are uniform 70-day, 61 chunks, identically aligned.
+  - **#1305's answer: size windows in TUPLES, per view, from the current chunk load.**
+    `MAX_REFRESH_WINDOW_DAYS` stays as an outer bound — tuples bound decompression, days bound
+    materialization, neither substitutes. ~1.9M of *every* window is edge spill regardless of span,
+    which is why the budget is a quarter of the ceiling. Per-view planning also retires two
+    accidents free: `candles_1w`'s 8-day overlap no longer costs `candles_5m` ~630k redundant
+    tuples per window, and a sparse cagg no longer pays the dense one's window count.
+  - **An IT caught what no mock could:** `approximate_row_count(regclass) does not exist` — services
+    connect with a `currentSchema` excluding `public`, which is exactly why the existing code says
+    `public.refresh_continuous_aggregate`. That would have failed the rebuild at the moment it was
+    needed. Open doubt to carry: window count rises ~48 → ~85 per rebuild (cheaper each, wall-clock
+    unmeasured end-to-end since the sweep is disarmed), and the invariant is proven at planning and
+    IT scale, **not on a live 12-year run**.
+- **N11 · Cagg repair scope (owner-decided 2026-08-04): 5m + 15m + 1h only.** 1d is mitigated by
+  the native dense `candles`@1d path (`readDailyWithWarmup`); 1w is rarely a gate input. The 5m hole
+  spans **2025-06 → 2026-04** for all 13 (shared boundary — cagg refresh is a global time-window
+  operation); 15m/1h/1d/1w were never refreshed at all and hold live-tail rows only.
+- **N12 · ⚠️ Equity CA adjustment basis — the largest open data finding, backtest-fidelity, SEVERE.**
+  Not a live money-path defect: live screeners read CA-adjusted bhavcopy and `SwingBatchEngine` goes
+  over REST through the adjuster; all 18 open swing paper positions were checked and only KAPSTON has
+  a recorded CA (KITE-sourced, smooth across ex-date). The defect is on the **backtest** plane:
+  - `EquitySplitBonusAdjuster` is **source-aware** — it scales ONLY `source='BHAVCOPY'` bars
+    (`:41`), by design, because broker history arrives back-adjusted. `KITE`+`BACKFILL` are
+    **85% of the NSE 1d plane**. So the axis is not adjusted-vs-raw, it is *which adjustment basis
+    a bar carries*.
+  - Its only production call site is `CandlesController:80`, gated on `interval='1d' && adjust=back`.
+    **Both swing deep-sims read `candles`@1d raw via JDBC with no adjuster**
+    (`MinerviniBacktestService:864,886,900,933,956`; `ManasAroraBacktestService:684,813,837,851,884,907`),
+    plus `MinerviniHitRateService:114`, the backtest-service `CandleReader` chain, and
+    `ScreenerService:103` (a THIRD plane — the `candles_1d` cagg).
+  - **`eod_corporate_actions` is a rolling 420-day window** (`ca-lookback-days:420`) sized to the
+    live screener; ex-dates 2025-04-29 → 2026-07-31 and it can never reach deeper. The swing backtest
+    reads **~11 years**. `kind` is CHECK-constrained to SPLIT/BONUS, so **dividends and demergers are
+    unrepresentable**.
+  - **It reaches a verdict undiminished:** `MinerviniSwingBacktest:205` computes raw percent return
+    with no clamp, and the 8% stop is **close-evaluated, not an intrabar fill** (`:247`) — a 50% cliff
+    trips `STOP_LOSS` and then fills at the post-cliff price, so the full spurious ~−50% is booked
+    into avg/best/worst/profitFactor.
+  - Exposure: 64 clean CA-shaped cliffs across 62 symbols, **29 in pre-CA-table BACKFILL history**
+    (SHRJAGP 2017-11-02 exactly 10:1, FINCABLES, OCCL). Ledger row B4 (#757) closed
+    "backtest adjusted vs live raw" in July; `candles` has since gained 639k raw BHAVCOPY bars from
+    2025-06-19 — **the polarity inverted and nobody re-checked the backtest side.**
+  - **VRLLOG** — recorded 1:1 BONUS ex-date 2025-08-14 that Upstox did NOT adjust; its BACKFILL rows
+    were fetched 2026-08-04, a year later, and are still raw. Same mechanism as the 29 deep-history
+    cliffs; it is only the sole CA-table-era instance because the table sees 15 months.
+  - **DBEIL is the proof case that mixing is an ACTIVE hazard**, not theoretical: 106 BACKFILL bars
+    fetched 2026-06-18, one day before a 10:1 split. They cannot be broker-adjusted (fetch predates
+    the split) and the adjuster skips non-BHAVCOPY by design, so on the GET path it scales that
+    symbol's BHAVCOPY bars by 0.1 while leaving BACKFILL at 10× — **actively creating** the step.
+    **This one needs an owner call: the fix touches the adjuster's contract, not data.**
+- **N13 · CAS (Closing Auction Session) — G18 rescope.** CAS did not freeze the platform; it **split
+  it into two regimes**. Cash/index freezes 15:15–15:30 and takes an auction print; every derivative
+  keeps trading, and all 38 scalpers signal off `NIFTY-FUT-CONT`, so the engine's gate/fill plane is
+  untouched. The exposure is the **daily** plane: the auction print now sets the day's HIGH, and
+  `max(high) OVER w252 AS high_52w` is a direct hard-gate input to both swing screens
+  (`ManasScreenService:123`, `TrendTemplateService:122` → `MinerviniGates:44`, `ManasGates:69,89-90`),
+  which persist rows and open paper positions at 20:00. Natural control, reproduced independently by
+  the main loop: 2026-08-03 F&O `close==high` **25.59%** / `close==last` **98.58%** (n=211) against
+  **0.00%** on 07-28/07-30/07-31, non-F&O control flat at 1.14–1.63% across all four.
+  Intraday is LATENT not realised — evaluation stops after the 15:18 bucket, the traded strike is
+  immune (`spot + (forward − spot)` cancels), but `futuresBasis` swings 146.65 points and changes
+  sign into a persisted `score_breakdown`. **Post-CAS backtest parity is not answerable yet** —
+  `expired_contracts` stops at 2026-07-30. Two sessions only, one an expiry; **no outcome has been
+  shown to change.** Also found: `candles_1d` cagg and native daily now disagree *semantically*
+  (24463.45 vs 24614.90) — worth its own look.
+- **N14 · 668 near-zero-weight symbols — MEASURED 2026-08-04, verdict (b) MATERIAL for the
+  DENOMINATOR ONLY; fix must be reporting-only.** No longer arithmetic on loop bounds; this is an
+  observed trade count.
+  - **0 of 668 produced a trade**, both families — 0 of 13,568 Manas trades, 0 of 23,765 Minervini.
+    Every P&L metric is *exactly* unchanged by them. But they are **26.2% of `scanned`**, and
+    `scanned` moved **1,806 → 2,553 (+41.4%) in 24 days** while trade count moved +2.5%. The number
+    an owner reads grew 41% for a pure data-plane reason with zero trade contribution.
+  - **Not the tautological half.** Their first evaluable bar lands in 2026-07 for **658 of 668**,
+    fully inside the measured window. At the deep tier's own base rate the cohort's 10,385 candidate
+    bars predict **~11 entries; observed 0**. Not a mechanical impossibility either — the frozen
+    golden panel is 30 symbols × **280 days**, inside the band, and produces 19 trades. And not
+    liquidity: **357 of 668 clear the ₹37.5L Manas turnover floor.**
+  - ⚠️ **DO NOT exclude them from the universe.** The cohort sits in the **RS cross-section** under
+    the same `MIN_SERIES` membership (`MinerviniBacktestService:439`, whose comment makes the
+    one-threshold coupling deliberate). Removing them shifts every other symbol's RS percentile and
+    touches **0.48% (Manas) / 0.56% (Minervini)** of raw trades — i.e. excluding is a BEHAVIOURAL
+    change. Only additive reporting is safe.
+  - **Parity is clear for the reporting route:** the swing goldens assert
+    `totalTrades`/`tradesTaken`/`cagrPct`/`maxDrawdownPct`/`sharpe` — **not `symbolsScanned`**. A
+    sibling `symbolsEvaluable` (symbols with ≥1 candidate bar in-window) leaves goldens
+    byte-identical. **`MIN_BARS` must not move.** Sole render site:
+    `ManasAroraBacktestPage.tsx:224`.
+  - Corrections to the numbers previously recorded here: candidate bars are **0–33** (median 16), not
+    1–39; max is **293**, not 299; and **a symbol at exactly 260 bars gets ZERO iterations**.
+  - ⚠️ **A premise in the dispatch brief was impossible and the agent was right to refuse it:**
+    "run a window ending before ~2026-07-15 and one ending today" is **not expressible** —
+    `DeepSwingRunRequest` is `(family, from, variant)` with **no `to`**, and both readers are
+    `bucket >= ?` with no upper bound. Every deep-sim run ends at "now". There is no end-date axis.
+  - No production code changed, no PR opened — the RS-cross-section coupling makes this an owner
+    decision first. Reproduce: runs `ee8562fe` / `5fba09dd` (today), `b928d38f` (archived).
+- **N19 · ⚠️ MANAS HEADLINE FELL 3.3× BETWEEN TWO RUNS OF THE SAME CONFIG — needs its own
+  investigation, and it is the largest unexplained number found on 2026-08-04.** Same family, same
+  variant, same `from=2015-07-01`:
+
+  | run | date | return | Sharpe | maxDD | trades | mds sha |
+  |---|---|---|---|---|---|---|
+  | `b928d38f` | 2026-07-12 | **2214.35%** | 0.88 | 51% | 1,337 | `c7a52842` |
+  | `ee8562fe` | 2026-08-04 | **662.86%** | 0.66 | 69% | 1,371 | `10765298` |
+
+  **Proven NOT to be the 668 cohort** — they contributed 0 trades to either run. Attributable to
+  **16 market-data screener commits** since `c7a52842`, two of which (**#1215, #843**) edited *both*
+  `*SwingBacktest.java` files, plus **retro-mutated `candles`**. An unchanged deterministic sim
+  should re-run to the decimal; this one did not, so **the sim changed, not the market** — that is
+  the surprising-result rule, and the harness is the suspect. Bisecting those 16 commits against a
+  pinned `fetched_at` snapshot is the obvious first step.
+- **N20 · `eqSymbols()`'s `SELECT DISTINCT … FROM candles` spans 1,050 chunks** and died once with
+  `out of shared memory / max_locks_per_transaction` under concurrent load — a fragility in the
+  deep-sim's FIRST query. Same class as the 5-way `UNION ALL` cagg probe that started failing today.
+- **N21 · ⚠️ HISTORICAL CAGG INVALIDATIONS HAVE NO SWEEPER, AND NOTHING ALARMS ON IT.** Surfaced by
+  #1303's review, upgraded from the builder's `assumed` open doubt to **computed**:
+  `_timescaledb_catalog.continuous_aggs_materialization_invalidation_log` currently holds **50
+  unprocessed entries**, spanning (IST) **2016-09-26 → 2026-08-03** on `candles_5m`, 2006-06-28 →
+  2026-08-02 on 15m, 2006-06-28 → 2026-07-18 on 1d, 2015-02-02 → 2026-04-26 on 1w. The caggs' own
+  refresh policies cover only `start_offset` 1d/2d/7d/14d/60d, so the futures roller's accidental
+  **epoch-wide nightly refresh was the only global consumer of historical invalidations, for every
+  symbol** — and `CandleQueryService:106` serves 5m/15m/1h/1w reads from those caggs, so history
+  reads are the exposed consumer.
+  **Not a blocker for #1303 and not caused by it:** that sweep has been dead since V049 first
+  compressed a cagg chunk, the backlog exists today pre-merge, and keeping the wide window is not an
+  option because it now hard-fails. #1303 removes a guarantee that was already gone. A bounded probe
+  (NSE `NIFTY 50`, 2026-06-15) found cagg 5m buckets == 1m-derived buckets == 75, i.e. **no
+  divergence in that sample** — so no pending invalidation has been shown to correspond to an
+  actually-wrong value. A real divergence sweep is DB-expensive and was deliberately not run.
+- **N22 · #1303's narrowing bounds the common case but not the worst one** (`ContinuousFuturesRoller
+  :172`, MEDIUM-LOW, latent). If CONT is ever missing buckets older than the 30-day compression
+  horizon that the currently-listed front contract can fill — a multi-day stack outage a month+ ago,
+  adding a root to `artha.futures.underlyings` (its first roll stitches the front contract's whole
+  ~3-month listed history), or a `purgeSymbol` on a CONT symbol — the next live roll re-widens into
+  compressed chunks and reproduces today's exact failure for that root. **Not armed today**:
+  `NIFTY-FUT-CONT` has 79/79 trading days covered over the last 100, zero holes. Failure mode is a
+  bare `log.warn` with no alerting. Optional hardening: clamp `from` to `max(firstBucket, today −
+  25d)`, or warn when the span exceeds the compression horizon.
+- **N15 · The 374-symbol exclusion is CORRECT — closed, do not reopen.** The live screen enforces its
+  own 252-session floor (`artha.minervini.min-sessions:252`, verified deployed — no container
+  override), so 357 of 374 are excluded from the screen too and **zero** backtest-excluded symbols
+  have passed either screen on any persisted date. Aligning 252 vs 260 would touch a parity surface
+  for an 8-session band empirically empty of passers and self-draining. **Recommend not doing it.**
+- **N16 · Promote `verdict` to a required context?** One owner call. It has been convention enforced
+  by the Architect, not GitHub — it failed red on #1156 and blocked nothing.
+- **N17 · ETF question, pre-existing but newly surfaced.** ~25 of the 66 lineage rename pairs are ETF
+  sponsor rebrands, and `HEALTHAXIS` (ex-`AXISHCETF`) is one of the surviving entering candidates.
+  Whether an ETF belongs in a Minervini SEPA funnel at all is not #1299's to answer.
+- **N18 · Restored-symbol depth caveat.** The 45 CA-gutted symbols were restored 1d-only (Upstox caps
+  `day` at ~a decade — `days=4200` returns `UDAPI1148` and writes nothing; `days=3600` works). Depth
+  bottoms at 2016-09-26, **shallower than the earlier BACKFILL cohort**, and ~81,000 of the 93,528
+  restored bars have **no bhavcopy counterpart at all**, so their adjustment basis is unverified.
+  1m bars were NOT restored, by scope.
+
+#### 2026-08-05 — from the day's four routines. Nothing below is started.
+
+All four routines ran and reported: 09:35 open-liveness gate **PASS**, 09:47 data-health **GREEN**,
+12:35 midday liveness **PASS**, 15:53 post-market → [`#1307`](https://github.com/prashantm912/artha-yantra-2/pull/1307)
+merged (`af2bfdff`). The three intraday runs need no action. Everything below comes from the
+post-market run's NEW-1 row plus the Architect's follow-up on it.
+
+- **N23 · ⚠️ THE F9 HEAT CAP HAS NEVER BEEN ABLE TO FIRE — armed 2026-07-05, structurally inert.**
+  Full investigation: [`docs/signal-analysis/2026-08-05-f9-heat-cap-inert.md`](../../signal-analysis/2026-08-05-f9-heat-cap-inert.md).
+  Not a loss and not a live money defect — a safety control that reports healthy while measuring the
+  wrong quantity. **Three distinct defects, do not collapse them:**
+  - **(A) STRUCTURAL, the real one.** `RiskService:503-510` computes heat as `spanMargin / equity`.
+    **Every scalper position ever opened is a long option BUY (11/11), which carries no SPAN** — 10 of
+    10 priced `margin_snapshot` rows are exactly `0.00`, so heat is `0.00%` against a `60%` cap and
+    `RiskService:468`'s blocking branch is unreachable for this book's position type. Upstox is right
+    to return `span_margin: 0` for a long basket; the capital at risk is the premium outlay, which the
+    gate never looks at. **HOLD-tier / owner** — arming it for real will start refusing entries on a
+    ₹1.5 L book. Options (a)–(e) are in the doc's §4; recommendation is (c)+(d) clean now, (a) owner.
+  - **(B) TRANSIENT, today's WARN.** `PaperMarginClient`'s **2000 ms** read timeout vs
+    `UpstoxFnoMasterClient`'s **lazy 5 MB+ gzip master load** budgeted **60 s** — the first `keyFor()`
+    of the day. Both WARNs fired at exactly 2000 ms; the master completed 535 ms later. Deterministic
+    per container start / per 12 h `REFRESH` lapse, **not** a wire defect. Fix = warm the master
+    (option d); do NOT lengthen the 2 s timeout — it protects the tick thread by design (#694).
+  - **(C) LATENT drift.** `PaperMarginClient.Quote` has 7 components, `MarginController.MarginResponse`
+    has 10 — the client cannot see `equityMargin`, `netBuyPremium`, `additionalMargin`. `netBuyPremium`
+    is exactly the field (A) needs. Silent (Jackson matches by name); prerequisite for (A).
+  - ⚠️ **The post-market routine diagnosed this as a "wire/content-negotiation defect" and proposed
+    reproducing the octet-stream reply** (`2026-08-05-session-findings.md` §6.1, §7 NEW-1). That
+    investigation points at a component behaving correctly and would never have reached (A). The dated
+    file is immutable; the correction lives here and in the linked doc. **Read N23 before actioning
+    NEW-1.**
+- **N24 · Routine follow-ups that need no build, only the next run to look.** Carried so the next
+  post-market run does not re-derive them:
+  - **`strike-pick` discriminator lands Thu 2026-08-06** — BSE weekly expiry, so the expiry-eve/day-of
+    mechanism predicts SENSEX-rooted fails. The 235 → 604 → **0** series (Mon/Tue/Wed) already favours
+    it over a persistent CAS-era chain degradation. The daily routine covers this automatically; no
+    action beyond reading the result. NB the 08-04 file's "Fri 08-07 SENSEX" watch row is wrong — the
+    BSE weekly is Thursday; corrected in the 08-05 file.
+  - **T23 opening-bucket WARN has a NEW SIGN** — 1 unpaired `PartialBucketCanary` WARN at the 09:15
+    bucket, 3m bar 246,870 vs Σ(3×1m) 241,150, shortfall **−5,720** (2.3%). Same locus as the pre-B2
+    opening defect, opposite direction (tick-agg UNDER-counting). Single sub-3% event; watch the
+    opening bucket, do not escalate on one.
+  - **G16/T30 `breadth` produced its FIRST mid-range session in 12** — PE 286/830 = 34.5% while CE
+    stayed 0/206. The "never in between" step-function claim is broken **on one side**. Sharpens the
+    evidence; the design question (a market-wide scalar in a per-bar composite) is unchanged and still
+    **OWNER**.
+  - **`minervini-cheat-3c` / `minervini-primary-base` STALE-PUBLISH, 3rd consecutive session**
+    (1.0.2 drafts, name+description only). Cheap ops republish; still not done. Apply the #1016 rule —
+    pick by "latest version row ≠ `published_version_id`", never "latest DRAFT ≠ published".
+  - ~~**T10 stale OPEN swing positions now 18** (was 17). Chronic, owner, unchanged class.~~
+    ⚠️ **"unchanged class" is WRONG — corrected the same evening. See N26: T10 is not housekeeping,
+    it is what has frozen both swing books' entries.**
+  - **`tools/ledger-consistency-check.py` [C] false positives now 3**, all "T18 promotion", the third
+    being the 08-04 file's own §6.3 quoting the second — the predicted self-quote accumulation.
+    **If a 4th accrues, teach the checker to skip quoted dispositions.** Conditional, not yet due.
+- **N25 · Cosmetic: the 09:35 open-liveness routine printed "Trading day: Tue 2026-08-05".**
+  2026-08-05 is a **Wednesday**. That routine runs no expiry logic so nothing was decided on it, and
+  the post-market run had the weekday right — but NSE weekly is Tuesday and BSE weekly is Thursday, so
+  a wrong weekday in a routine that later gains expiry awareness would matter. One-line fix in
+  `market-open-signal-liveness-gate/SKILL.md`'s date handling when that file is next touched.
+
+#### 2026-08-05 evening batch — all eleven jobs ran, and the swing books are starving
+
+**Every scheduled job fired and reported SUCCESS** (measured, `marketdata.ingest_runs` /
+`marketdata.canary_runs` / `strategy.swing_batch_runs`, IST): 18:59:58 + 19:00:07 the FII/DII +
+participant-OI + FII-derivative trio · 19:29:59 `BHAVCOPY` · 19:31:13 `MANAS_SCREEN` + 19:31:42
+`MINERVINI_SCREEN` · 19:32:28 `MINERVINI_PLANE_DIVERGENCE` · 19:44:58 `MARKET_CONTEXT_DAY` · 19:49:58
+`DATA_QUALITY` · 19:54:58 `EQUITY_BREADTH` · 20:00:48 minervini swing · 20:05:34 manas-arora swing ·
+21:14:58 paper reconcilers **clean, 0 discrepancies**. **0 ERROR lines** in market-data and
+strategy-signal across the whole evening. The CA sweep correctly did NOT run
+(`ARTHA_CORPORATE_ACTIONS_ENABLED=false`, disarmed per N10).
+
+- **N26 · ⚠️ BOTH SWING BOOKS HAVE ADMITTED ZERO FRESH ENTRIES FOR THREE SESSIONS — the cap refuses
+  every candidate, and the 18 stale positions are why.** This is T10, restated correctly: it is not
+  bookkeeping, it is **entry starvation of the forward-paper record** the owner's §0.5 #12 reliability
+  sign-off is accumulating.
+  - Measured, `strategy.swing_batch_runs` (`cap_exceedance` **equals** `would_enter` on every row
+    since 08-03):
+
+    | date | batch | candidates | would_enter | **admitted** | cap_exceedance | open_at_start |
+    |---|---|---|---|---|---|---|
+    | 07-30 | minervini | 106 | 6 | 1 | 5 | 15 |
+    | 07-31 | minervini | 111 | 20 | 1 | 19 | 14 |
+    | 08-03 | minervini | 139 | 23 | **1** | 22 | 14 |
+    | 08-04 | minervini | **0** | 17 | **0** | 17 | 15 |
+    | 08-05 | minervini | **0** | 17 | **0** | 17 | 15 |
+    | 08-03 | manas-arora | 93 | 10 | **0** | 10 | 6 |
+    | 08-04 | manas-arora | 100 | 4 | **0** | 4 | 6 |
+    | 08-05 | manas-arora | 111 | 11 | **0** | 11 | 6 |
+
+  - **One entry in five sessions, zero in the last three.** Tonight 28 qualifying setups across both
+    books were found and all 28 refused.
+  - **manas-arora's bound is named explicitly in the log** — `risk pyramid-cap manas-arora tripped for
+    KABRAEXTRU (fresh entry for KABRAEXTRU blocked by the 6.0% portfolio open-risk cap)`, repeated for
+    RRKABEL, TDPOWERSYS, SANGHVIMOV, APOLLOPIPE, RPTECH, HFCL, NRBBEARING, PRECWIRE, NETWEB,
+    JAYNECOIND (11 of 11).
+  - ⚠️ **minervini logs NO `RiskService` trip at all** — `cap_bound=t` and 17 dropped, but nothing
+    names which cap. **Its 17 are refused silently.** Identifying that cap is step one; do not assume
+    it is the same 6% rail.
+  - **The capacity is held by stale inventory:** 18 OPEN — **12 minervini (oldest 2026-07-07)** and
+    **6 manas-arora (oldest 2026-07-10)**, ~4 weeks old.
+  - **NOT the screen, and not a market drought.** `minervini_screen_results` is healthy and improving:
+    08-03 1767 scanned / 277 passing · 08-04 1772 / 272 · **08-05 1778 / 280**. `minervini_setups`
+    tracks it (277/272/280). The funnel is producing; the gate is refusing.
+  - **Owner call, two independent levers** — (i) age out / square off the stale inventory so capacity
+    frees, and (ii) decide whether a 6% portfolio open-risk cap that blocks 100% of fresh entries is
+    the intended steady state or a mis-sized rail. Ledger row #37 already holds M40 (the fresh-entry
+    6% cap) as HOLD with its PR open; **this is that rail observed live, and it is binding
+    absolutely.** Do not re-tune it from this row alone — one session's refusals are not a sizing
+    study.
+- **N27 · minervini's `candidates` counter collapsed 139 → 0 on 08-04 and has stayed 0, while
+  `would_enter` held at 17.** manas-arora's same counter is healthy and rising (93 → 100 → 111) over
+  the identical window, and the screen behind both is fine (above). So `candidates` counts something
+  other than the funnel, and for minervini only it reads zero while the batch demonstrably still finds
+  17 entry candidates. **It is NOT the cause of N26's zero admissions** — that is the cap — but a
+  headline counter that silently reads 0 while work is happening will mislead every future session
+  report, and it already misled this one. Unexplained; nothing investigated beyond establishing it is
+  not the screen. Start at `SwingBatchEngine`'s candidate accounting vs `SwingBatchRecorder`'s
+  persisted column.
+
+#### 2026-08-06 — four routines, all clean; two of yesterday's claims moved
+
+All four ran and passed: 09:36 open-liveness **PASS** (counters 28→32, gauges 6.17 s) · 09:50
+data-health **GREEN** (both canaries, Σ 36→108 in 6 min, 0 failures) · 12:36 midday **PASS** (four
+reads, Σ 1860→1924) · 15:53 post-market →
+[`#1310`](https://github.com/prashantm912/artha-yantra-2/pull/1310) `e9083ee9`. Session was a
+**VWAP-pin chop day**: the `vwap` dot (weight **2.5**, the composite's largest) read **0/989 on both
+sides — its first-ever 0% session** — because max |close−VWAP| was **13.2 bps against its ≥15 bps
+rule** on a 0.30%-range tape. With `iv_pair` also dead, 3.3 of 18.80 weight was silent ⇒ cap 0.8245
+and the pass share collapsed to **62/989 = 6.3%**, a series low. Engine fired into it and lost
+(−₹1,784.15); shadow champion had its worst day on record (−₹40,671.30, all-time past −₹1L). None of
+that needs an action — it is regime, and the routine read it correctly.
+
+- **N28 · ⚠️ N23-B's "deterministic" is FALSIFIED, and N23-A is CONFIRMED — both by today's single
+  funded entry.** Correct N23 before anyone acts on it.
+  - **N23-A CONFIRMED, and on stronger evidence than the finding was built on.** Position **58**
+    (`SENSEX2680678200CE`, opened 08-06 11:16) carries `margin_snapshot = 0.00`, `margin_pct = 0.00`
+    — and today the margin call **SUCCEEDED** (§3.34 grep = 0 on a funded-fire day). Yesterday's zero
+    came from a *failed* call; today's comes from a *successful* one. That is the difference between
+    "the number was missing" and "the number is genuinely zero". **The heat operand is structurally
+    zero on a long-option book — settled, two independent days, one of them a clean call.**
+  - ⚠️ **N23-B overclaimed. It is a RACE, not deterministic.** Measured today: the F&O master loaded
+    at **11:16:21 IST** — i.e. the day's first `keyFor()` was again the entry's own margin call, the
+    same cold-load shape as 08-05 — **and it completed inside the 2000 ms budget, so nothing failed.**
+    Master sizes were comparable (37,363 legs today vs 37,028 on 08-05), so the difference is CDN/
+    network latency, not payload. My ledger text said "deterministic per container start / per 12 h
+    REFRESH lapse"; that is wrong. It fires when the cold load happens to exceed 2 s. **Practical
+    consequence: it will recur unpredictably and a single clean session proves nothing** — do not
+    read 08-06's clean grep as the defect being gone. Fix (warming the master, N23 option d) is
+    unchanged and still the right one; only the frequency claim moves.
+- **N29 · `DotHealthCanary` cannot see a CHART operand go dead — known boundary, deliberately not
+  closed.** The canary's probe registry mirrors §3.7's **macro** fields, so today's `vwap` 0/989 —
+  §3.28's fourth state ("live, moving, never crosses") on the highest-weighted dot in the composite —
+  was structurally invisible to `neverCrossing`. The post-market run declined to propose a probe with
+  reasons worth preserving: VWAP distance is **per-bar/per-root**, not a session-wide scalar like
+  `breadth`; a 15-bps pin day is self-evidently regime; and the dot recovers the moment the tape
+  moves. **Recorded so a future 0% `vwap` reading is checked against session RANGE first and not
+  filed as a defect** — the §3.28 min/max-vs-threshold SQL applies verbatim with the chart fields.
+  No action proposed; this is a boundary note, not a queue item.
+- **N24 update — the `strike-pick` BSE-weekly prediction is FALSIFIED, cleanly.** The carried watch
+  expected SENSEX-rooted fails on Thu 08-06's BSE weekly expiry if the saturation mechanism
+  generalized across exchanges. **Zero fails on either root**, and the shadow book traded
+  expiring-today SENSEX legs all session. §3.27 now splits by exchange+cycle: monthlies (both roots)
+  and NSE-weekly eve/day-of (235 → 604) saturate; **the first observed BSE weekly does not.** README
+  §3.27 amended by the run. Next discriminators: **Mon/Tue 08-10/11 (NIFTY weekly)**.
+- **N26 continuity — session 4 landed, still zero.** Measured 21:23 IST: **minervini 0 candidates /
+  18 would-enter / 0 admitted / 18 cap-exceedance** (open_at_start 15); **manas-arora 103 / 7 / 0 / 7**
+  (open_at_start 6). **Four consecutive sessions, both books, zero admissions**, and minervini's
+  would-enter grew 17 → 18. Open inventory unchanged at 18. N26 stands exactly as written.
+- **Carried, no movement:** minervini republish now **4th consecutive session** (`minervini-cheat-3c`
+  / `minervini-primary-base`, 1.0.2 drafts, name+description only) · T1 **10th** consecutive no-pay
+  (2-leg sole-blocker set, both real shadow losers) · T7 **3rd** adverse marginal-trade reading
+  (composite-055 challenger-only 0/4, −₹3,340.20) · T28 10th frozen `atmIv` · T3 14th zero `iv_pair`.
+  **Improved:** T23/G9 recorded its **first fully-quiet session** (0 WARNs + 0 straddles) — 08-05's
+  opening-bucket watch point did not recur; and the 08-05 ledger-checker `[C]` self-quote class did
+  **not** accrue a 4th (the findings window rolled past it), so that conditional fix is not due.
+
+#### 2026-08-06 evening batch — all jobs completed; two things to look at
+
+**Everything ran and reported SUCCESS**, with an unusual shape (see N31): 18:40:55 `BHAVCOPY` + the
+FII trio (restart catch-up) · 18:42 both screens · 18:43:41 `MINERVINI_PLANE_DIVERGENCE` · 18:59:59 +
+19:00:00 FII trio (scheduled) · 19:30:04 `BHAVCOPY` (scheduled) · 19:44:59 `MARKET_CONTEXT_DAY` ·
+19:49:59 `DATA_QUALITY` · 19:54:59 `EQUITY_BREADTH` · 20:00:48 + 20:05:31 swing batches · 21:14:59
+paper reconcilers **clean, 2 positions, 0 discrepancies**. **0 ERROR lines** in both services. The
+screens correctly did NOT re-run at 19:31 — same `run_day`, deduped.
+
+- **N30 · The nightly bhavcopy catch-up rescans a FULL YEAR every run, re-fetches the same 13
+  historical dates, and retro-stamps their `fetched_at`.** Measured tonight, both runs:
+  - `bhavcopy watermark 2026-08-05 is older than the 365-day cap; starting from 2025-08-06` — **the
+    watermark was ONE DAY old.** Either the message is misworded or the comparison mis-triggers; the
+    effect either way is a 365-day rescan on every catch-up.
+  - Both runs then reported the identical `NSE bhavcopy catch-up 2025-08-06..2026-08-06: 13 days` —
+    18:41 (41,059 rows) and 19:30 (40,862 rows). **The same 13 dates recur; the gap never closes.**
+    Dates: 2025-10-21, 11-04, 12-24, 2026-01-14, 01-23, 03-02, 03-25, 03-30, 04-02, 04-13, 04-30,
+    05-27, 06-25 — all weekdays, scattered, no obvious pattern.
+  - **The consequence that matters:** the 19:30 run moved `fetched_at` forward on **40,862 rows across
+    those 13 historical trade dates** (measured: `GROUP BY fetched_at` shows `18:41 → 3,287 rows /
+    1 date` = today only, then `19:30 → 40,862 rows / 13 dates`). CLAUDE.md mandates gating every
+    historical A-vs-B on `fetched_at` precisely because these tables are retro-mutable — **and a
+    routine nightly job is silently churning that very timestamp on year-old rows.** An analysis
+    gated on `fetched_at < X` would read these 13 dates as freshly fetched.
+  - **Cause NOT established.** Bhavcopy rows and 1d candles both exist for all 13 (2,432–2,674 candles
+    each), so it is not missing data. What the gap detector keys on is unread. Start at the watermark/
+    365-day-cap comparison and `BhavcopyBackfillService`'s per-date completeness test.
+  - ⚠️ **Retracted mid-investigation, recorded because the false version was convincing:** I first
+    measured "0 candles on all 13" and nearly filed a much larger finding. The query used
+    `d.dt::timestamptz`, and a bare date cast resolves in the SESSION timezone — **UTC in-container** —
+    so the window straddled the wrong side of the 00:00-IST daily bucket. With explicit
+    `+05:30` bounds every date has candles. **CLAUDE.md already carries this exact rule and I hit it
+    anyway**; the contrast query against neighbouring dates is what exposed it. Bound with explicit
+    `+05:30` literals, never a bare `::date`/`::timestamptz` cast.
+- **N31 · Unexplained full-stack restart at 18:40:38 IST.** All four containers report
+  `StartedAt = 2026-08-06T13:10:38Z` **to the same second** with `RestartCount = 0` — that is a
+  compose recreate or a Docker Desktop restart, **not** a crash loop. Not performed by this session,
+  and the routines are read-only. It landed 16 minutes after a clean 18:24 check.
+  - **Nothing was lost:** boot catch-up re-ran the missed evening jobs (18:40–18:43), the scheduled
+    jobs then ran normally, screens deduped correctly, and the reconcilers were clean.
+  - **But nothing would have alarmed either.** `SwingBatchHeartbeat` pings only after the 20:15 swing
+    batches, so an outage at 18:40 that self-healed before 20:00 is invisible to the external
+    dead-man's-switch — the exact blind spot `external-batch-liveness-watchdog` names. If the restart
+    had happened at 19:50 instead, `EQUITY_BREADTH` would have been skipped silently.
+  - **Owner question: was this you?** If not, it wants a cause before it recurs during a batch window.
+
+#### 2026-08-07 (Fri) — an in-session degradation, and the routine that would have caught it did not run
+
+Three of four routines ran and passed: 09:36 open-liveness **PASS** (Σ 28→32, gauges matched, 0
+failures) · 09:50 data-health **GREEN** (canary GREEN, 91 ticked tokens) · 12:36 midday **PASS**
+(Σ 2040→2104, +64 over 4m24s). Session was quiet: **1,066 rejections, 0 signals, 0 paper opens**;
+open swing inventory ticked **18 → 17**.
+
+- **N32 · ⚠️ The Kite REST circuit breaker OPENED TWICE during the live session and cost 6 minutes of
+  OI capture.** Measured, not inferred.
+  - **Root cause is in the first error of the day:** `09:35:12 quote response parse failed:
+    Unexpected character ('<' (code 60)): expected a valid value` — **Kite REST returned HTML, not
+    JSON.** That tripped the breaker, which then correctly shed load (`kite-rest circuit open; serving
+    cached data`). This is exactly the drift class the `kite/wire/` mirror + `ContractCanary` exist for,
+    except the payload was not JSON at all — an error/maintenance page, not a schema change.
+  - **Two windows:** 09:35 (options snapshots + all six chain broadcasts failed) and **14:13–14:16**
+    (SENSEX + BANKEX + NIFTY MID SELECT snapshots, NIFTY 50 / NIFTY BANK chain broadcasts, and
+    `CandleQueryService: gap fetch failed for NFO:NIFTY26AUGFUT 3m — serving cached data stale`).
+    **That last one is the signal contract's own 3m gap-fill degrading.**
+  - **Measured cost — `futures_oi_snapshots` minute coverage: 369 of 375.** Missing minutes cluster
+    exactly on the events: **09:34** and **14:12–14:15** (69 rows/minute either side, zero rows
+    inside). **Tick-driven 1m candles were UNAFFECTED** — 20/20 minutes present for
+    `NIFTY26AUGFUT` across 14:05–14:24 — so the loss is confined to the REST-dependent OI path,
+    which is the correct blast radius for a REST breaker but is also the OI bloc's only input.
+  - **Fail-soft worked; the gap is that nothing alarms.** Every failure logged WARN + served cached
+    data, the stack stayed healthy, `strategy-signal` logged **0 ERRORs**, and the market-data canary
+    read GREEN at 09:50. **A 4-minute OI hole is invisible to every oracle we run.** Whether that
+    deserves an alert is an owner call; that it is currently silent is measured fact.
+  - **Not investigated:** why Kite served HTML, whether it recurs at fixed times (two events ~4.6 h
+    apart), and whether the breaker's open duration is configured or adaptive.
+- ~~**N33 · ⚠️ THE FRIDAY POST-MARKET ROUTINE DID NOT RUN**~~ **— RETRACTED IN FULL, same day. IT
+  RAN.** Session `local_022964d1` executed ~16:00–16:45 IST and produced
+  [`2026-08-07-session-findings.md`](../../signal-analysis/2026-08-07-session-findings.md) via
+  [`#1315`](https://github.com/prashantm912/artha-yantra-2/pull/1315) `6c9466cf`. **Every consequence
+  N33 drew is void** — no missing findings doc, no broken chain, no second liveness blind spot.
+  - **How the error was made, because the mechanism matters:** I checked at **15:53:37**, saw
+    `lastRunAt = 2026-08-06` with `nextRunAt` already reading Monday 08-10, and read that pair as
+    "today's slot was skipped". **`nextRunAt` advances at dispatch/scheduling time, not on
+    completion**, so during the firing window the pair legitimately reads
+    `lastRunAt = yesterday, nextRunAt = next occurrence`. That is the NORMAL in-flight state, not
+    evidence of a skip.
+  - **The reading was 15 SECONDS past a due time carrying 382 s of jitter.** The session list showing
+    no post-market entry proved only "not started at 15:53:37" — I converted "hasn't started yet"
+    into "will never start". Textbook
+    [[pattern-match-instead-of-distinguishing-check]]: the distinguishing check was to re-look a few
+    minutes later, or to treat `nextRunAt` as uninformative and wait for the artifact.
+  - **Rule for next time: a scheduled task is proven skipped ONLY by the absence of its ARTIFACT
+    well after the window** (no session, no doc, no PR), never by the `lastRunAt`/`nextRunAt` pair.
+    Same family as every other entry here — measure the artifact, not the machinery that claims to
+    produce it.
+- **N34 · The 08-07 post-market run corrects N32's ROOT CAUSE and found blast radius I missed.**
+  Its §6.1 measured the same two Kite blips independently and went further:
+  - ⚠️ **It is NOT a Kite-side defect.** In the 14:13–14:16 window the kite session probe
+    (`HTTP connect timed out`) **and an Upstox quote batch** (`Connect timed out`) failed together —
+    **both vendors ⇒ a local network-egress blip.** N32 attributed the cause to "Kite returned HTML";
+    the HTML parse error is the *symptom that tripped the breaker*, not the origin. I pattern-matched
+    on the first error text without checking whether other vendors were affected in the same window
+    — the one check that separates "vendor fault" from "our egress".
+  - **Blast radius was larger than I measured: 24 `chain-unavailable` rejections** (12 PE slugs ×
+    bars 14:12 + 14:15) — the honest gate outcome, blocking entries rather than trading a missing
+    chain. I found the OI minutes and missed the rejections entirely. Its OI cadence figure is
+    **370/375**, mine was 369; take the run's, it reconciled the attribution fully.
+  - **Verdict unchanged and now better evidenced: no action proposed.** Breaker, cached-data serving,
+    the `chain-unavailable` gate and the STALE visibility WARN all behaved per design; self-healed by
+    14:17. **N32's "nothing alarms on a 4-minute OI hole" observation still stands** — that is an
+    owner call, not a defect.
+- **N35 · Two genuinely new findings from the 08-07 run, neither previously on any list.**
+  - **First live `neverCrossing` firing — the G16 probe worked on its first real opportunity.**
+    `dot-health` reported `breadth neverCrossing: true` ("live and moving, yet supported 1/56 distinct
+    (bar,side) verdicts; session max 33 hugs the line advances/declines > 32, distance 1 ≤ 3").
+    Raw: CE 0/16, PE 16/692 = 2.3%. T30's per-session-bias case gains a third observation, and the
+    instrument built for it earned its keep. No action; evidence for the standing OWNER question.
+  - ⚠️ **`strike-pick`: the mechanism is reframed, and N24's "falsified" reading was premature.**
+    350 fails, **all SENSEX-rooted, on a NON-expiry Friday** — the **third consecutive
+    Friday-after-BSE-Thursday-expiry saturation** (07-24: 550 → 07-31: 374 → 08-07: 350) — and
+    back-history shows 07-23 (a BSE weekly day-of) saturated too at 390. **So 08-06's zero is the
+    OUTLIER among day-of observations, not the rule**, and N24's "BSE weekly does not saturate"
+    generalisation was drawn from a single sample. Mechanism candidate shifts from "expiry day
+    saturates" to **chain proximity-to-expiry/roll**. Watch row live; next NIFTY discriminators
+    Mon/Tue 08-10/11.
+  - Session context: **zero fires**, and the gate was right every time it was tested — the day's only
+    sole-blocker set (5 composite-passing PE rows) went **0W/5L**, all blocked by the required-dot
+    floor inside `confluence-composite` (aggregate ≥ 0.600 via optional dots only, NULL margin). The
+    standing prior — every measured loosening of the entry gate has lost money — gains a
+    required-floor data point. Fourth post-07-27 chop day.
+
+#### 2026-08-07 evening batch — clean, and N26 got PROVEN by a natural experiment
+
+**All nine jobs SUCCESS** (IST): 18:59:58 FII trio · 19:30:02 `BHAVCOPY` · 19:31:11 `MANAS_SCREEN` +
+19:31:41 `MINERVINI_SCREEN` · 19:32:52 `MINERVINI_PLANE_DIVERGENCE` · 19:44:58 `MARKET_CONTEXT_DAY` ·
+19:49:58 `DATA_QUALITY` · 19:54:58 `EQUITY_BREADTH` · 20:00:45 + 20:05:31 swing batches · 21:14:57
+paper reconcilers **clean (0 positions, 1 taken signal, 0 discrepancies)**. **0 ERROR lines** in both
+services, 11/11 healthy.
+
+- **N36 · ⚠️ N26 IS NO LONGER AN INFERENCE — one freed slot converted to exactly one entry, and the
+  cap resumed refusing immediately.** This is the cleanest evidence the item will ever get, and it
+  arrived by accident rather than by test.
+  - **The experiment, unplanned:** `GRWRHITECH` (manas-arora) **CLOSED 08-06 20:05**, taking that
+    book's open count 6 → 5. The **very next batch**, 08-07 20:05, ran with `open_at_start = 5` and
+    **admitted 1** — `manas-arora swing ENTRY #169 manas-arora-vcp SKYGOLD at 723.0000 (composite
+    0.73576168)`, now position id 59. Then, in the same run and within seconds, **MTARTECH,
+    BHARATFORG, GTECJAINX, UNIMECH and BHARATSE were all skipped** — `fresh entry … would breach the
+    open-risk cap`, with `risk pyramid-cap manas-arora tripped for MTARTECH` naming the **6.0%**
+    rail explicitly. Final row: `105 candidates, would-enter 6, admitted 1, cap-exceedance 5`.
+  - **What that settles:** the binding constraint is **capacity, not signal quality**. One slot
+    opened, one entry went in, the sixth candidate hit the wall. The book re-saturated at 6 within a
+    single batch. Nothing about the signals changed — 105 candidates against 100/103/111 on the
+    preceding sessions.
+  - **It sharpens the owner decision (triage row A/N26) rather than changing it:** freeing inventory
+    converts to entries **one-for-one and immediately**, so the two levers are not equivalent —
+    ageing out N stale positions buys exactly N entries, whereas re-sizing the cap changes the
+    steady-state ceiling. **Both are still owner calls; neither is started.**
+  - **minervini is unchanged and still fully saturated:** `open_at_start 15`, would-enter **18**,
+    **admitted 0**, cap-exceedance 18 — five consecutive sessions at zero, and its refusal is still
+    the SILENT one (no `RiskService` trip line names its cap). ~~That half of N26 remains
+    undiagnosed~~ — **DIAGNOSED, see N37.**
+- **N37 · ✅ minervini's silent refusal is SOLVED — three phantom anchors from 2026-07-03 are holding
+  slots, and the book reads 15/12.** Found by running the §0 seven-location enumeration, not by
+  looking at N26. **H4 predicted this exact residue and nobody connected it to the entry starvation.**
+  - **Measured, all this session:**
+    - `strategy.risk_settings` → `minervini / max_open_paper_positions = {"value": 12, "enabled": true}` (**sourced**)
+    - `paper_positions WHERE book='minervini' AND status='OPEN'` = **12** (**computed**)
+    - `signals WHERE status='TAKEN' AND signal_type='ENTRY' AND book='minervini'` = **15** (**computed**)
+    - the three with no open position: **signal 20 `SENORES`, 23 `TMB`, 26 `INDUSINDBK`, all generated
+      2026-07-03** (**computed**) — exactly the residue H4's closeout spun out and left as owner-tier
+    - the batch's `open_at_start` reads **15**, i.e. it counts **TAKEN anchors, not open positions**
+  - **So the book presents as 15 against a cap of 12 — three OVER — and refuses every candidate.**
+    The phantoms can never resolve on their own: there is no position to exit, so nothing will ever
+    close them. **This is a permanent, self-sustaining block, not a transient saturation.**
+  - **It explains the 08-07 asymmetry precisely.** manas-arora sat at 5 against 6, one close freed a
+    slot, and the next batch admitted one (N36). minervini would need **four** closes to admit one —
+    three to work off the phantom overhang, then one for an actual slot. That is why five sessions of
+    closes produced nothing.
+  - **This makes the N26 lever much cheaper than "re-size the cap".** Clearing three stale 2026-07-03
+    signal rows restores three slots immediately. **Still owner-tier** — it mutates signal status on a
+    money-adjacent path, and the correct terminal status (EXPIRED? CANCELLED? a new state?) is a
+    doctrine call, not a cleanup detail. **Not started; nothing was mutated by this investigation.**
+  - **Open doubt:** whether `open_at_start` counting TAKEN anchors rather than open positions is
+    intended (it is what makes a phantom cost a slot) or is itself the defect. Settle that before
+    choosing between "clear the rows" and "change the counter" — they are different fixes with
+    different blast radii.
 
 ---
 

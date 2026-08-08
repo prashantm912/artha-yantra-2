@@ -70,7 +70,7 @@ public final class SwingCoverageProbe {
    *         3                  0.0%                   1.2%         1
    * </pre>
    *
-   * <p>5% sits in the empty band between 2.4% and 10.0% with roughly 4x clearance on both sides: it
+   * <p>4.7619% sits in the empty band between 2.4% and 10.0% with roughly 2x clearance on both sides: it
    * refuses the real harm (a 5-bar hole inside a 50-bar window, the shape that mis-computed three
    * held positions' {@code sma50}) and permits the same hole inside a 252-bar window, where it
    * cannot move a 52-week extreme. Because the test is a FRACTION, refusal probability no longer
@@ -81,7 +81,9 @@ public final class SwingCoverageProbe {
    * all, so this is conservative for extremes and about right for averages. A per-indicator-type
    * sensitivity model would be more precise and is deliberately not built.
    */
-  private static final int MATERIALITY_DENOMINATOR = 20;
+  // Fixed 1/21 = 4.7619% band: 1/20 = 5% at depth 20 is caught with a 0.2381pp margin;
+  // 2/50 = 4% still passes at depth 50 while 3/50 = 6% refuses.
+  private static final int MATERIALITY_DENOMINATOR = 21;
 
   /**
    * Params whose value is a BAR COUNT, so a missing session shifts what the rule reads. Pinned by

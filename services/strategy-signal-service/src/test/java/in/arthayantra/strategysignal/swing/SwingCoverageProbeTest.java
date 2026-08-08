@@ -11,8 +11,10 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -210,10 +212,43 @@ class SwingCoverageProbeTest {
   }
 
   @Test
-  @DisplayName("MATERIALITY: refusal probability must not scale with declared depth")
-  void materialityIsDepthRelative() {
+  @DisplayName("MATERIALITY: one missing session at depth 20 refuses, with a tested boundary")
+  void depth20CatchesOneSessionAndDepth50KeepsTheBoundary() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+
+    SwingCoverageProbe.Coverage complete20 =
+        SwingCoverageProbe.probe(tradingWindow(20, end), 20, NSE);
+    assertThat(complete20.windowSessions()).isEqualTo(20);
+    assertThat(complete20.materiallyIncomplete())
+        .as("zero missing sessions is the largest gap that passes at depth 20")
+        .isFalse();
+
+    SwingCoverageProbe.Coverage oneMissing20 =
+        SwingCoverageProbe.probe(tradingWindow(20, end, 10), 20, NSE);
+    assertThat(oneMissing20.windowSessions()).isEqualTo(20);
+    assertThat(oneMissing20.missing()).hasSize(1);
+    assertThat(oneMissing20.materiallyIncomplete())
+        .as("one missing session is 1/20 = 5%, above the fixed ~4.76% band")
+        .isTrue();
+
+    SwingCoverageProbe.Coverage twoMissing50 =
+        SwingCoverageProbe.probe(tradingWindow(50, end, 10, 30), 50, NSE);
+    assertThat(twoMissing50.materiallyIncomplete())
+        .as("two missing sessions are 2/50 = 4%, the largest depth-50 gap that passes")
+        .isFalse();
+
+    SwingCoverageProbe.Coverage threeMissing50 =
+        SwingCoverageProbe.probe(tradingWindow(50, end, 10, 20, 30), 50, NSE);
+    assertThat(threeMissing50.materiallyIncomplete())
+        .as("three missing sessions are 3/50 = 6%, the smallest depth-50 gap that refuses")
+        .isTrue();
+  }
+
+  @Test
+  @DisplayName("MATERIALITY: the fixed fraction distinguishes shallow and deep windows")
+  void materialityUsesWindowFraction() {
     // The Critical. The SAME 5-session hole is material inside a 50-bar window and immaterial inside
-    // a 252-bar one, because 5/252 cannot move a 52-week extreme.
+    // a 252-bar one, because 5/252 cannot move a 52-week extreme even under the fixed ~4.76% band.
     List<EngineCandle> bars =
         series(LocalDate.of(2025, 3, 1), LocalDate.of(2026, 8, 3),
             LocalDate.of(2026, 6, 12), LocalDate.of(2026, 6, 15), LocalDate.of(2026, 6, 16),
@@ -246,5 +281,28 @@ class SwingCoverageProbeTest {
                             "stop_loss", Map.of("basis", "percent", "value", 8)))),
                 null))
         .isZero();
+  }
+
+  /** A fixed count of NSE sessions ending at {@code end}, optionally omitting session indexes. */
+  private static List<EngineCandle> tradingWindow(
+      int sessionCount, LocalDate end, int... missingIndexes) {
+    List<LocalDate> sessions = new ArrayList<>();
+    for (LocalDate d = end; sessions.size() < sessionCount; d = d.minusDays(1)) {
+      if (NSE.isTradingDay(d)) {
+        sessions.add(0, d);
+      }
+    }
+    Set<LocalDate> missing = new HashSet<>();
+    for (int index : missingIndexes) {
+      missing.add(sessions.get(index));
+    }
+    return sessions.stream()
+        .filter(d -> !missing.contains(d))
+        .map(
+            d ->
+                new EngineCandle(
+                    d.atStartOfDay().atOffset(IST), BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
+                    BigDecimal.ONE, 1L))
+        .toList();
   }
 }

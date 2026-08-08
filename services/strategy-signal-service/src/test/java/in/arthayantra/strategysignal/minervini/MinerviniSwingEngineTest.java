@@ -3,6 +3,7 @@ package in.arthayantra.strategysignal.minervini;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -25,6 +26,7 @@ import in.arthayantra.strategysignal.signals.MarketDataCandlesClient;
 import in.arthayantra.strategysignal.signals.SignalPublisher;
 import in.arthayantra.strategysignal.signals.SignalRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchEngine;
+import in.arthayantra.strategysignal.swing.SwingBatchRefusalRepository;
 import in.arthayantra.strategysignal.swing.SwingCandidate;
 import in.arthayantra.strategysignal.swing.SwingDoctrine;
 import java.io.IOException;
@@ -32,6 +34,8 @@ import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -498,7 +502,7 @@ class MinerviniSwingEngineTest {
     // drop 2026-06-18 — a real NSE trading day, and one of the sessions actually missing from
     // marketdata.candles on 2026-08-03
     List<EngineCandle> holed = new ArrayList<>(h.series);
-    // three sessions, not one: materiality requires >5% of the probed span, so a single hole is
+    // three sessions, not one: materiality requires >~4.76% of the probed span, so a single hole is
     // deliberately BELOW the refusal/alert bar (that is the Critical fix, not an oversight)
     holed.removeIf(
         b ->
@@ -518,6 +522,9 @@ class MinerviniSwingEngineTest {
     assertThat(run.exitSkipped())
         .as("a coverage hole is not a skip — the stop WAS evaluated")
         .isZero();
+    assertThat(h.coverageRows)
+        .as("exit coverage must persist the exact durable evidence row")
+        .containsExactly("minervini|2026-08-04|TESTCO|EXIT_DEGRADED_COVERAGE:TESTCO");
   }
 
   /** The degraded exit is not silent: ops gets a per-position alert beside the evaluation. */
@@ -525,7 +532,7 @@ class MinerviniSwingEngineTest {
   void degradedExitPublishesAnOpsAlert() throws IOException {
     ExitHarness h = new ExitHarness();
     List<EngineCandle> holed = new ArrayList<>(h.series);
-    // three sessions, not one: materiality requires >5% of the probed span, so a single hole is
+    // three sessions, not one: materiality requires >~4.76% of the probed span, so a single hole is
     // deliberately BELOW the refusal/alert bar (that is the Critical fix, not an oversight)
     holed.removeIf(
         b ->
@@ -594,6 +601,9 @@ class MinerviniSwingEngineTest {
     assertThat(run.entries()).as("a materially stretched entry window must refuse").isZero();
     assertThat(alerts(h.events))
         .anySatisfy(a -> assertThat(a.title()).contains("entries refused"));
+    assertThat(h.coverageRows)
+        .as("entry coverage must persist the exact durable evidence row")
+        .containsExactly("minervini|2026-08-04|TESTCO|INCOMPLETE_COVERAGE:TESTCO");
   }
 
   /** The same series with the holes filled must still enter — proving the refusal is the cause. */
@@ -665,9 +675,12 @@ class MinerviniSwingEngineTest {
     final MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
     final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     final EmissionGuard guard = mock(EmissionGuard.class);
+    final SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    final List<String> coverageRows = new ArrayList<>();
     final List<EngineCandle> series = craft(3_000L);
 
     EntryHarness() throws IOException {
+      captureCoverageRows();
       UUID strategyId = UUID.randomUUID();
       UUID publishedVersion = UUID.randomUUID();
       when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
@@ -685,10 +698,27 @@ class MinerviniSwingEngineTest {
           .thenReturn(new BigDecimal("10"));
     }
 
+    private void captureCoverageRows() {
+      doAnswer(
+              invocation -> {
+                coverageRows.add(
+                    invocation.getArgument(0)
+                        + "|"
+                        + invocation.getArgument(1)
+                        + "|"
+                        + invocation.getArgument(2)
+                        + "|"
+                        + invocation.getArgument(3));
+                return null;
+              })
+          .when(refusals)
+          .record(any(), any(), any(), any());
+    }
+
     SwingBatchEngine engine(ApplicationEventPublisher publisher) {
       return new SwingBatchEngine(
           registry, candles, signals, mock(SignalPublisher.class), publisher, Optional.of(guard),
-          passthroughTx(), new ObjectMapper(), Clock.systemUTC());
+          passthroughTx(), new ObjectMapper(), fixedTestClock(), null, refusals);
     }
 
     MinerviniDoctrine doctrine() {
@@ -701,10 +731,26 @@ class MinerviniSwingEngineTest {
     final SignalRepository signals = mock(SignalRepository.class);
     final MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
     final MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    final SwingBatchRefusalRepository refusals = mock(SwingBatchRefusalRepository.class);
+    final List<String> coverageRows = new ArrayList<>();
     final List<EngineCandle> series = craftDecline();
     final UUID versionId;
 
     ExitHarness() throws IOException {
+      doAnswer(
+              invocation -> {
+                coverageRows.add(
+                    invocation.getArgument(0)
+                        + "|"
+                        + invocation.getArgument(1)
+                        + "|"
+                        + invocation.getArgument(2)
+                        + "|"
+                        + invocation.getArgument(3));
+                return null;
+              })
+          .when(refusals)
+          .record(any(), any(), any(), any());
       UUID strategyId = UUID.randomUUID();
       versionId = UUID.randomUUID();
       JsonNode config = vcpConfig();
@@ -718,7 +764,7 @@ class MinerviniSwingEngineTest {
     }
 
     SwingBatchEngine engine() {
-      return MinerviniSwingEngineTest.this.engine(registry, candles, signals, funnel);
+      return MinerviniSwingEngineTest.this.engineWithRefusals(registry, candles, signals, refusals);
     }
 
     MinerviniDoctrine doctrine() {
@@ -733,6 +779,19 @@ class MinerviniSwingEngineTest {
         registry, candles, signals, mock(SignalPublisher.class),
         mock(ApplicationEventPublisher.class), Optional.empty(), passthroughTx(),
         new ObjectMapper(), Clock.systemUTC());
+  }
+
+  private SwingBatchEngine engineWithRefusals(
+      StrategyRepository registry, MarketDataCandlesClient candles, SignalRepository signals,
+      SwingBatchRefusalRepository refusals) {
+    return new SwingBatchEngine(
+        registry, candles, signals, mock(SignalPublisher.class),
+        mock(ApplicationEventPublisher.class), Optional.empty(), passthroughTx(),
+        new ObjectMapper(), fixedTestClock(), null, refusals);
+  }
+
+  private static Clock fixedTestClock() {
+    return Clock.fixed(Instant.parse("2026-08-04T00:00:00Z"), ZoneOffset.UTC);
   }
 
   private MinerviniDoctrine doctrine(

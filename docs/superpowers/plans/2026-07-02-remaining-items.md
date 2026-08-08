@@ -1617,6 +1617,37 @@ says, and every placebo statistic quoted in it was taken in the un-clipped regim
   explicitly warns about ("run reviews via `run_in_background`"). Both threads were salvaged from
   their events files per the documented recovery and resumed with context intact.
 
+#### 2026-08-08 second block — four owner decisions taken, and every review round found something
+
+**N41 · OWNER DECISIONS, 2026-08-08. These are settled; do not re-open them, build to them.**
+
+| item | decision | what it means for the build |
+|---|---|---|
+| **N23-A** F9 heat re-base | **Measure first, do NOT enforce** | Compute premium-outlay heat and LOG what it *would* have blocked; enforcement stays on the existing (structurally-zero) SPAN number. After ~10 sessions the real refusal rate is known before it costs a trade. Reversible, no live behaviour change. Option (b) accept-and-relabel is NOT taken. |
+| **N26** swing capacity | **All three levers**, in this order | (1) **Make the silent `max_open` refusal auditable first** — `entryVeto`'s `max_open` and kill-switch rails write no audit row, so the next starvation must be diagnosable in one query rather than an investigation. Then (2) raise minervini `max_open` and (3) raise the 6% portfolio open-risk cap. ⚠️ **The owner chose the direction, not the numbers** — both new values still need a measured proposal before arming. |
+| **N12** equity CA basis | **Cliff detector + flag contaminated runs** | Detect CA-shaped single-bar cliffs in the swing sims and mark the run's stats contaminated instead of silently booking the spurious ~−50% into avg/best/worst/profitFactor. Deliberately NOT the deep-CA-table backfill (no source for >420 days) and NOT wiring the existing adjuster in (it scales only `source='BHAVCOPY'`, and KITE+BACKFILL are 85% of the plane, so it would read as fixed while fixing a minority of bars). |
+| **#1283** materiality band | **Recalibrate for depth 20** | Fixed band, derived from the depth-20 arithmetic so one missing session is caught. Not depth-relative, not keep-and-document. The gate refuses on ENTRY and only alerts on EXIT, so an over-tight band costs a skipped entry, never a stuck position — that asymmetry is why the tighter calibration was chosen. |
+
+**N42 · Four review rounds, and the pattern from 2026-08-08's first block held exactly: every round
+found a defect CI could not, including on my own work.**
+
+| PR | verdict | the finding that mattered |
+|---|---|---|
+| [#1321](https://github.com/prashantm912/artha-yantra-2/pull/1321) runbook-hygiene tracked-files | **REQUEST_CHANGES → APPROVED** (round 2) | ⚠️ **Critical, on the very PR that introduced `git ls-files` here.** Assertion 1 has always refused an empty intersection; **assertion 2 did not** — a `git ls-files` that legitimately SUCCEEDS while returning nothing scanned zero files and printed "all assertions passed". Switching from `find` made that strictly MORE reachable, since the index can disagree with the worktree. Plus a tracked-but-absent file (sparse cone exclusion) where `grep … 2>/dev/null \|\| true` turned "cannot read it" into "it has no hits". **Red-proof detail worth keeping: pre-fix, the guard reported `1 runbook files scanned` for a list of ZERO** — it was itself making the class of false report it exists to catch. Also Major: I fixed "ALL EIGHT" at one site and left the same stale claim at `check_runbook_hygiene.sh:18-22` and `ci-java.yml:183` — the identical cross-file sweep miss the guard exists to stop. |
+| [#1324](https://github.com/prashantm912/artha-yantra-2/pull/1324) candidates counter | **REQUEST_CHANGES**, fixed @ `52a956e9` | Major: the new operator alert said **"slot cap bound"**, but `capBound` is `capExceedance > 0` = `wouldEnter − admitted`, and that gap is opened by **any of `entryVeto`'s six rails** plus the M40 open-risk skip. Failure it removes: minervini banks its daily profit target, the batch early-outs, the alert reads "slot cap bound: 17 would-enter", and the owner frees a slot on a book that had simply stopped for the day. Now "entry governor bound", deliberately NOT resolved to the precise rail (`entryVeto` carries `risk_audit` + ntfy side effects per trip). The log line in the same hunk was already rail-neutral — the builder knew, and only the alert drifted. |
+| [#1326](https://github.com/prashantm912/artha-yantra-2/pull/1326) F9 prereqs | **REQUEST_CHANGES**, fix round dispatched | **Three Majors, all in (d) the warmer; (c) the record widening is clean and verified independently.** **M1** `@EventListener(ApplicationReadyEvent.class)` is synchronous on the **boot thread** and carries no `@Order`, so a ≤75 s cold download can delay the 12 other ready-listeners — including `SubscriptionReplayer` / `PinnedIndicesSubscriber` / `FuturesPinner`, i.e. live Kite tick subscription through the open. `OptionAtmPinner:53-77` already litigated this exact mechanism as a cross-vendor Major and the remedy is `@Order(LOWEST_PRECEDENCE)` + a dedicated daemon executor. **M2** the 6-hourly `@Scheduled` has no `scheduler=` qualifier, so it lands on the default pool-size-1 `taskScheduler` that `MonitorSchedulingConfig` split three pools out of, for measured harm. **M3, the important one** — the production twin of the canary-IT hazard the builder found: `reload()` stamps `loadedAt` on the FAILURE path, so a transient CDN fault at boot caches an empty map with a fresh timestamp and the lazy retry never fires for a whole 6 h window. On `main` the first attempt happened at the moment of need, so **this PR is what makes it reachable.** And `warm()` returns `void` and can never throw, so the warmer logs `"… warm complete"` **identically whether 37 000 legs loaded or nothing did**. `ARTHA_UPSTOX_ANALYTICS_ENABLED=true` in `.env`, so it is live, not hypothetical. |
+| [#1327](https://github.com/prashantm912/artha-yantra-2/pull/1327) bhavcopy misdated payload | opened, review in flight | **N30's brief was wrong on BOTH stated causes** — the 365-day-cap warning is cosmetic and the gap detector is sound. Real cause: **NSE's archive answers HTTP 200 with the previous trading day's CSV on 13 of 16 holiday URLs**, and the fetcher trusted the CSV's own `DATE1` column, so a holiday fetch ingested the prior session's bars under the holiday's date and the gap detector then read the day as covered. A `BRIEF-CORRECTED` outcome. Verify: BUILD SUCCESS, 1238 tests, 0 failures. |
+
+**N43 · Correction to N40, from the #1324 reviewer.** N40 said the two swing books are bound by
+**different** rails — minervini by `max_open`, manas-arora by the 6% portfolio open-risk cap. That is
+what the LOGS show, but it is not the whole shape: **manas-arora is subject to `MAX_OPEN` too**
+(`max_open_paper_positions = 7`, shared by both Manas strategies, `SwingBatchEngine:518`), so it takes
+the same silent early-out when it is at 7. On 08-07 it held 6, so the rail that actually fired was the
+6% cap — which logs. **The correct statement: both books share both rails; which one fires depends on
+where each book sits, and only one of the two is auditable.** That is exactly why N26's owner decision
+puts "make the silent refusal auditable" FIRST. Same class as the errors N38/N40 corrected: a
+difference observed in the logs read as a difference in the mechanism.
+
 #### 2026-08-07 evening batch — clean, and N26 got PROVEN by a natural experiment
 
 **All nine jobs SUCCESS** (IST): 18:59:58 FII trio · 19:30:02 `BHAVCOPY` · 19:31:11 `MANAS_SCREEN` +

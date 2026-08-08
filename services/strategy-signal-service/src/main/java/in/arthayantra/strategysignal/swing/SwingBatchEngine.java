@@ -89,7 +89,11 @@ public class SwingBatchEngine {
    * <p>{@code candidates} is the SIZE OF THE FUNNEL this run was handed — not how many survived any
    * gate. It stays honest when the book's risk governor blocks the entry pass outright: a book at its
    * slot cap reports its full funnel with {@code entries} 0, and the probe's {@code capExceedance}
-   * carries what the cap shed. Reading 0 here means the screen genuinely returned nothing.
+   * carries what the governor shed. Reading 0 WITH {@code strategies} &gt; 0 and entries enabled means
+   * the screen genuinely returned nothing — but 0 is also correct and NOT a screen verdict on the
+   * paths that never reach the funnel: an expired deadline, {@code executionArmed} false, and the
+   * catch-up path's {@code entriesEnabled} false (a screenDate that is not the session), which passes
+   * an empty list while a candidate snapshot is present.
    */
   public record SwingRun(
       int strategies, int candidates, int entries, int exits, int exitSkipped,

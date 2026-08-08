@@ -440,7 +440,12 @@ class MinerviniSwingEngineTest {
     when(signals.activeEntries()).thenReturn(List.of());
 
     EmissionGuard guard = mock(EmissionGuard.class);
-    when(guard.entryAllowed(Books.MINERVINI)).thenReturn(false); // at the cap from the first check
+    // The book's entry governor refuses from the first check. The engine sees ONLY this boolean, so
+    // this fixture models every rail that opens the wouldEnter-minus-admitted gap, not the slot cap
+    // specifically — activeEntries is empty, so openAtStart is 0 and the row is a kill-switch /
+    // daily-loss / daily-target shape rather than a MAX_OPEN one. That is deliberate: the assertion
+    // below is about the counter, and the counter must be right whichever rail bound the run.
+    when(guard.entryAllowed(Books.MINERVINI)).thenReturn(false);
 
     SwingBatchEngine engine =
         new SwingBatchEngine(

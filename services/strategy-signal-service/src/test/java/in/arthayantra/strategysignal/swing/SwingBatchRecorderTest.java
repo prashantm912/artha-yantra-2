@@ -241,7 +241,7 @@ class SwingBatchRecorderTest {
     assertThat(((SwingBatchAlert) captor.getAllValues().get(0)).message())
         .isEqualTo(
             "139 candidates, 0 entries, 0 exits, 0 exit-skipped (4 strategies)"
-                + " — slot cap bound: 17 would-enter, 0 admitted, 17 dropped");
+                + " — entry governor bound: 17 would-enter, 0 admitted, 17 dropped");
     assertThat(((SwingBatchAlert) captor.getAllValues().get(1)).message())
         .as("an unbound run's summary is unchanged")
         .isEqualTo("139 candidates, 0 entries, 0 exits, 0 exit-skipped (4 strategies)");

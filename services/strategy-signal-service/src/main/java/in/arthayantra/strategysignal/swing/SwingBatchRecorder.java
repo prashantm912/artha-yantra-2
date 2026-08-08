@@ -216,16 +216,22 @@ public class SwingBatchRecorder {
     } catch (RuntimeException e) {
       log.warn("{} swing sell-decision persist failed: {}", doctrine.batchName(), e.getMessage());
     }
-    // A cap-bound run reads as "N candidates, 0 entries" — indistinguishable from a dead batch unless the
-    // probe is spelled out. Appended only when the cap actually shed a would-be entrant, so an ordinary
-    // run's alert text is unchanged.
+    // A governor-bound run reads as "N candidates, 0 entries" — indistinguishable from a dead batch
+    // unless the probe is spelled out. Appended only when something actually shed a would-be entrant,
+    // so an ordinary run's alert text is unchanged.
+    // ⚠️ SAY "entry governor", NOT "slot cap" (review 2026-08-08). capBound is capExceedance > 0, i.e.
+    // wouldEnter - admitted, and that gap is opened by ANY of entryVeto's six rails (KILL_SWITCH,
+    // MAX_OPEN, DAILY_LOSS, DAILY_PROFIT_TARGET, MAX_DEPLOYMENT_PCT, HEAT_CAP_PCT) as well as the M40
+    // portfolio open-risk skip. Naming the slot cap here would send the owner to free a slot on a book
+    // that had merely banked its daily target. Do NOT call entryVeto to name the rail precisely — it
+    // carries risk_audit + ntfy side effects per trip.
     String summary =
         result.candidates() + " candidates, " + result.entries() + " entries, " + result.exits()
             + " exits, " + result.exitSkipped() + " exit-skipped ("
             + result.strategies() + " strategies)"
             + (probe.capBound()
-                ? " — slot cap bound: " + probe.wouldEnter() + " would-enter, " + probe.admitted()
-                    + " admitted, " + probe.capExceedance() + " dropped"
+                ? " — entry governor bound: " + probe.wouldEnter() + " would-enter, "
+                    + probe.admitted() + " admitted, " + probe.capExceedance() + " dropped"
                 : "");
     publishQuietly(
         doctrine.batchName(),

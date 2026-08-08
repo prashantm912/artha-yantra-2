@@ -85,6 +85,7 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
 
   @Autowired private JdbcTemplate jdbc;
   @Autowired private SymbolLineageDetector detector;
+  @Autowired private SymbolLineageRepository lineageRepository;
 
   private List<String[]> bars;
   private List<String[]> bseBars;
@@ -149,6 +150,35 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
     assertThat(detectedPairs()).isEqualTo(want);
   }
 
+  /** A below-span run must exercise the clipped floor rather than the table's historical floor. */
+  @Test
+  void belowSpanWindowUsesOwnFloorForBoundaryChecks() {
+    int windowDays = 200;
+    LocalDate tableFloor =
+        jdbc.queryForObject("SELECT min(trade_date) FROM nse_eod_bhavcopy", LocalDate.class);
+    LocalDate latest =
+        jdbc.queryForObject("SELECT max(trade_date) FROM nse_eod_bhavcopy", LocalDate.class);
+    assertThat(latest.toEpochDay() - tableFloor.toEpochDay()).isGreaterThan(windowDays);
+
+    LocalDate clippedFloor = latest.minusDays(windowDays);
+    List<LocalDate> sessions =
+        jdbc.queryForList(
+            "SELECT DISTINCT trade_date FROM nse_eod_bhavcopy ORDER BY trade_date", LocalDate.class);
+    LocalDate successorDate =
+        sessions.stream()
+            .filter(d -> d.isAfter(clippedFloor))
+            .findFirst()
+            .orElseThrow();
+    bar("LINCLIPP", clippedFloor, "712.0000", "712.0000");
+    bar("LINCLIPS", successorDate, "712.0000", "713.0000");
+
+    SymbolLineageDetector clippedDetector =
+        new SymbolLineageDetector(jdbc, lineageRepository, windowDays, 5);
+    clippedDetector.detect();
+
+    assertThat(detectedPairs()).contains("LINCLIPP->LINCLIPS");
+  }
+
   /**
    * Every row's STATUS matches its oracle — the assertion the old 58-pair fixture could not make,
    * because the two rows it turns on were the two it excluded.
@@ -210,6 +240,34 @@ class SymbolLineageDetectorIntegrationTest extends MarketDataIntegrationTestBase
     // Silence is not refutation: neither AXISNIFTY nor NIFTYAXIS is on BSE at all.
     assertThat(column("status")).containsEntry("AXISNIFTY", "ACTIVE");
     assertThat(column("confidence")).containsEntry("AXISNIFTY", "inferred");
+  }
+
+  /** A BSE ticker reused across ISINs is ambiguous and cannot permanently refute a lineage pair. */
+  @Test
+  void ambiguousTickerEvidenceStaysInferred() {
+    List<LocalDate> cal =
+        jdbc.queryForList(
+            "SELECT DISTINCT trade_date FROM nse_eod_bhavcopy ORDER BY trade_date",
+            LocalDate.class);
+    LocalDate predecessorDate = cal.get(120);
+    LocalDate successorDate = cal.get(121);
+    bar("LINCOLD", predecessorDate, "701.0000", "701.0000");
+    bar("LINCNEW", successorDate, "701.0000", "702.0000");
+    jdbc.batchUpdate(
+        "INSERT INTO bse_eod_bhavcopy (trade_date, scrip_code, ticker, isin)"
+            + " VALUES (?::date, ?, ?, ?)",
+        List.of(
+            new Object[] {predecessorDate, "900001", "LINCOLD", "INEX11111111"},
+            new Object[] {successorDate, "900002", "LINCOLD", "INEX22222222"},
+            new Object[] {successorDate, "900003", "LINCNEW", "INEX33333333"}));
+
+    detector.detect();
+
+    Map<String, Object> row =
+        jdbc.queryForMap(
+            "SELECT status, confidence FROM symbol_lineage"
+                + " WHERE exchange='NSE' AND predecessor_symbol = 'LINCOLD'");
+    assertThat(row).containsEntry("status", "ACTIVE").containsEntry("confidence", "inferred");
   }
 
   /**

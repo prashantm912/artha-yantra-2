@@ -153,9 +153,10 @@ public final class AdjustedEquityDailySql {
    *       series directly. Duplicate {@code (symbol, bucket)} rows silently corrupt every window
    *       function downstream with no error anywhere, so this is closed structurally rather than
    *       trusted to the writer. The tie-break {@code (t.cur IS NULL) DESC} keeps a symbol's OWN bar
-   *       over a predecessor bar stitched onto the same day, which is the only defensible
-   *       precedence. Detected pairs never overlap, so this is inert on everything the detector
-   *       writes; it exists because the WITHHELD escape hatch invites hand-written rows.
+   *       over a predecessor bar stitched onto the same day, and the source primary-key columns
+   *       {@code (symbol, series)} then make the choice total among predecessor bars. Detected pairs
+   *       never overlap, so this is inert on everything the detector writes; it exists because the
+   *       WITHHELD escape hatch invites hand-written rows.
    *       <p>The one asymmetry: a predecessor bar dated ON or AFTER its switch keeps its own symbol
    *       while actions under that symbol resolve to the successor, so such a bar reads unadjusted.
    *       That fails toward raw prices rather than toward a cliff, and it cannot arise from a
@@ -200,7 +201,7 @@ public final class AdjustedEquityDailySql {
              b.close AS raw_close,
              b.volume
       FROM (
-        SELECT symbol, trade_date AS bucket, close_price AS close, high_price AS high,
+        SELECT symbol, series, trade_date AS bucket, close_price AS close, high_price AS high,
                low_price AS low, ttl_trd_qnty AS volume
         FROM nse_eod_bhavcopy
         WHERE series IN ('EQ','BE')
@@ -210,7 +211,8 @@ public final class AdjustedEquityDailySql {
       LEFT JOIN terminal t ON t.orig = b.symbol AND b.bucket < t.first_switch
       """
           + LINEAGE_FACTOR_LATERAL
-          + "ORDER BY COALESCE(t.cur, b.symbol), b.bucket, (t.cur IS NULL) DESC\n";
+          + "ORDER BY COALESCE(t.cur, b.symbol), b.bucket, (t.cur IS NULL) DESC,\n"
+          + "         b.symbol DESC, b.series DESC\n";
 
   /**
    * The screener {@code base} CTE body - plain by default, lineage-expanded when the caller asks.

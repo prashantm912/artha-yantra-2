@@ -6,6 +6,7 @@ import in.arthayantra.marketdata.screener.manas.ManasScreenService;
 import in.arthayantra.marketdata.screener.minervini.TrendCandidate;
 import in.arthayantra.marketdata.screener.minervini.TrendTemplateService;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -105,11 +106,15 @@ class ScreenerLineageOptInIntegrationTest extends MarketDataIntegrationTestBase 
   }
 
   private void linkPredToSucc(String status) {
+    linkToSuccessor(PRED, AS_OF.minusDays(SUCC_BARS - 1L), status);
+  }
+
+  private void linkToSuccessor(String predecessor, LocalDate switchDate, String status) {
     jdbc.update(
         "INSERT INTO symbol_lineage (exchange, predecessor_symbol, successor_symbol, switch_date,"
             + " gap_sessions, confidence, evidence, status, source)"
             + " VALUES ('NSE', ?, ?, ?, 1, 'confirmed', 'test fixture', ?, 'test')",
-        PRED, SUCC, AS_OF.minusDays(SUCC_BARS - 1L), status);
+        predecessor, SUCC, switchDate, status);
   }
 
   /** Precondition: neither leg clears 252 alone, and together they do. Without this the rest is vacuous. */
@@ -193,6 +198,48 @@ class ScreenerLineageOptInIntegrationTest extends MarketDataIntegrationTestBase 
     // labelled SUCC at all — SUCC has no bars of its own before its own first print.
     assertThat(baseSymbolCount(beforeSwitch, PRED)).isEqualTo(PRED_BARS);
     assertThat(baseSymbolCount(beforeSwitch, SUCC)).isZero();
+  }
+
+  /** N→1 stitching must choose a specific source row when two predecessors land on one bucket. */
+  @Test
+  void manyToOneLineageTiesUseTotalSourceOrder() {
+    LocalDate tiedBucket = AS_OF.minusDays(200);
+    LocalDate switchDate = AS_OF.minusDays(SUCC_BARS - 1L);
+    linkToSuccessor(PRED, switchDate, "ACTIVE");
+    linkToSuccessor(CTRL, switchDate, "ACTIVE");
+
+    jdbc.update(
+        "DELETE FROM nse_eod_bhavcopy WHERE symbol IN (?, ?) AND trade_date = ?",
+        PRED,
+        CTRL,
+        tiedBucket);
+    jdbc.update(
+        "INSERT INTO nse_eod_bhavcopy"
+            + " (symbol, series, trade_date, open_price, high_price, low_price, close_price, ttl_trd_qnty)"
+            + " VALUES (?, 'EQ', ?, 777, 777, 777, 777, 200000)",
+        PRED,
+        tiedBucket);
+    jdbc.update(
+        "INSERT INTO nse_eod_bhavcopy"
+            + " (symbol, series, trade_date, open_price, high_price, low_price, close_price, ttl_trd_qnty)"
+            + " VALUES (?, 'EQ', ?, 888, 888, 888, 888, 200000)",
+        CTRL,
+        tiedBucket);
+
+    java.sql.Date d = java.sql.Date.valueOf(AS_OF);
+    BigDecimal selected =
+        jdbc.queryForObject(
+            "SELECT raw_close FROM ("
+                + in.arthayantra.marketdata.equitydaily.AdjustedEquityDailySql.screenerBaseCte(true)
+                + ") q WHERE symbol = ? AND bucket = ?",
+            BigDecimal.class,
+            d,
+            d,
+            d,
+            SUCC,
+            java.sql.Date.valueOf(tiedBucket));
+
+    assertThat(selected).isEqualByComparingTo("777.0000");
   }
 
   /**

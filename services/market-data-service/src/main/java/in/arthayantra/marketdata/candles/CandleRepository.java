@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.candles;
 
 import java.math.BigDecimal;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -614,6 +615,19 @@ public class CandleRepository {
         tradingsymbol);
   }
 
+  /** Whether a symbol has staged rows that may be resumed after a partial swap. */
+  public boolean hasStagedRows(String exchange, String tradingsymbol, String interval) {
+    Boolean present =
+        jdbc.queryForObject(
+            "SELECT EXISTS(SELECT 1 FROM candle_rebuild_staging"
+                + " WHERE exchange = ? AND tradingsymbol = ? AND \"interval\" = ?)",
+            Boolean.class,
+            exchange,
+            tradingsymbol,
+            interval);
+    return Boolean.TRUE.equals(present);
+  }
+
   /**
    * What a staged re-fetch covers, measured against the live series it is about to replace — the
    * evidence {@code CorporateActionJob} judges BEFORE it deletes anything.
@@ -746,36 +760,90 @@ public class CandleRepository {
     for (Window w : purgeWindows(bounds.from(), bounds.to(), Period.ofMonths(PURGE_WINDOW_MONTHS))) {
       Timestamp from = Timestamp.from(w.from().toInstant());
       Timestamp to = Timestamp.from(w.to().toInstant());
-      jdbc.update(
-          "DELETE FROM candles WHERE exchange = ? AND tradingsymbol = ? AND \"interval\" = ?"
-              + " AND bucket >= ? AND bucket < ?",
-          exchange, tradingsymbol, interval, from, to);
       inserted +=
-          jdbc.update(
-              """
-              INSERT INTO candles
-                (exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi,
-                 source, fetched_at)
-              SELECT exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi,
-                     source, now()
-              FROM candle_rebuild_staging
-              WHERE exchange = ? AND tradingsymbol = ? AND "interval" = ?
-                AND bucket >= ? AND bucket < ?
-              ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO UPDATE SET
-                open = EXCLUDED.open,
-                high = EXCLUDED.high,
-                low = EXCLUDED.low,
-                close = EXCLUDED.close,
-                volume = EXCLUDED.volume,
-                oi = EXCLUDED.oi,
-                source = EXCLUDED.source,
-                fetched_at = now()
-              """,
+          replaceWindowAtomically(
               exchange, tradingsymbol, interval, from, to);
     }
     // fetched_at is stamped now() rather than copied: the Stage-D dataHash reads it to flag
     // pre-event backtest runs as not-like-for-like, which is exactly what a rebuild must trigger.
     return inserted;
+  }
+
+  /** Deletes and refills one window in one commit, so readers never observe an empty window. */
+  private int replaceWindowAtomically(
+      String exchange, String tradingsymbol, String interval, Timestamp from, Timestamp to) {
+    return jdbc.execute(
+        (ConnectionCallback<Integer>)
+            connection -> {
+              boolean manageTransaction = connection.getAutoCommit();
+              if (manageTransaction) {
+                connection.setAutoCommit(false);
+              }
+              boolean committed = false;
+              boolean rolledBack = false;
+              try {
+                int inserted;
+                try (PreparedStatement delete =
+                        connection.prepareStatement(
+                            "DELETE FROM candles WHERE exchange = ? AND tradingsymbol = ?"
+                                + " AND \"interval\" = ? AND bucket >= ? AND bucket < ?");
+                    PreparedStatement insert =
+                        connection.prepareStatement(
+                            """
+                            INSERT INTO candles
+                              (exchange, tradingsymbol, "interval", bucket, open, high, low, close,
+                               volume, oi, source, fetched_at)
+                            SELECT exchange, tradingsymbol, "interval", bucket, open, high, low, close,
+                                   volume, oi, source, now()
+                            FROM candle_rebuild_staging
+                            WHERE exchange = ? AND tradingsymbol = ? AND "interval" = ?
+                              AND bucket >= ? AND bucket < ?
+                            ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO UPDATE SET
+                              open = EXCLUDED.open,
+                              high = EXCLUDED.high,
+                              low = EXCLUDED.low,
+                              close = EXCLUDED.close,
+                              volume = EXCLUDED.volume,
+                              oi = EXCLUDED.oi,
+                              source = EXCLUDED.source,
+                              fetched_at = now()
+                            """)) {
+                  delete.setString(1, exchange);
+                  delete.setString(2, tradingsymbol);
+                  delete.setString(3, interval);
+                  delete.setTimestamp(4, from);
+                  delete.setTimestamp(5, to);
+                  delete.executeUpdate();
+
+                  insert.setString(1, exchange);
+                  insert.setString(2, tradingsymbol);
+                  insert.setString(3, interval);
+                  insert.setTimestamp(4, from);
+                  insert.setTimestamp(5, to);
+                  inserted = insert.executeUpdate();
+                }
+                if (manageTransaction) {
+                  connection.commit();
+                  committed = true;
+                }
+                return inserted;
+              } catch (SQLException | RuntimeException failure) {
+                if (manageTransaction) {
+                  try {
+                    connection.rollback();
+                    rolledBack = true;
+                  } catch (SQLException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                    abortQuietly(connection);
+                  }
+                }
+                throw failure;
+              } finally {
+                if (manageTransaction && (committed || rolledBack)) {
+                  connection.setAutoCommit(true);
+                }
+              }
+            });
   }
 
   /** {@code candles} hypertable size in bytes (the {@code ay_hypertable_bytes} gauge). */

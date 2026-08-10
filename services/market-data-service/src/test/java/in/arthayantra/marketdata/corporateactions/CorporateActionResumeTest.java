@@ -75,6 +75,7 @@ class CorporateActionResumeTest {
   private CorporateActionRepository events;
   private NtfyClient ntfy;
   private CorporateActionJob job;
+  private SimpleMeterRegistry meterRegistry;
 
   @SuppressWarnings("unchecked")
   @BeforeEach
@@ -85,6 +86,7 @@ class CorporateActionResumeTest {
     gateway = mock(HistoricalCandleGateway.class);
     events = mock(CorporateActionRepository.class);
     ntfy = mock(NtfyClient.class);
+    meterRegistry = new SimpleMeterRegistry();
     StringRedisTemplate redis = mock(StringRedisTemplate.class);
     when(redis.opsForValue()).thenReturn(mock(ValueOperations.class));
 
@@ -114,7 +116,7 @@ class CorporateActionResumeTest {
             List.of(),
             MAX_ATTEMPTS,
             COOLDOWN_DAYS,
-            new SimpleMeterRegistry());
+            meterRegistry);
   }
 
   private static CorporateActionRepository.EventRow row(UUID id, String status, int attempts) {
@@ -240,8 +242,15 @@ class CorporateActionResumeTest {
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(() -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "FAILED"));
     // 1m committed, 1d did not — which is the RECOVERABLE half. The cached 1d still diverges from
-    // Kite, so the next sweep re-detects and redoes both legs idempotently.
+    // Kite, so the next eligible sweep after the cooldown can re-detect and resume both legs
+    // idempotently from the retained staging rows.
     verify(candles).swapStaged("NSE", "TCS", "1m");
+    verify(candles, times(1)).clearStaging("NSE", "TCS");
+    verify(ntfy)
+        .send(
+            contains("FAILED"),
+            eq("urgent"),
+            contains("partial rebuild; swapped interval(s): 1m"));
     verify(events, never()).updateStatus(id, "BASE_REBUILT");
   }
 
@@ -303,6 +312,12 @@ class CorporateActionResumeTest {
     await()
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(() -> verify(candles).swapStaged("NSE", "TCS", "1d"));
+    assertThat(
+            meterRegistry
+                .get("ay_corporate_action_unadjusted_tail_bars_total")
+                .counter()
+                .count())
+        .isEqualTo(1_276.0);
     verify(events, never()).updateStatusIf(eq(id), anyString(), eq("FAILED"));
   }
 

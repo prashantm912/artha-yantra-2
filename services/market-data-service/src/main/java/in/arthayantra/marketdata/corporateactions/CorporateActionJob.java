@@ -353,16 +353,21 @@ public class CorporateActionJob {
     }
     executor.submit(
         () -> {
+          List<String> swappedIntervals = new ArrayList<>();
           try {
             events.updateStatus(id, "REBACKFILL_RUNNING");
             OffsetDateTime now = OffsetDateTime.now(clock);
-            rebuildBaseByStagedSwap(equity, today, now);
+            rebuildBaseByStagedSwap(equity, today, now, swappedIntervals);
             events.updateStatus(id, "BASE_REBUILT");
             refreshRebuiltAggregates(id, today, now);
-            recordResolved(id, "BASE_REBUILT", equity, " cache rebuilt");
+            recordResolved(
+                id,
+                "BASE_REBUILT",
+                equity,
+                " cache rebuilt; swapped intervals: " + String.join(", ", swappedIntervals));
           } catch (Exception e) {
             log.error("corporate-action rebuild failed for {}", equity.tradingsymbol(), e);
-            recordFailure(id, equity, e);
+            recordFailure(id, equity, e, swappedIntervals);
           } finally {
             inFlight.remove(id);
           }
@@ -389,25 +394,32 @@ public class CorporateActionJob {
    * {@code swapStaged} delete and refill — a delete scoped to exactly the staged span, so every
    * bucket removed provably has a replacement row waiting.
    *
-   * <p>Staging is cleared on the way IN as well as out: an attempt must never swap in rows a
-   * previous failed attempt left behind, and the {@code finally} bounds the buffer's disk footprint.
+   * <p>Staging is cleared before a fresh attempt and after a successful swap. If a swap has started,
+   * the verified rows remain as a retry checkpoint so a partial live rebuild is resumable.
    *
    * <p>The 1m stage still defers the cagg refresh to the caller (it writes no aggregates at all
    * now), so the {@code BASE_REBUILT} checkpoint still lands after the base commits and BEFORE the
    * chunked refresh — a hard crash mid-refresh RESUMES on the next sweep instead of redoing ~12
    * years for nothing (A14, 2026-07-10 3× live-Postgres OOM).
    */
-  private void rebuildBaseByStagedSwap(Instrument equity, LocalDate today, OffsetDateTime now) {
+  private void rebuildBaseByStagedSwap(
+      Instrument equity, LocalDate today, OffsetDateTime now, List<String> swappedIntervals) {
     String exchange = equity.exchange();
     String symbol = equity.tradingsymbol();
+    boolean swapStarted = false;
     try {
-      candles.clearStaging(exchange, symbol);
-      queryService.stageFullRange(
-          exchange, symbol, "1d",
-          today.minusDays(rebackfillDays1d).atStartOfDay().atOffset(Ist.OFFSET), now);
-      queryService.stageFullRange(
-          exchange, symbol, "1m",
-          today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now);
+      boolean resumeStaging =
+          candles.hasStagedRows(exchange, symbol, "1d")
+              && candles.hasStagedRows(exchange, symbol, "1m");
+      if (!resumeStaging) {
+        candles.clearStaging(exchange, symbol);
+        queryService.stageFullRange(
+            exchange, symbol, "1d",
+            today.minusDays(rebackfillDays1d).atStartOfDay().atOffset(Ist.OFFSET), now);
+        queryService.stageFullRange(
+            exchange, symbol, "1m",
+            today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now);
+      }
       // BOTH intervals are verified BEFORE EITHER is swapped: verifying and swapping per-interval
       // would let a good 1d swap land and a bad 1m refusal abort, leaving the symbol half-adjusted
       // — a series that looks complete and is silently wrong, which is worse than the gutting this
@@ -417,11 +429,11 @@ public class CorporateActionJob {
       // ⚠️ 1m SWAPS FIRST AND 1d LAST, AND THE ORDER IS LOAD-BEARING — do not "tidy" it back into
       // the 1d-then-1m order the staging above uses.
       //
-      // The two swaps are separate autocommitted statements (nothing in this chain is
-      // @Transactional, and making a ~1.1M-row DELETE+INSERT pair transactional is exactly the
-      // memory profile that OOM'd this instance 3× — see PURGE_WINDOW_MONTHS). So an ORDINARY
-      // catchable DB error on the second swap — decompression cap, lock or statement timeout, disk
-      // — commits the first and abandons the second.
+      // The two interval swaps are separate operations, but each DELETE+INSERT window is one
+      // transaction. Making the full ~1.1M-row interval replacement one transaction is exactly the
+      // memory profile that OOM'd this instance 3× — see PURGE_WINDOW_MONTHS. So an ORDINARY
+      // catchable DB error on the second interval — decompression cap, lock or statement timeout,
+      // disk — commits the first interval and retains the verified staging checkpoint for retry.
       //
       // Detection reads ONLY the 1d series (the anchor diff above). So if 1d went first and 1m
       // failed, the cache's 1d would now EQUAL Kite: the next sweep would find no divergence, never
@@ -443,10 +455,21 @@ public class CorporateActionJob {
       // DB error the cooldown should skip) needs a recorded status that does not exist yet, so it
       // is a follow-up, not something to infer at read time. Pinned by
       // aPartialSwapFailureIsHeldByTheCooldownNotRetriedNextSweep.
+      swapStarted = true;
       candles.swapStaged(exchange, symbol, "1m");
+      swappedIntervals.add("1m");
+      reportUnadjustedTail(equity, "1m");
       candles.swapStaged(exchange, symbol, "1d");
-    } finally {
+      swappedIntervals.add("1d");
+      reportUnadjustedTail(equity, "1d");
       candles.clearStaging(exchange, symbol);
+    } finally {
+      // Before the first swap, partial staging is unsafe and is discarded. Once a swap starts, the
+      // remaining staged rows are the verified checkpoint for a retry; clearing them would turn a
+      // partial live rebuild into a from-scratch rebuild and erase the only resumable work.
+      if (!swapStarted) {
+        candles.clearStaging(exchange, symbol);
+      }
     }
   }
 
@@ -503,19 +526,26 @@ public class CorporateActionJob {
               + ", short of the cached series at "
               + staged.cachedTo());
     }
-    if (staged.cachedBarsBelowSpan() > 0) {
-      unadjustedTail.increment(staged.cachedBarsBelowSpan());
-      log.warn(
-          "staged rebuild for {} leaves {} cached bar(s) older than {} UNADJUSTED — the series will"
-              + " carry a price discontinuity at that boundary; widen"
-              + " artha.corporate-actions.rebackfill-days-1d to cover them",
-          key,
-          staged.cachedBarsBelowSpan(),
-          staged.stagedFrom());
-    }
     log.info(
         "staged rebuild for {} verified: {} bar(s) covering [{} .. {}]",
         key, staged.stagedBars(), staged.stagedFrom(), staged.stagedTo());
+  }
+
+  /** Reports the post-swap tail only after this interval's replacement has committed. */
+  private void reportUnadjustedTail(Instrument equity, String interval) {
+    CandleRepository.StagedCoverage postSwap =
+        candles.stagedCoverage(equity.exchange(), equity.tradingsymbol(), interval);
+    String key = equity.exchange() + ":" + equity.tradingsymbol() + " " + interval;
+    if (postSwap.cachedBarsBelowSpan() > 0) {
+      unadjustedTail.increment(postSwap.cachedBarsBelowSpan());
+      log.warn(
+          "swapped rebuild for {} leaves {} cached bar(s) older than {} UNADJUSTED — the series"
+              + " carries a price discontinuity at that boundary; widen"
+              + " artha.corporate-actions.rebackfill-days-1d to cover them",
+          key,
+          postSwap.cachedBarsBelowSpan(),
+          postSwap.stagedFrom());
+    }
   }
 
   /**
@@ -542,7 +572,7 @@ public class CorporateActionJob {
             recordResolved(id, entryStatus, equity, " cagg refresh resumed");
           } catch (Exception e) {
             log.error("corporate-action refresh resume failed for {}", equity.tradingsymbol(), e);
-            recordFailure(id, equity, e);
+            recordFailure(id, equity, e, null);
           } finally {
             inFlight.remove(id);
           }
@@ -632,7 +662,8 @@ public class CorporateActionJob {
    * attempt was running, and downgrading {@code REFRESH_ABANDONED} to {@code FAILED} on the way out
    * would both destroy that verdict and re-classify the event into the wrong failure class.
    */
-  private void recordFailure(UUID id, Instrument equity, Exception e) {
+  private void recordFailure(
+      UUID id, Instrument equity, Exception e, List<String> swappedIntervals) {
     String recorded = events.statusOf(id).orElse("");
     if (TERMINAL.contains(recorded)) {
       log.warn(
@@ -653,6 +684,15 @@ public class CorporateActionJob {
     if (next.equals(recorded)) {
       return; // same state as the previous attempt — nothing changed to report
     }
+    String progress =
+        swappedIntervals == null
+            ? ""
+            : swappedIntervals.isEmpty()
+                ? " — no candle intervals swapped"
+                : swappedIntervals.size() == 2
+                    ? " — candle intervals swapped: " + String.join(", ", swappedIntervals)
+                    : " — partial rebuild; swapped interval(s): "
+                        + String.join(", ", swappedIntervals);
     ntfy.send(
         baseCommitted ? "Corporate action refresh failed" : "Corporate action rebuild FAILED",
         baseCommitted ? "default" : "urgent",
@@ -660,6 +700,8 @@ public class CorporateActionJob {
             + ":"
             + equity.tradingsymbol()
             + (baseCommitted ? " — base rebuilt, cagg refresh retrying: " : " — ")
+            + progress
+            + " — "
             + e.getMessage());
   }
 

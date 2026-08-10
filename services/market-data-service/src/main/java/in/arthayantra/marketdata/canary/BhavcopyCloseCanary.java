@@ -105,7 +105,7 @@ public class BhavcopyCloseCanary {
   }
 
   /** Daily sweep (20:10 IST, after the ~19:30 bhavcopy lands). Live-only. */
-  @Scheduled(cron = "${artha.bhavcopy-close.cron:0 10 20 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.bhavcopy-close.cron:0 11,26,41,56 18-19 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sweep() {
     if (!live || !enabled) {
       return;

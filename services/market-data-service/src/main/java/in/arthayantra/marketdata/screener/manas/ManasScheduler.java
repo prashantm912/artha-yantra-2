@@ -63,7 +63,7 @@ public class ManasScheduler {
   }
 
   /** Fallback cron (bhavcopy backfill failed → no event). 19:55, before the 20:05 swing batch. */
-  @Scheduled(cron = "${artha.manas-arora.cron:0 55 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.manas-arora.cron:0 52 18 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");
   }

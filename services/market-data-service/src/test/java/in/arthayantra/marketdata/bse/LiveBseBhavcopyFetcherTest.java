@@ -1,8 +1,10 @@
 package in.arthayantra.marketdata.bse;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.bse.BseBhavcopyFetcher.BseBhavRow;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -38,7 +40,9 @@ class LiveBseBhavcopyFetcherTest {
 
   @Test
   void parsesStkRowsByHeaderNameAndSkipsNonEquities() {
-    BseBhavcopyFetcher fetcher = new LiveBseBhavcopyFetcher(new StubBse(udiff()), "https://x");
+    BseBhavcopyFetcher fetcher =
+        new LiveBseBhavcopyFetcher(
+            new StubBse(udiff()), "https://x", new SimpleMeterRegistry(), MarketCalendar.nse());
 
     List<BseBhavRow> rows = fetcher.fetchForDate(LocalDate.of(2026, 6, 19));
 
@@ -56,7 +60,9 @@ class LiveBseBhavcopyFetcherTest {
 
   @Test
   void quotedCommaInNameDoesNotShiftOhlc() {
-    BseBhavcopyFetcher fetcher = new LiveBseBhavcopyFetcher(new StubBse(udiff()), "https://x");
+    BseBhavcopyFetcher fetcher =
+        new LiveBseBhavcopyFetcher(
+            new StubBse(udiff()), "https://x", new SimpleMeterRegistry(), MarketCalendar.nse());
 
     BseBhavRow comma =
         fetcher.fetchForDate(LocalDate.of(2026, 6, 19)).stream()
@@ -71,7 +77,9 @@ class LiveBseBhavcopyFetcherTest {
   @Test
   void htmlHomepageOnNonTradingDayYieldsEmpty() {
     String html = "<!DOCTYPE html>\n<html><head><title>BSE</title></head><body>LIVE Market</body></html>";
-    BseBhavcopyFetcher fetcher = new LiveBseBhavcopyFetcher(new StubBse(html), "https://x");
+    BseBhavcopyFetcher fetcher =
+        new LiveBseBhavcopyFetcher(
+            new StubBse(html), "https://x", new SimpleMeterRegistry(), MarketCalendar.nse());
 
     assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 20))).isEmpty();
   }
@@ -83,11 +91,38 @@ class LiveBseBhavcopyFetcherTest {
    */
   @Test
   void refusesAFileDatedForADifferentDayThanTheOneRequested() {
-    BseBhavcopyFetcher fetcher = new LiveBseBhavcopyFetcher(new StubBse(udiff()), "https://x");
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    BseBhavcopyFetcher fetcher = new LiveBseBhavcopyFetcher(
+        new StubBse(udiff()), "https://x", registry, MarketCalendar.nse());
 
     // The stub serves the same 19-Jun rows for EVERY URL.
     assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 22))).isEmpty();
     assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 19))).hasSize(3);
+
+    // Same rationale as the NSE twin: the refusal is invisible to every downstream health surface,
+    // so the counter is what makes a SYSTEMATIC refusal distinguishable from an empty fetch. The
+    // BSE tag is separate because the two feeds fail independently.
+    assertThat(
+            registry.get("ay_bhavcopy_misdated_payload_total").tag("exchange", "BSE").counter().count())
+        .as("one refusal, and exactly one — the correctly-dated fetch must not increment it")
+        .isEqualTo(1.0);
+  }
+
+  /** The BSE twin of the NSE holiday gate — see that test for why an ungated counter is unusable. */
+  @Test
+  void aHolidayRefusalIsNotCounted() {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    BseBhavcopyFetcher fetcher =
+        new LiveBseBhavcopyFetcher(new StubBse(udiff()), "https://x", registry, MarketCalendar.nse());
+
+    assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 26)))
+        .as("the guard still refuses the mis-dated payload — only the COUNT is calendar-gated")
+        .isEmpty();
+
+    assertThat(
+            registry.get("ay_bhavcopy_misdated_payload_total").tag("exchange", "BSE").counter().count())
+        .as("a holiday's re-served file is healthy behaviour and must not raise the counter")
+        .isEqualTo(0.0);
   }
 
   private static String udiff() {

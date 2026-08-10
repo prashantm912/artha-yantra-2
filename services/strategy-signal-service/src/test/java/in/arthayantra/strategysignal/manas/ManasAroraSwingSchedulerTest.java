@@ -44,7 +44,7 @@ class ManasAroraSwingSchedulerTest {
 
     run();
 
-    verify(intents).recordScheduled("manas-arora", SESSION, true);
+    verify(intents).recordSettled("manas-arora", SESSION, true);
     verify(recorder).runScheduled(doctrine, false);
   }
 
@@ -66,7 +66,7 @@ class ManasAroraSwingSchedulerTest {
 
     run();
 
-    verify(intents).recordScheduled("manas-arora", SESSION, false);
+    verify(intents).recordSettled("manas-arora", SESSION, false);
   }
 
   @Test
@@ -75,7 +75,7 @@ class ManasAroraSwingSchedulerTest {
     when(doctrine.enabled()).thenReturn(true);
     doThrow(new IllegalStateException("intent ledger unreachable"))
         .when(intents)
-        .recordScheduled(eq("manas-arora"), any(), anyBoolean());
+        .recordSettled(eq("manas-arora"), any(), anyBoolean());
 
     run();
 

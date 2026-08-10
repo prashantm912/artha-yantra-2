@@ -19,6 +19,57 @@ class SwingBatchIntentRepositoryIntegrationTest extends StrategySignalIntegratio
   @Autowired private SwingMissedBatchAlertRepository alerts;
   @Autowired private JdbcTemplate jdbc;
 
+  /**
+   * ⚠️ BOTH transition directions, and one of them is a money path.
+   *
+   * <p>The intraday ticks write PROVISIONALLY ({@code ON CONFLICT DO NOTHING}), so without an
+   * authoritative writer the first 09:05 observation would win permanently and the 16:00 settle
+   * could never correct it. Cross-vendor review found both halves broken (2026-08-10):
+   *
+   * <ul>
+   *   <li>armed at 09:05, DISARMED before the settle → intent stuck {@code true}, the settle writes
+   *       no marker, and the catch-up replays the session through the explicitly-armed historical
+   *       overload. A deliberately disabled family takes entries.
+   *   <li>disarmed at 09:05, ARMED before the settle → intent stuck {@code false} and every entry
+   *       for that session is forfeited while the family is live.
+   * </ul>
+   *
+   * <p>Widening the tick window would not have helped: once the row exists every later tick is a
+   * no-op. One writer has to be allowed to correct the others.
+   */
+  @Test
+  void theSettleOverwritesAProvisionalTickInBothDirections() {
+    LocalDate session = LocalDate.of(2026, 7, 21);
+
+    String armedThenDisarmed = "it-intent-off-" + java.util.UUID.randomUUID();
+    intents.recordScheduled(armedThenDisarmed, session, true); // 09:05 observation
+    intents.recordScheduled(armedThenDisarmed, session, true); // a later tick: no-op
+    intents.recordSettled(armedThenDisarmed, session, false); // 16:00, the authority
+    assertThat(intents.find(armedThenDisarmed, session))
+        .as("a family disarmed after the morning tick must NOT read as armed")
+        .contains(false);
+
+    String disarmedThenArmed = "it-intent-on-" + java.util.UUID.randomUUID();
+    intents.recordScheduled(disarmedThenArmed, session, false);
+    intents.recordSettled(disarmedThenArmed, session, true);
+    assertThat(intents.find(disarmedThenArmed, session))
+        .as("a family armed after the morning tick must not forfeit its entries")
+        .contains(true);
+  }
+
+  /** With no settle at all, the provisional tick still stands — that is why the ticks exist. */
+  @Test
+  void aProvisionalTickSurvivesWhenTheSettleNeverRuns() {
+    LocalDate session = LocalDate.of(2026, 7, 22);
+    String batch = "it-intent-nosettle-" + java.util.UUID.randomUUID();
+
+    intents.recordScheduled(batch, session, true);
+
+    assertThat(intents.find(batch, session))
+        .as("a container down at 16:00 must still leave the catch-up an intent row")
+        .contains(true);
+  }
+
   @Test
   void scheduleIntentIsImmutableForOneSessionAndMissingRowsAreEmpty() {
     String batch = "intent-it-" + UUID.randomUUID();

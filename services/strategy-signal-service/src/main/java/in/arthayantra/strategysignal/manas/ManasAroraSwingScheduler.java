@@ -67,7 +67,9 @@ public class ManasAroraSwingScheduler {
   public void run() {
     LocalDate session = LocalDate.now(clock.withZone(IST));
     try {
-      intents.recordScheduled(doctrine.batchName(), session, doctrine.enabled());
+      // recordSettled — the authoritative reading, overwriting the intraday ticks. See the
+      // Minervini twin for the transition defect this closes.
+      intents.recordSettled(doctrine.batchName(), session, doctrine.enabled());
     } catch (RuntimeException e) {
       log.warn(
           "{} swing schedule-intent record failed for {} — continuing: {}",

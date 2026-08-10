@@ -58,7 +58,7 @@ class MinerviniSwingSchedulerTest {
 
     run();
 
-    verify(intents).recordScheduled("minervini", SESSION, true);
+    verify(intents).recordSettled("minervini", SESSION, true);
     verify(recorder).runScheduled(doctrine, false);
   }
 
@@ -90,7 +90,7 @@ class MinerviniSwingSchedulerTest {
 
     run();
 
-    verify(intents).recordScheduled("minervini", SESSION, false);
+    verify(intents).recordSettled("minervini", SESSION, false);
   }
 
   /**
@@ -104,7 +104,7 @@ class MinerviniSwingSchedulerTest {
     when(doctrine.enabled()).thenReturn(true);
     doThrow(new IllegalStateException("intent ledger unreachable"))
         .when(intents)
-        .recordScheduled(eq("minervini"), any(), anyBoolean());
+        .recordSettled(eq("minervini"), any(), anyBoolean());
 
     run();
 

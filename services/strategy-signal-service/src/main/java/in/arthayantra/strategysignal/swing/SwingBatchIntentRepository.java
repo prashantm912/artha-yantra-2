@@ -17,13 +17,54 @@ public class SwingBatchIntentRepository {
     this.jdbc = jdbc;
   }
 
-  /** Records the effective flag once; a later same-day retry must not rewrite historical intent. */
+  /**
+   * Records a PROVISIONAL observation of the flag — first write wins, later ticks are no-ops.
+   *
+   * <p>Used by the intraday intent ticks, whose only job is to guarantee that SOME row exists for
+   * the session even if the settle never runs (a container down at 16:00 would otherwise leave the
+   * catch-up with nothing and forfeit the session's entries).
+   *
+   * <p>⚠️ It is deliberately NOT the authoritative value — see {@link #recordSettled}. A morning
+   * observation is a guess about what the flag will be at settle time, and the flag can move
+   * between them.
+   */
   public void recordScheduled(String batch, LocalDate session, boolean armed) {
     jdbc.update(
         """
         INSERT INTO swing_batch_schedule_intents (batch, session_date, armed, scheduled_at)
         VALUES (?, ?, ?, now())
         ON CONFLICT (batch, session_date) DO NOTHING
+        """,
+        batch, java.sql.Date.valueOf(session), armed);
+  }
+
+  /**
+   * Records the AUTHORITATIVE schedule-time arming — the settle's own reading, which OVERWRITES any
+   * provisional observation for the session.
+   *
+   * <p>⚠️ The overwrite is the whole point, and its absence was a Critical (cross-vendor review,
+   * 2026-08-10). With the intraday ticks writing {@code ON CONFLICT DO NOTHING}, the first 09:05
+   * observation won permanently and the settle could never correct it. Both transition directions
+   * then broke, and one of them is a money path:
+   *
+   * <ul>
+   *   <li><b>armed at 09:05, DISARMED before the settle</b> — intent stayed {@code true} and the
+   *       settle wrote no marker, so the catch-up replayed the session through the explicitly-armed
+   *       historical overload. A deliberately disabled family would take entries.
+   *   <li><b>disarmed at 09:05, ARMED before the settle</b> — intent stayed {@code false} and every
+   *       entry for the session was forfeited despite the family being live.
+   * </ul>
+   *
+   * <p>Extending the tick window would not have helped: once the row exists, every later tick is
+   * ignored. The fix has to be that one writer is allowed to correct the others.
+   */
+  public void recordSettled(String batch, LocalDate session, boolean armed) {
+    jdbc.update(
+        """
+        INSERT INTO swing_batch_schedule_intents (batch, session_date, armed, scheduled_at)
+        VALUES (?, ?, ?, now())
+        ON CONFLICT (batch, session_date) DO UPDATE
+          SET armed = EXCLUDED.armed, scheduled_at = EXCLUDED.scheduled_at
         """,
         batch, java.sql.Date.valueOf(session), armed);
   }

@@ -75,9 +75,15 @@ public class MinerviniSwingScheduler {
    * whole design exists for — leaves no row and forfeits the session.
    *
    * <p>Hourly and idempotent ({@code ON CONFLICT DO NOTHING}), so any tick during the session is
-   * enough and the FIRST one wins. ⚠️ It does not close the gap for a stack that is down for the
-   * WHOLE session: nothing in-process can record what it was never alive to see, and that residue is
-   * deliberately left to abandon loudly rather than infer today's flag onto a past session.
+   * enough and the first one wins among the ticks. ⚠️ These writes are PROVISIONAL: the 16:00 settle
+   * calls {@link SwingBatchIntentRepository#recordSettled} and OVERWRITES them, because the flag can
+   * move between 09:05 and 16:00 and a morning observation is only a guess about the settle-time
+   * value. Letting the guess stand was a Critical in review — a family disarmed after 09:05 would
+   * still have had its entries replayed by the catch-up.
+   *
+   * <p>⚠️ It does not close the gap for a stack that is down for the WHOLE session: nothing
+   * in-process can record what it was never alive to see, and that residue is deliberately left to
+   * abandon loudly rather than infer today's flag onto a past session.
    */
   @Scheduled(cron = "${artha.minervini.swing.intent-cron:0 5 9-15 * * MON-FRI}", zone = "Asia/Kolkata")
   public void recordIntent() {
@@ -98,7 +104,11 @@ public class MinerviniSwingScheduler {
   public void run() {
     LocalDate session = LocalDate.now(clock.withZone(IST));
     try {
-      intents.recordScheduled(doctrine.batchName(), session, doctrine.enabled());
+      // recordSettled, NOT recordScheduled: this is the AUTHORITATIVE reading and it must overwrite
+      // whatever the intraday ticks provisionally observed. The flag can move between 09:05 and
+      // 16:00, and letting the morning guess stand meant a disarmed family could still take entries
+      // through the catch-up (cross-vendor review, 2026-08-10).
+      intents.recordSettled(doctrine.batchName(), session, doctrine.enabled());
     } catch (RuntimeException e) {
       // Fail-soft on purpose: the detector's bookkeeping must never cost a settle. Losing the row
       // costs visibility of a miss; skipping the run costs an unevaluated stop.

@@ -1785,6 +1785,78 @@ this is the third time in one day a mechanical check overruled a conclusion two 
 converged on. **When a gate disagrees with a consensus, the gate is describing a state neither agent
 enumerated.** Do not "fix" the gate.
 
+#### 2026-08-11 (overnight closeout) — deployed, and the CA canary is ARMED
+
+**DEPLOYED + PROBED.** `flyway-init` force-recreated; **V055 → V056 → V057 applied in order**, each
+object probed rather than inferred from the log: `marketdata.symbol_lineage` present,
+`PARTIAL_SWAP` present in `corporate_action_events_status_check`, `marketdata.candle_rebuild_staging`
+present. Both services recreated, **13/13 healthy, 0 ERROR lines**, secret mounts confirmed pointing
+at the real checkout (not a worktree-poisoned directory). Deploy currency confirmed by
+FINGERPRINT, not timestamp: `CandleRepository$PartialSwapException.class` — a class that exists only
+in [#1297](https://github.com/prashantm912/artha-yantra-2/pull/1297) — is in the running jar.
+
+**Merged:** #1330 · #1297 @ `b14bb3e3` · #1329 @ `d766e39b` · #1334 @ `950bf2a8` · #1306 @
+`4e9f7455` · #1326 @ `a4e82618` · #1332 @ `31dda9af` · #1335 @ `f85ff736`.
+
+**N48 · ⚠️ THE CANARY ALLOWLIST COULD NOT BE SET, AND NOTHING WOULD HAVE SAID SO.**
+`CorporateActionJob` has read `artha.corporate-actions.symbols` since it was written. The key existed
+in **no** `application.yml` and had **no** compose passthrough. Putting
+`ARTHA_CORPORATE_ACTIONS_SYMBOLS` in `.env` would have produced no error, no log line and no effect —
+and the sweep would have taken all **248 DETECTED** symbols instead of the 2 the owner approved, on
+the path whose remediation OOM-crashed live Postgres three times.
+
+Found only because arming it was an actual task. **Both halves are required and exactly one was
+missing, which is what made it invisible:** a compose passthrough alone delivers the variable to the
+container and it is never read — and `docker inspect` shows it set, which is precisely the check an
+operator runs to confirm. `CorporateActionKnobPassthroughTest` now guards both sides for three knobs,
+**deriving** the env name from the property rather than writing it twice.
+
+**CA CANARY ARMED, 2026-08-11 ~02:30 IST** (owner: "canary first, 1-3 symbols"). `.env` edited IN
+PLACE (`r+` truncate/write — never a rename; ACL verified byte-identical before and after):
+`ARTHA_CORPORATE_ACTIONS_ENABLED=true`, `ARTHA_CORPORATE_ACTIONS_SYMBOLS=ITC,HDFCBANK`.
+Picked for unambiguity: **ITC** 7/7 anchors diverged at ratio 1.0426 over 4,970 daily bars, **HDFCBANK**
+a textbook 1.99992 split over 4,970. Verified by BEHAVIOUR, not config: six `ay_corporate_action_*`
+metrics are now exported, and they exist only when the `@ConditionalOnProperty` bean loads.
+`anchor_noise_total` and `unadjusted_tail_bars_total` both 0.0 — nothing has run yet.
+**⚠️ FIRST REAL SWEEP IS 16:30 IST 2026-08-11. Read `corporate_action_events` for ITC/HDFCBANK and
+the `unadjusted_tail_bars` counter before widening the allowlist.**
+
+**N49 · Five consecutive review rounds on #1333, and I introduced three of the five Criticals while
+fixing the previous one.** Ledger-worthy because it is a *pattern*, not five accidents:
+
+| Round | Critical | Whose |
+|---|---|---|
+| 1 | live scheduler bypassed `doctrine.enabled()` — a disabled family could exit and stamp completion | mine (first cut) |
+| 2 | the seed gate suppressed every exits-only session, one layer above where I had fixed it | pre-existing |
+| 3 | hourly intent ticks made 09:05 permanently override the authoritative 16:00 arming | **mine, fixing round 2** |
+| 4 | the overwrite covered only a SUCCESSFUL settle — and the settle's write is fail-soft | **mine, fixing round 3** |
+| 5 | the recovery pass wrote the marker that authorised its own next entry | **mine, fixing round 4** |
+
+The through-line: **each fix added a second writer, a second source of truth, or a second input to a
+computed threshold, and inherited the semantics the single-writer version had.** The question that
+would have caught all three — *what NEW state does this create, and which existing consumer reads it
+as if it were the old state?* Full write-up: memory `a-fix-can-reopen-the-hole-it-closed` §5.
+
+The sibling did it in miniature: #1283's `DEPTH_SLACK = 2` widened the probe footprint correctly and
+widened the materiality DENOMINATOR with it, so one hole in a depth-20 strategy stopped being
+material — silently undoing the 21→22 recalibration made earlier in the same PR. **Retreated to 0**
+with the gap documented, on the rule that *a measured-correct gate beats an unmeasured wider one.*
+
+**N50 · A migration that redefines an EXISTING writer's semantics reaches every fixture that used
+it — and those fixtures do not fail, they change meaning.** V061 made `recordScheduled` provisional.
+`SwingPaperExitCriticalsIntegrationTest` seeded intent through it, so three of its assertions
+silently began exercising the new exits-only path instead of what they were written for. They still
+passed. Caught only by a full-suite verify. **When a migration changes what an existing method
+MEANS, grep every caller including tests, and ask of each whether it meant the old thing.**
+
+**N51 · Two catalogued method traps, walked into anyway, in one session.** (a) `-Dtest='A+B'` — the
+invalid filter form — reported **12 passing tests off a STALE surefire report** for a class that
+actually has 14; the comma form ran 18. (b) A red-proof stayed GREEN because the test drove
+`warm()`, which calls `reload()` unconditionally and therefore **cannot observe the field under
+test**. Both are in `CLAUDE.md` and `MEMORY.md` already. **Knowing a trap and having a habit that
+avoids it are different things** — the only defence that worked both times was re-reading the
+failure text rather than the exit code.
+
 #### 2026-08-10 (late) — the swing day gets SPLIT: exits at 16:00, entries at 08:35
 
 **N46 · Owner decision: close the book as soon as the session closes.** Exits move from 20:00/20:05

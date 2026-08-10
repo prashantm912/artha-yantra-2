@@ -481,6 +481,19 @@ Detailed playbook + outcome log: memory topic `opus-delegation-standard`.
   while the deployed service served `{"type":"number"}` — a lie the sweep had already removed from the repo,
   still being published. Cheap live probes: `/v3/api-docs` for a known field, the frontend's served bundle
   hash vs `dist/index.html` (an IDENTITY check, not an mtime), `pg_constraint` for a migration object.
+- ⚠️ **The main CHECKOUT's BRANCH is part of the deploy, and a migration check will NOT catch it**
+  (2026-08-05). Deploying #1303 from the REAL checkout (worktree rule satisfied) still shipped
+  **pre-#1303 code**, because the checkout was parked on a branch merged BEFORE it. `MAVEN_EXIT=0`,
+  image `Built`, `UP_EXIT=0`, healthy, gateway `UP`, 0 ERROR lines — **and the recompiled `.class`
+  files carried the current timestamp**, which is what sells it. A fresh timestamp proves a REBUILD,
+  never the SOURCE it was built from. The false comfort was checking `deploy/flyway/<lineage>/`
+  against `origin/main` and finding them identical: **migrations only move when someone adds one, so
+  a checkout can be arbitrarily far behind on SOURCE with a matching migration set** — and a PR that
+  adds no migration makes that check pass by construction. **Pre-flight, in order:** (1)
+  `git rev-parse --abbrev-ref HEAD` — on `main`? (2) confirm the PR's commit is in HEAD's history
+  (`git log HEAD --oneline | grep <sha>`) — `--is-ancestor` alone is NOT enough, a merged older
+  branch is also an ancestor; (3) **grep the working tree for a symbol only the new code has** before
+  building; (4) fingerprint the JAR for it before `docker compose build`, not after deploying.
 - ⚠️ **Fingerprinting a NESTED lib class returns 0 from the outer fat jar — that is a FALSE NEGATIVE, not
   absence.** `unzip -l /app/*.jar | grep <LibClass>` = 0 for anything in `libs/`; and `unzip -p … | unzip -l
   /dev/stdin` does not work either (unzip cannot read stdin). Extract first:

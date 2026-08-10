@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import in.arthayantra.marketcalendar.MarketCalendar;
+import in.arthayantra.strategyengine.config.GateNode;
 import in.arthayantra.strategyengine.config.StrategyDefinition;
 import in.arthayantra.strategyengine.series.EngineCandle;
 import java.math.BigDecimal;
@@ -52,6 +53,15 @@ class SwingCoverageProbeTest {
     return new StrategyDefinition(
         "t", "1", "1d", List.of(), indicators, StrategyDefinition.Direction.LONG, null, null, exits,
         null, null);
+  }
+
+  /** Same, but with a gate that actually READS {@code gateAlias} — entry scoping keys on this. */
+  private static StrategyDefinition gated(
+      List<StrategyDefinition.IndicatorSpec> indicators, String gateAlias) {
+    return new StrategyDefinition(
+        "t", "1", "1d", List.of(), indicators, StrategyDefinition.Direction.LONG,
+        new GateNode.Expression(gateAlias, GateNode.Comparison.GT, null, BigDecimal.ZERO), null,
+        List.of(), null, null);
   }
 
   private static StrategyDefinition.IndicatorSpec indicator(String alias, Map<String, Object> p) {
@@ -331,6 +341,138 @@ class SwingCoverageProbeTest {
                             "stop_loss", Map.of("basis", "percent", "value", 8)))),
                 null))
         .isZero();
+  }
+
+  @Test
+  @DisplayName("FOOTPRINT: a hole just past the declared depth is invisible to probe and refused by probeEntry")
+  void probeEntryFindsHolesInTheSlackRegionThatProbeCannotSee() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+    // Session index 39 of 60 is the one position that separates the two windows: the last 20 bars
+    // span sessions 40..59 and never touch it, while the last 22 bars reach back to session 37 and
+    // do. That is the entire footprint gap, in one fixture.
+    List<EngineCandle> bars = tradingWindow(60, end, 39);
+
+    SwingCoverageProbe.Coverage declaredOnly = SwingCoverageProbe.probe(bars, 20, NSE);
+    assertThat(declaredOnly.missing())
+        .as("the declared 20-bar window spans no hole — this is what production used to see")
+        .isEmpty();
+    assertThat(declaredOnly.materiallyIncomplete()).isFalse();
+
+    SwingCoverageProbe.Coverage entry = SwingCoverageProbe.probeEntry(bars, 20, NSE);
+    assertThat(entry.missing())
+        .as("reading DEPTH_SLACK bars further back reaches the hole")
+        .hasSize(1);
+    assertThat(entry.materialityBasis())
+        .as("the hole is OUTSIDE the declared depth, so it does not inflate the denominator")
+        .isEqualTo(20);
+    assertThat(entry.windowSessions())
+        .as("the footprint DID widen — without this the test passes vacuously at DEPTH_SLACK 0")
+        .isGreaterThan(declaredOnly.windowSessions());
+    assertThat(entry.materiallyIncomplete())
+        .as("1 hole against a declared-depth basis of 20 is 5%, over the 4.545% band — refuse")
+        .isTrue();
+  }
+
+  @Test
+  @DisplayName("FOOTPRINT: widening the read moves no calibration point — slack tightens or does nothing")
+  void slackWidensTheFootprintWithoutMovingTheMaterialityBand() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+    // The invariant that makes DEPTH_SLACK safe to be non-zero again. At 2 it once LOOSENED this
+    // gate, because materiality then divided by the probed span: widening the probe widened the
+    // denominator and 1 x 22 > 23 went false, silently undoing the 21 -> 22 recalibration. Every
+    // calibration point from depth20CatchesOneSessionAndDepth50KeepsTheBoundary is re-run through
+    // the production entry call and must return the SAME verdict.
+    record Case(String label, List<EngineCandle> bars, int depth, boolean refuses) {}
+    List<Case> cases =
+        List.of(
+            new Case("depth 20, no hole", tradingWindow(60, end), 20, false),
+            new Case("depth 20, one hole", tradingWindow(60, end, 50), 20, true),
+            new Case("depth 50, two holes", tradingWindow(100, end, 60, 80), 50, false),
+            new Case("depth 50, three holes", tradingWindow(100, end, 60, 70, 80), 50, true));
+
+    for (Case c : cases) {
+      SwingCoverageProbe.Coverage declaredOnly = SwingCoverageProbe.probe(c.bars(), c.depth(), NSE);
+      SwingCoverageProbe.Coverage entry = SwingCoverageProbe.probeEntry(c.bars(), c.depth(), NSE);
+
+      assertThat(entry.materiallyIncomplete())
+          .as("%s: the entry probe must agree with the calibrated band", c.label())
+          .isEqualTo(c.refuses())
+          .isEqualTo(declaredOnly.materiallyIncomplete());
+      assertThat(entry.windowSessions())
+          .as(
+              "%s: the entry probe must actually READ further than the declared depth, else this"
+                  + " whole test is vacuous",
+              c.label())
+          .isGreaterThan(declaredOnly.windowSessions());
+      assertThat(entry.lookbackBars())
+          .as("%s: the reading reports the DECLARED depth, not the widened one", c.label())
+          .isEqualTo(c.depth());
+    }
+  }
+
+  @Test
+  @DisplayName("FOOTPRINT: the entry probe is driven by the production depth, not a hand-passed one")
+  void probeEntryTakesItsDepthFromTheStrategyDefinition() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+    // Every other test in this class hands probe() a literal depth, which is exactly how a
+    // mis-scoped entryLookbackBars would go unnoticed. This one goes through the production pair:
+    // entryLookbackBars(definition) -> probeEntry, the same two calls SwingBatchEngine#entryCoverage
+    // makes.
+    StrategyDefinition d =
+        gated(
+            List.of(indicator("px", Map.of("period", 1)), indicator("sma20", Map.of("period", 20))),
+            "sma20");
+    int depth = SwingCoverageProbe.entryLookbackBars(d);
+    assertThat(depth).as("declared, un-widened — the slack belongs to probeEntry").isEqualTo(20);
+
+    SwingCoverageProbe.Coverage clean =
+        SwingCoverageProbe.probeEntry(tradingWindow(60, end), depth, NSE);
+    assertThat(clean.materiallyIncomplete()).isFalse();
+    assertThat(clean.windowSessions())
+        .as("22 bars read for a declared depth of 20")
+        .isEqualTo(depth + SwingCoverageProbe.DEPTH_SLACK);
+
+    SwingCoverageProbe.Coverage holed =
+        SwingCoverageProbe.probeEntry(tradingWindow(60, end, 50), depth, NSE);
+    assertThat(holed.materiallyIncomplete())
+        .as("one hole inside a depth-20 entry window refuses, end to end")
+        .isTrue();
+  }
+
+  @Test
+  @DisplayName("FOOTPRINT: a non-positive declared depth makes no claim rather than probing the slack")
+  void probeEntryWithNoDepthMakesNoClaim() {
+    // entryLookbackBars returns 0 when nothing depth-bearing is read. Without the guard, adding
+    // DEPTH_SLACK to 0 would probe a 2-bar window and report it complete — a gate that answers
+    // "sound" for a strategy it never measured.
+    SwingCoverageProbe.Coverage none =
+        SwingCoverageProbe.probeEntry(tradingWindow(60, LocalDate.of(2026, 8, 3)), 0, NSE);
+    assertThat(none.determinable()).isFalse();
+    assertThat(none.notProvenSound()).isTrue();
+  }
+
+  @Test
+  @DisplayName("FOOTPRINT: describe() is byte-identical on the exit path and only widens for entry")
+  void describeKeepsTheLegacyWordingWhereverTheBasisEqualsTheFootprint() {
+    LocalDate end = LocalDate.of(2026, 8, 3);
+    // Cross-vendor review Major, caught after the split had already been claimed exit-safe: this
+    // string reaches the exit error log AND the operator alert (SwingBatchEngine:974, :984), so a
+    // reworded describe() is an exit-path behaviour change however pure the arithmetic is. Pinned as
+    // a literal because "the exit reading is unchanged" is exactly the claim that was wrong.
+    SwingCoverageProbe.Coverage exit = SwingCoverageProbe.probe(tradingWindow(60, end, 50), 20, NSE);
+    assertThat(exit.materialityBasis()).isEqualTo(exit.windowSessions());
+    assertThat(exit.describe())
+        .as("plain probe = every exit reading: legacy wording, no declared-depth span")
+        .isEqualTo("1 of 21 sessions missing (4% of the probed span, declared depth 20,"
+            + " 2026-07-21..2026-07-21)");
+
+    SwingCoverageProbe.Coverage entry =
+        SwingCoverageProbe.probeEntry(tradingWindow(60, end, 50), 20, NSE);
+    assertThat(entry.materialityBasis()).isNotEqualTo(entry.windowSessions());
+    assertThat(entry.describe())
+        .as("a WIDENED reading names the denominator, because there it differs from the footprint")
+        .contains("% of the declared-depth span " + entry.materialityBasis())
+        .doesNotContain("% of the probed span");
   }
 
   /** A fixed count of NSE sessions ending at {@code end}, optionally omitting session indexes. */

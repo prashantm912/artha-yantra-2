@@ -133,15 +133,21 @@ public final class SwingCoverageProbe {
   /**
    * One coverage reading over the last {@code lookbackBars} bars.
    *
-   * @param lookbackBars the window depth probed (bars)
+   * @param lookbackBars the DECLARED indicator depth this reading is about (bars). NOT the number
+   *     of bars read — the entry probe reads {@link #DEPTH_SLACK} more than this.
+   * @param windowSessions trading sessions spanned by the bars actually READ (held + holes). The
+   *     footprint. Grows with slack.
+   * @param materialityBasis trading sessions spanned by the DECLARED depth alone (held + holes
+   *     inside it). The denominator {@link Coverage#materiallyIncomplete()} divides by, held apart
+   *     from {@code windowSessions} precisely so widening the footprint cannot loosen the gate.
    * @param windowStart first session in the probed window, {@code null} when not determinable
    * @param missing calendar trading days inside the window with no bar, ascending
    * @param determinable false when no claim can be made (empty series, zero depth, or a year the
    *     bundled calendar does not cover) — callers MUST treat this as "unknown", never "complete"
    */
   public record Coverage(
-      int lookbackBars, int windowSessions, LocalDate windowStart, List<LocalDate> missing,
-      boolean determinable) {
+      int lookbackBars, int windowSessions, int materialityBasis, LocalDate windowStart,
+      List<LocalDate> missing, boolean determinable) {
 
     public Coverage {
       missing = missing == null ? List.of() : List.copyOf(missing);
@@ -155,14 +161,23 @@ public final class SwingCoverageProbe {
     /**
      * A hole big enough to plausibly move the value — see {@link #MATERIALITY_DENOMINATOR}.
      *
-     * <p>Measured against {@code windowSessions} (bars held + holes, i.e. the sessions the probed
-     * span actually covers) rather than the DECLARED {@code lookbackBars}. The two differ whenever
-     * the series is shorter than the declared depth — a warming symbol with 25 bars under a 50-bar
-     * SMA — and using the declared depth there would halve the apparent fraction and silently
-     * under-report exactly the thin-history symbols most sensitive to a missing bar.
+     * <p>Measured against {@link #materialityBasis} — the sessions the DECLARED depth spans (bars
+     * held + holes inside it) — never against {@link #windowSessions}, the sessions the probe
+     * actually READ. On the plain {@link #probe} the two are equal and this is the historic
+     * behaviour. They diverge on {@link #probeEntry}, which reads {@link #DEPTH_SLACK} bars past the
+     * declared depth, and keeping them apart is the whole point: a hole anywhere in the wider
+     * footprint counts in the NUMERATOR, while the denominator stays pinned to the declared depth,
+     * so widening the probe can only ever tighten the gate. Dividing by the widened span is exactly
+     * the defect this separation replaces — it made {@code 1 x 22 > 23} false and silently reopened
+     * the one-hole depth-20 case the 21 -> 22 recalibration existed to refuse.
+     *
+     * <p>Basis is a SPAN, not the declared number: it is bars-held + holes, so it collapses to the
+     * series length whenever the series is shorter than the declared depth — a warming symbol with
+     * 25 bars under a 50-bar SMA. Using the declared 50 there would halve the apparent fraction and
+     * silently under-report exactly the thin-history symbols most sensitive to a missing bar.
      */
     public boolean materiallyIncomplete() {
-      return incomplete() && missing.size() * MATERIALITY_DENOMINATOR > windowSessions;
+      return incomplete() && missing.size() * MATERIALITY_DENOMINATOR > materialityBasis;
     }
 
     /**
@@ -204,12 +219,22 @@ public final class SwingCoverageProbe {
       if (missing.isEmpty()) {
         return "complete over " + lookbackBars + "-bar window";
       }
+      String span =
+          materialityBasis == windowSessions
+              // The plain probe, i.e. every EXIT reading: byte-identical to the pre-split text.
+              // Cross-vendor review Major — this string reaches the exit error log and the operator
+              // alert (SwingBatchEngine:974, :984), so changing it here breaks the exit-path byte
+              // identity this change claims. Only a WIDENED entry reading gets the new wording.
+              ? (missing.size() * 100 / Math.max(1, windowSessions)) + "% of the probed span"
+              : (missing.size() * 100 / Math.max(1, materialityBasis))
+                  + "% of the declared-depth span "
+                  + materialityBasis;
       return missing.size()
           + " of "
           + windowSessions
           + " sessions missing ("
-          + (missing.size() * 100 / Math.max(1, windowSessions))
-          + "% of the probed span, declared depth "
+          + span
+          + ", declared depth "
           + lookbackBars
           + ", "
           + missing.get(0)
@@ -220,35 +245,51 @@ public final class SwingCoverageProbe {
   }
 
   /**
-   * Extra bars probed beyond the declared indicator depth.
+   * Extra bars the ENTRY probe reads beyond the declared indicator depth, to cover the gap between
+   * a DECLARED depth and the rows the evaluator actually touches. Two, measured in the live
+   * evaluator, for two independent reasons:
    *
-   * <p>⚠️ CURRENTLY ZERO, and that is a RETREAT, not a design. It was 2 — one bar for the
-   * "current bar plus prior D" read convention, one for a crossover's previous operand — which
-   * is the right direction for the footprint. But materiality divides by {@code windowSessions},
-   * the span actually probed, so widening the probe widened the denominator and a single hole in
-   * a depth-20 strategy stopped being material: 1 × 22 > 23 is false. That silently REOPENED the
-   * one-hole case the 21 → 22 denominator recalibration was made to refuse — two correct-looking
-   * changes composing into a defect, measured by cross-vendor review rather than by me.
+   * <ul>
+   *   <li>an indicator of declared depth D reads the CURRENT bar plus the prior D — {@code
+   *       VOLUME_RATIO(20)} touches 21 rows, not 20; and
+   *   <li>{@code crossover}/{@code crossunder} read the PREVIOUS value of each operand as well as
+   *       the current one, so a D-deep operand under a crossover needs one further bar behind that.
+   * </ul>
    *
-   * <p>Zero restores a KNOWN state: the footprint gap stays open and the materiality gate stays
-   * calibrated, rather than trading a documented gap for an undocumented loosening. Closing it
-   * properly means reconciling the probed footprint with the materiality fraction — the fraction
-   * must be taken over the DECLARED depth even when the probe reads wider — plus a test that
-   * invokes the production depth rather than a hand-passed one. That is the open work. See {@link #entryLookbackBars} for why
-   * this is a flat widening rather than a per-indicator warmup model.
+   * <p>Deliberately a flat widening rather than a per-indicator warm-up calculation: probing MORE
+   * bars can only find MORE holes, never fewer, so erring wide errs fail-CLOSED, the safe side of an
+   * ENTRY gate by this class's own doctrine. A per-indicator model would be tighter and is exactly
+   * the kind of derived constant that was wrong here in the first place.
    *
-   * <p>Package-visible so the depth ratchet can assert {@code declared + DEPTH_SLACK} instead of
-   * freezing a second copy of the number — a ratchet that hardcodes what it guards drifts silently.
+   * <p>⚠️ <b>This was 2, then 0, and is 2 again — the history is the point.</b> At 2 it originally
+   * LOOSENED the gate it was built to tighten, because materiality then divided by the probed span:
+   * widening the probe widened the denominator, so one hole in a depth-20 strategy stopped being
+   * material ({@code 1 x 22 > 23} is false) and the 21 -> 22 recalibration was silently undone. Two
+   * correct-looking changes composing into a defect. It was retreated to 0 to restore a KNOWN state
+   * — footprint gap open, materiality calibrated — rather than trade a documented gap for an
+   * undocumented loosening.
    *
-   * <p>Applied to the ENTRY window only. The exit probe is observational (it alerts, never refuses),
-   * so under-probing there costs an alert rather than a wrong trade, and widening it would change
-   * the exit alert population for no decision benefit.
+   * <p>It is 2 again only because the two quantities are now separate: {@link
+   * Coverage#windowSessions} is the footprint (grows with slack) and {@link
+   * Coverage#materialityBasis} is the declared-depth span (does not). A hole in the slack region
+   * counts in the numerator against an unchanged denominator, so slack now moves the gate in one
+   * direction only — tighter. Verified by holding every calibration case fixed while slack goes
+   * 0 -> 2 ({@code SwingCoverageProbeTest#slackWidensTheFootprintWithoutMovingTheMaterialityBand}).
+   *
+   * <p>Package-visible so the depth ratchet can assert against it instead of freezing a second copy
+   * of the number — a ratchet that hardcodes what it guards drifts silently.
+   *
+   * <p>Applied to the ENTRY probe only, and applied INSIDE {@link #probeEntry} rather than folded
+   * into {@link #entryLookbackBars}: the probe needs the declared depth and the widened depth as two
+   * separate numbers, so a caller that pre-widens leaves it no way to compute the basis. The exit
+   * probe is observational (it alerts, never refuses), so under-probing there costs an alert rather
+   * than a wrong trade.
    */
-  static final int DEPTH_SLACK = 0;
+  static final int DEPTH_SLACK = 2;
 
   /** A reading that makes no claim — the safe default for every uncertain input. */
   public static Coverage undeterminable(int lookbackBars) {
-    return new Coverage(lookbackBars, 0, null, List.of(), false);
+    return new Coverage(lookbackBars, 0, 0, null, List.of(), false);
   }
 
   /**
@@ -277,25 +318,13 @@ public final class SwingCoverageProbe {
           deepest = Math.max(deepest, deepestParam(spec.params()));
         }
       }
-      // ⚠️ A DECLARED depth is not the number of BARS the evaluator reads, and probing the declared
-      // depth measured a narrower span than the decision actually depends on (cross-vendor review,
-      // 2026-08-10). Two separate reasons, both measured in the live evaluator:
-      //
-      //   * an indicator of declared depth D reads the CURRENT bar plus the prior D — VOLUME_RATIO(20)
-      //     touches 21 rows, not 20; and
-      //   * crossover/crossunder read the PREVIOUS value of each operand as well as the current one,
-      //     so a D-deep operand under a crossover needs one further bar behind that.
-      //
-      // So a gap sitting one or two bars past the probed edge could move the entry decision while the
-      // probe reported the window complete. DEPTH_SLACK widens the span to cover both.
-      //
-      // Deliberately a flat, conservative widening rather than a per-indicator warmup calculation:
-      // probing MORE bars can only ever find MORE holes, never fewer, so erring wide errs
-      // fail-CLOSED — which is the safe side of an ENTRY gate by this class's own doctrine. A
-      // per-indicator model would be tighter and is the right eventual fix; it is also exactly the
-      // kind of derived constant that was wrong here in the first place, so it does not get guessed
-      // at 1am.
-      return deepest == 0 ? 0 : deepest + DEPTH_SLACK;
+      // Returns the DECLARED depth, deliberately un-widened. A declared depth is NOT the number of
+      // bars the evaluator reads — see DEPTH_SLACK for the two measured reasons — but the widening
+      // belongs to probeEntry, which needs BOTH numbers: the wide one to find holes, the declared
+      // one as the materiality denominator. Folding slack in here would hand the probe a single
+      // pre-widened number and leave it no way to tell the two apart, which is precisely how the
+      // widening came to loosen the gate the first time.
+      return deepest;
     } catch (RuntimeException e) {
       return 0;
     }
@@ -410,16 +439,45 @@ public final class SwingCoverageProbe {
    */
   public static Coverage probe(
       List<EngineCandle> series, int lookbackBars, MarketCalendar calendar) {
-    if (series == null || series.isEmpty() || lookbackBars <= 0 || calendar == null) {
-      return undeterminable(lookbackBars);
+    return measure(series, lookbackBars, lookbackBars, calendar);
+  }
+
+  /**
+   * The ENTRY reading: probes {@code declaredDepth + }{@link #DEPTH_SLACK} bars but keeps the
+   * materiality denominator at the declared depth's own span.
+   *
+   * <p>Use this at every entry site and pass the raw {@link #entryLookbackBars} result. Do NOT
+   * pre-widen and call {@link #probe} — that hands one number where two are needed and reproduces
+   * the composed defect DEPTH_SLACK documents.
+   *
+   * <p>The direction is one-way by construction: the wider read can only add to {@code missing}
+   * (the numerator) while {@code materialityBasis} is computed from the declared depth alone, so
+   * slack tightens the gate or leaves it alone, and can never loosen it.
+   */
+  public static Coverage probeEntry(
+      List<EngineCandle> series, int declaredDepth, MarketCalendar calendar) {
+    if (declaredDepth <= 0) {
+      return undeterminable(declaredDepth);
+    }
+    return measure(series, declaredDepth + DEPTH_SLACK, declaredDepth, calendar);
+  }
+
+  /**
+   * @param probedBars how many trailing bars to READ (declared depth plus any slack)
+   * @param declaredBars the depth the materiality fraction is taken over; {@code <= probedBars}
+   */
+  private static Coverage measure(
+      List<EngineCandle> series, int probedBars, int declaredBars, MarketCalendar calendar) {
+    if (series == null || series.isEmpty() || probedBars <= 0 || calendar == null) {
+      return undeterminable(declaredBars);
     }
     try {
-      int from = Math.max(0, series.size() - lookbackBars);
+      int from = Math.max(0, series.size() - probedBars);
       List<LocalDate> dates = new ArrayList<>(series.size() - from);
       for (int i = from; i < series.size(); i++) {
         EngineCandle bar = series.get(i);
         if (bar == null || bar.bucketStart() == null) {
-          return undeterminable(lookbackBars);
+          return undeterminable(declaredBars);
         }
         dates.add(bar.bucketStart().withOffsetSameInstant(IST).toLocalDate());
       }
@@ -427,7 +485,7 @@ public final class SwingCoverageProbe {
       LocalDate last = dates.get(dates.size() - 1);
       for (int year = first.getYear(); year <= last.getYear(); year++) {
         if (!calendar.coveredYears().contains(year)) {
-          return undeterminable(lookbackBars);
+          return undeterminable(declaredBars);
         }
       }
       Set<LocalDate> present = new HashSet<>(dates);
@@ -437,9 +495,27 @@ public final class SwingCoverageProbe {
           missing.add(d);
         }
       }
-      return new Coverage(lookbackBars, dates.size() + missing.size(), first, missing, true);
+      // The denominator is the DECLARED depth's own span, computed over the same held/holes
+      // definition as windowSessions but restricted to the last `declaredBars` rows. When the series
+      // is shorter than the declared depth the two coincide, which is the warming-symbol case
+      // materiallyIncomplete() relies on.
+      int declaredHeld = Math.min(declaredBars, dates.size());
+      LocalDate declaredFirst = dates.get(dates.size() - declaredHeld);
+      int holesInDeclared = 0;
+      for (LocalDate d : missing) {
+        if (!d.isBefore(declaredFirst)) {
+          holesInDeclared++;
+        }
+      }
+      return new Coverage(
+          declaredBars,
+          dates.size() + missing.size(),
+          declaredHeld + holesInDeclared,
+          first,
+          missing,
+          true);
     } catch (RuntimeException e) {
-      return undeterminable(lookbackBars);
+      return undeterminable(declaredBars);
     }
   }
 }

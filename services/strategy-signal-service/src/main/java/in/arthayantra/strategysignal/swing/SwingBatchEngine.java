@@ -1097,7 +1097,10 @@ public class SwingBatchEngine {
    */
   private static SwingCoverageProbe.Coverage entryCoverage(
       SwingStrategy strat, List<EngineCandle> series) {
-    return SwingCoverageProbe.probe(
+    // probeEntry, not probe: it widens the READ by DEPTH_SLACK while pinning the materiality
+    // denominator to the declared depth. Passing entryLookbackBars() to probe() would restore the
+    // single-number shape whose widening loosened this gate once already.
+    return SwingCoverageProbe.probeEntry(
         series, SwingCoverageProbe.entryLookbackBars(strat.definition()), calendar);
   }
 

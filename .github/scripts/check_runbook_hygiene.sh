@@ -15,11 +15,11 @@
 # repo has historically ended up admin-merging past red checks. `it-naming-guard` in ci-java.yml
 # is the same shape and the direct precedent.
 #
-# ⚠️ TRADE RECORDED HONESTLY: `build-test (strategy-gateway)` IS one of main's eight required
-# contexts and this job is NOT, so today this reports red rather than blocking the merge.
-# Promoting `runbook-hygiene` to a required context is a one-call owner decision and would make
-# the end state strictly better than the original (fast, every-PR, blocking, and — unlike the
-# Testcontainers shard — incapable of flaking). Until then the guard is visible, not binding.
+# TRADE, AS ORIGINALLY RECORDED: `build-test (strategy-gateway)` IS a required context and this job
+# was NOT, so it reported red rather than blocking the merge. ✅ RESOLVED 2026-08-04 (#1298, owner
+# call): `runbook-hygiene` was promoted and is now one of main's NINE required contexts. The guard is
+# binding, not merely visible. Re-read the protection API rather than trusting any count written
+# here — it has moved three times in a week (six on 08-01, eight and then nine on 08-04).
 #
 # Usage: check_runbook_hygiene.sh [repo_root]   (defaults to the enclosing git worktree root)
 set -euo pipefail
@@ -95,9 +95,15 @@ done
 # ---------------------------------------------------------------------------
 # ASSERTION 2 — no runbook prescribes an admin merge.
 #
-# This is the assertion that carries the weight. `--admin` bypasses ALL EIGHT of main's required
+# This is the assertion that carries the weight. `--admin` bypasses ALL NINE of main's required
 # contexts, and `lock_branch` — the branch-level lock that was the only reason it was ever needed
 # — was set false on 2026-07-26.
+#
+# ⚠️ The count MOVES — it was six on 2026-08-01, eight earlier on 2026-08-04, and nine once this
+# very guard was promoted. Verified nine on 2026-08-08 against the protection API:
+# contracts · e2e · gitleaks · build-test (market-data|backtest|strategy-gateway) ·
+# optimizer-lint-test · margin-lint-test · runbook-hygiene. **Re-read the API before quoting a
+# number here** — CLAUDE.md says the same, and this comment was stale at EIGHT for four days.
 #
 # ⚠️ SCOPE IS ALL RUNBOOK TEXT, NOT JUST SKILL.md (review MAJOR-2). The first cut filtered to
 # `SKILL.md` and was therefore blind to 29 tracked files, including .claude/skills/codex/ROUTING.md,
@@ -136,14 +142,44 @@ ALLOW_MARKER='runbook-hygiene:allow'
 # live-incident lane that cannot merge past an unrelated red check is not a fast lane.
 EXEMPT_SKILLS="hotfix"
 
+# ⚠️ `git ls-files`, NOT `find` (fixed 2026-08-08). `find` walks the WORKING TREE, so it also sees
+# gitignored local state that CI never checks out — measured: it picked up three untracked files
+# under .claude/skills/comprehensive-audit/state/ (context-pack.md, findings-ledger.md,
+# shard-scopes.md, all matched by that dir's own .gitignore `*`), and one of them carries a
+# CAUTIONARY sentence about admin-merge. Net effect: this guard FAILED locally while passing in CI.
+# That split is corrosive — a check that reds on your machine and greens on the runner trains people
+# to ignore it, which is exactly the disable-pressure the escape hatch above exists to relieve.
+# 55 files under `find` vs 52 under `git ls-files`; the three-file delta IS the bug.
 runbook_files="$(
-  find "$CLAUDE_TREE" "$AGENTS_TREE" -type f \( -name '*.md' -o -name '*.tpl' \) 2>/dev/null | sort
+  git ls-files -- \
+    "$CLAUDE_TREE/*.md" "$CLAUDE_TREE/*.tpl" \
+    "$AGENTS_TREE/*.md" "$AGENTS_TREE/*.tpl" | sort
 )"
+
+# ⚠️ FAIL CLOSED ON AN EMPTY LIST (review 2026-08-08, Critical — found on the very PR that
+# introduced `git ls-files` here). Assertion 1 has always refused an empty intersection; assertion 2
+# did not, so a `git ls-files` that legitimately SUCCEEDS while returning nothing — a partial sparse
+# checkout, a pathspec that stops matching after a tree move, a rename of CLAUDE_TREE — would scan
+# zero files and print "all assertions passed". Silently scanning nothing is the exact failure this
+# guard exists to prevent, and switching from `find` to `git ls-files` made it strictly MORE
+# reachable, since the index can disagree with the worktree. A non-repository already exits 128 via
+# `set -e`; this covers the successful-but-empty case, which is the one that reports green.
+if [ -z "$runbook_files" ]; then
+  fail "Enumerated ZERO runbook files under $CLAUDE_TREE / $AGENTS_TREE. Either a tree moved, the pathspecs stopped matching, or this is a partial checkout — in every case the admin-merge assertion below scanned nothing and would otherwise have reported green. Scanning nothing is not passing."
+fi
 
 for file in $runbook_files; do
   # skills/<name>/... — field 3 of the path is the skill directory.
   skill="$(cut -d/ -f3 <<<"$file")"
   case " $EXEMPT_SKILLS " in *" $skill "*) continue ;; esac
+
+  # ⚠️ An INDEXED-BUT-ABSENT file (sparse checkout, a cone that excludes .claude/) must fail, not be
+  # skipped. Without this, `grep … 2>/dev/null || true` turns "cannot read the file" into "the file
+  # is clean" — same class as the empty-list case above, one file at a time.
+  if [ ! -r "$file" ]; then
+    fail "$file is tracked but not readable in this checkout (sparse checkout? partial clone?). This guard cannot certify a file it never read, and treating an unreadable runbook as clean is how a prescription reaches an agent session unchallenged."
+    continue
+  fi
 
   # Offending lines = match a banned spelling AND do not carry the marker.
   hits="$(grep -nE "$ADMIN_PATTERNS" "$file" 2>/dev/null | grep -v "$ALLOW_MARKER" || true)"
@@ -161,7 +197,7 @@ if [ "$failures" -gt 0 ]; then
 --------------------------------------------------------------------------------
 runbook-hygiene FAILED.
 
-`--admin` bypasses ALL EIGHT of main's required contexts. `lock_branch` -- the only
+`--admin` bypasses ALL NINE of main's required contexts. `lock_branch` -- the only
 reason it was ever needed -- was set false on 2026-07-26. Reaching for it now means a
 required check is genuinely red, and reading that check is the job.
 

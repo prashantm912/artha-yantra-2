@@ -189,6 +189,7 @@ public class SwingBatchRecorder {
     doctrine.pyramid().describe().forEach((k, v) -> flags.put("pyramid." + k, v));
     flagSnapshots.capture(
         FlagSnapshotService.SWING_BATCH, doctrine.batchName() + ":" + runDate, doctrine.book(), flags);
+    SwingBatchEngine.AdmissionProbe probe = result.admission();
     boolean markerRecorded = false;
     boolean snapshotAvailable = candidateSnapshot == null || candidateSnapshot.isPresent();
     if (snapshotAvailable
@@ -196,7 +197,6 @@ public class SwingBatchRecorder {
         && result.refusalReasons().isEmpty()
         && (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0)) {
       try {
-        SwingBatchEngine.AdmissionProbe probe = result.admission();
         markerRecorded =
             runs.record(
                 doctrine.batchName(), runDate, result.strategies(), result.candidates(),
@@ -216,10 +216,23 @@ public class SwingBatchRecorder {
     } catch (RuntimeException e) {
       log.warn("{} swing sell-decision persist failed: {}", doctrine.batchName(), e.getMessage());
     }
+    // A governor-bound run reads as "N candidates, 0 entries" — indistinguishable from a dead batch
+    // unless the probe is spelled out. Appended only when something actually shed a would-be entrant,
+    // so an ordinary run's alert text is unchanged.
+    // ⚠️ SAY "entry governor", NOT "slot cap" (review 2026-08-08). capBound is capExceedance > 0, i.e.
+    // wouldEnter - admitted, and that gap is opened by ANY of entryVeto's six rails (KILL_SWITCH,
+    // MAX_OPEN, DAILY_LOSS, DAILY_PROFIT_TARGET, MAX_DEPLOYMENT_PCT, HEAT_CAP_PCT) as well as the M40
+    // portfolio open-risk skip. Naming the slot cap here would send the owner to free a slot on a book
+    // that had merely banked its daily target. Do NOT call entryVeto to name the rail precisely — it
+    // carries risk_audit + ntfy side effects per trip.
     String summary =
         result.candidates() + " candidates, " + result.entries() + " entries, " + result.exits()
             + " exits, " + result.exitSkipped() + " exit-skipped ("
-            + result.strategies() + " strategies)";
+            + result.strategies() + " strategies)"
+            + (probe.capBound()
+                ? " — entry governor bound: " + probe.wouldEnter() + " would-enter, "
+                    + probe.admitted() + " admitted, " + probe.capExceedance() + " dropped"
+                : "");
     publishQuietly(
         doctrine.batchName(),
         !result.refusalReasons().isEmpty()

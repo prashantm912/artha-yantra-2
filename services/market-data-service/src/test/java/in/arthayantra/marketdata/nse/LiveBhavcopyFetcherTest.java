@@ -1,8 +1,10 @@
 package in.arthayantra.marketdata.nse;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.nse.BhavcopyFetcher.BhavcopyRow;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -29,7 +31,9 @@ class LiveBhavcopyFetcherTest {
 
   @Test
   void parsesSecBhavdataFullCsv() {
-    BhavcopyFetcher fetcher = new LiveBhavcopyFetcher(new StubClient(CSV), "https://archives", CLOCK);
+    BhavcopyFetcher fetcher =
+        new LiveBhavcopyFetcher(
+            new StubClient(CSV), "https://archives", CLOCK, new SimpleMeterRegistry(), MarketCalendar.nse());
 
     List<BhavcopyRow> rows = fetcher.fetchLatest();
 
@@ -51,6 +55,61 @@ class LiveBhavcopyFetcherTest {
     assertThat(be.close()).isEqualByComparingTo("10.30");
     assertThat(be.delivQty()).isNull();
     assertThat(be.delivPer()).isNull();
+  }
+
+  /**
+   * NSE answers 200 with the PREVIOUS trading day's file under most holiday URLs, and the row's
+   * trade date comes from the CSV's own DATE1 column — so an unchecked payload is stored under
+   * H-1 while the requested day H stays missing and is re-probed (and H-1 re-stamped) forever.
+   */
+  @Test
+  void refusesAPayloadDatedForADifferentDayThanTheOneRequested() {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    BhavcopyFetcher fetcher =
+        new LiveBhavcopyFetcher(
+            new StubClient(CSV), "https://archives", CLOCK, registry, MarketCalendar.nse());
+
+    // The stub serves the same 12-Jun rows for EVERY archive URL.
+    assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 15))).isEmpty();
+    assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 12))).hasSize(2);
+
+    // The refusal is otherwise INVISIBLE downstream: the backfill still records a SUCCESS ingest run,
+    // so a systematic false positive would stall the feed forever and still report green. The counter
+    // is the only signal that distinguishes "the guard is refusing" from "the fetch came back empty".
+    // Registered by the FETCHER, not by this test — the assertion reads production's own meter.
+    assertThat(misdated(registry))
+        .as("one refusal, and exactly one — the correctly-dated fetch must not increment it")
+        .isEqualTo(1.0);
+  }
+
+  /**
+   * ⚠️ The counter must stay at ZERO on a holiday, and this is the assertion that makes the metric
+   * usable at all (review of #1329). Serving the previous day's file under a holiday URL is NORMAL
+   * NSE behaviour — it is the exact case the guard was written for. The catch-up loop skips only
+   * Saturdays, Sundays and dates already stored, so every exchange holiday inside the window is
+   * re-probed on EVERY run and refused every time. Counting those would give the counter a
+   * monotonically-rising baseline on a perfectly healthy feed, and no threshold could then separate
+   * it from the systematic break it exists to reveal. 2026-06-26 is Muharram in the bundled NSE
+   * calendar; the guard still REFUSES the payload (behaviour unchanged) — only the count is gated.
+   */
+  @Test
+  void aHolidayRefusalIsNotCounted() {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    BhavcopyFetcher fetcher =
+        new LiveBhavcopyFetcher(
+            new StubClient(CSV), "https://archives", CLOCK, registry, MarketCalendar.nse());
+
+    assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 26)))
+        .as("the guard still refuses the mis-dated payload — only the COUNT is calendar-gated")
+        .isEmpty();
+
+    assertThat(misdated(registry))
+        .as("a holiday's re-served file is healthy NSE behaviour and must not raise the counter")
+        .isEqualTo(0.0);
+  }
+
+  private static double misdated(SimpleMeterRegistry registry) {
+    return registry.get("ay_bhavcopy_misdated_payload_total").tag("exchange", "NSE").counter().count();
   }
 
   /** NseHttpClient stub returning canned CSV for any archive URL. */

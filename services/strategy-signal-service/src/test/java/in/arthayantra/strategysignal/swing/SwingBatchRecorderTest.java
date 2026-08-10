@@ -215,6 +215,39 @@ class SwingBatchRecorderTest {
   }
 
   @Test
+  void aCapBoundRunSpellsOutTheAdmissionProbeInTheSummaryAlert() {
+    // "139 candidates, 0 entries" alone reads like a dead batch; the probe numbers are what say the
+    // funnel was full and the slot cap took none of it. An unbound run's text stays as it was.
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(engine.runDaily(doctrine, null, true))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(
+                4, 139, 0, 0, 0,
+                new SwingBatchEngine.AdmissionProbe(15, 17, 0, 17, true, List.of())))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(4, 139, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty()));
+
+    SwingBatchRecorder recorder =
+        new SwingBatchRecorder(
+            engine, mock(SwingBatchRunRepository.class), mock(SwingSellDecisionService.class),
+            mock(FlagSnapshotService.class), new SwingRunMutex(), events, Clock.systemUTC());
+    recorder.runAndRecord(doctrine);
+    recorder.runAndRecord(doctrine);
+
+    ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+    verify(events, org.mockito.Mockito.times(2)).publishEvent(captor.capture());
+    assertThat(((SwingBatchAlert) captor.getAllValues().get(0)).message())
+        .isEqualTo(
+            "139 candidates, 0 entries, 0 exits, 0 exit-skipped (4 strategies)"
+                + " — entry governor bound: 17 would-enter, 0 admitted, 17 dropped");
+    assertThat(((SwingBatchAlert) captor.getAllValues().get(1)).message())
+        .as("an unbound run's summary is unchanged")
+        .isEqualTo("139 candidates, 0 entries, 0 exits, 0 exit-skipped (4 strategies)");
+  }
+
+  @Test
   void aRefusedRunDoesNotRecordTheCanonicalCompletionMarker() {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);
     SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);

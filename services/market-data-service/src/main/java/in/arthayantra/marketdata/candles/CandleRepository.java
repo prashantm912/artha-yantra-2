@@ -625,13 +625,16 @@ public class CandleRepository {
    * Timescale aborts at the 5,000,000 ceiling, burning one of the refresh's bounded attempts and
    * reproducing the outage this sizing exists to end. Cross-vendor review, 2026-08-11.
    *
-   * <p>⚠️ AND THE CURSOR ADVANCES BY {@code to - overlap}, NOT BY {@code to}. {@link #windowsFrom}
+   * <p>⚠️ AND THE CURSOR TAKES THE PLANNER'S NEXT CUT, NOT {@code w.to()}. {@link #windowsFrom}
    * extends every window PAST its cut, and the next window is meant to begin at the CUT — so
    * advancing to the extended end makes consecutive CALLs merely abut, and a cagg bucket straddling
    * that boundary is fully contained in NEITHER and silently stays unmaterialized. That is exactly
    * the damage the overlap exists to prevent, and the first version of this loop reintroduced it
-   * while fixing the staleness above (same review, next round). Pinned by
-   * {@code CandleRepositoryWindowsTest}'s execution-sequence assertion.
+   * while fixing the staleness above (same review, next round). Pinned by {@code
+   * CandleRepositoryRefreshDecompressionLimitTest#consecutiveRebuildCallsOverlapRatherThanMerelyAbut},
+   * which asserts the exact overlap between the CALLs this loop actually emits — an earlier version
+   * of that guard re-implemented the loop inside the test and so proved only that it agreed with
+   * itself.
    */
   private static int refreshReplanning(
       Statement st, DerivedAggregate view, OffsetDateTime start, OffsetDateTime end)
@@ -652,18 +655,15 @@ public class CandleRepository {
       }
       call(st, view, plan.get(0));
       executed++;
-      // ⚠️ TAKE THE PLANNER'S OWN NEXT CUT — never re-derive it as `to - overlapDays`.
+      // TAKE THE PLANNER'S OWN NEXT CUT rather than re-deriving it as `to - overlapDays`.
       //
-      // The plan's second window ALREADY starts at the cut the first window was extended past, so
-      // this is the same number by construction and cannot drift from it. Re-deriving it looked
-      // equivalent and was not: when a window's cut lands within overlapDays of the cursor,
-      // `to - overlap` is <= cursor, and the no-spin guard that protected against that then BROKE
-      // THE LOOP — silently abandoning the rest of the span unmaterialised. Caught by
-      // consecutiveRebuildCallsOverlapRatherThanMerelyAbut, whose coverage assertion failed with
-      // the last CALL ending 8 days short of `end` (2026-08-11).
-      //
-      // Progress is guaranteed without a guard: plan.get(1).from() is a strictly later cut than
-      // plan.get(0).from(), which is the cursor.
+      // Both produce the same instant — the plan's second window starts at exactly the cut the first
+      // was extended past — so this is a one-source-of-truth choice, not a bug fix. ⚠️ An earlier
+      // commit message claimed the re-derived form abandoned the tail; that was wrong, and came from
+      // a test assertion that ignored refresh()'s ±8-day pad. The re-derivation was correct; it just
+      // duplicated an arithmetic the planner already owns, and needed a no-spin guard that this form
+      // does not: plan.get(1).from() is a strictly later cut than plan.get(0).from(), which is the
+      // cursor, so progress is structural.
       if (plan.size() == 1) {
         break; // the single window was clamped at end — the span is covered
       }

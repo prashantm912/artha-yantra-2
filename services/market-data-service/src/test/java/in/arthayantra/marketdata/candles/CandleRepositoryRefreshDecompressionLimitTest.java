@@ -13,6 +13,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -222,24 +223,31 @@ class CandleRepositoryRefreshDecompressionLimitTest {
         ds.onlyConnection().sql.stream().filter(s -> s.startsWith(CALL_PREFIX)).toList();
     assertThat(calls).as("need interior boundaries to inspect").hasSizeGreaterThan(2);
 
+    // ⚠️ The EXACT configured overlap, not merely "some overlap". A positive-but-tiny overlap would
+    // satisfy `isBefore` while still losing any bucket wider than it — and a cagg bucket is a day or
+    // a week, not a second. Cross-vendor review, 2026-08-11.
+    Duration overlap = Duration.ofDays(CandleRepository.DerivedAggregate.CANDLES_5M.overlapDays());
     List<Instant[]> bounds = calls.stream().map(CandleRepositoryRefreshDecompressionLimitTest::boundsOf).toList();
     for (int i = 1; i < bounds.size(); i++) {
-      assertThat(bounds.get(i)[0])
+      assertThat(Duration.between(bounds.get(i)[0], bounds.get(i - 1)[1]))
           .as(
-              "CALL %d must START strictly BEFORE CALL %d ended — abutting loses the straddling"
-                  + " bucket (call %d: %s, call %d: %s)",
-              i, i - 1, i - 1, calls.get(i - 1), i, calls.get(i))
-          .isBefore(bounds.get(i - 1)[1]);
+              "CALL %d must start EXACTLY %s before CALL %d ended (call %d: %s, call %d: %s)",
+              i, overlap, i - 1, i - 1, calls.get(i - 1), i, calls.get(i))
+          .isEqualTo(overlap);
     }
-    // …and the union still COVERS [FROM, TO], so overlapping did not cost coverage.
+    // …and the union covers the whole PADDED span, exactly.
     //
-    // ⚠️ Asserted as containment, NOT equality. refresh() pads the requested range by ±8 days before
-    // planning, so the first CALL legitimately starts BEFORE FROM and the last ends AFTER TO. My
-    // first draft asserted exact equality against FROM/TO, went red on the pad, and I read that as
-    // production abandoning the tail — then changed production on the strength of it. The code was
-    // right and the assertion was wrong. Containment is the property that actually matters here.
-    assertThat(bounds.get(0)[0]).isBeforeOrEqualTo(FROM.toInstant());
-    assertThat(bounds.get(bounds.size() - 1)[1]).isAfterOrEqualTo(TO.toInstant());
+    // ⚠️ The padded endpoints, not FROM/TO, and not containment. refresh() widens the requested
+    // range by ±8 days before planning (CandleRepository:533-534) and that pad is materialised on
+    // purpose. Containment against the UNPADDED range would pass while the entire TO..TO+8d tail was
+    // abandoned — which is the same silent-hole failure this test exists for, just at the end
+    // instead of the middle. Two of my own mistakes met here: the first draft asserted equality with
+    // the unpadded FROM/TO (red for the wrong reason, and I changed production over it), the second
+    // loosened to containment (green for the wrong reason). The padded endpoints are the actual
+    // contract.
+    Duration pad = Duration.ofDays(8);
+    assertThat(bounds.get(0)[0]).isEqualTo(FROM.toInstant().minus(pad));
+    assertThat(bounds.get(bounds.size() - 1)[1]).isEqualTo(TO.toInstant().plus(pad));
   }
 
   /** Pulls the two timestamptz literals out of a recorded {@code CALL refresh_continuous_aggregate}. */

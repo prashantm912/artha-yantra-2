@@ -84,6 +84,12 @@ public class UpstoxFnoMasterWarmer {
   private final AtomicBoolean retryInFlight = new AtomicBoolean();
 
   /**
+   * Coalesces concurrent warms — startup, scheduled and retry alike. Distinct from {@link
+   * #retryInFlight}, which bounds only the retry CHAIN: this one bounds the DOWNLOAD.
+   */
+  private final AtomicBoolean warmInFlight = new AtomicBoolean();
+
+  /**
    * Wires the optional F&amp;O master client.
    *
    * <p>No interval parameter, deliberately: the period is read by the {@code @Scheduled} SpEL from
@@ -157,22 +163,43 @@ public class UpstoxFnoMasterWarmer {
     if ("retry".equals(trigger)) {
       retryInFlight.set(false); // this attempt IS the outstanding retry; re-arm on its own failure
     }
-    UpstoxFnoMasterClient client = master.getIfAvailable();
-    if (client == null) {
-      return; // analytics/quote/ticker flags off — nothing to warm (not an error)
+    // ⚠️ COALESCE EVERY WARM, not just retries. retryInFlight guards the retry chain alone, and
+    // cross-vendor review (2026-08-10) showed that is not enough: Spring's fixedDelay measures the
+    // DISPATCH, and submit() returns the instant it hands the task to the executor. So at the
+    // one-minute floor the scheduler enqueues a fresh warm every minute regardless of how long the
+    // previous download is taking — a 75-second fetch queues them faster than the single daemon
+    // drains, and the backlog is a pile of duplicate multi-megabyte downloads against a shared rate
+    // limiter.
+    //
+    // The claim lives HERE rather than in submit() so it covers all three entry points — startup,
+    // scheduled, retry — including the retry, which is scheduled directly onto the executor. A tick
+    // that arrives mid-warm still costs one queued task, but that task now returns in microseconds
+    // instead of downloading, so the queue drains as fast as it fills.
+    if (!warmInFlight.compareAndSet(false, true)) {
+      log.debug("Upstox F&O master warm ({}) skipped — a warm is already in flight", trigger);
+      return;
     }
     try {
-      if (client.warm()) {
-        log.debug("Upstox F&O master warm ({}) complete", trigger);
-      } else {
-        log.warn("Upstox F&O master warm ({}) failed; retrying in {}", trigger, retryDelay);
+      UpstoxFnoMasterClient client = master.getIfAvailable();
+      if (client == null) {
+        return; // analytics/quote/ticker flags off — nothing to warm (not an error)
+      }
+      try {
+        if (client.warm()) {
+          log.debug("Upstox F&O master warm ({}) complete", trigger);
+        } else {
+          log.warn("Upstox F&O master warm ({}) failed; retrying in {}", trigger, retryDelay);
+          scheduleRetry();
+        }
+      } catch (RuntimeException e) {
+        // NEVER propagate: an escaped daemon exception would retire the retry chain.
+        log.warn(
+            "Upstox F&O master warm ({}) failed; retrying in {}: {}",
+            trigger, retryDelay, e.toString());
         scheduleRetry();
       }
-    } catch (RuntimeException e) {
-      // NEVER propagate: an escaped daemon exception would retire the retry chain.
-      log.warn(
-          "Upstox F&O master warm ({}) failed; retrying in {}: {}", trigger, retryDelay, e.toString());
-      scheduleRetry();
+    } finally {
+      warmInFlight.set(false);
     }
   }
 

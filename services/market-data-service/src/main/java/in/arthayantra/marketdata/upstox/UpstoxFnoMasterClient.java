@@ -170,32 +170,48 @@ public final class UpstoxFnoMasterClient {
     try {
       byte[] gzip = restClient.get().uri(masterPath).retrieve().body(byte[].class);
       if (gzip == null || gzip.length == 0) {
+        // Same rule as the catch below: an empty body is a FAILED attempt, so lastAttemptAt bounds
+        // the retry and loadedAt stays where it was. Advancing it here would hand a dead upstream a
+        // fresh refresh window.
         log.warn("Upstox instrument master fetch returned empty body — keeping prior cache");
-        markFailedAttempt(attemptAt);
         return false;
       }
       List<UpstoxInstrumentMaster> rows;
       try (InputStream in = new GZIPInputStream(new ByteArrayInputStream(gzip))) {
         rows = mapper.readValue(in, new TypeReference<List<UpstoxInstrumentMaster>>() {});
       }
-      keysByLeg = index(rows);
+      // ⚠️ INDEX INTO A CANDIDATE, THEN CHECK IT — never assign straight into the live cache.
+      // A payload that parses cleanly but yields ZERO mapped legs is not a successful warm: Upstox
+      // serving a truncated file, or a schema change that makes isFno() match nothing, both land
+      // here. Assigning it would REPLACE a perfectly good cache with {}, stamp loadedAt fresh, and
+      // return true — after which every instrument-key lookup misses and every margin call returns
+      // `unpriced` for a full refresh interval, with the warmer reporting itself healthy throughout.
+      // Cross-vendor review, 2026-08-10.
+      Map<FnoKey, FnoLeg> candidate = index(rows);
+      if (candidate.isEmpty()) {
+        log.warn(
+            "Upstox instrument master parsed {} row(s) but mapped ZERO F&O legs — keeping prior"
+                + " cache of {} leg(s)",
+            rows.size(),
+            keysByLeg.size());
+        return false;
+      }
+      keysByLeg = candidate;
       loadedAt = attemptAt;
       log.info("Upstox F&O instrument master loaded: {} mapped legs", keysByLeg.size());
       return true;
     } catch (IOException | RuntimeException e) {
       // Transport / gunzip / parse failure: keep any prior cache (the resolver then falls back to the
-      // Kite path — this enrichment must NEVER break the source). A non-empty prior cache keeps its
-      // refresh timestamp; an empty cache stays retryable after the short backoff above. NEVER
-      // propagates out of a lookup.
-      markFailedAttempt(attemptAt);
+      // Kite path — this enrichment must NEVER break the source). NEVER propagates out of a lookup.
+      //
+      // ⚠️ loadedAt is deliberately NOT touched here, and an earlier version of this method DID
+      // advance it whenever a prior cache existed. That is the catalogued "a CACHE that stores a
+      // FAILURE with a fresh timestamp" shape: a failed load bought the stale cache another full
+      // REFRESH interval, so a source that had been broken for hours read as freshly warmed. The
+      // rate limit on retries is lastAttemptAt + RETRY_BACKOFF, which is set unconditionally above
+      // and is the only thing that should bound them.
       log.warn("Upstox instrument master load failed — keeping prior cache: {}", e.toString());
       return false;
-    }
-  }
-
-  private void markFailedAttempt(Instant attemptAt) {
-    if (!keysByLeg.isEmpty()) {
-      loadedAt = attemptAt;
     }
   }
 

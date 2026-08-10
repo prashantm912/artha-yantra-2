@@ -726,7 +726,30 @@ Run in order; each answers one question. Canned SQL in §6.
     — 10 of 10 priced snapshots are `0.00`, so the normal path yields `0.00%` against a `60%` cap and
     blocks nothing. Zero here means "the call succeeded", not "the control worked". Treat this §3.34
     row as an evaluability probe only; **coverage is an open owner question (ledger N23-A)**.
-35. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+35. **Discriminate NO-SESSION from NO-CAPTURE before reading any zero** (added 2026-08-10) — a
+    session with zero rejection rows is triply ambiguous: a holiday (normal), chart-gate silence
+    (INCONCLUSIVE, §4.3), or a platform outage (the 07-08/07-09 and 08-10 class). On 2026-08-10 the
+    stack was down 08:30–18:47 IST — the ENTIRE trading session — and the first probe ("rejections
+    today: 0") is identical to a holiday's. The distinguishing chain, in order, each step cheap:
+    ```sql
+    -- (a) calendar: no row in libs/market-calendar nse-trading-holidays.csv for the date
+    -- (b) did the market trade? bhavcopy dated TODAY proves it independently of capture
+    SELECT count(*) FROM marketdata.nse_eod_bhavcopy WHERE trade_date = :d;
+    -- (c) was there a full session? post-hoc REST backfill of the signal future shows it
+    SELECT source, count(*) FROM marketdata.candles
+    WHERE tradingsymbol=:front_fut AND interval='1m'
+      AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1;
+    -- (d) stack or engine? log-gap on BOTH services + empty eval buckets = stack, not engine
+    ```
+    ⚠️ Two provenance artifacts a naive read misinterprets after the boot: the REST backfill makes
+    the future's bar count read "375/375 healthy" (only `source`/`fetched_at` reveal none were
+    captured live), and the post-boot WS connect writes ONE `TICK_AGG` bar per subscribed symbol
+    at its last-trade minute (Kite's snapshot tick), stamped hours after the close. Classify such
+    a day **OUTAGE / NO-DATA** in the rollup — never "quiet", never a G15 regime row (a proxy off
+    the future may be recorded, labelled PROXY, but must not enter G11's chop-day count), and
+    never evidence for or against any tuning row. The in-stack canaries cannot see this class —
+    they were down too; only an off-stack heartbeat (the unbuilt batch-liveness third layer) can.
+36. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

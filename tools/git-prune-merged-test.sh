@@ -86,13 +86,26 @@ cat > "$TMP/nogh/gh" <<'STUB'
 #!/bin/sh
 # mirrors: gh pr list --head <branch> --state merged --json headRefOid,commits --jq ...
 # which emits the headRefOid followed by one line per PR commit.
-branch=""
+# It MUST honour --json. A stub that always prints every OID it knows answers the same for the
+# headRefOid-only query as for the headRefOid,commits one, which silently disarms any red-proof
+# aimed at that distinction -- measured: reverting the caller to headRefOid-only left this suite
+# fully green.
+branch=""; fields=""
 while [ $# -gt 0 ]; do
-  case "$1" in --head) branch="$2"; shift 2;; *) shift;; esac
+  case "$1" in
+    --head) branch="$2"; shift 2;;
+    --json) fields="$2"; shift 2;;
+    *) shift;;
+  esac
 done
 [ -n "$branch" ] || exit 1
 [ -n "${GH_FIXTURE:-}" ] || { echo 'gh stub: GH_FIXTURE unset' >&2; exit 2; }
-oids=$(awk -v b="$branch" '$1 == b {for (i = 2; i <= NF; i++) print $i}' "$GH_FIXTURE")
+case ",$fields," in
+  *,commits,*) last=0;;   # head + every PR commit
+  *)           last=2;;   # head only
+esac
+oids=$(awk -v b="$branch" -v last="$last" \
+  '$1 == b { n = (last == 0 ? NF : last); for (i = 2; i <= n; i++) print $i }' "$GH_FIXTURE")
 [ -n "$oids" ] || exit 1
 echo "$oids"
 STUB

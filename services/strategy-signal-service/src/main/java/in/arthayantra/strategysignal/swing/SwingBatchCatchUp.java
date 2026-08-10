@@ -343,17 +343,17 @@ public class SwingBatchCatchUp {
       //   - an undifferentiated marker written HERE would be read by the NEXT sweep as proof of
       //     settle-time arming, so a recovery pass would manufacture the evidence authorising its
       //     own entries. A catch-up may not vouch for itself.
+      // ⚠️ LOG the intent here; ALERT only after the run, from its outcome. An earlier version
+      // published "Held stops WERE evaluated" at this point — before the atomic claim, the
+      // attempt-budget check, the market-open deadline and the engine call itself. A lost claim, an
+      // exhausted budget, a crossed deadline or exitSkipped > 0 all made that operator-facing
+      // sentence false while it had already been sent (cross-vendor review, 2026-08-11). An alert
+      // that asserts an outcome must be written BY the outcome.
       log.warn(
-          "swing catch-up: {} {} has only a PROVISIONAL arming row and no run marker — running"
+          "swing catch-up: {} {} has only a PROVISIONAL arming row and no run marker — attempting"
               + " EXITS ONLY, leaving the session retryable and writing no marker",
           batch,
           session);
-      alert(
-          doctrine,
-          "catch-up EXITS ONLY for " + session,
-          "The " + session + " arming is provisional (an intraday observation, not the settle's own"
-              + " reading) and no run marker exists, so entries are withheld and the session stays"
-              + " retryable. Held stops WERE evaluated off that session's bar.");
     }
     // ATOMIC claim BEFORE any emission. Lost = another caller holds a fresh RUNNING claim, or the
     // session is terminal (DONE / ABANDONED). This is the durable idempotency gate the JVM mutex alone
@@ -472,10 +472,21 @@ public class SwingBatchCatchUp {
       // authoritative arming. markDone here would have forfeited the very pass this run deferred.
       state.markPending(batch, session, "ARMING_UNKNOWN_EXITS_ONLY");
       log.warn(
-          "swing catch-up: {} evaluated {}'s stops with UNKNOWN arming — left retryable, entries"
-              + " still owed",
+          "swing catch-up: {} ran {}'s exits with UNKNOWN arming — left retryable, entries still"
+              + " owed",
           batch,
           session);
+      alert(
+          doctrine,
+          "catch-up EXITS ONLY for " + session,
+          "The " + session + " arming is provisional (an intraday observation, not the settle's own"
+              + " reading) and no run marker exists, so entries were withheld and the session stays"
+              + " retryable. "
+              + (run.exitSkipped() == 0
+                  ? "Every held stop WAS evaluated off that session's bar."
+                  : run.exitSkipped()
+                      + " held stop(s) were NOT evaluated — see the STOP NOT EVALUATED TODAY errors"
+                      + " in the service log."));
     } else if (run.exitSkipped() == 0 && outcome.markerRecorded()) {
       state.markDone(batch, session);
       log.warn("swing catch-up: {} caught up {} — {}", batch, session, summary);

@@ -44,6 +44,50 @@ class SwingBatchRecorderTest {
     return d;
   }
 
+  /**
+   * {@code MarkerPolicy.NEVER} against the REAL recorder: no {@code swing_batch_runs} write at all,
+   * and {@code markerRecorded=false}.
+   *
+   * <p>⚠️ The catch-up suite only proves NEVER was PASSED — it mocks this class, so it cannot prove
+   * the suppression happens. Cross-vendor review flagged exactly that gap (2026-08-11), and it
+   * matters more than a usual coverage note: NEVER exists so a recovery pass on an UNKNOWN arming
+   * cannot write the marker that the next sweep would read as proof of settle-time arming. If the
+   * suppression silently stopped working, the catch-up would resume manufacturing its own
+   * authorisation and every test above would still pass.
+   */
+  @Test
+  void markerPolicyNeverWritesNoRunMarkerAtAll() {
+    SwingBatchEngine engine = mock(SwingBatchEngine.class);
+    SwingBatchRunRepository runs = mock(SwingBatchRunRepository.class);
+    SwingSellDecisionService sellDecisions = mock(SwingSellDecisionService.class);
+    ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    SwingDoctrine doctrine = manasDoctrine();
+    when(engine.runDaily(eq(doctrine), any(), anyBoolean(), any(), anyBoolean()))
+        .thenReturn(
+            new SwingBatchEngine.SwingRun(
+                1, 0, 0, 2, 0, SwingBatchEngine.AdmissionProbe.empty()));
+
+    SwingBatchRecorder.RunOutcome outcome =
+        new SwingBatchRecorder(
+                engine, runs, sellDecisions, mock(FlagSnapshotService.class), new SwingRunMutex(),
+                events, Clock.systemUTC())
+            .runAndRecord(
+                doctrine,
+                LocalDate.of(2026, 7, 17),
+                false,
+                SwingBatchRecorder.MarkerPolicy.NEVER,
+                Optional.of(
+                    new SwingDoctrine.CandidateSnapshot(LocalDate.of(2026, 7, 17), List.of())));
+
+    assertThat(outcome.markerRecorded())
+        .as("NEVER must report the marker as NOT recorded, whatever the run did")
+        .isFalse();
+    verify(runs, never())
+        .record(
+            any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
+            anyInt(), anyInt(), anyBoolean(), any(), anyBoolean());
+  }
+
   @Test
   void runScheduledPublishesAFailedAlertWhenTheBatchThrows() {
     SwingBatchEngine engine = mock(SwingBatchEngine.class);

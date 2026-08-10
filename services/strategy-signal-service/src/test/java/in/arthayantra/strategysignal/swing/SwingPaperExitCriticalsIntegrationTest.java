@@ -339,7 +339,10 @@ class SwingPaperExitCriticalsIntegrationTest extends StrategySignalIntegrationTe
   private void runCatchup(SwingDoctrine doctrine, ApplicationEventPublisher droppedEvents) {
     String batch = doctrine.batchName();
     runs.record(batch, SESSION.minusDays(1), 0, 0, 0, 0, 0, 0, 0, 0, 0, false, List.of(), true);
-    intents.recordScheduled(batch, SESSION, true);
+    // recordSettled, not recordScheduled: these fixtures mean "the settle recorded this arming".
+    // A provisional row (V061) would send the catch-up down the exits-only path and quietly change
+    // what every assertion below is about.
+    intents.recordSettled(batch, SESSION, true);
     SwingBatchRecorder recorder = mock(SwingBatchRecorder.class);
     SwingBatchEngine.SwingRun run =
         new SwingBatchEngine.SwingRun(1, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty());

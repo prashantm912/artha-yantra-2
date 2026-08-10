@@ -293,37 +293,31 @@ public class SwingBatchCatchUp {
     }
     Optional<SwingBatchIntentRepository.Intent> row = intents.findIntent(batch, session);
     boolean markerProvesArmed = runs.hasRun(batch, session);
-    // ⚠️ A PROVISIONAL row is an intraday observation made hours before the settle, kept only so a
-    // container down at 16:00 leaves this sweep something to work with. It is NOT authority to
-    // ENTER: the flag can have moved since, and the settle's own intent write is fail-soft, so a
-    // provisional row surviving proves nothing about what the settle saw. Two rounds of cross-vendor
-    // review found both directions of that (2026-08-10) — a family disarmed after the morning tick
-    // taking entries, and a family armed after it forfeiting them.
+    // THREE states, not two, and collapsing them is what the last two review rounds kept finding.
     //
-    // A run MARKER settles it either way, because only an armed run writes one, so a provisional row
-    // WITH a marker is as good as settled. A provisional row with NO marker means nobody knows: this
-    // sweep then runs EXITS ONLY and says so. You can always decline to enter; you cannot decline to
-    // leave.
-    boolean entriesTrustworthy =
-        row.map(SwingBatchIntentRepository.Intent::settled).orElse(false) || markerProvesArmed;
-    Optional<Boolean> intent = row.map(SwingBatchIntentRepository.Intent::armed);
-    if (intent.isEmpty() && markerProvesArmed) {
-      // ⚠️ A run MARKER is itself proof the family was armed for this session, because the only path
-      // that writes one runs behind runLocked's executionArmed gate — a disarmed run returns before
-      // reaching runs.record. So when the marker exists but the intent row does not, the intent
-      // WRITE failed (it is deliberately fail-soft) rather than the arming being unknown, and
-      // refusing here would forfeit the session's entries over a bookkeeping error.
-      //
-      // Narrow on purpose: it does NOT cover a session the stack was down for. There is no marker
-      // then either, so that case still abandons below — see the honest limits note on the class.
+    //   ARMED       — a SETTLED row saying armed, or a run marker (only an armed run writes one, so
+    //                 a marker outranks a provisional row in EITHER direction).
+    //   DISARMED    — a SETTLED row saying disarmed. Terminal: the family was deliberately off.
+    //   UNKNOWN     — a PROVISIONAL row only, with no marker. An intraday observation made hours
+    //                 before the settle proves nothing about what the settle saw; the flag can move,
+    //                 and the settle's own intent write is fail-soft so its absence is not evidence
+    //                 either.
+    //
+    // ⚠️ A provisional FALSE must NOT be recorded terminally DISARMED. Round 5 did exactly that, so
+    // a morning `false` + an armed settle whose intent write failed + a successful run marker still
+    // forfeited every entry, permanently.
+    Boolean armed = row.filter(SwingBatchIntentRepository.Intent::settled)
+        .map(SwingBatchIntentRepository.Intent::armed)
+        .orElse(null);
+    if (armed == null && markerProvesArmed) {
       log.warn(
-          "swing catch-up: {} {} has a run marker but no intent row — treating the marker as proof"
-              + " of arming (the intent write is fail-soft and evidently failed)",
+          "swing catch-up: {} {} has a run marker but no SETTLED arming row — the marker is proof"
+              + " enough (only an armed run writes one; the intent write is fail-soft)",
           batch,
           session);
-      intent = Optional.of(true);
+      armed = Boolean.TRUE;
     }
-    if (intent.isEmpty()) {
+    if (armed == null && row.isEmpty()) {
       state.markAbandoned(batch, session, "NO_SCHEDULE_INTENT");
       log.error("swing catch-up: {} {} refused - no schedule-time arming row", batch, session);
       alert(
@@ -332,27 +326,34 @@ public class SwingBatchCatchUp {
               + " failure); refusing replay rather than inferring today's flag.");
       return;
     }
-    if (!intent.get()) {
+    if (Boolean.FALSE.equals(armed)) {
       state.recordDisarmed(batch, session);
       log.info("swing catch-up: {} {} was DISARMED at schedule time - not replaying", batch, session);
       return;
     }
-    if (!entriesTrustworthy) {
-      // Provisional arming, no run marker: the settle never ran (or its batch never got far enough
-      // to record one), so the session's real arming is unknown. Evaluate the held stops off its own
-      // bar and take NO entries. Deliberately NOT terminal — leave the session retryable so a later
-      // sweep can still take its entries if a marker or settled row appears.
+    boolean armingUnknown = armed == null;
+    if (armingUnknown) {
+      // Provisional row, no marker: the settle never ran. Evaluate the held stops off this session's
+      // own bar and take NO entries — you can always decline to enter, you cannot decline to leave.
+      //
+      // ⚠️ This pass must leave NO evidence behind. It writes no run marker (MarkerPolicy.NEVER) and
+      // does not markDone, for two separate reasons found in round 5:
+      //   - markDone excludes the session from retryableSessions, so the entry pass it is explicitly
+      //     deferring would be forfeited by the very run that deferred it; and
+      //   - an undifferentiated marker written HERE would be read by the NEXT sweep as proof of
+      //     settle-time arming, so a recovery pass would manufacture the evidence authorising its
+      //     own entries. A catch-up may not vouch for itself.
       log.warn(
           "swing catch-up: {} {} has only a PROVISIONAL arming row and no run marker — running"
-              + " EXITS ONLY, entries need an authoritative arming",
+              + " EXITS ONLY, leaving the session retryable and writing no marker",
           batch,
           session);
       alert(
           doctrine,
           "catch-up EXITS ONLY for " + session,
           "The " + session + " arming is provisional (an intraday observation, not the settle's own"
-              + " reading) and no run marker exists, so entries are withheld. Held stops WERE"
-              + " evaluated off that session's bar.");
+              + " reading) and no run marker exists, so entries are withheld and the session stays"
+              + " retryable. Held stops WERE evaluated off that session's bar.");
     }
     // ATOMIC claim BEFORE any emission. Lost = another caller holds a fresh RUNNING claim, or the
     // session is terminal (DONE / ABANDONED). This is the durable idempotency gate the JVM mutex alone
@@ -384,14 +385,20 @@ public class SwingBatchCatchUp {
     //     one, so entering off it would take the wrong day's names); and
     //   - the arming must be AUTHORITATIVE, not a provisional intraday observation (V061).
     boolean entriesReady =
-        entriesTrustworthy
+        !armingUnknown
             && candidateSnapshot.map(snapshot -> session.equals(snapshot.screenDate())).orElse(false);
+    // ⚠️ NEVER, not ON_COMPLETE, when the arming is unknown: this pass must not leave a marker the
+    // NEXT sweep would read as proof of settle-time arming. A catch-up may not vouch for itself.
+    SwingBatchRecorder.MarkerPolicy markerPolicy =
+        armingUnknown
+            ? SwingBatchRecorder.MarkerPolicy.NEVER
+            : SwingBatchRecorder.MarkerPolicy.ON_COMPLETE;
     SwingBatchRecorder.RunOutcome outcome =
         recorder.runAndRecord(
             doctrine,
             session,
             entriesReady,
-            SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            markerPolicy,
             candidateSnapshot,
             this::marketOpenDeadlinePassed);
     if (outcome == null) {
@@ -459,6 +466,16 @@ public class SwingBatchCatchUp {
           "catch-up REFUSED for " + session,
           "The session remains retryable because the engine refused an approximate money effect: "
               + reason + ". " + summary);
+    } else if (armingUnknown) {
+      // Exits ran, entries deliberately did not, and no marker was written. The session is NOT done
+      // — it still owes its entries — so it stays PENDING for a later sweep that finds an
+      // authoritative arming. markDone here would have forfeited the very pass this run deferred.
+      state.markPending(batch, session, "ARMING_UNKNOWN_EXITS_ONLY");
+      log.warn(
+          "swing catch-up: {} evaluated {}'s stops with UNKNOWN arming — left retryable, entries"
+              + " still owed",
+          batch,
+          session);
     } else if (run.exitSkipped() == 0 && outcome.markerRecorded()) {
       state.markDone(batch, session);
       log.warn("swing catch-up: {} caught up {} — {}", batch, session, summary);

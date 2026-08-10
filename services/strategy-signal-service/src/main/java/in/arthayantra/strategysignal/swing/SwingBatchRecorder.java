@@ -41,7 +41,18 @@ public class SwingBatchRecorder {
    */
   public enum MarkerPolicy {
     ALWAYS,
-    ON_COMPLETE
+    ON_COMPLETE,
+    /**
+     * Write NO marker, whatever the run did.
+     *
+     * <p>For a recovery pass that must leave no evidence behind: the catch-up's exits-only run on an
+     * UNKNOWN arming. A marker written there is undifferentiated, so the next sweep would read it as
+     * proof of settle-time arming and enter on the strength of a run that was explicitly deferring
+     * entries — a catch-up manufacturing the evidence that authorises itself (cross-vendor review,
+     * 2026-08-10). The cost is that the did-not-run canary keeps alerting for that session, which is
+     * correct: the session genuinely is not done.
+     */
+    NEVER
   }
 
   /**
@@ -197,7 +208,8 @@ public class SwingBatchRecorder {
     SwingBatchEngine.AdmissionProbe probe = result.admission();
     boolean markerRecorded = false;
     boolean snapshotAvailable = candidateSnapshot == null || candidateSnapshot.isPresent();
-    if (snapshotAvailable
+    if (markerPolicy != MarkerPolicy.NEVER
+        && snapshotAvailable
         && !result.deadlineReached()
         && result.refusalReasons().isEmpty()
         && (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0)) {

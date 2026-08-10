@@ -139,6 +139,101 @@ class SwingBatchCatchUpTest {
    * <p>So {@code hasRun} is stubbed TRUE here and {@code hasRunWithEntries} FALSE — the exact shape
    * the 16:00 settle leaves behind — and the sweep must still run, with entries enabled.
    */
+  /** A PROVISIONAL arming row — what an intraday tick writes when the settle never ran. */
+  private static SwingBatchIntentRepository.Intent provisional(boolean armed) {
+    return new SwingBatchIntentRepository.Intent(armed, false);
+  }
+
+  /**
+   * ⚠️ Provisional FALSE + a run marker must NOT be recorded terminally DISARMED.
+   *
+   * <p>Round 5 did exactly that: a morning tick observing {@code false}, an ARMED settle whose
+   * fail-soft intent write then failed, and a successful run marker — and the session was marked
+   * disarmed forever, forfeiting every entry. Only a SETTLED false is a real disarm; a marker
+   * outranks a provisional value in either direction, because only an armed run writes one.
+   */
+  @Test
+  void aProvisionalDisarmIsOverriddenByARunMarkerRatherThanRecordedTerminal() {
+    SwingDoctrine manas = doctrine(true, FRIDAY);
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
+    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(true); // the settle DID run
+    when(intents.findIntent("manas-arora", FRIDAY)).thenReturn(Optional.of(provisional(false)));
+    when(state.claim(eq("manas-arora"), any(), anyInt()))
+        .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
+    when(recorder.runAndRecord(
+            eq(manas), eq(FRIDAY), eq(true), eq(SwingBatchRecorder.MarkerPolicy.ON_COMPLETE)))
+        .thenReturn(run(1, 0, 0));
+
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    verify(state, never()).recordDisarmed("manas-arora", FRIDAY);
+    verify(recorder).runAndRecord(manas, FRIDAY, true, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE);
+  }
+
+  /**
+   * ⚠️ Provisional arming with NO marker: exits run, entries do not, NO marker is written, and the
+   * session stays RETRYABLE.
+   *
+   * <p>Three separate round-5 findings meet here. {@code markDone} would have excluded the session
+   * from {@code retryableSessions}, forfeiting the entry pass this run is explicitly deferring. And
+   * an undifferentiated marker written by THIS run would be read by the next sweep as proof of
+   * settle-time arming — a recovery pass manufacturing the evidence that authorises its own entries.
+   * A catch-up may not vouch for itself, so it writes {@code MarkerPolicy.NEVER}.
+   */
+  @Test
+  void unknownArmingRunsExitsOnlyWritesNoMarkerAndStaysRetryable() {
+    SwingDoctrine manas = doctrine(true, FRIDAY);
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
+    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false); // the settle never ran
+    when(intents.findIntent("manas-arora", FRIDAY)).thenReturn(Optional.of(provisional(true)));
+    when(state.claim(eq("manas-arora"), any(), anyInt()))
+        .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
+    // The snapshot-aware overload is the one the catch-up actually calls; the 4-arg form is only a
+    // fallback for pre-snapshot test doubles, so asserting on it here would pass for the wrong reason.
+    when(recorder.runAndRecord(
+            eq(manas),
+            eq(FRIDAY),
+            eq(false),
+            eq(SwingBatchRecorder.MarkerPolicy.NEVER),
+            org.mockito.ArgumentMatchers.<Optional<SwingDoctrine.CandidateSnapshot>>any(),
+            any()))
+        .thenReturn(run(0, 1, 0, false));
+
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    verify(recorder)
+        .runAndRecord(
+            eq(manas),
+            eq(FRIDAY),
+            eq(false),
+            eq(SwingBatchRecorder.MarkerPolicy.NEVER),
+            org.mockito.ArgumentMatchers.<Optional<SwingDoctrine.CandidateSnapshot>>any(),
+            any());
+    verify(state, never()).markDone("manas-arora", FRIDAY);
+    verify(state, never()).recordDisarmed("manas-arora", FRIDAY);
+    verify(state).markPending("manas-arora", FRIDAY, "ARMING_UNKNOWN_EXITS_ONLY");
+  }
+
+  /** A SETTLED disarm is still terminal — the fix above must not have made every disarm replayable. */
+  @Test
+  void aSettledDisarmIsStillRecordedTerminally() {
+    SwingDoctrine manas = doctrine(false, FRIDAY);
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
+    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
+    when(intents.findIntent("manas-arora", FRIDAY)).thenReturn(Optional.of(settled(false)));
+
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    verify(state).recordDisarmed("manas-arora", FRIDAY);
+    verify(recorder, never()).runAndRecord(any(), any(), anyBoolean(), any());
+  }
+
   @Test
   void anExitsOnlyMarkerStillOwesItsEntriesAndIsNotSkipped() {
     SwingDoctrine manas = doctrine(true, FRIDAY);

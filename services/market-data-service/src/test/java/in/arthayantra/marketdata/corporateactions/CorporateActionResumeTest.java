@@ -42,6 +42,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -315,7 +316,18 @@ class CorporateActionResumeTest {
     // base is correct and the cagg refresh is stranded FOREVER, with nothing left to retrigger it.
     // REFRESH_FAILED is in BASE_COMMITTED, so the checkpoint scan resumes the refresh instead.
     UUID id = armDetection();
-    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    // The event row is MODELLED, not stubbed flat, because round 8 moved the checkpoint write ahead
+    // of the throwing call: statusOf must answer what the last updateStatus actually wrote, or the
+    // test asserts a transition (from REBACKFILL_RUNNING) that can no longer occur on this path.
+    AtomicReference<String> persistedStatus = new AtomicReference<>("REBACKFILL_RUNNING");
+    when(events.statusOf(id)).thenAnswer(invocation -> Optional.of(persistedStatus.get()));
+    doAnswer(
+            invocation -> {
+              persistedStatus.set(invocation.getArgument(1));
+              return null;
+            })
+        .when(events)
+        .updateStatus(eq(id), anyString());
     // stagedCoverage("1d") is called TWICE: once by verifyStagedRebuild BEFORE either swap, and
     // again by reportUnadjustedTail AFTER the 1d swap commits. Throwing on the FIRST call would
     // abort at verify with nothing swapped — the case already covered elsewhere — so the healthy
@@ -334,12 +346,40 @@ class CorporateActionResumeTest {
     assertThat(job.sweepNow()).containsExactly(id);
     await()
         .atMost(Duration.ofSeconds(10))
-        .untilAsserted(
-            () -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "REFRESH_FAILED"));
+        .untilAsserted(() -> verify(events).updateStatusIf(id, "BASE_REBUILT", "REFRESH_FAILED"));
 
     verify(candles).swapStaged("NSE", "TCS", "1m");
     verify(candles).swapStaged("NSE", "TCS", "1d");
-    verify(events, never()).updateStatusIf(id, "REBACKFILL_RUNNING", "FAILED");
+    verify(events, never()).updateStatusIf(eq(id), anyString(), eq("FAILED"));
+  }
+
+  @Test
+  void theBaseCheckpointIsPersistedBEFORETheTailReportAndTheStagingCleanup() {
+    // Round-8 Critical, and the one the in-memory list structurally cannot cover: a HARD failure.
+    //
+    // swappedIntervals only survives an exception that unwinds into recordFailure. A JVM kill, a
+    // container OOM or a database restart between the 1d swap committing and the checkpoint being
+    // written loses the list, leaves the row at REBACKFILL_RUNNING, and reaches no failure handler
+    // at all. The resume scan only picks up BASE_COMMITTED statuses, and 1d now MATCHES Kite, so
+    // detection never re-fires either — an adjusted base with permanently stale caggs, from the
+    // exact failure mode (OOM) this job already has a live history of.
+    //
+    // No unit test can kill a JVM, so the property under test is the ORDER: the checkpoint must be
+    // the first thing that happens after the swap, ahead of the tail read and the million-row
+    // staging cleanup that widen the window. Everything after it is then crash-safe by resume.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+
+    assertThat(job.sweepNow()).containsExactly(id);
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> verify(events).updateStatus(id, "BASE_REBUILT"));
+
+    InOrder ordered = inOrder(candles, events);
+    ordered.verify(candles).swapStaged("NSE", "TCS", "1m");
+    ordered.verify(candles).swapStaged("NSE", "TCS", "1d");
+    ordered.verify(events).updateStatus(id, "BASE_REBUILT");
+    ordered.verify(candles).clearStaging("NSE", "TCS");
   }
 
   @Test

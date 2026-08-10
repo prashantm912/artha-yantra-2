@@ -357,8 +357,8 @@ public class CorporateActionJob {
           try {
             events.updateStatus(id, "REBACKFILL_RUNNING");
             OffsetDateTime now = OffsetDateTime.now(clock);
-            rebuildBaseByStagedSwap(equity, today, now, swappedIntervals);
-            events.updateStatus(id, "BASE_REBUILT");
+            rebuildBaseByStagedSwap(
+                equity, today, now, swappedIntervals, () -> events.updateStatus(id, "BASE_REBUILT"));
             refreshRebuiltAggregates(id, today, now);
             recordResolved(
                 id,
@@ -412,7 +412,11 @@ public class CorporateActionJob {
    * years for nothing (A14, 2026-07-10 3× live-Postgres OOM).
    */
   private void rebuildBaseByStagedSwap(
-      Instrument equity, LocalDate today, OffsetDateTime now, List<String> swappedIntervals) {
+      Instrument equity,
+      LocalDate today,
+      OffsetDateTime now,
+      List<String> swappedIntervals,
+      Runnable onBaseCommitted) {
     String exchange = equity.exchange();
     String symbol = equity.tradingsymbol();
     try {
@@ -468,6 +472,20 @@ public class CorporateActionJob {
         reportUnadjustedTail(equity, "1m");
         candles.swapStaged(exchange, symbol, "1d");
         swappedIntervals.add("1d");
+        // ⚠️ THE CHECKPOINT IS PERSISTED HERE — the FIRST statement after the base commits, ahead of
+        // the tail report and the (potentially million-row) staging cleanup below.
+        //
+        // Round 8 of review caught why the in-memory swappedIntervals list is not enough on its own.
+        // It only survives an exception that unwinds into recordFailure; a JVM kill, a container OOM
+        // or a database restart in the window between this line and the old checkpoint site loses
+        // the list entirely, leaves the event at REBACKFILL_RUNNING, and never reaches any failure
+        // handler. The next sweep only resumes statuses in BASE_COMMITTED, and 1d now MATCHES Kite,
+        // so detection does not re-fire either: the symbol keeps an adjusted base with permanently
+        // stale caggs. Given this job's own OOM history that is a real class, not a timing edge.
+        //
+        // Same reasoning as the swap order itself — make the durable record match what is durably
+        // TRUE, as soon as it becomes true.
+        onBaseCommitted.run();
         reportUnadjustedTail(equity, "1d");
       } catch (CandleRepository.PartialSwapException partial) {
         swappedIntervals.add(partial.interval() + PARTIAL_SUFFIX);

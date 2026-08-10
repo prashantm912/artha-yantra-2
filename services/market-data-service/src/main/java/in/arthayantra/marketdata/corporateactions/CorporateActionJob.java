@@ -43,7 +43,7 @@ import org.springframework.stereotype.Service;
  * Single-anchor noise only counts {@code ay_corporate_action_anchor_noise_total}. Kite-diff is the
  * SOLE detection input.
  *
- * <p>The re-backfill runs BEFORE any deletion (V054, see {@link #rebuildBaseByStagedSwap}) — it used
+ * <p>The re-backfill runs BEFORE any deletion (V057, see {@link #rebuildBaseByStagedSwap}) — it used
  * to run after a full purge, so a failed fetch left the symbol gutted with nothing that would ever
  * retry it.
  *
@@ -145,7 +145,7 @@ public class CorporateActionJob {
       @Value("${artha.corporate-actions.tolerance:0.005}") double tolerance,
       @Value("${artha.corporate-actions.uniformity-epsilon:0.01}") double uniformityEpsilon,
       // defaults exceed Kite's serving depth (~2015 for 1m) so the staged re-backfill spans the
-      // whole re-fetchable history — anything deeper cannot be re-fetched anyway, and since V054
+      // whole re-fetchable history — anything deeper cannot be re-fetched anyway, and since V057
       // the swap deletes only the span it actually staged, such bars are now LEFT ALONE rather
       // than purged with no replacement
       @Value("${artha.corporate-actions.rebackfill-days-1m:4400}") int rebackfillDays1m,
@@ -155,8 +155,8 @@ public class CorporateActionJob {
       // sweep is daily, so this is also the backoff — 3 spends three calendar days before paging
       @Value("${artha.corporate-actions.max-refresh-attempts:3}") int maxRefreshAttempts,
       // how long a FAILED rebuild waits before the sweep will re-detect the symbol. Bounds the Kite
-      // page cost of a symbol that can never pass staged verification (V054) without ever sealing
-      // it out of the sweep the way the pre-V054 purge did.
+      // page cost of a symbol that can never pass staged verification (V057) without ever sealing
+      // it out of the sweep the way the pre-V057 purge did.
       @Value("${artha.corporate-actions.rebuild-retry-cooldown-days:7}") int rebuildRetryCooldownDays,
       MeterRegistry meterRegistry) {
     this.instruments = instruments;
@@ -240,7 +240,7 @@ public class CorporateActionJob {
       resumeOrAbandon(latest.get(), equity, today, key);
       return java.util.Optional.empty(); // a resume, not a fresh detection
     }
-    // The rebuild path's retry BOUND (V054). Before this PR a failed rebuild gutted the symbol, and
+    // The rebuild path's retry BOUND (V057). Before this PR a failed rebuild gutted the symbol, and
     // the hasNonBhavcopyDaily pre-filter below then sealed it out of the sweep forever — which
     // accidentally bounded the cost of a symbol that could not be rebuilt. Leaving the cache intact
     // deliberately breaks that seal, so the divergence stays visible and the next sweep re-detects:
@@ -389,7 +389,7 @@ public class CorporateActionJob {
    * bars and zero 1m base rows.
    *
    * <p>{@code stageFullRange} ignores present coverage instead, so no purge is needed to force the
-   * re-fetch, and the whole fetch lands in the V054 staging buffer. Only once
+   * re-fetch, and the whole fetch lands in the V057 staging buffer. Only once
    * {@link #verifyStagedRebuild} proves the staged series covers what it is about to overwrite does
    * {@code swapStaged} delete and refill — a delete scoped to exactly the staged span, so every
    * bucket removed provably has a replacement row waiting.
@@ -452,7 +452,7 @@ public class CorporateActionJob {
       // the rebuild cooldown gate above then holds off for rebuildRetryCooldownDays — so recovery
       // is that many days later, not the next night, with the symbol on adjusted 1m + unadjusted 1d
       // + stale caggs throughout. It is PAGED urgently the whole time (recordFailure alerts on the
-      // REBACKFILL_RUNNING -> FAILED transition), and it is still strictly better than the pre-V054
+      // REBACKFILL_RUNNING -> FAILED transition), and it is still strictly better than the pre-V057
       // permanent seal, but it is not next-night recovery. Distinguishing "failed before any swap"
       // (a livelock candidate the cooldown is FOR) from "failed after a partial swap" (a transient
       // DB error the cooldown should skip) needs a recorded status that does not exist yet, so it
@@ -657,7 +657,7 @@ public class CorporateActionJob {
    * lambda believes — {@code status} is one overwritten column, so "did this run commit its base?"
    * is only answerable by reading it back. Base committed ⇒ REFRESH_FAILED, which the next sweep
    * resumes (redoing a cagg refresh cannot corrupt anything). Base NOT committed ⇒ plain FAILED,
-   * which the checkpoint deliberately does NOT resume: since V054 the run failed at or before the
+   * which the checkpoint deliberately does NOT resume: since V057 the run failed at or before the
    * staged swap, so the base is either untouched or half-swapped — never the completed rebuild a
    * refresh-only retry assumes, and materialising aggregates over it would bake in that state.
    *
@@ -672,6 +672,19 @@ public class CorporateActionJob {
   /** Marks an interval whose swap left durable windows behind without finishing. */
   private static final String PARTIAL_SUFFIX = "(partial)";
 
+  /**
+   * Both intervals swapped with NO partial marker — the staged base is fully in place.
+   *
+   * <p>Deliberately requires the absence of {@link #PARTIAL_SUFFIX}: a half-replaced interval means
+   * the base is NOT committed, and treating it as such would route a genuinely broken series to a
+   * resume path that only redoes aggregates.
+   */
+  private static boolean bothIntervalsSwappedCleanly(List<String> swappedIntervals) {
+    return swappedIntervals != null
+        && swappedIntervals.size() == 2
+        && swappedIntervals.stream().noneMatch(i -> i.endsWith(PARTIAL_SUFFIX));
+  }
+
   private void recordFailure(
       UUID id, Instrument equity, Exception e, List<String> swappedIntervals) {
     String recorded = events.statusOf(id).orElse("");
@@ -682,7 +695,16 @@ public class CorporateActionJob {
           recorded);
       return;
     }
-    boolean baseCommitted = BASE_COMMITTED.contains(recorded);
+    // ⚠️ The base can be committed WITHOUT the checkpoint having been written (cross-vendor review
+    // 2026-08-10, round 3). Both swaps land, then reportUnadjustedTail or clearStaging throws —
+    // before recordResolved persists BASE_REBUILT. Judged on `recorded` alone that is an ordinary
+    // FAILED, and this one is WORSE than the cooldown: both live intervals now MATCH Kite, so
+    // detection finds no divergence and never re-fires. The base is correct and the cagg refresh is
+    // stranded FOREVER — the 13-symbols-with-1%-of-their-caggs failure this class already carries a
+    // resume path for. Two CLEAN entries mean the base IS committed, so route to REFRESH_FAILED,
+    // which BASE_COMMITTED covers and the checkpoint scan resumes.
+    boolean baseCommitted =
+        BASE_COMMITTED.contains(recorded) || bothIntervalsSwappedCleanly(swappedIntervals);
     // ⚠️ A PARTIAL swap is not an ordinary failure and must NOT be recorded as one (V056; found by
     // cross-vendor review 2026-08-10). The cooldown skips any symbol whose latest event is FAILED
     // within rebuild-retry-cooldown-days — so recording a committed-1m/failed-1d run as FAILED

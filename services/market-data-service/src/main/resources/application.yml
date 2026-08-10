@@ -65,7 +65,7 @@ artha:
     # the operator needs a one-line .env disarm without a code change. Name MUST byte-match the
     # docker-compose passthrough key ARTHA_CORPORATE_ACTIONS_ENABLED (#653).
     enabled: ${ARTHA_CORPORATE_ACTIONS_ENABLED:true}
-    # V054 rebuild retry cooldown (days). A FAILED staged rebuild suppresses re-detection for this
+    # V057 rebuild retry cooldown (days). A FAILED staged rebuild suppresses re-detection for this
     # long. Needed because the staged swap leaves the cache INTACT on failure, which restores nightly
     # re-detection — unbounded, that is a ~196-page Kite re-fetch per symbol per night against the
     # shared limiter for any symbol that can never pass verification. Given a placeholder + compose

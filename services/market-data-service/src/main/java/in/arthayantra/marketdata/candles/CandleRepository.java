@@ -592,7 +592,7 @@ public class CandleRepository {
    * re-fetch and swaps it in through {@link #swapStaged}, whose delete is scoped to the verified
    * staged span. Nothing on the production path calls this today — it survives as a test fixture
    * helper (seeding a symbol from empty), and any new production caller would be reintroducing
-   * exactly the unguarded destruction that V054 exists to prevent.
+   * exactly the unguarded destruction that V057 exists to prevent.
    */
   public int purgeSymbol(String exchange, String tradingsymbol) {
     // bucket span for this symbol; +1 day on the high side so the DELETE's exclusive upper bound
@@ -645,7 +645,7 @@ public class CandleRepository {
       """;
 
   /**
-   * Batched insert into the corporate-action rebuild STAGING buffer (V054). Plain replace-on-conflict
+   * Batched insert into the corporate-action rebuild STAGING buffer (V057). Plain replace-on-conflict
    * — the staged rows are one authoritative Kite re-fetch, so a re-fetched overlapping page simply
    * supersedes itself; there is no provenance rule to preserve because nothing here is live data yet.
    */

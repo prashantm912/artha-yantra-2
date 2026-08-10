@@ -203,7 +203,7 @@ class CorporateActionIntegrationTest extends MarketDataIntegrationTestBase {
 
   @Test
   void aReBackfillThatFailsPartWayLeavesTheExistingSeriesIntact() {
-    // THE discriminating fixture (V054): a re-backfill that dies AFTER the 1d leg has already
+    // THE discriminating fixture (V057): a re-backfill that dies AFTER the 1d leg has already
     // succeeded — i.e. past the point the old purge-then-fetch order had already deleted every bar
     // this symbol owns. Under that order the 1m failure left the symbol gutted forever, because a
     // purged symbol fails the sweep's own hasNonBhavcopyDaily pre-filter and is never looked at

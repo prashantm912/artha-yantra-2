@@ -226,7 +226,7 @@ public class CandleQueryService {
   }
 
   /**
-   * Full-range forced fetch into the corporate-action rebuild STAGING buffer (V054) — synchronous,
+   * Full-range forced fetch into the corporate-action rebuild STAGING buffer (V057) — synchronous,
    * caller owns scheduling, and it writes NOTHING to {@code candles}.
    *
    * <p>This exists because {@link #ensureCoverage} is GAP-AWARE: it fetches only the buckets the

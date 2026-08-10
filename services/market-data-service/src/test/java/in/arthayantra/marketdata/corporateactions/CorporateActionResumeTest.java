@@ -172,7 +172,7 @@ class CorporateActionResumeTest {
               null));
     }
     when(gateway.fetch(any(), eq("1d"), any(), any())).thenReturn(kiteBars);
-    // a HEALTHY staged coverage by default (V054): non-empty, nothing left unreplaced, and reaching
+    // a HEALTHY staged coverage by default (V057): non-empty, nothing left unreplaced, and reaching
     // the cached series' end — so a test that wants the rebuild to proceed does not have to say so,
     // and a test about a REFUSAL has to state which of the three properties it breaks
     when(candles.stagedCoverage(eq("NSE"), eq("TCS"), anyString()))
@@ -193,7 +193,7 @@ class CorporateActionResumeTest {
 
   @Test
   void theReBackfillFetchesAndVerifiesBeforeItDeletesAnything() {
-    // The ordering fix itself (V054). The old body ran purgeSymbol FIRST and only then re-fetched,
+    // The ordering fix itself (V057). The old body ran purgeSymbol FIRST and only then re-fetched,
     // so every failure mode of a multi-hour ~12-year Kite fetch landed after the destruction.
     UUID id = armDetection();
     when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
@@ -304,6 +304,42 @@ class CorporateActionResumeTest {
 
     verify(candles).swapStaged("NSE", "TCS", "1m"); // the clean one did land
     verify(ntfy).send(contains("PARTIAL_SWAP"), eq("urgent"), contains("1d(partial)"));
+  }
+
+  @Test
+  void aFailureAfterBOTHSwapsIsRefreshFailedNotTerminalFailed() {
+    // Round-3 Critical, and the worst of the family: both swaps LAND, then the post-swap tail report
+    // throws before recordResolved persists BASE_REBUILT. Judged on the recorded status alone that
+    // is an ordinary FAILED — and unlike the partial cases the cooldown is not even the main harm.
+    // Both live intervals now MATCH Kite, so detection finds no divergence and never re-fires: the
+    // base is correct and the cagg refresh is stranded FOREVER, with nothing left to retrigger it.
+    // REFRESH_FAILED is in BASE_COMMITTED, so the checkpoint scan resumes the refresh instead.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    // stagedCoverage("1d") is called TWICE: once by verifyStagedRebuild BEFORE either swap, and
+    // again by reportUnadjustedTail AFTER the 1d swap commits. Throwing on the FIRST call would
+    // abort at verify with nothing swapped — the case already covered elsewhere — so the healthy
+    // reading is returned first and only the POST-SWAP read fails. That ordering IS the fixture.
+    when(candles.stagedCoverage("NSE", "TCS", "1d"))
+        .thenReturn(
+            new CandleRepository.StagedCoverage(
+                500,
+                OffsetDateTime.ofInstant(NOW, IST).minusYears(5),
+                OffsetDateTime.ofInstant(NOW, IST),
+                0,
+                OffsetDateTime.ofInstant(NOW, IST),
+                0))
+        .thenThrow(new RuntimeException("statement timeout reading staged coverage"));
+
+    assertThat(job.sweepNow()).containsExactly(id);
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "REFRESH_FAILED"));
+
+    verify(candles).swapStaged("NSE", "TCS", "1m");
+    verify(candles).swapStaged("NSE", "TCS", "1d");
+    verify(events, never()).updateStatusIf(id, "REBACKFILL_RUNNING", "FAILED");
   }
 
   @Test
@@ -598,7 +634,7 @@ class CorporateActionResumeTest {
         .when(queryService)
         .stageFullRange(anyString(), anyString(), eq("1m"), any(), any());
 
-    // detect → REBACKFILL_RUNNING → stage 1d → stage 1m THROWS: no base was committed. (Since V054
+    // detect → REBACKFILL_RUNNING → stage 1d → stage 1m THROWS: no base was committed. (Since V057
     // no base was DESTROYED either — that property is pinned by aReBackfillThatDiesPartWayDeletesNothing;
     // what this test still owns is that the FAILED row is not treated as refresh-resumable.)
     assertThat(job.sweepNow()).containsExactly(id);
@@ -611,7 +647,7 @@ class CorporateActionResumeTest {
 
     // the next sweep sees that FAILED row and must leave it alone: the run died before its base
     // was committed, so refreshing the caggs now would materialise aggregates over a base that was
-    // never rebuilt (and, since V054, was also never destroyed — the cooldown then holds it off)
+    // never rebuilt (and, since V057, was also never destroyed — the cooldown then holds it off)
     when(events.latestEvent("NSE", "TCS")).thenReturn(Optional.of(row(id, "FAILED", 0)));
     job.sweepNow();
     verify(candles, never()).refreshDerivedAggregatesForRebuild(any(), any());

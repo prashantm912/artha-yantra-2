@@ -185,19 +185,27 @@ public final class SemanticValidator {
    * price. So on an options strategy {@code percent} silently means a percentage of a DIFFERENT
    * INSTRUMENT than an author writing it almost certainly intends, and builds no premium bracket.
    *
-   * <p>The two downstream consumers disagree in OPPOSITE directions, which is what makes this
+   * <p>The two downstream consumers disagreed in OPPOSITE directions, which is what made this
    * worth refusing rather than documenting: the premium plane honours {@code premium_pct} and
-   * ignores {@code percent}, while {@code ScalperRisk.ENGINE_SIDE_STOP_BASES} counts
-   * {@code percent} as an engine-fireable §0B bounding stop and excludes {@code premium_pct} as
-   * "inert at index scale" — yet {@code levelDistance} computes both with the SAME formula
-   * ({@code entryPrice × value ÷ 100}). A scalper whose only stop is {@code {percent, 25}}
-   * therefore LOADS as bounded while having no enforceable stop on either plane: ~25% of the index
-   * never fires intraday, and no bracket is built. That is precisely the unbounded-losing-option
-   * state the §0B hard-stop rule exists to prevent.
+   * ignores {@code percent}, while {@code ScalperRisk.ENGINE_SIDE_STOP_BASES} counted
+   * {@code percent} as an engine-fireable §0B bounding stop and excluded {@code premium_pct} —
+   * yet {@code levelDistance} computes both with the SAME formula
+   * ({@code entryPrice × value ÷ 100}). A scalper whose only stop was {@code {percent, 25}}
+   * therefore LOADED as bounded while having no enforceable stop on either plane: ~25% of the
+   * index never fires intraday, and no bracket is built. That is precisely the
+   * unbounded-losing-option state the §0B hard-stop rule exists to prevent.
    *
    * <p>Deliberately narrow: the other level bases stay legal here because they ARE enforced
    * index-side by {@code ExitEvaluator} ({@code atr_multiple}, {@code index_points}), so the
    * position is bounded even though they build no premium bracket either.
+   *
+   * <p>⚠️ <b>This refusal is load-bearing for a rule in another module.</b> {@code ScalperRisk}
+   * has since dropped {@code percent} from its bounding-exit set, but the two decisions are still
+   * joined by nothing except this {@code "options_of_underlying"} literal appearing in both.
+   * Widening the mode keying here, or relaxing the refusal for an unrelated reason, changes what
+   * the §0B hard-stop rule admits at engine load. {@code ScalperStopBasisCouplingTest}
+   * (strategy-signal-service) freezes the joint verdict of the two and goes red on either edit
+   * alone — change this method and expect to answer to it.
    */
   private void checkOptionsPlaneLevelBases(JsonNode config) {
     if (!"options_of_underlying".equals(config.path("universe").path("mode").asText())) {

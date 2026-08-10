@@ -73,6 +73,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired BseEodBhavcopyRepository bseRepo;
   @Autowired EodCorporateActionRepository caRepo;
   @Autowired DividendRepository dividendRepo;
+  @Autowired in.arthayantra.marketdata.lineage.SymbolRenameEventRepository renameRepo;
   @Autowired EquitySplitBonusAdjuster adjuster;
   @Autowired in.arthayantra.marketdata.ingest.IngestRunLedger ledger;
   @Autowired JdbcTemplate jdbc;
@@ -98,7 +99,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
 
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
-            nseStub(), nseRepo, bseStub(), bseRepo, caStub(), bseCaStub(), caRepo, dividendRepo,
+            nseStub(), nseRepo, bseStub(), bseRepo, caStub(), bseCaStub(), caRepo, dividendRepo, renameRepo,
             candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     // A Kite-owned 1d bar must survive the bhavcopy projection (DO NOTHING; source not in PK).
@@ -180,7 +181,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
         };
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
-            flaky, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo,
+            flaky, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo, renameRepo,
             candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     // Run 1: trd2 missed; the watermark must NOT advance past it.
@@ -206,7 +207,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo,
-            dividendRepo, candles, CLOCK, published::add, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
+            dividendRepo, renameRepo, candles, CLOCK, published::add, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
             420);
 
     svc.runIfFree(); // the scheduler/startup entry — submits runLocked to the service's executor
@@ -231,7 +232,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             emptyNse(), nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo,
-            dividendRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
+            dividendRepo, renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
             420);
 
     svc.runIfFree(); // scheduler/startup entry — submits runLocked to the service's executor
@@ -283,7 +284,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
         };
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
-            full, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo,
+            full, nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo, renameRepo,
             candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
 
     BhavcopyBackfillService.RefetchResult result = svc.refetchDate(day);
@@ -320,7 +321,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     BhavcopyBackfillService svc =
         new BhavcopyBackfillService(
             emptyNse(), nseRepo, emptyBse(), bseRepo, nseActions, bseActions, caRepo,
-            dividendRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
+            dividendRepo, renameRepo, candles, CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7,
             420);
 
     assertThat(svc.runRatios()).isEqualTo(2); // only the split + bonus ratio writes are counted
@@ -426,7 +427,7 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     return new BhavcopyBackfillService(
         new LiveBhavcopyFetcher(
             new NseHttpClient(RestClient.builder(), wireMock.baseUrl()), wireMock.baseUrl(), CLOCK),
-        nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo, candles,
+        nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo, renameRepo, candles,
         CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
   }
 

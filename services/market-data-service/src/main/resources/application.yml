@@ -65,6 +65,19 @@ artha:
     # the operator needs a one-line .env disarm without a code change. Name MUST byte-match the
     # docker-compose passthrough key ARTHA_CORPORATE_ACTIONS_ENABLED (#653).
     enabled: ${ARTHA_CORPORATE_ACTIONS_ENABLED:true}
+    # ⚠️ CANARY ALLOWLIST — comma-separated tradingsymbols; EMPTY (the default) means EVERY active
+    # equity, which is the pre-existing behaviour.
+    #
+    # CorporateActionJob has read `artha.corporate-actions.symbols` since it was written, but the key
+    # existed in NO yml and had NO compose passthrough, so it could not be set on a deployed stack at
+    # all. Setting ARTHA_CORPORATE_ACTIONS_SYMBOLS in .env would have been silently inert and the
+    # sweep would have taken the whole universe — a knob that looks armed and does nothing, on the
+    # exact path whose remediation OOM-crashed live Postgres three times.
+    #
+    # Found 2026-08-10 while arming a 2-symbol canary after V057 made the rebuild safe to re-enable
+    # (owner: "canary first"). The name MUST byte-match the compose passthrough
+    # ARTHA_CORPORATE_ACTIONS_SYMBOLS (#653) — a mismatch swallows the override with no error.
+    symbols: ${ARTHA_CORPORATE_ACTIONS_SYMBOLS:}
     # V057 rebuild retry cooldown (days). A FAILED staged rebuild suppresses re-detection for this
     # long. Needed because the staged swap leaves the cache INTACT on failure, which restores nightly
     # re-detection — unbounded, that is a ~196-page Kite re-fetch per symbol per night against the

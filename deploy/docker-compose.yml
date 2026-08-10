@@ -348,6 +348,11 @@ services:
       # (no behaviour change); flip false in .env to disarm. Name MUST byte-match application.yml's
       # artha.corporate-actions.enabled placeholder ARTHA_CORPORATE_ACTIONS_ENABLED (#653).
       ARTHA_CORPORATE_ACTIONS_ENABLED: ${ARTHA_CORPORATE_ACTIONS_ENABLED:-true}
+      # Canary allowlist for the CA sweep — comma-separated tradingsymbols; empty = every active
+      # equity. CorporateActionJob has always read artha.corporate-actions.symbols, but without this
+      # passthrough (and the matching yml key) it was unsettable on a deployed stack, so an operator
+      # arming a "2-symbol canary" would have swept all of them.
+      ARTHA_CORPORATE_ACTIONS_SYMBOLS: ${ARTHA_CORPORATE_ACTIONS_SYMBOLS:-}
       # artha.corporate-actions.rebuild-retry-cooldown-days placeholder (#653).
       ARTHA_CORPORATE_ACTIONS_REBUILD_RETRY_COOLDOWN_DAYS: ${ARTHA_CORPORATE_ACTIONS_REBUILD_RETRY_COOLDOWN_DAYS:-7}
       # Phase-9 Minervini (MV-9.4): push an ntfy alert when a SEPA funnel candidate transitions into

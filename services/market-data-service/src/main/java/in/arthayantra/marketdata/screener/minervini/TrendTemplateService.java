@@ -109,11 +109,10 @@ public class TrendTemplateService {
   // are split/bonus back-adjusted so a corporate action inside the window no longer opens a false
   // cliff under the MA/52w/RS gates; raw_close carries the unadjusted close for the rupee-turnover
   // liquidity gate (avg_turnover_50), which must stay split-invariant.
-  private static final String SQL =
-      "WITH base AS (\n"
-          + AdjustedEquityDailySql.SCREENER_BASE_CTE
-          + "\n),\n"
-          + """
+  // ⚠️ SQL_TAIL is declared BEFORE the two constants built from it: static initialisers run in
+  // declaration order, so building SQL above this point would splice in a null tail.
+  private static final String SQL_TAIL =
+      """
       calc AS (
         SELECT symbol, bucket, close, volume,
           avg(close) OVER w50  AS sma50,
@@ -169,6 +168,23 @@ public class TrendTemplateService {
         AND calc2.avg_turnover_50 >= ?
       """;
 
+  private static String sqlFor(boolean lineageExpanded) {
+    return "WITH base AS (\n"
+        + AdjustedEquityDailySql.screenerBaseCte(lineageExpanded)
+        + "\n),\n"
+        + SQL_TAIL;
+  }
+
+  /** The screen query as it has always been — no lineage, byte-identical to the pre-N2 constant. */
+  private static final String SQL = sqlFor(false);
+
+  /**
+   * The lineage-expanded twin (N2 / #1285). Same tail, same binds, same gates — the ONLY difference
+   * is which base CTE feeds it, so the two cannot drift. Reached only by an explicit {@code
+   * screen(asOf, true)}.
+   */
+  private static final String SQL_LINEAGE = sqlFor(true);
+
   /**
    * The latest bhavcopy trade date ON OR BEFORE {@code asOf} — the EFFECTIVE screen date. The
    * requested {@code asOf} must never become the label: the row selection compares each symbol
@@ -189,16 +205,45 @@ public class TrendTemplateService {
             java.sql.Date.valueOf(asOf));
   }
 
-  /** Runs the screen as of {@code asOf} (default = latest). Computes gates + RS-rank + Stage. */
+  /**
+   * Runs the screen as of {@code asOf} (default = latest). Computes gates + RS-rank + Stage.
+   *
+   * <p>Every persisting caller — both schedulers, {@code POST /run}, {@code runOnce} — lands here,
+   * and here lineage is OFF. The published daily screen is unchanged by N2.
+   */
   public ScreenResult screen(LocalDate asOf) {
+    return screen(asOf, false);
+  }
+
+  /**
+   * The same screen, optionally reading the LINEAGE-EXPANDED price plane (N2 / #1285): a renamed
+   * symbol's pre-rename bars accrue to the ticker that carries the series today, so a successor can
+   * clear the 252-session gate on history that already exists under a retired key.
+   *
+   * <p>{@code lineageExpanded = false} runs the identical statement this method has always run.
+   * Opting in is an explicit argument at the call site — there is no ambient default that could
+   * move the screen's numbers behind a reader's back.
+   */
+  public ScreenResult screen(LocalDate asOf, boolean lineageExpanded) {
     LocalDate date = effectiveScreenDate(asOf);
     if (date == null) {
       return new ScreenResult(null, 0, List.of());
     }
     java.sql.Date d = java.sql.Date.valueOf(date);
+    // ⚠️ The lineage plane binds a THIRD asOf (its walk excludes links that had not switched yet),
+    // and it is bound FIRST because the `asof` CTE is textually first. Arity comes from
+    // AdjustedEquityDailySql rather than being restated here: one param short does not fail, it
+    // shifts minSessions/minPrice/liquidity by one position and screens on the wrong thresholds.
+    Object[] args =
+        new Object[AdjustedEquityDailySql.screenerBaseCteDateBinds(lineageExpanded) + 4];
+    java.util.Arrays.fill(args, 0, args.length - 4, d);
+    args[args.length - 4] = sma200RisingSessions;
+    args[args.length - 3] = minSessions;
+    args[args.length - 2] = minPrice;
+    args[args.length - 1] = liquidityThreshold;
     List<Raw> raws =
         jdbc.query(
-            SQL,
+            lineageExpanded ? SQL_LINEAGE : SQL,
             (rs, n) ->
                 new Raw(
                     rs.getString("symbol"),
@@ -217,7 +262,7 @@ public class TrendTemplateService {
                     rs.getBigDecimal("ff_mcap"),
                     rs.getBigDecimal("ff_pct"),
                     rs.getBoolean("is_current")),
-            d, d, sma200RisingSessions, minSessions, minPrice, liquidityThreshold);
+            args);
 
     // Trailing-bar guard + coverage floor. Applied FIRST — before the low-cap gate and the RS-rank —
     // so the percentile is computed over the surviving universe, exactly as when this was a WHERE

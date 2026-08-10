@@ -198,6 +198,18 @@ public class ManasScreenService {
 
   /** Runs the screen as of {@code asOf} (default = latest). Computes the §4.1/§1.2/§4.3/§4.4 gates. */
   public ScreenResult screen(LocalDate asOf) {
+    return screen(asOf, false);
+  }
+
+  /**
+   * The same screen, optionally reading the LINEAGE-EXPANDED price plane (N2 / #1285): a renamed
+   * symbol's pre-rename bars accrue to the ticker that carries the series today.
+   *
+   * <p>{@code lineageExpanded = false} builds the identical statement this method has always built —
+   * {@link AdjustedEquityDailySql#screenerBaseCte} returns the untouched constant for {@code false}.
+   * Every persisting caller uses the one-arg overload, so the published daily screen is unchanged.
+   */
+  public ScreenResult screen(LocalDate asOf, boolean lineageExpanded) {
     LocalDate date = effectiveScreenDate(asOf);
     if (date == null) {
       return new ScreenResult(null, 0, List.of());
@@ -208,9 +220,16 @@ public class ManasScreenService {
     // The CA-adjusted base CTE (no '%' → safe to concatenate around the %d-bearing calc/select).
     String sql =
         "WITH base AS (\n"
-            + AdjustedEquityDailySql.SCREENER_BASE_CTE
+            + AdjustedEquityDailySql.screenerBaseCte(lineageExpanded)
             + "\n),\n"
             + String.format(CALC_AND_SELECT, newHighPreceding);
+    // ⚠️ See TrendTemplateService: the lineage plane binds a THIRD asOf, first. Arity is read from
+    // AdjustedEquityDailySql so it can never drift out of step with the CTE it belongs to.
+    Object[] args =
+        new Object[AdjustedEquityDailySql.screenerBaseCteDateBinds(lineageExpanded) + 2];
+    java.util.Arrays.fill(args, 0, args.length - 2, d);
+    args[args.length - 2] = sma200RisingSessions;
+    args[args.length - 1] = minSessions;
     List<Raw> raws =
         jdbc.query(
             sql,
@@ -234,7 +253,7 @@ public class ManasScreenService {
                     rs.getBigDecimal("ff_mcap"),
                     rs.getBigDecimal("ff_pct"),
                     rs.getBoolean("is_current")),
-            d, d, sma200RisingSessions, minSessions);
+            args);
 
     // Trailing-bar guard + coverage floor. Applied FIRST — before the RS-rank — so the percentile is
     // computed over the surviving universe, exactly as when this was a WHERE filter.

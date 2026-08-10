@@ -1,5 +1,8 @@
 package in.arthayantra.marketdata.bse;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -33,10 +36,41 @@ public class LiveBseBhavcopyFetcher implements BseBhavcopyFetcher {
   private final BseHttpClient client;
   private final String baseUrl;
 
+  /**
+   * Counts payloads refused by the mis-dated guard below, gated on the trading calendar exactly as
+   * the NSE twin is — see {@code LiveBhavcopyFetcher} for the full rationale (short version: a
+   * holiday's re-served file is normal, is re-probed every run forever, and would otherwise give the
+   * counter a non-zero baseline that no threshold can see past).
+   *
+   * <p>The injected {@link MarketCalendar} is the NSE bean, and that is correct here rather than a
+   * gap: {@code MarketCalendar.nse()} and {@code .bse()} are built from the SAME bundled holiday
+   * resource and differ only in {@code weeklyExpiryDay}, so {@code isTradingDay} is identical for
+   * both exchanges.
+   */
+  private final Counter misdatedCounter;
+
+  private final MarketCalendar calendar;
+
   public LiveBseBhavcopyFetcher(
-      BseHttpClient client, @Value("${artha.bse.base-url:https://www.bseindia.com}") String baseUrl) {
+      BseHttpClient client,
+      @Value("${artha.bse.base-url:https://www.bseindia.com}") String baseUrl,
+      MeterRegistry meterRegistry,
+      MarketCalendar calendar) {
     this.client = client;
     this.baseUrl = baseUrl;
+    this.calendar = calendar;
+    this.misdatedCounter =
+        meterRegistry.counter("ay_bhavcopy_misdated_payload_total", "exchange", "BSE");
+  }
+
+  /** Fail-CLOSED for the counter past the bundled calendar's covered years; never blocks a fetch. */
+  private boolean countableTradingDay(LocalDate date) {
+    try {
+      return calendar.isTradingDay(date);
+    } catch (RuntimeException calendarCliff) {
+      log.debug("BSE bhavcopy {}: calendar does not cover this year — not counting", date);
+      return false;
+    }
   }
 
   @Override
@@ -59,7 +93,9 @@ public class LiveBseBhavcopyFetcher implements BseBhavcopyFetcher {
     return parse(body, date);
   }
 
-  private static List<BseBhavRow> parse(String csv, LocalDate expected) {
+  // Instance, not static: the mis-dated guard below increments the per-exchange counter, and the
+  // single caller is already an instance method. Nothing outside this class calls it.
+  private List<BseBhavRow> parse(String csv, LocalDate expected) {
     String[] lines = csv.split("\\r?\\n");
     if (lines.length < 2 || !lines[0].startsWith("TradDt,")) {
       return List.of(); // not the expected UDiFF header
@@ -107,6 +143,9 @@ public class LiveBseBhavcopyFetcher implements BseBhavcopyFetcher {
     // 200 with a DIFFERENT day's file would store that day's rows and leave the requested one
     // permanently missing. Refuse the payload rather than mis-file it.
     if (!rows.isEmpty() && !rows.stream().allMatch(r -> expected.equals(r.date()))) {
+      if (countableTradingDay(expected)) {
+        misdatedCounter.increment();
+      }
       log.warn(
           "BSE bhavcopy {}: file served {} row(s) dated {} — discarding as not published",
           expected,

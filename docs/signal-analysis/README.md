@@ -469,6 +469,25 @@ Run in order; each answers one question. Canned SQL in §6.
     WHERE r.generated_at >= :d0 AND c->>'rail'='strike-pick' AND (c->>'pass')::boolean=false
     GROUP BY 1,2 ORDER BY 1,2;
     ```
+    ⚠️ **AMENDED 2026-08-06 — the rule does NOT generalize to every expiry cycle.** The first
+    observed **BSE WEEKLY** expiry (Thu 2026-08-06, SENSEX weeklies expiring) produced **ZERO
+    `strike-pick` fails on either root**, and the shadow book traded expiring-today SENSEX legs
+    all session — falsifying the carried prediction. The observed saturations are the two
+    MONTHLIES (07-28 NSE → NIFTY 534; 07-30 BSE → SENSEX 405) and the **NSE-weekly eve/day-of**
+    pair (08-03 → 235, 08-04 → 604, both NIFTY-rooted; 08-05 non-expiry control → 0). Read the
+    claim as *monthly expiries and NSE weeklies have saturated the expiring root; the BSE weekly
+    has not (n=1)* — check the day's cycle before predicting fails, and keep 07-24's
+    no-expiry 550 as the standing reminder that non-expiry causes exist too.
+    ⚠️ **AMENDED AGAIN 2026-08-07 — the full 15-session history reframes the mechanism from
+    "expiry day" to CHAIN PROXIMITY-TO-EXPIRY/ROLL.** Querying all sessions since 07-20 (table in
+    `2026-08-07-session-findings.md` §2.2): SENSEX saturation clusters **Thu–Mon around the BSE
+    Thursday expiry** — including **three consecutive post-expiry Fridays (07-24: 550, 07-31: 374,
+    08-07: 350)** — NIFTY saturation clusters Mon–Tue around the NSE Tuesday expiry, and
+    **Wednesdays are always clean** (07-22 / 07-29 / 08-05: zero on both roots). The 08-06 BSE
+    weekly's zero (the amendment above) is the OUTLIER among day-of observations, not the
+    falsifier: 07-23 (BSE weekly day-of) saturated with 390. Read the fails as *the front weekly
+    sitting outside the delta/premium band when freshly rolled or at expiry*, and expect them on
+    the cluster days, not only the expiry date itself.
 28. **A dot at 0% (or 100%) on a LIVE, MOVING operand is a FOURTH state — "never crosses" — that neither
     the alive/dead nor the frozen probe can see; check the operand's own min/max against the dot's
     threshold before classifying** (added 2026-07-30) — `breadth` (w **1.0**, the canary's only required
@@ -680,7 +699,57 @@ Run in order; each answers one question. Canned SQL in §6.
       AND EXTRACT(second FROM bucket)=0 AND bucket >= :d1510 AND bucket < :d1530 ORDER BY bucket;
     -- continuous close = the pinned value before the late jump; official = the 1d bar's close.
     ```
-34. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
+34. **Heat-gate evaluability on every funded fire** (added 2026-08-05) — the paper book's F9
+    heat-cap is FAIL-SOFT: `PaperMarginClient.margin()` (→ market-data `POST /api/v1/market/margin`)
+    returns an `unpriced` quote on ANY failure and `RiskService` logs
+    `heat-cap enforcement ON but heat unassessable — gate inert this entry` and lets the entry
+    through. That is the designed degrade — but it means a wire defect silently disables a
+    money-path guard, and NOTHING else surfaces it. First live instance 2026-08-05 11:04: the
+    session's ONLY funded entry got `Error while extracting response ... content type
+    [application/octet-stream]`, twice (entry path + notifier). Standing check on every session WITH
+    a funded fire:
+    ```bash
+    docker logs ay-strategy-signal-service --since <open-UTC> 2>&1 \
+      | grep -cE "heat call failed|heat unassessable"
+    ```
+    Non-zero = the F9 heat check never ran on those entries — report it and count it against the fire
+    count. (On a zero-fire session the grep proves nothing — the gate only runs at entry.)
+
+    ⚠️ **CORRECTED 2026-08-05 (same day, after the finding was written) — read
+    [`2026-08-05-f9-heat-cap-inert.md`](2026-08-05-f9-heat-cap-inert.md) before acting on this row.**
+    Two things above are wrong. **(1) The cause is not a content-type/wire defect.** It is
+    `PaperMarginClient`'s 2000 ms read timeout against `UpstoxFnoMasterClient`'s lazy 5 MB+ gzip
+    master load, which is itself budgeted 60 s — the day's first `keyFor()`. Both WARNs fired at
+    exactly 2000 ms and the master completed 535 ms later. Deterministic per container start / per
+    12 h refresh lapse. **(2) A ZERO grep does NOT mean the cap covered the entry.** Heat is computed
+    as `spanMargin / equity`, and every scalper position is a long option BUY, which carries no SPAN
+    — 10 of 10 priced snapshots are `0.00`, so the normal path yields `0.00%` against a `60%` cap and
+    blocks nothing. Zero here means "the call succeeded", not "the control worked". Treat this §3.34
+    row as an evaluability probe only; **coverage is an open owner question (ledger N23-A)**.
+35. **Discriminate NO-SESSION from NO-CAPTURE before reading any zero** (added 2026-08-10) — a
+    session with zero rejection rows is triply ambiguous: a holiday (normal), chart-gate silence
+    (INCONCLUSIVE, §4.3), or a platform outage (the 07-08/07-09 and 08-10 class). On 2026-08-10 the
+    stack was down 08:30–18:47 IST — the ENTIRE trading session — and the first probe ("rejections
+    today: 0") is identical to a holiday's. The distinguishing chain, in order, each step cheap:
+    ```sql
+    -- (a) calendar: no row in libs/market-calendar nse-trading-holidays.csv for the date
+    -- (b) did the market trade? bhavcopy dated TODAY proves it independently of capture
+    SELECT count(*) FROM marketdata.nse_eod_bhavcopy WHERE trade_date = :d;
+    -- (c) was there a full session? post-hoc REST backfill of the signal future shows it
+    SELECT source, count(*) FROM marketdata.candles
+    WHERE tradingsymbol=:front_fut AND interval='1m'
+      AND bucket >= :d0915 AND bucket < :d1530 GROUP BY 1;
+    -- (d) stack or engine? log-gap on BOTH services + empty eval buckets = stack, not engine
+    ```
+    ⚠️ Two provenance artifacts a naive read misinterprets after the boot: the REST backfill makes
+    the future's bar count read "375/375 healthy" (only `source`/`fetched_at` reveal none were
+    captured live), and the post-boot WS connect writes ONE `TICK_AGG` bar per subscribed symbol
+    at its last-trade minute (Kite's snapshot tick), stamped hours after the close. Classify such
+    a day **OUTAGE / NO-DATA** in the rollup — never "quiet", never a G15 regime row (a proxy off
+    the future may be recorded, labelled PROXY, but must not enter G11's chop-day count), and
+    never evidence for or against any tuning row. The in-stack canaries cannot see this class —
+    they were down too; only an off-stack heartbeat (the unbuilt batch-liveness third layer) can.
+36. *(new dimensions land here — keep numbering append-only so findings files can cite "§3.6" stably)*
 
 ## 4. Live in-session analysis
 

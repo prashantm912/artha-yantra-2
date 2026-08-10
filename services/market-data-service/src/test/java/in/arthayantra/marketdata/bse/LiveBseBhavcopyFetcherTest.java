@@ -76,6 +76,20 @@ class LiveBseBhavcopyFetcherTest {
     assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 20))).isEmpty();
   }
 
+  /**
+   * The trade date is read from the file's own {@code TradDt}, so a server answering 200 with a
+   * DIFFERENT day's file would store that day's rows and leave the requested day permanently
+   * missing (the NSE archive demonstrably does exactly this on holiday URLs). Refuse the payload.
+   */
+  @Test
+  void refusesAFileDatedForADifferentDayThanTheOneRequested() {
+    BseBhavcopyFetcher fetcher = new LiveBseBhavcopyFetcher(new StubBse(udiff()), "https://x");
+
+    // The stub serves the same 19-Jun rows for EVERY URL.
+    assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 22))).isEmpty();
+    assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 19))).hasSize(3);
+  }
+
   private static String udiff() {
     return HEADER + "\n" + RELIANCE + "\n" + TCS + "\n" + INDEX_FUT + "\n" + COMMA_NAME + "\n";
   }

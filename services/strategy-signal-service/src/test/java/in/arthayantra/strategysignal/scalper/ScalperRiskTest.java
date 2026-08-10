@@ -11,6 +11,12 @@ import org.junit.jupiter.api.Test;
  * §0B hard-stop rule, hardened post-T21 (#990 round-3): a scalper must carry a bounding exit the
  * ENGINE can fire — a time_stop or an index-side stop_loss. A premium_pct stop is an option-leg
  * band (paper bracket path only) and does NOT count on its own.
+ *
+ * <p>⚠️ Unit-level only: these cases build {@link ExitRuleSpec} objects directly, so nothing here
+ * touches validation and nothing here can notice {@code ScalperRisk} drifting apart from
+ * {@code SemanticValidator}'s view of which bases may be declared on an options strategy. That
+ * coupling is pinned by {@link ScalperStopBasisCouplingTest}, which drives real configs through the
+ * publish-path validator — add a case THERE, not here, when a level basis changes meaning.
  */
 class ScalperRiskTest {
 
@@ -36,7 +42,6 @@ class ScalperRiskTest {
   @Test
   void anEngineSideStopLossSatisfiesIt() {
     assertThat(ScalperRisk.hasBoundingExit(List.of(POINT_STOP))).isTrue();
-    assertThat(ScalperRisk.hasBoundingExit(List.of(PERCENT_STOP))).isTrue();
     assertThat(ScalperRisk.hasBoundingExit(List.of(ATR_STOP))).isTrue();
   }
 
@@ -48,6 +53,20 @@ class ScalperRiskTest {
     assertThat(ScalperRisk.hasBoundingExit(List.of(PREMIUM_STOP, SIGNAL))).isFalse();
     assertThat(ScalperRisk.hasBoundingExit(List.of(PREMIUM_STOP, TIME))).isTrue();
     assertThat(ScalperRisk.hasBoundingExit(List.of(PREMIUM_STOP, POINT_STOP))).isTrue();
+  }
+
+  @Test
+  void aPercentOnlyStopDoesNot() {
+    // `percent` names no plane on an options config, so SemanticValidator refuses it there (#1284)
+    // and it is no longer counted here. NOT because it is mechanically inert: ExitEvaluator
+    // computes `percent` and `premium_pct` with ONE shared entryPrice×value÷100 arm, so {percent,
+    // 0.3} on NIFTY is ~72 index points and would fire normally. It is excluded so that widening
+    // or relaxing that refusal cannot silently restore the §0B hole — a config whose only stop is
+    // {percent, 25} loading as bounded with no enforceable stop on either plane. The two gates are
+    // held together by ScalperStopBasisCouplingTest.
+    assertThat(ScalperRisk.hasBoundingExit(List.of(PERCENT_STOP))).isFalse();
+    assertThat(ScalperRisk.hasBoundingExit(List.of(PERCENT_STOP, SIGNAL))).isFalse();
+    assertThat(ScalperRisk.hasBoundingExit(List.of(PERCENT_STOP, TIME))).isTrue();
   }
 
   @Test

@@ -103,6 +103,17 @@ public class LiveBseBhavcopyFetcher implements BseBhavcopyFetcher {
     if (skipped > 0) {
       log.warn("BSE bhavcopy {}: skipped {} malformed rows", expected, skipped);
     }
+    // Same seam as NSE: the trade date comes from the file's own TradDt, so a server that answers
+    // 200 with a DIFFERENT day's file would store that day's rows and leave the requested one
+    // permanently missing. Refuse the payload rather than mis-file it.
+    if (!rows.isEmpty() && !rows.stream().allMatch(r -> expected.equals(r.date()))) {
+      log.warn(
+          "BSE bhavcopy {}: file served {} row(s) dated {} — discarding as not published",
+          expected,
+          rows.size(),
+          rows.stream().map(BseBhavRow::date).distinct().sorted().toList());
+      return List.of();
+    }
     return rows;
   }
 

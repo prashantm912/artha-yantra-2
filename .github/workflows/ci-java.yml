@@ -175,6 +175,24 @@ jobs:
           tar -xzf gitleaks.tar.gz gitleaks
           ./gitleaks git --redact --no-banner .
 
+  # Same shape and same reasoning as it-naming-guard below: a pure-file repo-hygiene rule, ungated
+  # so it runs on EVERY PR rather than only classified ones, ~10s, no classifier entry needed.
+  # Guards the two skill trees (.claude/skills, .agents/skills) that load into agent sessions.
+  # It deliberately does NOT ride a build-test shard: a guard whose whole purpose is "never merge
+  # past a red check with --admin" must not itself be the slowest, flakiest required context.
+  # See the script header for the full trade. This job WAS promoted to a required context on
+  # 2026-08-04 (#1298) and is now binding — the header's original "not required" caveat is resolved.
+  runbook-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      # The guard's own red-proofs, run BEFORE the real check so a guard edit that would let a
+      # prescription through fails here rather than reporting green.
+      - name: Guard self-test
+        run: bash .github/scripts/check_runbook_hygiene_test.sh
+      - name: Runbook hygiene
+        run: bash .github/scripts/check_runbook_hygiene.sh
+
   it-naming-guard:
     runs-on: ubuntu-latest
     steps:

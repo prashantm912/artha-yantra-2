@@ -219,6 +219,20 @@ public final class SwingCoverageProbe {
     }
   }
 
+  /**
+   * Extra bars probed beyond the declared indicator depth: one for the "current bar plus prior D"
+   * read convention, one for a crossover's previous operand. See {@link #entryLookbackBars} for why
+   * this is a flat widening rather than a per-indicator warmup model.
+   *
+   * <p>Package-visible so the depth ratchet can assert {@code declared + DEPTH_SLACK} instead of
+   * freezing a second copy of the number — a ratchet that hardcodes what it guards drifts silently.
+   *
+   * <p>Applied to the ENTRY window only. The exit probe is observational (it alerts, never refuses),
+   * so under-probing there costs an alert rather than a wrong trade, and widening it would change
+   * the exit alert population for no decision benefit.
+   */
+  static final int DEPTH_SLACK = 2;
+
   /** A reading that makes no claim — the safe default for every uncertain input. */
   public static Coverage undeterminable(int lookbackBars) {
     return new Coverage(lookbackBars, 0, null, List.of(), false);
@@ -250,7 +264,25 @@ public final class SwingCoverageProbe {
           deepest = Math.max(deepest, deepestParam(spec.params()));
         }
       }
-      return deepest;
+      // ⚠️ A DECLARED depth is not the number of BARS the evaluator reads, and probing the declared
+      // depth measured a narrower span than the decision actually depends on (cross-vendor review,
+      // 2026-08-10). Two separate reasons, both measured in the live evaluator:
+      //
+      //   * an indicator of declared depth D reads the CURRENT bar plus the prior D — VOLUME_RATIO(20)
+      //     touches 21 rows, not 20; and
+      //   * crossover/crossunder read the PREVIOUS value of each operand as well as the current one,
+      //     so a D-deep operand under a crossover needs one further bar behind that.
+      //
+      // So a gap sitting one or two bars past the probed edge could move the entry decision while the
+      // probe reported the window complete. DEPTH_SLACK widens the span to cover both.
+      //
+      // Deliberately a flat, conservative widening rather than a per-indicator warmup calculation:
+      // probing MORE bars can only ever find MORE holes, never fewer, so erring wide errs
+      // fail-CLOSED — which is the safe side of an ENTRY gate by this class's own doctrine. A
+      // per-indicator model would be tighter and is the right eventual fix; it is also exactly the
+      // kind of derived constant that was wrong here in the first place, so it does not get guessed
+      // at 1am.
+      return deepest == 0 ? 0 : deepest + DEPTH_SLACK;
     } catch (RuntimeException e) {
       return 0;
     }

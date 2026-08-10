@@ -114,9 +114,13 @@ class SwingCoverageDepthRatchetTest {
 
     // primary-base is the Critical case: its gate IS crossover(px, w52h) with period 252, so entry
     // scoping alone cannot shrink it — materiality is what stops it refusing the funnel nightly.
+    // DERIVED, not a second hardcoded copy: the probed window is the declared depth plus the read
+    // slack (SwingCoverageProbe.DEPTH_SLACK — the current bar plus a crossover's previous operand),
+    // and a ratchet that froze the raw 252 would have to be edited every time either moved, which is
+    // exactly how a ratchet stops guarding anything.
     assertThat(actual.get("minervini-primary-base"))
-        .as("w52h(252) is read by the entry gate")
-        .isEqualTo(252);
+        .as("w52h(252) is read by the entry gate, plus the read slack")
+        .isEqualTo(252 + SwingCoverageProbe.DEPTH_SLACK);
 
     // For every other seeded strategy sma50 is exit-only (or declared-but-unread), so the entry
     // window must NOT be 50 — that was the Major: refusing entries on an indicator the entry never

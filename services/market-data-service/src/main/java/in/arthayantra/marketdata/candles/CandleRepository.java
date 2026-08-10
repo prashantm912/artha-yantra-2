@@ -594,67 +594,85 @@ public class CandleRepository {
     List<Window> shared =
         refreshWindows(start, end, MAX_REFRESH_WINDOW_DAYS, REFRESH_WINDOW_OVERLAP_DAYS);
     for (DerivedAggregate view : views) {
-      List<Window> windows =
+      int windowCount =
           planFromChunkLoad
-              ? planRebuildWindows(
-                  chunkLoad(st, view, start, end),
-                  start,
-                  end,
-                  REBUILD_WINDOW_TUPLE_BUDGET,
-                  MAX_REFRESH_WINDOW_DAYS,
-                  view.overlapDays())
-              : shared;
-      // ⚠️ REPLAN BEFORE EACH CALL when sizing from chunk load. Planning the whole list from ONE
-      // snapshot is a stale-operand bug: the load a window was sized against can grow between the
-      // read and the CALL — a compression policy running (V049 compresses these caggs on a
-      // schedule), a concurrent backfill, or an uncompressed chunk that reported 0 and has since
-      // been compressed and now decompresses in full. The window does NOT shrink to compensate;
-      // Timescale simply aborts at the 5,000,000 ceiling, which burns one of the refresh's limited
-      // attempts and reproduces the outage this whole change exists to end.
-      //
-      // Cross-vendor review, 2026-08-11. Cost is one metadata query per window instead of one per
-      // view — cheap next to the refresh itself, and it makes the budget track reality rather than
-      // a photograph of it. Each replan re-reads the load for the REMAINING span only, so the plan
-      // converges rather than repeating work already materialised.
-      OffsetDateTime cursor = start;
-      int executed = 0;
-      while (cursor.isBefore(end)) {
-        Window w =
-            planFromChunkLoad
-                ? planRebuildWindows(
-                        chunkLoad(st, view, cursor, end),
-                        cursor,
-                        end,
-                        REBUILD_WINDOW_TUPLE_BUDGET,
-                        MAX_REFRESH_WINDOW_DAYS,
-                        view.overlapDays())
-                    .get(0)
-                : windows.get(Math.min(executed, windows.size() - 1));
-        st.execute(
-            "CALL public.refresh_continuous_aggregate('"
-                + view.viewName()
-                + "', '"
-                + w.from().toInstant()
-                + "'::timestamptz, '"
-                + w.to().toInstant()
-                + "'::timestamptz)");
-        executed++;
-        // The next span starts at this window's END minus its overlap; the planner already applied
-        // the overlap to `from`, so advancing to `to` cannot skip a bucket.
-        if (!w.to().isAfter(cursor)) {
-          break; // a planner that cannot advance must not spin — bounded by construction, guarded here
-        }
-        cursor = w.to();
-        if (!planFromChunkLoad && executed >= windows.size()) {
-          break;
-        }
-      }
-      int windowCount = executed;
+              ? refreshReplanning(st, view, start, end)
+              : callEach(st, view, shared);
       // one line per view, not per window: a 12-yr rebuild is ~48 windows × 5 views (2026-07-10 OOM)
       log.info(
           "refreshed derived aggregate {} over {} window(s) [{} .. {}]",
           view.viewName(), windowCount, start.toInstant(), end.toInstant());
     }
+  }
+
+  /** Issues one CALL per precomputed window — the plain day-count path, unchanged. */
+  private static int callEach(Statement st, DerivedAggregate view, List<Window> windows)
+      throws SQLException {
+    for (Window w : windows) {
+      call(st, view, w);
+    }
+    return windows.size();
+  }
+
+  /**
+   * Refreshes {@code [start, end)} one window at a time, REPLANNING each from the chunk load over
+   * the remaining span.
+   *
+   * <p>⚠️ Planning the whole list from ONE read is a stale-operand bug: the load a window was sized
+   * against moves between the read and the CALL — V049 compresses these caggs on a schedule, a
+   * concurrent backfill adds rows, and an UNCOMPRESSED chunk honestly reports 0 today and
+   * decompresses in full once a policy compresses it. The window does not shrink to compensate;
+   * Timescale aborts at the 5,000,000 ceiling, burning one of the refresh's bounded attempts and
+   * reproducing the outage this sizing exists to end. Cross-vendor review, 2026-08-11.
+   *
+   * <p>⚠️ AND THE CURSOR ADVANCES BY {@code to - overlap}, NOT BY {@code to}. {@link #windowsFrom}
+   * extends every window PAST its cut, and the next window is meant to begin at the CUT — so
+   * advancing to the extended end makes consecutive CALLs merely abut, and a cagg bucket straddling
+   * that boundary is fully contained in NEITHER and silently stays unmaterialized. That is exactly
+   * the damage the overlap exists to prevent, and the first version of this loop reintroduced it
+   * while fixing the staleness above (same review, next round). Pinned by
+   * {@code CandleRepositoryWindowsTest}'s execution-sequence assertion.
+   */
+  private static int refreshReplanning(
+      Statement st, DerivedAggregate view, OffsetDateTime start, OffsetDateTime end)
+      throws SQLException {
+    OffsetDateTime cursor = start;
+    int executed = 0;
+    while (cursor.isBefore(end)) {
+      Window w =
+          planRebuildWindows(
+                  chunkLoad(st, view, cursor, end),
+                  cursor,
+                  end,
+                  REBUILD_WINDOW_TUPLE_BUDGET,
+                  MAX_REFRESH_WINDOW_DAYS,
+                  view.overlapDays())
+              .get(0);
+      call(st, view, w);
+      executed++;
+      if (!w.to().isBefore(end)) {
+        break; // the window was clamped at end — the span is covered
+      }
+      OffsetDateTime next = w.to().minusDays(view.overlapDays());
+      if (!next.isAfter(cursor)) {
+        // A planner that cannot advance must not spin. Bounded by construction (every window spans
+        // at least one day), but an infinite loop here holds a pinned statement, so it is guarded.
+        break;
+      }
+      cursor = next;
+    }
+    return executed;
+  }
+
+  private static void call(Statement st, DerivedAggregate view, Window w) throws SQLException {
+    st.execute(
+        "CALL public.refresh_continuous_aggregate('"
+            + view.viewName()
+            + "', '"
+            + w.from().toInstant()
+            + "'::timestamptz, '"
+            + w.to().toInstant()
+            + "'::timestamptz)");
   }
 
   /**

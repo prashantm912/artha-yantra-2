@@ -41,7 +41,18 @@ public class SwingBatchRecorder {
    */
   public enum MarkerPolicy {
     ALWAYS,
-    ON_COMPLETE
+    ON_COMPLETE,
+    /**
+     * Write NO marker, whatever the run did.
+     *
+     * <p>For a recovery pass that must leave no evidence behind: the catch-up's exits-only run on an
+     * UNKNOWN arming. A marker written there is undifferentiated, so the next sweep would read it as
+     * proof of settle-time arming and enter on the strength of a run that was explicitly deferring
+     * entries — a catch-up manufacturing the evidence that authorises itself (cross-vendor review,
+     * 2026-08-10). The cost is that the did-not-run canary keeps alerting for that session, which is
+     * correct: the session genuinely is not done.
+     */
+    NEVER
   }
 
   /**
@@ -111,14 +122,19 @@ public class SwingBatchRecorder {
         return runLocked(
             doctrine, sessionDate, entriesEnabled, markerPolicy, null, false, null);
       }
-      SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
+      // ⚠️ An EXITS-ONLY run must not read the entry funnel at all. Passing a snapshot makes
+      // runLocked's `snapshotAvailable` gate depend on it, so a funnel failure would refuse the run
+      // MARKER even though the exit pass ran to completion — and the 20:15 heartbeat then withholds
+      // its ping over a funnel the run never needed. Cross-vendor review, 2026-08-10; it matters now
+      // because the 16:00 settle is exits-only every single session, so that would not be an edge
+      // case but the normal path. null means "no snapshot was consulted", which is the truth here.
+      java.util.Optional<SwingDoctrine.CandidateSnapshot> snapshot = null;
+      if (entriesEnabled) {
+        SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
+        snapshot = read == null ? null : read.snapshot();
+      }
       return runLocked(
-          doctrine,
-          sessionDate,
-          entriesEnabled,
-          markerPolicy,
-          read == null ? null : read.snapshot(),
-          doctrine.enabled(), null);
+          doctrine, sessionDate, entriesEnabled, markerPolicy, snapshot, doctrine.enabled(), null);
     } finally {
       lock.unlock();
     }
@@ -192,7 +208,8 @@ public class SwingBatchRecorder {
     SwingBatchEngine.AdmissionProbe probe = result.admission();
     boolean markerRecorded = false;
     boolean snapshotAvailable = candidateSnapshot == null || candidateSnapshot.isPresent();
-    if (snapshotAvailable
+    if (markerPolicy != MarkerPolicy.NEVER
+        && snapshotAvailable
         && !result.deadlineReached()
         && result.refusalReasons().isEmpty()
         && (markerPolicy == MarkerPolicy.ALWAYS || result.exitSkipped() == 0)) {
@@ -202,7 +219,7 @@ public class SwingBatchRecorder {
                 doctrine.batchName(), runDate, result.strategies(), result.candidates(),
                 result.entries(), result.exits(), result.exitSkipped(), probe.openAtStart(),
                 probe.wouldEnter(), probe.admitted(), probe.capExceedance(), probe.capBound(),
-                probe.droppedByCap());
+                probe.droppedByCap(), entriesEnabled);
       } catch (RuntimeException e) {
         log.warn("{} swing run-marker record failed: {}", doctrine.batchName(), e.getMessage());
       }
@@ -255,8 +272,24 @@ public class SwingBatchRecorder {
    * prices, corrupting the forward-paper evidence).
    */
   public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine) {
+    return runScheduled(doctrine, true);
+  }
+
+  /**
+   * The scheduler path with an explicit entry arming — the 16:00 IST settle passes {@code false}.
+   *
+   * <p>Added rather than reusing one of the snapshot-carrying {@link #runAndRecord} overloads
+   * because those hardcode {@code executionArmed = true} for the catch-up's benefit (a historical
+   * session's arming flag may legitimately have changed since). Routing the live scheduler through
+   * one of them would let a DISABLED strategy exit and stamp completion — a Critical raised in
+   * cross-vendor review of the first cut of this change, before merge. This overload delegates to
+   * the four-argument form, which gates on {@code doctrine.enabled()}, and keeps the FAILED-alert
+   * envelope that a direct {@code runAndRecord} call would have silently dropped.
+   */
+  public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine, boolean entriesEnabled) {
     try {
-      SwingBatchEngine.SwingRun result = runAndRecord(doctrine);
+      SwingBatchEngine.SwingRun result =
+          runAndRecord(doctrine, null, entriesEnabled, MarkerPolicy.ALWAYS).run();
       log.info(
           "{} swing batch done: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped",
           doctrine.batchName(), result.strategies(), result.candidates(), result.entries(),
@@ -264,14 +297,25 @@ public class SwingBatchRecorder {
       return result;
     } catch (RuntimeException e) {
       log.error("{} swing batch failed: {}", doctrine.batchName(), e.getMessage(), e);
+      // ⚠️ The remediation must NOT tell the operator to POST /run after an exits-only settle. That
+      // endpoint runs the FULL entries-plus-exits path, and at 16:00 this session's screen has not
+      // landed — the funnel silently serves the PREVIOUS session's names, so following the
+      // instruction would enter off yesterday's screen. Exactly the behaviour the 16:00/08:35 split
+      // exists to prevent. Cross-vendor review, 2026-08-10.
+      String remediation =
+          entriesEnabled
+              ? " Re-run via POST /api/v1/signals/" + doctrine.batchName() + "-swing/run."
+              : " Do NOT POST /run to recover this — that endpoint takes ENTRIES too, and this"
+                  + " session's screen has not landed yet, so it would enter off the previous"
+                  + " session's names. The 08:35 catch-up re-runs this session pinned to its own"
+                  + " bar; if the stops cannot wait that long, square off by hand.";
       publishQuietly(
           doctrine.batchName(),
           new SwingBatchAlert(
               doctrine.batchName(),
               doctrine.alertLabel() + " batch FAILED",
               "The scheduled batch threw: " + e.getMessage()
-                  + " — open positions' stops were NOT evaluated. Re-run via POST"
-                  + " /api/v1/signals/" + doctrine.batchName() + "-swing/run."));
+                  + " — open positions' stops were NOT evaluated." + remediation));
       return new SwingBatchEngine.SwingRun(0, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty());
     }
   }

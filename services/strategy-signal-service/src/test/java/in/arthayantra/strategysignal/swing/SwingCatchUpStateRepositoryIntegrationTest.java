@@ -26,6 +26,83 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
 
   private static final LocalDate SESSION = LocalDate.of(2026, 7, 17);
 
+  /**
+   * V060, and the defect a UNIT test could not see: {@code seedMissing} must refuse a session only
+   * when its run marker says the ENTRIES ran, not merely that a row exists.
+   *
+   * <p>Since the 16:00/08:35 split the exits-only settle writes a marker for every session —
+   * correctly, since it evaluated every held stop, which is what the 08:30 canary and 20:15
+   * heartbeat ask about. A bare row-exists test here refuses to SEED, so the session never reaches
+   * {@code retryableSessions}, the catch-up never sees it, and the 08:35 entry pass silently never
+   * happens with every health signal green.
+   *
+   * <p>⚠️ This test exists because a unit test MASKED exactly that. {@code SwingBatchCatchUpTest}
+   * fakes the retryable-state helper by filtering on {@code hasRunWithEntries}, which is not what
+   * this SQL does — so the fix looked complete while the real statement still refused every
+   * session. Cross-vendor review caught it one layer above where I had fixed it. The rule the
+   * miss illustrates: when a guard lives in SQL, the test that proves it must run the SQL.
+   */
+  @Test
+  void anExitsOnlyMarkerIsStillSeeded_butACompleteRunIsNot() {
+    String exitsOnly = "cu-it-exits-" + System.nanoTime();
+    String full = "cu-it-full-" + System.nanoTime();
+    String legacy = "cu-it-legacy-" + System.nanoTime();
+
+    // The 16:00 settle's marker: ran, but owes its entries.
+    insertMarker(exitsOnly, SESSION, Boolean.FALSE);
+    // A complete run — nothing left to do for this session.
+    insertMarker(full, SESSION, Boolean.TRUE);
+    // A pre-V060 row: NULL reads as "entries ran", so it must NOT be re-seeded.
+    insertMarker(legacy, SESSION, null);
+
+    state.seedMissing(exitsOnly, java.util.List.of(SESSION));
+    state.seedMissing(full, java.util.List.of(SESSION));
+    state.seedMissing(legacy, java.util.List.of(SESSION));
+
+    assertThat(seeded(exitsOnly))
+        .as("an exits-only session still owes its entries and MUST be seeded")
+        .isTrue();
+    assertThat(seeded(full))
+        .as("a complete run must not be re-seeded")
+        .isFalse();
+    assertThat(seeded(legacy))
+        .as("a pre-V060 NULL row reads as entries-ran — re-seeding it would replay history")
+        .isFalse();
+  }
+
+  /** A session with NO marker at all is seeded, exactly as before V060. */
+  @Test
+  void aSessionWithNoMarkerAtAllIsStillSeeded() {
+    String batch = "cu-it-nomarker-" + System.nanoTime();
+
+    state.seedMissing(batch, java.util.List.of(SESSION));
+
+    assertThat(seeded(batch)).isTrue();
+  }
+
+  private void insertMarker(String batch, LocalDate session, Boolean entriesEnabled) {
+    jdbc.update(
+        """
+        INSERT INTO swing_batch_runs
+            (batch, run_date, ran_at, strategies, candidates, entries, exits, exit_skipped,
+             entries_enabled)
+        VALUES (?, ?, now(), 1, 0, 0, 0, 0, ?)
+        """,
+        batch,
+        java.sql.Date.valueOf(session),
+        entriesEnabled);
+  }
+
+  private boolean seeded(String batch) {
+    Integer rows =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM swing_catchup_runs WHERE batch = ? AND session_date = ?",
+            Integer.class,
+            batch,
+            java.sql.Date.valueOf(SESSION));
+    return rows != null && rows > 0;
+  }
+
   @Test
   void firstClaimWinsAndAConcurrentFreshClaimLoses() {
     String batch = "cu-it-fresh-" + System.nanoTime();

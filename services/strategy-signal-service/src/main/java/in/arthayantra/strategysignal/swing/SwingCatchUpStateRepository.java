@@ -69,8 +69,21 @@ public class SwingCatchUpStateRepository {
 
   /**
    * Seeds every missing session before the catch-up takes its JVM mutex or starts funnel/candle work.
-   * A canonical run marker wins over a seed, and an existing PENDING/RUNNING/terminal row is never
+   * A COMPLETE run marker wins over a seed, and an existing PENDING/RUNNING/terminal row is never
    * overwritten.
+   *
+   * <p>⚠️ "Complete" means {@code entries_enabled} (V060), NOT merely "a row exists", and the
+   * difference is the whole 16:00/08:35 split. The 16:00 exits-only settle writes a marker row for
+   * every session — correctly, because it evaluated every held stop, which is what the 08:30 canary
+   * and the 20:15 heartbeat ask about. A bare row-exists test here refuses to SEED that session, so
+   * it never reaches {@code retryableSessions}, the catch-up never sees it, and the 08:35 entry pass
+   * silently never happens — with the canary and heartbeat both green throughout.
+   *
+   * <p>Cross-vendor review caught this one layer above where I had fixed it: the skip check in
+   * {@code SwingBatchCatchUp} was already asking {@code hasRunWithEntries}, but this SEED gate runs
+   * first and never let the session get that far. Worse, the unit test masked it — its fake
+   * retryable-state helper filtered on {@code hasRunWithEntries}, which is not what this SQL does.
+   * That is why {@code SwingCatchUpStateRepositoryIntegrationTest} drives the real statement.
    */
   public void seedMissing(String batch, java.util.List<LocalDate> sessions) {
     for (LocalDate session : sessions) {
@@ -79,7 +92,8 @@ public class SwingCatchUpStateRepository {
           INSERT INTO swing_catchup_runs (batch, session_date, status, attempts, updated_at)
           SELECT ?, ?, 'PENDING', 0, now()
           WHERE NOT EXISTS (
-            SELECT 1 FROM swing_batch_runs WHERE batch=? AND run_date=?
+            SELECT 1 FROM swing_batch_runs
+            WHERE batch=? AND run_date=? AND COALESCE(entries_enabled, true)
           )
           ON CONFLICT (batch, session_date) DO NOTHING
           """,

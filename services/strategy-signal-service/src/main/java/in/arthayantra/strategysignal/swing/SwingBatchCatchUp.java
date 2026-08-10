@@ -268,7 +268,14 @@ public class SwingBatchCatchUp {
 
   private void catchUpSession(SwingDoctrine doctrine, LocalDate session, boolean retryable) {
     String batch = doctrine.batchName();
-    if (runs.hasRun(batch, session)) {
+    // ⚠️ hasRunWithEntries, NOT hasRun (V060). Since the 16:00/08:35 split this sweep is no longer
+    // only a recovery path — it is the ONLY path that takes entries, every session, because the
+    // screen it needs lands somewhere between 17:52 and 19:30+ while the exits pass runs at 16:00.
+    // That exits-only run writes a marker row, correctly (it evaluated every held stop, which is
+    // what the 08:30 canary asks about), so a bare row-exists test would skip every single session
+    // here and the book would never take another entry. The marker would be true and the inference
+    // drawn from it false.
+    if (runs.hasRunWithEntries(batch, session)) {
       if (retryable) {
         repairPendingEffects(batch, session);
         if (hasUnconfirmedPaperEffects(batch, session)) {
@@ -284,8 +291,33 @@ public class SwingBatchCatchUp {
       }
       return; // the on-time batch (or a prior complete catch-up) already ran this session
     }
-    Optional<Boolean> intent = intents.find(batch, session);
-    if (intent.isEmpty()) {
+    Optional<SwingBatchIntentRepository.Intent> row = intents.findIntent(batch, session);
+    boolean markerProvesArmed = runs.hasRun(batch, session);
+    // THREE states, not two, and collapsing them is what the last two review rounds kept finding.
+    //
+    //   ARMED       — a SETTLED row saying armed, or a run marker (only an armed run writes one, so
+    //                 a marker outranks a provisional row in EITHER direction).
+    //   DISARMED    — a SETTLED row saying disarmed. Terminal: the family was deliberately off.
+    //   UNKNOWN     — a PROVISIONAL row only, with no marker. An intraday observation made hours
+    //                 before the settle proves nothing about what the settle saw; the flag can move,
+    //                 and the settle's own intent write is fail-soft so its absence is not evidence
+    //                 either.
+    //
+    // ⚠️ A provisional FALSE must NOT be recorded terminally DISARMED. Round 5 did exactly that, so
+    // a morning `false` + an armed settle whose intent write failed + a successful run marker still
+    // forfeited every entry, permanently.
+    Boolean armed = row.filter(SwingBatchIntentRepository.Intent::settled)
+        .map(SwingBatchIntentRepository.Intent::armed)
+        .orElse(null);
+    if (armed == null && markerProvesArmed) {
+      log.warn(
+          "swing catch-up: {} {} has a run marker but no SETTLED arming row — the marker is proof"
+              + " enough (only an armed run writes one; the intent write is fail-soft)",
+          batch,
+          session);
+      armed = Boolean.TRUE;
+    }
+    if (armed == null && row.isEmpty()) {
       state.markAbandoned(batch, session, "NO_SCHEDULE_INTENT");
       log.error("swing catch-up: {} {} refused - no schedule-time arming row", batch, session);
       alert(
@@ -294,10 +326,34 @@ public class SwingBatchCatchUp {
               + " failure); refusing replay rather than inferring today's flag.");
       return;
     }
-    if (!intent.get()) {
+    if (Boolean.FALSE.equals(armed)) {
       state.recordDisarmed(batch, session);
       log.info("swing catch-up: {} {} was DISARMED at schedule time - not replaying", batch, session);
       return;
+    }
+    boolean armingUnknown = armed == null;
+    if (armingUnknown) {
+      // Provisional row, no marker: the settle never ran. Evaluate the held stops off this session's
+      // own bar and take NO entries — you can always decline to enter, you cannot decline to leave.
+      //
+      // ⚠️ This pass must leave NO evidence behind. It writes no run marker (MarkerPolicy.NEVER) and
+      // does not markDone, for two separate reasons found in round 5:
+      //   - markDone excludes the session from retryableSessions, so the entry pass it is explicitly
+      //     deferring would be forfeited by the very run that deferred it; and
+      //   - an undifferentiated marker written HERE would be read by the NEXT sweep as proof of
+      //     settle-time arming, so a recovery pass would manufacture the evidence authorising its
+      //     own entries. A catch-up may not vouch for itself.
+      // ⚠️ LOG the intent here; ALERT only after the run, from its outcome. An earlier version
+      // published "Held stops WERE evaluated" at this point — before the atomic claim, the
+      // attempt-budget check, the market-open deadline and the engine call itself. A lost claim, an
+      // exhausted budget, a crossed deadline or exitSkipped > 0 all made that operator-facing
+      // sentence false while it had already been sent (cross-vendor review, 2026-08-11). An alert
+      // that asserts an outcome must be written BY the outcome.
+      log.warn(
+          "swing catch-up: {} {} has only a PROVISIONAL arming row and no run marker — attempting"
+              + " EXITS ONLY, leaving the session retryable and writing no marker",
+          batch,
+          session);
     }
     // ATOMIC claim BEFORE any emission. Lost = another caller holds a fresh RUNNING claim, or the
     // session is terminal (DONE / ABANDONED). This is the durable idempotency gate the JVM mutex alone
@@ -324,14 +380,25 @@ public class SwingBatchCatchUp {
     }
     repairPendingEffects(batch, session);
     Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot = readCandidateSnapshot(doctrine);
+    // TWO independent conditions, and both must hold before this sweep enters anything:
+    //   - the funnel must actually be THIS session's screen (it silently serves the latest persisted
+    //     one, so entering off it would take the wrong day's names); and
+    //   - the arming must be AUTHORITATIVE, not a provisional intraday observation (V061).
     boolean entriesReady =
-        candidateSnapshot.map(snapshot -> session.equals(snapshot.screenDate())).orElse(false);
+        !armingUnknown
+            && candidateSnapshot.map(snapshot -> session.equals(snapshot.screenDate())).orElse(false);
+    // ⚠️ NEVER, not ON_COMPLETE, when the arming is unknown: this pass must not leave a marker the
+    // NEXT sweep would read as proof of settle-time arming. A catch-up may not vouch for itself.
+    SwingBatchRecorder.MarkerPolicy markerPolicy =
+        armingUnknown
+            ? SwingBatchRecorder.MarkerPolicy.NEVER
+            : SwingBatchRecorder.MarkerPolicy.ON_COMPLETE;
     SwingBatchRecorder.RunOutcome outcome =
         recorder.runAndRecord(
             doctrine,
             session,
             entriesReady,
-            SwingBatchRecorder.MarkerPolicy.ON_COMPLETE,
+            markerPolicy,
             candidateSnapshot,
             this::marketOpenDeadlinePassed);
     if (outcome == null) {
@@ -399,6 +466,27 @@ public class SwingBatchCatchUp {
           "catch-up REFUSED for " + session,
           "The session remains retryable because the engine refused an approximate money effect: "
               + reason + ". " + summary);
+    } else if (armingUnknown) {
+      // Exits ran, entries deliberately did not, and no marker was written. The session is NOT done
+      // — it still owes its entries — so it stays PENDING for a later sweep that finds an
+      // authoritative arming. markDone here would have forfeited the very pass this run deferred.
+      state.markPending(batch, session, "ARMING_UNKNOWN_EXITS_ONLY");
+      log.warn(
+          "swing catch-up: {} ran {}'s exits with UNKNOWN arming — left retryable, entries still"
+              + " owed",
+          batch,
+          session);
+      alert(
+          doctrine,
+          "catch-up EXITS ONLY for " + session,
+          "The " + session + " arming is provisional (an intraday observation, not the settle's own"
+              + " reading) and no run marker exists, so entries were withheld and the session stays"
+              + " retryable. "
+              + (run.exitSkipped() == 0
+                  ? "Every held stop WAS evaluated off that session's bar."
+                  : run.exitSkipped()
+                      + " held stop(s) were NOT evaluated — see the STOP NOT EVALUATED TODAY errors"
+                      + " in the service log."));
     } else if (run.exitSkipped() == 0 && outcome.markerRecorded()) {
       state.markDone(batch, session);
       log.warn("swing catch-up: {} caught up {} — {}", batch, session, summary);

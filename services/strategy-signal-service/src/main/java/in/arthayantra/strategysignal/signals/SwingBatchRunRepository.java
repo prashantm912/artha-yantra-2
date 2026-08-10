@@ -44,24 +44,36 @@ public class SwingBatchRunRepository {
   public boolean record(
       String batch, LocalDate runDate, int strategies, int candidates, int entries, int exits,
       int exitSkipped, int openAtStart, int wouldEnter, int admitted, int capExceedance,
-      boolean capBound, List<DroppedCandidate> droppedByCap) {
+      boolean capBound, List<DroppedCandidate> droppedByCap, boolean entriesEnabled) {
     int rows =
         jdbc.update(
             """
             INSERT INTO swing_batch_runs
                 (batch, run_date, ran_at, strategies, candidates, entries, exits, exit_skipped,
-                 open_at_start, would_enter, admitted, cap_exceedance, cap_bound, dropped_by_cap)
-            VALUES (?, ?, now(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                 open_at_start, would_enter, admitted, cap_exceedance, cap_bound, dropped_by_cap,
+                 entries_enabled)
+            VALUES (?, ?, now(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
             ON CONFLICT (batch, run_date) DO UPDATE SET
                 ran_at = now(), strategies = EXCLUDED.strategies, candidates = EXCLUDED.candidates,
                 entries = EXCLUDED.entries, exits = EXCLUDED.exits,
                 exit_skipped = EXCLUDED.exit_skipped, open_at_start = EXCLUDED.open_at_start,
                 would_enter = EXCLUDED.would_enter, admitted = EXCLUDED.admitted,
                 cap_exceedance = EXCLUDED.cap_exceedance, cap_bound = EXCLUDED.cap_bound,
-                dropped_by_cap = EXCLUDED.dropped_by_cap
+                dropped_by_cap = EXCLUDED.dropped_by_cap,
+                -- ⚠️ The upsert must never DOWNGRADE an entries-enabled session back to exits-only.
+                -- The 16:00 exits pass writes false; the 08:35 catch-up then writes true for the SAME
+                -- (batch, run_date). If a later exits-only re-run (a manual settle, a restart) took
+                -- the row back to false, the catch-up would re-open that session and re-enter names
+                -- it has already entered. OR is the monotone direction: once entries have run for a
+                -- session, they have run. COALESCE(..., true) because a pre-V060 row is NULL and is
+                -- read as entries-ran everywhere else -- resolving it to false here would hand the
+                -- catch-up every historical session at once.
+                entries_enabled = COALESCE(swing_batch_runs.entries_enabled, true)
+                                  OR EXCLUDED.entries_enabled
             """,
             batch, java.sql.Date.valueOf(runDate), strategies, candidates, entries, exits, exitSkipped,
-            openAtStart, wouldEnter, admitted, capExceedance, capBound, writeDropped(droppedByCap));
+            openAtStart, wouldEnter, admitted, capExceedance, capBound, writeDropped(droppedByCap),
+            entriesEnabled);
     return rows > 0;
   }
 
@@ -82,6 +94,31 @@ public class SwingBatchRunRepository {
     return Boolean.TRUE.equals(
         jdbc.queryForObject(
             "SELECT EXISTS(SELECT 1 FROM swing_batch_runs WHERE batch = ? AND run_date = ?)",
+            Boolean.class, batch, java.sql.Date.valueOf(sessionDate)));
+  }
+
+  /**
+   * Whether this session's ENTRY pass has run — {@link SwingBatchCatchUp}'s skip signal since the
+   * 16:00/08:35 split (V060).
+   *
+   * <p>Distinct from {@link #hasRun} on purpose, and the distinction is the whole point of the
+   * split. The 16:00 exits pass writes a marker row because it genuinely did evaluate every held
+   * stop, which is what the 08:30 canary and the heartbeat ask about — so they keep using {@code
+   * hasRun}. The catch-up asks a different question, "does this session still owe its entries", and
+   * a bare row-exists answered it wrongly the moment an exits-only run could write one.
+   *
+   * <p>A pre-V060 row has {@code entries_enabled} NULL and is read as TRUE: every historical row was
+   * written by a full batch, and treating those as owing entries would hand the catch-up every past
+   * session at once.
+   */
+  public boolean hasRunWithEntries(String batch, LocalDate sessionDate) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM swing_batch_runs
+                WHERE batch = ? AND run_date = ? AND COALESCE(entries_enabled, true))
+            """,
             Boolean.class, batch, java.sql.Date.valueOf(sessionDate)));
   }
 

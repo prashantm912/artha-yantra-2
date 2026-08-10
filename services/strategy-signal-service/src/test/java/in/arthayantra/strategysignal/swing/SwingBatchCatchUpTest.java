@@ -218,6 +218,69 @@ class SwingBatchCatchUpTest {
     verify(state).markPending("manas-arora", FRIDAY, "ARMING_UNKNOWN_EXITS_ONLY");
   }
 
+  /**
+   * The UNKNOWN-arming alert must report what actually happened to the stops, both ways.
+   *
+   * <p>It used to be published at the DECISION point, before the atomic claim, the attempt budget,
+   * the market-open deadline and the engine call — so "Held stops WERE evaluated" could already be
+   * on its way to an operator while a lost claim or an exhausted budget meant nothing ran
+   * (cross-vendor review, 2026-08-11). It is now written from the RunOutcome and branches on
+   * exitSkipped. An alert that asserts an outcome must be written by the outcome.
+   */
+  @Test
+  void theUnknownArmingAlertReportsWhatActuallyHappenedToTheStops() {
+    SwingDoctrine manas = doctrine(true, FRIDAY);
+    unknownArmingForFriday();
+    when(recorder.runAndRecord(
+            eq(manas),
+            eq(FRIDAY),
+            eq(false),
+            eq(SwingBatchRecorder.MarkerPolicy.NEVER),
+            org.mockito.ArgumentMatchers.<Optional<SwingDoctrine.CandidateSnapshot>>any(),
+            any()))
+        .thenReturn(run(0, 1, 0, false)); // every held stop evaluated
+
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    assertThat(alerts())
+        .as("a complete exit pass must say so")
+        .anyMatch(a -> a.message().contains("Every held stop WAS evaluated"));
+  }
+
+  /** …and the other branch: a stop that was NOT evaluated must not be reported as if it were. */
+  @Test
+  void theUnknownArmingAlertNamesStopsItCouldNotEvaluate() {
+    SwingDoctrine manas = doctrine(true, FRIDAY);
+    unknownArmingForFriday();
+    when(recorder.runAndRecord(
+            eq(manas),
+            eq(FRIDAY),
+            eq(false),
+            eq(SwingBatchRecorder.MarkerPolicy.NEVER),
+            org.mockito.ArgumentMatchers.<Optional<SwingDoctrine.CandidateSnapshot>>any(),
+            any()))
+        .thenReturn(run(0, 0, 2, false)); // two held bars missing
+
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    assertThat(alerts())
+        .anyMatch(a -> a.message().contains("2 held stop(s) were NOT evaluated"));
+    assertThat(alerts())
+        .as("the complete-pass wording must NOT appear when stops were skipped")
+        .noneMatch(a -> a.message().contains("Every held stop WAS evaluated"));
+  }
+
+  /** Provisional arming, no marker — the UNKNOWN state, wired once for the two alert tests. */
+  private void unknownArmingForFriday() {
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
+    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
+    when(intents.findIntent("manas-arora", FRIDAY)).thenReturn(Optional.of(provisional(true)));
+    when(state.claim(eq("manas-arora"), any(), anyInt()))
+        .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
+  }
+
   /** A SETTLED disarm is still terminal — the fix above must not have made every disarm replayable. */
   @Test
   void aSettledDisarmIsStillRecordedTerminally() {

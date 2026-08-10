@@ -6,6 +6,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -45,6 +46,9 @@ public final class UpstoxFnoMasterClient {
   /** The Upstox master is published once a day; re-fetch at most this often. */
   static final Duration REFRESH = Duration.ofHours(12);
 
+  /** A failed empty-cache load may be retried by a lookup after this backoff, not on every lookup. */
+  static final Duration RETRY_BACKOFF = Duration.ofMinutes(5);
+
   /** Upstox publishes expiry as the contract's end-of-day IST instant; convert in IST. */
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
@@ -53,13 +57,23 @@ public final class UpstoxFnoMasterClient {
   private final RestClient restClient;
   private final ObjectMapper mapper;
   private final String masterPath;
+  private final Clock clock;
 
   private volatile Map<FnoKey, FnoLeg> keysByLeg = Map.of();
   private volatile Instant loadedAt = Instant.EPOCH;
+  private volatile Instant lastAttemptAt = Instant.EPOCH;
 
   /** Binds the wire client to the (configurable) assets host. */
   public UpstoxFnoMasterClient(
       RestClient.Builder builder, ObjectMapper mapper, UpstoxAnalyticsProperties properties) {
+    this(builder, mapper, properties, Clock.systemUTC());
+  }
+
+  UpstoxFnoMasterClient(
+      RestClient.Builder builder,
+      ObjectMapper mapper,
+      UpstoxAnalyticsProperties properties,
+      Clock clock) {
     // A 5MB+ gzip download — generous read timeout, fail-fast connect, so a dead CDN never parks the
     // first lookup forever (the resolver then simply returns null and the Kite path stays the source).
     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -68,6 +82,7 @@ public final class UpstoxFnoMasterClient {
     this.restClient = builder.baseUrl(properties.instrumentsBaseUrl()).requestFactory(factory).build();
     this.mapper = mapper;
     this.masterPath = "/market-quote/instruments/exchange/complete.json.gz";
+    this.clock = clock;
   }
 
   /**
@@ -99,6 +114,29 @@ public final class UpstoxFnoMasterClient {
         .get(new FnoKey(segment, underlying.trim().toUpperCase(), type, expiry, normalizeStrike(strike)));
   }
 
+  /**
+   * Forces a master (re)load NOW, off any caller's critical path — the {@link UpstoxFnoMasterWarmer}
+   * hook. Its whole purpose is that a LIVE lookup never pays the cold load: the master is a 5MB+ gzip
+   * fetched on this client's own generous timeouts (connect 15s / read 60s), while the F9 heat read
+   * reaching {@code keyFor} through market-data allows the caller only 2000ms end-to-end. Measured
+   * 2026-08-05: two WARNs at exactly 2000ms with the master landing 535ms later, so the heat gate went
+   * inert on that session's only funded entry; the same cold-load shape on 2026-08-06 completed inside
+   * budget. It is a RACE, not a deterministic failure — warming removes the race rather than fixing a
+   * constant break.
+   *
+   * <p>Unconditional by design: the warmer runs on a period STRICTLY SHORTER than {@link #REFRESH}, so
+   * the cache is always inside its window when a caller arrives and {@link #cache()}'s lazy branch —
+   * the one that would run the download on the caller's thread, under this monitor — never fires in a
+   * long-running service. Takes the same lock as that branch so a warm and a lazy load can never
+   * double-fetch. Fail-soft: {@link #reload()} swallows transport/gunzip/parse failure and keeps the
+   * prior cache, so this NEVER throws.
+   */
+  public boolean warm() {
+    synchronized (this) {
+      return reload();
+    }
+  }
+
   /** ArthaYantra F&amp;O exchange → Upstox segment; {@code null} (skip) for a non-F&amp;O exchange. */
   private static String segmentFor(String exchange) {
     return switch (exchange) {
@@ -110,9 +148,10 @@ public final class UpstoxFnoMasterClient {
 
   /** Returns the cached map, (re)loading it on first use or after the refresh window. */
   private Map<FnoKey, FnoLeg> cache() {
-    if (Duration.between(loadedAt, Instant.now()).compareTo(REFRESH) >= 0) {
+    Instant now = Instant.now(clock);
+    if (loadDue(now)) {
       synchronized (this) {
-        if (Duration.between(loadedAt, Instant.now()).compareTo(REFRESH) >= 0) {
+        if (loadDue(Instant.now(clock))) {
           reload();
         }
       }
@@ -120,27 +159,59 @@ public final class UpstoxFnoMasterClient {
     return keysByLeg;
   }
 
-  private void reload() {
+  private boolean loadDue(Instant now) {
+    return Duration.between(loadedAt, now).compareTo(REFRESH) >= 0
+        && Duration.between(lastAttemptAt, now).compareTo(RETRY_BACKOFF) >= 0;
+  }
+
+  private boolean reload() {
+    Instant attemptAt = Instant.now(clock);
+    lastAttemptAt = attemptAt;
     try {
       byte[] gzip = restClient.get().uri(masterPath).retrieve().body(byte[].class);
       if (gzip == null || gzip.length == 0) {
+        // Same rule as the catch below: an empty body is a FAILED attempt, so lastAttemptAt bounds
+        // the retry and loadedAt stays where it was. Advancing it here would hand a dead upstream a
+        // fresh refresh window.
         log.warn("Upstox instrument master fetch returned empty body — keeping prior cache");
-        loadedAt = Instant.now();
-        return;
+        return false;
       }
       List<UpstoxInstrumentMaster> rows;
       try (InputStream in = new GZIPInputStream(new ByteArrayInputStream(gzip))) {
         rows = mapper.readValue(in, new TypeReference<List<UpstoxInstrumentMaster>>() {});
       }
-      keysByLeg = index(rows);
-      loadedAt = Instant.now();
+      // ⚠️ INDEX INTO A CANDIDATE, THEN CHECK IT — never assign straight into the live cache.
+      // A payload that parses cleanly but yields ZERO mapped legs is not a successful warm: Upstox
+      // serving a truncated file, or a schema change that makes isFno() match nothing, both land
+      // here. Assigning it would REPLACE a perfectly good cache with {}, stamp loadedAt fresh, and
+      // return true — after which every instrument-key lookup misses and every margin call returns
+      // `unpriced` for a full refresh interval, with the warmer reporting itself healthy throughout.
+      // Cross-vendor review, 2026-08-10.
+      Map<FnoKey, FnoLeg> candidate = index(rows);
+      if (candidate.isEmpty()) {
+        log.warn(
+            "Upstox instrument master parsed {} row(s) but mapped ZERO F&O legs — keeping prior"
+                + " cache of {} leg(s)",
+            rows.size(),
+            keysByLeg.size());
+        return false;
+      }
+      keysByLeg = candidate;
+      loadedAt = attemptAt;
       log.info("Upstox F&O instrument master loaded: {} mapped legs", keysByLeg.size());
+      return true;
     } catch (IOException | RuntimeException e) {
       // Transport / gunzip / parse failure: keep any prior cache (the resolver then falls back to the
-      // Kite path — this enrichment must NEVER break the source) and don't hammer the CDN on every
-      // lookup — defer the next attempt by the refresh window. NEVER propagates out of a lookup.
-      loadedAt = Instant.now();
+      // Kite path — this enrichment must NEVER break the source). NEVER propagates out of a lookup.
+      //
+      // ⚠️ loadedAt is deliberately NOT touched here, and an earlier version of this method DID
+      // advance it whenever a prior cache existed. That is the catalogued "a CACHE that stores a
+      // FAILURE with a fresh timestamp" shape: a failed load bought the stale cache another full
+      // REFRESH interval, so a source that had been broken for hours read as freshly warmed. The
+      // rate limit on retries is lastAttemptAt + RETRY_BACKOFF, which is set unconditionally above
+      // and is the only thing that should bound them.
       log.warn("Upstox instrument master load failed — keeping prior cache: {}", e.toString());
+      return false;
     }
   }
 

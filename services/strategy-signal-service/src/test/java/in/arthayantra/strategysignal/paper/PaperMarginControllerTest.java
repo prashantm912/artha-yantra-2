@@ -57,6 +57,7 @@ class PaperMarginControllerTest {
         .thenReturn(
             new PaperMarginClient.Quote(
                 true, null, new BigDecimal("99381.1"), new BigDecimal("31554.38"),
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
                 new BigDecimal("130935.48"), new BigDecimal("130935.48"),
                 new BigDecimal("130821.73")));
 
@@ -86,7 +87,8 @@ class PaperMarginControllerTest {
     when(client.margin(any()))
         .thenReturn(
             new PaperMarginClient.Quote(
-                true, null, new BigDecimal("50000"), BigDecimal.ZERO, new BigDecimal("50000"),
+                true, null, new BigDecimal("50000"), BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("50000"),
                 new BigDecimal("50000"), new BigDecimal("50000")));
 
     MarginHeat h = new PaperMarginController(repo, client).marginHeat("scalper");
@@ -124,7 +126,8 @@ class PaperMarginControllerTest {
     when(client.margin(any()))
         .thenReturn(
             new PaperMarginClient.Quote(
-                true, null, new BigDecimal("40000"), BigDecimal.ZERO, new BigDecimal("40000"),
+                true, null, new BigDecimal("40000"), BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("40000"),
                 new BigDecimal("40000"), new BigDecimal("40000")));
 
     MarginHeat h = new PaperMarginController(repo, client).marginHeat(null);

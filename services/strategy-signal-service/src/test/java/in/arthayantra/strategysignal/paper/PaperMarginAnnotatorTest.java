@@ -31,7 +31,8 @@ class PaperMarginAnnotatorTest {
     when(margin.margin(anyList()))
         .thenReturn(
             new PaperMarginClient.Quote(
-                true, null, new BigDecimal("30000"), BigDecimal.ZERO, new BigDecimal("30000"),
+                true, null, new BigDecimal("30000"), BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("30000"),
                 new BigDecimal("30000"), new BigDecimal("30000")));
     when(account.equity("scalper")).thenReturn(new BigDecimal("150000"));
 

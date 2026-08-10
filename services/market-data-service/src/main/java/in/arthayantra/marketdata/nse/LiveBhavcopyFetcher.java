@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.nse;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
@@ -45,21 +46,49 @@ public class LiveBhavcopyFetcher implements BhavcopyFetcher {
    * {@code IngestCoverageCanary} judges bhavcopy on "≥1 SUCCESS run". So a SYSTEMATIC false positive
    * — NSE changing {@code DATE1} semantics, say — would discard every payload forever, stall {@code
    * nse_eod_bhavcopy}, and still report green. The counter is the diagnosis (which exchange, how
-   * many); the row-count floor added to that canary in the same change is the alarm.
+   * many); the per-exchange floor in that canary is the alarm.
    *
-   * <p>Zero on a healthy feed, by construction: it increments only where the guard refuses.
+   * <p>⚠️ <b>Counted only for dates the exchange actually TRADED</b>, and that gate is the whole
+   * reason this counter is usable. Serving the previous day's file under a holiday URL is NORMAL
+   * NSE behaviour — it is the very case the guard was written for. The catch-up loop skips only
+   * Saturdays, Sundays and dates already stored ({@code BhavcopyBackfillService.runNse}), so every
+   * exchange holiday inside the catch-up window is re-probed on EVERY run, forever, and refused
+   * every time. Without the calendar gate the counter would climb monotonically on a perfectly
+   * healthy feed — roughly one increment per holiday per run — and no threshold could separate that
+   * baseline from the systematic break it exists to reveal. With it, zero on a healthy feed is true
+   * by construction rather than by wishful javadoc.
    */
   private final Counter misdatedCounter;
+
+  /** NSE trading calendar; only its {@code isTradingDay} is used, to gate the counter above. */
+  private final MarketCalendar calendar;
 
   public LiveBhavcopyFetcher(
       NseHttpClient client,
       @Value("${artha.nse.archives-url:https://nsearchives.nseindia.com}") String archivesUrl,
       Clock clock,
-      MeterRegistry meterRegistry) {
+      MeterRegistry meterRegistry,
+      MarketCalendar calendar) {
     this.client = client;
     this.archivesUrl = archivesUrl;
     this.clock = clock;
-    this.misdatedCounter = meterRegistry.counter("ay_bhavcopy_misdated_payload_total", "exchange", "NSE");
+    this.calendar = calendar;
+    this.misdatedCounter =
+        meterRegistry.counter("ay_bhavcopy_misdated_payload_total", "exchange", "NSE");
+  }
+
+  /**
+   * True when {@code date} is a real trading session. Fail-CLOSED for the counter: past the bundled
+   * calendar's covered years {@code isTradingDay} throws (the CD-2 cliff, deliberately loud), and a
+   * metric must never break a fetch — so a cliff means "do not count", never "do not fetch".
+   */
+  private boolean countableTradingDay(LocalDate date) {
+    try {
+      return calendar.isTradingDay(date);
+    } catch (RuntimeException calendarCliff) {
+      log.debug("NSE bhavcopy {}: calendar does not cover this year — not counting", date);
+      return false;
+    }
   }
 
   @Override
@@ -96,7 +125,9 @@ public class LiveBhavcopyFetcher implements BhavcopyFetcher {
       // this date" as present — so a partial write is never re-probed and the hole becomes silent
       // and permanent. Refusing is loud (WARN + re-probe next run). Less destructive is not safer.
       if (!rows.isEmpty() && !rows.stream().allMatch(r -> date.equals(r.date()))) {
-        misdatedCounter.increment();
+        if (countableTradingDay(date)) {
+          misdatedCounter.increment();
+        }
         log.warn(
             "NSE bhavcopy {}: archive served {} row(s) dated {} — discarding as not published",
             date,

@@ -429,7 +429,8 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
             new NseHttpClient(RestClient.builder(), wireMock.baseUrl()),
             wireMock.baseUrl(),
             CLOCK,
-            new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
+            new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+            in.arthayantra.marketcalendar.MarketCalendar.nse()),
         nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo, renameRepo, candles,
         CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
   }

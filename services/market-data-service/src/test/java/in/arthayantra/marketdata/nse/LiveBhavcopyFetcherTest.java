@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.nse;
 
+import in.arthayantra.marketcalendar.MarketCalendar;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import in.arthayantra.marketdata.nse.BhavcopyFetcher.BhavcopyRow;
@@ -31,7 +32,8 @@ class LiveBhavcopyFetcherTest {
   @Test
   void parsesSecBhavdataFullCsv() {
     BhavcopyFetcher fetcher =
-        new LiveBhavcopyFetcher(new StubClient(CSV), "https://archives", CLOCK, new SimpleMeterRegistry());
+        new LiveBhavcopyFetcher(
+            new StubClient(CSV), "https://archives", CLOCK, new SimpleMeterRegistry(), MarketCalendar.nse());
 
     List<BhavcopyRow> rows = fetcher.fetchLatest();
 
@@ -64,7 +66,8 @@ class LiveBhavcopyFetcherTest {
   void refusesAPayloadDatedForADifferentDayThanTheOneRequested() {
     SimpleMeterRegistry registry = new SimpleMeterRegistry();
     BhavcopyFetcher fetcher =
-        new LiveBhavcopyFetcher(new StubClient(CSV), "https://archives", CLOCK, registry);
+        new LiveBhavcopyFetcher(
+            new StubClient(CSV), "https://archives", CLOCK, registry, MarketCalendar.nse());
 
     // The stub serves the same 12-Jun rows for EVERY archive URL.
     assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 15))).isEmpty();
@@ -77,6 +80,32 @@ class LiveBhavcopyFetcherTest {
     assertThat(misdated(registry))
         .as("one refusal, and exactly one — the correctly-dated fetch must not increment it")
         .isEqualTo(1.0);
+  }
+
+  /**
+   * ⚠️ The counter must stay at ZERO on a holiday, and this is the assertion that makes the metric
+   * usable at all (review of #1329). Serving the previous day's file under a holiday URL is NORMAL
+   * NSE behaviour — it is the exact case the guard was written for. The catch-up loop skips only
+   * Saturdays, Sundays and dates already stored, so every exchange holiday inside the window is
+   * re-probed on EVERY run and refused every time. Counting those would give the counter a
+   * monotonically-rising baseline on a perfectly healthy feed, and no threshold could then separate
+   * it from the systematic break it exists to reveal. 2026-06-26 is Muharram in the bundled NSE
+   * calendar; the guard still REFUSES the payload (behaviour unchanged) — only the count is gated.
+   */
+  @Test
+  void aHolidayRefusalIsNotCounted() {
+    SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    BhavcopyFetcher fetcher =
+        new LiveBhavcopyFetcher(
+            new StubClient(CSV), "https://archives", CLOCK, registry, MarketCalendar.nse());
+
+    assertThat(fetcher.fetchForDate(LocalDate.of(2026, 6, 26)))
+        .as("the guard still refuses the mis-dated payload — only the COUNT is calendar-gated")
+        .isEmpty();
+
+    assertThat(misdated(registry))
+        .as("a holiday's re-served file is healthy NSE behaviour and must not raise the counter")
+        .isEqualTo(0.0);
   }
 
   private static double misdated(SimpleMeterRegistry registry) {

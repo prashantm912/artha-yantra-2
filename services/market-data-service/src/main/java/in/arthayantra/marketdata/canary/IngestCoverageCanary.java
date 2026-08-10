@@ -83,7 +83,7 @@ public class IngestCoverageCanary {
     /** ≥1 SUCCESS row required (latest-only pulls + full dumps). */
     REQUIRE_SUCCESS,
     /**
-     * ≥1 SUCCESS run AND that run wrote rows; SUCCESS with 0 rows is YELLOW.
+     * ≥1 SUCCESS run AND <b>each exchange separately</b> stored rows for the assessed trading day.
      *
      * <p>Added 2026-08-08 for bhavcopy, after review of the mis-dated-payload guard (#1327). That
      * guard REFUSES a payload NSE dated wrongly and returns an empty list — correct — but the refusal
@@ -94,18 +94,30 @@ public class IngestCoverageCanary {
      * signal being a WARN nobody reads. A total outage already reaches the same state through the
      * fetcher's 404 path, but that route is transient and self-heals; the guard's is permanent.
      *
-     * <p><b>Why a bare row floor is safe here and would NOT be elsewhere.</b> The sweep only ever
-     * evaluates the PREVIOUS TRADING DAY — {@code targetDay} returns null on a non-trading day, so a
-     * holiday is never assessed and cannot alarm. The floor therefore needs no calendar logic of its
-     * own. {@code maxRows} is the MAX across the day's SUCCESS runs, so a legitimate no-op re-run
-     * after a successful one does not trip it either.
+     * <p>⚠️ <b>The first version of this policy read {@code ingest_runs.rows_written} and did not
+     * work</b> (caught in review, 2026-08-10, before merge). That column is
+     * {@code nse.bhavRows() + bse.bhavRows()} summed across BOTH exchanges and across the whole
+     * catch-up window ({@code BhavcopyBackfillService.runLocked}) — so a healthy BSE, or a single
+     * repaired gap from three weeks ago, produces a positive total while NSE refuses every payload
+     * for the target day. The policy was written FOR the NSE-only systematic failure and could not
+     * see it. Worth keeping as a warning: the aggregate was one number away from the right one, and
+     * the test that "passed" used an aggregate zero, a stricter stand-in that never reproduced the
+     * production shape.
+     *
+     * <p>So it now measures the ARTIFACT, not the step: a direct per-exchange count in
+     * {@code nse_eod_bhavcopy} and {@code bse_eod_bhavcopy} for the assessed date. Either side at
+     * zero is YELLOW, and the message names WHICH side.
+     *
+     * <p><b>Why no calendar logic of its own.</b> The sweep only ever evaluates the PREVIOUS TRADING
+     * DAY — {@code targetDay} returns null on a non-trading day, so a holiday is never assessed and
+     * cannot alarm.
      *
      * <p>YELLOW rather than RED, deliberately: it still sends an ntfy alert (default priority) and
      * shows in the report, but a single quiet day is a degradation to look at, not a page. The
      * {@code ay_bhavcopy_misdated_payload_total} counter distinguishes the two causes — a rising
-     * counter means the guard is refusing; a flat counter with 0 rows means the fetch itself is dry.
+     * counter means the guard is refusing; a flat counter with no rows means the fetch itself is dry.
      */
-    REQUIRE_SUCCESS_WITH_ROWS,
+    BHAVCOPY_BOTH_EXCHANGES_ADVANCED,
     /** SUCCESS with rows &gt; 0 is green; SUCCESS with 0 rows is a data-starved YELLOW. */
     SCREENER,
     /** Exactly one accumulating per-day row; green only when it captured rows. */
@@ -196,7 +208,8 @@ public class IngestCoverageCanary {
           new ExpectedSource(IngestRunLedger.SOURCE_NSE_FII_DII, Policy.REQUIRE_SUCCESS),
           new ExpectedSource(IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI, Policy.REQUIRE_SUCCESS),
           new ExpectedSource(IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE, Policy.REQUIRE_SUCCESS),
-          new ExpectedSource(IngestRunLedger.SOURCE_BHAVCOPY, Policy.REQUIRE_SUCCESS_WITH_ROWS),
+          new ExpectedSource(
+              IngestRunLedger.SOURCE_BHAVCOPY, Policy.BHAVCOPY_BOTH_EXCHANGES_ADVANCED),
           new ExpectedSource(IngestRunLedger.SOURCE_INSTRUMENT_SYNC, Policy.REQUIRE_SUCCESS),
           new ExpectedSource(IngestRunLedger.SOURCE_MINERVINI_SCREEN, Policy.SCREENER),
           new ExpectedSource(IngestRunLedger.SOURCE_MANAS_SCREEN, Policy.SCREENER),
@@ -573,7 +586,8 @@ public class IngestCoverageCanary {
 
     List<SourceCoverage> results = new ArrayList<>();
     for (ExpectedSource expected : EXPECTED) {
-      results.add(assess(expected, bySource.getOrDefault(expected.source(), List.of()), now));
+      results.add(
+          assess(expected, bySource.getOrDefault(expected.source(), List.of()), now, tradingDay));
     }
     String overall =
         results.stream().anyMatch(r -> RED.equals(r.status()))
@@ -605,23 +619,47 @@ public class IngestCoverageCanary {
         Timestamp.from(dayEnd));
   }
 
-  private SourceCoverage assess(ExpectedSource expected, List<RunRow> rows, Instant now) {
+  /**
+   * Per-exchange advancement for {@code tradingDay}, read from the destination tables rather than
+   * from {@code ingest_runs.rows_written} — see {@link Policy#BHAVCOPY_BOTH_EXCHANGES_ADVANCED} for
+   * why the aggregate column cannot answer this. {@code count(*)} deliberately, and on a plain
+   * (non-hypertable) relation: no DISTINCT/ORDER BY/GROUP BY over a computed expression under a
+   * LIMIT, so the Timescale 2.18.2 sorted-merge planner assertion is not in play.
+   */
+  private SourceCoverage bhavcopyCoverage(ExpectedSource expected, int successRuns, LocalDate day) {
+    long nse =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM nse_eod_bhavcopy WHERE trade_date = ?", Long.class, day);
+    long bse =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM bse_eod_bhavcopy WHERE trade_date = ?", Long.class, day);
+    String counts = "NSE " + nse + " / BSE " + bse + " rows";
+    if (nse > 0 && bse > 0) {
+      return green(expected, successRuns + " SUCCESS run(s), " + counts);
+    }
+    String dead = nse == 0 && bse == 0 ? "BOTH exchanges" : nse == 0 ? "NSE" : "BSE";
+    return yellow(
+        expected,
+        successRuns
+            + " SUCCESS run(s) but "
+            + dead
+            + " stored NO rows for this trading day ("
+            + counts
+            + ") — that feed did not advance. Check ay_bhavcopy_misdated_payload_total{exchange=\""
+            + (nse == 0 ? "NSE" : "BSE")
+            + "\"}: rising means the mis-dated-payload guard is refusing every file, flat means the"
+            + " fetch itself came back empty");
+  }
+
+  private SourceCoverage assess(
+      ExpectedSource expected, List<RunRow> rows, Instant now, LocalDate tradingDay) {
     List<RunRow> success = rows.stream().filter(r -> "SUCCESS".equals(r.status())).toList();
     if (!success.isEmpty()) {
       long maxRows =
           success.stream().mapToLong(r -> r.rowsWritten() == null ? 0 : r.rowsWritten()).max().orElse(0);
       return switch (expected.policy()) {
         case REQUIRE_SUCCESS -> green(expected, success.size() + " SUCCESS run(s), " + maxRows + " rows");
-        case REQUIRE_SUCCESS_WITH_ROWS ->
-            maxRows > 0
-                ? green(expected, success.size() + " SUCCESS run(s), " + maxRows + " rows")
-                : yellow(
-                    expected,
-                    success.size()
-                        + " SUCCESS run(s) but 0 rows written on a trading day — the feed did not"
-                        + " advance. Check ay_bhavcopy_misdated_payload_total: rising means the"
-                        + " mis-dated-payload guard is refusing every file, flat means the fetch"
-                        + " itself came back empty");
+        case BHAVCOPY_BOTH_EXCHANGES_ADVANCED -> bhavcopyCoverage(expected, success.size(), tradingDay);
         case SCREENER ->
             maxRows > 0
                 ? green(expected, "screen wrote " + maxRows + " rows")

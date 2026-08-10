@@ -192,23 +192,48 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
    * a holiday is never assessed, so it cannot alarm on a legitimately empty non-trading day.
    */
   @Test
-  void aBhavcopySuccessWithZeroRowsIsYellowNotGreen() {
+  void aBhavcopyRunIsYellowWhenONEExchangeStoredNothing() {
     LocalDate target = LocalDate.of(2026, 3, 10);
     clearWindow(target);
     seedBatchesHealthy(target);
     seedCapture(target, 5200L);
-    // The fetchers refused every payload as mis-dated: the run SUCCEEDS, and writes nothing.
+    // The PRODUCTION shape, and the reason this test was rewritten (review of #1329): NSE refused
+    // every payload as mis-dated while BSE stayed healthy. rows_written is nse+bse summed over the
+    // whole catch-up window, so it is POSITIVE here — the first version of this policy read that
+    // column, greened, and could not see the very failure it was built for. The earlier fixture set
+    // rows_written to an aggregate 0, a stricter stand-in that never reproduced this shape.
     deleteSource(target, IngestRunLedger.SOURCE_BHAVCOPY);
-    seedBatch(target, IngestRunLedger.SOURCE_BHAVCOPY, "SUCCESS", 0L, true);
+    seedBatch(target, IngestRunLedger.SOURCE_BHAVCOPY, "SUCCESS", 3102L, true);
+    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE trade_date = ?", target);
 
     IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
 
     assertThat(report.status()).isEqualTo("YELLOW");
     SourceCoverage cov = find(report, IngestRunLedger.SOURCE_BHAVCOPY);
-    assertThat(cov.status()).isEqualTo("YELLOW");
-    assertThat(cov.detail()).contains("0 rows written on a trading day");
+    assertThat(cov.status())
+        .as("a positive aggregate rows_written must NOT rescue a dead NSE side")
+        .isEqualTo("YELLOW");
+    assertThat(cov.detail()).contains("NSE stored NO rows");
+    assertThat(cov.detail()).contains("NSE 0 / BSE 1 rows");
     // The detail must name the metric, so the reader can tell a refusing guard from a dry fetch.
     assertThat(cov.detail()).contains("ay_bhavcopy_misdated_payload_total");
+  }
+
+  /** The mirror: a dead BSE side with a healthy NSE must alarm too, and must name BSE. */
+  @Test
+  void aBhavcopyRunIsYellowWhenTheOtherExchangeStoredNothing() {
+    LocalDate target = LocalDate.of(2026, 3, 11);
+    clearWindow(target);
+    seedBatchesHealthy(target);
+    seedCapture(target, 5200L);
+    jdbc.update("DELETE FROM bse_eod_bhavcopy WHERE trade_date = ?", target);
+
+    IngestCoverageReport report = canary(morningAfter(target), true, mock(NtfyClient.class)).evaluate(target);
+
+    SourceCoverage cov = find(report, IngestRunLedger.SOURCE_BHAVCOPY);
+    assertThat(cov.status()).isEqualTo("YELLOW");
+    assertThat(cov.detail()).contains("BSE stored NO rows");
+    assertThat(cov.detail()).contains("NSE 1 / BSE 0 rows");
   }
 
   /** The floor must not redden the NORMAL path: a bhavcopy run that wrote rows stays GREEN. */
@@ -225,7 +250,8 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
 
     SourceCoverage cov = find(report, IngestRunLedger.SOURCE_BHAVCOPY);
     assertThat(cov.status()).isEqualTo("GREEN");
-    assertThat(cov.detail()).contains("3102 rows");
+    // Counts come from the destination tables now, not from the run row's aggregate.
+    assertThat(cov.detail()).contains("NSE 1 / BSE 1 rows");
   }
 
   @Test
@@ -996,6 +1022,7 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
     seedBatch(day, IngestRunLedger.SOURCE_NSE_PARTICIPANT_OI, "SUCCESS", 40L, true);
     seedBatch(day, IngestRunLedger.SOURCE_NSE_FII_DERIVATIVE, "SUCCESS", 12L, true);
     seedBatch(day, IngestRunLedger.SOURCE_BHAVCOPY, "SUCCESS", 4000L, true);
+    seedBhavRows(day, true, true);
     seedBatch(day, IngestRunLedger.SOURCE_INSTRUMENT_SYNC, "SUCCESS", 90000L, true);
     seedBatch(day, IngestRunLedger.SOURCE_MINERVINI_SCREEN, "SUCCESS", 96L, true);
     seedBatch(day, IngestRunLedger.SOURCE_MANAS_SCREEN, "SUCCESS", 40L, true);
@@ -1034,6 +1061,30 @@ class IngestCoverageCanaryIntegrationTest extends MarketDataIntegrationTestBase 
         end,
         start,
         end);
+    jdbc.update("DELETE FROM nse_eod_bhavcopy WHERE trade_date = ?", day);
+    jdbc.update("DELETE FROM bse_eod_bhavcopy WHERE trade_date = ?", day);
+  }
+
+  /**
+   * Seeds the DESTINATION tables the bhavcopy policy actually reads. Minimal columns only —
+   * the policy counts rows, it does not look at prices.
+   */
+  private void seedBhavRows(LocalDate day, boolean nse, boolean bse) {
+    if (nse) {
+      jdbc.update(
+          "INSERT INTO nse_eod_bhavcopy (trade_date, symbol, series) VALUES (?, ?, 'EQ')"
+              + " ON CONFLICT DO NOTHING",
+          day,
+          "RELIANCE");
+    }
+    if (bse) {
+      jdbc.update(
+          "INSERT INTO bse_eod_bhavcopy (trade_date, scrip_code, ticker) VALUES (?, ?, ?)"
+              + " ON CONFLICT DO NOTHING",
+          day,
+          "500325",
+          "RELIANCE");
+    }
   }
 
   private void deleteSource(LocalDate day, String source) {

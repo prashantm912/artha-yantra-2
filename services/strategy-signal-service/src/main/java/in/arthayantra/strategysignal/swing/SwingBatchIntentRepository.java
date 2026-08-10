@@ -31,9 +31,11 @@ public class SwingBatchIntentRepository {
   public void recordScheduled(String batch, LocalDate session, boolean armed) {
     jdbc.update(
         """
-        INSERT INTO swing_batch_schedule_intents (batch, session_date, armed, scheduled_at)
-        VALUES (?, ?, ?, now())
-        ON CONFLICT (batch, session_date) DO NOTHING
+        INSERT INTO swing_batch_schedule_intents (batch, session_date, armed, scheduled_at, settled)
+        VALUES (?, ?, ?, now(), false)
+        ON CONFLICT (batch, session_date) DO UPDATE
+          SET armed = EXCLUDED.armed, scheduled_at = EXCLUDED.scheduled_at
+          WHERE swing_batch_schedule_intents.settled = false
         """,
         batch, java.sql.Date.valueOf(session), armed);
   }
@@ -61,13 +63,40 @@ public class SwingBatchIntentRepository {
   public void recordSettled(String batch, LocalDate session, boolean armed) {
     jdbc.update(
         """
-        INSERT INTO swing_batch_schedule_intents (batch, session_date, armed, scheduled_at)
-        VALUES (?, ?, ?, now())
+        INSERT INTO swing_batch_schedule_intents (batch, session_date, armed, scheduled_at, settled)
+        VALUES (?, ?, ?, now(), true)
         ON CONFLICT (batch, session_date) DO UPDATE
-          SET armed = EXCLUDED.armed, scheduled_at = EXCLUDED.scheduled_at
+          SET armed = EXCLUDED.armed, scheduled_at = EXCLUDED.scheduled_at, settled = true
         """,
         batch, java.sql.Date.valueOf(session), armed);
   }
+
+  /**
+   * The arming AND whether it is authoritative — what the catch-up must ask before taking entries.
+   *
+   * <p>{@link #find} deliberately survives unchanged for the detector, which only cares whether the
+   * family was armed, not who observed it.
+   */
+  public Optional<Intent> findIntent(String batch, LocalDate session) {
+    return jdbc
+        .query(
+            "SELECT armed, settled FROM swing_batch_schedule_intents"
+                + " WHERE batch = ? AND session_date = ?",
+            (rs, n) -> new Intent(rs.getBoolean("armed"), rs.getBoolean("settled")),
+            batch, java.sql.Date.valueOf(session))
+        .stream()
+        .findFirst();
+  }
+
+  /**
+   * A schedule-intent row: the arming, plus whether the SETTLE wrote it (V061).
+   *
+   * <p>{@code settled = false} is an intraday observation made hours before the settle, kept only so
+   * a container down at 16:00 still leaves the catch-up something to work with. It is NOT enough on
+   * its own to justify entering — the flag can have moved since, and the settle's own write is
+   * fail-soft, so its absence proves nothing either way.
+   */
+  public record Intent(boolean armed, boolean settled) {}
 
   /** The arming captured for exactly this session, or empty when the scheduler never fired for it. */
   public Optional<Boolean> find(String batch, LocalDate session) {

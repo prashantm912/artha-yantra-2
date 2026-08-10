@@ -291,8 +291,23 @@ public class SwingBatchCatchUp {
       }
       return; // the on-time batch (or a prior complete catch-up) already ran this session
     }
-    Optional<Boolean> intent = intents.find(batch, session);
-    if (intent.isEmpty() && runs.hasRun(batch, session)) {
+    Optional<SwingBatchIntentRepository.Intent> row = intents.findIntent(batch, session);
+    boolean markerProvesArmed = runs.hasRun(batch, session);
+    // ⚠️ A PROVISIONAL row is an intraday observation made hours before the settle, kept only so a
+    // container down at 16:00 leaves this sweep something to work with. It is NOT authority to
+    // ENTER: the flag can have moved since, and the settle's own intent write is fail-soft, so a
+    // provisional row surviving proves nothing about what the settle saw. Two rounds of cross-vendor
+    // review found both directions of that (2026-08-10) — a family disarmed after the morning tick
+    // taking entries, and a family armed after it forfeiting them.
+    //
+    // A run MARKER settles it either way, because only an armed run writes one, so a provisional row
+    // WITH a marker is as good as settled. A provisional row with NO marker means nobody knows: this
+    // sweep then runs EXITS ONLY and says so. You can always decline to enter; you cannot decline to
+    // leave.
+    boolean entriesTrustworthy =
+        row.map(SwingBatchIntentRepository.Intent::settled).orElse(false) || markerProvesArmed;
+    Optional<Boolean> intent = row.map(SwingBatchIntentRepository.Intent::armed);
+    if (intent.isEmpty() && markerProvesArmed) {
       // ⚠️ A run MARKER is itself proof the family was armed for this session, because the only path
       // that writes one runs behind runLocked's executionArmed gate — a disarmed run returns before
       // reaching runs.record. So when the marker exists but the intent row does not, the intent
@@ -322,6 +337,23 @@ public class SwingBatchCatchUp {
       log.info("swing catch-up: {} {} was DISARMED at schedule time - not replaying", batch, session);
       return;
     }
+    if (!entriesTrustworthy) {
+      // Provisional arming, no run marker: the settle never ran (or its batch never got far enough
+      // to record one), so the session's real arming is unknown. Evaluate the held stops off its own
+      // bar and take NO entries. Deliberately NOT terminal — leave the session retryable so a later
+      // sweep can still take its entries if a marker or settled row appears.
+      log.warn(
+          "swing catch-up: {} {} has only a PROVISIONAL arming row and no run marker — running"
+              + " EXITS ONLY, entries need an authoritative arming",
+          batch,
+          session);
+      alert(
+          doctrine,
+          "catch-up EXITS ONLY for " + session,
+          "The " + session + " arming is provisional (an intraday observation, not the settle's own"
+              + " reading) and no run marker exists, so entries are withheld. Held stops WERE"
+              + " evaluated off that session's bar.");
+    }
     // ATOMIC claim BEFORE any emission. Lost = another caller holds a fresh RUNNING claim, or the
     // session is terminal (DONE / ABANDONED). This is the durable idempotency gate the JVM mutex alone
     // cannot give (it must survive a crash between the money effect and the marker write).
@@ -347,8 +379,13 @@ public class SwingBatchCatchUp {
     }
     repairPendingEffects(batch, session);
     Optional<SwingDoctrine.CandidateSnapshot> candidateSnapshot = readCandidateSnapshot(doctrine);
+    // TWO independent conditions, and both must hold before this sweep enters anything:
+    //   - the funnel must actually be THIS session's screen (it silently serves the latest persisted
+    //     one, so entering off it would take the wrong day's names); and
+    //   - the arming must be AUTHORITATIVE, not a provisional intraday observation (V061).
     boolean entriesReady =
-        candidateSnapshot.map(snapshot -> session.equals(snapshot.screenDate())).orElse(false);
+        entriesTrustworthy
+            && candidateSnapshot.map(snapshot -> session.equals(snapshot.screenDate())).orElse(false);
     SwingBatchRecorder.RunOutcome outcome =
         recorder.runAndRecord(
             doctrine,

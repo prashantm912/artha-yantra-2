@@ -57,6 +57,69 @@ class SwingBatchIntentRepositoryIntegrationTest extends StrategySignalIntegratio
         .contains(true);
   }
 
+  /**
+   * V061 — the half a successful settle cannot cover: a FAILED settle write.
+   *
+   * <p>The settle's intent write is deliberately fail-soft (bookkeeping must never cost a settle),
+   * so "the row was not corrected" is a state that really happens. Before {@code settled} existed,
+   * a provisional {@code true} that the settle failed to correct read exactly like an authoritative
+   * {@code true}, and the catch-up entered on it. Now the row still carries the stale value — there
+   * is nothing to correct it WITH — but it is marked provisional, so the catch-up can tell.
+   */
+  @Test
+  void aProvisionalRowStaysMarkedProvisionalSoAFailedSettleCannotPassAsAuthority() {
+    LocalDate session = LocalDate.of(2026, 7, 23);
+    String batch = "it-intent-prov-" + java.util.UUID.randomUUID();
+
+    intents.recordScheduled(batch, session, true);
+
+    assertThat(intents.findIntent(batch, session))
+        .get()
+        .satisfies(
+            i -> {
+              assertThat(i.armed()).isTrue();
+              assertThat(i.settled())
+                  .as("an intraday observation must never read as the settle's own reading")
+                  .isFalse();
+            });
+
+    intents.recordSettled(batch, session, false);
+    assertThat(intents.findIntent(batch, session))
+        .get()
+        .satisfies(
+            i -> {
+              assertThat(i.armed()).isFalse();
+              assertThat(i.settled()).isTrue();
+            });
+  }
+
+  /**
+   * A LATER provisional observation supersedes an earlier one — a restart that sees a changed flag
+   * is no longer ignored — but a provisional write can never clobber a settled value.
+   */
+  @Test
+  void aLaterTickSupersedesAnEarlierOneButNeverOverwritesTheSettle() {
+    LocalDate session = LocalDate.of(2026, 7, 24);
+
+    String ticksOnly = "it-intent-later-" + java.util.UUID.randomUUID();
+    intents.recordScheduled(ticksOnly, session, false);
+    intents.recordScheduled(ticksOnly, session, true); // the flag moved; a later tick sees it
+    assertThat(intents.findIntent(ticksOnly, session))
+        .get()
+        .satisfies(i -> assertThat(i.armed()).isTrue());
+
+    String settledThenTicked = "it-intent-guard-" + java.util.UUID.randomUUID();
+    intents.recordSettled(settledThenTicked, session, true);
+    intents.recordScheduled(settledThenTicked, session, false); // a stray late tick
+    assertThat(intents.findIntent(settledThenTicked, session))
+        .get()
+        .satisfies(
+            i -> {
+              assertThat(i.armed()).as("a provisional write must not clobber the settle").isTrue();
+              assertThat(i.settled()).isTrue();
+            });
+  }
+
   /** With no settle at all, the provisional tick still stands — that is why the ticks exist. */
   @Test
   void aProvisionalTickSurvivesWhenTheSettleNeverRuns() {
@@ -70,12 +133,22 @@ class SwingBatchIntentRepositoryIntegrationTest extends StrategySignalIntegratio
         .contains(true);
   }
 
+  /**
+   * ⚠️ This test used to assert that a schedule intent is IMMUTABLE for a session — the first write
+   * wins, forever. That rule was correct while the settle was the only writer, and became dangerous
+   * the moment intraday ticks were added: it meant a 09:05 guess could never be corrected by the
+   * 16:00 reading, and cross-vendor review found both directions of the resulting defect (a
+   * disarmed family entering, and an armed family forfeiting). The test was pinning the defect.
+   *
+   * <p>The rule now: a SETTLED value is immutable against provisional writes; a provisional value is
+   * not immutable at all. Missing rows still read empty, which is what keeps a fresh deploy quiet.
+   */
   @Test
-  void scheduleIntentIsImmutableForOneSessionAndMissingRowsAreEmpty() {
+  void aSettledIntentIsImmutableAgainstTicksAndMissingRowsAreEmpty() {
     String batch = "intent-it-" + UUID.randomUUID();
     LocalDate session = LocalDate.of(2026, 7, 17);
 
-    intents.recordScheduled(batch, session, true);
+    intents.recordSettled(batch, session, true);
     intents.recordScheduled(batch, session, false);
 
     assertThat(intents.find(batch, session)).contains(true);

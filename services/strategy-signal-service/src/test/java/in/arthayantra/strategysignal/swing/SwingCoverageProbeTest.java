@@ -265,7 +265,8 @@ class SwingCoverageProbeTest {
   @DisplayName("MATERIALITY: the fixed fraction distinguishes shallow and deep windows")
   void materialityUsesWindowFraction() {
     // The Critical. The SAME 5-session hole is material inside a 50-bar window and immaterial inside
-    // a 252-bar one, because 5/252 cannot move a 52-week extreme even under the fixed ~4.76% band.
+    // a 252-bar one. Fractions are window-local — m/(L+m), NOT m/L — so this is 5/55 = 9.09% against
+    // 5/257 = 1.95%, either side of the fixed 1/22 = 4.545% band.
     List<EngineCandle> bars =
         series(LocalDate.of(2025, 3, 1), LocalDate.of(2026, 8, 3),
             LocalDate.of(2026, 6, 12), LocalDate.of(2026, 6, 15), LocalDate.of(2026, 6, 16),
@@ -275,13 +276,45 @@ class SwingCoverageProbeTest {
     SwingCoverageProbe.Coverage deep = SwingCoverageProbe.probe(bars, 252, NSE);
 
     assertThat(shallow.missing()).hasSize(5);
-    assertThat(shallow.materiallyIncomplete()).as("5 of 50 = 10% — refuse").isTrue();
+    assertThat(shallow.materiallyIncomplete()).as("5 of 55 window sessions = 9.09%, over the 4.545% band — refuse").isTrue();
 
     assertThat(deep.missing()).hasSize(5);
     assertThat(deep.incomplete()).as("the hole is still SEEN at depth 252").isTrue();
     assertThat(deep.materiallyIncomplete())
-        .as("5 of 252 = 2% — must NOT refuse, or primary-base stops entering nightly")
+        .as("5 of 257 window sessions = 1.95%, under the band — must NOT refuse, or primary-base stops entering nightly")
         .isFalse();
+  }
+
+  @Test
+  @DisplayName("FAIL-CLOSED: an undeterminable probe blocks entry, though it is not 'incomplete'")
+  void undeterminableCoverageBlocksEntry() {
+    // The shipped defect (cross-vendor review 2026-08-10): undeterminable() carries an EMPTY missing
+    // list, so incomplete() is false and materiallyIncomplete() is false with it. Both entry gates
+    // keyed on materiallyIncomplete(), so a probe that FAILED — exception, a year outside the
+    // bundled calendar, an invalid bar, depth degraded to zero — permitted the entry it exists to
+    // guard. The gate reported as a gate while passing everything through.
+    SwingCoverageProbe.Coverage unknown = SwingCoverageProbe.undeterminable(50);
+
+    assertThat(unknown.incomplete())
+        .as("no claim is not a claim of incompleteness — this stays false BY DESIGN")
+        .isFalse();
+    assertThat(unknown.materiallyIncomplete())
+        .as("and so does this — which is exactly why an entry must not key on it")
+        .isFalse();
+    assertThat(unknown.notProvenSound())
+        .as("but an entry MUST refuse: an unreadable window is not a safe window")
+        .isTrue();
+  }
+
+  @Test
+  @DisplayName("FAIL-CLOSED: a complete window still permits entry")
+  void completeCoverageDoesNotBlockEntry() {
+    // The other half — notProvenSound() must not become a blanket refusal, or the batch enters nothing.
+    SwingCoverageProbe.Coverage complete =
+        SwingCoverageProbe.probe(tradingWindow(80, LocalDate.of(2026, 8, 3)), 50, NSE);
+
+    assertThat(complete.missing()).isEmpty();
+    assertThat(complete.notProvenSound()).isFalse();
   }
 
   @Test

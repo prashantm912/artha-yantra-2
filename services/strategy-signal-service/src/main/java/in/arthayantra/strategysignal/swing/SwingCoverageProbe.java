@@ -165,6 +165,37 @@ public final class SwingCoverageProbe {
       return incomplete() && missing.size() * MATERIALITY_DENOMINATOR > windowSessions;
     }
 
+    /**
+     * "This coverage cannot be vouched for" — incomplete OR unknown. The fail-CLOSED test the ENTRY
+     * decision must use, and the observation test the EXIT side must use. ⚠️ Do NOT reach for
+     * {@link #materiallyIncomplete()} at either site — that was the shipped defect (cross-vendor
+     * review, 2026-08-10, caught before merge).
+     *
+     * <p>Named for the PROPERTY rather than the action deliberately: an earlier draft called it
+     * {@code blocksEntry}, which read as a promise that exits block too once the exit path started
+     * using it. Exits do not block. They alert.
+     *
+     * <p>{@link #undeterminable} builds {@code missing = List.of()} with {@code determinable =
+     * false}, so {@code incomplete()} is false and {@code materiallyIncomplete()} is therefore false
+     * too. Both entry paths keyed on it, which meant a probe that FAILED — an exception, a year
+     * outside the bundled calendar (the CD-2 cliff), an invalid bar, a depth-extraction error
+     * degrading to depth zero — silently PERMITTED live evaluation. A data-coverage safety gate that
+     * fails open on its own failure is worse than no gate, because it reports as a gate.
+     *
+     * <p>The class contract already said this ("{@code determinable = false} — an explicit 'no
+     * claim', never an exception and never a false 'complete'"); nothing consumed it that way. This
+     * method is that contract made callable, so a future entry path cannot re-open the hole by
+     * reaching for the obvious-looking predicate.
+     *
+     * <p>Entry only. EXITS stay non-blocking by design: refusing to evaluate an exit on thin data
+     * strands an open position, which is the strictly worse failure — you can always decline to
+     * ENTER, you cannot decline to LEAVE forever (the #694 doctrine, same shape as paper
+     * tick-freshness).
+     */
+    public boolean notProvenSound() {
+      return !determinable || materiallyIncomplete();
+    }
+
     /** Compact ops rendering including the fraction, so an alert shows WHY it tripped. */
     public String describe() {
       if (!determinable) {

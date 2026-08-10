@@ -534,7 +534,10 @@ public class SwingBatchEngine {
         // session permanently retryable and the did-not-run canary permanently firing. Evidence is
         // durable (swing_batch_refusals) and alerting is aggregated once per run instead.
         SwingCoverageProbe.Coverage coverage = entryCoverage(strat, series);
-        if (coverage.materiallyIncomplete()) {
+        // notProvenSound(), NOT materiallyIncomplete(): the latter is FALSE for an undeterminable
+        // probe, so a probe failure used to permit the entry it exists to guard. See the javadoc
+        // on SwingCoverageProbe.Coverage#notProvenSound.
+        if (coverage.notProvenSound()) {
           coverageRefused.add(c.symbol());
           recordCoverageRow(
               doctrine, effectSession, c.symbol(), coverageReason(c.symbol()));
@@ -750,8 +753,8 @@ public class SwingBatchEngine {
       // apply it too (cross-vendor review Major): otherwise a coverage-refused candidate still
       // increments wouldEnter, never becomes held, and is persisted as a slot-cap drop —
       // mis-attributing a DATA refusal to the capital cap and corrupting the ledger-F3 measurement.
-      if (entryCoverage(strat, series).materiallyIncomplete()) {
-        continue;
+      if (entryCoverage(strat, series).notProvenSound()) {
+        continue; // fail-closed, same reason as the gate above
       }
       IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());
       Optional<EntryEvaluator.Evaluation> eval =
@@ -956,10 +959,18 @@ public class SwingBatchEngine {
       SwingCoverageProbe.Coverage exitCoverage =
           SwingCoverageProbe.probe(
               series, SwingCoverageProbe.exitLookbackBars(strat.definition(), bank), calendar);
-      if (exitCoverage.materiallyIncomplete()) {
+      // ⚠️ UNDETERMINABLE counts as degraded here, and materiallyIncomplete() alone does NOT say so
+      // — it is false when determinable is false, so a probe that FAILED reported the exit as
+      // cleanly covered and said nothing (cross-vendor review, 2026-08-10). On the ENTRY side the
+      // same blindness let the trade through; here it is quieter but the same shape: the operand
+      // cannot express "I do not know", so silence meant both "fine" and "broken".
+      //
+      // Evaluation still proceeds unconditionally — that is the doctrine above and it does not
+      // change. Only the OBSERVATION widens.
+      if (exitCoverage.notProvenSound()) {
         log.error(
-            "{} swing exit: #{} {} evaluated on INCOMPLETE data — {} — stop/trail level may be"
-                + " computed off a stretched window (evaluation NOT blocked)",
+            "{} swing exit: #{} {} evaluated on INCOMPLETE or UNKNOWN coverage — {} — stop/trail"
+                + " level may be computed off a stretched window (evaluation NOT blocked)",
             doctrine.batchName(), primary.id(), primary.tradingsymbol(), exitCoverage.describe());
         recordCoverageRow(
             doctrine,

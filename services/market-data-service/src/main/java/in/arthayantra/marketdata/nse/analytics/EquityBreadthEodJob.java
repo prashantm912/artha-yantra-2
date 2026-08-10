@@ -66,7 +66,7 @@ public class EquityBreadthEodJob {
   }
 
   /** Daily cron, 19:55 IST — after the ~19:30 bhavcopy lands and the 19:50 screens run. */
-  @Scheduled(cron = "${artha.breadth.materialize-cron:0 9,24,39,54 18-19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.breadth.materialize-cron:0 55 19 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");
   }

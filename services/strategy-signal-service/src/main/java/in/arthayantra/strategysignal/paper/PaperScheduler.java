@@ -74,7 +74,7 @@ public class PaperScheduler {
    * next evening's pass picks the strand up again.
    */
   @Scheduled(
-      cron = "${artha.paper.past-expiry-recon.cron:0 58 18 * * MON-FRI}", zone = "Asia/Kolkata")
+      cron = "${artha.paper.past-expiry-recon.cron:0 20 21 * * MON-FRI}", zone = "Asia/Kolkata")
   public void pastExpiryRecovery() {
     int settled = expiry.settlePastExpiries();
     if (settled > 0) {

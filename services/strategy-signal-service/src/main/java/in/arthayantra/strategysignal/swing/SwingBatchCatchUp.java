@@ -268,7 +268,14 @@ public class SwingBatchCatchUp {
 
   private void catchUpSession(SwingDoctrine doctrine, LocalDate session, boolean retryable) {
     String batch = doctrine.batchName();
-    if (runs.hasRun(batch, session)) {
+    // ⚠️ hasRunWithEntries, NOT hasRun (V060). Since the 16:00/08:35 split this sweep is no longer
+    // only a recovery path — it is the ONLY path that takes entries, every session, because the
+    // screen it needs lands somewhere between 17:52 and 19:30+ while the exits pass runs at 16:00.
+    // That exits-only run writes a marker row, correctly (it evaluated every held stop, which is
+    // what the 08:30 canary asks about), so a bare row-exists test would skip every single session
+    // here and the book would never take another entry. The marker would be true and the inference
+    // drawn from it false.
+    if (runs.hasRunWithEntries(batch, session)) {
       if (retryable) {
         repairPendingEffects(batch, session);
         if (hasUnconfirmedPaperEffects(batch, session)) {

@@ -145,7 +145,8 @@ class SwingBatchRecorderTest {
 
     verify(runs)
         .record(
-            "manas-arora", LocalDate.of(2026, 7, 12), 3, 12, 6, 1, 0, 5, 8, 6, 2, true, dropped);
+            "manas-arora", LocalDate.of(2026, 7, 12), 3, 12, 6, 1, 0, 5, 8, 6, 2, true, dropped,
+            true);
     // The batch also persists the sell-decision snapshot for the family it ran.
     verify(sellDecisions).persist(doctrine);
   }
@@ -173,7 +174,7 @@ class SwingBatchRecorderTest {
     verify(runs)
         .record(
             eq("manas-arora"), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-            anyInt(), anyInt(), anyInt(), anyBoolean(), any());
+            anyInt(), anyInt(), anyInt(), anyBoolean(), any(), anyBoolean());
   }
 
   @Test
@@ -191,7 +192,7 @@ class SwingBatchRecorderTest {
         .thenReturn(result);
     when(runs.record(
             any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-            anyInt(), anyInt(), anyBoolean(), any()))
+            anyInt(), anyInt(), anyBoolean(), any(), anyBoolean()))
         .thenReturn(true);
 
     SwingBatchRecorder recorder =
@@ -211,7 +212,7 @@ class SwingBatchRecorderTest {
     assertThat(emptyScreen.markerRecorded()).isTrue();
     verify(runs).record(
         any(), any(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(),
-        anyInt(), anyBoolean(), any());
+        anyInt(), anyBoolean(), any(), anyBoolean());
   }
 
   @Test

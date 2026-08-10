@@ -3,10 +3,7 @@ package in.arthayantra.strategysignal.minervini;
 import in.arthayantra.strategysignal.swing.SwingBatchIntentRepository;
 import in.arthayantra.strategysignal.swing.SwingBatchRecorder;
 import java.time.Clock;
-import in.arthayantra.strategysignal.swing.SwingDoctrine;
 import java.time.LocalDate;
-import java.time.LocalTime;
-import java.util.Optional;
 import java.time.ZoneId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,39 +11,42 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Fires the Minervini swing batch on a POLL across the evening window, running as soon as the day's
- * screen actually lands rather than at a fixed hour chosen to sit safely after it.
+ * Settles the Minervini swing book at 16:00 IST — half an hour after the close, and four hours
+ * earlier than the 20:00 batch this replaces. EXITS ONLY: entries moved to the 08:35 morning pass
+ * (owner decision, 2026-08-10).
  *
- * <p><b>Why a poll.</b> The screens are event-chained to the bhavcopy backfill in market-data, so
- * their completion time is data-dependent — it moved from a dependable ~19:31 to "whenever NSE
- * publishes" once the bhavcopy job began polling. A fixed swing cron can only be safe by leaving a
- * gap big enough for the worst case, which is exactly the ~29 minutes this used to burn every night.
+ * <p><b>Why exits can run this early, and entries cannot.</b> They need different data. A stop on a
+ * held name needs that name's own daily bar, which the batch fetches on demand through the
+ * cache-first Kite path — measured on 2026-08-07, ELEVEN of the held symbols' 1d bars were written
+ * by {@code KITE} at 20:00:47–20:05:33, i.e. by this batch as it ran, against only four from
+ * {@code BHAVCOPY} at 19:30. Move the batch to 16:00 and it fetches at 16:00. Entries need the
+ * SCREEN, which needs the whole ~1800-symbol NSE bhavcopy, which NSE publishes anywhere between
+ * 17:52 and 19:30+. Waiting for that is what used to hold the entire book hostage until 20:00.
  *
- * <p><b>⚠️ Why entries are gated and exits are not.</b> The funnel SILENTLY serves the latest
- * persisted screen — there is no error when today's has not landed, just yesterday's names. The
- * previous fixed-time run passed {@code entriesEnabled = true} unconditionally, so running it before
- * the screen landed would have entered off the WRONG DAY'S names, silently. Entries therefore run
- * only when the snapshot's {@code screenDate} IS this session.
+ * <p><b>Entries are not dropped, they are deferred.</b> {@link
+ * in.arthayantra.strategysignal.swing.SwingBatchCatchUp} runs at 08:35, before the open, and its own
+ * doctrine is exactly what this needs: between a session's 15:30 close and the next 09:15 open that
+ * session's bar is final, so a run in that window reads exactly the bar the on-time run would have,
+ * and every pass is pinned + truncated to its own session. An entry taken at 08:35 for session D
+ * fills at D's close — the same price the 20:00 run would have used.
  *
- * <p>Exits get the opposite treatment, and this is the half that makes the poll safe to add at all:
- * by {@code ENTRY_DEADLINE} the batch runs whether or not the screen arrived, with entries
- * suppressed. A held stop MUST be evaluated — you can always decline to ENTER, you cannot decline to
- * LEAVE (the #694 doctrine). Without that deadline a screen that never lands would mean stops were
- * never evaluated and open positions sat unmanaged all night, which is strictly worse than the
- * fixed-time run this replaces.
+ * <p><b>⚠️ The marker this run writes is deliberately NOT the catch-up's skip signal.</b> An
+ * exits-only run records a {@code swing_batch_runs} row because it genuinely evaluated every held
+ * stop, which is what the 08:30 canary and the heartbeat ask about. The catch-up asks a different
+ * question, and V060 gives it a different operand: {@code entries_enabled}. Before that column
+ * existed a bare row-exists test would have skipped every session and the book would never have
+ * taken another entry — the marker true, the inference from it false.
  *
- * <p>Idempotency is the schedule-intent row: it is written only on the poll that actually runs, so
- * an earlier poll that declined to run leaves the session retryable. Execution stays inert when the
- * family flag is false via {@code SwingBatchEngine.runDaily}'s own {@code doctrine.enabled()} check.
+ * <p>The schedule-intent row is written on EVERY tick, including a disarmed one, because the
+ * missed-batch detector's population is "armed intent with no run row". It is also what the catch-up
+ * requires: the only two rows ever written to {@code swing_catchup_runs} are 2026-07-17, both
+ * {@code ABANDONED / NO_SCHEDULE_INTENT} — it refused for want of exactly this row.
  */
 @Component
 public class MinerviniSwingScheduler {
 
   private static final Logger log = LoggerFactory.getLogger(MinerviniSwingScheduler.class);
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
-
-  /** The wall-clock past which exits run regardless — a held stop cannot wait for a late screen. */
-  private static final LocalTime ENTRY_DEADLINE = LocalTime.of(18, 45);
 
   private final SwingBatchRecorder recorder;
   private final MinerviniDoctrine doctrine;
@@ -65,60 +65,28 @@ public class MinerviniSwingScheduler {
     this.clock = clock;
   }
 
-  /** Evening poll: runs as soon as this session's screen lands, and by the deadline regardless. */
-  @Scheduled(cron = "${artha.minervini.swing.cron:0 10,25,40,55 18-19 * * MON-FRI}", zone = "Asia/Kolkata")
+  /** 16:00 IST settle: evaluate every held stop against this session's own daily bar. */
+  @Scheduled(cron = "${artha.minervini.swing.cron:0 0 16 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
     LocalDate session = LocalDate.now(clock.withZone(IST));
-    // Intent on the FIRST tick, unconditionally: the missed-batch detector's population is
-    // "armed intent with no swing_batch_runs row", so an evening where every poll declined must
-    // still leave an intent row or the detector goes blind to exactly the miss it exists for.
-    // recordScheduled is ON CONFLICT DO NOTHING, so later ticks are no-ops.
     try {
       intents.recordScheduled(doctrine.batchName(), session, doctrine.enabled());
     } catch (RuntimeException e) {
+      // Fail-soft on purpose: the detector's bookkeeping must never cost a settle. Losing the row
+      // costs visibility of a miss; skipping the run costs an unevaluated stop.
       log.warn(
-          "{} swing schedule-intent record failed for {} - continuing: {}",
+          "{} swing schedule-intent record failed for {} — continuing: {}",
           doctrine.batchName(),
           session,
           e.getMessage());
     }
-    if (alreadyRan(session)) {
-      return;
-    }
-    Optional<SwingDoctrine.CandidateSnapshot> snapshot = doctrine.candidateSnapshot().snapshot();
-    boolean screenIsForThisSession =
-        snapshot.isPresent() && session.equals(snapshot.get().screenDate());
-    boolean pastDeadline = LocalTime.now(clock.withZone(IST)).isAfter(ENTRY_DEADLINE);
-    if (!screenIsForThisSession && !pastDeadline) {
-      log.debug(
-          "{} swing batch waiting for {}'s screen (funnel currently serves {})",
-          doctrine.batchName(),
-          session,
-          snapshot.map(s -> s.screenDate().toString()).orElse("nothing"));
-      return; // a later poll picks it up — do NOT enter off the previous day's names
-    }
-    if (!screenIsForThisSession) {
-      log.warn(
-          "{} swing batch running at the deadline WITHOUT {}'s screen — exits only, no entries",
-          doctrine.batchName(),
-          session);
-    }
-    // sessionDate stays null: this is a SCHEDULE change, not a change to how exits are priced.
-    recorder.runAndRecord(
-        doctrine, null, screenIsForThisSession, SwingBatchRecorder.MarkerPolicy.ALWAYS, snapshot);
-  }
-
-  /** True when the batch already RAN this session — a swing_batch_runs row, not the intent row. */
-  private boolean alreadyRan(LocalDate session) {
-    try {
-      return intents.hasRunFor(doctrine.batchName(), session);
-    } catch (RuntimeException e) {
-      log.warn(
-          "{} swing intent lookup failed for {} — skipping this poll: {}",
-          doctrine.batchName(),
-          session,
-          e.getMessage());
-      return true; // fail CLOSED: a lookup failure must not cause a duplicate batch
-    }
+    // sessionDate stays null — this IS the session's own evening, so the batch prices off today's
+    // bar exactly as the 20:00 run did. Only the hour moved.
+    //
+    // runScheduled, NOT a bare runAndRecord: it is the path that turns a thrown batch into a FAILED
+    // ops alert instead of a lone log line, and a settle that dies silently means every held stop
+    // goes unevaluated with nobody told. The first cut of this change called runAndRecord directly
+    // and lost that envelope — caught in cross-vendor review, before merge.
+    recorder.runScheduled(doctrine, false);
   }
 }

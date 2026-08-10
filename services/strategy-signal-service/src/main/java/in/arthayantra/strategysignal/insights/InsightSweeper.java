@@ -96,7 +96,7 @@ public class InsightSweeper {
   }
 
   /** 21:10-IST strategy-evidence sweep — STRATEGY_EVIDENCE, after the 21:00 graduation eval (§5.2). */
-  @Scheduled(cron = "${artha.insights.strategy-evidence-cron:0 54 18 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.insights.strategy-evidence-cron:0 10 21 * * MON-FRI}", zone = "Asia/Kolkata")
   public void strategyEvidenceSweep() {
     try {
       engine.runStrategyEvidenceSweep();
@@ -106,7 +106,7 @@ public class InsightSweeper {
   }
 
   /** 21:15-IST sell-decision sweep — SELL_DECISION, after the 20:05 swing batch persists V037 (§5.3). */
-  @Scheduled(cron = "${artha.insights.sell-decision-cron:0 56 18 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.insights.sell-decision-cron:0 15 21 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sellDecisionSweep() {
     try {
       engine.runSellDecisionSweep();

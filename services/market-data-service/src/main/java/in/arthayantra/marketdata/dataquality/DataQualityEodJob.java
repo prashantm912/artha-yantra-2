@@ -89,7 +89,7 @@ public class DataQualityEodJob {
   }
 
   /** Nightly run at 19:50 IST, after the settled bhavcopy is expected to have landed. */
-  @Scheduled(cron = "${artha.data-quality.eod-cron:0 7,22,37,52 18-19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.data-quality.eod-cron:0 50 19 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");
   }

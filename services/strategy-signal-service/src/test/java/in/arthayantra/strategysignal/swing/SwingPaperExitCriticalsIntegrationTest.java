@@ -338,7 +338,7 @@ class SwingPaperExitCriticalsIntegrationTest extends StrategySignalIntegrationTe
 
   private void runCatchup(SwingDoctrine doctrine, ApplicationEventPublisher droppedEvents) {
     String batch = doctrine.batchName();
-    runs.record(batch, SESSION.minusDays(1), 0, 0, 0, 0, 0, 0, 0, 0, 0, false, List.of());
+    runs.record(batch, SESSION.minusDays(1), 0, 0, 0, 0, 0, 0, 0, 0, 0, false, List.of(), true);
     intents.recordScheduled(batch, SESSION, true);
     SwingBatchRecorder recorder = mock(SwingBatchRecorder.class);
     SwingBatchEngine.SwingRun run =

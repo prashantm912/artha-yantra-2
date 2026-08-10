@@ -28,26 +28,6 @@ public class SwingBatchIntentRepository {
         batch, java.sql.Date.valueOf(session), armed);
   }
 
-  /**
-   * Whether the batch actually RAN for this session — a {@code swing_batch_runs} row exists.
-   *
-   * <p>Deliberately distinct from {@link #find}: intent means "the scheduler fired and captured the
-   * arming", a run means "the batch executed". {@link #claimableMissedSessionsBefore} already keys
-   * the missed-batch detector on exactly that pair (armed intent AND no run row), and the evening
-   * poll needs the same split — it records intent on its FIRST tick so the detector's population is
-   * unchanged, then uses THIS to avoid running twice across the remaining ticks. Using the intent
-   * row as the run guard would have made the first poll suppress every later one.
-   */
-  public boolean hasRunFor(String batch, LocalDate session) {
-    Boolean present =
-        jdbc.queryForObject(
-            "SELECT EXISTS(SELECT 1 FROM swing_batch_runs WHERE batch = ? AND run_date = ?)",
-            Boolean.class,
-            batch,
-            java.sql.Date.valueOf(session));
-    return Boolean.TRUE.equals(present);
-  }
-
   /** The arming captured for exactly this session, or empty when the scheduler never fired for it. */
   public Optional<Boolean> find(String batch, LocalDate session) {
     return jdbc

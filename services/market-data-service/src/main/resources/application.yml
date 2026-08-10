@@ -250,7 +250,7 @@ artha:
       expiry-horizon-days: ${ARTHA_OPTIONS_ATM_PINNER_EXPIRY_HORIZON_DAYS:7}
   data-quality:
     # FID P2-4: settled-day per-symbol completeness (chain capture, primary 1m, NSE EQ bhavcopy).
-    eod-cron: "0 7,22,37,52 18-19 * * MON-FRI"
+    eod-cron: "0 50 19 * * MON-FRI"
     enabled: true
     chain-expected-passes: 187
     chain-min-coverage-pct: 80

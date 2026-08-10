@@ -56,7 +56,7 @@ public class MarketContextEodJob {
    * Daily after the NSE EOD ingests (default 19:45 IST, MON-FRI). Its own try/catch keeps a fetch/
    * persist failure logged and non-fatal — the ledger has already recorded the FAILURE and rethrown.
    */
-  @Scheduled(cron = "${artha.context.eod-cron:0 5,20,35,50 18-19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.context.eod-cron:0 45 19 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
     try {
       ledger.record(IngestRunLedger.SOURCE_MARKET_CONTEXT_DAY, this::persist);

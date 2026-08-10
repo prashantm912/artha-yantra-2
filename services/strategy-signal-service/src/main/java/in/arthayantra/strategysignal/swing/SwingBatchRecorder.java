@@ -202,7 +202,7 @@ public class SwingBatchRecorder {
                 doctrine.batchName(), runDate, result.strategies(), result.candidates(),
                 result.entries(), result.exits(), result.exitSkipped(), probe.openAtStart(),
                 probe.wouldEnter(), probe.admitted(), probe.capExceedance(), probe.capBound(),
-                probe.droppedByCap());
+                probe.droppedByCap(), entriesEnabled);
       } catch (RuntimeException e) {
         log.warn("{} swing run-marker record failed: {}", doctrine.batchName(), e.getMessage());
       }
@@ -255,8 +255,24 @@ public class SwingBatchRecorder {
    * prices, corrupting the forward-paper evidence).
    */
   public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine) {
+    return runScheduled(doctrine, true);
+  }
+
+  /**
+   * The scheduler path with an explicit entry arming — the 16:00 IST settle passes {@code false}.
+   *
+   * <p>Added rather than reusing one of the snapshot-carrying {@link #runAndRecord} overloads
+   * because those hardcode {@code executionArmed = true} for the catch-up's benefit (a historical
+   * session's arming flag may legitimately have changed since). Routing the live scheduler through
+   * one of them would let a DISABLED strategy exit and stamp completion — a Critical raised in
+   * cross-vendor review of the first cut of this change, before merge. This overload delegates to
+   * the four-argument form, which gates on {@code doctrine.enabled()}, and keeps the FAILED-alert
+   * envelope that a direct {@code runAndRecord} call would have silently dropped.
+   */
+  public SwingBatchEngine.SwingRun runScheduled(SwingDoctrine doctrine, boolean entriesEnabled) {
     try {
-      SwingBatchEngine.SwingRun result = runAndRecord(doctrine);
+      SwingBatchEngine.SwingRun result =
+          runAndRecord(doctrine, null, entriesEnabled, MarkerPolicy.ALWAYS).run();
       log.info(
           "{} swing batch done: {} strategies, {} candidates, {} entries, {} exits, {} exit-skipped",
           doctrine.batchName(), result.strategies(), result.candidates(), result.entries(),

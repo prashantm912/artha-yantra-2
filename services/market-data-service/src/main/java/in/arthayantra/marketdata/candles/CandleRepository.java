@@ -888,8 +888,22 @@ public class CandleRepository {
                 }
                 throw failure;
               } finally {
+                // ⚠️ Restoration must never REPLACE the outcome (cross-vendor review 2026-08-10).
+                // Unguarded, a throw here does one of two harmful things: after a rollback it
+                // supplants the original exception, so the caller is told about a JDBC housekeeping
+                // failure instead of the DB error that actually aborted the swap; and after a
+                // COMMIT it turns durable work into a thrown swapStaged, so the caller never
+                // records the interval as swapped and the alert under-reports what landed.
+                //
+                // Aborting is the safe direction either way. A connection returned to the pool with
+                // autoCommit=false silently enrols the NEXT unrelated caller in a transaction
+                // nobody commits — a whole-service hazard that no test on this path would catch.
                 if (manageTransaction && (committed || rolledBack)) {
-                  connection.setAutoCommit(true);
+                  try {
+                    connection.setAutoCommit(true);
+                  } catch (SQLException restoreFailure) {
+                    abortQuietly(connection);
+                  }
                 }
               }
             });

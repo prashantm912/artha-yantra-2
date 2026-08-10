@@ -240,7 +240,7 @@ class CorporateActionResumeTest {
 
     await()
         .atMost(Duration.ofSeconds(10))
-        .untilAsserted(() -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "FAILED"));
+        .untilAsserted(() -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "PARTIAL_SWAP"));
     // 1m committed, 1d did not — which is the RECOVERABLE half. The cached 1d still diverges from
     // Kite, so the next eligible sweep after the cooldown can re-detect and resume both legs
     // idempotently from the retained staging rows.
@@ -251,22 +251,27 @@ class CorporateActionResumeTest {
     verify(candles, times(2)).clearStaging("NSE", "TCS");
     verify(ntfy)
         .send(
-            contains("FAILED"),
+            contains("PARTIAL_SWAP"),
             eq("urgent"),
             contains("partial rebuild; swapped interval(s): 1m"));
     verify(events, never()).updateStatus(id, "BASE_REBUILT");
   }
 
   @Test
-  void aPartialSwapFailureIsHeldByTheCooldownNotRetriedNextSweep() {
-    // The CONSEQUENCE of the swap-order fix, executed rather than argued — and it is NOT the
-    // consequence the ordering rationale originally claimed.
+  void aPartialSwapIsRetriedOnTheNextSweepNotHeldByTheCooldown() {
+    // The CONSEQUENCE of the swap-order fix, executed rather than argued.
     //
-    // theDetectionInputIsSwappedLast... proves the mechanism (1m committed, 1d not), which was then
-    // reasoned forward to "so the next sweep re-detects". Traced end-to-end that is FALSE: the run
-    // records FAILED with detected_at = today, and the rebuild cooldown then suppresses the very
-    // next sweep. Recovery is rebuildRetryCooldownDays away, not one night. Pinning the real
-    // behaviour here so the gap is visible in the suite instead of only in prose.
+    // theDetectionInputIsSwappedLast... proves the mechanism (1m committed, 1d not), which the
+    // ordering rationale reasons forward to "so the next sweep re-detects". That was FALSE until
+    // V056: the run recorded plain FAILED with detected_at = today, and the rebuild cooldown then
+    // suppressed the very next sweep — so the symbol sat on ADJUSTED 1m against UNADJUSTED 1d for
+    // rebuildRetryCooldownDays, paged but not stopped. An earlier revision of this test PINNED that
+    // gap as expected behaviour, which is how it survived three review rounds.
+    //
+    // A partial swap now records PARTIAL_SWAP, which is outside the cooldown's match set, so
+    // recovery is one night away rather than a week. Deliberately a fresh restage and NOT a resumed
+    // checkpoint: verifyStagedRebuild validates coverage only, so retained staging could pass
+    // verification carrying values a later corporate action has already invalidated.
     UUID first = armDetection();
     when(events.statusOf(first)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
     doThrow(new RuntimeException("max_tuples_decompressed_per_dml_transaction"))
@@ -276,18 +281,30 @@ class CorporateActionResumeTest {
     assertThat(job.sweepNow()).containsExactly(first);
     await()
         .atMost(Duration.ofSeconds(10))
-        .untilAsserted(() -> verify(events).updateStatusIf(first, "REBACKFILL_RUNNING", "FAILED"));
+        .untilAsserted(
+            () -> verify(events).updateStatusIf(first, "REBACKFILL_RUNNING", "PARTIAL_SWAP"));
 
-    // the row the failing run left behind: FAILED, stamped today
+    // the row the failing run left behind: PARTIAL_SWAP, stamped today
+    when(events.latestEvent("NSE", "TCS")).thenReturn(Optional.of(row(first, "PARTIAL_SWAP", 0)));
+
+    assertThat(job.sweepNow())
+        .as("PARTIAL_SWAP is not FAILED, so the cooldown does not hold it — the next sweep re-detects")
+        .isNotEmpty();
+    verify(events, times(2))
+        .insertDetected(anyString(), anyString(), any(), any(), anyInt(), anyInt(), anyString());
+    // It is paged as well as retried: recordFailure alerts on the REBACKFILL_RUNNING transition.
+    verify(ntfy).send(contains("PARTIAL_SWAP"), eq("urgent"), anyString());
+  }
+
+  @Test
+  void anOrdinaryFailureIsStillHeldByTheCooldown() {
+    // The other half, and the reason PARTIAL_SWAP is a separate state rather than a blanket
+    // cooldown bypass. A symbol whose rebuild can NEVER pass verification must not cost a nightly
+    // ~196-page Kite re-fetch against the shared rate limiter plus a nightly urgent page.
+    UUID first = armDetection();
     when(events.latestEvent("NSE", "TCS")).thenReturn(Optional.of(row(first, "FAILED", 0)));
 
-    assertThat(job.sweepNow()).as("the next sweep does NOT re-detect — the cooldown holds it").isEmpty();
-    verify(events, times(1))
-        .insertDetected(anyString(), anyString(), any(), any(), anyInt(), anyInt(), anyString());
-    // …and the symbol sits on adjusted 1m + unadjusted 1d for the whole cooldown. It is paged, not
-    // silent: recordFailure alerts on the REBACKFILL_RUNNING -> FAILED transition.
-    verify(candles, times(1)).swapStaged("NSE", "TCS", "1m");
-    verify(ntfy).send(contains("FAILED"), eq("urgent"), anyString());
+    assertThat(job.sweepNow()).as("an ordinary FAILED still cools off").isEmpty();
   }
 
   @Test

@@ -537,7 +537,9 @@ public class CorporateActionJob {
       log.warn(
           "swapped rebuild for {} leaves {} cached bar(s) older than {} UNADJUSTED — the series"
               + " carries a price discontinuity at that boundary; widen"
-              + " artha.corporate-actions.rebackfill-days-1d to cover them",
+              + " artha.corporate-actions.rebackfill-days-"
+              + interval
+              + " to cover them",
           key,
           postSwap.cachedBarsBelowSpan(),
           postSwap.stagedFrom());
@@ -669,7 +671,17 @@ public class CorporateActionJob {
       return;
     }
     boolean baseCommitted = BASE_COMMITTED.contains(recorded);
-    String next = baseCommitted ? "REFRESH_FAILED" : "FAILED";
+    // ⚠️ A PARTIAL swap is not an ordinary failure and must NOT be recorded as one (V056; found by
+    // cross-vendor review 2026-08-10). The cooldown skips any symbol whose latest event is FAILED
+    // within rebuild-retry-cooldown-days — so recording a committed-1m/failed-1d run as FAILED
+    // suppressed the very recovery the 1m-first swap order exists to guarantee, and left every
+    // consumer reading ADJUSTED 1m against UNADJUSTED 1d for that symbol for the whole cooldown.
+    // PARTIAL_SWAP is outside the cooldown's match set, so the next sweep re-detects (1d is still
+    // unadjusted, so detection DOES re-fire) and re-stages from scratch. Fresh restage, not reuse:
+    // retained staging is unsafe here because verifyStagedRebuild validates coverage only.
+    boolean partialSwap =
+        swappedIntervals != null && !swappedIntervals.isEmpty() && swappedIntervals.size() < 2;
+    String next = baseCommitted ? "REFRESH_FAILED" : partialSwap ? "PARTIAL_SWAP" : "FAILED";
     if (!events.updateStatusIf(id, recorded, next)) {
       log.warn(
           "corporate-action event for {} moved during a failing attempt — not writing {}",
@@ -689,8 +701,11 @@ public class CorporateActionJob {
                     ? " — candle intervals swapped: " + String.join(", ", swappedIntervals)
                     : " — partial rebuild; swapped interval(s): "
                         + String.join(", ", swappedIntervals);
+    // The title names the status ACTUALLY recorded. It used to hardcode "FAILED", which after V056
+    // would have paged FAILED for a row written as PARTIAL_SWAP — an operator reading the page would
+    // conclude the cooldown now holds the symbol for a week when in fact it retries tonight.
     ntfy.send(
-        baseCommitted ? "Corporate action refresh failed" : "Corporate action rebuild FAILED",
+        baseCommitted ? "Corporate action refresh failed" : "Corporate action rebuild " + next,
         baseCommitted ? "default" : "urgent",
         equity.exchange()
             + ":"

@@ -65,6 +65,34 @@ public class MinerviniSwingScheduler {
     this.clock = clock;
   }
 
+  /**
+   * Records the session's arming HOURLY through the trading day, independently of the settle.
+   *
+   * <p>The intent row is what {@link in.arthayantra.strategysignal.swing.SwingBatchCatchUp} needs to
+   * replay a session at all — without one it abandons with {@code NO_SCHEDULE_INTENT}, which is
+   * precisely what happened to 2026-07-17 and is why that catch-up has never once run. Writing it
+   * only from the 16:00 settle would mean a container down at 16:00 — the exact incident class this
+   * whole design exists for — leaves no row and forfeits the session.
+   *
+   * <p>Hourly and idempotent ({@code ON CONFLICT DO NOTHING}), so any tick during the session is
+   * enough and the FIRST one wins. ⚠️ It does not close the gap for a stack that is down for the
+   * WHOLE session: nothing in-process can record what it was never alive to see, and that residue is
+   * deliberately left to abandon loudly rather than infer today's flag onto a past session.
+   */
+  @Scheduled(cron = "${artha.minervini.swing.intent-cron:0 5 9-15 * * MON-FRI}", zone = "Asia/Kolkata")
+  public void recordIntent() {
+    LocalDate session = LocalDate.now(clock.withZone(IST));
+    try {
+      intents.recordScheduled(doctrine.batchName(), session, doctrine.enabled());
+    } catch (RuntimeException e) {
+      log.debug(
+          "{} swing intent tick failed for {} — a later tick or the settle will retry: {}",
+          doctrine.batchName(),
+          session,
+          e.getMessage());
+    }
+  }
+
   /** 16:00 IST settle: evaluate every held stop against this session's own daily bar. */
   @Scheduled(cron = "${artha.minervini.swing.cron:0 0 16 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {

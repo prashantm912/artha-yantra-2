@@ -78,7 +78,7 @@ class SwingBatchCatchUpTest {
                         LocalDate.of(2026, 7, 17),
                         LocalDate.of(2026, 7, 20))
                     .stream()
-                    .filter(session -> !runs.hasRun("manas-arora", session))
+                    .filter(session -> !runs.hasRunWithEntries("manas-arora", session))
                     .toList());
     return state;
   }
@@ -109,12 +109,46 @@ class SwingBatchCatchUpTest {
   /** Armed family with only FRIDAY missed (every other window session already ran), FRIDAY claimable. */
   private void armedFamilyOnlyFridayMissed() {
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
-    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find("manas-arora", FRIDAY))
         .thenReturn(Optional.of(true));
     when(state.claim(eq("manas-arora"), any(), org.mockito.ArgumentMatchers.anyInt()))
         .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
+  }
+
+  /**
+   * V060, and the property the whole 16:00/08:35 split rests on: an EXITS-ONLY marker must not make
+   * this sweep skip the session.
+   *
+   * <p>Since the split, the 16:00 settle writes a {@code swing_batch_runs} row for every session —
+   * correctly, because it did evaluate every held stop, which is what the 08:30 canary and the 20:15
+   * heartbeat ask about. This sweep asks a DIFFERENT question, "does this session still owe its
+   * entries", and if it kept reading a bare row-exists it would skip every session forever and the
+   * book would never take another entry. The marker would be true and the inference from it false.
+   *
+   * <p>So {@code hasRun} is stubbed TRUE here and {@code hasRunWithEntries} FALSE — the exact shape
+   * the 16:00 settle leaves behind — and the sweep must still run, with entries enabled.
+   */
+  @Test
+  void anExitsOnlyMarkerStillOwesItsEntriesAndIsNotSkipped() {
+    SwingDoctrine manas = doctrine(true, FRIDAY);
+    when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
+    // The 16:00 settle DID record a marker for Friday — a bare row-exists test would skip here.
+    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
+    when(intents.find("manas-arora", FRIDAY)).thenReturn(Optional.of(true));
+    when(state.claim(eq("manas-arora"), any(), anyInt()))
+        .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
+    when(recorder.runAndRecord(
+            eq(manas), eq(FRIDAY), eq(true), eq(SwingBatchRecorder.MarkerPolicy.ON_COMPLETE)))
+        .thenReturn(run(1, 0, 0));
+
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    verify(recorder).runAndRecord(manas, FRIDAY, true, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE);
+    verify(state).markDone("manas-arora", FRIDAY);
   }
 
   @Test
@@ -176,7 +210,7 @@ class SwingBatchCatchUpTest {
     // DISARMED is written and — crucially — a re-arm WOULD replay them; this pins the fix.
     SwingDoctrine manas = doctrine(false, FRIDAY); // family OFF
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(false); // nothing recorded for the window
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(false); // nothing recorded for the window
     when(intents.find(eq("manas-arora"), any()))
         .thenReturn(Optional.of(false));
 
@@ -195,7 +229,7 @@ class SwingBatchCatchUpTest {
     // The DISARMED record must be written independent of the catch-up flag — else arming the feature
     // AFTER a disarm period (during which the flag was off) would replay the un-recorded backlog.
     SwingDoctrine manas = doctrine(false, FRIDAY);
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(false);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(false);
     when(intents.find(eq("manas-arora"), any()))
         .thenReturn(Optional.of(false));
 
@@ -230,8 +264,8 @@ class SwingBatchCatchUpTest {
     // NO run happens — the claim is the durable lock taken before any money effect.
     SwingDoctrine manas = doctrine(true, FRIDAY);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(false);
-    when(runs.hasRun("manas-arora", THURSDAY)).thenReturn(true);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(false);
+    when(runs.hasRunWithEntries("manas-arora", THURSDAY)).thenReturn(true);
     when(intents.find("manas-arora", FRIDAY))
         .thenReturn(Optional.of(true));
     when(intents.find("manas-arora", FRIDAY))
@@ -251,7 +285,7 @@ class SwingBatchCatchUpTest {
     // prior complete catch-up) is skipped before the claim — it can never be re-run.
     SwingDoctrine manas = doctrine(true, FRIDAY);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(FRIDAY));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true); // everything already ran
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true); // everything already ran
 
     catchUp(MONDAY_0835, true, manas).catchUp();
 
@@ -266,8 +300,8 @@ class SwingBatchCatchUpTest {
     // attempt budget it is ABANDONED (a terminal alert), never chased forever.
     SwingDoctrine manas = doctrine(true, FRIDAY);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(false);
-    when(runs.hasRun("manas-arora", THURSDAY)).thenReturn(true);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(false);
+    when(runs.hasRunWithEntries("manas-arora", THURSDAY)).thenReturn(true);
     when(intents.find("manas-arora", FRIDAY))
         .thenReturn(Optional.of(true));
     // FRIDAY reports the 6th attempt on a max-5 budget → abandon; the other window sessions lose the claim.
@@ -303,7 +337,7 @@ class SwingBatchCatchUpTest {
   void disarmedFamilyIsNeverRecovered() {
     // A disabled family records DISARMED bookkeeping (covered above) but never runs the money path.
     SwingDoctrine manas = doctrine(false, FRIDAY);
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(false);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(false);
 
     catchUp(MONDAY_0835, true, manas).catchUp();
 
@@ -339,9 +373,9 @@ class SwingBatchCatchUpTest {
     // (each pinned to its own bar); the older one first.
     SwingDoctrine manas = doctrine(true, null); // funnel unknown → entries suppressed, exits still run
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true); // default: earlier window sessions ran
-    when(runs.hasRun("manas-arora", THURSDAY)).thenReturn(false);
-    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true); // default: earlier window sessions ran
+    when(runs.hasRunWithEntries("manas-arora", THURSDAY)).thenReturn(false);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find(eq("manas-arora"), any()))
         .thenReturn(Optional.of(true));
     when(state.claim(eq("manas-arora"), any(), org.mockito.ArgumentMatchers.anyInt()))
@@ -365,8 +399,8 @@ class SwingBatchCatchUpTest {
         Clock.fixed(Instant.parse("2026-07-21T03:05:00Z"), ZoneOffset.UTC);
     SwingDoctrine manas = doctrine(true, null);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(oldest.minusDays(1)));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
-    when(runs.hasRun("manas-arora", oldest)).thenReturn(false);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", oldest)).thenReturn(false);
     when(intents.find("manas-arora", oldest))
         .thenReturn(Optional.of(true));
     when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(oldest), List.of(oldest));
@@ -395,7 +429,7 @@ class SwingBatchCatchUpTest {
             eq(manas), eq(FRIDAY), anyBoolean(), any()))
         .thenReturn(run(1, 1, 0));
     when(effects.repairable("manas-arora", FRIDAY)).thenReturn(List.of());
-    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false, true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false, true);
     when(state.claim(eq("manas-arora"), eq(FRIDAY), anyInt()))
         .thenReturn(Optional.of(new SwingCatchUpStateRepository.Claim(1)));
 
@@ -414,7 +448,7 @@ class SwingBatchCatchUpTest {
   void anUndecidedPaperEffectIsNotReplayedAfterRestart() {
     SwingDoctrine manas = doctrine(true, FRIDAY);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
-    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(true);
     when(effects.pendingSessions("manas-arora")).thenReturn(List.of(FRIDAY));
     when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(FRIDAY));
     when(effects.allConfirmed("manas-arora", FRIDAY)).thenReturn(false);
@@ -442,7 +476,7 @@ class SwingBatchCatchUpTest {
   void aRefusedRunIsRetriedInsteadOfBecomingDoneOnTheNextSweep() {
     SwingDoctrine manas = doctrine(true, FRIDAY);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
-    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false, false);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false, false);
     when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(FRIDAY), List.of(FRIDAY));
     when(intents.find("manas-arora", FRIDAY))
         .thenReturn(Optional.of(true));
@@ -471,8 +505,8 @@ class SwingBatchCatchUpTest {
     SwingDoctrine manas = doctrine(true, FRIDAY);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
     when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(FRIDAY));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
-    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find("manas-arora", FRIDAY))
         .thenReturn(Optional.of(true));
     when(state.claim("manas-arora", FRIDAY, 30))
@@ -493,9 +527,9 @@ class SwingBatchCatchUpTest {
     LocalDate wednesday = LocalDate.of(2026, 7, 15);
     SwingDoctrine manas = doctrine(true, null);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(wednesday));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
-    when(runs.hasRun("manas-arora", THURSDAY)).thenReturn(false);
-    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", THURSDAY)).thenReturn(false);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find(eq("manas-arora"), any()))
         .thenReturn(Optional.of(true));
     when(state.retryableSessions("manas-arora", 30)).thenReturn(List.of(THURSDAY, FRIDAY));
@@ -553,8 +587,8 @@ class SwingBatchCatchUpTest {
   void aSessionDisarmedAtScheduleTimeIsNotReplayedWhenEnabledToday() {
     SwingDoctrine manas = doctrine(true, FRIDAY);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(THURSDAY));
-    when(runs.hasRun(eq("manas-arora"), any())).thenReturn(true);
-    when(runs.hasRun("manas-arora", FRIDAY)).thenReturn(false);
+    when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
+    when(runs.hasRunWithEntries("manas-arora", FRIDAY)).thenReturn(false);
     when(intents.find("manas-arora", FRIDAY))
         .thenReturn(Optional.of(false));
 

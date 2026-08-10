@@ -292,6 +292,22 @@ public class SwingBatchCatchUp {
       return; // the on-time batch (or a prior complete catch-up) already ran this session
     }
     Optional<Boolean> intent = intents.find(batch, session);
+    if (intent.isEmpty() && runs.hasRun(batch, session)) {
+      // ⚠️ A run MARKER is itself proof the family was armed for this session, because the only path
+      // that writes one runs behind runLocked's executionArmed gate — a disarmed run returns before
+      // reaching runs.record. So when the marker exists but the intent row does not, the intent
+      // WRITE failed (it is deliberately fail-soft) rather than the arming being unknown, and
+      // refusing here would forfeit the session's entries over a bookkeeping error.
+      //
+      // Narrow on purpose: it does NOT cover a session the stack was down for. There is no marker
+      // then either, so that case still abandons below — see the honest limits note on the class.
+      log.warn(
+          "swing catch-up: {} {} has a run marker but no intent row — treating the marker as proof"
+              + " of arming (the intent write is fail-soft and evidently failed)",
+          batch,
+          session);
+      intent = Optional.of(true);
+    }
     if (intent.isEmpty()) {
       state.markAbandoned(batch, session, "NO_SCHEDULE_INTENT");
       log.error("swing catch-up: {} {} refused - no schedule-time arming row", batch, session);

@@ -111,14 +111,19 @@ public class SwingBatchRecorder {
         return runLocked(
             doctrine, sessionDate, entriesEnabled, markerPolicy, null, false, null);
       }
-      SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
+      // ⚠️ An EXITS-ONLY run must not read the entry funnel at all. Passing a snapshot makes
+      // runLocked's `snapshotAvailable` gate depend on it, so a funnel failure would refuse the run
+      // MARKER even though the exit pass ran to completion — and the 20:15 heartbeat then withholds
+      // its ping over a funnel the run never needed. Cross-vendor review, 2026-08-10; it matters now
+      // because the 16:00 settle is exits-only every single session, so that would not be an edge
+      // case but the normal path. null means "no snapshot was consulted", which is the truth here.
+      java.util.Optional<SwingDoctrine.CandidateSnapshot> snapshot = null;
+      if (entriesEnabled) {
+        SwingDoctrine.CandidateSnapshotRead read = doctrine.candidateSnapshot();
+        snapshot = read == null ? null : read.snapshot();
+      }
       return runLocked(
-          doctrine,
-          sessionDate,
-          entriesEnabled,
-          markerPolicy,
-          read == null ? null : read.snapshot(),
-          doctrine.enabled(), null);
+          doctrine, sessionDate, entriesEnabled, markerPolicy, snapshot, doctrine.enabled(), null);
     } finally {
       lock.unlock();
     }
@@ -280,14 +285,25 @@ public class SwingBatchRecorder {
       return result;
     } catch (RuntimeException e) {
       log.error("{} swing batch failed: {}", doctrine.batchName(), e.getMessage(), e);
+      // ⚠️ The remediation must NOT tell the operator to POST /run after an exits-only settle. That
+      // endpoint runs the FULL entries-plus-exits path, and at 16:00 this session's screen has not
+      // landed — the funnel silently serves the PREVIOUS session's names, so following the
+      // instruction would enter off yesterday's screen. Exactly the behaviour the 16:00/08:35 split
+      // exists to prevent. Cross-vendor review, 2026-08-10.
+      String remediation =
+          entriesEnabled
+              ? " Re-run via POST /api/v1/signals/" + doctrine.batchName() + "-swing/run."
+              : " Do NOT POST /run to recover this — that endpoint takes ENTRIES too, and this"
+                  + " session's screen has not landed yet, so it would enter off the previous"
+                  + " session's names. The 08:35 catch-up re-runs this session pinned to its own"
+                  + " bar; if the stops cannot wait that long, square off by hand.";
       publishQuietly(
           doctrine.batchName(),
           new SwingBatchAlert(
               doctrine.batchName(),
               doctrine.alertLabel() + " batch FAILED",
               "The scheduled batch threw: " + e.getMessage()
-                  + " — open positions' stops were NOT evaluated. Re-run via POST"
-                  + " /api/v1/signals/" + doctrine.batchName() + "-swing/run."));
+                  + " — open positions' stops were NOT evaluated." + remediation));
       return new SwingBatchEngine.SwingRun(0, 0, 0, 0, 0, SwingBatchEngine.AdmissionProbe.empty());
     }
   }

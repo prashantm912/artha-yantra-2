@@ -43,6 +43,25 @@ public class ManasAroraSwingScheduler {
     this.clock = clock;
   }
 
+  /**
+   * Records the session's arming hourly through the trading day, independently of the settle — see
+   * the Minervini twin for why the settle alone is not enough (a container down at 16:02 would leave
+   * the catch-up with no intent row and forfeit the session's entries).
+   */
+  @Scheduled(cron = "${artha.manas-arora.swing.intent-cron:0 7 9-15 * * MON-FRI}", zone = "Asia/Kolkata")
+  public void recordIntent() {
+    LocalDate session = LocalDate.now(clock.withZone(IST));
+    try {
+      intents.recordScheduled(doctrine.batchName(), session, doctrine.enabled());
+    } catch (RuntimeException e) {
+      log.debug(
+          "{} swing intent tick failed for {} — a later tick or the settle will retry: {}",
+          doctrine.batchName(),
+          session,
+          e.getMessage());
+    }
+  }
+
   /** 16:02 IST settle: evaluate every held stop against this session's own daily bar. */
   @Scheduled(cron = "${artha.manas-arora.swing.cron:0 2 16 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {

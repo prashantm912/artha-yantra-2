@@ -416,6 +416,59 @@ class MinerviniSwingEngineTest {
     });
   }
 
+  @Test
+  void aBookBlockedAtRunStartStillReportsTheFunnelItNeverScanned() throws IOException {
+    // The 2026-08-04 minervini collapse: the book sat at its slot cap, so entryPass early-outs before
+    // the candidate scan — and used to report 0 candidates, publishing "the screen found nothing" to
+    // swing_batch_runs / the summary alert / every session report, while the F3 probe on the same run
+    // counted every one of them as a would-be entrant. The count must survive the early-out.
+    UUID strategyId = UUID.randomUUID();
+    UUID publishedVersion = UUID.randomUUID();
+    JsonNode config = vcpConfig();
+    StrategyRepository registry = mock(StrategyRepository.class);
+    when(registry.listAll()).thenReturn(List.of(strategyRow(strategyId, publishedVersion)));
+    when(registry.findVersionById(publishedVersion))
+        .thenReturn(Optional.of(version(publishedVersion, strategyId, "1", config)));
+
+    List<EngineCandle> series = craft(3_000L); // a breakout that fires the entry for every symbol
+    MinerviniFunnelClient funnel = mock(MinerviniFunnelClient.class);
+    when(funnel.buyableAndOnDeck())
+        .thenReturn(List.of(candidate("AAA"), candidate("BBB"), candidate("CCC")));
+    MarketDataCandlesClient candles = mock(MarketDataCandlesClient.class);
+    when(candles.fetch(eq("NSE"), any(), eq("1d"), any(), any())).thenReturn(series);
+    SignalRepository signals = mock(SignalRepository.class);
+    when(signals.activeEntries()).thenReturn(List.of());
+
+    EmissionGuard guard = mock(EmissionGuard.class);
+    // The book's entry governor refuses from the first check. The engine sees ONLY this boolean, so
+    // this fixture models every rail that opens the wouldEnter-minus-admitted gap, not the slot cap
+    // specifically — activeEntries is empty, so openAtStart is 0 and the row is a kill-switch /
+    // daily-loss / daily-target shape rather than a MAX_OPEN one. That is deliberate: the assertion
+    // below is about the counter, and the counter must be right whichever rail bound the run.
+    when(guard.entryAllowed(Books.MINERVINI)).thenReturn(false);
+
+    SwingBatchEngine engine =
+        new SwingBatchEngine(
+            registry, candles, signals, mock(SignalPublisher.class),
+            mock(ApplicationEventPublisher.class), Optional.of(guard), passthroughTx(),
+            new ObjectMapper(), Clock.systemUTC());
+
+    SwingBatchEngine.SwingRun run = engine.runDaily(doctrine(funnel, signals, true, 10));
+
+    assertThat(run.candidates())
+        .as("the whole funnel is reported even though the blocked pass scanned none of it")
+        .isEqualTo(3);
+    assertThat(run.entries()).as("the gate admits nothing").isZero();
+    verify(signals, org.mockito.Mockito.never())
+        .insert(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
+    // The probe is the corroborating witness: candidates=0 alongside these numbers was the tell.
+    SwingBatchEngine.AdmissionProbe probe = run.admission();
+    assertThat(probe.wouldEnter()).isEqualTo(3);
+    assertThat(probe.admitted()).isZero();
+    assertThat(probe.capExceedance()).isEqualTo(3);
+    assertThat(probe.capBound()).isTrue();
+  }
+
   private static MinerviniFunnelClient.Candidate candidate(String symbol) {
     return new MinerviniFunnelClient.Candidate(
         symbol, new BigDecimal("152"), PIVOT, null, false, 2, "40W 31/3 4T", false);

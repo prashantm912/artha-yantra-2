@@ -161,10 +161,19 @@ public class CorporateActionRepository {
   }
 
   /**
-   * The MOST-RECENT event for a symbol, or empty. The A14 resume checkpoint reads its status: a
-   * {@code BASE_REBUILT} (crashed mid-refresh) or {@code REFRESH_FAILED} (errored mid-refresh)
-   * latest event means a prior remediation re-fetched the base but never finished the cagg refresh
-   * → resume the refresh only, never re-purge. Any other status is NOT resumable.
+   * The MOST-RECENT event for a symbol, or empty. It now has TWO consumers in the sweep, and they
+   * read the same row for opposite purposes:
+   *
+   * <ul>
+   *   <li>the A14 resume checkpoint — a {@code BASE_REBUILT} (crashed mid-refresh) or
+   *       {@code REFRESH_FAILED} (errored mid-refresh) latest event means a prior remediation
+   *       re-fetched the base but never finished the cagg refresh, so resume the refresh ONLY and
+   *       never redo the staged rebuild. No other status is resumable.
+   *   <li>the V057 rebuild cooldown — a {@code FAILED} latest event stamped inside
+   *       {@code artha.corporate-actions.rebuild-retry-cooldown-days} SUPPRESSES re-detection. That
+   *       gate exists because leaving the cache intact (rather than gutting it, as the pre-V057
+   *       purge did) restores nightly re-detection, which is unbounded without it.
+   * </ul>
    */
   public Optional<EventRow> latestEvent(String exchange, String tradingsymbol) {
     List<EventRow> rows = eventsFor(exchange, tradingsymbol);

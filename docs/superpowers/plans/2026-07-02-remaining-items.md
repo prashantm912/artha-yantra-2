@@ -774,6 +774,7 @@ N clean forward sessions and then it is startable by any session that checks the
 | G16 | `T30-breadth-live-but-never-crossing` | **A FOURTH dot-input state exists — live, MOVING, and never crossing its threshold — and NOTHING sees it.** 2026-07-30: `breadth` (w 1.0, the `DotHealthCanary`'s only required non-OI probe) read **0/814** with a completely healthy input — 0 nulls, 0 zero-pairs, **10 distinct values spanning 23–32** — against its own rule `advances > 32` and a session max of **exactly 32**. The canary reports `alive=true, frozen=false` and is **correct on both axes**: the input is neither dead nor frozen. G12's #1111 probe cannot see this either — it tests DISTINCTNESS, and this operand moves. ⚠️ **This is the SECOND one-constituent near-miss** (07-28 also max exactly 32; 07-21 max 31), and over 8 sessions the dot is **0% on FIVE, ~100% on TWO, 0.2% on ONE — never in between**, because `advances` is a market-wide scalar shared by every row of the session. **So its 1.0 of an 18.80 denominator is a ±5.3 pp per-session BIAS, not a per-bar discriminator** — the same shape as `iv_abs_band`'s per-day step function (G12), reached by a different mechanism. ⚠️ Do NOT treat this as a threshold-tuning row on its own: `>32` on a ~50-name universe is a doctrine number, and moving it is an entry-gate loosening — **which the T1/T7/G13/G10 prior says has lost money four times out of four.** The question this row asks is whether a market-wide scalar belongs in a PER-BAR confluence composite at all, which is a design question, not a knob. Method promoted to README **§3.28** (a dot at 0% is now three explanations deep) + §4.1 | `docs/signal-analysis/2026-07-30-session-findings.md` §3.2 / T30 | **HOLD (any change to the operand or its weight changes which signals fire)** | ✅ **DONE — near-miss probe MERGED [#1169](https://github.com/prashantm912/artha-yantra-2/pull/1169) @ 946e0c11, deployed 2026-08-01.** The FOURTH dot-input state (alive + moving + never crossing) is now visible on `GET /api/v1/signal-rejections/dot-health` with a `near-miss` badge, disjoint from the G12 frozen state by construction. **SCOPE HELD: no operand, threshold or weight moved** — `>32` is a doctrine number and moving it is an entry-gate loosening (lost money 4 of 4 measured times); `sweep()` is byte-identical so the state never pages. ⚠️ **Review found the detector was NOT session-wide while CLAIMING to be:** it read only the newest 200 rejection rows, and under 38-strategy fan-out that covers a handful of bars, so a genuine 09:25 crossing could age out and the dot be flagged never-crossing later the same session — false positives AND false negatives from a probe whose only value is trustworthiness. Fixed with a session-wide `DISTINCT ON (bar_time, side)` read bounded to the IST day, collapsing fan-out IN THE DB, fired at most once and only when a probe reaches the near-miss branch (a dead/frozen dot pays nothing). Cost justified rather than assumed: `signal_rejections` is a PLAIN OLTP table with the right index, so the Timescale 2.18.2 sorted-merge trap structurally cannot apply. **Second review finding REVERSED the Architect's own call:** strictness (0 crossings) was chosen to avoid false positives, but that reasoning applies to PAGERS — this badge never pages and touches no money, so a false negative preserves exactly the blindness G16 was filed to kill. Tolerance is now 2% of distinct (bar, side) verdicts with a floor of one, derived from the gap between the one-sided sessions (0%, 0.2%) and the nearest genuinely-rare firing dot (`oi_spurt` 4.9%), aggregated per (bar, side) so fan-out cannot skew it. **The row's actual question — whether a market-wide scalar belongs in a per-bar composite at all — remains an OWNER design call, unchanged.** Prior state: **OPEN — NEW 2026-07-30.** ⚠️ Filed by THIS row's promotion rule, not by the routine that found it: the 07-30 findings doc said "Needs a §0 group-G row" and #1125 shipped without one — a finding that lives only in a dated doc is invisible to the next enumeration. Same PR also landed README §3.27, which #1125 claimed as promoted but never wrote (the second dangling promotion in two sessions). |
 | G17 | `T14-sign-aware-margin-invariant` | **A persisted rejection row can contradict itself — it can record a BLOCK whose operand actually CLEARED its threshold — and nothing asserts otherwise.** Origin 2026-07-20 §6.3: **7 rows logged a first-block with a POSITIVE `blocking_margin`**. The obvious fix (assert `blocking_margin < 0` on persist) is WRONG as stated, which is why this needs design and not just a guard: 2026-07-23 §2.3 established that `vwap-distance` first-blocks with a positive margin **and is CORRECT** — the sign that means "blocked" depends on the rail's comparison direction, so the invariant must be **sign-aware per rail**, deriving the expected sign from the gate's own operator rather than assuming every rail is a floor. Defect is INTERMITTENT (0 self-contradicting rows on 07-29/07-30/07-31 — three clean sessions running, `composite-pass ∩ composite-blocked = 0`), which is exactly why an assertion is worth more than another session of eyeballing: a diagnostic that only misfires occasionally is the kind that gets explained away. Scope = diagnostic only; it changes no gate outcome and no money path | `2026-07-20-session-findings.md` §6.3 · refined `2026-07-23-session-findings.md` §2.3 · carried in every findings doc since | clean (diagnostic) | ✅ **DONE — MERGED [#1171](https://github.com/prashantm912/artha-yantra-2/pull/1171) @ b7246a3e, deployed 2026-08-01.** A self-contradicting rejection row (a BLOCK whose operand actually CLEARED its threshold) is now counted + WARN-logged, never thrown — diagnostic only, no gate outcome and no money path moves. **The expected sign is DERIVED, not declared:** `RailMarginSign` rides `GateOutcome`, stamped by the gate that performed the comparison, and flows to the persist seam — so **the hand-maintained `RailMarginSigns` table is DELETED**, and the drift artifact this row existed to eliminate no longer exists in any form. Nine gates plus the composite declare signs, each probed on both sides of its threshold; the three side-dependent/conjunction rails are proven to block with BOTH signs. Default is `UNSIGNED`, so silence never becomes an accusation. ⚠️ **Review caught two Majors:** (1) the first cut matched rail NAMES only, never binding a registry entry to the actual operator wiring — so once `vwap_distance_min_frac` is armed, that genuinely two-bound rail's legitimate NEGATIVE-margin blocks would all have been counted as self-contradictory, i.e. the diagnostic crying wolf on correct behaviour; now `vwapDistance` computes its sign per evaluation (ceiling when only `maxFrac` is set, `UNSIGNED` once `minFrac` is armed). (2) the WARN sat SYNCHRONOUSLY on the sole evaluation thread ahead of `queue.submit`, violating the bounded async-writer doctrine — lookup and counter stay on the caller (they must survive a queue drop), the WARN moved inside the submit. Net one FEWER file. Prior state: **OPEN — promoted to a ledger row 2026-07-31 (chip task_e2e01h, owner: PROMOTE not WONT).** It had been carried session-to-session as "PROPOSED (carried)" since 07-20 with **no ledger row at all**, which the 2026-07-31 E2E audit flagged as a promotion-rule violation (docs-drift #7): the six-location enumeration recipe cannot see a proposal that lives only in findings tables, so it rode eleven sessions invisibly. Startable — needs the per-rail expected-sign map derived from the gate operators, then the assertion at the `recordRejection` persist seam |
 | G18 | `cas-close-semantics` (was `bogus-index-close-tick-repair-and-guard`) | **RESCOPED 2026-08-04 — the premise was WRONG: the 2026-08-03 print was not a bogus tick, it was the first-ever CAS official close.** NSE/BSE launched the Closing Auction Session on 2026-08-03 (continuous trading in Category-I stocks ends 15:15 IST; a call auction 15:15–15:30 sets the official close). The "freeze + late jump + basis inversion" shape is the auction arriving, and it will now occur EVERY session. Proof: on 08-04 the expiring NIFTY chain converged at 15:30 to settlement 24,613–24,615 = the stored official close 24,614.90 exactly (5 strikes, sub-point); the 08-03 official close 24,774.30 is publicly confirmed. **(a) REPAIR: RETRACTED** — the 1d bars are correct; never hand-UPDATE an official close. **(b) GUARD: RETRACTED as designed** — a capture-time basis-divergence quarantine would reject every legitimate CAS close daily. **Remaining scope (small, data-tier):** session-TAIL analytics now mix two price regimes — the 1m TICK_AGG bar at ~15:28/15:29 carries the auction print as if traded, and chain `spot_price` flips to it from 15:28 — so (i) G15 regime stamps use the CONTINUOUS session (doctrine shipped, README §3.33); (ii) any VWAP/last-30-min/3m read touching 15:15+ must bound at 15:15 or state which close it uses; (iii) revisit backtest/replay parity when option-replay covers post-CAS dates (futures daily settlement is now CAS-anchored while intraday marks are continuous) | `2026-08-04-session-findings.md` §6.1 · README §3.32-amend + §3.33 · 08-03 file addendum | data | **RESCOPED-OPEN (watch/doctrine; no build startable until a concrete consumer of the mixed-regime tail is identified)** |
+| G19 | `scalperrisk-stop-basis-coupling` | **Two modules independently decide whether a scalper's only stop bounds it, coupled by nothing but a shared `"options_of_underlying"` string literal.** #1284 refused a `percent` level basis on options strategies, which made the §0B hole UNREACHABLE but not fixed: `ScalperRisk.ENGINE_SIDE_STOP_BASES` still counted `percent` as an engine-fireable bound while excluding `premium_pct`, though `ExitEvaluator.levelDistance:480` computes both with ONE shared `entryPrice × value ÷ 100` arm. `ScalperRiskTest` builds `ExitRuleSpec` objects by hand and imports no schema class, so it cannot redden on a widened mode keying — measured: with the validator keying moved off `options_of_underlying`, it stayed 6/6 green. Fix = drop `percent` from the set (failure direction becomes refuse-to-load, which is LOUD — warn + `Classification.NO_BOUNDING_EXIT` + `StrategyCoverageWatchdog` alert) + `ScalperStopBasisCouplingTest`, which drives every level basis through the real publish-path validator and freezes the JOINT verdict, with the domain read from the schema enum so a newly-added basis cannot escape both checks | chip 2026-08-04; [#1284](https://github.com/prashantm912/artha-yantra-2/pull/1284) follow-up; `ScalperRisk.java`, `SemanticValidator.checkOptionsPlaneLevelBases` | **HOLD (ScalperRisk governs live scalper arming)** | ✅ **DONE — MERGED [#1296](https://github.com/prashantm912/artha-yantra-2/pull/1296) @ `77c066d6`, 2026-08-10.** Owner cleared the HOLD in the same overnight session that merged it; NOT yet deployed (rides the V055→V056→V057 wave). All 6 required CI contexts green; Golden 9/9 + BacktestParity 9/9 byte-identical (no golden/fixture/contract file touched). Same-vendor review round (Codex at usage limit to 2026-08-08) returned REQUEST_CHANGES → resolved: domain now derived from the schema enum, refusal assertion matches the plane-check message, publish-time-only caveat corrected. Live blast radius NIL — 0 of 12 `percent`-declaring version rows are `options_of_underlying` (all `minervini_funnel`/`manas_arora_funnel`), and 38/38 enabled+published scalpers carry a `time_stop` |
 
 **H. Enumeration-invisible items — promoted 2026-08-02 from the prose audit (shard C,
 [#1232](https://github.com/prashantm912/artha-yantra-2/pull/1232) Part 1)**
@@ -797,6 +798,8 @@ than carried.
 | H6 | `optionanalytics-pcr-flip` | `source.optionanalytics` Upstox PCR/max-pain flip — the ledger's own §6 says "only a LIVE market-hours freshness check remains before flipping it", and that check has never run | shard C Part 1 #6; ledger §6 | owner (needs a live-hours window) | **OPEN.** `sourced` — `market-data-service/src/main/resources/application.yml:87`: `optionanalytics: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:native}  # native \| upstox`, and `upstox` additionally REQUIRES `artha.upstox.analytics.enabled=true`. Blocked on nothing but a market-hours window plus someone to run the comparison; it is a source swap on an analytics read, not a money path. ⚠️✅ **PREMISE FALSIFIED 2026-08-03 — there is nothing to flip. `ARTHA_MD_SOURCE_OPTIONANALYTICS=upstox` has been the DEPLOYED value for ≥28 days** (`sourced`: `.env:56` + `ARTHA_UPSTOX_ANALYTICS_ENABLED=true` at `.env:53` + container env + `SPRING_PROFILES_ACTIVE=live`, so all three bean conditions at `UpstoxOptionAnalyticsSource.java:32` are satisfied; and `docs/audits/2026-07-06-ui-data-correctness/options.md:17` already recorded it set on 2026-07-06). **Root cause of the false OPEN: this row cited the YAML DEFAULT (`${…:native}`) as if it were the deployed value.** Behaviourally confirmed serving, not merely env-set — 12:04:44 IST the API returned `pcr=1.7776`, byte-matching Upstox direct (1.7775806…) while native `peOi/ceOi` gave 1.7763. The live question is therefore whether to **REVERT**, and the measurement says the flip never had a rationale: `computed` over **57 paired 3-minute buckets** the median PCR divergence is **−0.01%** (mean −0.106%, Upstox higher 27/57 and lower 29/57 — no systematic direction) with **max-pain identical in 55/57**; native capture covers **100% of the listed strike universe on all 7 NIFTY expiries** (93/93, 92/92, 84/84, 103/103, 84/84, 104/104, 79/79), so the code's own stated rationale at `UpstoxOptionAnalyticsSource.java:24-27` ("native omits deep-OTM strikes Upstox includes") is **obsolete**; and Upstox returns **two values 0.26% apart for the SAME bucket** across consecutive reads (two backend replicas), where native is byte-identical — so the UI flickers. **Tier: CLEAN** — 5 consumers, all one read-only React page; `ContextClient`'s PCR/max-pain comes from a DIFFERENT never-overridden endpoint (`/context/options-digest`, natively computed), the scalper OI dots use neither PCR nor max-pain, and `market_context_days.pcr_eod`/`max_pain_eod` are NATIVE — the flip writes nothing to the DB. **OWNER DECIDED 2026-08-03: KEEP `upstox`.** Nothing is broken, agreement is at the noise floor, and it has run harmlessly for ~28 days. Row CLOSED. Open doubt: all agreement numbers are NIFTY 50 / one expiry / one session; SENSEX and BANKEX untested, and 100% strike coverage was measured today only |
 | H7 | `mid-session-drop-drill` | The mid-session subscription-drop DRILL on #886's receive-gap path — the 2026-07-17 F10 block called it "the HIGHEST-VALUE NEXT ACTION … a DRILL, NOT A BUILD", then row F10 closed and the drill lost its home | shard C Part 1 #7; ledger §0 prose, 2026-07-17 | clean (ops drill) | **OPEN — CANDIDATE, and it can reopen a row currently marked DONE.** `sourced` — F10 now reads `Part A DONE #874 · Part B DONE — G2 ARMED 2026-08-01` and states the row "no longer carries independent work", but **G2 covers the LOAD-coverage class, not the mid-session-DROP class**. `computed` — no drill record exists in `docs/signal-analysis/`; the only two logged drills (07-16, 07-17) are both COLD-START. The original prose warns that a negative result "would overturn 'Part B is already shipped'", so this is a cheap check with an expensive downside if skipped. ✅ **DRILL RUN 2026-08-03 on LIVE during market hours (owner-authorised twice — once for the drill, again after the blast radius turned out wider than described). Full record: [`docs/signal-analysis/2026-08-03-h7-subscriber-drop-drill.md`](../../signal-analysis/2026-08-03-h7-subscriber-drop-drill.md). Part B is NOT overturned — but the drill's result is a negative one about the DRILL.** ⚠️ **First correction: it CANNOT be scoped to one symbol.** `CLIENT LIST` confirms the engine holds exactly ONE Redis pub/sub connection (`flags=P`, `sub=3`) multiplexing every candle channel, exactly as `SubscriberHealthCanary`'s javadoc states — a connection drop takes down ALL channels together. Injection: `CLIENT KILL ID 983` at **12:43:34 IST**, watchdog ARMED (`bar-gap 180000`, `feed-fresh 90000`). Result `computed`: **Lettuce's own `ConnectionWatchdog` reconnected in ~22 ms** (log: "Reconnecting" 12:43:35.165 IST → "Reconnected" 12:43:35.187), a fresh `sub=3` connection was present at T0+3 s, **bar receipt never gapped** (four polls: received_age 60.0 → 25.6 → 51.6 → 17.7 s, evaluated tracking to within 10 ms), and `subscriber_health_events` stayed at **10 rows** — the watchdog correctly stayed silent, since the gap was ~1.2 s against a 180 s threshold. **The load-bearing inference: 2026-07-07 was NOT a transport-level connection drop**, because one self-heals three orders of magnitude faster than the detection threshold. That incident must have been a SILENT subscription loss with the socket still up (listener registry lost), which Lettuce sees nothing to repair — and which **cannot be injected from outside Redis**. So `SubscriberHealthCanary`'s fire path remains **live-unexercised**, covered only by `SubscriberHealthCanaryTest`; reaching it for real needs in-process fault injection (a test-only endpoint that stops the listener container without closing the connection), which is a BUILD, not a drill. Row CLOSED as a drill; the in-process injector is a new candidate, unregistered |
 | H8 | `task_f624fca7-empty-contracts` | Chip **`task_f624fca7`** — should an empty `contracts` array on an INDEX ladder be a FAULT? (#877 residue). **It has NO §4b row**, so the register's own awk cannot see it | shard C Part 1 #8; ledger §0 prose "Open chips:" list, 2026-07-17 (now at §0 lines ~442/452) | clean (design first) | **OPEN, unregistered.** `sourced` — explicitly routed around by a design doc six days later: `docs/superpowers/plans/2026-07-26-t9-strategy-coverage-watchdog-design.md` §3.7 — *"(Whether an empty `contracts` array on an INDEX ladder should be a FAULT is chip `task_f624fca7`'s question, owned by the resolver, untouched here.)"* — which is what proves it live rather than forgotten. **Give it a §4b row when it is next touched**; it is deliberately NOT given one here, because the register is for chips that exist and this one's card is long gone |
+| H9 | `cas-close-in-kite-daily-bar` | **The 16:00 IST swing settle prices exits off Kite's DAILY bar, and nobody has checked that bar carries the CLOSING AUCTION close.** Since 2026-08-03 continuous trading in Category-I stocks ends 15:15 and a 15:15–15:30 call auction sets the official close (row G18). If Kite's 1d candle at 16:00 still holds the 15:15 continuous price, every exit that session prices at the wrong close — silently, because the number is entirely plausible. Owner was told and chose to arm 16:00 immediately rather than shadow a session (2026-08-10). **Check: on the first live settle, compare each exited symbol's 16:00 close against that evening's `nse_eod_bhavcopy` close.** | N46e, this file; [#1333](https://github.com/prashantm912/artha-yantra-2/pull/1333) | verify-only (money path) | **OPEN — due on the FIRST trading day after the 16:00 settle deploys.** |
+| H10 | `minervini-funnel-empties` | **The minervini swing batch reported `candidates = 0` on 5 of the last 6 sessions (08-04/05/06/07/10) while manas ran 93–111 each — and the screen itself wrote ~1,780 rows on every one of those days.** So the screen is producing and the funnel between screen and batch is emptying. Found while measuring H4; NOT diagnosed. Distinguish first: a legitimately strict SEPA stage-2 filter in a chop tape vs a gate whose operand went dead — the second is this codebase's most common defect shape (N44) | `strategy.swing_batch_runs` + `marketdata.minervini_screen_results`, measured 2026-08-10 | data (answerable from live rows) | **OPEN — undiagnosed.** |
 
 ⚠️ **Deliberately NOT promoted, twice checked (shard C, and again at closeout):** `task_019321d3` and
 `task_2938fa28` are **CONTENT-UNRECOVERABLE** — `git log -S` finds exactly ONE introducing commit each
@@ -1581,22 +1584,37 @@ open swing inventory ticked **18 → 17**.
 
 #### 2026-08-08 — four review rounds, ALL REQUEST_CHANGES; plus two corrections to my own merged rows
 
-**N39 · ⚠️ ONE FINDING HAS A SIX-DAY FUSE — #1299 M1 breaks on 2026-08-14.**
+**N39 · #1299 M1 — a DOCUMENTATION-TRUTH defect, not a live fuse. ⚠️ I first wrote this row as "ONE
+FINDING HAS A SIX-DAY FUSE — breaks on 2026-08-14", and that framing was WRONG. Corrected
+2026-08-10 (fixed + merged @ `53330394`).**
 `SymbolLineageDetector.java:157,163,180`: `bounds.floor_d` is `min(trade_date)` over the WHOLE
 `nse_eod_bhavcopy`, but `firstrow`/`lastrow` are computed over the trailing `windowDays` slice. Rule 3
 therefore asks "is this symbol's first IN-WINDOW bar after the TABLE's first bar" — only the intended
 question while `windowDays ≥ table span`. **Measured: span 2025-06-20 → 2026-08-07 = 413 days,
-`windowDays` default 420. The clip begins at max(trade_date) = 2025-06-20 + 420 = 2026-08-14.**
-Reviewer simulated the post-clip regime by shrinking `windowDays` to 300 and 200 → **zero spurious
-pairs today**, so blast radius is currently nil — but the guard has stopped meaning what its javadoc
-says, and every placebo statistic quoted in it was taken in the un-clipped regime. Fix direction:
-`GREATEST(floor_d, latest_d - windowDays)`, plus a test that sets `window-days` below the fixture span.
+`windowDays` default 420**, so the clip would begin 2026-08-14 — which is where the "fuse" reading
+came from.
+
+**Why that reading was wrong.** Rule 3's floor test is *structurally unreachable*, clip or no clip:
+deleting the predicate outright returns the **same 25 pairs**. So there is no dated behaviour change
+to fuse — 2026-08-14 was the date a clause that already does nothing would start doing nothing for a
+second reason. The reviewer's own probe said as much (shrinking `windowDays` to 300 and 200 → zero
+spurious pairs); I read "blast radius currently nil" as "nil *until* the 14th" when it was nil
+full stop. **The real defect is that the guard's javadoc describes a test the code does not perform,
+and every placebo statistic quoted in it was taken in the un-clipped regime** — worth fixing, worth
+none of the urgency I attached to it.
+
+**The genuinely behavioural half of M1** is the separate `>` → `>=` widening, which is a real recall
+gain: it recovers `HEUBACHIND→SUDARCOLOR`. Shipped as `GREATEST(floor_d, latest_d - windowDays)`
+plus a test that sets `window-days` below the fixture span. *(Lesson, and it is the same one as the
+#1283 no-op: when a probe reports "no effect", the next question is "is this operand reachable **at
+all**?" — not "when does it start having an effect?" A structurally-inert clause and a
+not-yet-triggered one look identical from a single measurement.)*
 
 **Review verdicts — none approved, and each found something CI could not:**
 
 | PR | verdict | the finding that matters |
 |---|---|---|
-| **#1299** `symbol_lineage` | REQUEST_CHANGES | M1 above (six-day fuse) · M2 the schema permits N→1 but the reader resolves it **non-deterministically** (`DISTINCT ON` without a total order — two stitched rows tie and Postgres picks arbitrarily, plan-dependent) · M3 a **detector** refutation is as permanent as an owner verdict, keyed on an NSE-tradingsymbol-vs-BSE-ticker string match with no ISIN corroboration — **113 BSE tickers carry ≥2 distinct ISINs** in the window · M4 V055/V054 order. ✅ All 7 must-fix items independently verified fixed; the reviewer **re-derived the headline against the live DB and reproduced the deployed service exactly** (coverage 1783 / 285 both ways). **Δcoverage +42 reproduces; entering moved 7 → 5** — the moving-population effect the PR's own open doubt predicted, and nothing is armed on those figures |
+| **#1299** `symbol_lineage` ✅ **MERGED `53330394`** | REQUEST_CHANGES → resolved | M1 above (**not** a six-day fuse — see the correction) · M2 the schema permits N→1 but the reader resolves it **non-deterministically** (`DISTINCT ON` without a total order — two stitched rows tie and Postgres picks arbitrarily, plan-dependent) · M3 a **detector** refutation is as permanent as an owner verdict, keyed on an NSE-tradingsymbol-vs-BSE-ticker string match with no ISIN corroboration — **113 BSE tickers carry ≥2 distinct ISINs** in the window · M4 V055/V054 order. ✅ All 7 must-fix items independently verified fixed; the reviewer **re-derived the headline against the live DB and reproduced the deployed service exactly** (coverage 1783 / 285 both ways). **Δcoverage +42 reproduces; entering moved 7 → 5** — the moving-population effect the PR's own open doubt predicted, and nothing is armed on those figures |
 | **#1297** CA stage→verify→swap | REQUEST_CHANGES | M-A — the round-3 deliverable — **emits its alert before the swap it reports on**, so a run that verifies 1d then fails 1m reports 1,276 unadjusted bars when nothing was adjusted; and its test constructs the meter registry inline, so **deleting the metric leaves the test green**. Plus the per-window `DELETE`→`INSERT` is two autocommits, and the next attempt truncates the staged replacement first |
 | **#1305** cagg window sizing | REQUEST_CHANGES | The `/4` budget divisor — **the number the whole PR turns on — is pinned by nothing**; every test passes it in and asserts against it, so any divisor satisfies them. At `/1` the 2026-07-30 failure returns with the suite green. Also: "a tuple budget does not decay" is false for **spill**, which is ~60% of the cost and invariant to window width |
 | **#1283** swing coverage gate | REQUEST_CHANGES | Asymmetry and parity verified clean, but the **durable-evidence half has zero red-proof** — both engine tests use the 9-arg seam that nulls the repository, so deleting both `recordCoverageRow` calls leaves the suite green. Also the 5% materiality band was calibrated at depth 50 while **5 of 6 live strategies run at depth 20**, where one missing session sits 0.24pp under the threshold |
@@ -1647,6 +1665,189 @@ the same silent early-out when it is at 7. On 08-07 it held 6, so the rail that 
 where each book sits, and only one of the two is auditable.** That is exactly why N26's owner decision
 puts "make the silent refusal auditable" FIRST. Same class as the errors N38/N40 corrected: a
 difference observed in the logs read as a difference in the mechanism.
+
+#### 2026-08-10 — FULL-SESSION PLATFORM OUTAGE (host power failure), plus three merged PRs
+
+**N45 · ⚠️ 2026-08-10 (Mon) was a trading day with ZERO capture — host down `08:30:17` → `18:47:34`
+IST. Owner-reported cause: electricity failure. Nothing below is a software defect.** Full forensics
+in [`docs/signal-analysis/2026-08-10-session-findings.md`](../../signal-analysis/2026-08-10-session-findings.md)
+([`#1331`](https://github.com/prashantm912/artha-yantra-2/pull/1331)); this row exists so the ledger
+itself carries the date, because a future enumeration that reads only §0 would otherwise re-open it.
+
+**This is the THIRD full-session outage** (after 2026-07-08 and 07-09) and the first since the shadow
+book / G16 / G12 / CAS / freeze telemetry existed. Host-boot shape: `restarts=2`, containers NOT
+recreated, logs intact. Boot catch-up recovered the EOD/swing lane by 18:51 (bhavcopy + FII/participant
++ MANAS/MINERVINI screens + canaries via `BOOT_CATCHUP`; reload 38/0/0; the morning Kite token was
+still valid). Zero scalper positions were open, so nothing was left unmanaged.
+
+**Lost permanently:** the day's OI-snapshot capture (live-only — historical OI is read-time derived and
+LIVE/today never derives), the whole entry-gate evidence base (zero rejections, zero eval buckets), and
+the §2.2 Mon-08-10 NIFTY strike-pick discriminator.
+
+⚠️ **TWO POST-BOOT PROVENANCE ARTIFACTS THAT READ AS A HEALTHY SESSION.** Both are the reason this
+needs a ledger row rather than only a findings doc — a liveness check that counts rows sees a normal
+day:
+1. **A `TICK_AGG` 1m bar bucketed `15:29`, one per subscribed symbol, WRITTEN at `18:47:45`.** The
+   post-boot WS connect emits a snapshot tick and it lands stamped at the session's last minute.
+   Dozens of instruments carry exactly one. **Nothing was captured** — the bucket lies, the write-time
+   tells the truth.
+2. **REST backfill reports a full `375/375`-minute session**, because boot catch-up re-fetched the day
+   from Kite historical (`source = KITE`, 09:15–15:28). Coverage looks complete; none was observed live.
+
+*(I hit artifact 1 myself while writing this: I read the 15:29 band as evidence live aggregation was
+running at 15:29 and floated an outage starting there instead of 08:30. **Infer liveness from the
+WRITE time, never the bucket.** `README §3.35` now carries the no-session-vs-no-capture discrimination.)*
+
+**Standing rule this establishes:** before investigating any "feed dead / engine emitted nothing /
+batch missed" report, check the date against the outage register first. An outage takes out every
+layer at once — empty `signal_rejections`, flat `ay_signal_eval_outcome_total`, absent
+`options_chain_snapshots`, missing `ingest_runs` — and a real defect almost never does. An in-stack
+canary cannot observe a down stack, so there is no alert to find.
+
+#### 2026-08-10 — three merged; and the SAME defect shape turned up in three unrelated PRs
+
+**N44 · The shape: an armed gate whose operand cannot represent the failure it guards.** Three
+instances, three different subsystems, found independently in one session. None was catchable by
+tests, because in every case the test asserted the operand rather than the outcome.
+
+| Where | The gate | Why its operand was blind |
+|---|---|---|
+| **#1283** `SwingCoverageProbe` | refuse a strategy whose lookback window is too holey | `MATERIALITY_DENOMINATOR = 21` with the rule `m*(D-1) > L` needs `D >= 22` to fire at `m=1, L=20`. The "recalibration" 20→21 was an arithmetic **no-op**, and its test pinned `windowSessions == 20`, a population production never presents (fixture built 20 sessions and deleted one → 19 bars; production caps at 20 PRESENT bars spanning 21 sessions) |
+| **#1283** (2nd, review) | same gate, entry side | `undeterminable()` carries an EMPTY `missing` list, so `incomplete()` is false and `materiallyIncomplete()` false with it — and BOTH entry paths keyed on it. A probe that FAILED (exception, uncovered calendar year, invalid bar, depth degraded to zero) therefore **permitted** the entry it exists to guard. **A safety gate that fails open on its own failure is worse than no gate, because it reports as a gate.** The class javadoc already said `determinable=false` means "an explicit no claim" — no consumer honoured it |
+| **#1329** `IngestCoverageCanary` | yellow when bhavcopy wrote no rows | `ingest_runs.rows_written` is `nse.bhavRows() + bse.bhavRows()` summed over the WHOLE catch-up window, so a healthy BSE (or one repaired gap from weeks ago) greens it while NSE refuses every payload. The policy existed FOR the NSE-only systematic failure and could not see it. Its test used an aggregate zero — a stricter stand-in that never reproduced the production shape |
+
+**The tell, and it is cheap to apply:** for any gate, ask *"can this operand take the value that means
+'the thing I am guarding against is happening'?"* — not *"does the gate fire on my fixture?"* Two of
+the three fired correctly on their fixtures. Fixes all measure the ARTIFACT instead: per-exchange
+counts read from `nse_eod_bhavcopy`/`bse_eod_bhavcopy`, and a `blocksEntry()` that is
+`!determinable || materiallyIncomplete()`.
+
+**N44b · A counter with a non-zero baseline is not a metric.** `ay_bhavcopy_misdated_payload_total`
+(#1329) counted the mis-dated-payload guard's refusals. But serving the previous day's file under a
+holiday URL is NORMAL NSE behaviour — the exact case the guard was written for — and the catch-up
+loop skips only Saturdays, Sundays and already-stored dates, so **every exchange holiday in the
+window is re-probed on every run, forever, and refused every time**. The counter would have climbed
+monotonically on a perfectly healthy feed, and no threshold could separate that baseline from the
+break it exists to reveal. The javadoc claimed "zero on a healthy feed, by construction"; it was
+false when written. Now gated on `calendar.isTradingDay`, fail-CLOSED for the counter past the CD-2
+calendar cliff (a metric must never break a fetch).
+
+**N44c · Merged today.** [`#1299`](https://github.com/prashantm912/artha-yantra-2/pull/1299) symbol
+lineage @ `53330394` · [`#1296`](https://github.com/prashantm912/artha-yantra-2/pull/1296) §0B
+stop-basis coupling @ `77c066d6` · [`#1324`](https://github.com/prashantm912/artha-yantra-2/pull/1324)
+swing candidates counter @ `2a53b5cc`.
+
+⚠️ **DEPLOY HOLD — market-data must not be deployed until [`#1297`](https://github.com/prashantm912/artha-yantra-2/pull/1297) lands.**
+`main` is at **V053**; #1299 shipped **V055**; #1297 carries **V054**. Deploying V055 while V054 is
+absent, then merging #1297, makes flyway-init fail *validation* (`Detected resolved migration not
+applied: 054`) and that blocks EVERY future migration, not just the skipped one. The remedy then is
+renumbering the stranded migration higher — never `outOfOrder=true`. Merging in any order is fine;
+only the DEPLOY is ordered.
+
+**N44d · A near-miss worth recording: I nearly reverted N41–N43 while writing this row.** The main
+checkout was 6 commits behind `origin/main`, so the ledger file I had been editing did not contain
+[`#1328`](https://github.com/prashantm912/artha-yantra-2/pull/1328)'s N41/N42/N43 at all. Committing
+would have silently deleted three rows — invisible in review, since the diff would just look like my
+own additions. Caught only because a `grep -n "N41"` returned nothing and that was surprising enough
+to check. **Before editing a long-lived shared doc, `git fetch` and confirm you are not behind** —
+this file is edited by nearly every session, so it is the single most likely file in the repo to be
+stale in your working copy.
+
+**N44e · The shape kept going: SEVEN instances by the end of the night, six of them in ONE PR.**
+[`#1297`](https://github.com/prashantm912/artha-yantra-2/pull/1297) took **nine** cross-vendor review
+rounds and produced a Critical in six of them — every one the same shape, each fix widening the
+operand until the next thing it still could not say came into view:
+
+| Round | What the operand could not express |
+|---|---|
+| 5 | `swappedIntervals` could not say "a partial swap happened" (whole-interval only) |
+| 6 | …nor "progress stopped MID-interval" |
+| 7 | …nor "the base is committed but the run died after" |
+| 8 | …and the in-memory list **cannot survive a hard crash at all** — a JVM kill between the swap committing and the checkpoint leaves the row `REBACKFILL_RUNNING`, reaches no failure handler, and detection never re-fires because 1d now matches Kite |
+
+Round 8 is the general lesson, not round 5: **an in-process operand can only describe failures that
+unwind through your own code.** The remedy is not a wider variable but a DURABLE write placed as the
+first statement after the thing it records becomes true. Merged @ `b14bb3e3`.
+
+**N44f · ⚠️ A MACHINE GATE BEAT A CROSS-VENDOR AGREEMENT — and the agreement was two-sided.** The
+reviewer raised "V054 cannot land below the already-applied V055". I refuted it from the live DB
+(latest applied `053`, zero rows for `054`–`056`) and **the reviewer withdrew the finding**. CI's
+`flyway` check then failed: `Detected resolved migration not applied to database: 054`.
+
+The measurement was correct and the inference was not. The binding constraint was never the live
+database's current state — it is that **main's committed file set already contains V055 with no
+V054**, so any environment that deploys main before this PR lands applies 055 and is permanently
+stranded when 054 appears underneath it. CI validates against a DB populated in main's order, which
+is exactly that environment. Renamed to **V057**; deploy order **V055 → V056 → V057**.
+
+Two agents agreeing is not evidence. It reads like evidence, which is what makes it expensive —
+this is the third time in one day a mechanical check overruled a conclusion two reasoning agents had
+converged on. **When a gate disagrees with a consensus, the gate is describing a state neither agent
+enumerated.** Do not "fix" the gate.
+
+#### 2026-08-10 (late) — the swing day gets SPLIT: exits at 16:00, entries at 08:35
+
+**N46 · Owner decision: close the book as soon as the session closes.** Exits move from 20:00/20:05
+to **16:00/16:02 IST**; entries move to the **08:35** morning pass. The split is possible because the
+two halves need different data and only one needs the bhavcopy.
+
+`computed` 2026-08-07, for the symbols held in the two swing books: **11 of 15** daily bars were
+written by **`KITE` at 20:00:47–20:05:33** — fetched by the batch itself, on demand, through the
+cache-first path — against **4 from `BHAVCOPY` at 19:30`**. A stop on a held name needs that name's
+own bar and nothing else. The **screen** needs the whole ~1800-symbol NSE bhavcopy, which landed at
+17:52 / 18:41 / 18:48 / 19:08 / 19:30+ across the last 11 sessions — and our own history **cannot
+bound that tighter**, because the fetch cron ran at 19:30 and masked every earlier availability.
+
+**N46b · `SwingBatchCatchUp` was already built, already armed, and had never once worked.** Its own
+doctrine says the quiet part: *between a session's 15:30 close and the next 09:15 open, that
+session's bar is final, so a run in that window reads exactly the bar the on-time run would have.*
+`ARTHA_SWING_CATCHUP_ENABLED=true` live. And the only two rows ever written to
+`swing_catchup_runs` are 2026-07-17, **both `ABANDONED / NO_SCHEDULE_INTENT`** — it refused for want
+of a schedule-intent row that nothing wrote. Recording that intent is what makes the morning path
+real.
+
+**N46c · The marker hole, and it is N44's shape again — caught in design, before code.** The
+catch-up skips any session present in `swing_batch_runs`. An exits-only 16:00 run writes such a row,
+*correctly*, because it did evaluate every held stop — which is what the 08:30 canary and 20:15
+heartbeat ask about. Left alone it would have skipped **every** session and the book would never have
+taken another entry. **V060** adds `entries_enabled`: the catch-up asks `hasRunWithEntries`, the
+canary and heartbeat keep asking `hasRun`, the upsert ORs so a later exits-only re-run cannot re-open
+a session already entered, and `NULL` (pre-V060) reads as TRUE so the deploy does not hand the
+catch-up every historical session at once.
+
+**N46d · Two Criticals in the first cut, both money-path, both from reusing the wrong overload.** The
+snapshot-carrying `runAndRecord` overloads hardcode `executionArmed = true` for the catch-up's
+benefit (a historical session's arming may legitimately have changed since). Calling one from the
+LIVE scheduler bypassed `doctrine.enabled()` entirely — **a disabled strategy could exit and stamp
+completion** — and also dropped `runScheduled`'s FAILED-alert envelope, so a settle that threw would
+have died as a lone log line with every held stop unevaluated. Both found by cross-vendor review
+before merge. Five of the same round's eight Majors were consequences of *polling the alerting jobs*
+and are gone by construction: those crons are back to single-shot, and only bhavcopy + NSE EOD still
+poll.
+
+**N46e · ⚠️ OPEN — the closing auction is unverified on this path.** Since 2026-08-03 continuous
+trading in Category-I stocks ends 15:15 and a **15:15–15:30 call auction sets the official close**.
+Whether Kite's *daily candle* carries that auction close by 16:00, or still the 15:15 continuous
+price, is **not measured**. Flagged to the owner, who chose to arm 16:00 immediately rather than
+shadow a session first. **First live settle must be compared symbol-by-symbol against that evening's
+bhavcopy close** — a wrong close here is silent and perfectly plausible-looking.
+
+**N47 · H4 answered: the 18 stale swing positions are legitimately held, not stranded.** `computed`
+2026-08-10: `exit_skipped = 0` on **every** `swing_batch_runs` row for both books over the last two
+weeks, and exits DID fire when stops were hit (manas `TRAILING_STOP` 08-06; manas + minervini one
+each 07-31). All 18 open rows carry a non-null `stop_loss`. The exit path evaluates them every
+session; the stops simply have not been hit. **No cleanup action** — the owner's "measure first"
+call was the right one, and it turned a proposed square-off into a no-op.
+
+- ⚠️ **A false finding I nearly filed from the same data:** `open_at_start = 15` against **12** open
+  minervini rows looked like a week-stable counter defect. It is not — `openAtStart` counts open
+  **signal ANCHORS**, not paper positions, and `SwingBatchEngine`'s own comment at the entry pass
+  says so outright ("this pass classifies held purely from active signal anchors … so a symbol with
+  an open position but no live anchor reads as fresh here"). The distinguishing check was reading the
+  code, not re-running the query.
+- **Genuinely open, unexplained:** minervini reported `candidates = 0` on **5 of the last 6
+  sessions** (08-04/05/06/07/10) while manas ran 93–111 each, and the screen itself produced ~1,780
+  rows every one of those days. The funnel between screen and batch is emptying. Not diagnosed.
 
 #### 2026-08-07 evening batch — clean, and N26 got PROVEN by a natural experiment
 

@@ -226,6 +226,44 @@ public class CandleQueryService {
   }
 
   /**
+   * Full-range forced fetch into the corporate-action rebuild STAGING buffer (V057) — synchronous,
+   * caller owns scheduling, and it writes NOTHING to {@code candles}.
+   *
+   * <p>This exists because {@link #ensureCoverage} is GAP-AWARE: it fetches only the buckets the
+   * cache misses, so against an intact series it would fetch nothing. That is precisely why the
+   * rebuild used to purge FIRST — the purge was what manufactured the gaps. Staging removes the need
+   * for that bargain: this ignores present coverage the way {@link #refreshAsync} does, so the
+   * re-fetch can complete (or fail) with the live series still untouched.
+   */
+  public void stageFullRange(
+      String exchange,
+      String tradingsymbol,
+      String baseInterval,
+      OffsetDateTime rawFrom,
+      OffsetDateTime rawTo) {
+    GapDetector.Gap window = alignBackfillWindow(rawFrom, rawTo);
+    OffsetDateTime now = OffsetDateTime.now(clock);
+    OffsetDateTime to = window.to().isAfter(now) ? now : window.to();
+    if (!window.from().isBefore(to)) {
+      return;
+    }
+    InstrumentKey key = new InstrumentKey(exchange, tradingsymbol);
+    for (GapDetector.Gap page : GapDetector.pages(new GapDetector.Gap(window.from(), to))) {
+      List<HistoricalCandleGateway.Candle> fetched =
+          gateway.fetch(key, baseInterval, page.from().toInstant(), page.to().toInstant());
+      repository.stageAll(
+          fetched.stream()
+              .map(
+                  c ->
+                      new Candle(
+                          exchange, tradingsymbol, baseInterval, c.bucketStart(),
+                          c.open(), c.high(), c.low(), c.close(), c.volume(), c.oi(),
+                          fetchSource))
+              .toList());
+    }
+  }
+
+  /**
    * Phase-13 gap backfill: re-fetch 1m bars for a silent-through-reconnect window, async on the
    * refresh executor, stored with {@code source='BACKFILL'} (B-6 — replayed vs streamed bars).
    *

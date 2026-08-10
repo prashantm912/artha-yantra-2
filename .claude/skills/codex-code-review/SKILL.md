@@ -101,6 +101,17 @@ name the branch, and point at `git diff origin/main...<branch>` (or the state-fi
   Since 2026-07-28 the error names where it looked and, when it can find the session in the main
   checkout, says so outright — but the discipline above is what avoids the round trip.
 
+- **Watch a run LIVE — it is not a black box.** The harness streams every event to
+  `state/<target>.<hash>.events.ndjson` *while codex runs*: the agent's own narration, every shell
+  command, and exit codes. Reading only the wrapper's tail after it exits (what we did for months)
+  throws that away and makes a 10-minute `xhigh` review look like a hang.
+  ```bash
+  python tools/codex-watch.py                 # list sessions, newest first
+  python tools/codex-watch.py <target> -f     # follow live
+  ```
+  Works for `codex-build` and `codex-plan-review` sessions too (it searches every skill's state dir).
+  Especially worth doing on a long review: you can see WHICH files it is tracing, so a reviewer that
+  never opens the file your finding depends on is visible before the verdict, not after.
 - `--sandbox read-only`. Safe to invoke autonomously (no writes, no commits).
 - Model/effort from `.claude/skills/codex/scripts/_common.sh` (reviews → gpt-5.6-sol, effort xhigh);
   override per run via `CODEX_MODEL` / `CODEX_EFFORT`.

@@ -139,13 +139,28 @@ branch_work_is_in_main() {
 # fix/foo --state merged` still returns the OLD merged PR, and we would force-delete the NEW commits.
 # Require the merged PR's headRefOid to be the branch's CURRENT tip — that is what makes the answer
 # about THIS work rather than about a name.
+#
+# WARNING: headRefOid ALONE is too strict, and it made this whole fallback DEAD (measured
+# 2026-08-11: 25 branches kept, every one of them merged). `main` carries `strict: true`, so a green
+# PR goes BEHIND whenever main moves, and the standard fix is a server-side
+# `gh api -X PUT repos/{o}/{r}/pulls/<n>/update-branch`. That writes a MERGE COMMIT onto the remote
+# head which the local checkout never fetches, so headRefOid advances PAST the local tip and the
+# equality test fails for every branch we ever updated that way -- which, on a busy evening, is most
+# of them. Measured on #1335: local tip a98885e6, headRefOid 5d30596f, and a98885e6 sits in that
+# PR's own commit list one entry below it.
+#
+# Matching the tip against the PR's commit LIST keeps the name-reuse protection intact: a recreated
+# `fix/foo` carrying new work has a tip that appears nowhere in the old PR, so it is still kept. A
+# descendant test (`merge-base --is-ancestor`) would be the other repair and does NOT work here --
+# it needs the merged OID present locally, and delete_branch_on_merge removed the remote branch
+# before we ever fetched it.
 gh_says_merged() {
-  local branch="$1" tip oid
+  local branch="$1" tip hit
   command -v gh >/dev/null 2>&1 || return 1
   tip="$(git rev-parse "$branch" 2>/dev/null)" || return 1
-  oid="$(gh pr list --head "$branch" --state merged --json headRefOid \
-           --jq '.[].headRefOid' 2>/dev/null | grep -Fx "$tip")" || return 1
-  [ -n "$oid" ]
+  hit="$(gh pr list --head "$branch" --state merged --json headRefOid,commits \
+           --jq '.[] | .headRefOid, .commits[].oid' 2>/dev/null | grep -Fx "$tip")" || return 1
+  [ -n "$hit" ]
 }
 
 # 2) Local branches whose upstream is gone (git marks these "[gone]").

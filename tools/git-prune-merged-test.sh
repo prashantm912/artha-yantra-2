@@ -75,23 +75,26 @@ git config user.name t
 git config commit.gpgsign false
 # Stub `gh` so the real one can never answer for an unrelated repo, AND so the fallback path is
 # actually EXERCISED rather than merely disabled. It answers from $GH_FIXTURE: one
-# "<branch> <headRefOid>" line per merged PR; an unlisted branch exits 1 (= no merged PR).
+# "<branch> <headRefOid> [<commitOid>...]" line per merged PR; an unlisted branch exits 1 (= no
+# merged PR). The trailing OIDs stand in for `.commits[].oid`, which the script matches as well as
+# the head -- a server-side update-branch advances headRefOid past every commit the author wrote.
 export PATH="$TMP/nogh:$PATH"
 mkdir -p "$TMP/nogh"
 export GH_FIXTURE="$TMP/gh-fixture"
 : > "$GH_FIXTURE"
 cat > "$TMP/nogh/gh" <<'STUB'
 #!/bin/sh
-# mirrors: gh pr list --head <branch> --state merged --json headRefOid --jq ...
+# mirrors: gh pr list --head <branch> --state merged --json headRefOid,commits --jq ...
+# which emits the headRefOid followed by one line per PR commit.
 branch=""
 while [ $# -gt 0 ]; do
   case "$1" in --head) branch="$2"; shift 2;; *) shift;; esac
 done
 [ -n "$branch" ] || exit 1
 [ -n "${GH_FIXTURE:-}" ] || { echo 'gh stub: GH_FIXTURE unset' >&2; exit 2; }
-oid=$(awk -v b="$branch" '$1 == b {print $2}' "$GH_FIXTURE")
-[ -n "$oid" ] || exit 1
-echo "$oid"
+oids=$(awk -v b="$branch" '$1 == b {for (i = 2; i <= NF; i++) print $i}' "$GH_FIXTURE")
+[ -n "$oids" ] || exit 1
+echo "$oids"
 STUB
 chmod +x "$TMP/nogh/gh"
 
@@ -141,8 +144,25 @@ git merge --quiet --squash gh-rescue && git commit --quiet -m 'squashed rescue (
 echo r2 > rescue.txt && git add -A && git commit --quiet -m 'later change to rescue.txt'
 
 # --- R2 STALE OID: same shape, but a NEW local commit lands after the merge -----------------------
+# UPDATE-BRANCH: the shape that made the gh fallback dead in production (2026-08-11). `main` is
+# strict:true, so a green PR is brought forward with a server-side
+# `gh api -X PUT .../update-branch`; that merge commit becomes headRefOid and the local checkout
+# never fetches it. The local tip is therefore NOT the head -- but it IS one of the PR's commits,
+# which is what the script must match on. Fixture lists a head OID that exists nowhere locally.
+git checkout --quiet -b updated-branch main
+echo updated > updated.txt && git add -A && git commit --quiet -m 'work on updated-branch'
+git push --quiet -u origin updated-branch
+UPDATED_TIP="$(git rev-parse updated-branch)"
+git checkout --quiet main
+git merge --quiet --squash updated-branch && git commit --quiet -m 'squashed updated (#5)'
+# main moves on the SAME path afterwards, so the path-scoped test is inconclusive and the run is
+# forced through gh_says_merged -- without this the branch would be deleted by the cheap test and
+# prove nothing about the fallback.
+echo 'later edit' >> updated.txt && git add -A && git commit --quiet -m 'main touches updated.txt again'
+git push --quiet origin main
+
 # `gh pr list --head` matches by NAME and still returns the OLD merged PR. Matching on name alone
-# would force-delete the new commit. The headRefOid check must keep it.
+# would force-delete the new commit. Neither the head NOR any PR commit may equal the new tip.
 git checkout --quiet -b stale-oid main
 echo s1 > stale.txt && git add -A && git commit --quiet -m s1
 git push --quiet -u origin stale-oid
@@ -178,8 +198,14 @@ git merge --quiet --squash worktree-squash-merged && git commit --quiet -m 'squa
 
 git push --quiet origin main
 # GitHub's delete_branch_on_merge equivalent: drop the remote heads, then let the script see [gone].
-{ echo "gh-rescue $GH_RESCUE_OID"; echo "stale-oid $STALE_MERGED_OID"; } > "$GH_FIXTURE"
-git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid worktree-squash-merged
+{
+  echo "gh-rescue $GH_RESCUE_OID"
+  echo "stale-oid $STALE_MERGED_OID $STALE_MERGED_OID"
+  # head OID is a fabricated 40-hex that exists in no repo -- exactly like an unfetched
+  # update-branch merge commit. Only the trailing commit OID can rescue this branch.
+  echo "updated-branch 0123456789abcdef0123456789abcdef01234567 $UPDATED_TIP"
+} > "$GH_FIXTURE"
+git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid updated-branch worktree-squash-merged
 
 echo "=== --dry must remove NOTHING ==="
 # ⚠️ No `|| true` (review R4). It masked the script's exit status, so a fatal error AFTER the one
@@ -222,6 +248,7 @@ check "rename with unlanded deletion SURVIVES"  KEPT renames-a-file "$TMP/run.ou
 check "gh rescue removes a confirmed merge"     GONE gh-rescue      "$TMP/run.out"
 # R2 negative: gh still returns the OLD merged PR for this reused name; the new commit must survive.
 check "stale gh OID does NOT delete new work"   KEPT stale-oid      "$TMP/run.out"
+check "update-branch head is rescued by commits" GONE updated-branch "$TMP/run.out"
 # The bug this fix pins: a clean, never-pushed live worktree must survive the real run, not just
 # --dry's report (RED against the pre-fix script — see receipt for the failure text).
 check_worktree "clean never-pushed worktree SURVIVES (the fix)" KEPT "$TMP/wt-live" "$TMP/run.out"

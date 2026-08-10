@@ -1582,22 +1582,37 @@ open swing inventory ticked **18 → 17**.
 
 #### 2026-08-08 — four review rounds, ALL REQUEST_CHANGES; plus two corrections to my own merged rows
 
-**N39 · ⚠️ ONE FINDING HAS A SIX-DAY FUSE — #1299 M1 breaks on 2026-08-14.**
+**N39 · #1299 M1 — a DOCUMENTATION-TRUTH defect, not a live fuse. ⚠️ I first wrote this row as "ONE
+FINDING HAS A SIX-DAY FUSE — breaks on 2026-08-14", and that framing was WRONG. Corrected
+2026-08-10 (fixed + merged @ `53330394`).**
 `SymbolLineageDetector.java:157,163,180`: `bounds.floor_d` is `min(trade_date)` over the WHOLE
 `nse_eod_bhavcopy`, but `firstrow`/`lastrow` are computed over the trailing `windowDays` slice. Rule 3
 therefore asks "is this symbol's first IN-WINDOW bar after the TABLE's first bar" — only the intended
 question while `windowDays ≥ table span`. **Measured: span 2025-06-20 → 2026-08-07 = 413 days,
-`windowDays` default 420. The clip begins at max(trade_date) = 2025-06-20 + 420 = 2026-08-14.**
-Reviewer simulated the post-clip regime by shrinking `windowDays` to 300 and 200 → **zero spurious
-pairs today**, so blast radius is currently nil — but the guard has stopped meaning what its javadoc
-says, and every placebo statistic quoted in it was taken in the un-clipped regime. Fix direction:
-`GREATEST(floor_d, latest_d - windowDays)`, plus a test that sets `window-days` below the fixture span.
+`windowDays` default 420**, so the clip would begin 2026-08-14 — which is where the "fuse" reading
+came from.
+
+**Why that reading was wrong.** Rule 3's floor test is *structurally unreachable*, clip or no clip:
+deleting the predicate outright returns the **same 25 pairs**. So there is no dated behaviour change
+to fuse — 2026-08-14 was the date a clause that already does nothing would start doing nothing for a
+second reason. The reviewer's own probe said as much (shrinking `windowDays` to 300 and 200 → zero
+spurious pairs); I read "blast radius currently nil" as "nil *until* the 14th" when it was nil
+full stop. **The real defect is that the guard's javadoc describes a test the code does not perform,
+and every placebo statistic quoted in it was taken in the un-clipped regime** — worth fixing, worth
+none of the urgency I attached to it.
+
+**The genuinely behavioural half of M1** is the separate `>` → `>=` widening, which is a real recall
+gain: it recovers `HEUBACHIND→SUDARCOLOR`. Shipped as `GREATEST(floor_d, latest_d - windowDays)`
+plus a test that sets `window-days` below the fixture span. *(Lesson, and it is the same one as the
+#1283 no-op: when a probe reports "no effect", the next question is "is this operand reachable **at
+all**?" — not "when does it start having an effect?" A structurally-inert clause and a
+not-yet-triggered one look identical from a single measurement.)*
 
 **Review verdicts — none approved, and each found something CI could not:**
 
 | PR | verdict | the finding that matters |
 |---|---|---|
-| **#1299** `symbol_lineage` | REQUEST_CHANGES | M1 above (six-day fuse) · M2 the schema permits N→1 but the reader resolves it **non-deterministically** (`DISTINCT ON` without a total order — two stitched rows tie and Postgres picks arbitrarily, plan-dependent) · M3 a **detector** refutation is as permanent as an owner verdict, keyed on an NSE-tradingsymbol-vs-BSE-ticker string match with no ISIN corroboration — **113 BSE tickers carry ≥2 distinct ISINs** in the window · M4 V055/V054 order. ✅ All 7 must-fix items independently verified fixed; the reviewer **re-derived the headline against the live DB and reproduced the deployed service exactly** (coverage 1783 / 285 both ways). **Δcoverage +42 reproduces; entering moved 7 → 5** — the moving-population effect the PR's own open doubt predicted, and nothing is armed on those figures |
+| **#1299** `symbol_lineage` ✅ **MERGED `53330394`** | REQUEST_CHANGES → resolved | M1 above (**not** a six-day fuse — see the correction) · M2 the schema permits N→1 but the reader resolves it **non-deterministically** (`DISTINCT ON` without a total order — two stitched rows tie and Postgres picks arbitrarily, plan-dependent) · M3 a **detector** refutation is as permanent as an owner verdict, keyed on an NSE-tradingsymbol-vs-BSE-ticker string match with no ISIN corroboration — **113 BSE tickers carry ≥2 distinct ISINs** in the window · M4 V055/V054 order. ✅ All 7 must-fix items independently verified fixed; the reviewer **re-derived the headline against the live DB and reproduced the deployed service exactly** (coverage 1783 / 285 both ways). **Δcoverage +42 reproduces; entering moved 7 → 5** — the moving-population effect the PR's own open doubt predicted, and nothing is armed on those figures |
 | **#1297** CA stage→verify→swap | REQUEST_CHANGES | M-A — the round-3 deliverable — **emits its alert before the swap it reports on**, so a run that verifies 1d then fails 1m reports 1,276 unadjusted bars when nothing was adjusted; and its test constructs the meter registry inline, so **deleting the metric leaves the test green**. Plus the per-window `DELETE`→`INSERT` is two autocommits, and the next attempt truncates the staged replacement first |
 | **#1305** cagg window sizing | REQUEST_CHANGES | The `/4` budget divisor — **the number the whole PR turns on — is pinned by nothing**; every test passes it in and asserts against it, so any divisor satisfies them. At `/1` the 2026-07-30 failure returns with the suite green. Also: "a tuple budget does not decay" is false for **spill**, which is ~60% of the cost and invariant to window width |
 | **#1283** swing coverage gate | REQUEST_CHANGES | Asymmetry and parity verified clean, but the **durable-evidence half has zero red-proof** — both engine tests use the 9-arg seam that nulls the repository, so deleting both `recordCoverageRow` calls leaves the suite green. Also the 5% materiality band was calibrated at depth 50 while **5 of 6 live strategies run at depth 20**, where one missing session sits 0.24pp under the threshold |
@@ -1648,6 +1663,55 @@ the same silent early-out when it is at 7. On 08-07 it held 6, so the rail that 
 where each book sits, and only one of the two is auditable.** That is exactly why N26's owner decision
 puts "make the silent refusal auditable" FIRST. Same class as the errors N38/N40 corrected: a
 difference observed in the logs read as a difference in the mechanism.
+
+#### 2026-08-10 — three merged; and the SAME defect shape turned up in three unrelated PRs
+
+**N44 · The shape: an armed gate whose operand cannot represent the failure it guards.** Three
+instances, three different subsystems, found independently in one session. None was catchable by
+tests, because in every case the test asserted the operand rather than the outcome.
+
+| Where | The gate | Why its operand was blind |
+|---|---|---|
+| **#1283** `SwingCoverageProbe` | refuse a strategy whose lookback window is too holey | `MATERIALITY_DENOMINATOR = 21` with the rule `m*(D-1) > L` needs `D >= 22` to fire at `m=1, L=20`. The "recalibration" 20→21 was an arithmetic **no-op**, and its test pinned `windowSessions == 20`, a population production never presents (fixture built 20 sessions and deleted one → 19 bars; production caps at 20 PRESENT bars spanning 21 sessions) |
+| **#1283** (2nd, review) | same gate, entry side | `undeterminable()` carries an EMPTY `missing` list, so `incomplete()` is false and `materiallyIncomplete()` false with it — and BOTH entry paths keyed on it. A probe that FAILED (exception, uncovered calendar year, invalid bar, depth degraded to zero) therefore **permitted** the entry it exists to guard. **A safety gate that fails open on its own failure is worse than no gate, because it reports as a gate.** The class javadoc already said `determinable=false` means "an explicit no claim" — no consumer honoured it |
+| **#1329** `IngestCoverageCanary` | yellow when bhavcopy wrote no rows | `ingest_runs.rows_written` is `nse.bhavRows() + bse.bhavRows()` summed over the WHOLE catch-up window, so a healthy BSE (or one repaired gap from weeks ago) greens it while NSE refuses every payload. The policy existed FOR the NSE-only systematic failure and could not see it. Its test used an aggregate zero — a stricter stand-in that never reproduced the production shape |
+
+**The tell, and it is cheap to apply:** for any gate, ask *"can this operand take the value that means
+'the thing I am guarding against is happening'?"* — not *"does the gate fire on my fixture?"* Two of
+the three fired correctly on their fixtures. Fixes all measure the ARTIFACT instead: per-exchange
+counts read from `nse_eod_bhavcopy`/`bse_eod_bhavcopy`, and a `blocksEntry()` that is
+`!determinable || materiallyIncomplete()`.
+
+**N44b · A counter with a non-zero baseline is not a metric.** `ay_bhavcopy_misdated_payload_total`
+(#1329) counted the mis-dated-payload guard's refusals. But serving the previous day's file under a
+holiday URL is NORMAL NSE behaviour — the exact case the guard was written for — and the catch-up
+loop skips only Saturdays, Sundays and already-stored dates, so **every exchange holiday in the
+window is re-probed on every run, forever, and refused every time**. The counter would have climbed
+monotonically on a perfectly healthy feed, and no threshold could separate that baseline from the
+break it exists to reveal. The javadoc claimed "zero on a healthy feed, by construction"; it was
+false when written. Now gated on `calendar.isTradingDay`, fail-CLOSED for the counter past the CD-2
+calendar cliff (a metric must never break a fetch).
+
+**N44c · Merged today.** [`#1299`](https://github.com/prashantm912/artha-yantra-2/pull/1299) symbol
+lineage @ `53330394` · [`#1296`](https://github.com/prashantm912/artha-yantra-2/pull/1296) §0B
+stop-basis coupling @ `77c066d6` · [`#1324`](https://github.com/prashantm912/artha-yantra-2/pull/1324)
+swing candidates counter @ `2a53b5cc`.
+
+⚠️ **DEPLOY HOLD — market-data must not be deployed until [`#1297`](https://github.com/prashantm912/artha-yantra-2/pull/1297) lands.**
+`main` is at **V053**; #1299 shipped **V055**; #1297 carries **V054**. Deploying V055 while V054 is
+absent, then merging #1297, makes flyway-init fail *validation* (`Detected resolved migration not
+applied: 054`) and that blocks EVERY future migration, not just the skipped one. The remedy then is
+renumbering the stranded migration higher — never `outOfOrder=true`. Merging in any order is fine;
+only the DEPLOY is ordered.
+
+**N44d · A near-miss worth recording: I nearly reverted N41–N43 while writing this row.** The main
+checkout was 6 commits behind `origin/main`, so the ledger file I had been editing did not contain
+[`#1328`](https://github.com/prashantm912/artha-yantra-2/pull/1328)'s N41/N42/N43 at all. Committing
+would have silently deleted three rows — invisible in review, since the diff would just look like my
+own additions. Caught only because a `grep -n "N41"` returned nothing and that was surprising enough
+to check. **Before editing a long-lived shared doc, `git fetch` and confirm you are not behind** —
+this file is edited by nearly every session, so it is the single most likely file in the repo to be
+stale in your working copy.
 
 #### 2026-08-07 evening batch — clean, and N26 got PROVEN by a natural experiment
 

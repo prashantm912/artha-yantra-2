@@ -2,6 +2,7 @@ package in.arthayantra.marketdata.candles;
 
 import java.math.BigDecimal;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -583,8 +584,15 @@ public class CandleRepository {
   }
 
   /**
-   * Purges every cached bar of one symbol — ONLY the Phase-16A corporate-action remediation may
-   * call this (amendment A8, the single sanctioned exception to closed-bars-immutable).
+   * Purges every cached bar of one symbol, every interval.
+   *
+   * <p>This WAS the Phase-16A corporate-action remediation's first step (amendment A8, the single
+   * sanctioned exception to closed-bars-immutable). It is not any more: the remediation destroyed
+   * ~12 years of history before proving it could re-fetch a replacement, so it now stages the
+   * re-fetch and swaps it in through {@link #swapStaged}, whose delete is scoped to the verified
+   * staged span. Nothing on the production path calls this today — it survives as a test fixture
+   * helper (seeding a symbol from empty), and any new production caller would be reintroducing
+   * exactly the unguarded destruction that V057 exists to prevent.
    */
   public int purgeSymbol(String exchange, String tradingsymbol) {
     // bucket span for this symbol; +1 day on the high side so the DELETE's exclusive upper bound
@@ -619,6 +627,331 @@ public class CandleRepository {
               Timestamp.from(w.to().toInstant()));
     }
     return deleted;
+  }
+
+  private static final String STAGE_INSERT =
+      """
+      INSERT INTO candle_rebuild_staging
+        (exchange, tradingsymbol, "interval", bucket, open, high, low, close, volume, oi, source)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO UPDATE SET
+        open = EXCLUDED.open,
+        high = EXCLUDED.high,
+        low = EXCLUDED.low,
+        close = EXCLUDED.close,
+        volume = EXCLUDED.volume,
+        oi = EXCLUDED.oi,
+        source = EXCLUDED.source
+      """;
+
+  /**
+   * Batched insert into the corporate-action rebuild STAGING buffer (V057). Plain replace-on-conflict
+   * — the staged rows are one authoritative Kite re-fetch, so a re-fetched overlapping page simply
+   * supersedes itself; there is no provenance rule to preserve because nothing here is live data yet.
+   */
+  public void stageAll(List<Candle> bars) {
+    jdbc.batchUpdate(
+        STAGE_INSERT,
+        bars,
+        500,
+        (ps, bar) -> {
+          ps.setString(1, bar.exchange());
+          ps.setString(2, bar.tradingsymbol());
+          ps.setString(3, bar.interval());
+          ps.setTimestamp(4, Timestamp.from(bar.bucket().toInstant()));
+          ps.setBigDecimal(5, bar.open());
+          ps.setBigDecimal(6, bar.high());
+          ps.setBigDecimal(7, bar.low());
+          ps.setBigDecimal(8, bar.close());
+          ps.setLong(9, bar.volume());
+          ps.setObject(10, bar.oi());
+          ps.setString(11, bar.source());
+        });
+  }
+
+  /** Empties one symbol's rebuild staging buffer; run at the start AND the end of every attempt. */
+  public int clearStaging(String exchange, String tradingsymbol) {
+    return jdbc.update(
+        "DELETE FROM candle_rebuild_staging WHERE exchange = ? AND tradingsymbol = ?",
+        exchange,
+        tradingsymbol);
+  }
+
+  /**
+   * What a staged re-fetch covers, measured against the live series it is about to replace — the
+   * evidence {@code CorporateActionJob} judges BEFORE it deletes anything.
+   *
+   * @param stagedBars staged row count for this interval; {@code 0} means the fetch returned nothing
+   * @param stagedFrom oldest staged bucket, {@code null} iff {@code stagedBars == 0}
+   * @param stagedTo newest staged bucket, {@code null} iff {@code stagedBars == 0}
+   * @param cachedBarsNotStaged live buckets INSIDE {@code [stagedFrom, stagedTo]} that the staged
+   *     series does not carry — every one of these would be deleted with no replacement
+   * @param cachedTo newest live bucket, {@code null} iff the symbol has nothing cached
+   * @param cachedBarsBelowSpan live buckets OLDER than {@code stagedFrom}. The swap does not touch
+   *     them, so after a corporate action they keep PRE-event prices while everything from
+   *     {@code stagedFrom} forward is adjusted — a ratio-sized discontinuity with no gap marking
+   *     it. Nothing else can see this: the detector's deepest anchor is 5 years, so it cannot reach
+   *     the splice, and {@code cachedBarsNotStaged} is scoped inside the span by construction.
+   *     Measured live 2026-08-04: 1,276 1d rows across 49 symbols sit older than the default
+   *     {@code rebackfill-days-1d} window, and every one of those symbols is in the sweep's scope
+   */
+  public record StagedCoverage(
+      long stagedBars,
+      OffsetDateTime stagedFrom,
+      OffsetDateTime stagedTo,
+      long cachedBarsNotStaged,
+      OffsetDateTime cachedTo,
+      long cachedBarsBelowSpan) {}
+
+  /**
+   * Measures {@link StagedCoverage} for one (symbol, interval).
+   *
+   * <p>Every aggregate here is a bare-column {@code min}/{@code max} with no {@code ORDER BY} /
+   * {@code DISTINCT} / {@code LIMIT} over a computed expression — deliberately the shape that is
+   * SAFE on a compressed hypertable under TimescaleDB 2.18.2, whose sorted-merge planner assertion
+   * took the OI chain pages down on 2026-07-20.
+   */
+  public StagedCoverage stagedCoverage(String exchange, String tradingsymbol, String interval) {
+    return jdbc.query(
+        """
+        SELECT s.n AS staged_n, s.lo AS staged_lo, s.hi AS staged_hi, c.hi AS cached_hi,
+               (SELECT count(*) FROM candles k
+                 WHERE k.exchange = ? AND k.tradingsymbol = ? AND k."interval" = ?
+                   AND k.bucket >= s.lo AND k.bucket <= s.hi
+                   AND NOT EXISTS (SELECT 1 FROM candle_rebuild_staging g
+                                    WHERE g.exchange = k.exchange
+                                      AND g.tradingsymbol = k.tradingsymbol
+                                      AND g."interval" = k."interval"
+                                      AND g.bucket = k.bucket)) AS not_staged,
+               (SELECT count(*) FROM candles b
+                 WHERE b.exchange = ? AND b.tradingsymbol = ? AND b."interval" = ?
+                   AND b.bucket < s.lo) AS below_span
+        FROM (SELECT count(*) AS n, min(bucket) AS lo, max(bucket) AS hi
+                FROM candle_rebuild_staging
+               WHERE exchange = ? AND tradingsymbol = ? AND "interval" = ?) s,
+             (SELECT max(bucket) AS hi FROM candles
+               WHERE exchange = ? AND tradingsymbol = ? AND "interval" = ?) c
+        """,
+        rs -> {
+          if (!rs.next()) {
+            return new StagedCoverage(0, null, null, 0, null, 0);
+          }
+          return new StagedCoverage(
+              rs.getLong("staged_n"),
+              rs.getObject("staged_lo", OffsetDateTime.class),
+              rs.getObject("staged_hi", OffsetDateTime.class),
+              rs.getLong("not_staged"),
+              rs.getObject("cached_hi", OffsetDateTime.class),
+              rs.getLong("below_span"));
+        },
+        exchange, tradingsymbol, interval,
+        exchange, tradingsymbol, interval,
+        exchange, tradingsymbol, interval,
+        exchange, tradingsymbol, interval);
+  }
+
+  /**
+   * The SWAP: replaces one (symbol, interval)'s live bars over EXACTLY the staged span with the
+   * staged ones. Returns the rows inserted.
+   *
+   * <p>⚠️ The window loop runs OLDEST → NEWEST ({@link #purgeWindows} advances a cursor from
+   * {@code start}), and that direction is load-bearing, not incidental. A failure part-way through
+   * therefore leaves a RECENT SUFFIX unswapped, which keeps the detector's short-dated anchors
+   * (7d/1m/3m) diverged — two or more, so the next sweep re-detects. Newest-first would leave the
+   * OLD end unswapped, and the deepest anchors alone can be a SINGLE diverged anchor, which
+   * {@code CorporateActionDetector} classifies as {@code anchorNoise} and never remediates. Nothing
+   * else pins this direction; reversing it would strand symbols silently.
+   *
+   * <p>Scoped to the staged span rather than the whole symbol on purpose — the invariant this whole
+   * change buys is "every bucket deleted has a verified replacement", and outside the staged span
+   * there is none.
+   *
+   * <p>⚠️ That is less DESTRUCTIVE than the {@link #purgeSymbol} it replaces on this path — which
+   * deleted bars older than Kite's serving depth that nothing could restore — but less destructive
+   * is NOT the same as safer, and reading it that way would be the wrong inference. The old purge
+   * produced a visible TRUNCATION; this produces a silent WRONG PRICE, because bars below the
+   * staged span survive at pre-event levels while everything above is adjusted. On the same data
+   * that is arguably the worse failure mode: a gap is obvious to every consumer, a discontinuity is
+   * obvious to none. It is deliberately accepted rather than fixed here (refusing would strand the
+   * 49 live symbols that have such bars), and it is made OBSERVABLE instead — see
+   * {@link StagedCoverage#cachedBarsBelowSpan}, which the caller counts and alerts on.
+   *
+   * <p>Windowed at {@link #PURGE_WINDOW_MONTHS} for the same reason the purge is: {@code candles} is
+   * segmentby {@code (exchange, tradingsymbol, interval)}, so an unwindowed DELETE over a fully
+   * compressed liquid equity decompresses the whole symbol in one DML and blows
+   * {@code max_tuples_decompressed_per_dml_transaction}. Adding {@code "interval" = ?} to the
+   * predicate narrows the touched segments FURTHER than the all-interval purge did, so this
+   * decompresses strictly less per window than the code it replaces. No continuous aggregate is
+   * touched here: the caller still refreshes them afterwards through the existing chunked
+   * {@link #refreshDerivedAggregatesForRebuild}, at its unchanged
+   * {@link #MAX_REFRESH_WINDOW_DAYS}-day per-CALL bound.
+   */
+  public int swapStaged(String exchange, String tradingsymbol, String interval) {
+    Window bounds =
+        jdbc.query(
+            "SELECT min(bucket) AS lo, max(bucket) AS hi FROM candle_rebuild_staging"
+                + " WHERE exchange = ? AND tradingsymbol = ? AND \"interval\" = ?",
+            rs -> {
+              if (!rs.next()) {
+                return null;
+              }
+              OffsetDateTime lo = rs.getObject("lo", OffsetDateTime.class);
+              OffsetDateTime hi = rs.getObject("hi", OffsetDateTime.class);
+              return lo == null ? null : new Window(lo, hi.plusDays(1));
+            },
+            exchange,
+            tradingsymbol,
+            interval);
+    if (bounds == null) {
+      return 0; // nothing staged for this interval
+    }
+    int inserted = 0;
+    int windowsCommitted = 0;
+    for (Window w : purgeWindows(bounds.from(), bounds.to(), Period.ofMonths(PURGE_WINDOW_MONTHS))) {
+      Timestamp from = Timestamp.from(w.from().toInstant());
+      Timestamp to = Timestamp.from(w.to().toInstant());
+      try {
+        inserted += replaceWindowAtomically(exchange, tradingsymbol, interval, from, to);
+        windowsCommitted++;
+      } catch (RuntimeException failure) {
+        // ⚠️ A failure PARTWAY THROUGH an interval is still progress, and the caller cannot see it
+        // any other way (cross-vendor review 2026-08-10). Each window commits independently, so
+        // windows before this one are DURABLE: the live series is now internally split between
+        // adjusted and unadjusted windows. Reported as a plain failure the caller would record
+        // ordinary FAILED, and the cooldown would hold that split series for seven days — the exact
+        // hole V056 closes for a whole-interval partial. The caller needs "any window committed",
+        // not "the interval finished", so the exception carries it.
+        if (windowsCommitted > 0) {
+          throw new PartialSwapException(interval, windowsCommitted, failure);
+        }
+        throw failure;
+      }
+    }
+    // fetched_at is stamped now() rather than copied: the Stage-D dataHash reads it to flag
+    // pre-event backtest runs as not-like-for-like, which is exactly what a rebuild must trigger.
+    return inserted;
+  }
+
+  /**
+   * Thrown when an interval swap fails AFTER at least one six-month window has durably committed.
+   *
+   * <p>It exists so the caller can distinguish "nothing landed" from "the series is now half
+   * replaced". Those need opposite recoveries: the first is an ordinary failure the cooldown should
+   * bound, the second must be re-attempted promptly because the live series is internally
+   * inconsistent until it is.
+   */
+  public static class PartialSwapException extends RuntimeException {
+    private final transient String interval;
+    private final transient int windowsCommitted;
+
+    public PartialSwapException(String interval, int windowsCommitted, Throwable cause) {
+      super(
+          "swap of " + interval + " failed after " + windowsCommitted + " window(s) had committed",
+          cause);
+      this.interval = interval;
+      this.windowsCommitted = windowsCommitted;
+    }
+
+    /** The interval left half-replaced. */
+    public String interval() {
+      return interval;
+    }
+
+    /** How many windows are already durable. */
+    public int windowsCommitted() {
+      return windowsCommitted;
+    }
+  }
+
+  /** Deletes and refills one window in one commit, so readers never observe an empty window. */
+  private int replaceWindowAtomically(
+      String exchange, String tradingsymbol, String interval, Timestamp from, Timestamp to) {
+    return jdbc.execute(
+        (ConnectionCallback<Integer>)
+            connection -> {
+              boolean manageTransaction = connection.getAutoCommit();
+              if (manageTransaction) {
+                connection.setAutoCommit(false);
+              }
+              boolean committed = false;
+              boolean rolledBack = false;
+              try {
+                int inserted;
+                try (PreparedStatement delete =
+                        connection.prepareStatement(
+                            "DELETE FROM candles WHERE exchange = ? AND tradingsymbol = ?"
+                                + " AND \"interval\" = ? AND bucket >= ? AND bucket < ?");
+                    PreparedStatement insert =
+                        connection.prepareStatement(
+                            """
+                            INSERT INTO candles
+                              (exchange, tradingsymbol, "interval", bucket, open, high, low, close,
+                               volume, oi, source, fetched_at)
+                            SELECT exchange, tradingsymbol, "interval", bucket, open, high, low, close,
+                                   volume, oi, source, now()
+                            FROM candle_rebuild_staging
+                            WHERE exchange = ? AND tradingsymbol = ? AND "interval" = ?
+                              AND bucket >= ? AND bucket < ?
+                            ON CONFLICT (exchange, tradingsymbol, "interval", bucket) DO UPDATE SET
+                              open = EXCLUDED.open,
+                              high = EXCLUDED.high,
+                              low = EXCLUDED.low,
+                              close = EXCLUDED.close,
+                              volume = EXCLUDED.volume,
+                              oi = EXCLUDED.oi,
+                              source = EXCLUDED.source,
+                              fetched_at = now()
+                            """)) {
+                  delete.setString(1, exchange);
+                  delete.setString(2, tradingsymbol);
+                  delete.setString(3, interval);
+                  delete.setTimestamp(4, from);
+                  delete.setTimestamp(5, to);
+                  delete.executeUpdate();
+
+                  insert.setString(1, exchange);
+                  insert.setString(2, tradingsymbol);
+                  insert.setString(3, interval);
+                  insert.setTimestamp(4, from);
+                  insert.setTimestamp(5, to);
+                  inserted = insert.executeUpdate();
+                }
+                if (manageTransaction) {
+                  connection.commit();
+                  committed = true;
+                }
+                return inserted;
+              } catch (SQLException | RuntimeException failure) {
+                if (manageTransaction) {
+                  try {
+                    connection.rollback();
+                    rolledBack = true;
+                  } catch (SQLException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                    abortQuietly(connection);
+                  }
+                }
+                throw failure;
+              } finally {
+                // ⚠️ Restoration must never REPLACE the outcome (cross-vendor review 2026-08-10).
+                // Unguarded, a throw here does one of two harmful things: after a rollback it
+                // supplants the original exception, so the caller is told about a JDBC housekeeping
+                // failure instead of the DB error that actually aborted the swap; and after a
+                // COMMIT it turns durable work into a thrown swapStaged, so the caller never
+                // records the interval as swapped and the alert under-reports what landed.
+                //
+                // Aborting is the safe direction either way. A connection returned to the pool with
+                // autoCommit=false silently enrols the NEXT unrelated caller in a transaction
+                // nobody commits — a whole-service hazard that no test on this path would catch.
+                if (manageTransaction && (committed || rolledBack)) {
+                  try {
+                    connection.setAutoCommit(true);
+                  } catch (SQLException restoreFailure) {
+                    abortQuietly(connection);
+                  }
+                }
+              }
+            });
   }
 
   /** {@code candles} hypertable size in bytes (the {@code ay_hypertable_bytes} gauge). */

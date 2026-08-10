@@ -5,6 +5,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -13,7 +14,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -81,10 +86,15 @@ class UpstoxFnoMasterClientTest {
   }
 
   private static UpstoxFnoMasterClient client() {
+    return client(Clock.systemUTC());
+  }
+
+  private static UpstoxFnoMasterClient client(Clock clock) {
     return new UpstoxFnoMasterClient(
         RestClient.builder(),
         new ObjectMapper(),
-        new UpstoxAnalyticsProperties(null, null, null, wireMock.baseUrl()));
+        new UpstoxAnalyticsProperties(null, null, null, wireMock.baseUrl()),
+        clock);
   }
 
   @Test
@@ -184,6 +194,170 @@ class UpstoxFnoMasterClientTest {
 
     // The master is loaded ONCE and reused — no per-lookup re-fetch.
     assertThat(wireMock.getAllServeEvents()).hasSize(1);
+  }
+
+  @Test
+  void warmLoadsTheMasterSoTheNextLookupPaysNothing() {
+    // The point of the warm: the 5MB cold load happens OFF the caller's path, so the lookup that a
+    // live margin call makes (through a 2000ms budget) finds the cache already populated.
+    UpstoxFnoMasterClient client = client();
+
+    client.warm();
+    assertThat(wireMock.getAllServeEvents()).as("the warm itself fetched the master").hasSize(1);
+
+    String key = client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null);
+
+    assertThat(key).isEqualTo("NSE_FO|61093");
+    assertThat(wireMock.getAllServeEvents())
+        .as("the lookup re-used the warmed cache — no second fetch on the caller's thread")
+        .hasSize(1);
+  }
+
+  @Test
+  void failedWarmNeverThrowsAndLeavesTheLookupWorking() {
+    // The assets CDN is auth-free but can be down. A failed warm must cost nothing beyond the
+    // pre-existing lazy behaviour — never propagate out of startup or the scheduler.
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(aResponse().withStatus(503).withBody("cdn down")));
+    UpstoxFnoMasterClient client = client();
+
+    assertThatCode(client::warm).doesNotThrowAnyException();
+
+    // ...and the client still answers, degrading to null exactly as it did before the warm existed.
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null)).isNull();
+  }
+
+  @Test
+  void failedEmptyWarmIsRetriedByALaterLookupAfterTheBackoff() {
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(aResponse().withStatus(503).withBody("cdn down")));
+    MutableClock clock = new MutableClock(Instant.parse("2026-08-08T03:30:00Z"));
+    UpstoxFnoMasterClient client = client(clock);
+
+    assertThat(client.warm()).isFalse();
+
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/gzip")
+                    .withBody(gzip(MASTER_JSON))));
+    clock.advance(UpstoxFnoMasterClient.RETRY_BACKOFF);
+
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null))
+        .as("a failed empty load must be retried by a later lookup")
+        .isEqualTo("NSE_FO|61093");
+    wireMock.verify(getRequestedFor(urlPathEqualTo(MASTER_PATH)));
+  }
+
+  /**
+   * A payload that parses cleanly but maps ZERO F&O legs must NOT replace a good cache — the
+   * catalogued "success-shaped nothing" shape, and cross-vendor review found it live here
+   * (2026-08-10). Upstox serving a truncated file, or a schema change that makes the F&O predicate
+   * match nothing, both land on this path. Before the fix it assigned {@code {}} into the live
+   * cache, stamped {@code loadedAt} fresh and returned true — after which every instrument-key
+   * lookup missed and every margin call returned {@code unpriced} for a full refresh interval, with
+   * the warmer logging success throughout.
+   */
+  @Test
+  void aMasterThatMapsZeroLegsIsRefusedAndTheGoodCacheSurvives() {
+    MutableClock clock = new MutableClock(Instant.parse("2026-08-08T03:30:00Z"));
+    UpstoxFnoMasterClient client = client(clock);
+    assertThat(client.warm()).as("the good master loads first").isTrue();
+
+    // Now Upstox serves a well-formed master with no F&O rows at all.
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/gzip")
+                    .withBody(gzip("[]"))));
+    clock.advance(UpstoxFnoMasterClient.REFRESH);
+
+    assertThat(client.warm()).as("an empty index is a FAILED warm, not a successful one").isFalse();
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null))
+        .as("the previously good cache must survive the empty payload")
+        .isEqualTo("NSE_FO|61093");
+  }
+
+  /**
+   * A FAILED load must not buy the stale cache another refresh interval. {@code loadedAt} used to be
+   * advanced on failure whenever a prior cache existed, which is the "cache stores a FAILURE with a
+   * fresh timestamp" shape: a source broken for hours read as freshly warmed, and the next lookup
+   * would not retry until a whole REFRESH had passed. {@code lastAttemptAt} + backoff is the only
+   * thing that should bound retries.
+   */
+  @Test
+  void aFailedLoadDoesNotExtendTheLifeOfTheCacheItKept() {
+    // ⚠️ This MUST drive the LAZY path (keyFor -> cache() -> loadDue), not warm(). warm() calls
+    // reload() unconditionally, so it cannot observe loadedAt at all — a first draft of this test
+    // used warm() and stayed GREEN against the very defect it was written for. The bug lives
+    // entirely in loadDue's arithmetic, and only a lookup consults it.
+    MutableClock clock = new MutableClock(Instant.parse("2026-08-08T03:30:00Z"));
+    UpstoxFnoMasterClient client = client(clock);
+    assertThat(client.warm()).as("the good master loads first").isTrue();
+    wireMock.resetAll();
+
+    // The refresh window lapses, upstream is down, and a LOOKUP triggers the lazy reload.
+    clock.advance(UpstoxFnoMasterClient.REFRESH);
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(aResponse().withStatus(503).withBody("cdn down")));
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null))
+        .as("the kept cache still answers while upstream is down")
+        .isEqualTo("NSE_FO|61093");
+    wireMock.verify(1, getRequestedFor(urlPathEqualTo(MASTER_PATH)));
+
+    // Upstream recovers. Only the short RETRY_BACKOFF should stand between us and a fresh fetch —
+    // NOT another full REFRESH, which is exactly what advancing loadedAt on a FAILURE imposed.
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/gzip")
+                    .withBody(gzip(MASTER_JSON))));
+    clock.advance(UpstoxFnoMasterClient.RETRY_BACKOFF);
+    client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null);
+
+    // The observable is the REQUEST, not the returned key: the kept cache answers correctly either
+    // way, so a value assertion here would pass against the defect.
+    wireMock.verify(
+        1,
+        getRequestedFor(urlPathEqualTo(MASTER_PATH)));
+  }
+
+  private static final class MutableClock extends Clock {
+    private Instant now;
+
+    private MutableClock(Instant now) {
+      this.now = now;
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneId.of("UTC");
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return now;
+    }
+
+    private void advance(Duration duration) {
+      now = now.plus(duration);
+    }
   }
 
   private static byte[] gzip(String json) {

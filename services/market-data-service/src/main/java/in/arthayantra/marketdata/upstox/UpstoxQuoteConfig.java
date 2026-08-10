@@ -1,6 +1,9 @@
 package in.arthayantra.marketdata.upstox;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -56,5 +59,39 @@ public class UpstoxQuoteConfig {
   public UpstoxFnoMasterClient upstoxFnoMasterClient(
       RestClient.Builder restClientBuilder, ObjectMapper mapper, UpstoxAnalyticsProperties properties) {
     return new UpstoxFnoMasterClient(restClientBuilder, mapper, properties);
+  }
+
+  /**
+   * The warm period, clamped once, here. {@code UpstoxFnoMasterWarmer}'s {@code @Scheduled} reads it
+   * BY NAME through SpEL ({@code #{@upstoxFnoMasterWarmInterval.toMillis()}}) rather than taking it
+   * as a constructor argument, because {@code @Scheduled} needs the value at annotation-resolution
+   * time. This is the ONE place the operator's setting is bounded — {@link
+   * UpstoxFnoMasterWarmer#clampWarmInterval} is called here and nowhere else on the live path.
+   *
+   * <p>Nothing injects this by type; the reference is by bean name. Keep it that way — a bare {@code
+   * Duration} in the context is a by-type magnet for any future single-{@code Duration} constructor.
+   */
+  @Bean
+  public Duration upstoxFnoMasterWarmInterval(
+      @Value("${artha.upstox.fno-master.warm-interval:PT6H}") Duration warmInterval) {
+    return UpstoxFnoMasterWarmer.clampWarmInterval(warmInterval);
+  }
+
+  /**
+   * Keeps the F&amp;O master warm so a live margin call never pays its 5MB cold load inside {@code
+   * PaperMarginClient}'s 2000ms budget (see {@link UpstoxFnoMasterWarmer}). Takes the client through
+   * an {@link ObjectProvider}, so this bean is inert — not a wiring failure — when none of the three
+   * conditions above bound one. Off switch: {@code artha.upstox.fno-master.warm-enabled=false}, which
+   * {@code UpstoxContractCanaryIntegrationTest} sets because a startup warm would otherwise load the
+   * master from WireMock BEFORE that test stubs it, caching an empty map and suppressing the lazy load
+   * its margin probe depends on.
+   */
+  @Bean
+  @ConditionalOnProperty(
+      name = "artha.upstox.fno-master.warm-enabled",
+      havingValue = "true",
+      matchIfMissing = true)
+  public UpstoxFnoMasterWarmer upstoxFnoMasterWarmer(ObjectProvider<UpstoxFnoMasterClient> master) {
+    return new UpstoxFnoMasterWarmer(master);
   }
 }

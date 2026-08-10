@@ -1,7 +1,10 @@
 package in.arthayantra.marketdata.upstox;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Duration;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -69,11 +72,19 @@ public class UpstoxQuoteConfig {
    * its margin probe depends on.
    */
   @Bean
+  public Duration upstoxFnoMasterWarmInterval(
+      @Value("${artha.upstox.fno-master.warm-interval:PT6H}") Duration warmInterval) {
+    return UpstoxFnoMasterWarmer.clampWarmInterval(warmInterval);
+  }
+
+  @Bean
   @ConditionalOnProperty(
       name = "artha.upstox.fno-master.warm-enabled",
       havingValue = "true",
       matchIfMissing = true)
-  public UpstoxFnoMasterWarmer upstoxFnoMasterWarmer(ObjectProvider<UpstoxFnoMasterClient> master) {
-    return new UpstoxFnoMasterWarmer(master);
+  public UpstoxFnoMasterWarmer upstoxFnoMasterWarmer(
+      ObjectProvider<UpstoxFnoMasterClient> master,
+      @Qualifier("upstoxFnoMasterWarmInterval") Duration warmInterval) {
+    return new UpstoxFnoMasterWarmer(master, warmInterval);
   }
 }

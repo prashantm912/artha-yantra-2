@@ -1,67 +1,91 @@
 package in.arthayantra.marketdata.upstox;
 
+import java.time.Duration;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.scheduling.annotation.Scheduled;
 
-/**
- * Keeps the Upstox F&amp;O instrument master ({@link UpstoxFnoMasterClient}) loaded so a LIVE margin
- * call never pays its cold load.
- *
- * <p><b>Why.</b> The master is a 5MB+ gzip the client fetches lazily, on the first lookup after its
- * 12-hour {@code REFRESH} window, on its own connect-15s/read-60s timeouts. The F9 heat read arrives
- * through {@code PaperMarginClient}, which allows 2000ms end-to-end — deliberately, so a slow
- * market-data can never park the tick thread (the #694 doctrine), and NOT something to lengthen. So
- * whenever a cold load lands on a live margin call the two budgets race. Measured 2026-08-05: two
- * WARNs at exactly 2000ms, master load completing 535ms later, F9 heat gate inert on the session's
- * only funded entry. Measured 2026-08-06: same cold-load shape, inside budget, no failure. A race,
- * not a constant break — this removes the race by making sure the load has already happened.
- *
- * <p><b>Two triggers, one job.</b> {@link #warmOnStartup()} covers the fresh boot; {@link
- * #warmPeriodically()} covers the service staying up past the refresh window, which is the case that
- * actually bites (the stack runs for days). The period must stay STRICTLY SHORTER than the client's
- * {@code REFRESH} — pinned by {@code UpstoxFnoMasterWarmerTest} — so the cache is always inside its
- * window when a caller arrives and the client's lazy branch never runs on a caller's thread. {@code
- * initialDelay} equals the period so the scheduler's first run does not duplicate the startup warm.
- *
- * <p><b>Fail-soft, three ways.</b> The client is resolved through an {@link ObjectProvider} (absent
- * unless the analytics/quote/ticker flags bind it, so this is a no-op rather than a wiring failure);
- * {@link UpstoxFnoMasterClient#warm()} already swallows transport/gunzip/parse failure and keeps any
- * prior cache; and each trigger additionally catches {@link RuntimeException}. That last catch is not
- * belt-and-braces for an impossible case — an escaped exception from a {@code fixedDelay} task
- * SUPPRESSES ALL ITS FUTURE EXECUTIONS, so a single bad CDN response would silently retire the warm
- * for the life of the process. The CDN is auth-free but can be down; a failed warm must cost nothing
- * more than the pre-existing lazy behaviour.
- */
+/** Keeps the Upstox F&amp;O instrument master warm without blocking a framework-owned thread. */
 public class UpstoxFnoMasterWarmer {
 
   private static final Logger log = LoggerFactory.getLogger(UpstoxFnoMasterWarmer.class);
+  private static final Duration DEFAULT_WARM_INTERVAL = Duration.ofHours(6);
+  private static final Duration MIN_WARM_INTERVAL = Duration.ofMinutes(1);
+  private static final Duration MAX_WARM_INTERVAL =
+      UpstoxFnoMasterClient.REFRESH.minusMinutes(1);
 
   private final ObjectProvider<UpstoxFnoMasterClient> master;
+  private final ScheduledExecutorService warmExecutor;
+  private final Duration warmInterval;
+  private final Duration retryDelay;
 
-  /** Wires the (optional) F&amp;O master client. */
-  public UpstoxFnoMasterWarmer(ObjectProvider<UpstoxFnoMasterClient> master) {
+  /** Wires the optional F&amp;O master client and its bounded refresh interval. */
+  public UpstoxFnoMasterWarmer(
+      ObjectProvider<UpstoxFnoMasterClient> master, Duration warmInterval) {
+    this(
+        master,
+        warmInterval,
+        Executors.newSingleThreadScheduledExecutor(
+            runnable -> {
+              Thread thread = new Thread(runnable, "upstox-fno-master-warmer");
+              thread.setDaemon(true);
+              return thread;
+            }),
+        UpstoxFnoMasterClient.RETRY_BACKOFF);
+  }
+
+  UpstoxFnoMasterWarmer(
+      ObjectProvider<UpstoxFnoMasterClient> master,
+      Duration warmInterval,
+      ScheduledExecutorService warmExecutor,
+      Duration retryDelay) {
     this.master = master;
+    this.warmInterval = clampWarmInterval(warmInterval);
+    this.warmExecutor = warmExecutor;
+    this.retryDelay = retryDelay;
   }
 
-  /** Warms on boot so the day's first margin call finds the master already loaded. */
+  /** Clamps the operator-provided period to a safe, positive interval inside the client refresh. */
+  static Duration clampWarmInterval(Duration interval) {
+    if (interval == null) {
+      return DEFAULT_WARM_INTERVAL;
+    }
+    if (interval.compareTo(MIN_WARM_INTERVAL) < 0) {
+      return MIN_WARM_INTERVAL;
+    }
+    if (interval.compareTo(MAX_WARM_INTERVAL) > 0) {
+      return MAX_WARM_INTERVAL;
+    }
+    return interval;
+  }
+
+  /** Submits the boot warm; the ApplicationReadyEvent caller never downloads. */
   @EventListener(ApplicationReadyEvent.class)
+  @Order(Ordered.LOWEST_PRECEDENCE)
   public void warmOnStartup() {
-    warm("startup");
+    submit("startup");
   }
 
-  /**
-   * Re-warms inside the client's refresh window, so the window never lapses onto a caller's thread.
-   * The first run is one full period after boot — {@link #warmOnStartup()} has already covered t=0.
-   */
+  /** Submits the periodic warm; the default Spring scheduler only queues this short dispatch. */
   @Scheduled(
-      initialDelayString = "${artha.upstox.fno-master.warm-interval:PT6H}",
-      fixedDelayString = "${artha.upstox.fno-master.warm-interval:PT6H}")
+      initialDelayString = "#{@upstoxFnoMasterWarmInterval.toMillis()}",
+      fixedDelayString = "#{@upstoxFnoMasterWarmInterval.toMillis()}")
   public void warmPeriodically() {
-    warm("scheduled");
+    submit("scheduled");
+  }
+
+  /** Hands the download to the dedicated daemon; the ready listener and scheduler never download. */
+  private void submit(String trigger) {
+    warmExecutor.execute(() -> warm(trigger));
   }
 
   private void warm(String trigger) {
@@ -70,12 +94,36 @@ public class UpstoxFnoMasterWarmer {
       return; // analytics/quote/ticker flags off — nothing to warm (not an error)
     }
     try {
-      client.warm();
-      log.debug("Upstox F&O master warm ({}) complete", trigger);
+      if (client.warm()) {
+        log.debug("Upstox F&O master warm ({}) complete", trigger);
+      } else {
+        log.warn(
+            "Upstox F&O master warm ({}) failed; retrying in {}", trigger, retryDelay);
+        scheduleRetry();
+      }
     } catch (RuntimeException e) {
-      // NEVER propagate: out of @EventListener this would fail startup, and out of the @Scheduled
-      // fixedDelay task it would cancel every future warm.
-      log.warn("Upstox F&O master warm ({}) failed — leaving the lazy path in place: {}", trigger, e.toString());
+      // NEVER propagate: an escaped daemon exception would retire the retry chain.
+      log.warn(
+          "Upstox F&O master warm ({}) failed; retrying in {}: {}",
+          trigger,
+          retryDelay,
+          e.toString());
+      scheduleRetry();
     }
+  }
+
+  @SuppressWarnings("FutureReturnValueIgnored")
+  private void scheduleRetry() {
+    try {
+      warmExecutor.schedule(() -> warm("retry"), retryDelay.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (RejectedExecutionException ignored) {
+      // Context shutdown won the race with a failed warm; no retry is needed after shutdown.
+    }
+  }
+
+  /** Releases the daemon thread on context shutdown. */
+  @jakarta.annotation.PreDestroy
+  public void shutdown() {
+    warmExecutor.shutdownNow();
   }
 }

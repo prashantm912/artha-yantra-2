@@ -118,6 +118,11 @@ artha:
     # Neutral to every composite) — owner decision after forward measurement. Requires analytics.enabled;
     # mutually exclusive with artha.openalgo.global-quotes-enabled (both on ⇒ context refuses to start).
     global-quotes-enabled: ${ARTHA_UPSTOX_GLOBAL_QUOTES_ENABLED:false}
+    fno-master:
+      # Default-on when the F&O master client is bound. The canary overrides it off because its
+      # WireMock stubs are installed after ApplicationReadyEvent; failed loads retry after 5 minutes.
+      warm-enabled: ${ARTHA_UPSTOX_FNO_MASTER_WARM_ENABLED:true}
+      warm-interval: ${ARTHA_UPSTOX_FNO_MASTER_WARM_INTERVAL:PT6H}
 
 # B-3: the per-endpoint-family resilience stack — exactly one resilience
 # dependency. Limiter saturation queues up to 5s (virtual threads), then 429

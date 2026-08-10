@@ -374,6 +374,9 @@ services:
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
       ARTHA_UPSTOX_CANARY_ENABLED: ${ARTHA_UPSTOX_CANARY_ENABLED:-false}
+      # F&O instrument-master warm: interval is clamped inside the client's 12h refresh window.
+      ARTHA_UPSTOX_FNO_MASTER_WARM_ENABLED: ${ARTHA_UPSTOX_FNO_MASTER_WARM_ENABLED:-true}
+      ARTHA_UPSTOX_FNO_MASTER_WARM_INTERVAL: ${ARTHA_UPSTOX_FNO_MASTER_WARM_INTERVAL:-PT6H}
       # Connecting-Dots Dow factor off the live Upstox world-indices feed. Name MUST byte-match
       # application.yml's artha.upstox.global-quotes-enabled placeholder (#653). Default false —
       # arming changes which signals fire, so it is an owner decision, not a deploy detail.

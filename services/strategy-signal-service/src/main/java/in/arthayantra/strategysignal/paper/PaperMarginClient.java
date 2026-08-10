@@ -1,5 +1,6 @@
 package in.arthayantra.strategysignal.paper;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
@@ -54,6 +55,7 @@ public class PaperMarginClient {
    * the whole point of this record change — no consumer re-bases onto it here ({@code RiskService}'s
    * heat still reads {@code spanMargin}); that re-base is a deferred owner decision.
    */
+  @JsonIgnoreProperties(ignoreUnknown = true)
   public record Quote(
       boolean priced,
       String unpricedReason,

@@ -14,7 +14,11 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -82,10 +86,15 @@ class UpstoxFnoMasterClientTest {
   }
 
   private static UpstoxFnoMasterClient client() {
+    return client(Clock.systemUTC());
+  }
+
+  private static UpstoxFnoMasterClient client(Clock clock) {
     return new UpstoxFnoMasterClient(
         RestClient.builder(),
         new ObjectMapper(),
-        new UpstoxAnalyticsProperties(null, null, null, wireMock.baseUrl()));
+        new UpstoxAnalyticsProperties(null, null, null, wireMock.baseUrl()),
+        clock);
   }
 
   @Test
@@ -218,6 +227,59 @@ class UpstoxFnoMasterClientTest {
 
     // ...and the client still answers, degrading to null exactly as it did before the warm existed.
     assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null)).isNull();
+  }
+
+  @Test
+  void failedEmptyWarmIsRetriedByALaterLookupAfterTheBackoff() {
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(aResponse().withStatus(503).withBody("cdn down")));
+    MutableClock clock = new MutableClock(Instant.parse("2026-08-08T03:30:00Z"));
+    UpstoxFnoMasterClient client = client(clock);
+
+    assertThat(client.warm()).isFalse();
+
+    wireMock.resetAll();
+    wireMock.stubFor(
+        get(urlPathEqualTo(MASTER_PATH))
+            .willReturn(
+                aResponse()
+                    .withHeader("Content-Type", "application/gzip")
+                    .withBody(gzip(MASTER_JSON))));
+    clock.advance(UpstoxFnoMasterClient.RETRY_BACKOFF);
+
+    assertThat(client.keyFor("NFO", "NIFTY", "FUT", LocalDate.of(2026, 7, 28), null))
+        .as("a failed empty load must be retried by a later lookup")
+        .isEqualTo("NSE_FO|61093");
+    wireMock.verify(getRequestedFor(urlPathEqualTo(MASTER_PATH)));
+  }
+
+  private static final class MutableClock extends Clock {
+    private Instant now;
+
+    private MutableClock(Instant now) {
+      this.now = now;
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneId.of("UTC");
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return now;
+    }
+
+    private void advance(Duration duration) {
+      now = now.plus(duration);
+    }
   }
 
   private static byte[] gzip(String json) {

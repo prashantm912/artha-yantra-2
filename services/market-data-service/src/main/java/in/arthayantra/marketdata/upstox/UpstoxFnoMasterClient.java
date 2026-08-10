@@ -6,6 +6,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -45,6 +46,9 @@ public final class UpstoxFnoMasterClient {
   /** The Upstox master is published once a day; re-fetch at most this often. */
   static final Duration REFRESH = Duration.ofHours(12);
 
+  /** A failed empty-cache load may be retried by a lookup after this backoff, not on every lookup. */
+  static final Duration RETRY_BACKOFF = Duration.ofMinutes(5);
+
   /** Upstox publishes expiry as the contract's end-of-day IST instant; convert in IST. */
   private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
@@ -53,13 +57,23 @@ public final class UpstoxFnoMasterClient {
   private final RestClient restClient;
   private final ObjectMapper mapper;
   private final String masterPath;
+  private final Clock clock;
 
   private volatile Map<FnoKey, FnoLeg> keysByLeg = Map.of();
   private volatile Instant loadedAt = Instant.EPOCH;
+  private volatile Instant lastAttemptAt = Instant.EPOCH;
 
   /** Binds the wire client to the (configurable) assets host. */
   public UpstoxFnoMasterClient(
       RestClient.Builder builder, ObjectMapper mapper, UpstoxAnalyticsProperties properties) {
+    this(builder, mapper, properties, Clock.systemUTC());
+  }
+
+  UpstoxFnoMasterClient(
+      RestClient.Builder builder,
+      ObjectMapper mapper,
+      UpstoxAnalyticsProperties properties,
+      Clock clock) {
     // A 5MB+ gzip download — generous read timeout, fail-fast connect, so a dead CDN never parks the
     // first lookup forever (the resolver then simply returns null and the Kite path stays the source).
     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -68,6 +82,7 @@ public final class UpstoxFnoMasterClient {
     this.restClient = builder.baseUrl(properties.instrumentsBaseUrl()).requestFactory(factory).build();
     this.mapper = mapper;
     this.masterPath = "/market-quote/instruments/exchange/complete.json.gz";
+    this.clock = clock;
   }
 
   /**
@@ -116,9 +131,9 @@ public final class UpstoxFnoMasterClient {
    * double-fetch. Fail-soft: {@link #reload()} swallows transport/gunzip/parse failure and keeps the
    * prior cache, so this NEVER throws.
    */
-  public void warm() {
+  public boolean warm() {
     synchronized (this) {
-      reload();
+      return reload();
     }
   }
 
@@ -133,9 +148,10 @@ public final class UpstoxFnoMasterClient {
 
   /** Returns the cached map, (re)loading it on first use or after the refresh window. */
   private Map<FnoKey, FnoLeg> cache() {
-    if (Duration.between(loadedAt, Instant.now()).compareTo(REFRESH) >= 0) {
+    Instant now = Instant.now(clock);
+    if (loadDue(now)) {
       synchronized (this) {
-        if (Duration.between(loadedAt, Instant.now()).compareTo(REFRESH) >= 0) {
+        if (loadDue(Instant.now(clock))) {
           reload();
         }
       }
@@ -143,27 +159,43 @@ public final class UpstoxFnoMasterClient {
     return keysByLeg;
   }
 
-  private void reload() {
+  private boolean loadDue(Instant now) {
+    return Duration.between(loadedAt, now).compareTo(REFRESH) >= 0
+        && Duration.between(lastAttemptAt, now).compareTo(RETRY_BACKOFF) >= 0;
+  }
+
+  private boolean reload() {
+    Instant attemptAt = Instant.now(clock);
+    lastAttemptAt = attemptAt;
     try {
       byte[] gzip = restClient.get().uri(masterPath).retrieve().body(byte[].class);
       if (gzip == null || gzip.length == 0) {
         log.warn("Upstox instrument master fetch returned empty body — keeping prior cache");
-        loadedAt = Instant.now();
-        return;
+        markFailedAttempt(attemptAt);
+        return false;
       }
       List<UpstoxInstrumentMaster> rows;
       try (InputStream in = new GZIPInputStream(new ByteArrayInputStream(gzip))) {
         rows = mapper.readValue(in, new TypeReference<List<UpstoxInstrumentMaster>>() {});
       }
       keysByLeg = index(rows);
-      loadedAt = Instant.now();
+      loadedAt = attemptAt;
       log.info("Upstox F&O instrument master loaded: {} mapped legs", keysByLeg.size());
+      return true;
     } catch (IOException | RuntimeException e) {
       // Transport / gunzip / parse failure: keep any prior cache (the resolver then falls back to the
-      // Kite path — this enrichment must NEVER break the source) and don't hammer the CDN on every
-      // lookup — defer the next attempt by the refresh window. NEVER propagates out of a lookup.
-      loadedAt = Instant.now();
+      // Kite path — this enrichment must NEVER break the source). A non-empty prior cache keeps its
+      // refresh timestamp; an empty cache stays retryable after the short backoff above. NEVER
+      // propagates out of a lookup.
+      markFailedAttempt(attemptAt);
       log.warn("Upstox instrument master load failed — keeping prior cache: {}", e.toString());
+      return false;
+    }
+  }
+
+  private void markFailedAttempt(Instant attemptAt) {
+    if (!keysByLeg.isEmpty()) {
+      loadedAt = attemptAt;
     }
   }
 

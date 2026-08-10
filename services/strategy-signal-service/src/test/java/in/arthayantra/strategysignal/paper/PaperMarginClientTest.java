@@ -5,8 +5,13 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -18,7 +23,9 @@ import org.springframework.web.client.RestClient;
  * Wire test for {@link PaperMarginClient}: market-data's {@code MarginController.MarginResponse}
  * carries TEN components, and the client record must mirror every one of them or Jackson silently
  * drops the difference (a missing component is not an upstream absence — it is an invisible loss on
- * OUR side of the wire).
+ * OUR side of the wire). This test uses a raw {@code RestClient.builder()} and therefore validates
+ * DTO mapping against the explicit fixture; it does not exercise the application's Boot-configured
+ * {@code ObjectMapper}.
  *
  * <p>{@code equityMargin} / {@code netBuyPremium} / {@code additionalMargin} are the three that were
  * blind. {@code netBuyPremium} is the load-bearing one: a LONG option basket's capital requirement
@@ -26,9 +33,11 @@ import org.springframework.web.client.RestClient;
  * {@code spanMargin} alone cannot see it. This test only proves the field ARRIVES; nothing re-bases
  * onto it (that is a deferred owner decision).
  *
- * <p>The fixture sends decimals as JSON STRINGS, which is the real wire shape: {@code
+ * <p>The fixture sends decimals as JSON STRINGS, matching the captured contract: {@code
  * ArthaJacksonAutoConfiguration} registers {@code ToStringSerializer} for {@code BigDecimal}
- * platform-wide, so market-data emits {@code "337004.85"}, not {@code 337004.85}.
+ * platform-wide, so market-data emits {@code "337004.85"}, not {@code 337004.85}. The raw builder
+ * above does not prove that Boot mapper configuration; it only proves this DTO accepts the captured
+ * response shape.
  */
 class PaperMarginClientTest {
 
@@ -135,5 +144,23 @@ class PaperMarginClientTest {
     assertThat(q.priced()).isFalse();
     assertThat(q.unpricedReason()).isEqualTo("no open positions");
     assertThat(wireMock.getAllServeEvents()).isEmpty();
+  }
+
+  @Test
+  void quoteComponentsMatchTheCommittedMarketDataResponseSchema() throws Exception {
+    Path spec = Path.of("..", "..", "contracts", "market-data-service.openapi.json");
+    JsonNode properties =
+        new ObjectMapper()
+            .readTree(Files.readString(spec))
+            .path("components")
+            .path("schemas")
+            .path("MarginResponse")
+            .path("properties");
+    List<String> schemaNames = new java.util.ArrayList<>();
+    properties.fieldNames().forEachRemaining(schemaNames::add);
+
+    assertThat(Arrays.stream(PaperMarginClient.Quote.class.getRecordComponents()).map(c -> c.getName()).toList())
+        .as("PaperMarginClient.Quote must mirror every market-data MarginResponse property")
+        .containsExactlyInAnyOrderElementsOf(schemaNames);
   }
 }

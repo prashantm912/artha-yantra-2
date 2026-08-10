@@ -85,7 +85,12 @@ class UpstoxFnoMasterWarmerTest {
     UpstoxFnoMasterWarmer warmer = new UpstoxFnoMasterWarmer(provider(master));
 
     try {
+      // Drained between triggers ON PURPOSE. Since the queued-or-running reservation, two triggers
+      // fired back-to-back COLLAPSE INTO ONE — that is the point of it, and it is pinned by
+      // aTriggerArrivingWhileAWarmIsQueuedIsDroppedRatherThanStackedBehindIt below. What this test
+      // is about is that a LATER scheduled tick still warms at all.
       warmer.warmPeriodically();
+      await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> verify(master, times(1)).warm());
       warmer.warmPeriodically();
       await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> verify(master, times(2)).warm());
     } finally {
@@ -100,7 +105,9 @@ class UpstoxFnoMasterWarmerTest {
     UpstoxFnoMasterWarmer warmer = new UpstoxFnoMasterWarmer(provider(master));
 
     try {
+      // Drained between triggers — see theScheduledTriggerWarmsTheMasterToo for why.
       warmer.warmOnStartup();
+      await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> verify(master, times(1)).warm());
       warmer.warmPeriodically();
       await().atMost(Duration.ofSeconds(2)).untilAsserted(() -> verify(master, times(2)).warm());
     } finally {
@@ -137,12 +144,68 @@ class UpstoxFnoMasterWarmerTest {
         new UpstoxFnoMasterWarmer(provider(master), executor, Duration.ofMinutes(5));
     ArgumentCaptor<Runnable> submitted = ArgumentCaptor.forClass(Runnable.class);
 
+    // Each submission must be DRAINED before the next, or the queued-or-running reservation drops
+    // the second one — which is the subject of the sibling test below, not this one.
     warmer.warmOnStartup();
+    verify(executor, times(1)).execute(submitted.capture());
+    submitted.getValue().run(); // first warm fails on this thread, schedules the retry
+
     warmer.warmPeriodically();
     verify(executor, times(2)).execute(submitted.capture());
-    submitted.getAllValues().forEach(Runnable::run); // both warms fail, on this thread
+    submitted.getValue().run(); // second warm fails too
 
     verify(executor, times(1)).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
+  }
+
+  /**
+   * A second trigger arriving while a warm is QUEUED OR RUNNING is dropped, not stacked behind it.
+   *
+   * <p>This is the test the first attempt at the fix did not have, and it would have failed it.
+   * That version took the reservation inside the task body — useless, because {@code warmExecutor}
+   * is single-threaded, so queued tasks never overlap and each one in turn found the flag clear and
+   * performed another full download. The reservation has to mean "queued OR running", so it is
+   * taken before {@code execute}.
+   *
+   * <p>What it protects: Spring's {@code fixedDelay} measures the DISPATCH, and submit returns the
+   * instant it hands off. At the one-minute floor a warm is therefore enqueued every minute however
+   * long the current 5MB+ download is taking, and the backlog is duplicate downloads against a
+   * shared rate limiter.
+   */
+  @Test
+  void aTriggerArrivingWhileAWarmIsQueuedIsDroppedRatherThanStackedBehindIt() {
+    UpstoxFnoMasterClient master = mock(UpstoxFnoMasterClient.class);
+    when(master.warm()).thenReturn(true);
+    // Never runs what it is given — this IS the "already queued" condition.
+    ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+    UpstoxFnoMasterWarmer warmer =
+        new UpstoxFnoMasterWarmer(provider(master), executor, Duration.ofMinutes(5));
+
+    warmer.warmOnStartup();
+    warmer.warmPeriodically();
+    warmer.warmPeriodically();
+    warmer.warmPeriodically();
+
+    verify(executor, times(1)).execute(any(Runnable.class));
+    verify(master, never()).warm(); // nothing ran: the queue holds exactly one task, not four
+  }
+
+  /** …and once that warm completes, the NEXT trigger is accepted again. */
+  @Test
+  void theReservationIsReleasedWhenTheWarmFinishes() {
+    UpstoxFnoMasterClient master = mock(UpstoxFnoMasterClient.class);
+    when(master.warm()).thenReturn(true);
+    ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+    UpstoxFnoMasterWarmer warmer =
+        new UpstoxFnoMasterWarmer(provider(master), executor, Duration.ofMinutes(5));
+    ArgumentCaptor<Runnable> submitted = ArgumentCaptor.forClass(Runnable.class);
+
+    warmer.warmOnStartup();
+    verify(executor, times(1)).execute(submitted.capture());
+    submitted.getValue().run(); // the warm completes
+
+    warmer.warmPeriodically();
+
+    verify(executor, times(2)).execute(any(Runnable.class));
   }
 
   @Test
@@ -156,13 +219,18 @@ class UpstoxFnoMasterWarmerTest {
             provider((UpstoxFnoMasterClient) null), executor, Duration.ofMinutes(5));
     ArgumentCaptor<Runnable> submitted = ArgumentCaptor.forClass(Runnable.class);
 
+    // One at a time: the queued-or-running reservation drops a second trigger while the first is
+    // still outstanding, so both triggers only reach the executor if each is drained first.
     warmer.warmOnStartup();
-    warmer.warmPeriodically();
-    verify(executor, times(2)).execute(submitted.capture());
-
-    assertThatCode(() -> submitted.getAllValues().forEach(Runnable::run))
+    verify(executor, times(1)).execute(submitted.capture());
+    assertThatCode(submitted.getValue()::run)
         .as("run on THIS thread, so an escaped exception actually fails the test")
         .doesNotThrowAnyException();
+
+    warmer.warmPeriodically();
+    verify(executor, times(2)).execute(submitted.capture());
+    assertThatCode(submitted.getValue()::run).doesNotThrowAnyException();
+
     verify(executor, never()).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
   }
 

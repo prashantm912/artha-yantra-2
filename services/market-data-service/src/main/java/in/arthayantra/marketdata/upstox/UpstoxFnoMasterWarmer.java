@@ -149,36 +149,40 @@ public class UpstoxFnoMasterWarmer {
 
   /** Hands the download to the dedicated daemon; the ready listener and scheduler never download. */
   private void submit(String trigger) {
+    if ("retry".equals(trigger)) {
+      // This submission IS the outstanding retry — release the chain guard BEFORE the reservation
+      // below, or a retry dropped as a duplicate would wedge the chain permanently.
+      retryInFlight.set(false);
+    }
+    // ⚠️ RESERVE BEFORE ENQUEUEING, and this is the second attempt at the fix. The first version
+    // claimed the flag inside warm(), which does nothing: warmExecutor is SINGLE-THREADED, so queued
+    // tasks never overlap and the flag is never contended — each queued task in turn found it clear
+    // and performed another full download. Cross-vendor review caught the ineffective fix, 2026-08-10.
+    //
+    // The pile-up it has to stop is real: Spring's fixedDelay measures the DISPATCH, and this method
+    // returns the instant it hands off, so at the one-minute floor a warm is enqueued every minute
+    // regardless of how long the current download is taking. A 75-second fetch queues them faster
+    // than the daemon drains, and the backlog is duplicate multi-megabyte downloads against a shared
+    // rate limiter. Reserving here makes the reservation mean "queued OR running", which is the
+    // condition that actually needs to be exclusive.
+    if (!warmInFlight.compareAndSet(false, true)) {
+      log.debug(
+          "Upstox F&O master warm ({}) skipped — a warm is already queued or running", trigger);
+      return;
+    }
     try {
       warmExecutor.execute(() -> warm(trigger));
     } catch (RejectedExecutionException shuttingDown) {
       // Must not escape: out of the @Scheduled fixedDelay task an exception cancels every future
       // execution, and out of the @EventListener it fails startup. Only reachable once the context
       // is going down, when there is nothing left to warm.
+      warmInFlight.set(false);
       log.debug("Upstox F&O master warm ({}) not submitted — executor is shut down", trigger);
     }
   }
 
+  /** Runs one download. The {@code warmInFlight} reservation is already held by {@link #submit}. */
   private void warm(String trigger) {
-    if ("retry".equals(trigger)) {
-      retryInFlight.set(false); // this attempt IS the outstanding retry; re-arm on its own failure
-    }
-    // ⚠️ COALESCE EVERY WARM, not just retries. retryInFlight guards the retry chain alone, and
-    // cross-vendor review (2026-08-10) showed that is not enough: Spring's fixedDelay measures the
-    // DISPATCH, and submit() returns the instant it hands the task to the executor. So at the
-    // one-minute floor the scheduler enqueues a fresh warm every minute regardless of how long the
-    // previous download is taking — a 75-second fetch queues them faster than the single daemon
-    // drains, and the backlog is a pile of duplicate multi-megabyte downloads against a shared rate
-    // limiter.
-    //
-    // The claim lives HERE rather than in submit() so it covers all three entry points — startup,
-    // scheduled, retry — including the retry, which is scheduled directly onto the executor. A tick
-    // that arrives mid-warm still costs one queued task, but that task now returns in microseconds
-    // instead of downloading, so the queue drains as fast as it fills.
-    if (!warmInFlight.compareAndSet(false, true)) {
-      log.debug("Upstox F&O master warm ({}) skipped — a warm is already in flight", trigger);
-      return;
-    }
     try {
       UpstoxFnoMasterClient client = master.getIfAvailable();
       if (client == null) {
@@ -209,7 +213,11 @@ public class UpstoxFnoMasterWarmer {
       return; // a retry is already queued — see the single-flight paragraph on the class
     }
     try {
-      warmExecutor.schedule(() -> warm("retry"), retryDelay.toMillis(), TimeUnit.MILLISECONDS);
+      // Fires through submit(), not warm(), so the retry takes the same queued-or-running
+      // reservation everything else does. Scheduling it (rather than reserving now) matters: a
+      // reservation held across the whole retryDelay would block legitimate periodic warms for the
+      // duration of the backoff.
+      warmExecutor.schedule(() -> submit("retry"), retryDelay.toMillis(), TimeUnit.MILLISECONDS);
     } catch (RejectedExecutionException ignored) {
       retryInFlight.set(false);
       // Context shutdown won the race with a failed warm; no retry is needed after shutdown.

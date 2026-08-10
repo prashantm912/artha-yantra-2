@@ -14,6 +14,7 @@ import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.candles.EodCorporateActionRepository;
 import in.arthayantra.marketdata.dividends.DividendRepository;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
+import in.arthayantra.marketdata.lineage.SymbolRenameEventRepository;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher.BhavcopyRow;
 import in.arthayantra.marketdata.nse.NseCorporateActionFetcher;
@@ -66,6 +67,7 @@ public class BhavcopyBackfillService {
   private final BseCorporateActionFetcher bseCa;
   private final EodCorporateActionRepository caRepo;
   private final DividendRepository dividendRepo;
+  private final SymbolRenameEventRepository renameRepo;
   private final CandleRepository candles;
   private final Clock clock;
   private final ApplicationEventPublisher events;
@@ -112,6 +114,7 @@ public class BhavcopyBackfillService {
       BseCorporateActionFetcher bseCa,
       EodCorporateActionRepository caRepo,
       DividendRepository dividendRepo,
+      SymbolRenameEventRepository renameRepo,
       CandleRepository candles,
       Clock clock,
       ApplicationEventPublisher events,
@@ -130,6 +133,7 @@ public class BhavcopyBackfillService {
     this.bseCa = bseCa;
     this.caRepo = caRepo;
     this.dividendRepo = dividendRepo;
+    this.renameRepo = renameRepo;
     this.candles = candles;
     this.clock = clock;
     this.events = events;
@@ -482,8 +486,24 @@ public class BhavcopyBackfillService {
               a.subject(),
               a.isin(),
               "NSE");
+        } else if (NameChangeSubjectParser.isNameChange(a.subject())) {
+          // N2 / #1285: a "Change in Name" arrives here WITH its ISIN attached and used to fall
+          // straight through the continue below — not logged, not counted, not stored. It is the
+          // best rename signal available and we were already paying to fetch it; capturing it is
+          // what keeps symbol_lineage current instead of going stale at ~59 renames/year.
+          NameChangeSubjectParser.Names names =
+              NameChangeSubjectParser.parseNames(a.subject()).orElse(null);
+          renameRepo.upsert(
+              "NSE",
+              a.symbol(),
+              a.exDate(),
+              a.isin(),
+              names == null ? null : names.fromName(),
+              names == null ? null : names.toName(),
+              a.subject(),
+              "NSE");
         }
-        continue; // dividend / buyback / AGM — not a price adjustment
+        continue; // dividend / name-change / buyback / AGM — not a price adjustment
       }
       CorporateActionSubjectParser.Parsed p = parsed.get();
       caRepo.upsert("NSE", a.symbol(), a.exDate(), p.ratio(), p.kind(), a.isin(), a.subject());

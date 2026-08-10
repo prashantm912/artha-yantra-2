@@ -604,7 +604,32 @@ public class CandleRepository {
                   MAX_REFRESH_WINDOW_DAYS,
                   view.overlapDays())
               : shared;
-      for (Window w : windows) {
+      // ⚠️ REPLAN BEFORE EACH CALL when sizing from chunk load. Planning the whole list from ONE
+      // snapshot is a stale-operand bug: the load a window was sized against can grow between the
+      // read and the CALL — a compression policy running (V049 compresses these caggs on a
+      // schedule), a concurrent backfill, or an uncompressed chunk that reported 0 and has since
+      // been compressed and now decompresses in full. The window does NOT shrink to compensate;
+      // Timescale simply aborts at the 5,000,000 ceiling, which burns one of the refresh's limited
+      // attempts and reproduces the outage this whole change exists to end.
+      //
+      // Cross-vendor review, 2026-08-11. Cost is one metadata query per window instead of one per
+      // view — cheap next to the refresh itself, and it makes the budget track reality rather than
+      // a photograph of it. Each replan re-reads the load for the REMAINING span only, so the plan
+      // converges rather than repeating work already materialised.
+      OffsetDateTime cursor = start;
+      int executed = 0;
+      while (cursor.isBefore(end)) {
+        Window w =
+            planFromChunkLoad
+                ? planRebuildWindows(
+                        chunkLoad(st, view, cursor, end),
+                        cursor,
+                        end,
+                        REBUILD_WINDOW_TUPLE_BUDGET,
+                        MAX_REFRESH_WINDOW_DAYS,
+                        view.overlapDays())
+                    .get(0)
+                : windows.get(Math.min(executed, windows.size() - 1));
         st.execute(
             "CALL public.refresh_continuous_aggregate('"
                 + view.viewName()
@@ -613,11 +638,22 @@ public class CandleRepository {
                 + "'::timestamptz, '"
                 + w.to().toInstant()
                 + "'::timestamptz)");
+        executed++;
+        // The next span starts at this window's END minus its overlap; the planner already applied
+        // the overlap to `from`, so advancing to `to` cannot skip a bucket.
+        if (!w.to().isAfter(cursor)) {
+          break; // a planner that cannot advance must not spin — bounded by construction, guarded here
+        }
+        cursor = w.to();
+        if (!planFromChunkLoad && executed >= windows.size()) {
+          break;
+        }
       }
+      int windowCount = executed;
       // one line per view, not per window: a 12-yr rebuild is ~48 windows × 5 views (2026-07-10 OOM)
       log.info(
           "refreshed derived aggregate {} over {} window(s) [{} .. {}]",
-          view.viewName(), windows.size(), start.toInstant(), end.toInstant());
+          view.viewName(), windowCount, start.toInstant(), end.toInstant());
     }
   }
 

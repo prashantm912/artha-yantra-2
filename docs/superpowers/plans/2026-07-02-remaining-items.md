@@ -1785,6 +1785,55 @@ this is the third time in one day a mechanical check overruled a conclusion two 
 converged on. **When a gate disagrees with a consensus, the gate is describing a state neither agent
 enumerated.** Do not "fix" the gate.
 
+#### 2026-08-11 (early) — #1305 lands before the canary sweep, after six rounds of my own defects
+
+**MERGED + DEPLOYED [#1305](https://github.com/prashantm912/artha-yantra-2/pull/1305) @ `9af81e6b`.**
+The CA rebuild's cagg refresh was sizing windows in DAYS: the shipped 100-day span decompresses
+**9,543,253 tuples against a 5,000,000 ceiling — 190.9% over, deterministically**, which is what put
+13 symbols at `REFRESH_FAILED`. Windows are now sized in TUPLES from the current chunk load, replanned
+before every CALL.
+
+⚠️ **SEQUENCING CATCH, and it is the reusable part.** I armed the CA canary hours BEFORE this landed.
+A detected ITC/HDFCBANK would have staged, verified and swapped its base correctly — then failed at
+the very next step, for a reason already fixed in an open PR. Not data-destructive (#1297 records
+`REFRESH_FAILED` and the checkpoint scan resumes it), but the canary's first night would have proven
+nothing about the step that actually breaks. **When arming a multi-stage pipeline, check EVERY stage
+for an open fix, not just the one the arming is about.** Owner chose to race it in; it landed with
+~9 hours of margin. Deployed jar fingerprinted via `CandleRepository$ChunkLoad.class`; 13/13 healthy,
+0 ERRORs, canary still armed for the 16:30 IST sweep.
+
+**N52 · Six review rounds, and FIVE of the findings were defects I introduced while fixing the
+previous one.** The original capability was sound; everything after round 1 was self-inflicted:
+
+| Round | Finding | Whose |
+|---|---|---|
+| 1 | one chunk-load snapshot sized every CALL | original |
+| 2 | replanning advanced the cursor to the window's EXTENDED end, so CALLs merely **abutted** and a straddling bucket landed in neither | **mine, fixing 1** |
+| 3 | the regression test re-implemented the loop inside itself, so reverting production left it GREEN | **mine, fixing 2** |
+| 4 | the replacement guard accepted a one-second overlap and an abandoned padded tail | **mine, fixing 3** |
+| 5 | the exact-overlap assertion derived its expectation from the operand under test, so a regression to `0` would pass | **mine, fixing 4** |
+
+With #1333's five rounds (N49), that is **ten rounds across two PRs in one session where the
+reviewer's finding was my previous fix.** Not bad luck — see N49 for the shared mechanism.
+
+**N53 · ⚠️ A CORRECTION TO MY OWN COMMIT MESSAGE, which is why this row exists.** Round 3's commit
+claimed the `to - overlap` form abandoned the tail. **It did not.** That reading came from my own test
+asserting exact equality against the UNPADDED `[FROM, TO]` while `refresh()` widens the range ±8 days
+before planning — so the test was red for a reason that was not a bug, and **I changed production on
+the strength of it.** The change is kept (it removes a duplicated calculation the planner already
+owns) but it fixed nothing. Two production comments still told the disproven story until a later round
+caught them: **a stale comment asserting a CAUSE is worse than no comment**, because the next reader
+inherits a defect that never existed and reasons from it.
+
+**N54 · THE FOURTH RED-PROOF SHAPE: a proof that reddens or greens against code you never changed.**
+Four broken proofs this session, one shared cause — **the mutation never landed and nothing checked
+that it had.** Mutating the TEST's copy of a re-implemented loop; a replace anchor that matched
+nothing (I assumed an enum arg was a constant; it was a literal `1`); a proof driving a method that
+cannot observe the field under test; and `-Dtest='A+B'` reporting 12 passes off a STALE surefire
+report for a class with 14. **A red-proof makes TWO claims — (1) the code changed, (2) the test
+noticed — and only (2) is usually tested.** Assert the mutation before running: `assert old in s`
+before the replace, then grep the line back. Full write-up: memory `red-proofs-are-often-broken`.
+
 #### 2026-08-11 (overnight closeout) — deployed, and the CA canary is ARMED
 
 **DEPLOYED + PROBED.** `flyway-init` force-recreated; **V055 → V056 → V057 applied in order**, each

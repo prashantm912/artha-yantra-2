@@ -540,7 +540,7 @@ public class SwingBatchEngine {
         if (coverage.notProvenSound()) {
           coverageRefused.add(c.symbol());
           recordCoverageRow(
-              doctrine, effectSession, c.symbol(), coverageReason(c.symbol()));
+              doctrine, effectSession, c.symbol(), coverageReason(c.symbol(), coverage));
           log.warn(
               "{} swing entry: {} refused for {} — {}",
               doctrine.batchName(), c.symbol(), strat.slug(), coverage.describe());
@@ -1139,6 +1139,16 @@ public class SwingBatchEngine {
     } catch (RuntimeException e) {
       log.warn("{} swing coverage alert failed: {}", doctrine.batchName(), e.getMessage());
     }
+  }
+
+  /**
+   * ⚠️ Two DIFFERENT refusals, and reporting them as one misleads the operator. A calendar-horizon
+   * failure or a caught probe exception establishes NO missing share at all — calling that
+   * "incomplete coverage" sends someone looking for a data gap that was never measured. Cross-vendor
+   * review, 2026-08-10.
+   */
+  private static String coverageReason(String symbol, SwingCoverageProbe.Coverage coverage) {
+    return (coverage.determinable() ? "INCOMPLETE_COVERAGE:" : "UNDETERMINABLE_COVERAGE:") + symbol;
   }
 
   private static String coverageReason(String symbol) {

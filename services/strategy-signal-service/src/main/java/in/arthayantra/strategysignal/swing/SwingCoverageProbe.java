@@ -220,8 +220,21 @@ public final class SwingCoverageProbe {
   }
 
   /**
-   * Extra bars probed beyond the declared indicator depth: one for the "current bar plus prior D"
-   * read convention, one for a crossover's previous operand. See {@link #entryLookbackBars} for why
+   * Extra bars probed beyond the declared indicator depth.
+   *
+   * <p>⚠️ CURRENTLY ZERO, and that is a RETREAT, not a design. It was 2 — one bar for the
+   * "current bar plus prior D" read convention, one for a crossover's previous operand — which
+   * is the right direction for the footprint. But materiality divides by {@code windowSessions},
+   * the span actually probed, so widening the probe widened the denominator and a single hole in
+   * a depth-20 strategy stopped being material: 1 × 22 > 23 is false. That silently REOPENED the
+   * one-hole case the 21 → 22 denominator recalibration was made to refuse — two correct-looking
+   * changes composing into a defect, measured by cross-vendor review rather than by me.
+   *
+   * <p>Zero restores a KNOWN state: the footprint gap stays open and the materiality gate stays
+   * calibrated, rather than trading a documented gap for an undocumented loosening. Closing it
+   * properly means reconciling the probed footprint with the materiality fraction — the fraction
+   * must be taken over the DECLARED depth even when the probe reads wider — plus a test that
+   * invokes the production depth rather than a hand-passed one. That is the open work. See {@link #entryLookbackBars} for why
    * this is a flat widening rather than a per-indicator warmup model.
    *
    * <p>Package-visible so the depth ratchet can assert {@code declared + DEPTH_SLACK} instead of
@@ -231,7 +244,7 @@ public final class SwingCoverageProbe {
    * so under-probing there costs an alert rather than a wrong trade, and widening it would change
    * the exit alert population for no decision benefit.
    */
-  static final int DEPTH_SLACK = 2;
+  static final int DEPTH_SLACK = 0;
 
   /** A reading that makes no claim — the safe default for every uncertain input. */
   public static Coverage undeterminable(int lookbackBars) {

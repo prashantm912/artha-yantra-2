@@ -844,7 +844,7 @@ public class CandleRepository {
     private final transient String interval;
     private final transient int windowsCommitted;
 
-    PartialSwapException(String interval, int windowsCommitted, Throwable cause) {
+    public PartialSwapException(String interval, int windowsCommitted, Throwable cause) {
       super(
           "swap of " + interval + " failed after " + windowsCommitted + " window(s) had committed",
           cause);

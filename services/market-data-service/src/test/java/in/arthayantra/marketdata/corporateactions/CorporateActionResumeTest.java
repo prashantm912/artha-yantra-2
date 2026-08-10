@@ -258,6 +258,55 @@ class CorporateActionResumeTest {
   }
 
   @Test
+  void aSwapFailingPARTWAYThroughTheFirstIntervalIsAlsoAPartialSwap() {
+    // Round-6 Critical. swapStaged commits per six-month WINDOW, so a failure after some windows
+    // have committed leaves the 1m series internally split between adjusted and unadjusted ranges.
+    // Control never reaches swappedIntervals.add("1m") on that path, so before PartialSwapException
+    // the list was EMPTY and this recorded ordinary FAILED — and the cooldown then held that split
+    // series for the full window. The classification, not the throw, is what this pins.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    doThrow(
+            new CandleRepository.PartialSwapException(
+                "1m", 3, new RuntimeException("statement timeout")))
+        .when(candles)
+        .swapStaged("NSE", "TCS", "1m");
+
+    assertThat(job.sweepNow()).containsExactly(id);
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "PARTIAL_SWAP"));
+
+    verify(candles, never()).swapStaged("NSE", "TCS", "1d");
+    verify(ntfy).send(contains("PARTIAL_SWAP"), eq("urgent"), contains("1m(partial)"));
+  }
+
+  @Test
+  void theSecondIntervalFailingPartwayIsStillPartialEvenThoughTwoIntervalsAreListed() {
+    // The subtle one, and the reason the predicate is not a bare size check: 1m swapped CLEANLY and
+    // 1d failed PARTWAY yields TWO entries — ["1m", "1d(partial)"] — so `size() < 2` alone would
+    // have classified the WORST case (both intervals touched, one half-replaced) as an ordinary
+    // FAILED and handed it to the cooldown.
+    UUID id = armDetection();
+    when(events.statusOf(id)).thenReturn(Optional.of("REBACKFILL_RUNNING"));
+    doThrow(
+            new CandleRepository.PartialSwapException(
+                "1d", 1, new RuntimeException("decompression cap")))
+        .when(candles)
+        .swapStaged("NSE", "TCS", "1d");
+
+    assertThat(job.sweepNow()).containsExactly(id);
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () -> verify(events).updateStatusIf(id, "REBACKFILL_RUNNING", "PARTIAL_SWAP"));
+
+    verify(candles).swapStaged("NSE", "TCS", "1m"); // the clean one did land
+    verify(ntfy).send(contains("PARTIAL_SWAP"), eq("urgent"), contains("1d(partial)"));
+  }
+
+  @Test
   void aPartialSwapIsRetriedOnTheNextSweepNotHeldByTheCooldown() {
     // The CONSEQUENCE of the swap-order fix, executed rather than argued.
     //

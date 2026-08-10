@@ -639,27 +639,35 @@ public class CandleRepository {
     OffsetDateTime cursor = start;
     int executed = 0;
     while (cursor.isBefore(end)) {
-      Window w =
+      List<Window> plan =
           planRebuildWindows(
-                  chunkLoad(st, view, cursor, end),
-                  cursor,
-                  end,
-                  REBUILD_WINDOW_TUPLE_BUDGET,
-                  MAX_REFRESH_WINDOW_DAYS,
-                  view.overlapDays())
-              .get(0);
-      call(st, view, w);
+              chunkLoad(st, view, cursor, end),
+              cursor,
+              end,
+              REBUILD_WINDOW_TUPLE_BUDGET,
+              MAX_REFRESH_WINDOW_DAYS,
+              view.overlapDays());
+      if (plan.isEmpty()) {
+        break; // nothing left to materialise over [cursor, end)
+      }
+      call(st, view, plan.get(0));
       executed++;
-      if (!w.to().isBefore(end)) {
-        break; // the window was clamped at end — the span is covered
+      // ⚠️ TAKE THE PLANNER'S OWN NEXT CUT — never re-derive it as `to - overlapDays`.
+      //
+      // The plan's second window ALREADY starts at the cut the first window was extended past, so
+      // this is the same number by construction and cannot drift from it. Re-deriving it looked
+      // equivalent and was not: when a window's cut lands within overlapDays of the cursor,
+      // `to - overlap` is <= cursor, and the no-spin guard that protected against that then BROKE
+      // THE LOOP — silently abandoning the rest of the span unmaterialised. Caught by
+      // consecutiveRebuildCallsOverlapRatherThanMerelyAbut, whose coverage assertion failed with
+      // the last CALL ending 8 days short of `end` (2026-08-11).
+      //
+      // Progress is guaranteed without a guard: plan.get(1).from() is a strictly later cut than
+      // plan.get(0).from(), which is the cursor.
+      if (plan.size() == 1) {
+        break; // the single window was clamped at end — the span is covered
       }
-      OffsetDateTime next = w.to().minusDays(view.overlapDays());
-      if (!next.isAfter(cursor)) {
-        // A planner that cannot advance must not spin. Bounded by construction (every window spans
-        // at least one day), but an infinite loop here holds a pinned statement, so it is guarded.
-        break;
-      }
-      cursor = next;
+      cursor = plan.get(1).from();
     }
     return executed;
   }

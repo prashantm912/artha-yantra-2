@@ -13,6 +13,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -188,6 +189,68 @@ class CandleRepositoryRefreshDecompressionLimitTest {
         .as("a 5.5M-tuple chunk must be split by the TUPLE budget, not just the 92-day span cap")
         .hasSizeGreaterThan(EXPECTED_CALLS / 5);
     assertThat(calls).allMatch(s -> s.contains("candles_5m"));
+  }
+
+  /**
+   * ⚠️ CONSECUTIVE CALLs MUST OVERLAP — asserted from the CALL boundaries the PRODUCTION loop
+   * actually emitted, not from a re-implementation of it.
+   *
+   * <p>{@code windowsFrom} extends every window PAST its cut and the next window is meant to begin
+   * at the CUT. The first replanning loop advanced the cursor to the extended end instead, so
+   * consecutive CALLs merely ABUTTED and a cagg bucket straddling that boundary was fully contained
+   * in NEITHER — silently unmaterialized, with no error and no failed refresh.
+   *
+   * <p>⚠️ AND THE FIRST TEST I WROTE FOR THIS COULD NOT HAVE CAUGHT IT. It rebuilt the loop inside
+   * the test with its own correct {@code minusDays(overlapDays)}, so reverting production's cursor
+   * arithmetic left it GREEN — a red-proof that mutated the test's copy rather than the code under
+   * test, and therefore proved only that the test agreed with itself. Cross-vendor review caught
+   * that (2026-08-11). This version parses the boundaries out of the recorded CALL text, so the only
+   * arithmetic in play is production's.
+   */
+  @Test
+  void consecutiveRebuildCallsOverlapRatherThanMerelyAbut() throws SQLException {
+    // Dense enough that the tuple budget — not the day cap — decides, so several windows are
+    // planned and there are real interior boundaries to inspect.
+    RecordingDataSource ds =
+        new RecordingDataSource(sql -> false, List.of(new long[] {0, 70, 5_558_488}));
+
+    ds.repository()
+        .refreshDerivedAggregatesForRebuild(
+            FROM, TO, List.of(CandleRepository.DerivedAggregate.CANDLES_5M));
+
+    List<String> calls =
+        ds.onlyConnection().sql.stream().filter(s -> s.startsWith(CALL_PREFIX)).toList();
+    assertThat(calls).as("need interior boundaries to inspect").hasSizeGreaterThan(2);
+
+    List<Instant[]> bounds = calls.stream().map(CandleRepositoryRefreshDecompressionLimitTest::boundsOf).toList();
+    for (int i = 1; i < bounds.size(); i++) {
+      assertThat(bounds.get(i)[0])
+          .as(
+              "CALL %d must START strictly BEFORE CALL %d ended — abutting loses the straddling"
+                  + " bucket (call %d: %s, call %d: %s)",
+              i, i - 1, i - 1, calls.get(i - 1), i, calls.get(i))
+          .isBefore(bounds.get(i - 1)[1]);
+    }
+    // …and the union still COVERS [FROM, TO], so overlapping did not cost coverage.
+    //
+    // ⚠️ Asserted as containment, NOT equality. refresh() pads the requested range by ±8 days before
+    // planning, so the first CALL legitimately starts BEFORE FROM and the last ends AFTER TO. My
+    // first draft asserted exact equality against FROM/TO, went red on the pad, and I read that as
+    // production abandoning the tail — then changed production on the strength of it. The code was
+    // right and the assertion was wrong. Containment is the property that actually matters here.
+    assertThat(bounds.get(0)[0]).isBeforeOrEqualTo(FROM.toInstant());
+    assertThat(bounds.get(bounds.size() - 1)[1]).isAfterOrEqualTo(TO.toInstant());
+  }
+
+  /** Pulls the two timestamptz literals out of a recorded {@code CALL refresh_continuous_aggregate}. */
+  private static Instant[] boundsOf(String call) {
+    java.util.regex.Matcher m =
+        java.util.regex.Pattern.compile("'([^']+)'::timestamptz, '([^']+)'::timestamptz")
+            .matcher(call);
+    if (!m.find()) {
+      throw new IllegalArgumentException("not a refresh CALL: " + call);
+    }
+    return new Instant[] {Instant.parse(m.group(1)), Instant.parse(m.group(2))};
   }
 
   @Test

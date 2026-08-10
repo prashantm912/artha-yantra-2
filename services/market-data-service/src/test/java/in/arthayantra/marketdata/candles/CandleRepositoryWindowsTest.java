@@ -6,7 +6,6 @@ import in.arthayantra.marketdata.candles.CandleRepository.Window;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.Period;
-import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -19,63 +18,6 @@ class CandleRepositoryWindowsTest {
 
   private static OffsetDateTime t(String iso) {
     return OffsetDateTime.parse(iso);
-  }
-
-  /**
-   * ⚠️ The EXECUTION SEQUENCE, not just the plan: consecutive CALLs must OVERLAP, never merely abut.
-   *
-   * <p>Simulates the replanning loop the way {@code refreshReplanning} walks it — plan from the
-   * remaining span, take the first window, advance the cursor — and asserts every step lands at
-   * {@code previous.to - overlap}. Advancing to {@code previous.to} instead makes the CALLs abut,
-   * and a cagg bucket straddling that boundary is fully contained in NEITHER and silently stays
-   * unmaterialized.
-   *
-   * <p>This test exists because the first version of the replanning loop did exactly that. The
-   * staleness fix it was making was correct; the cursor arithmetic it introduced was not, and every
-   * existing test still passed — they all check the PLAN, and the defect was in how the plan was
-   * consumed. Cross-vendor review caught it (2026-08-11).
-   */
-  @Test
-  void replanningAdvancesByToMinusOverlapSoConsecutiveCallsStillOverlap() {
-    OffsetDateTime start = t("2024-01-01T00:00:00Z");
-    OffsetDateTime end = start.plusDays(400);
-    int overlapDays = 8;
-    // A uniform, dense load so the planner is genuinely tuple-bound rather than day-bound.
-    List<CandleRepository.ChunkLoad> load = new ArrayList<>();
-    for (int d = 0; d < 400; d += 10) {
-      load.add(
-          new CandleRepository.ChunkLoad(
-              start.plusDays(d), start.plusDays(d + 10), 1_000_000L));
-    }
-
-    List<Window> executed = new ArrayList<>();
-    OffsetDateTime cursor = start;
-    while (cursor.isBefore(end) && executed.size() < 200) {
-      Window w =
-          CandleRepository.planRebuildWindows(load, cursor, end, 3_000_000L, 92, overlapDays).get(0);
-      executed.add(w);
-      if (!w.to().isBefore(end)) {
-        break;
-      }
-      OffsetDateTime next = w.to().minusDays(overlapDays);
-      if (!next.isAfter(cursor)) {
-        break;
-      }
-      cursor = next;
-    }
-
-    assertThat(executed).hasSizeGreaterThan(2); // otherwise the boundary is never exercised
-    assertThat(executed.get(0).from()).isEqualTo(start);
-    assertThat(executed.get(executed.size() - 1).to()).isEqualTo(end);
-    for (int i = 1; i < executed.size(); i++) {
-      assertThat(executed.get(i).from())
-          .as("window %d must START %d days BEFORE window %d ends — abutting loses the straddler",
-              i, overlapDays, i - 1)
-          .isEqualTo(executed.get(i - 1).to().minusDays(overlapDays));
-      assertThat(executed.get(i).from())
-          .as("and that means it starts strictly before the previous window ended")
-          .isBefore(executed.get(i - 1).to());
-    }
   }
 
   // ---- refreshWindows: overlapping, so refresh_continuous_aggregate never drops a straddling bucket

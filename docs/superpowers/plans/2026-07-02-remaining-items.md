@@ -1664,6 +1664,44 @@ where each book sits, and only one of the two is auditable.** That is exactly wh
 puts "make the silent refusal auditable" FIRST. Same class as the errors N38/N40 corrected: a
 difference observed in the logs read as a difference in the mechanism.
 
+#### 2026-08-10 — FULL-SESSION PLATFORM OUTAGE (host power failure), plus three merged PRs
+
+**N45 · ⚠️ 2026-08-10 (Mon) was a trading day with ZERO capture — host down `08:30:17` → `18:47:34`
+IST. Owner-reported cause: electricity failure. Nothing below is a software defect.** Full forensics
+in [`docs/signal-analysis/2026-08-10-session-findings.md`](../../signal-analysis/2026-08-10-session-findings.md)
+([`#1331`](https://github.com/prashantm912/artha-yantra-2/pull/1331)); this row exists so the ledger
+itself carries the date, because a future enumeration that reads only §0 would otherwise re-open it.
+
+**This is the THIRD full-session outage** (after 2026-07-08 and 07-09) and the first since the shadow
+book / G16 / G12 / CAS / freeze telemetry existed. Host-boot shape: `restarts=2`, containers NOT
+recreated, logs intact. Boot catch-up recovered the EOD/swing lane by 18:51 (bhavcopy + FII/participant
++ MANAS/MINERVINI screens + canaries via `BOOT_CATCHUP`; reload 38/0/0; the morning Kite token was
+still valid). Zero scalper positions were open, so nothing was left unmanaged.
+
+**Lost permanently:** the day's OI-snapshot capture (live-only — historical OI is read-time derived and
+LIVE/today never derives), the whole entry-gate evidence base (zero rejections, zero eval buckets), and
+the §2.2 Mon-08-10 NIFTY strike-pick discriminator.
+
+⚠️ **TWO POST-BOOT PROVENANCE ARTIFACTS THAT READ AS A HEALTHY SESSION.** Both are the reason this
+needs a ledger row rather than only a findings doc — a liveness check that counts rows sees a normal
+day:
+1. **A `TICK_AGG` 1m bar bucketed `15:29`, one per subscribed symbol, WRITTEN at `18:47:45`.** The
+   post-boot WS connect emits a snapshot tick and it lands stamped at the session's last minute.
+   Dozens of instruments carry exactly one. **Nothing was captured** — the bucket lies, the write-time
+   tells the truth.
+2. **REST backfill reports a full `375/375`-minute session**, because boot catch-up re-fetched the day
+   from Kite historical (`source = KITE`, 09:15–15:28). Coverage looks complete; none was observed live.
+
+*(I hit artifact 1 myself while writing this: I read the 15:29 band as evidence live aggregation was
+running at 15:29 and floated an outage starting there instead of 08:30. **Infer liveness from the
+WRITE time, never the bucket.** `README §3.35` now carries the no-session-vs-no-capture discrimination.)*
+
+**Standing rule this establishes:** before investigating any "feed dead / engine emitted nothing /
+batch missed" report, check the date against the outage register first. An outage takes out every
+layer at once — empty `signal_rejections`, flat `ay_signal_eval_outcome_total`, absent
+`options_chain_snapshots`, missing `ingest_runs` — and a real defect almost never does. An in-stack
+canary cannot observe a down stack, so there is no alert to find.
+
 #### 2026-08-10 — three merged; and the SAME defect shape turned up in three unrelated PRs
 
 **N44 · The shape: an armed gate whose operand cannot represent the failure it guards.** Three

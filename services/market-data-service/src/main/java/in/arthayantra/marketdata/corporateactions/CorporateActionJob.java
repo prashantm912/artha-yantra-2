@@ -458,12 +458,21 @@ public class CorporateActionJob {
       // DB error the cooldown should skip) needs a recorded status that does not exist yet, so it
       // is a follow-up, not something to infer at read time. Pinned by
       // aPartialSwapFailureIsHeldByTheCooldownNotRetriedNextSweep.
-      candles.swapStaged(exchange, symbol, "1m");
-      swappedIntervals.add("1m");
-      reportUnadjustedTail(equity, "1m");
-      candles.swapStaged(exchange, symbol, "1d");
-      swappedIntervals.add("1d");
-      reportUnadjustedTail(equity, "1d");
+      // Each swap commits per six-month WINDOW, so a failure partway through an interval leaves
+      // durable windows behind. PartialSwapException is how that progress reaches the caller — the
+      // interval never gets added to swappedIntervals on that path, so without it a half-replaced
+      // series is indistinguishable from one where nothing landed.
+      try {
+        candles.swapStaged(exchange, symbol, "1m");
+        swappedIntervals.add("1m");
+        reportUnadjustedTail(equity, "1m");
+        candles.swapStaged(exchange, symbol, "1d");
+        swappedIntervals.add("1d");
+        reportUnadjustedTail(equity, "1d");
+      } catch (CandleRepository.PartialSwapException partial) {
+        swappedIntervals.add(partial.interval() + PARTIAL_SUFFIX);
+        throw partial;
+      }
     } finally {
       candles.clearStaging(exchange, symbol);
     }
@@ -660,6 +669,9 @@ public class CorporateActionJob {
    * attempt was running, and downgrading {@code REFRESH_ABANDONED} to {@code FAILED} on the way out
    * would both destroy that verdict and re-classify the event into the wrong failure class.
    */
+  /** Marks an interval whose swap left durable windows behind without finishing. */
+  private static final String PARTIAL_SUFFIX = "(partial)";
+
   private void recordFailure(
       UUID id, Instrument equity, Exception e, List<String> swappedIntervals) {
     String recorded = events.statusOf(id).orElse("");
@@ -679,8 +691,14 @@ public class CorporateActionJob {
     // PARTIAL_SWAP is outside the cooldown's match set, so the next sweep re-detects (1d is still
     // unadjusted, so detection DOES re-fire) and re-stages from scratch. Fresh restage, not reuse:
     // retained staging is unsafe here because verifyStagedRebuild validates coverage only.
+    // Partial = ANY durable progress that is not a clean full swap of BOTH intervals. Note the
+    // size<2 test alone is NOT enough: 1m fully swapped plus 1d failing PARTWAY yields two entries
+    // and is still a half-replaced series, which is why the suffix is checked too.
     boolean partialSwap =
-        swappedIntervals != null && !swappedIntervals.isEmpty() && swappedIntervals.size() < 2;
+        swappedIntervals != null
+            && !swappedIntervals.isEmpty()
+            && (swappedIntervals.size() < 2
+                || swappedIntervals.stream().anyMatch(i -> i.endsWith(PARTIAL_SUFFIX)));
     String next = baseCommitted ? "REFRESH_FAILED" : partialSwap ? "PARTIAL_SWAP" : "FAILED";
     if (!events.updateStatusIf(id, recorded, next)) {
       log.warn(

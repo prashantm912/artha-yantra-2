@@ -806,16 +806,61 @@ public class CandleRepository {
       return 0; // nothing staged for this interval
     }
     int inserted = 0;
+    int windowsCommitted = 0;
     for (Window w : purgeWindows(bounds.from(), bounds.to(), Period.ofMonths(PURGE_WINDOW_MONTHS))) {
       Timestamp from = Timestamp.from(w.from().toInstant());
       Timestamp to = Timestamp.from(w.to().toInstant());
-      inserted +=
-          replaceWindowAtomically(
-              exchange, tradingsymbol, interval, from, to);
+      try {
+        inserted += replaceWindowAtomically(exchange, tradingsymbol, interval, from, to);
+        windowsCommitted++;
+      } catch (RuntimeException failure) {
+        // ⚠️ A failure PARTWAY THROUGH an interval is still progress, and the caller cannot see it
+        // any other way (cross-vendor review 2026-08-10). Each window commits independently, so
+        // windows before this one are DURABLE: the live series is now internally split between
+        // adjusted and unadjusted windows. Reported as a plain failure the caller would record
+        // ordinary FAILED, and the cooldown would hold that split series for seven days — the exact
+        // hole V056 closes for a whole-interval partial. The caller needs "any window committed",
+        // not "the interval finished", so the exception carries it.
+        if (windowsCommitted > 0) {
+          throw new PartialSwapException(interval, windowsCommitted, failure);
+        }
+        throw failure;
+      }
     }
     // fetched_at is stamped now() rather than copied: the Stage-D dataHash reads it to flag
     // pre-event backtest runs as not-like-for-like, which is exactly what a rebuild must trigger.
     return inserted;
+  }
+
+  /**
+   * Thrown when an interval swap fails AFTER at least one six-month window has durably committed.
+   *
+   * <p>It exists so the caller can distinguish "nothing landed" from "the series is now half
+   * replaced". Those need opposite recoveries: the first is an ordinary failure the cooldown should
+   * bound, the second must be re-attempted promptly because the live series is internally
+   * inconsistent until it is.
+   */
+  public static class PartialSwapException extends RuntimeException {
+    private final transient String interval;
+    private final transient int windowsCommitted;
+
+    PartialSwapException(String interval, int windowsCommitted, Throwable cause) {
+      super(
+          "swap of " + interval + " failed after " + windowsCommitted + " window(s) had committed",
+          cause);
+      this.interval = interval;
+      this.windowsCommitted = windowsCommitted;
+    }
+
+    /** The interval left half-replaced. */
+    public String interval() {
+      return interval;
+    }
+
+    /** How many windows are already durable. */
+    public int windowsCommitted() {
+      return windowsCommitted;
+    }
   }
 
   /** Deletes and refills one window in one commit, so readers never observe an empty window. */

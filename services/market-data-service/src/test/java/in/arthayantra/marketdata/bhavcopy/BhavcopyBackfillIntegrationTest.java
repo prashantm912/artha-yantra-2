@@ -1,7 +1,12 @@
 package in.arthayantra.marketdata.bhavcopy;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import in.arthayantra.marketdata.bse.BseBhavcopyFetcher;
 import in.arthayantra.marketdata.bse.BseCorporateActionFetcher;
 import in.arthayantra.marketdata.bse.BseEodBhavcopyRepository;
@@ -11,8 +16,10 @@ import in.arthayantra.marketdata.candles.EodCorporateActionRepository;
 import in.arthayantra.marketdata.candles.EquitySplitBonusAdjuster;
 import in.arthayantra.marketdata.dividends.DividendRepository;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher;
+import in.arthayantra.marketdata.nse.LiveBhavcopyFetcher;
 import in.arthayantra.marketdata.nse.NseCorporateActionFetcher;
 import in.arthayantra.marketdata.nse.NseEodBhavcopyRepository;
+import in.arthayantra.marketdata.nse.NseHttpClient;
 import in.arthayantra.marketdata.testsupport.MarketDataIntegrationTestBase;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -21,8 +28,12 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -30,6 +41,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.client.RestClient;
 
 /**
  * End-to-end EOD bhavcopy backfill against the real Timescale container: watermark catch-up,
@@ -64,6 +76,20 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
   @Autowired EquitySplitBonusAdjuster adjuster;
   @Autowired in.arthayantra.marketdata.ingest.IngestRunLedger ledger;
   @Autowired JdbcTemplate jdbc;
+
+  /** Stubs the NSE archive host for the two tests that drive the REAL {@link LiveBhavcopyFetcher}. */
+  private static WireMockServer wireMock;
+
+  @BeforeAll
+  static void startWireMock() {
+    wireMock = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
+    wireMock.start();
+  }
+
+  @AfterAll
+  static void stopWireMock() {
+    wireMock.stop();
+  }
 
   @Test
   @Order(1)
@@ -347,6 +373,82 @@ class BhavcopyBackfillIntegrationTest extends MarketDataIntegrationTestBase {
             jdbc.queryForObject(
                 "SELECT count(*) FROM candles WHERE tradingsymbol LIKE 'DIVIT%'", Long.class))
         .isZero();
+  }
+
+  /**
+   * The catch-up driven by the REAL {@link LiveBhavcopyFetcher} against a stubbed archive that
+   * answers 200 with the PREVIOUS trading day's file — exactly what NSE does under most holiday
+   * URLs. Nothing may be written: storing H-1's rows leaves the requested day H missing forever, so
+   * the anti-join re-probes it (and re-stamps H-1's {@code fetched_at}) on every subsequent run.
+   */
+  @Test
+  @Order(7)
+  void misdatedArchivePayloadIsRefusedAndWritesNothing() {
+    wireMock.resetAll();
+    jdbc.update("DELETE FROM nse_eod_bhavcopy"); // deterministic watermark (same reset as @Order(2))
+    jdbc.update("DELETE FROM candles WHERE tradingsymbol IN ('MISDT', 'WELLDT')");
+    LocalDate requested = LocalDate.of(2026, 6, 18); // 'today' under the fixed clock
+    LocalDate served = LocalDate.of(2026, 6, 17); // what the archive actually hands back
+
+    stubArchive(requested, archiveCsv("MISDT", served));
+
+    BhavcopyBackfillService.ExchangeResult result = liveNseBackfill().runNse();
+
+    assertThat(result.days()).isZero();
+    assertThat(result.bhavRows()).isZero();
+    assertThat(rawNseCount("MISDT")).isZero();
+    assertThat(close("NSE", "MISDT", served)).isNull();
+    assertThat(nseRepo.maxTradeDate()).isNull(); // the shadow day was never written under H-1
+  }
+
+  /** The guard must refuse mis-dated payloads WITHOUT refusing correctly-dated ones. */
+  @Test
+  @Order(8)
+  void correctlyDatedArchivePayloadStillLands() {
+    wireMock.resetAll();
+    jdbc.update("DELETE FROM nse_eod_bhavcopy");
+    jdbc.update("DELETE FROM candles WHERE tradingsymbol IN ('MISDT', 'WELLDT')");
+    LocalDate requested = LocalDate.of(2026, 6, 18);
+
+    stubArchive(requested, archiveCsv("WELLDT", requested));
+
+    BhavcopyBackfillService.ExchangeResult result = liveNseBackfill().runNse();
+
+    assertThat(result.days()).isEqualTo(1);
+    assertThat(result.bhavRows()).isEqualTo(1);
+    assertThat(rawNseCount("WELLDT")).isEqualTo(1);
+    assertThat(nseRepo.maxTradeDate()).isEqualTo(requested);
+    assertThat(close("NSE", "WELLDT", requested)).isEqualByComparingTo("104");
+  }
+
+  /** The backfill wired to the REAL NSE fetcher pointed at WireMock (BSE/CA sides stay empty). */
+  private BhavcopyBackfillService liveNseBackfill() {
+    return new BhavcopyBackfillService(
+        new LiveBhavcopyFetcher(
+            new NseHttpClient(RestClient.builder(), wireMock.baseUrl()), wireMock.baseUrl(), CLOCK),
+        nseRepo, emptyBse(), bseRepo, emptyCa(), emptyBseCa(), caRepo, dividendRepo, candles,
+        CLOCK, event -> {}, noopNtfy(), ledger, "EQ,BE", 10, 90, 7, 420);
+  }
+
+  /** Only this date is published; every other archive URL 404s, as on a real non-trading day. */
+  private static void stubArchive(LocalDate urlDate, String csv) {
+    wireMock.stubFor(
+        get(urlPathEqualTo(
+                "/products/content/sec_bhavdata_full_"
+                    + urlDate.format(DateTimeFormatter.ofPattern("ddMMyyyy"))
+                    + ".csv"))
+            .willReturn(aResponse().withStatus(200).withBody(csv)));
+  }
+
+  /** One EQ row in the real sec_bhavdata_full shape (leading-space cells), close = 104. */
+  private static String archiveCsv(String symbol, LocalDate rowDate) {
+    return "SYMBOL, SERIES, DATE1, PREV_CLOSE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, LAST_PRICE,"
+        + " CLOSE_PRICE, AVG_PRICE, TTL_TRD_QNTY, TURNOVER_LACS, NO_OF_TRADES, DELIV_QTY,"
+        + " DELIV_PER\n"
+        + symbol
+        + ", EQ, "
+        + rowDate.format(DateTimeFormatter.ofPattern("dd-MMM-yyyy", Locale.ENGLISH))
+        + ", 100.00, 101.00, 105.00, 99.00, 103.00, 104.00, 102.00, 1000, 10.00, 10, 500, 50.00\n";
   }
 
   private static BhavcopyFetcher emptyNse() {

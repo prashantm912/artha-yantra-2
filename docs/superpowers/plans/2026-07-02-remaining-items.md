@@ -1045,8 +1045,8 @@ enumeration recipe at the top of §0 still governs.
 | # | decision | why it is yours, not the Architect's |
 |---|---|---|
 | **N23-A** | Re-base the F9 heat cap on premium outlay, **or** accept + re-label it a short-option control | It changes live behaviour: on a ₹1.5 L book a real 60% cap **will start refusing entries**. Today it measures `spanMargin`, structurally `0.00` on a long-only book, so the gate cannot fire. Confirmed twice, once on a *successful* margin call |
-| **N26** | Free swing capacity. **Cheapest lever first: clear the 3 phantom anchors (N37).** Then age out stale positions and/or re-size the 6% rail | **PROVEN, both books, and the diagnosis is complete.** manas-arora: **N36** — one close freed a slot, the next batch admitted exactly one entry, then refused five more (capacity-bound, not signal-bound). minervini: **N37** — 12 open positions but **15 TAKEN anchors** against a cap of 12, because three 2026-07-03 anchors (`SENORES`/`TMB`/`INDUSINDBK`) hold slots with no position behind them and **can never self-resolve**. So minervini needs **four** closes to admit one; manas-arora needed **one**. Clearing three stale rows restores three slots — far cheaper than re-sizing. Still owner-tier (mutates signal status on a money-adjacent path; the correct terminal status is a doctrine call). M40 (ledger #37 task) is manas-arora's rail, HOLD with its PR open |
-| **T21** | Premium exits on the 30 bracket-less scalpers — accept indicator-exit-only, or add a `premium_pct` band | Decision pack **DELIVERED 2026-07-25** (§0a row B11, `2026-07-25-weekly-bug-queue.md`) with **rec = (b) add bands**. Awaiting the call ever since; it is not blocked on anything |
+| **N26** | Free swing capacity — age out stale positions and/or re-size the caps. **There is no cheap phantom-anchor shortcut; see N38.** | **Diagnosis complete and SIMPLER than N37 claimed.** BOTH books are plainly capacity-bound on REAL open positions: the `max_open` gate is `positions.openCount(book) >= cap` (`RiskService:412-415`), so minervini sits at **12/12** and manas-arora was at **6/6**. **Each needs exactly ONE close to admit ONE entry** — manas-arora demonstrated it live (N36: one close → one admission → five refusals). ⚠️ **N37's "minervini needs four closes" and "clearing three rows frees three slots" are RETRACTED (N38)** — the 3 phantom anchors are measurement noise in `open_at_start`, they hold no slots, and two of their siblings already self-resolved. minervini's refusal is silent because the max-open rail **writes no audit by design**, not because of phantoms. M40 (ledger #37 task) is manas-arora's 6% rail, HOLD with its PR open |
+| ~~**T21**~~ | ~~Premium exits on the 30 bracket-less scalpers~~ | ⚠️ **THIS ROW WAS FALSE AND IT CAUSED A REAL FALSE DISPATCH ON 2026-08-08.** It said the decision pack was "awaiting the call ever since". **T21 SHIPPED THE SAME NIGHT the pack was written** — [#990](https://github.com/prashantm912/artha-yantra-2/pull/990) `64f9caaa`, closed out in [#994](https://github.com/prashantm912/artha-yantra-2/pull/994), republished 2026-07-25 ~23:00 IST. **Verified 2026-08-08: 63 of 63 scalper YAMLs carry `take_profit premium_pct 35` + `stop_loss premium_pct 25`; `grep -L premium_pct` returns ZERO files.** The owner was shown this row, said "build it", and it was already built — the item went to a planner before anyone re-checked. **How it happened, because the mechanism is the lesson:** I lifted T21 from the weekly bug queue's closing bullets (a SOURCE doc) and promoted it to the triage without reading the ledger's own **D1** row, which said DONE. **That is precisely what the single-status rule at the top of §0 forbids** — "an item's status is authoritative in THIS FILE's row and nowhere else… when they disagree, the ledger row wins". The irony is exact: the false dispatch was manufactured *by the triage table whose entire purpose is to prevent false dispatches.* **Corollary for anyone building the next triage: promoting an item from a source doc REQUIRES grepping this file for an existing row first.** Full falsification with evidence: [`2026-08-08-t21-premium-exit-bands.md`](2026-08-08-t21-premium-exit-bands.md) |
 | **N12** | The `EquitySplitBonusAdjuster` source-aware contract (DBEIL case) | Fixing it touches the adjuster's contract, not data — backtest-fidelity, SEVERE |
 | **N32** | Should a multi-minute OI capture hole alarm? | Fail-soft worked perfectly and **that is the problem** — a 4-minute hole in the OI bloc's only input is invisible to every oracle. Whether that deserves paging is a risk-appetite call |
 | **N31** | Was the 2026-08-06 18:40 full-stack restart you? | If not, it needs a cause before it lands inside a batch window |
@@ -1580,6 +1580,75 @@ open swing inventory ticked **18 → 17**.
     standing prior — every measured loosening of the entry gate has lost money — gains a
     required-floor data point. Fourth post-07-27 chop day.
 
+#### 2026-08-08 — four review rounds, ALL REQUEST_CHANGES; plus two corrections to my own merged rows
+
+**N39 · ⚠️ ONE FINDING HAS A SIX-DAY FUSE — #1299 M1 breaks on 2026-08-14.**
+`SymbolLineageDetector.java:157,163,180`: `bounds.floor_d` is `min(trade_date)` over the WHOLE
+`nse_eod_bhavcopy`, but `firstrow`/`lastrow` are computed over the trailing `windowDays` slice. Rule 3
+therefore asks "is this symbol's first IN-WINDOW bar after the TABLE's first bar" — only the intended
+question while `windowDays ≥ table span`. **Measured: span 2025-06-20 → 2026-08-07 = 413 days,
+`windowDays` default 420. The clip begins at max(trade_date) = 2025-06-20 + 420 = 2026-08-14.**
+Reviewer simulated the post-clip regime by shrinking `windowDays` to 300 and 200 → **zero spurious
+pairs today**, so blast radius is currently nil — but the guard has stopped meaning what its javadoc
+says, and every placebo statistic quoted in it was taken in the un-clipped regime. Fix direction:
+`GREATEST(floor_d, latest_d - windowDays)`, plus a test that sets `window-days` below the fixture span.
+
+**Review verdicts — none approved, and each found something CI could not:**
+
+| PR | verdict | the finding that matters |
+|---|---|---|
+| **#1299** `symbol_lineage` | REQUEST_CHANGES | M1 above (six-day fuse) · M2 the schema permits N→1 but the reader resolves it **non-deterministically** (`DISTINCT ON` without a total order — two stitched rows tie and Postgres picks arbitrarily, plan-dependent) · M3 a **detector** refutation is as permanent as an owner verdict, keyed on an NSE-tradingsymbol-vs-BSE-ticker string match with no ISIN corroboration — **113 BSE tickers carry ≥2 distinct ISINs** in the window · M4 V055/V054 order. ✅ All 7 must-fix items independently verified fixed; the reviewer **re-derived the headline against the live DB and reproduced the deployed service exactly** (coverage 1783 / 285 both ways). **Δcoverage +42 reproduces; entering moved 7 → 5** — the moving-population effect the PR's own open doubt predicted, and nothing is armed on those figures |
+| **#1297** CA stage→verify→swap | REQUEST_CHANGES | M-A — the round-3 deliverable — **emits its alert before the swap it reports on**, so a run that verifies 1d then fails 1m reports 1,276 unadjusted bars when nothing was adjusted; and its test constructs the meter registry inline, so **deleting the metric leaves the test green**. Plus the per-window `DELETE`→`INSERT` is two autocommits, and the next attempt truncates the staged replacement first |
+| **#1305** cagg window sizing | REQUEST_CHANGES | The `/4` budget divisor — **the number the whole PR turns on — is pinned by nothing**; every test passes it in and asserts against it, so any divisor satisfies them. At `/1` the 2026-07-30 failure returns with the suite green. Also: "a tuple budget does not decay" is false for **spill**, which is ~60% of the cost and invariant to window width |
+| **#1283** swing coverage gate | REQUEST_CHANGES | Asymmetry and parity verified clean, but the **durable-evidence half has zero red-proof** — both engine tests use the 9-arg seam that nulls the repository, so deleting both `recordCoverageRow` calls leaves the suite green. Also the 5% materiality band was calibrated at depth 50 while **5 of 6 live strategies run at depth 20**, where one missing session sits 0.24pp under the threshold |
+
+⚠️ **All four reviewers were Opus — same vendor as the builders.** Codex was available (my "Codex is down" call was wrong; see below) but these were already in flight. **Re-run at least #1297 and #1305 through `codex-code-review` before merging** — those two carry the most consequential logic.
+
+**N40 · Two corrections to rows I merged myself.**
+- ⚠️ **N36 said manas-arora "re-saturated at 6", implying a cap of 6. The cap is 7** (`risk_settings`,
+  read 2026-08-08), and it holds 6 — **it had a free slot and still refused five candidates.** So the
+  two books are bound by **DIFFERENT RAILS**: minervini by `max_open` (12/12, silent — `entryVeto`
+  writes no audit), manas-arora by the **6% portfolio open-risk cap** (logged explicitly). N36's
+  "one close → one admission" observation stands, but it works through **risk headroom**, not slot
+  count — so freeing a manas slot does not free manas capacity. N26's owner decision is unchanged in
+  substance; the levers differ per book.
+- **"Codex is down" was wrong.** `codex exec` returns fine. Two misreads: the
+  "Subagent dispatch requires multi-agent support" text was the CONTENT of a plugin markdown file
+  Codex had read, not an error; and both runs were killed by **my own `timeout 280`**, which CLAUDE.md
+  explicitly warns about ("run reviews via `run_in_background`"). Both threads were salvaged from
+  their events files per the documented recovery and resumed with context intact.
+
+#### 2026-08-08 second block — four owner decisions taken, and every review round found something
+
+**N41 · OWNER DECISIONS, 2026-08-08. These are settled; do not re-open them, build to them.**
+
+| item | decision | what it means for the build |
+|---|---|---|
+| **N23-A** F9 heat re-base | **Measure first, do NOT enforce** | Compute premium-outlay heat and LOG what it *would* have blocked; enforcement stays on the existing (structurally-zero) SPAN number. After ~10 sessions the real refusal rate is known before it costs a trade. Reversible, no live behaviour change. Option (b) accept-and-relabel is NOT taken. |
+| **N26** swing capacity | **All three levers**, in this order | (1) **Make the silent `max_open` refusal auditable first** — `entryVeto`'s `max_open` and kill-switch rails write no audit row, so the next starvation must be diagnosable in one query rather than an investigation. Then (2) raise minervini `max_open` and (3) raise the 6% portfolio open-risk cap. ⚠️ **The owner chose the direction, not the numbers** — both new values still need a measured proposal before arming. |
+| **N12** equity CA basis | **Cliff detector + flag contaminated runs** | Detect CA-shaped single-bar cliffs in the swing sims and mark the run's stats contaminated instead of silently booking the spurious ~−50% into avg/best/worst/profitFactor. Deliberately NOT the deep-CA-table backfill (no source for >420 days) and NOT wiring the existing adjuster in (it scales only `source='BHAVCOPY'`, and KITE+BACKFILL are 85% of the plane, so it would read as fixed while fixing a minority of bars). |
+| **#1283** materiality band | **Recalibrate for depth 20** | Fixed band, derived from the depth-20 arithmetic so one missing session is caught. Not depth-relative, not keep-and-document. The gate refuses on ENTRY and only alerts on EXIT, so an over-tight band costs a skipped entry, never a stuck position — that asymmetry is why the tighter calibration was chosen. |
+
+**N42 · Four review rounds, and the pattern from 2026-08-08's first block held exactly: every round
+found a defect CI could not, including on my own work.**
+
+| PR | verdict | the finding that mattered |
+|---|---|---|
+| [#1321](https://github.com/prashantm912/artha-yantra-2/pull/1321) runbook-hygiene tracked-files | **REQUEST_CHANGES → APPROVED** (round 2) | ⚠️ **Critical, on the very PR that introduced `git ls-files` here.** Assertion 1 has always refused an empty intersection; **assertion 2 did not** — a `git ls-files` that legitimately SUCCEEDS while returning nothing scanned zero files and printed "all assertions passed". Switching from `find` made that strictly MORE reachable, since the index can disagree with the worktree. Plus a tracked-but-absent file (sparse cone exclusion) where `grep … 2>/dev/null \|\| true` turned "cannot read it" into "it has no hits". **Red-proof detail worth keeping: pre-fix, the guard reported `1 runbook files scanned` for a list of ZERO** — it was itself making the class of false report it exists to catch. Also Major: I fixed "ALL EIGHT" at one site and left the same stale claim at `check_runbook_hygiene.sh:18-22` and `ci-java.yml:183` — the identical cross-file sweep miss the guard exists to stop. |
+| [#1324](https://github.com/prashantm912/artha-yantra-2/pull/1324) candidates counter | **REQUEST_CHANGES**, fixed @ `52a956e9` | Major: the new operator alert said **"slot cap bound"**, but `capBound` is `capExceedance > 0` = `wouldEnter − admitted`, and that gap is opened by **any of `entryVeto`'s six rails** plus the M40 open-risk skip. Failure it removes: minervini banks its daily profit target, the batch early-outs, the alert reads "slot cap bound: 17 would-enter", and the owner frees a slot on a book that had simply stopped for the day. Now "entry governor bound", deliberately NOT resolved to the precise rail (`entryVeto` carries `risk_audit` + ntfy side effects per trip). The log line in the same hunk was already rail-neutral — the builder knew, and only the alert drifted. |
+| [#1326](https://github.com/prashantm912/artha-yantra-2/pull/1326) F9 prereqs | **REQUEST_CHANGES**, fix round dispatched | **Three Majors, all in (d) the warmer; (c) the record widening is clean and verified independently.** **M1** `@EventListener(ApplicationReadyEvent.class)` is synchronous on the **boot thread** and carries no `@Order`, so a ≤75 s cold download can delay the 12 other ready-listeners — including `SubscriptionReplayer` / `PinnedIndicesSubscriber` / `FuturesPinner`, i.e. live Kite tick subscription through the open. `OptionAtmPinner:53-77` already litigated this exact mechanism as a cross-vendor Major and the remedy is `@Order(LOWEST_PRECEDENCE)` + a dedicated daemon executor. **M2** the 6-hourly `@Scheduled` has no `scheduler=` qualifier, so it lands on the default pool-size-1 `taskScheduler` that `MonitorSchedulingConfig` split three pools out of, for measured harm. **M3, the important one** — the production twin of the canary-IT hazard the builder found: `reload()` stamps `loadedAt` on the FAILURE path, so a transient CDN fault at boot caches an empty map with a fresh timestamp and the lazy retry never fires for a whole 6 h window. On `main` the first attempt happened at the moment of need, so **this PR is what makes it reachable.** And `warm()` returns `void` and can never throw, so the warmer logs `"… warm complete"` **identically whether 37 000 legs loaded or nothing did**. `ARTHA_UPSTOX_ANALYTICS_ENABLED=true` in `.env`, so it is live, not hypothetical. |
+| [#1327](https://github.com/prashantm912/artha-yantra-2/pull/1327) bhavcopy misdated payload | opened, review in flight | **N30's brief was wrong on BOTH stated causes** — the 365-day-cap warning is cosmetic and the gap detector is sound. Real cause: **NSE's archive answers HTTP 200 with the previous trading day's CSV on 13 of 16 holiday URLs**, and the fetcher trusted the CSV's own `DATE1` column, so a holiday fetch ingested the prior session's bars under the holiday's date and the gap detector then read the day as covered. A `BRIEF-CORRECTED` outcome. Verify: BUILD SUCCESS, 1238 tests, 0 failures. |
+
+**N43 · Correction to N40, from the #1324 reviewer.** N40 said the two swing books are bound by
+**different** rails — minervini by `max_open`, manas-arora by the 6% portfolio open-risk cap. That is
+what the LOGS show, but it is not the whole shape: **manas-arora is subject to `MAX_OPEN` too**
+(`max_open_paper_positions = 7`, shared by both Manas strategies, `SwingBatchEngine:518`), so it takes
+the same silent early-out when it is at 7. On 08-07 it held 6, so the rail that actually fired was the
+6% cap — which logs. **The correct statement: both books share both rails; which one fires depends on
+where each book sits, and only one of the two is auditable.** That is exactly why N26's owner decision
+puts "make the silent refusal auditable" FIRST. Same class as the errors N38/N40 corrected: a
+difference observed in the logs read as a difference in the mechanism.
+
 #### 2026-08-07 evening batch — clean, and N26 got PROVEN by a natural experiment
 
 **All nine jobs SUCCESS** (IST): 18:59:58 FII trio · 19:30:02 `BHAVCOPY` · 19:31:11 `MANAS_SCREEN` +
@@ -1610,8 +1679,12 @@ services, 11/11 healthy.
     **admitted 0**, cap-exceedance 18 — five consecutive sessions at zero, and its refusal is still
     the SILENT one (no `RiskService` trip line names its cap). ~~That half of N26 remains
     undiagnosed~~ — **DIAGNOSED, see N37.**
-- **N37 · ✅ minervini's silent refusal is SOLVED — three phantom anchors from 2026-07-03 are holding
-  slots, and the book reads 15/12.** Found by running the §0 seven-location enumeration, not by
+- **N37 · ⚠️ RETRACTED 2026-08-08, one day after merging — the central causal claim is WRONG. See
+  N38.** The three phantom anchors are real, but they hold **ZERO slots** and clearing them frees
+  **nothing**: the `max_open` gate counts OPEN POSITIONS, not anchors. Original text kept below for
+  the record, struck.
+- ~~**N37 · minervini's silent refusal is SOLVED — three phantom anchors from 2026-07-03 are holding
+  slots, and the book reads 15/12.**~~ Found by running the §0 seven-location enumeration, not by
   looking at N26. **H4 predicted this exact residue and nobody connected it to the entry starvation.**
   - **Measured, all this session:**
     - `strategy.risk_settings` → `minervini / max_open_paper_positions = {"value": 12, "enabled": true}` (**sourced**)
@@ -1634,7 +1707,58 @@ services, 11/11 healthy.
   - **Open doubt:** whether `open_at_start` counting TAKEN anchors rather than open positions is
     intended (it is what makes a phantom cost a slot) or is itself the defect. Settle that before
     choosing between "clear the rows" and "change the counter" — they are different fixes with
-    different blast radii.
+    different blast radii. → **That doubt is what N38 resolved, and resolving it falsified the row.**
+
+- **N38 · ⚠️ N37 IS WRONG, AND THE REAL FINDING IS A LIVE ONE-CLICK DEFECT.** Investigated 2026-08-08
+  (owner chose "investigate first, don't mutate" — correctly, as it turns out: the mutation N37
+  proposed would have achieved nothing).
+  - **Correction 1 — the phantoms hold ZERO slots.** The gate is `RiskService.entryVeto:412-415`
+    → `positions.openCount(book) >= max_open`, and `PaperPositionRepository.openCount:674-681` is
+    `SELECT count(*) FROM paper_positions WHERE status='OPEN' AND book=?` (**sourced**, both read
+    directly). minervini holds **12 real OPEN positions against a cap of 12** — saturated on
+    positions alone. `open_at_start` (15) comes from `SwingBatchEngine.computeAdmissionProbe:629-630`
+    over `signals.activeEntries()`, and its own javadoc (`:575-577`) says it is
+    **"measurement-only… it NEVER changes admission"**. **So minervini needs ONE close to admit one,
+    exactly like manas-arora — not four.** N37's headline arithmetic was wrong.
+  - **Correction 2 — "they can never self-resolve" is refuted by their own siblings.**
+    `SwingBatchEngine.emitExit:1053` transitions the anchor to `EXPIRED` with no reference to any
+    paper position. Two of the same stranded set already did exactly that: signal 24 `MANAKSTEEL`
+    (exit sig 95, 07-27) and signal 27 `PNBHOUSING` (exit sig 125, 07-30, effect row records
+    `decision=SKIPPED, target_position_ids={}` — no position to close). The remaining three are
+    simply still above their trail (`sell_decisions` 08-07: SENORES 1340.10 vs 1295.63, TMB 872.80
+    vs 787.85, INDUSINDBK 1020.20 vs 968.09, all HOLD).
+  - **Correction 3 — the refusal is silent BY DESIGN, not because of phantoms.** `entryVeto`'s
+    javadoc (`:404-405`): *"the kill-switch and max-open rails write no audit"*. No `risk_audit` row,
+    no log line. That is the whole explanation for N26's "silent" half.
+  - **ROOT CAUSE of the phantoms:** on **2026-07-05 14:02:34 IST** the `V021__paper_books` migration
+    ran `DELETE FROM paper_orders; DELETE FROM paper_positions;` (owner-approved "every book starts
+    flat", commit `738b43c9`) and **did not touch `strategy.signals`**, stranding the 8 minervini
+    `TAKEN` anchors emitted the evening before. Fingerprint: `paper_positions` and `paper_orders`
+    both have `min(id)=10` with no gaps after, first surviving row 2h46m after V021 ran, and
+    `paper_account` ids 2-5 share that exact insert timestamp (**computed**).
+  - ⚠️ **THE PART THAT MATTERS — IT CAN RECUR TODAY, WITH A BUTTON.** `POST /api/v1/paper/reset` is
+    V021's DELETE with a UI on it: `PaperService.reset:1673-1681` is `positions.deleteAll(book)` +
+    `orders.deleteAll(book)` and **nothing else** — no signal-status reset, no effect-ledger cleanup
+    (**sourced**, read directly). `PaperController:335-341`, wired at
+    `frontend-react/src/pages/paper/PaperPage.tsx:261-273`. **Resetting the minervini ledger right now
+    would instantly strand 12 fresh phantom anchors.** No guard exists and no PR has ever addressed
+    it. **This is the real deliverable of the investigation** — a latent live defect, found only
+    because the owner said investigate rather than mutate.
+  - **Adjacent, narrower:** the runtime CAS→open-failure window is closed for SWING books by the
+    durable effect ledger (`AutoPaperListener:76-80` writes `requireEntry` before the CAS;
+    `SwingBatchCatchUp:473-494` replays it), landed 2026-07-27 via V050/V051 — but `isSwingBook` is
+    false for **scalper and manual** books, so that window is still open there. Zero residue today
+    (0 TAKEN scalper signals), so it is latent, not active.
+  - **Real cost of the 3 phantoms, correctly scoped:** they read as "held" in
+    `SwingBatchEngine.openLotsBySymbol:562-570`, so a fresh entry on those three names routes to the
+    pyramid path and is skipped, and `open_at_start` over-reports by 3. **They do not consume
+    slot-cap headroom.**
+  - **Falsifiable prediction, cheap to check:** the next time a minervini position closes, the
+    following batch should admit an entry at 11/12. If it does not, the positions-based reading is
+    wrong and this correction needs re-opening.
+  - **Open doubt carried:** `signals` `min(id)=20` and no code path in the repo deletes signals —
+    someone did manual DB surgery in the same 07-04/05 window, so the *actor* is not fully pinned.
+    Does not change the defect class. Settled only by a 07-04/05 backup.
 
 ---
 

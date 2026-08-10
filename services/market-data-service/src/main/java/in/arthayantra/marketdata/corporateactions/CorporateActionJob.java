@@ -394,8 +394,17 @@ public class CorporateActionJob {
    * {@code swapStaged} delete and refill — a delete scoped to exactly the staged span, so every
    * bucket removed provably has a replacement row waiting.
    *
-   * <p>Staging is cleared before a fresh attempt and after a successful swap. If a swap has started,
-   * the verified rows remain as a retry checkpoint so a partial live rebuild is resumable.
+   * <p>⚠️ Staging is cleared on the way IN as well as OUT, unconditionally, and round 4 deliberately
+   * KEPT it that way after trying the alternative. Review F4 asked for the staged rows to survive a
+   * partial swap as a resumable checkpoint; that was implemented and then REVERTED, because
+   * {@link #verifyStagedRebuild} validates COVERAGE ONLY — bar counts and span bounds, never values
+   * — and the existence probe it resumed on carried no fetch time and no event identity. A retry
+   * fires after {@code COOLDOWN_DAYS}, so a checkpoint staged before a LATER corporate action would
+   * pass verification on coverage and be swapped in at pre-event prices: silently wrong data on the
+   * exact plane this class exists to protect. Less destructive is not safer. A from-scratch rebuild
+   * is wasteful and correct; real resumability needs provenance columns on the staging table plus a
+   * freshness check, which is a separate change. The partial state is made VISIBLE instead — see the
+   * urgent failure alert naming the intervals that actually committed.
    *
    * <p>The 1m stage still defers the cagg refresh to the caller (it writes no aggregates at all
    * now), so the {@code BASE_REBUILT} checkpoint still lands after the base commits and BEFORE the
@@ -406,20 +415,14 @@ public class CorporateActionJob {
       Instrument equity, LocalDate today, OffsetDateTime now, List<String> swappedIntervals) {
     String exchange = equity.exchange();
     String symbol = equity.tradingsymbol();
-    boolean swapStarted = false;
     try {
-      boolean resumeStaging =
-          candles.hasStagedRows(exchange, symbol, "1d")
-              && candles.hasStagedRows(exchange, symbol, "1m");
-      if (!resumeStaging) {
-        candles.clearStaging(exchange, symbol);
-        queryService.stageFullRange(
-            exchange, symbol, "1d",
-            today.minusDays(rebackfillDays1d).atStartOfDay().atOffset(Ist.OFFSET), now);
-        queryService.stageFullRange(
-            exchange, symbol, "1m",
-            today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now);
-      }
+      candles.clearStaging(exchange, symbol);
+      queryService.stageFullRange(
+          exchange, symbol, "1d",
+          today.minusDays(rebackfillDays1d).atStartOfDay().atOffset(Ist.OFFSET), now);
+      queryService.stageFullRange(
+          exchange, symbol, "1m",
+          today.minusDays(rebackfillDays1m).atStartOfDay().atOffset(Ist.OFFSET), now);
       // BOTH intervals are verified BEFORE EITHER is swapped: verifying and swapping per-interval
       // would let a good 1d swap land and a bad 1m refusal abort, leaving the symbol half-adjusted
       // — a series that looks complete and is silently wrong, which is worse than the gutting this
@@ -455,21 +458,14 @@ public class CorporateActionJob {
       // DB error the cooldown should skip) needs a recorded status that does not exist yet, so it
       // is a follow-up, not something to infer at read time. Pinned by
       // aPartialSwapFailureIsHeldByTheCooldownNotRetriedNextSweep.
-      swapStarted = true;
       candles.swapStaged(exchange, symbol, "1m");
       swappedIntervals.add("1m");
       reportUnadjustedTail(equity, "1m");
       candles.swapStaged(exchange, symbol, "1d");
       swappedIntervals.add("1d");
       reportUnadjustedTail(equity, "1d");
-      candles.clearStaging(exchange, symbol);
     } finally {
-      // Before the first swap, partial staging is unsafe and is discarded. Once a swap starts, the
-      // remaining staged rows are the verified checkpoint for a retry; clearing them would turn a
-      // partial live rebuild into a from-scratch rebuild and erase the only resumable work.
-      if (!swapStarted) {
-        candles.clearStaging(exchange, symbol);
-      }
+      candles.clearStaging(exchange, symbol);
     }
   }
 

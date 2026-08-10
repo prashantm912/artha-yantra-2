@@ -677,19 +677,6 @@ public class CandleRepository {
         tradingsymbol);
   }
 
-  /** Whether a symbol has staged rows that may be resumed after a partial swap. */
-  public boolean hasStagedRows(String exchange, String tradingsymbol, String interval) {
-    Boolean present =
-        jdbc.queryForObject(
-            "SELECT EXISTS(SELECT 1 FROM candle_rebuild_staging"
-                + " WHERE exchange = ? AND tradingsymbol = ? AND \"interval\" = ?)",
-            Boolean.class,
-            exchange,
-            tradingsymbol,
-            interval);
-    return Boolean.TRUE.equals(present);
-  }
-
   /**
    * What a staged re-fetch covers, measured against the live series it is about to replace — the
    * evidence {@code CorporateActionJob} judges BEFORE it deletes anything.

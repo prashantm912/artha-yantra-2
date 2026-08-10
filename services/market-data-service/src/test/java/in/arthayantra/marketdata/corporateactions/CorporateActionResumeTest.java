@@ -245,7 +245,10 @@ class CorporateActionResumeTest {
     // Kite, so the next eligible sweep after the cooldown can re-detect and resume both legs
     // idempotently from the retained staging rows.
     verify(candles).swapStaged("NSE", "TCS", "1m");
-    verify(candles, times(1)).clearStaging("NSE", "TCS");
+    // Twice: once on the way IN to the attempt, once in the finally. Staging is NOT retained as a
+    // resumable checkpoint — verifyStagedRebuild validates coverage only, so a checkpoint reused
+    // after the cooldown could swap in pre-corporate-action prices that pass verification.
+    verify(candles, times(2)).clearStaging("NSE", "TCS");
     verify(ntfy)
         .send(
             contains("FAILED"),

@@ -223,10 +223,23 @@ class CandleRepositoryRefreshDecompressionLimitTest {
         ds.onlyConnection().sql.stream().filter(s -> s.startsWith(CALL_PREFIX)).toList();
     assertThat(calls).as("need interior boundaries to inspect").hasSizeGreaterThan(2);
 
-    // ⚠️ The EXACT configured overlap, not merely "some overlap". A positive-but-tiny overlap would
-    // satisfy `isBefore` while still losing any bucket wider than it — and a cagg bucket is a day or
-    // a week, not a second. Cross-vendor review, 2026-08-11.
+    // ⚠️ TWO assertions, because either alone is blind to a different failure.
+    //
+    // The EXACT configured overlap catches drift — a positive-but-tiny overlap would satisfy a bare
+    // `isBefore` while still losing any bucket wider than it. The configured safety margin is ONE
+    // day for candles_5m (the view this test drives) and eight for the coarser views; both are
+    // orders of magnitude above the sub-second an `isBefore` would accept.
+    //
+    // But the expected value is DERIVED from the same production operand under test, so on its own
+    // it cannot represent the operand going to ZERO: production would abut, Duration.between would
+    // be ZERO, expected would be ZERO, and the test would pass against the exact silent-hole defect
+    // it exists for. isPositive() is what makes the derivation safe. Cross-vendor review found this
+    // in the assertion that had just been tightened to fix the previous version of it (2026-08-11) —
+    // the third self-referential guard on this PR.
     Duration overlap = Duration.ofDays(CandleRepository.DerivedAggregate.CANDLES_5M.overlapDays());
+    assertThat(overlap)
+        .as("a zero overlap is the defect itself — the equality below would happily confirm it")
+        .isPositive();
     List<Instant[]> bounds = calls.stream().map(CandleRepositoryRefreshDecompressionLimitTest::boundsOf).toList();
     for (int i = 1; i < bounds.size(); i++) {
       assertThat(Duration.between(bounds.get(i)[0], bounds.get(i - 1)[1]))

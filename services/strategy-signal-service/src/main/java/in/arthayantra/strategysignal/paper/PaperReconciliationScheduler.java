@@ -34,7 +34,7 @@ public class PaperReconciliationScheduler {
   }
 
   /** Post-close nightly reconciliation (21:15 IST, weekdays). */
-  @Scheduled(cron = "${artha.paper.reconciliation.cron:0 15 21 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.paper.reconciliation.cron:0 56 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
     try {
       ReconciliationResult r = reconciliation.reconcile();

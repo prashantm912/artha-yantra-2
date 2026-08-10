@@ -614,9 +614,9 @@ services:
       # advisory risk sizing (advised_lots = floor(pct% × equity ÷ stop-distance); advisory only)
       ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT: ${ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT:-1.0}
       # batch/evaluator crons (Asia/Kolkata) — quoted (the value has spaces)
-      ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 0 21 * * MON-FRI}"
-      ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 0 20 * * MON-FRI}"
-      ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 5 20 * * MON-FRI}"
+      ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 52 18 * * MON-FRI}"
+      ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 10,25,40,55 18-19 * * MON-FRI}"
+      ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 12,27,42,57 18-19 * * MON-FRI}"
       ARTHA_SWING_CANARY_CRON: "${ARTHA_SWING_CANARY_CRON:-0 30 8 * * MON-FRI}"
       # Swing-batch CATCH-UP (2026-07-17 incident): re-runs a batch the stack was down for, pinned to
       # the missed session's daily bar. Runs in the post-close/pre-open window (08:35, after the 08:30
@@ -638,7 +638,7 @@ services:
       # covered years, where a session cannot be judged expected-or-not -- refresh libs/market-calendar
       # (CD-2) before the horizon canary reddens or expect nightly alarms from that date on.
       ARTHA_HEARTBEAT_URL: "${ARTHA_HEARTBEAT_URL:-}"
-      ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 15 20 * * MON-FRI}"
+      ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 50 18 * * MON-FRI}"
       # Session-cadence dead-man's-switch for the LIVE trading session (the swing ping above proves only
       # the 20:15 batch ran — a stack dead 09:15-15:30 but recovered by 20:15 pings it happily). Pings
       # every ~10 min while candles are flowing; the withheld ping is the alarm. Blank = dormant; paste a

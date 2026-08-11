@@ -605,6 +605,49 @@ class MinerviniSwingEngineTest {
         .containsExactly("minervini|2026-08-04|TESTCO|INCOMPLETE_COVERAGE:TESTCO");
   }
 
+  /**
+   * THE SHIPPED DEFAULT (owner decision 2026-08-11). The identical series that ARMED refuses must
+   * ENTER under OBSERVE_ONLY — that is what "ships inert" means, and it is the whole basis on which
+   * this gate was allowed to merge. The evidence still accrues, as a distinctly-prefixed row.
+   */
+  @Test
+  void observeOnlyRecordsTheWouldBeRefusalAndLetsTheEntryFire() throws IOException {
+    EntryHarness h = new EntryHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
+        .thenReturn(holed(h.series, 6, 16, 18, 19));
+
+    SwingBatchEngine.SwingRun run =
+        h.engine(h.events, SwingBatchEngine.CoverageGateMode.OBSERVE_ONLY).runDaily(h.doctrine());
+
+    assertThat(run.entries()).as("OBSERVE_ONLY must not change live behaviour").isEqualTo(1);
+    assertThat(alerts(h.events))
+        .as("an observation must never page")
+        .noneSatisfy(a -> assertThat(a.title()).contains("entries refused"));
+    // ⚠️ The prefix is load-bearing: swing_batch_refusals rows are read as "this candidate was
+    // refused", and the arming decision rests on counting them. A bare reason here would make the
+    // table claim a refusal for an entry that fired.
+    assertThat(h.coverageRows)
+        .containsExactly("minervini|2026-08-04|TESTCO|WOULD_REFUSE_INCOMPLETE_COVERAGE:TESTCO");
+    // The F3 probe must model the pass AS CONFIGURED, or wouldEnter under-counts what entered.
+    assertThat(run.admission().wouldEnter())
+        .as("the admission probe must agree with the entry pass under every mode")
+        .isEqualTo(1);
+  }
+
+  /** DISABLED does no probe work at all — no refusal, and no durable row either. */
+  @Test
+  void disabledRunsNoProbeAndWritesNothing() throws IOException {
+    EntryHarness h = new EntryHarness();
+    when(h.candles.fetch(eq("NSE"), eq("TESTCO"), eq("1d"), any(), any()))
+        .thenReturn(holed(h.series, 6, 16, 18, 19));
+
+    SwingBatchEngine.SwingRun run =
+        h.engine(h.events, SwingBatchEngine.CoverageGateMode.DISABLED).runDaily(h.doctrine());
+
+    assertThat(run.entries()).isEqualTo(1);
+    assertThat(h.coverageRows).as("DISABLED must leave no trace").isEmpty();
+  }
+
   /** The same series with the holes filled must still enter — proving the refusal is the cause. */
   @Test
   void entryFiresWhenCoverageIsComplete() throws IOException {
@@ -715,9 +758,19 @@ class MinerviniSwingEngineTest {
     }
 
     SwingBatchEngine engine(ApplicationEventPublisher publisher) {
+      return engine(publisher, SwingBatchEngine.CoverageGateMode.ARMED);
+    }
+
+    /**
+     * ⚠️ The no-mode overload above ARMS the gate deliberately, and every coverage test states its
+     * mode. The engine's own default is OBSERVE_ONLY (it ships inert, owner 2026-08-11), so a test
+     * that silently inherited the default would assert refusals the live stack does not perform.
+     */
+    SwingBatchEngine engine(
+        ApplicationEventPublisher publisher, SwingBatchEngine.CoverageGateMode mode) {
       return new SwingBatchEngine(
           registry, candles, signals, mock(SignalPublisher.class), publisher, Optional.of(guard),
-          passthroughTx(), new ObjectMapper(), fixedTestClock(), null, refusals);
+          passthroughTx(), new ObjectMapper(), fixedTestClock(), null, refusals, mode.name());
     }
 
     MinerviniDoctrine doctrine() {

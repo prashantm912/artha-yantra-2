@@ -40,6 +40,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -79,6 +80,30 @@ public class SwingBatchEngine {
    * raising CD-2's {@code IllegalArgumentException} on the money path.
    */
   private static final MarketCalendar calendar = MarketCalendar.nse();
+
+  /**
+   * How the entry-side data-coverage gate behaves. Mirrors the T9 coverage watchdog's three-state
+   * shape (`strategy-coverage-watchdog.mode`) because this is the same situation: a detector whose
+   * refusal rate must be OBSERVED in production before anyone arms it.
+   *
+   * <ul>
+   *   <li>{@code DISABLED} — the probe never runs. No rows, no logs, no cost.
+   *   <li>{@code OBSERVE_ONLY} — the probe runs and every would-be refusal is RECORDED and LOGGED,
+   *       but the entry PROCEEDS. Live behaviour is byte-identical to a build without the gate.
+   *   <li>{@code ARMED} — a candidate whose coverage is not proven sound is REFUSED.
+   * </ul>
+   *
+   * <p>Ships {@code OBSERVE_ONLY} (owner decision, 2026-08-11). Arming is a one-word env change once
+   * the observed refusal rate justifies it — the same path `dot-coverage-floor`, the T9 watchdog and
+   * the F9 heat caps all took. ⚠️ The seam constructor defaults to the SAME value as production
+   * deliberately: a test seam that armed by default would let the suite pass against behaviour the
+   * live stack does not have.
+   */
+  public enum CoverageGateMode {
+    DISABLED,
+    OBSERVE_ONLY,
+    ARMED
+  }
 
   /**
    * A loaded published swing strategy (identity + compiled definition + neutral setup token). {@code
@@ -176,6 +201,20 @@ public class SwingBatchEngine {
   private final Clock clock;
   private final SwingPaperEffectRepository paperEffects;
   private final SwingBatchRefusalRepository refusals;
+  private final CoverageGateMode coverageGateMode;
+
+  /** Unknown / blank values fall back to the shipped default rather than throwing at boot. */
+  private static CoverageGateMode parseGateMode(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return CoverageGateMode.OBSERVE_ONLY;
+    }
+    try {
+      return CoverageGateMode.valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+    } catch (IllegalArgumentException e) {
+      log.warn("unknown swing-coverage-gate mode '{}' — falling back to OBSERVE_ONLY", raw);
+      return CoverageGateMode.OBSERVE_ONLY;
+    }
+  }
 
   /** Wires the shared collaborators (family-neutral); the family varies only via the doctrine arg. */
   @Autowired
@@ -190,7 +229,8 @@ public class SwingBatchEngine {
       ObjectMapper objectMapper,
       Clock clock,
       SwingPaperEffectRepository paperEffects,
-      SwingBatchRefusalRepository refusals) {
+      SwingBatchRefusalRepository refusals,
+      @Value("${artha.signals.swing-coverage-gate.mode:OBSERVE_ONLY}") String coverageGateMode) {
     this.registry = registry;
     this.candles = candles;
     this.signals = signals;
@@ -202,6 +242,28 @@ public class SwingBatchEngine {
     this.clock = clock;
     this.paperEffects = paperEffects;
     this.refusals = refusals;
+    this.coverageGateMode = parseGateMode(coverageGateMode);
+  }
+
+  /**
+   * Ledger-carrying seam without an explicit gate mode — takes the SAME default as production, so a
+   * test written against this overload cannot pass on behaviour the live stack does not have.
+   */
+  public SwingBatchEngine(
+      StrategyRepository registry,
+      MarketDataCandlesClient candles,
+      SignalRepository signals,
+      SignalPublisher publisher,
+      ApplicationEventPublisher events,
+      Optional<EmissionGuard> emissionGuard,
+      TransactionTemplate tx,
+      ObjectMapper objectMapper,
+      Clock clock,
+      SwingPaperEffectRepository paperEffects,
+      SwingBatchRefusalRepository refusals) {
+    this(
+        registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
+        paperEffects, refusals, CoverageGateMode.OBSERVE_ONLY.name());
   }
 
   /** Backwards-compatible seam for focused unit tests that do not exercise the V049 ledgers. */
@@ -217,7 +279,24 @@ public class SwingBatchEngine {
       Clock clock) {
     this(
         registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
-        null, null);
+        CoverageGateMode.OBSERVE_ONLY);
+  }
+
+  /** Same seam, with the coverage gate's mode stated explicitly — for tests that exercise it. */
+  public SwingBatchEngine(
+      StrategyRepository registry,
+      MarketDataCandlesClient candles,
+      SignalRepository signals,
+      SignalPublisher publisher,
+      ApplicationEventPublisher events,
+      Optional<EmissionGuard> emissionGuard,
+      TransactionTemplate tx,
+      ObjectMapper objectMapper,
+      Clock clock,
+      CoverageGateMode coverageGateMode) {
+    this(
+        registry, candles, signals, publisher, events, emissionGuard, tx, objectMapper, clock,
+        null, null, coverageGateMode.name());
   }
 
   /** Runs one full daily batch for a family: the entry pass over its funnel, then the exit pass. */
@@ -467,6 +546,7 @@ public class SwingBatchEngine {
     // Symbols refused this run for incomplete data coverage. Aggregated into ONE ops alert at the end
     // of the pass — a per-symbol alert would page ~17% of the funnel nightly (measured 2026-08-03).
     java.util.Set<String> coverageRefused = new java.util.LinkedHashSet<>();
+    java.util.Set<String> coverageWouldRefuse = new java.util.LinkedHashSet<>();
     try {
     for (SwingCandidate c : candidates) {
       if (deadline.expired()) {
@@ -533,18 +613,39 @@ public class SwingBatchEngine {
         // it as marker-blocking would withhold the completeness marker EVERY night, leaving the
         // session permanently retryable and the did-not-run canary permanently firing. Evidence is
         // durable (swing_batch_refusals) and alerting is aggregated once per run instead.
-        SwingCoverageProbe.Coverage coverage = entryCoverage(strat, series);
         // notProvenSound(), NOT materiallyIncomplete(): the latter is FALSE for an undeterminable
         // probe, so a probe failure used to permit the entry it exists to guard. See the javadoc
         // on SwingCoverageProbe.Coverage#notProvenSound.
-        if (coverage.notProvenSound()) {
-          coverageRefused.add(c.symbol());
-          recordCoverageRow(
-              doctrine, effectSession, c.symbol(), coverageReason(c.symbol(), coverage));
-          log.warn(
-              "{} swing entry: {} refused for {} — {}",
-              doctrine.batchName(), c.symbol(), strat.slug(), coverage.describe());
-          continue;
+        //
+        // Three-state by owner decision (2026-08-11), shipping OBSERVE_ONLY — see CoverageGateMode.
+        // DISABLED skips the probe entirely; OBSERVE_ONLY records and logs the would-be refusal but
+        // lets the entry PROCEED, so live behaviour is byte-identical to a build without the gate.
+        if (coverageGateMode != CoverageGateMode.DISABLED) {
+          SwingCoverageProbe.Coverage coverage = entryCoverage(strat, series);
+          if (coverage.notProvenSound()) {
+            boolean armed = coverageGateMode == CoverageGateMode.ARMED;
+            // ⚠️ The reason string is PREFIXED in OBSERVE_ONLY. swing_batch_refusals rows are read
+            // as "this candidate was refused"; writing the bare reason for an entry that then FIRED
+            // would make the table lie, and the arming decision rests on counting these rows.
+            recordCoverageRow(
+                doctrine,
+                effectSession,
+                c.symbol(),
+                (armed ? "" : "WOULD_REFUSE_") + coverageReason(c.symbol(), coverage));
+            if (armed) {
+              // Only an ARMED refusal joins the aggregated ops alert — otherwise the run would page
+              // about entries it allowed.
+              coverageRefused.add(c.symbol());
+              log.warn(
+                  "{} swing entry: {} refused for {} — {}",
+                  doctrine.batchName(), c.symbol(), strat.slug(), coverage.describe());
+              continue;
+            }
+            coverageWouldRefuse.add(c.symbol());
+            log.info(
+                "{} swing entry: {} WOULD be refused for {} (gate OBSERVE_ONLY, entry proceeds) — {}",
+                doctrine.batchName(), c.symbol(), strat.slug(), coverage.describe());
+          }
         }
         Optional<EntryEvaluator.Evaluation> eval =
             EntryEvaluator.evaluate(strat.definition(), bank, series.size() - 1);
@@ -616,6 +717,13 @@ public class SwingBatchEngine {
       // finally, not a tail call: the pass has four early returns (deadline, mid-run gate trip) and
       // the coverage summary must reach ops on every one of them.
       alertCoverageRefusals(doctrine, effectSession(requiredBarDate), coverageRefused);
+      if (!coverageWouldRefuse.isEmpty()) {
+        // Observation only — deliberately a LOG, not an ntfy alert: the whole point of OBSERVE_ONLY
+        // is to accrue a rate without paging on it. The durable count is the WOULD_REFUSE_ rows.
+        log.info(
+            "{} swing: coverage gate OBSERVE_ONLY would have refused {} candidate(s) this run — {}",
+            doctrine.batchName(), coverageWouldRefuse.size(), coverageWouldRefuse);
+      }
     }
     return new EntryResult(candidates.size(), fired, refusalReasons, false);
   }
@@ -753,7 +861,12 @@ public class SwingBatchEngine {
       // apply it too (cross-vendor review Major): otherwise a coverage-refused candidate still
       // increments wouldEnter, never becomes held, and is persisted as a slot-cap drop —
       // mis-attributing a DATA refusal to the capital cap and corrupting the ledger-F3 measurement.
-      if (entryCoverage(strat, series).notProvenSound()) {
+      // ⚠️ Mode-gated for the SAME reason the pass above is: the probe answers "could the entry pass
+      // admit this", so it must model the pass as CONFIGURED. If it kept skipping while OBSERVE_ONLY
+      // let the entry through, wouldEnter would UNDER-count exactly the candidates that entered —
+      // the mirror of the mis-attribution this check was added to fix.
+      if (coverageGateMode == CoverageGateMode.ARMED
+          && entryCoverage(strat, series).notProvenSound()) {
         continue; // fail-closed, same reason as the gate above
       }
       IndicatorBank bank = buildBank(strat.definition(), c.symbol(), series, c.contextSeeds());

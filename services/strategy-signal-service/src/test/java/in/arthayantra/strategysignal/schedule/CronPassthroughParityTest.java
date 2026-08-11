@@ -23,14 +23,13 @@ import org.springframework.core.env.SystemEnvironmentPropertySource;
  * Pins the chain every evening cron travels: {@code @Scheduled} default ⇠ {@code application.yml}
  * ⇠ compose {@code environment} ⇠ {@code .env}. Each link is silent when it breaks.
  *
- * <p>⚠️ Why this file exists. Ten of these properties had no compose passthrough at all, so setting
- * one in {@code .env} was swallowed and the code default won with no error (#653) — "we set the env
- * var" and "the job did not move" were both true at once. Adding the passthroughs fixes that and
- * introduces a quieter version of the same problem: compose now carries a COPY of every default, and
- * copies drift. Worse, three of these ALSO had a literal value in {@code application.yml}, which the
- * new compose entry now shadows — a later YAML-only edit would be ignored, #653 in reverse. Those
- * three were converted to {@code ${ENV:default}} form, and {@link #applicationYmlDefersToTheEnvVar}
- * keeps them that way.
+ * <p>⚠️ Why this file exists. TWO of these four — both paper reconcilers, both money path — had no
+ * compose passthrough at all, so setting either in {@code .env} was swallowed and the code default
+ * won with no error (#653). Adding the passthroughs fixes that and introduces a quieter version of
+ * the same problem: compose now carries a COPY of every default, and copies drift.
+ *
+ * <p>Unlike market-data, NONE of these four is declared in this service's {@code application.yml},
+ * so there is no literal here for compose to shadow — asserted below rather than assumed.
  *
  * <p>The properties reach Spring through {@code SystemEnvironmentPropertySource}'s relaxed
  * dot/hyphen-to-underscore resolution ({@code artha.bhavcopy-close.cron} ⇢ {@code
@@ -64,7 +63,7 @@ class CronPassthroughParityTest {
               "artha.graduation.promotion-cron",
               "ARTHA_GRADUATION_PROMOTION_CRON",
               SRC + "paper/GraduationPromotionScheduler.java"),
-          // ⚠️ Money path, and the two that had no passthrough at all until 2026-08-11.
+          // Money path, and the two that had no passthrough at all until 2026-08-11.
           new Job(
               "artha.paper.reconciliation.cron",
               "ARTHA_PAPER_RECONCILIATION_CRON",
@@ -129,62 +128,33 @@ class CronPassthroughParityTest {
     }
   }
 
-  /**
-   * ⚠️ Unlike market-data, NONE of these four is declared in this service's application.yml, so the
-   * counter below is 0 and the loop is expected to check nothing. That is asserted rather than
-   * assumed: if one is ever added as a LITERAL, compose would shadow it and a YAML-only edit would
-   * be silently ignored (#653 in reverse) — this test would then have to start passing for a
-   * reason, not keep passing for none.
-   */
   @Test
   @DisplayName("application.yml declares none of these, so compose cannot shadow a literal")
   void applicationYmlDefersToTheEnvVar() throws IOException {
-    // ⚠️ Cross-vendor review Major. Three of these properties carried a LITERAL value here, which the
-    // new compose entry now takes precedence over — so a later YAML-only cron edit would be silently
-    // ignored. That is #653 in reverse, and it is invisible: the values matched, so nothing broke on
-    // the day. They now read ${ENV:default}; this keeps them that way.
+    // ⚠️ Expected to check ZERO items, and that is asserted rather than left implicit. On
+    // market-data the same test found three properties carrying LITERAL cron values that the new
+    // compose entries then shadowed — #653 in reverse, invisible because the values matched. If one
+    // of these four is ever added here, it must read ${ENV:default} and this expectation must be
+    // updated deliberately.
     List<String> yml = Files.readAllLines(repoRoot().resolve(YML), StandardCharsets.UTF_8);
-    int checked = 0;
+    List<String> declared = new ArrayList<>();
     for (Job job : JOBS) {
-      String declared = valueAtPath(yml, job.property());
-      if (declared == null) {
-        continue; // not declared here at all — the relaxed-binding test above is what covers it
+      if (valueAtPath(yml, job.property()) != null) {
+        declared.add(job.property());
       }
-      checked++;
-      assertThat(declared)
-          .as(
-              "application.yml declares %s but does not read %s, so compose's value shadows it and a"
-                  + " YAML-only change would be silently ignored",
-              job.property(), job.envName())
-          .startsWith("${" + job.envName() + ":");
     }
-    assertThat(checked)
+    assertThat(declared)
         .as(
-            "one of these crons is now declared in application.yml. That is not automatically wrong,"
-                + " but it must read ${ENV:default} and this expectation must be updated"
-                + " deliberately — a literal there is shadowed by compose")
-        .isZero();
+            "these are now declared in application.yml. Not automatically wrong, but a LITERAL there"
+                + " is shadowed by compose — convert to ${ENV:default} and update this test")
+        .isEmpty();
   }
 
   @Test
   @DisplayName("exactly one ACTIVE @Scheduled site reads each property, in IST")
   void onePropertyOneActiveScheduledSite() throws IOException {
     for (Job job : JOBS) {
-      List<String> lines =
-          Files.readAllLines(repoRoot().resolve(job.sourceFile()), StandardCharsets.UTF_8);
-      // ⚠️ Line-oriented and comment-aware (cross-vendor review Major). A raw indexOf over the whole
-      // file accepts a COMMENTED-OUT annotation — the shape left behind when someone disables a job
-      // "temporarily" — and stops at the first hit, so a second active site goes unseen.
-      List<String> sites = new ArrayList<>();
-      for (String line : lines) {
-        String trimmed = line.trim();
-        if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
-          continue;
-        }
-        if (trimmed.contains("cron = \"${" + job.property() + ":")) {
-          sites.add(trimmed);
-        }
-      }
+      List<String> sites = activeCronSites(job);
       assertThat(sites)
           .as(
               "%s must have exactly ONE active @Scheduled reading ${%s} — zero means the compose"
@@ -273,12 +243,86 @@ class CronPassthroughParityTest {
     return out;
   }
 
-  /** The default baked into the job's own {@code @Scheduled} annotation. */
+  /**
+   * Every ACTIVE {@code @Scheduled} line reading this job's property, with comments removed first.
+   *
+   * <p>⚠️ ONE routine, used by both the site check and {@link #codeDefault} (cross-vendor review
+   * Major, twice). A per-line filter misses a BLOCK comment — the annotation line inside
+   * a block comment starts with neither a double-slash nor an asterisk — and a raw
+   * {@code indexOf} over the whole file takes the FIRST occurrence, so a commented-out OLD default
+   * above an active new one silently becomes the value compose is compared against.
+   */
+  private static List<String> activeCronSites(Job job) throws IOException {
+    String needle = "cron = \"${" + job.property() + ":";
+    List<String> sites = new ArrayList<>();
+    for (String line :
+        uncommentedLines(
+            Files.readString(repoRoot().resolve(job.sourceFile()), StandardCharsets.UTF_8))) {
+      if (line.contains(needle)) {
+        sites.add(line.trim());
+      }
+    }
+    return sites;
+  }
+
+  /**
+   * The source lines that are NOT inside a comment, in file order.
+   *
+   * <p>Tracks block-comment state across lines rather than filtering each line on its own: the
+   * annotation line inside a block comment begins with neither a double-slash nor an asterisk, so a
+   * per-line filter waves it through as active code.
+   */
+  private static List<String> uncommentedLines(String source) {
+    String blockOpen = "/*";
+    String blockClose = "*/";
+    String lineComment = "//";
+    List<String> out = new ArrayList<>();
+    boolean inBlock = false;
+    for (String line : source.lines().toList()) {
+      String working = line;
+      if (inBlock) {
+        int close = working.indexOf(blockClose);
+        if (close < 0) {
+          continue;
+        }
+        working = working.substring(close + blockClose.length());
+        inBlock = false;
+      }
+      int open = working.indexOf(blockOpen);
+      while (open >= 0) {
+        int close = working.indexOf(blockClose, open + blockOpen.length());
+        if (close < 0) {
+          working = working.substring(0, open);
+          inBlock = true;
+          break;
+        }
+        working = working.substring(0, open) + working.substring(close + blockClose.length());
+        open = working.indexOf(blockOpen);
+      }
+      int slashes = working.indexOf(lineComment);
+      if (slashes >= 0) {
+        working = working.substring(0, slashes);
+      }
+      out.add(working);
+    }
+    return out;
+  }
+
+  /** The default baked into the job's own ACTIVE {@code @Scheduled} annotation. */
   private static String codeDefault(Job job) throws IOException {
-    String src = Files.readString(repoRoot().resolve(job.sourceFile()), StandardCharsets.UTF_8);
+    List<String> sites = activeCronSites(job);
+    if (sites.size() != 1) {
+      return fail(
+          job.sourceFile()
+              + " has "
+              + sites.size()
+              + " active @Scheduled sites reading ${"
+              + job.property()
+              + "} — expected exactly one");
+    }
     Matcher m =
         Pattern.compile("cron = \"\\$\\{" + Pattern.quote(job.property()) + ":([^}]*)\\}\"")
-            .matcher(src);
+            .matcher(sites.get(0));
     if (!m.find()) {
       fail(job.sourceFile() + " has no `cron = \"${" + job.property() + ":<default>}\"`");
     }

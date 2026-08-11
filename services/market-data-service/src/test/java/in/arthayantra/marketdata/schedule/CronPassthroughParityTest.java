@@ -164,12 +164,24 @@ class CronPassthroughParityTest {
         continue; // not declared here at all — the relaxed-binding test above is what covers it
       }
       checked++;
-      assertThat(declared)
+      // ⚠️ Parse the WHOLE ${ENV:default} expression, not startsWith (cross-vendor review Major).
+      // `${ARTHA_NSE_EOD_CRON:something-else}` starts with the right prefix while carrying a default
+      // that agrees with neither the code nor compose — a third copy, drifting unobserved, which is
+      // the exact failure this test was added to close.
+      Matcher m =
+          Pattern.compile("^\\$\\{" + Pattern.quote(job.envName()) + ":(.*)}$").matcher(declared);
+      assertThat(m.matches())
           .as(
-              "application.yml declares %s but does not read %s, so compose's value shadows it and a"
-                  + " YAML-only change would be silently ignored",
-              job.property(), job.envName())
-          .startsWith("${" + job.envName() + ":");
+              "application.yml declares %s as '%s'. It must read exactly ${%s:<default>}, or"
+                  + " compose's value shadows it and a YAML-only change is silently ignored",
+              job.property(), declared, job.envName())
+          .isTrue();
+      assertThat(m.group(1))
+          .as(
+              "application.yml's fallback for %s is a THIRD copy of this cron and it has drifted"
+                  + " from the @Scheduled default in %s",
+              job.property(), job.sourceFile())
+          .isEqualTo(codeDefault(job));
     }
     assertThat(checked)
         .as(
@@ -182,21 +194,7 @@ class CronPassthroughParityTest {
   @DisplayName("exactly one ACTIVE @Scheduled site reads each property, in IST")
   void onePropertyOneActiveScheduledSite() throws IOException {
     for (Job job : JOBS) {
-      List<String> lines =
-          Files.readAllLines(repoRoot().resolve(job.sourceFile()), StandardCharsets.UTF_8);
-      // ⚠️ Line-oriented and comment-aware (cross-vendor review Major). A raw indexOf over the whole
-      // file accepts a COMMENTED-OUT annotation — the shape left behind when someone disables a job
-      // "temporarily" — and stops at the first hit, so a second active site goes unseen.
-      List<String> sites = new ArrayList<>();
-      for (String line : lines) {
-        String trimmed = line.trim();
-        if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
-          continue;
-        }
-        if (trimmed.contains("cron = \"${" + job.property() + ":")) {
-          sites.add(trimmed);
-        }
-      }
+      List<String> sites = activeCronSites(job);
       assertThat(sites)
           .as(
               "%s must have exactly ONE active @Scheduled reading ${%s} — zero means the compose"
@@ -285,12 +283,86 @@ class CronPassthroughParityTest {
     return out;
   }
 
-  /** The default baked into the job's own {@code @Scheduled} annotation. */
+  /**
+   * Every ACTIVE {@code @Scheduled} line reading this job's property, with comments removed first.
+   *
+   * <p>⚠️ ONE routine, used by both the site check and {@link #codeDefault} (cross-vendor review
+   * Major, twice). A per-line filter misses a BLOCK comment — the annotation line inside
+   * a block comment starts with neither a double-slash nor an asterisk — and a raw
+   * {@code indexOf} over the whole file takes the FIRST occurrence, so a commented-out OLD default
+   * above an active new one silently becomes the value compose is compared against.
+   */
+  private static List<String> activeCronSites(Job job) throws IOException {
+    String needle = "cron = \"${" + job.property() + ":";
+    List<String> sites = new ArrayList<>();
+    for (String line :
+        uncommentedLines(
+            Files.readString(repoRoot().resolve(job.sourceFile()), StandardCharsets.UTF_8))) {
+      if (line.contains(needle)) {
+        sites.add(line.trim());
+      }
+    }
+    return sites;
+  }
+
+  /**
+   * The source lines that are NOT inside a comment, in file order.
+   *
+   * <p>Tracks block-comment state across lines rather than filtering each line on its own: the
+   * annotation line inside a block comment begins with neither a double-slash nor an asterisk, so a
+   * per-line filter waves it through as active code.
+   */
+  private static List<String> uncommentedLines(String source) {
+    String blockOpen = "/*";
+    String blockClose = "*/";
+    String lineComment = "//";
+    List<String> out = new ArrayList<>();
+    boolean inBlock = false;
+    for (String line : source.lines().toList()) {
+      String working = line;
+      if (inBlock) {
+        int close = working.indexOf(blockClose);
+        if (close < 0) {
+          continue;
+        }
+        working = working.substring(close + blockClose.length());
+        inBlock = false;
+      }
+      int open = working.indexOf(blockOpen);
+      while (open >= 0) {
+        int close = working.indexOf(blockClose, open + blockOpen.length());
+        if (close < 0) {
+          working = working.substring(0, open);
+          inBlock = true;
+          break;
+        }
+        working = working.substring(0, open) + working.substring(close + blockClose.length());
+        open = working.indexOf(blockOpen);
+      }
+      int slashes = working.indexOf(lineComment);
+      if (slashes >= 0) {
+        working = working.substring(0, slashes);
+      }
+      out.add(working);
+    }
+    return out;
+  }
+
+  /** The default baked into the job's own ACTIVE {@code @Scheduled} annotation. */
   private static String codeDefault(Job job) throws IOException {
-    String src = Files.readString(repoRoot().resolve(job.sourceFile()), StandardCharsets.UTF_8);
+    List<String> sites = activeCronSites(job);
+    if (sites.size() != 1) {
+      return fail(
+          job.sourceFile()
+              + " has "
+              + sites.size()
+              + " active @Scheduled sites reading ${"
+              + job.property()
+              + "} — expected exactly one");
+    }
     Matcher m =
         Pattern.compile("cron = \"\\$\\{" + Pattern.quote(job.property()) + ":([^}]*)\\}\"")
-            .matcher(src);
+            .matcher(sites.get(0));
     if (!m.find()) {
       fail(job.sourceFile() + " has no `cron = \"${" + job.property() + ":<default>}\"`");
     }

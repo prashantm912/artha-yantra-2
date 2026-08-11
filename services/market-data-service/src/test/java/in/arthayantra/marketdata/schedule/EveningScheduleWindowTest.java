@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -89,28 +90,77 @@ class EveningScheduleWindowTest {
               SRC + "screener/minervini/MinerviniBuyableProducer.java"));
 
   @Test
-  @DisplayName("every evening cron compose sets lands inside 18:00–19:00 IST")
+  @DisplayName("EVERY firing of every evening cron lands inside 18:00–19:00 IST")
   void everyEveningJobFiresBeforeTheOwnerClosesTheMachine() throws IOException {
     List<String> compose = composeLines();
     for (Job job : JOBS) {
       String cron = composeDefault(compose, job.envName());
-      Matcher m = Pattern.compile("^0 (\\d{1,2}) (\\d{1,2}) ").matcher(cron);
-      assertThat(m.find())
-          .as("%s = '%s' is not a second-precision cron this test can read", job.envName(), cron)
-          .isTrue();
-      int hour = Integer.parseInt(m.group(2));
-      assertThat(hour)
-          .as(
-              "%s fires at %02d:%02d IST. The owner shuts the machine down at %d:00 and starts it"
-                  + " after 08:00 (decision 2026-08-11), so anything at or after %d:00 NEVER RUNS —"
-                  + " it is not 'late', it is silently skipped every single day",
-              job.envName(),
-              hour,
-              Integer.parseInt(m.group(1)),
-              WINDOW_END_HOUR,
-              WINDOW_END_HOUR)
-          .isBetween(WINDOW_START_HOUR, WINDOW_END_HOUR - 1);
+      // ⚠️ EVERY firing, not just the first. These crons poll (`0 0,15,30,45 18 ...`) because NSE's
+      // publish time varies, and an hour field like `18-19` reads as a wider safety net while every
+      // 19:xx pass is in fact dead — the machine is off. Checking one firing would pass that exact
+      // mistake.
+      List<String> firings = firings(job.envName(), cron);
+      assertThat(firings)
+          .as("%s = '%s' produced no firing this test could read", job.envName(), cron)
+          .isNotEmpty();
+      for (String at : firings) {
+        int hour = Integer.parseInt(at.substring(0, at.indexOf(':')));
+        assertThat(hour)
+            .as(
+                "%s fires at %s IST (cron '%s'). The owner shuts the machine down at %d:00 and"
+                    + " starts it after 08:00 (decision 2026-08-11), so anything at or after %d:00"
+                    + " NEVER RUNS — it is not 'late', it is silently skipped every single day",
+                job.envName(), at, cron, WINDOW_END_HOUR, WINDOW_END_HOUR)
+            .isBetween(WINDOW_START_HOUR, WINDOW_END_HOUR - 1);
+      }
     }
+  }
+
+  /**
+   * Every {@code HH:mm} a second-precision Spring cron fires at, expanding {@code a,b} lists and
+   * {@code a-b} ranges in the minute and hour fields. Deliberately REFUSES anything else (a step, a
+   * wildcard hour) rather than guessing — a schedule this test cannot enumerate is a schedule it
+   * cannot vouch for, and silently returning an empty list would turn the assertion above into a
+   * guard that checks nothing.
+   */
+  private static List<String> firings(String envName, String cron) {
+    String[] f = cron.trim().split("\\s+");
+    if (f.length != 6) {
+      fail(envName + " = '" + cron + "' is not a 6-field second-precision cron");
+    }
+    List<String> out = new ArrayList<>();
+    for (int h : expand(envName, cron, "hour", f[2])) {
+      for (int m : expand(envName, cron, "minute", f[1])) {
+        out.add(String.format("%02d:%02d", h, m));
+      }
+    }
+    return out;
+  }
+
+  private static List<Integer> expand(String envName, String cron, String field, String spec) {
+    List<Integer> out = new ArrayList<>();
+    for (String part : spec.split(",")) {
+      Matcher range = Pattern.compile("^(\\d{1,2})-(\\d{1,2})$").matcher(part);
+      if (part.matches("\\d{1,2}")) {
+        out.add(Integer.parseInt(part));
+      } else if (range.matches()) {
+        for (int v = Integer.parseInt(range.group(1)); v <= Integer.parseInt(range.group(2)); v++) {
+          out.add(v);
+        }
+      } else {
+        fail(
+            envName
+                + " = '"
+                + cron
+                + "' has a "
+                + field
+                + " field ('"
+                + part
+                + "') this test cannot enumerate. Widen it deliberately — never let an unreadable"
+                + " schedule pass unchecked");
+      }
+    }
+    return out;
   }
 
   @Test

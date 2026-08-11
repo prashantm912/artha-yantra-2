@@ -382,39 +382,49 @@ services:
       # scheduled outside that window. Every job below previously ran 19:00-20:10; the times here are
       # the DEFAULT (not an .env override) so the repo, not a gitignored file, is the source of truth.
       #
-      # Ordering is the original dependency order, compressed: NSE feeds -> bhavcopy -> close-recon ->
-      # canary -> data-quality -> screens -> breadth (must follow the screens) -> market-context ->
-      # buyable alerts. Measured 2026-08-11: once bhavcopy lands the dependent chain completes in
-      # ~2 minutes, so the 25-minute gap from bhavcopy to the screens is generous headroom.
+      # ⚠️ EARLIER MEANS "POLL", NOT "MOVE THE CLOCK BACK". NSE's publish time VARIES -- measured
+      # 17:52 (07-31), 17:59 (08-11), 18:47 (08-10), 19:31 (07-28). Every one of these jobs is
+      # SINGLE-SHOT and watermark-driven, so a fixed earlier time just makes it run BEFORE its input
+      # exists, no-op, and never re-run that day: on 08-10 a single 18:05 bhavcopy would have missed
+      # and the whole dependent chain would have skipped. The seven chain jobs therefore fire every
+      # 15 minutes across 18:00-18:58, staggered by dependency order so each pass sees the previous
+      # job's output: bhavcopy(:00) -> NSE feeds(:02) -> market-context(:05) -> data-quality(:07) ->
+      # breadth(:09) -> close-recon(:11) -> upstox canary(:13). Repeat runs are cheap and already
+      # observed harmless (2026-08-11: a second BHAVCOPY wrote 0 rows, manas rewrote the same 2271).
       #
-      # WARNING: NSE publish time VARIES -- fetchable at 17:59 on 2026-08-11 but only 18:47 on 08-10.
-      # On a late day the screens SKIP and the 08:35 catch-up takes the session next morning (owner
-      # decision: "skip, catch up at 08:35 next morning"). That is the designed outcome, not a miss.
+      # The two screens are NOT polled -- they already run off a bhavcopy-complete listener, so their
+      # single 18:50/18:52 slots are a backstop for the case where that event is missed, and the
+      # breadth fold's LAST pass (18:54) is the one that lands after them.
+      #
+      # NOTHING may span hour 19: a `18-19` cron looks like a wider net but every 19:xx firing is
+      # dead, because the machine is off. On a night NSE publishes after ~18:58 the screens SKIP and
+      # the 08:35 catch-up takes the session next morning (owner decision: "skip, catch up at 08:35
+      # next morning"). That is the designed outcome, not a miss.
       # ⚠️ There is NO overnight schedule: the 00:55/03:24 BHAVCOPY rows seen on 2026-08-11 were
       # BhavcopyStartupCatchup firing on ApplicationReadyEvent after a DEPLOY, not a cron. Verified
       # over 8 days -- 19:30 is the only time that appears daily. Do not deploy overnight expecting
       # nothing to run; a restart re-runs the catch-up.
 
-      # was 19:00  NSE FII / participant / DII feeds
-      ARTHA_NSE_EOD_CRON: "${ARTHA_NSE_EOD_CRON:-0 0 18 * * MON-FRI}"
-      # was 19:30  the bhavcopy fetch everything else waits on
-      ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 5 18 * * MON-FRI}"
-      # was 20:10  close reconciliation
-      ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 10 18 * * MON-FRI}"
-      # was 19:30  upstox contract canary
-      ARTHA_UPSTOX_CANARY_CRON: "${ARTHA_UPSTOX_CANARY_CRON:-0 15 18 * * MON-FRI}"
-      # was 19:50  data-quality sweep
-      ARTHA_DATA_QUALITY_EOD_CRON: "${ARTHA_DATA_QUALITY_EOD_CRON:-0 20 18 * * MON-FRI}"
-      # was 19:50  minervini screen
-      ARTHA_MINERVINI_CRON: "${ARTHA_MINERVINI_CRON:-0 25 18 * * MON-FRI}"
-      # was 19:55  manas screen
-      ARTHA_MANAS_ARORA_CRON: "${ARTHA_MANAS_ARORA_CRON:-0 30 18 * * MON-FRI}"
-      # was 19:55  breadth fold -- MUST follow the screens
-      ARTHA_BREADTH_MATERIALIZE_CRON: "${ARTHA_BREADTH_MATERIALIZE_CRON:-0 35 18 * * MON-FRI}"
-      # was 19:45  market context -- ledger row H11
-      ARTHA_CONTEXT_EOD_CRON: "${ARTHA_CONTEXT_EOD_CRON:-0 40 18 * * MON-FRI}"
-      # was 19:58  buyable alerts
-      ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 45 18 * * MON-FRI}"
+      # was 19:00 once  NSE FII / participant / DII feeds
+      ARTHA_NSE_EOD_CRON: "${ARTHA_NSE_EOD_CRON:-0 2,17,32,47 18 * * MON-FRI}"
+      # was 19:30 once  the chain head: NSE publish time VARIES 17:52-19:31, so POLL
+      ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 0,15,30,45 18 * * MON-FRI}"
+      # was 20:10 once  close reconciliation
+      ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 11,26,41,56 18 * * MON-FRI}"
+      # was 19:30 once  upstox contract canary
+      ARTHA_UPSTOX_CANARY_CRON: "${ARTHA_UPSTOX_CANARY_CRON:-0 13,28,43,58 18 * * MON-FRI}"
+      # was 19:50 once  data-quality sweep
+      ARTHA_DATA_QUALITY_EOD_CRON: "${ARTHA_DATA_QUALITY_EOD_CRON:-0 7,22,37,52 18 * * MON-FRI}"
+      # was 19:50  minervini screen -- BACKSTOP only; primary path is its bhavcopy-complete listener
+      ARTHA_MINERVINI_CRON: "${ARTHA_MINERVINI_CRON:-0 50 18 * * MON-FRI}"
+      # was 19:55  manas screen -- BACKSTOP only; primary path is its bhavcopy-complete listener
+      ARTHA_MANAS_ARORA_CRON: "${ARTHA_MANAS_ARORA_CRON:-0 52 18 * * MON-FRI}"
+      # was 19:55 once  breadth fold -- its LAST pass (18:54) is the one after the screens
+      ARTHA_BREADTH_MATERIALIZE_CRON: "${ARTHA_BREADTH_MATERIALIZE_CRON:-0 9,24,39,54 18 * * MON-FRI}"
+      # was 19:45 once  market context -- ledger row H11
+      ARTHA_CONTEXT_EOD_CRON: "${ARTHA_CONTEXT_EOD_CRON:-0 5,20,35,50 18 * * MON-FRI}"
+      # was 19:58  buyable alerts (bean is @ConditionalOnProperty-disabled today, so inert)
+      ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 58 18 * * MON-FRI}"
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
@@ -563,18 +573,33 @@ services:
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS:-180000}
       # EOD swing missed-batch detector: ship dormant; owner arms after ops ntfy is configured.
       # ---- Evening chain, COMPRESSED to finish before 19:00 IST (owner decision 2026-08-11) ----
-      # See the matching block on market-data-service for the rationale. These four run AFTER the
-      # market-data chain because they read its output (the swing heartbeat checks the batch ran; the
-      # insights jobs read the screens and the settle). The 16:00 settle is unchanged.
+      # See the matching block on market-data-service for the rationale. These four are NOT polled --
+      # they read DB state the market-data chain has already written, so they take the tail of the
+      # window (18:55-18:58), after the screens at 18:50/18:52 and the breadth fold at 18:54. The
+      # 16:00 settle is unchanged.
+      #
+      # ⚠️ NOT MOVED, and therefore DEAD under the owner's 19:00 close: the paper reconcilers
+      # (artha.paper.reconciliation.cron 21:15, artha.paper.past-expiry-recon.cron 21:20). They are
+      # out of scope here -- moving a reconciler is a money-path change that needs its own review --
+      # but they have not run since the owner started closing the machine at 19:00. Ledger row.
 
       # was 20:15  swing batch heartbeat
-      ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 50 18 * * MON-FRI}"
+      ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 55 18 * * MON-FRI}"
       # was 21:00  paper graduation promotion
-      ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 52 18 * * MON-FRI}"
+      ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 56 18 * * MON-FRI}"
       # was 21:10  strategy-evidence insight
-      ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON: "${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:-0 54 18 * * MON-FRI}"
+      ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON: "${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:-0 57 18 * * MON-FRI}"
+      # ⚠️ MONEY PATH, folded in on the owner's explicit call (2026-08-11). Both reconcilers ran at
+      # 21:15/21:20 and have therefore NOT RUN AT ALL since the owner started closing at 19:00 —
+      # leaving them out of this PR would have kept them dead, which is strictly worse than moving
+      # them. They sit at 18:40/18:42, after the market-data chain's data has landed and before the
+      # 18:55-18:58 tail, so they read a settled book rather than racing it.
+      # was 21:15  paper nightly reconciliation
+      ARTHA_PAPER_RECONCILIATION_CRON: "${ARTHA_PAPER_RECONCILIATION_CRON:-0 40 18 * * MON-FRI}"
+      # was 21:20  past-expiry reconciliation
+      ARTHA_PAPER_PAST_EXPIRY_RECON_CRON: "${ARTHA_PAPER_PAST_EXPIRY_RECON_CRON:-0 42 18 * * MON-FRI}"
       # was 21:15  sell-decision insight
-      ARTHA_INSIGHTS_SELL_DECISION_CRON: "${ARTHA_INSIGHTS_SELL_DECISION_CRON:-0 56 18 * * MON-FRI}"
+      ARTHA_INSIGHTS_SELL_DECISION_CRON: "${ARTHA_INSIGHTS_SELL_DECISION_CRON:-0 58 18 * * MON-FRI}"
       ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED: ${ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED:-false}
       # (The ARTHA_SIGNALS_STARVATION_WATCHDOG_* passthroughs were removed 2026-07-26 with the
       # retirement of SignalStarvationCanary — see the note in strategy-signal's application.yml.)
@@ -678,7 +703,12 @@ services:
       # canary alert) where the newest daily bar is still the missed session's — so it decides off the
       # SAME bar the on-time run would have. Default-OFF: it fires real entries + real paper exits.
       ARTHA_SWING_CATCHUP_ENABLED: ${ARTHA_SWING_CATCHUP_ENABLED:-false}
-      ARTHA_SWING_CATCHUP_CRON: "${ARTHA_SWING_CATCHUP_CRON:-0 35 8 * * MON-FRI}"
+      # ⚠️ POLLS, because the owner starts the machine "after 08:00" and sometimes as late as 09:00
+      # (owner, 2026-08-11). A single 08:35 shot is the ONLY path that recovers a session the evening
+      # chain missed, so on a late-start morning a fixed 08:35 loses that session outright. Fires
+      # every 10 minutes; SwingBatchCatchUp refuses past the 09:15 market-open deadline on its own
+      # (SwingBatchCatchUp:610), so the 09:15+ passes are cheap no-ops, not a risk of late entries.
+      ARTHA_SWING_CATCHUP_CRON: "${ARTHA_SWING_CATCHUP_CRON:-0 5,15,25,35,45,55 8-9 * * MON-FRI}"
       # How many missed sessions the sweep will keep retrying before it abandons one (a held bar that
       # never lands). The scan window is this + 2 most-recent trading days, so a multi-day outage
       # catches up every session in range, oldest first.

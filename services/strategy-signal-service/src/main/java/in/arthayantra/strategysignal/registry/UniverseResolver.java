@@ -179,7 +179,7 @@ public class UniverseResolver {
    * silently never happened. It went unnoticed because {@code BacktestRunner.signalInstrument} gates
    * pinned-array routing to {@code futures_screener} and the two funnel modes — {@code
    * futures_of_underlying} signals on the underlying spot and never reads the pin — so the only
-   * user-visible symptom was {@code /api/v1/universe/resolve} returning a 503 for a valid config.
+   * user-visible symptom was {@code GET /api/v1/strategies/{id}/universe} returning a 503 for a valid config.
    * Found by cross-vendor review on PR #1344; no published strategy uses the mode today.
    *
    * <p>Tolerates the legacy {@code "EXCH:SYMBOL"} string for the same reason {@code BacktestRunner}

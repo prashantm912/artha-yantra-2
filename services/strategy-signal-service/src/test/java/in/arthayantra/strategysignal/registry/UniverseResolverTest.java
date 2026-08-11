@@ -83,7 +83,7 @@ class UniverseResolverTest {
     //
     // ⚠️ It pins that the resolver returns EMPTY and does NOT throw. That is a deliberate departure
     // from how #1340 treated the same shape on the LIVE path, for two reasons: this class also backs
-    // the /api/v1/universe/resolve preview, where "show me what this resolves to" must answer
+    // the GET /api/v1/strategies/{id}/universe preview, where "show me what this resolves to" must answer
     // honestly rather than 5xx; and ApiException(503, UPSTREAM_UNAVAILABLE) would be a false claim
     // when the upstream ANSWERED, with 200 and an empty ladder.
     //

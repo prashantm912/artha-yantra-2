@@ -1873,19 +1873,28 @@ catch-up then writes true for the SAME (batch, run_date)"* -- read as INTENT whe
 that predicate against live data.** Sibling of N59 (verify the consumer); this is verify the GATE.
 Third premise error in one day.
 
-**N61 · A DEPLOY THAT RETURNS 0 EVERYWHERE AND DEPLOYS NOTHING.** 2026-08-11: the scheduled 17:15
-post-close deploy fired (`lastRunAt` confirms) and left the live stack untouched -- containers 15-16 h
-old, the #1340 marker ABSENT from the running jar, `ARTHA_MD_SOURCE_OPTIONANALYTICS` still `upstox` in
-the container. Its pre-flight would have PASSED, re-run by hand: on `main`, current, both commits in
-history, clean tree. Re-running manually exposed the mechanism: **`docker compose up -d` left
-`ay-strategy-signal-service` in state `Created` and never started it -- no logs, no error, exit code
-0.** A plain `docker start` then booted it in 5.1 s. Every command returned 0, so a task judging on
-exit codes reports a clean deploy while the signal engine is DOWN. Two consequences: `.env` HAD been
-edited (the H6 revert was on disk but unverifiable from the container), so the routine died between
-config and compose; and CLAUDE.md's rule *"plain `up -d` STARTS an already-Created container instead
-of replacing it"* has a worse sibling -- **`up -d` can leave it Created and not start it at all**.
-**Every deploy must end in a jar FINGERPRINT plus a `docker ps` state check, and a deploy task must
-fail loudly when the fingerprint is absent -- never on exit codes.**
+**N61 · `docker compose up -d` CAN LEAVE A CONTAINER `Created` AND NEVER START IT -- exit code 0, no
+logs, no error.** 2026-08-11, measured: image created 18:00:13 IST, container created 18:00:25, and
+`up -d` returned 0 with the container sitting in state `Created`. A plain `docker start` booted it
+38 s later (`StartedAt` 18:01:03) and the app came up in 5.1 s. Between those two moments the signal
+engine was DOWN with every command in the deploy chain reporting success. CLAUDE.md already warns
+that *"plain `up -d` STARTS an already-Created container instead of replacing it"*; this is the worse
+sibling -- **it can leave it Created and not start it at all.** **A deploy must end in a jar
+FINGERPRINT plus a `docker ps` RUNNING check, and must fail loudly on either -- never on exit codes.**
+
+⚠️ **CORRECTION, same day, before this note was merged.** The first draft blamed the 17:15 scheduled
+deploy task: "it fired and deployed nothing". That is NOT supported by the timestamps. The 18:00:13
+image and 18:00:25 container are the ARCHITECT's own manual build and compose, run after measuring
+(correctly, at 17:55) that the running jar still lacked the #1340 marker and the container env still
+read `upstox`. The scheduled task ran LONG, past that manual deploy, and its ledger PR ([#1349])
+describes the correct end state -- including the transient `2 loaded / 36 unresolved` reload row at
+18:00:24 that self-healed at 18:01:46, 82 s later -- because by the time it verified, the manual
+deploy had landed. **It recorded someone else's deploy as its own, and nothing in its receipts could
+have revealed that.** Two lessons worth more than the original claim: a long-running deploy task and
+a human deploying the same services CONCURRENTLY produce a receipt that is true and misattributed;
+and the Architect asserted "the routine deployed nothing" from a 17:55 measurement plus an absence of
+artifacts, without checking `StartedAt`/`.Created` -- the timestamps that settle it in one command.
+Fourth premise error of the day, and the only one caught by re-reading its own PR.
 
 **N55 · A SUSPICIOUS NUMBER MAY ALREADY HAVE A MERGED FIX — GREP THE METRIC'S OWN NAME BEFORE
 MEASURING THE SYSTEM THAT PRODUCES IT.** Ledger row H10 (`candidates = 0` on 5 of 6 minervini runs)

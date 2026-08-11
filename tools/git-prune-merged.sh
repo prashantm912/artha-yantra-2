@@ -182,12 +182,15 @@ branch_work_is_in_main() {
 #   no-merged-pr        -- gh answered, and there is no merged PR for this head
 #   tip-not-in-pr       -- a merged PR exists but this tip is none of its commits (reused branch name)
 #   tip-behind-merged-pr-- this tip IS one of its commits but an EARLIER one; its tree never landed
+# GH_PR carries the PR number for that case, so the remedy can name a ref that actually exists.
 #   merge-commit-absent -- we do not hold the squash commit locally, so the proof cannot be run
 GH_REASON=""
+GH_PR=""
 
 gh_says_merged() {
   local branch="$1" tip row merged_at head_oid oids tmp rc saw_pr=0 saw_identity=0 saw_merge=0
   GH_REASON="gh-unavailable"
+  GH_PR=
   command -v gh >/dev/null 2>&1 || return 1
   tip="$(git rev-parse "$branch" 2>/dev/null)" || return 1
 
@@ -200,8 +203,8 @@ gh_says_merged() {
   # real prune run stopped part-way through with no indication anything had gone wrong.
   tmp="$(mktemp)" || return 1
   gh pr list --head "$branch" --state merged \
-     --json mergeCommit,headRefOid,commits \
-     --jq '.[] | [(.mergeCommit.oid // "")] + [.headRefOid] + [.commits[].oid] | @tsv' \
+     --json number,mergeCommit,headRefOid,commits \
+     --jq '.[] | [(.number|tostring)] + [(.mergeCommit.oid // "")] + [.headRefOid] + [.commits[].oid] | @tsv' \
      >"$tmp" 2>/dev/null
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -214,6 +217,8 @@ gh_says_merged() {
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     saw_pr=1
+    GH_PR="${row%% *}"
+    row="${row#* }"
     merged_at="${row%% *}"
     oids="${row#* }"
     head_oid="${oids%% *}"
@@ -261,8 +266,13 @@ while read -r branch; do
         gh-unavailable)
           why="GitHub could not be asked (gh missing, or the API refused) — status UNKNOWN, kept" ;;
         tip-behind-merged-pr)
-          why="its PR MERGED, but this local tip is an EARLIER commit of it whose tree never landed;"
-          why="$why fetch or reset the branch to its merged head, then re-run" ;;
+          # WARNING: do NOT say "fetch the merged head" -- delete_branch_on_merge removed the
+          # remote branch, so no branch ref exists to fetch and that advice is unactionable.
+          # The PR head ref survives and IS fetchable. Verified 2026-08-11 on #1333: the fetch
+          # returns a54a4b4b and the branch prunes on the next run.
+          why="its PR${GH_PR:+ #$GH_PR} MERGED, but this local tip is an EARLIER commit whose"
+          why="$why tree never landed. Clear it with:  git fetch origin"
+          why="$why refs/pull/${GH_PR:-N}/head && git branch -f $branch FETCH_HEAD" ;;
         tip-not-in-pr)
           why="a merged PR exists for this branch NAME, but this tip is none of its commits" ;;
         merge-commit-absent)

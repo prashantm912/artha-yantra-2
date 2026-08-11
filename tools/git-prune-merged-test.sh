@@ -108,16 +108,22 @@ if awk -v b="$branch" '$1 == b && $2 == "FAIL" {found=1} END {exit !found}' "$GH
   echo 'gh stub: simulated API failure' >&2
   exit 1
 fi
-want_merge=0; want_commits=0
+want_merge=0; want_commits=0; want_number=0
 case ",$fields," in *,mergeCommit,*) want_merge=1;; esac
 case ",$fields," in *,commits,*)     want_commits=1;; esac
+case ",$fields," in *,number,*)      want_number=1;; esac
 # Fixture line: "<branch> <mergeCommitOid> <headRefOid> [<commitOid>...]", ONE LINE PER MERGED PR.
 # Emits ONE ROW per PR in jq's field order, matching
 #   --json mergeCommit,headRefOid,commits --jq '.[] | [.mergeCommit.oid] + [.headRefOid] + [.commits[].oid] | @tsv'
-oids=$(awk -v b="$branch" -v wm="$want_merge" -v wc="$want_commits" '
+oids=$(awk -v b="$branch" -v wm="$want_merge" -v wc="$want_commits" -v wn="$want_number" '
   $1 == b {
     out = ""
-    if (wm) out = $2
+    # The stub must emit EVERY requested field, in jq order. Omitting one silently SHIFTS the
+    # positional parse of the caller -- measured 2026-08-11 when `number` was added to the real query
+    # and this stub kept emitting three fields: mergeCommit landed in the number slot and a passing
+    # case flipped to KEPT. Fourth time in this PR series the double diverged from real gh.
+    if (wn) out = NR
+    if (wm) out = (out == "" ? $2 : out " " $2)
     out = (out == "" ? $3 : out " " $3)
     if (wc) for (i = 4; i <= NF; i++) out = out " " $i
     print out
@@ -327,11 +333,11 @@ else
   echo "FAIL a gh refusal is REPORTED, not silent            no warning line"
   fail=$((fail + 1))
 fi
-if grep -q "this local tip is an EARLIER commit" "$TMP/run.out"; then
+if grep -q "this local tip is an EARLIER commit" "$TMP/run.out" \n   && grep -q "git fetch origin refs/pull/" "$TMP/run.out"; then
   echo "ok   intermediate keep names its REAL reason         accurate"
   pass=$((pass + 1))
 else
-  echo "FAIL intermediate keep names its REAL reason         still says 'not merged'"
+  echo "FAIL intermediate keep names its REAL reason         no reason or no refs/pull remedy"
   fail=$((fail + 1))
 fi
 # The bug this fix pins: a clean, never-pushed live worktree must survive the real run, not just

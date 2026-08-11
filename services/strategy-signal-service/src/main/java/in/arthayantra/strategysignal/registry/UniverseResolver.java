@@ -168,8 +168,35 @@ public class UniverseResolver {
     return new ResolvedUniverse("index_constituents", asOf, items, checksum(items), SURVIVORSHIP_CAVEAT);
   }
 
+  /**
+   * The underlying's TRADINGSYMBOL, whatever shape the config carries it in.
+   *
+   * <p>⚠️ schema-v1 declares {@code universe.underlying} as an instrumentRef OBJECT
+   * ({@code $defs/instrumentRef}, and it is REQUIRED for {@code futures_of_underlying}) — but this
+   * class read it with a bare {@code .asText()}, which on an ObjectNode yields the EMPTY STRING. So
+   * for every schema-VALID config the term-structure call went out as {@code ?underlying=}, market-data
+   * answered 404, {@link #get} mapped that to {@code ApiException(503)}, and the mode's universe pin
+   * silently never happened. It went unnoticed because {@code BacktestRunner.signalInstrument} gates
+   * pinned-array routing to {@code futures_screener} and the two funnel modes — {@code
+   * futures_of_underlying} signals on the underlying spot and never reads the pin — so the only
+   * user-visible symptom was {@code /api/v1/universe/resolve} returning a 503 for a valid config.
+   * Found by cross-vendor review on PR #1344; no published strategy uses the mode today.
+   *
+   * <p>Tolerates the legacy {@code "EXCH:SYMBOL"} string for the same reason {@code BacktestRunner}
+   * does — that form predates the schema and still appears in old configs.
+   */
+  private static String underlyingSymbol(JsonNode universe) {
+    JsonNode node = universe.path("underlying");
+    if (node.isObject()) {
+      return node.path("tradingsymbol").asText("");
+    }
+    String raw = node.asText("");
+    int colon = raw.indexOf(':');
+    return colon >= 0 ? raw.substring(colon + 1) : raw;
+  }
+
   private ResolvedUniverse resolveFutures(JsonNode universe) {
-    String underlying = universe.path("underlying").asText();
+    String underlying = underlyingSymbol(universe);
     String contract = universe.path("futures").path("contract").asText("front_month");
     JsonNode ts = get("/api/v1/market/futures/term-structure?underlying={u}", underlying);
     JsonNode legs = ts.path("contracts");

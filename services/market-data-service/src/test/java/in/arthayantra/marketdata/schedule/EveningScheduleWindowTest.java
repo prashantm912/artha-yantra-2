@@ -33,10 +33,13 @@ import org.springframework.core.env.SystemEnvironmentPropertySource;
  * cron passthrough in compose happens to carry a value identical to its code default, so live state
  * could not have proven the mechanism works either — hence a test rather than a probe.
  *
- * <p>The four assertions are deliberately different questions: does the name resolve, does the
- * property still exist in the source, does compose still carry it on THIS service, and is the
- * resulting time actually inside the window. A rename breaks the second, a moved passthrough breaks
- * the third, and a well-meaning "put it back to 19:50" breaks the fourth.
+ * <p>The assertions are deliberately different questions: does the name resolve, does the property
+ * still exist in the source, does compose still carry it on THIS service, is the resulting time
+ * inside the window, and do any two jobs share a minute. A rename breaks the second, a moved
+ * passthrough breaks the third, a well-meaning "put it back to 19:50" breaks the fourth, and the
+ * fifth exists because the tail runs one job per minute with zero slack — "polling creates
+ * cross-job minute collisions" was a Major in the 2026-08-10 review and the hazard outlived the
+ * polls.
  */
 class EveningScheduleWindowTest {
 
@@ -95,10 +98,10 @@ class EveningScheduleWindowTest {
     List<String> compose = composeLines();
     for (Job job : JOBS) {
       String cron = composeDefault(compose, job.envName());
-      // ⚠️ EVERY firing, not just the first. These crons poll (`0 0,15,30,45 18 ...`) because NSE's
-      // publish time varies, and an hour field like `18-19` reads as a wider safety net while every
-      // 19:xx pass is in fact dead — the machine is off. Checking one firing would pass that exact
-      // mistake.
+      // ⚠️ EVERY firing, not just the first. Nothing here may poll (see the compose header for the
+      // review that killed that), but an hour field like `18-19` reads as a wider safety net while
+      // every 19:xx pass is in fact dead — the machine is off. Checking one firing would pass that
+      // exact mistake, and it is the mistake a well-meaning "widen the net" edit makes.
       List<String> firings = firings(job.envName(), cron);
       assertThat(firings)
           .as("%s = '%s' produced no firing this test could read", job.envName(), cron)
@@ -161,6 +164,49 @@ class EveningScheduleWindowTest {
       }
     }
     return out;
+  }
+
+  @Test
+  @DisplayName("no two evening jobs share a firing minute, across BOTH services")
+  void noTwoEveningJobsCollide() throws IOException {
+    // ⚠️ "Polling creates cross-job minute collisions" was a Major in the 2026-08-10 cross-vendor
+    // review of the polling version of this change. The collision hazard did not leave with the
+    // polls: the tail is now one job per minute with zero slack, so any future edit that reuses a
+    // minute puts two jobs on the same trigger. Deliberately spans BOTH services — they share one
+    // machine and one 15-minute window, and a per-service check would miss exactly the pairs most
+    // likely to collide (the market-data tail against the strategy-signal head).
+    Map<String, String> takenBy = new HashMap<>();
+    List<String> compose = composeLines();
+    for (String envName : allEveningCronNames(compose)) {
+      for (String at : firings(envName, composeDefault(compose, envName))) {
+        String previous = takenBy.putIfAbsent(at, envName);
+        assertThat(previous)
+            .as("%s and %s both fire at %s IST", previous, envName, at)
+            .isNull();
+      }
+    }
+    assertThat(takenBy)
+        .as(
+            "found no evening crons at all in compose — the scan is broken, and a collision check"
+                + " over an empty set passes while checking nothing")
+        .hasSizeGreaterThanOrEqualTo(JOBS.size());
+  }
+
+  /**
+   * Every {@code ARTHA_*_CRON} compose sets to an 18:xx time, whichever service it sits under. Read
+   * from the file rather than from {@link #JOBS} on purpose: a job added to compose but forgotten
+   * here must still be caught colliding.
+   */
+  private static List<String> allEveningCronNames(List<String> compose) {
+    Pattern p = Pattern.compile("^\\s*(ARTHA_[A-Z_]*CRON): \"\\$\\{\\1:-0 \\d+ 18 .*");
+    List<String> names = new ArrayList<>();
+    for (String line : compose) {
+      Matcher m = p.matcher(line);
+      if (m.matches()) {
+        names.add(m.group(1));
+      }
+    }
+    return names;
   }
 
   @Test

@@ -84,10 +84,10 @@ class EveningScheduleWindowTest {
     List<String> compose = composeLines();
     for (Job job : JOBS) {
       String cron = composeDefault(compose, job.envName());
-      // ⚠️ EVERY firing, not just the first. These crons poll (`0 0,15,30,45 18 ...`) because NSE's
-      // publish time varies, and an hour field like `18-19` reads as a wider safety net while every
-      // 19:xx pass is in fact dead — the machine is off. Checking one firing would pass that exact
-      // mistake.
+      // ⚠️ EVERY firing, not just the first. Nothing here may poll (see the compose header for the
+      // review that killed that), but an hour field like `18-19` reads as a wider safety net while
+      // every 19:xx pass is in fact dead — the machine is off. Checking one firing would pass that
+      // exact mistake, and it is the mistake a well-meaning "widen the net" edit makes.
       List<String> firings = firings(job.envName(), cron);
       assertThat(firings)
           .as("%s = '%s' produced no firing this test could read", job.envName(), cron)

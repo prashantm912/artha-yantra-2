@@ -204,7 +204,7 @@ gh_says_merged() {
   tmp="$(mktemp)" || return 1
   gh pr list --head "$branch" --state merged \
      --json number,mergeCommit,headRefOid,commits \
-     --jq '.[] | [(.number|tostring), (.mergeCommit.oid // ""), .headRefOid] + [.commits[].oid] | @tsv' \
+     --jq '.[] | [(.number|tostring), (.mergeCommit.oid // "-"), .headRefOid] + [.commits[].oid] | @tsv' \
      >"$tmp" 2>/dev/null
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -213,12 +213,20 @@ gh_says_merged() {
     return 1
   fi
 
-  # WARNING: parse the TSV as TSV. An earlier cut collapsed tabs to spaces and split on spaces,
+  # WARNING: parse the TSV as TSV, and make sure NO column can ever be empty. An earlier cut
   # which made a row with an EMPTY mergeCommit column shift every later field left by one
   # (cross-vendor review, Critical, 2026-08-11). .mergeCommit.oid CAN be null on a merged PR, and
   # then headRefOid slid into the merge-commit slot -- so in the COMMON case where the local tip
   # equals headRefOid, the proof compared the branch against ITSELF, found an empty diff, and
   # authorised a DELETE. Fields are now read tab-delimited and validated before they are trusted.
+  #
+  # ⚠️ IFS=$'	' is NOT sufficient on its own: bash treats tab as IFS WHITESPACE, so a run of tabs
+  # collapses and an empty column still vanishes (cross-vendor review, round 2). That is why the jq
+  # above emits "-" rather than "" for a null mergeCommit — a non-whitespace sentinel is the only
+  # thing that survives the split. Without it, 8<TAB><TAB><head> read back as merge=<head>, head=""
+  # and the branch was kept for the WRONG REASON (tip-not-in-pr rather than merge-commit-absent).
+  # It failed safe, and it still misdescribed itself, which is the whole defect class this PR is
+  # about.
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     saw_pr=1
@@ -245,7 +253,9 @@ gh_says_merged() {
     matched_pr="$num"
 
     # PROOF -- we must hold the squash commit, and the tip paths must match it.
-    case "$merge" in ""|*[!0-9a-f]*) continue ;; esac
+    # "-" is the null-mergeCommit sentinel; anything non-hex or wrong-length is a shape we do not
+    # understand. Both fall through with saw_merge=0, which renders as merge-commit-absent.
+    case "$merge" in "-"|""|*[!0-9a-f]*) continue ;; esac
     [ "${#merge}" -eq 40 ] || continue
     git cat-file -e "${merge}^{commit}" 2>/dev/null || continue
     # A squash-merge commit is BY DEFINITION a commit on main. Requiring that is what actually closes

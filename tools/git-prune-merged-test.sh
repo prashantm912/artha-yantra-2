@@ -113,7 +113,13 @@ done
 [ "$state" = "merged" ]       || { echo "gh stub: expected --state merged, got '$state'" >&2; exit 2; }
 [ "$fields" = "number,mergeCommit,headRefOid,commits" ] || {
   echo "gh stub: unexpected --json '$fields'" >&2; exit 2; }
-case "$jq" in *"@tsv"*) ;; *) echo "gh stub: --jq must emit @tsv, got '$jq'" >&2; exit 2 ;; esac
+# EXACT match, not a substring. Accepting any program containing @tsv left field REORDERING
+# invisible to the suite (cross-vendor review, round 2): the stub independently emitted the
+# order it expected, so production could swap two columns and every case stayed green.
+expect_jq='.[] | [(.number|tostring), (.mergeCommit.oid // "-"), .headRefOid] + [.commits[].oid] | @tsv'
+[ "$jq" = "$expect_jq" ] || { echo "gh stub: --jq differs from the pinned expression" >&2
+                              echo "  expected: $expect_jq" >&2
+                              echo "  actual:   $jq" >&2; exit 2; }
 [ -n "$branch" ] || exit 1
 [ -n "${GH_FIXTURE:-}" ] || { echo 'gh stub: GH_FIXTURE unset' >&2; exit 2; }
 
@@ -126,8 +132,9 @@ fi
 # which made "no merged PR" indistinguishable from "the API refused".
 awk -v b="$branch" 'BEGIN { OFS = "	" }
   $1 == b {
-    merge = ($3 == "-" ? "" : $3)
-    line = $2 OFS merge OFS $4
+    # "-" passes THROUGH: it is the production sentinel for a null mergeCommit, not a local
+    # placeholder. Emitting "" here would reintroduce the collapsing-tab bug inside the double.
+    line = $2 OFS $3 OFS $4
     for (i = 5; i <= NF; i++) line = line OFS $i
     print line
   }' "$GH_FIXTURE"
@@ -381,6 +388,13 @@ check "update-branch head is rescued by commits" GONE updated-branch "$TMP/run.o
 check "INTERMEDIATE commit of a merged PR is KEPT" KEPT intermediate   "$TMP/run.out"
 check "gh API refusal KEEPS rather than answers no" KEPT gh-down       "$TMP/run.out"
 check "NULL mergeCommit must NOT authorise a delete" KEPT null-merge  "$TMP/run.out"
+if grep -q "null-merge.*do not hold the squash commit locally" "$TMP/run.out"; then
+  echo "ok   null mergeCommit names merge-commit-absent    accurate"
+  pass=$((pass + 1))
+else
+  echo "FAIL null mergeCommit names merge-commit-absent    wrong reason rendered"
+  fail=$((fail + 1))
+fi
 check "two merged PRs for one head: still KEPT"      KEPT two-prs     "$TMP/run.out"
 check "malformed row (merge==head==tip) is KEPT"     KEPT crafted     "$TMP/run.out"
 if grep -q "refs/pull/9/head" "$TMP/run.out"; then

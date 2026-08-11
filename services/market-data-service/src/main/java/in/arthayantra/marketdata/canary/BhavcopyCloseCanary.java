@@ -112,10 +112,16 @@ public class BhavcopyCloseCanary {
    * varies — measured 17:52, 17:59, 18:47 and 19:31 across four days — so on a late night the file
    * has not landed when this fires, and without the guard below the canary silently re-evaluates
    * YESTERDAY's session and alerts on it as if it were tonight's: an operator message naming the
-   * wrong day, repeated every late night. Skip instead — a missed comparison is recoverable (the
-   * next boot's BhavcopyStartupCatchup replays the chain), a confidently wrong one trains the owner
-   * to ignore the alert. The margin is thin even at the current 20:10 against a 19:30 bhavcopy, and
-   * it shrinks to nothing under the pending schedule move.
+   * wrong day, repeated every late night — and a confidently wrong alert trains the owner to ignore
+   * the channel. The margin is thin even at the current 20:10 against a 19:30 bhavcopy, and it
+   * shrinks to nothing under the pending schedule move.
+   *
+   * <p>⚠️ A skipped comparison is NOT automatically recovered. {@code BhavcopyStartupCatchup} starts
+   * the backfill on the next boot, so the DATA arrives — but this canary has no completion listener
+   * and only fires on its own cron, so that session's close comparison is simply not made until the
+   * next scheduled sweep finds it as the latest date. Skipping trades a missed check for a wrong
+   * one, which is the right trade; it does not make the check free. Wiring a bhavcopy-complete
+   * listener here is the real fix and is deliberately not in this change.
    */
   @Scheduled(cron = "${artha.bhavcopy-close.cron:0 10 20 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sweep() {
@@ -128,9 +134,12 @@ public class BhavcopyCloseCanary {
     }
     LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
     if (latest.isBefore(today)) {
+      // Neutral wording on purpose: this also fires on a weekday NSE holiday, where there is no
+      // file to wait for and "has not landed yet" would be a small lie in the log every holiday.
       log.info(
-          "bhavcopy-close canary skipped — the newest bhavcopy is {} but today is {}; tonight's file"
-              + " has not landed yet, and comparing an older session would alert on the wrong day",
+          "bhavcopy-close canary skipped — the newest bhavcopy is {} but today is {}; there is no"
+              + " bar for today (a late publish, or a non-trading weekday), and comparing an older"
+              + " session would alert on the wrong day",
           latest, today);
       return;
     }

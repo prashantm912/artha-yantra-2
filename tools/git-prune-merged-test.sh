@@ -86,13 +86,14 @@ cat > "$TMP/nogh/gh" <<'STUB'
 #!/bin/bash
 # Mirrors: gh pr list --head <b> --state merged
 #            --json number,mergeCommit,headRefOid,commits
-#            --jq '.[] | [(.number|tostring), (.mergeCommit.oid // ""), .headRefOid]
+#            --jq '.[] | [(.number|tostring), (.mergeCommit.oid // "-"), .headRefOid]
 #                        + [.commits[].oid] | @tsv'
 #
 # Fixture line: "<branch> <prNumber> <mergeCommit|-> <headRefOid> [<commitOid>...]", ONE LINE PER
-# MERGED PR (repeat the branch to model several). "-" in the mergeCommit slot emits an EMPTY
-# column, which is what a merged PR with a null mergeCommit looks like. "<branch> FAIL" models an
-# API refusal.
+# MERGED PR (repeat the branch to model several). "-" in the mergeCommit slot is passed THROUGH
+# as the production sentinel for a NULL mergeCommit -- it must NOT be converted back to an empty
+# column, because bash collapses consecutive tabs and the column would vanish. "<branch> FAIL"
+# models an API refusal.
 #
 # WARNING: this double has diverged from real gh FOUR times in this PR series, and every
 # divergence turned the suite green or red for a reason unrelated to the change under test. It

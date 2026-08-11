@@ -409,8 +409,13 @@ services:
       ARTHA_NSE_EOD_CRON: "${ARTHA_NSE_EOD_CRON:-0 2,17,32,47 18 * * MON-FRI}"
       # was 19:30 once  the chain head: NSE publish time VARIES 17:52-19:31, so POLL
       ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 0,15,30,45 18 * * MON-FRI}"
-      # was 20:10 once  close reconciliation
-      ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 11,26,41,56 18 * * MON-FRI}"
+      # ⚠️ NOT polled, unlike its neighbours. BhavcopyCloseCanary has NO already-ran-today guard
+      # (BhavcopyCloseCanary.sweep -> publish), so every non-GREEN pass BOTH sends an ntfy alert and
+      # increments divergenceCounter -- polling it four times would mean four duplicate alerts a
+      # night and a metric inflated 4x. It only READS what bhavcopy already wrote, so one late shot
+      # is enough: 18:56 is 11 minutes after bhavcopy's last pass, and the chain completes in ~2 min.
+      # was 20:10  close reconciliation
+      ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 56 18 * * MON-FRI}"
       # was 19:30 once  upstox contract canary
       ARTHA_UPSTOX_CANARY_CRON: "${ARTHA_UPSTOX_CANARY_CRON:-0 13,28,43,58 18 * * MON-FRI}"
       # was 19:50 once  data-quality sweep
@@ -421,7 +426,12 @@ services:
       ARTHA_MANAS_ARORA_CRON: "${ARTHA_MANAS_ARORA_CRON:-0 52 18 * * MON-FRI}"
       # was 19:55 once  breadth fold -- its LAST pass (18:54) is the one after the screens
       ARTHA_BREADTH_MATERIALIZE_CRON: "${ARTHA_BREADTH_MATERIALIZE_CRON:-0 9,24,39,54 18 * * MON-FRI}"
-      # was 19:45 once  market context -- ledger row H11
+      # ⚠️ Each pass writes an ingest_runs row (IngestRunLedger, no already-done skip), so
+      # MARKET_CONTEXT_DAY now records up to 4 SUCCESS rows an evening instead of 1. The upsert
+      # itself is idempotent, so the data is unaffected; anything reading ingest_runs as a COUNT
+      # rather than an existence check will see 4x. Accepted deliberately -- four cheap rows beats
+      # missing the day, which is what a single fixed time does when NSE publishes late.
+      # was 19:45  market context -- ledger row H11
       ARTHA_CONTEXT_EOD_CRON: "${ARTHA_CONTEXT_EOD_CRON:-0 5,20,35,50 18 * * MON-FRI}"
       # was 19:58  buyable alerts (bean is @ConditionalOnProperty-disabled today, so inert)
       ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 58 18 * * MON-FRI}"

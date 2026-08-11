@@ -100,6 +100,14 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$branch" ] || exit 1
 [ -n "${GH_FIXTURE:-}" ] || { echo 'gh stub: GH_FIXTURE unset' >&2; exit 2; }
+# A branch listed as FAIL models an API refusal (rate limit / auth): non-zero, nothing on stdout.
+# ⚠️ Everything else must exit 0 EVEN WITH NO MATCH -- real `gh pr list` returns an empty array and
+# exits 0 when a head has no merged PR. An earlier stub exited 1 there, which made "no merged PR"
+# indistinguishable from "the API refused" and tripped the new degradation warning on every run.
+if awk -v b="$branch" '$1 == b && $2 == "FAIL" {found=1} END {exit !found}' "$GH_FIXTURE"; then
+  echo 'gh stub: simulated API failure' >&2
+  exit 1
+fi
 want_merge=0; want_commits=0
 case ",$fields," in *,mergeCommit,*) want_merge=1;; esac
 case ",$fields," in *,commits,*)     want_commits=1;; esac
@@ -114,7 +122,7 @@ oids=$(awk -v b="$branch" -v wm="$want_merge" -v wc="$want_commits" '
     if (wc) for (i = 4; i <= NF; i++) out = out " " $i
     print out
   }' "$GH_FIXTURE")
-[ -n "$oids" ] || exit 1
+[ -n "$oids" ] || exit 0   # no merged PR for this head: empty, exit 0 -- mirrors real gh
 echo "$oids"
 STUB
 chmod +x "$TMP/nogh/gh"
@@ -218,6 +226,20 @@ git push --quiet origin main
 # strand the local branch on the FIRST commit, exactly as an unfetched amend/force-push would
 git branch --quiet -f intermediate "$INTERMEDIATE_FIRST"
 
+# --- GH UNAVAILABLE: the API refuses, so the branch's status is UNKNOWN and it must be KEPT --------
+# Measured 2026-08-11: `gh pr list` is a GRAPHQL call and the GraphQL budget is separate from REST
+# core, so core can read 4993/5000 -- "the rate limit is fine" by the obvious check -- while every
+# lookup fails. The old code piped gh straight into the read loop, discarding its exit status, so a
+# refusal was indistinguishable from "no merged PR" and a real prune run stopped part-way with no
+# indication. Shape here: merged and squashed exactly like gh-rescue, but the fixture marks it FAIL.
+git checkout --quiet -b gh-down main
+echo d1 > down.txt && git add -A && git commit --quiet -m d1
+git push --quiet -u origin gh-down
+git checkout --quiet main
+git merge --quiet --squash gh-down && git commit --quiet -m 'squashed gh-down (#7)'
+echo d2 > down.txt && git add -A && git commit --quiet -m 'later change to down.txt'
+git push --quiet origin main
+
 # --- never pushed: local WIP, must be untouchable -------------------------------------------------
 git checkout --quiet -b local-wip main
 echo wip > wip.txt && git add -A && git commit --quiet -m wip
@@ -250,8 +272,9 @@ git push --quiet origin main
   echo "updated-branch $UPDATED_BRANCH_MERGE 0123456789abcdef0123456789abcdef01234567 $UPDATED_TIP"
   # both commits are in the PR; the local tip is the FIRST. Identity passes, proof must not.
   echo "intermediate $INTERMEDIATE_MERGE $INTERMEDIATE_TIP $INTERMEDIATE_FIRST $INTERMEDIATE_TIP"
+  echo "gh-down FAIL"
 } > "$GH_FIXTURE"
-git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid updated-branch intermediate worktree-squash-merged
+git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid updated-branch intermediate gh-down worktree-squash-merged
 
 echo "=== --dry must remove NOTHING ==="
 # ⚠️ No `|| true` (review R4). It masked the script's exit status, so a fatal error AFTER the one
@@ -296,6 +319,21 @@ check "gh rescue removes a confirmed merge"     GONE gh-rescue      "$TMP/run.ou
 check "stale gh OID does NOT delete new work"   KEPT stale-oid      "$TMP/run.out"
 check "update-branch head is rescued by commits" GONE updated-branch "$TMP/run.out"
 check "INTERMEDIATE commit of a merged PR is KEPT" KEPT intermediate   "$TMP/run.out"
+check "gh API refusal KEEPS rather than answers no" KEPT gh-down       "$TMP/run.out"
+if grep -q "at least one GitHub lookup FAILED" "$TMP/run.out"; then
+  echo "ok   a gh refusal is REPORTED, not silent            warned"
+  pass=$((pass + 1))
+else
+  echo "FAIL a gh refusal is REPORTED, not silent            no warning line"
+  fail=$((fail + 1))
+fi
+if grep -q "this local tip is an EARLIER commit" "$TMP/run.out"; then
+  echo "ok   intermediate keep names its REAL reason         accurate"
+  pass=$((pass + 1))
+else
+  echo "FAIL intermediate keep names its REAL reason         still says 'not merged'"
+  fail=$((fail + 1))
+fi
 # The bug this fix pins: a clean, never-pushed live worktree must survive the real run, not just
 # --dry's report (RED against the pre-fix script — see receipt for the failure text).
 check_worktree "clean never-pushed worktree SURVIVES (the fix)" KEPT "$TMP/wt-live" "$TMP/run.out"

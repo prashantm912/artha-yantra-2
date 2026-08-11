@@ -171,14 +171,49 @@ branch_work_is_in_main() {
 #
 # Every uncertainty KEEPS: no gh, no merged PR, no identity match, a merge commit we do not have
 # locally (GC'd or never fetched), or a non-empty scoped diff.
+#
+# GH_REASON records WHY a keep happened, because "kept" alone is what got this script re-reported as
+# broken (2026-08-11, owner): a run that kept a demonstrably squash-merged branch printed
+# "its changes are NOT in main -- not merged", which is a claim the script had not established and
+# in two of the four reported cases was simply false. Keeping is right; MISDESCRIBING the keep is
+# what wastes an investigation. Values:
+#   merged              -- identity and proof both hold; the branch is deletable
+#   gh-unavailable      -- gh missing, or the API refused to answer (see the rate-limit note below)
+#   no-merged-pr        -- gh answered, and there is no merged PR for this head
+#   tip-not-in-pr       -- a merged PR exists but this tip is none of its commits (reused branch name)
+#   tip-behind-merged-pr-- this tip IS one of its commits but an EARLIER one; its tree never landed
+#   merge-commit-absent -- we do not hold the squash commit locally, so the proof cannot be run
+GH_REASON=""
+
 gh_says_merged() {
-  local branch="$1" tip row merged_at head_oid oids
+  local branch="$1" tip row merged_at head_oid oids tmp rc saw_pr=0 saw_identity=0 saw_merge=0
+  GH_REASON="gh-unavailable"
   command -v gh >/dev/null 2>&1 || return 1
   tip="$(git rev-parse "$branch" 2>/dev/null)" || return 1
+
+  # WARNING: run gh into a FILE and check its exit code. Piping it straight into `while ... done < <()`
+  # discards the status, so an API failure is indistinguishable from "no merged PR" -- and it degrades
+  # in exactly the direction that looks like a correct answer. Measured 2026-08-11: `gh pr list` is a
+  # GRAPHQL call, and the GraphQL limit is separate from REST core. With core sitting at 4993/5000
+  # (i.e. "the rate limit is fine" by the obvious check) every `gh pr list` was already failing with
+  # "API rate limit already exceeded", so the fallback silently answered NO for every branch and a
+  # real prune run stopped part-way through with no indication anything had gone wrong.
+  tmp="$(mktemp)" || return 1
+  gh pr list --head "$branch" --state merged \
+     --json mergeCommit,headRefOid,commits \
+     --jq '.[] | [(.mergeCommit.oid // "")] + [.headRefOid] + [.commits[].oid] | @tsv' \
+     >"$tmp" 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$tmp"
+    GH_UNAVAILABLE=1
+    return 1
+  fi
 
   # One row per merged PR for this head: "<mergeCommitOid> <headRefOid> <commitOid>...".
   while IFS= read -r row; do
     [ -n "$row" ] || continue
+    saw_pr=1
     merged_at="${row%% *}"
     oids="${row#* }"
     head_oid="${oids%% *}"
@@ -186,14 +221,28 @@ gh_says_merged() {
 
     # IDENTITY
     printf '%s\n' $oids | grep -Fxq "$tip" || continue
+    saw_identity=1
     # PROOF -- we must actually hold the squash commit, and the tip's own paths must match it.
     [ -n "$merged_at" ] || continue
     git cat-file -e "${merged_at}^{commit}" 2>/dev/null || continue
-    branch_work_is_in_main "$branch" "$merged_at" && return 0
-  done < <(gh pr list --head "$branch" --state merged \
-             --json mergeCommit,headRefOid,commits \
-             --jq '.[] | [(.mergeCommit.oid // "")] + [.headRefOid] + [.commits[].oid] | @tsv' \
-             2>/dev/null | tr '\t' ' ')
+    saw_merge=1
+    if branch_work_is_in_main "$branch" "$merged_at"; then
+      rm -f "$tmp"
+      GH_REASON="merged"
+      return 0
+    fi
+  done < <(tr '\t' ' ' <"$tmp")
+  rm -f "$tmp"
+
+  if [ "$saw_pr" -eq 0 ]; then
+    GH_REASON="no-merged-pr"
+  elif [ "$saw_identity" -eq 0 ]; then
+    GH_REASON="tip-not-in-pr"
+  elif [ "$saw_merge" -eq 0 ]; then
+    GH_REASON="merge-commit-absent"
+  else
+    GH_REASON="tip-behind-merged-pr"
+  fi
   return 1
 }
 
@@ -208,7 +257,20 @@ while read -r branch; do
       echo "branch    -> $branch  (main moved on its paths; GitHub confirms the PR merged)"
     else
       ahead="$(git rev-list --count "origin/main..$branch" 2>/dev/null || echo '?')"
-      kept+=("$branch ($ahead commit(s) ahead; its changes are NOT in main — not merged)")
+      case "$GH_REASON" in
+        gh-unavailable)
+          why="GitHub could not be asked (gh missing, or the API refused) — status UNKNOWN, kept" ;;
+        tip-behind-merged-pr)
+          why="its PR MERGED, but this local tip is an EARLIER commit of it whose tree never landed;"
+          why="$why fetch or reset the branch to its merged head, then re-run" ;;
+        tip-not-in-pr)
+          why="a merged PR exists for this branch NAME, but this tip is none of its commits" ;;
+        merge-commit-absent)
+          why="its PR merged, but we do not hold the squash commit locally — cannot verify, kept" ;;
+        *)
+          why="no merged PR, and its changes are not in main — not merged" ;;
+      esac
+      kept+=("$branch ($ahead commit(s) ahead; $why)")
       continue
     fi
   fi
@@ -218,6 +280,14 @@ done < <(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/hea
            | awk '$2 == "[gone]" {print $1}')
 
 echo
+if [ -n "${GH_UNAVAILABLE:-}" ]; then
+  # Not decoration. Without this line a rate-limited run reads as "nothing left to prune", which is
+  # the exact false conclusion that had this script re-reported as broken.
+  echo "WARNING: at least one GitHub lookup FAILED (rate limit or auth), so any branch whose"
+  echo "         content test was inconclusive was kept WITHOUT being checked. Re-run after"
+  echo "         'gh api rate_limit --jq .resources.graphql' shows headroom."
+  echo
+fi
 if [ -n "$DRY" ]; then
   echo "dry run — nothing removed"
 else

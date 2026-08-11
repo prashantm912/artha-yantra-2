@@ -23,6 +23,93 @@ class UniverseResolverTest {
   private final ObjectMapper mapper = new ObjectMapper();
 
   @Test
+  void futuresOfUnderlyingSendsTheTRADINGSYMBOLFromTheInstrumentRefObject() throws Exception {
+    // The bug, found by cross-vendor review on PR #1344. schema-v1 declares universe.underlying as an
+    // instrumentRef OBJECT and REQUIRES it for futures_of_underlying, but this class read it with a
+    // bare .asText(), which on an ObjectNode is the EMPTY STRING — so every schema-VALID config asked
+    // market-data for `?underlying=`, got a 404, and the pin silently never happened.
+    //
+    // The assertion is on the OUTBOUND QUERY, deliberately. Asserting only on the returned items
+    // would pass with an empty underlying too, because the stub answers whatever it is asked.
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    server
+        .expect(ExpectedCount.once(), requestTo(containsString("underlying=NIFTY")))
+        .andRespond(
+            withSuccess(
+                "{\"contracts\":[{\"tradingsymbol\":\"NIFTY26AUGFUT\"},"
+                    + "{\"tradingsymbol\":\"NIFTY26SEPFUT\"}]}",
+                MediaType.APPLICATION_JSON));
+    UniverseResolver futuresResolver = new UniverseResolver(builder, "http://market-data:8081");
+
+    ResolvedUniverse u =
+        futuresResolver.resolve(
+            mapper.readTree(
+                "{\"universe\":{\"mode\":\"futures_of_underlying\","
+                    + "\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"}}}"));
+
+    assertThat(u.mode()).isEqualTo("futures_of_underlying");
+    assertThat(u.items()).extracting(Constituent::tradingsymbol).containsExactly("NIFTY26AUGFUT");
+    server.verify();
+  }
+
+  @Test
+  void futuresOfUnderlyingStillAcceptsTheLegacyColonStringForm() throws Exception {
+    // BacktestRunner tolerates "EXCH:SYMBOL" because it predates the schema and survives in old
+    // configs; the resolver must not be stricter than the runner that consumes it.
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    server
+        .expect(ExpectedCount.once(), requestTo(containsString("underlying=NIFTY")))
+        .andRespond(
+            withSuccess(
+                "{\"contracts\":[{\"tradingsymbol\":\"NIFTY26AUGFUT\"}]}",
+                MediaType.APPLICATION_JSON));
+    UniverseResolver futuresResolver = new UniverseResolver(builder, "http://market-data:8081");
+
+    ResolvedUniverse u =
+        futuresResolver.resolve(
+            mapper.readTree(
+                "{\"universe\":{\"mode\":\"futures_of_underlying\","
+                    + "\"underlying\":\"NSE:NIFTY 50\"}}"));
+
+    assertThat(u.items()).extracting(Constituent::tradingsymbol).containsExactly("NIFTY26AUGFUT");
+    server.verify();
+  }
+
+  @Test
+  void futuresOfUnderlyingPinsAnEmptyUniverseWhenTheLadderIsEmpty() throws Exception {
+    // The test the class never had: nothing anywhere drove {"contracts":[]} through resolveFutures.
+    //
+    // ⚠️ It pins that the resolver returns EMPTY and does NOT throw. That is a deliberate departure
+    // from how #1340 treated the same shape on the LIVE path, for two reasons: this class also backs
+    // the GET /api/v1/strategies/{id}/universe preview, where "show me what this resolves to" must answer
+    // honestly rather than 5xx; and ApiException(503, UPSTREAM_UNAVAILABLE) would be a false claim
+    // when the upstream ANSWERED, with 200 and an empty ladder.
+    //
+    // ⚠️ And an empty pin here is NOT the silent-backtest hazard it looks like:
+    // BacktestRunner.signalInstrument gates pinned-array routing to futures_screener and the two
+    // funnel modes, so a futures_of_underlying run signals on the underlying SPOT and never reads
+    // this pin. Verified before adding a submission-time guard for it — the guard would have refused
+    // runs that work.
+    RestClient.Builder builder = RestClient.builder();
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    server
+        .expect(ExpectedCount.once(), requestTo(containsString("underlying=NIFTY")))
+        .andRespond(withSuccess("{\"contracts\":[]}", MediaType.APPLICATION_JSON));
+    UniverseResolver futuresResolver = new UniverseResolver(builder, "http://market-data:8081");
+
+    ResolvedUniverse u =
+        futuresResolver.resolve(
+            mapper.readTree(
+                "{\"universe\":{\"mode\":\"futures_of_underlying\",\"underlying\":{\"exchange\":\"NSE\",\"tradingsymbol\":\"NIFTY 50\"}}}"));
+
+    assertThat(u.items()).isEmpty();
+    assertThat(u.checksum()).isEqualTo(UniverseResolver.checksum(List.of()));
+    server.verify();
+  }
+
+  @Test
   void checksumIsDeterministicAndOrderSensitive() {
     List<Constituent> a = List.of(new Constituent("NSE", "RELIANCE"), new Constituent("NSE", "TCS"));
     List<Constituent> b = List.of(new Constituent("NSE", "TCS"), new Constituent("NSE", "RELIANCE"));

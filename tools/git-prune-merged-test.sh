@@ -100,12 +100,20 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$branch" ] || exit 1
 [ -n "${GH_FIXTURE:-}" ] || { echo 'gh stub: GH_FIXTURE unset' >&2; exit 2; }
-case ",$fields," in
-  *,commits,*) last=0;;   # head + every PR commit
-  *)           last=2;;   # head only
-esac
-oids=$(awk -v b="$branch" -v last="$last" \
-  '$1 == b { n = (last == 0 ? NF : last); for (i = 2; i <= n; i++) print $i }' "$GH_FIXTURE")
+want_merge=0; want_commits=0
+case ",$fields," in *,mergeCommit,*) want_merge=1;; esac
+case ",$fields," in *,commits,*)     want_commits=1;; esac
+# Fixture line: "<branch> <mergeCommitOid> <headRefOid> [<commitOid>...]", ONE LINE PER MERGED PR.
+# Emits ONE ROW per PR in jq's field order, matching
+#   --json mergeCommit,headRefOid,commits --jq '.[] | [.mergeCommit.oid] + [.headRefOid] + [.commits[].oid] | @tsv'
+oids=$(awk -v b="$branch" -v wm="$want_merge" -v wc="$want_commits" '
+  $1 == b {
+    out = ""
+    if (wm) out = $2
+    out = (out == "" ? $3 : out " " $3)
+    if (wc) for (i = 4; i <= NF; i++) out = out " " $i
+    print out
+  }' "$GH_FIXTURE")
 [ -n "$oids" ] || exit 1
 echo "$oids"
 STUB
@@ -154,6 +162,7 @@ git push --quiet -u origin gh-rescue
 GH_RESCUE_OID="$(git rev-parse gh-rescue)"
 git checkout --quiet main
 git merge --quiet --squash gh-rescue && git commit --quiet -m 'squashed rescue (#3)'
+GH_RESCUE_MERGE="$(git rev-parse HEAD)"
 echo r2 > rescue.txt && git add -A && git commit --quiet -m 'later change to rescue.txt'
 
 # --- R2 STALE OID: same shape, but a NEW local commit lands after the merge -----------------------
@@ -168,6 +177,7 @@ git push --quiet -u origin updated-branch
 UPDATED_TIP="$(git rev-parse updated-branch)"
 git checkout --quiet main
 git merge --quiet --squash updated-branch && git commit --quiet -m 'squashed updated (#5)'
+UPDATED_BRANCH_MERGE="$(git rev-parse HEAD)"
 # main moves on the SAME path afterwards, so the path-scoped test is inconclusive and the run is
 # forced through gh_says_merged -- without this the branch would be deleted by the cheap test and
 # prove nothing about the fallback.
@@ -182,10 +192,31 @@ git push --quiet -u origin stale-oid
 STALE_MERGED_OID="$(git rev-parse stale-oid)"
 git checkout --quiet main
 git merge --quiet --squash stale-oid && git commit --quiet -m 'squashed stale (#4)'
+STALE_OID_MERGE="$(git rev-parse HEAD)"
 echo s2 > stale.txt && git add -A && git commit --quiet -m 'later change to stale.txt'
 git checkout --quiet stale-oid
 echo NEW-WORK > stale-new.txt && git add -A && git commit --quiet -m 'new work AFTER the merge'
 git checkout --quiet main
+
+# --- INTERMEDIATE COMMIT (cross-vendor review, Critical 2026-08-11) -------------------------------
+# Commit-list membership ALONE is a false-DELETE. A branch stranded on an EARLIER commit of a merged
+# PR matches the commit list just as well as the final one -- but its TREE is not what landed. The
+# reviewer demonstrated it on this script's own PR (7dd03e3e vs 06d96383, different test-file trees).
+# So: two commits, the PR merged BOTH, the local tip left on the FIRST. Identity matches; the proof
+# step must reject it, because the second commit's content is in main and this tip's is not.
+git checkout --quiet -b intermediate main
+echo first > intermediate.txt && git add -A && git commit --quiet -m 'first commit'
+INTERMEDIATE_FIRST="$(git rev-parse HEAD)"
+echo second >> intermediate.txt && git add -A && git commit --quiet -m 'second commit'
+INTERMEDIATE_TIP="$(git rev-parse HEAD)"
+git push --quiet -u origin intermediate
+git checkout --quiet main
+git merge --quiet --squash intermediate && git commit --quiet -m 'squashed intermediate (#6)'
+INTERMEDIATE_MERGE="$(git rev-parse HEAD)"
+echo 'later edit' >> intermediate.txt && git add -A && git commit --quiet -m 'main touches intermediate.txt again'
+git push --quiet origin main
+# strand the local branch on the FIRST commit, exactly as an unfetched amend/force-push would
+git branch --quiet -f intermediate "$INTERMEDIATE_FIRST"
 
 # --- never pushed: local WIP, must be untouchable -------------------------------------------------
 git checkout --quiet -b local-wip main
@@ -212,13 +243,15 @@ git merge --quiet --squash worktree-squash-merged && git commit --quiet -m 'squa
 git push --quiet origin main
 # GitHub's delete_branch_on_merge equivalent: drop the remote heads, then let the script see [gone].
 {
-  echo "gh-rescue $GH_RESCUE_OID"
-  echo "stale-oid $STALE_MERGED_OID $STALE_MERGED_OID"
+  echo "gh-rescue $GH_RESCUE_MERGE $GH_RESCUE_OID"
+  echo "stale-oid $STALE_OID_MERGE $STALE_MERGED_OID $STALE_MERGED_OID"
   # head OID is a fabricated 40-hex that exists in no repo -- exactly like an unfetched
-  # update-branch merge commit. Only the trailing commit OID can rescue this branch.
-  echo "updated-branch 0123456789abcdef0123456789abcdef01234567 $UPDATED_TIP"
+  # update-branch merge commit. Only the trailing commit OID can identify this branch.
+  echo "updated-branch $UPDATED_BRANCH_MERGE 0123456789abcdef0123456789abcdef01234567 $UPDATED_TIP"
+  # both commits are in the PR; the local tip is the FIRST. Identity passes, proof must not.
+  echo "intermediate $INTERMEDIATE_MERGE $INTERMEDIATE_TIP $INTERMEDIATE_FIRST $INTERMEDIATE_TIP"
 } > "$GH_FIXTURE"
-git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid updated-branch worktree-squash-merged
+git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid updated-branch intermediate worktree-squash-merged
 
 echo "=== --dry must remove NOTHING ==="
 # ⚠️ No `|| true` (review R4). It masked the script's exit status, so a fatal error AFTER the one
@@ -262,6 +295,7 @@ check "gh rescue removes a confirmed merge"     GONE gh-rescue      "$TMP/run.ou
 # R2 negative: gh still returns the OLD merged PR for this reused name; the new commit must survive.
 check "stale gh OID does NOT delete new work"   KEPT stale-oid      "$TMP/run.out"
 check "update-branch head is rescued by commits" GONE updated-branch "$TMP/run.out"
+check "INTERMEDIATE commit of a merged PR is KEPT" KEPT intermediate   "$TMP/run.out"
 # The bug this fix pins: a clean, never-pushed live worktree must survive the real run, not just
 # --dry's report (RED against the pre-fix script — see receipt for the failure text).
 check_worktree "clean never-pushed worktree SURVIVES (the fix)" KEPT "$TMP/wt-live" "$TMP/run.out"

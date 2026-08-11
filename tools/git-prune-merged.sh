@@ -103,8 +103,11 @@ done < <(git worktree list --porcelain | awk '/^worktree /{print $2}')
 # Failure mode is deliberately one-directional: if a LATER commit on main also touched one of those
 # paths, the diff is non-empty and we keep a branch that was in fact merged. A false "keep" costs one
 # manual `git branch -D`; a false "delete" costs work. `gh` below recovers most of those anyway.
+# $2 is the ref to compare the branch's content AGAINST — origin/main by default, or a specific
+# squash-merge commit when gh_says_merged wants to ask "did THIS tip's content land?" without main's
+# later commits polluting the answer.
 branch_work_is_in_main() {
-  local branch="$1" base tmp
+  local branch="$1" against="${2:-origin/main}" base tmp
   base="$(git merge-base origin/main "$branch" 2>/dev/null)" || return 1
 
   # ⚠️ --no-renames is LOAD-BEARING, not tidiness (review R1). With rename detection on (the
@@ -128,7 +131,7 @@ branch_work_is_in_main() {
 
   # Genuinely empty now means what it says: the branch changed nothing since the merge base.
   [ "${#paths[@]}" -eq 0 ] && return 0
-  git diff --no-renames --quiet origin/main "$branch" -- "${paths[@]}" 2>/dev/null
+  git diff --no-renames --quiet "$against" "$branch" -- "${paths[@]}" 2>/dev/null
 }
 
 # GitHub is authoritative and cheap; it also rescues the false "keep" above. Only consulted when the
@@ -149,18 +152,49 @@ branch_work_is_in_main() {
 # of them. Measured on #1335: local tip a98885e6, headRefOid 5d30596f, and a98885e6 sits in that
 # PR's own commit list one entry below it.
 #
-# Matching the tip against the PR's commit LIST keeps the name-reuse protection intact: a recreated
-# `fix/foo` carrying new work has a tip that appears nowhere in the old PR, so it is still kept. A
-# descendant test (`merge-base --is-ancestor`) would be the other repair and does NOT work here --
-# it needs the merged OID present locally, and delete_branch_on_merge removed the remote branch
-# before we ever fetched it.
+# WARNING: commit-list membership ALONE is too LOOSE, and it is a false-DELETE -- the strictly worse
+# direction (cross-vendor review, Critical, 2026-08-11). Membership proves the tip is *a* commit of a
+# merged PR; it does not prove the tip's TREE is what landed. An INTERMEDIATE commit of that PR
+# matches just as well as its final one, and its tree differs. The reviewer demonstrated it on this
+# script's own PR: 7dd03e3e is an ancestor of 06d96383 with a different test-file tree, and bare
+# membership matches it -- so a checkout stranded there would have been deleted. Same hole for an
+# intra-PR revert, a later revert on main, and a reused branch name whose old merged PR happens to
+# share a commit.
+#
+# So the two questions are asked separately, and both must answer yes:
+#   IDENTITY -- is this merged PR about THIS branch's work? (tip is the head or one of its commits)
+#   PROOF    -- did THIS tip's content actually land? (its touched paths are identical in the PR's
+#               own squash-merge commit)
+# Comparing against the SQUASH COMMIT rather than current main is what makes the proof usable: it is
+# the exact point the work landed, so main's later commits on the same paths -- the very thing that
+# made the cheap test inconclusive and sent us here -- cannot pollute the answer.
+#
+# Every uncertainty KEEPS: no gh, no merged PR, no identity match, a merge commit we do not have
+# locally (GC'd or never fetched), or a non-empty scoped diff.
 gh_says_merged() {
-  local branch="$1" tip hit
+  local branch="$1" tip row merged_at head_oid oids
   command -v gh >/dev/null 2>&1 || return 1
   tip="$(git rev-parse "$branch" 2>/dev/null)" || return 1
-  hit="$(gh pr list --head "$branch" --state merged --json headRefOid,commits \
-           --jq '.[] | .headRefOid, .commits[].oid' 2>/dev/null | grep -Fx "$tip")" || return 1
-  [ -n "$hit" ]
+
+  # One row per merged PR for this head: "<mergeCommitOid> <headRefOid> <commitOid>...".
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    merged_at="${row%% *}"
+    oids="${row#* }"
+    head_oid="${oids%% *}"
+    [ -n "$head_oid" ] || continue
+
+    # IDENTITY
+    printf '%s\n' $oids | grep -Fxq "$tip" || continue
+    # PROOF -- we must actually hold the squash commit, and the tip's own paths must match it.
+    [ -n "$merged_at" ] || continue
+    git cat-file -e "${merged_at}^{commit}" 2>/dev/null || continue
+    branch_work_is_in_main "$branch" "$merged_at" && return 0
+  done < <(gh pr list --head "$branch" --state merged \
+             --json mergeCommit,headRefOid,commits \
+             --jq '.[] | [(.mergeCommit.oid // "")] + [.headRefOid] + [.commits[].oid] | @tsv' \
+             2>/dev/null | tr '\t' ' ')
+  return 1
 }
 
 # 2) Local branches whose upstream is gone (git marks these "[gone]").

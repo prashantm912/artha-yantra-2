@@ -83,53 +83,55 @@ mkdir -p "$TMP/nogh"
 export GH_FIXTURE="$TMP/gh-fixture"
 : > "$GH_FIXTURE"
 cat > "$TMP/nogh/gh" <<'STUB'
-#!/bin/sh
-# mirrors: gh pr list --head <branch> --state merged --json headRefOid,commits --jq ...
-# which emits the headRefOid followed by one line per PR commit.
-# It MUST honour --json. A stub that always prints every OID it knows answers the same for the
-# headRefOid-only query as for the headRefOid,commits one, which silently disarms any red-proof
-# aimed at that distinction -- measured: reverting the caller to headRefOid-only left this suite
-# fully green.
-branch=""; fields=""
+#!/bin/bash
+# Mirrors: gh pr list --head <b> --state merged
+#            --json number,mergeCommit,headRefOid,commits
+#            --jq '.[] | [(.number|tostring), (.mergeCommit.oid // ""), .headRefOid]
+#                        + [.commits[].oid] | @tsv'
+#
+# Fixture line: "<branch> <prNumber> <mergeCommit|-> <headRefOid> [<commitOid>...]", ONE LINE PER
+# MERGED PR (repeat the branch to model several). "-" in the mergeCommit slot emits an EMPTY
+# column, which is what a merged PR with a null mergeCommit looks like. "<branch> FAIL" models an
+# API refusal.
+#
+# WARNING: this double has diverged from real gh FOUR times in this PR series, and every
+# divergence turned the suite green or red for a reason unrelated to the change under test. It
+# now VALIDATES the whole invocation, because "the caller asked for something else" is exactly the
+# class of regression the double is supposed to catch.
+sub1=""; sub2=""; branch=""; state=""; fields=""; jq=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --head) branch="$2"; shift 2;;
-    --json) fields="$2"; shift 2;;
-    *) shift;;
+    --head)  branch="$2"; shift 2 ;;
+    --state) state="$2";  shift 2 ;;
+    --json)  fields="$2"; shift 2 ;;
+    --jq)    jq="$2";     shift 2 ;;
+    -*)      shift ;;
+    *)       if [ -z "$sub1" ]; then sub1="$1"; elif [ -z "$sub2" ]; then sub2="$1"; fi; shift ;;
   esac
 done
+[ "$sub1 $sub2" = "pr list" ] || { echo "gh stub: unexpected subcommand '$sub1 $sub2'" >&2; exit 2; }
+[ "$state" = "merged" ]       || { echo "gh stub: expected --state merged, got '$state'" >&2; exit 2; }
+[ "$fields" = "number,mergeCommit,headRefOid,commits" ] || {
+  echo "gh stub: unexpected --json '$fields'" >&2; exit 2; }
+case "$jq" in *"@tsv"*) ;; *) echo "gh stub: --jq must emit @tsv, got '$jq'" >&2; exit 2 ;; esac
 [ -n "$branch" ] || exit 1
 [ -n "${GH_FIXTURE:-}" ] || { echo 'gh stub: GH_FIXTURE unset' >&2; exit 2; }
-# A branch listed as FAIL models an API refusal (rate limit / auth): non-zero, nothing on stdout.
-# ⚠️ Everything else must exit 0 EVEN WITH NO MATCH -- real `gh pr list` returns an empty array and
-# exits 0 when a head has no merged PR. An earlier stub exited 1 there, which made "no merged PR"
-# indistinguishable from "the API refused" and tripped the new degradation warning on every run.
-if awk -v b="$branch" '$1 == b && $2 == "FAIL" {found=1} END {exit !found}' "$GH_FIXTURE"; then
+
+if awk -v b="$branch" '$1 == b && $2 == "FAIL" {f=1} END {exit !f}' "$GH_FIXTURE"; then
   echo 'gh stub: simulated API failure' >&2
   exit 1
 fi
-want_merge=0; want_commits=0; want_number=0
-case ",$fields," in *,mergeCommit,*) want_merge=1;; esac
-case ",$fields," in *,commits,*)     want_commits=1;; esac
-case ",$fields," in *,number,*)      want_number=1;; esac
-# Fixture line: "<branch> <mergeCommitOid> <headRefOid> [<commitOid>...]", ONE LINE PER MERGED PR.
-# Emits ONE ROW per PR in jq's field order, matching
-#   --json mergeCommit,headRefOid,commits --jq '.[] | [.mergeCommit.oid] + [.headRefOid] + [.commits[].oid] | @tsv'
-oids=$(awk -v b="$branch" -v wm="$want_merge" -v wc="$want_commits" -v wn="$want_number" '
+
+# No merged PR for this head: real gh prints NOTHING and exits 0. An earlier stub exited 1 here,
+# which made "no merged PR" indistinguishable from "the API refused".
+awk -v b="$branch" 'BEGIN { OFS = "	" }
   $1 == b {
-    out = ""
-    # The stub must emit EVERY requested field, in jq order. Omitting one silently SHIFTS the
-    # positional parse of the caller -- measured 2026-08-11 when `number` was added to the real query
-    # and this stub kept emitting three fields: mergeCommit landed in the number slot and a passing
-    # case flipped to KEPT. Fourth time in this PR series the double diverged from real gh.
-    if (wn) out = NR
-    if (wm) out = (out == "" ? $2 : out " " $2)
-    out = (out == "" ? $3 : out " " $3)
-    if (wc) for (i = 4; i <= NF; i++) out = out " " $i
-    print out
-  }' "$GH_FIXTURE")
-[ -n "$oids" ] || exit 0   # no merged PR for this head: empty, exit 0 -- mirrors real gh
-echo "$oids"
+    merge = ($3 == "-" ? "" : $3)
+    line = $2 OFS merge OFS $4
+    for (i = 5; i <= NF; i++) line = line OFS $i
+    print line
+  }' "$GH_FIXTURE"
+exit 0
 STUB
 chmod +x "$TMP/nogh/gh"
 
@@ -246,6 +248,42 @@ git merge --quiet --squash gh-down && git commit --quiet -m 'squashed gh-down (#
 echo d2 > down.txt && git add -A && git commit --quiet -m 'later change to down.txt'
 git push --quiet origin main
 
+# --- NULL mergeCommit (cross-vendor Critical, 2026-08-11) -----------------------------------------
+# tip == headRefOid, so identity passes trivially; the PR reports NO merge commit. Must be KEPT --
+# there is nothing to prove the tree against.
+git checkout --quiet -b null-merge main
+echo n1 > nullmerge.txt && git add -A && git commit --quiet -m n1
+git push --quiet -u origin null-merge
+NULL_MERGE_TIP="$(git rev-parse null-merge)"
+git checkout --quiet main
+git merge --quiet --squash null-merge && git commit --quiet -m "squashed null-merge (#8)"
+echo n2 > nullmerge.txt && git add -A && git commit --quiet -m 'later change to nullmerge.txt'
+git push --quiet origin main
+
+# --- TWO merged PRs for one head: the remedy must name the one that CONTAINS the tip -------------
+git checkout --quiet -b two-prs main
+echo t1 > twoprs.txt && git add -A && git commit --quiet -m t1
+TWO_PRS_FIRST="$(git rev-parse HEAD)"
+echo t2 >> twoprs.txt && git add -A && git commit --quiet -m t2
+TWO_PRS_HEAD="$(git rev-parse HEAD)"
+git push --quiet -u origin two-prs
+git checkout --quiet main
+git merge --quiet --squash two-prs && git commit --quiet -m "squashed two-prs (#9)"
+TWO_PRS_MERGE="$(git rev-parse HEAD)"
+echo t3 >> twoprs.txt && git add -A && git commit --quiet -m 'later change to twoprs.txt'
+git push --quiet origin main
+git branch --quiet -f two-prs "$TWO_PRS_FIRST"
+
+# --- MALFORMED gh ROW: mergeCommit == headRefOid == tip (must be KEPT) ---------------------------
+git checkout --quiet -b crafted main
+echo c1 > crafted.txt && git add -A && git commit --quiet -m c1
+git push --quiet -u origin crafted
+CRAFTED_TIP="$(git rev-parse crafted)"
+git checkout --quiet main
+git merge --quiet --squash crafted && git commit --quiet -m "squashed crafted (#11)"
+echo c2 > crafted.txt && git add -A && git commit --quiet -m 'later change to crafted.txt'
+git push --quiet origin main
+
 # --- never pushed: local WIP, must be untouchable -------------------------------------------------
 git checkout --quiet -b local-wip main
 echo wip > wip.txt && git add -A && git commit --quiet -m wip
@@ -271,16 +309,32 @@ git merge --quiet --squash worktree-squash-merged && git commit --quiet -m 'squa
 git push --quiet origin main
 # GitHub's delete_branch_on_merge equivalent: drop the remote heads, then let the script see [gone].
 {
-  echo "gh-rescue $GH_RESCUE_MERGE $GH_RESCUE_OID"
-  echo "stale-oid $STALE_OID_MERGE $STALE_MERGED_OID $STALE_MERGED_OID"
+  # <branch> <prNumber> <mergeCommit|-> <headRefOid> [<commitOid>...]   -- one line per merged PR
+  echo "gh-rescue 3 $GH_RESCUE_MERGE $GH_RESCUE_OID"
+  echo "stale-oid 4 $STALE_OID_MERGE $STALE_MERGED_OID $STALE_MERGED_OID"
   # head OID is a fabricated 40-hex that exists in no repo -- exactly like an unfetched
   # update-branch merge commit. Only the trailing commit OID can identify this branch.
-  echo "updated-branch $UPDATED_BRANCH_MERGE 0123456789abcdef0123456789abcdef01234567 $UPDATED_TIP"
+  echo "updated-branch 5 $UPDATED_BRANCH_MERGE 0123456789abcdef0123456789abcdef01234567 $UPDATED_TIP"
   # both commits are in the PR; the local tip is the FIRST. Identity passes, proof must not.
-  echo "intermediate $INTERMEDIATE_MERGE $INTERMEDIATE_TIP $INTERMEDIATE_FIRST $INTERMEDIATE_TIP"
+  echo "intermediate 6 $INTERMEDIATE_MERGE $INTERMEDIATE_TIP $INTERMEDIATE_FIRST $INTERMEDIATE_TIP"
   echo "gh-down FAIL"
+  # MALFORMED ROW, the reviewer's exact shape: mergeCommit == headRefOid == the local tip. Under
+  # the old space-collapsing parse this made branch_work_is_in_main compare the branch against
+  # ITSELF -- empty diff, DELETE. ⚠️ Kept as a GUARD, not as a reproduction of a live hole: no real
+  # gh output was found that emits this (a squash mergeCommit is never the head), and the plausible
+  # variant -- a NULL mergeCommit -- was already caught by the old empty-string check. See the
+  # null-merge case above, which passes on BOTH versions.
+  echo "crafted 11 $CRAFTED_TIP $CRAFTED_TIP"
+  # NULL mergeCommit on a merged PR (the "-"), with tip == headRefOid. Cross-vendor Critical: the
+  # old space-split collapsed the empty column, slid headRefOid into the merge slot, and the
+  # proof then compared the branch against ITSELF -- an empty diff, and a DELETE.
+  echo "null-merge 8 - $NULL_MERGE_TIP"
+  # TWO merged PRs for one head. Only the OLDER contains the tip, so the remedy must name 9, not
+  # 10 -- binding the number per ROW would have printed a fetch of the wrong PR.
+  echo "two-prs 9 $TWO_PRS_MERGE $TWO_PRS_HEAD $TWO_PRS_FIRST $TWO_PRS_HEAD"
+  echo "two-prs 10 0123456789abcdef0123456789abcdef0123beef 89abcdef0123456789abcdef0123456789abcdef"
 } > "$GH_FIXTURE"
-git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid updated-branch intermediate gh-down worktree-squash-merged
+git push --quiet origin --delete squash-merged never-merged touched-again renames-a-file gh-rescue stale-oid updated-branch intermediate gh-down null-merge two-prs crafted worktree-squash-merged
 
 echo "=== --dry must remove NOTHING ==="
 # ⚠️ No `|| true` (review R4). It masked the script's exit status, so a fatal error AFTER the one
@@ -326,6 +380,16 @@ check "stale gh OID does NOT delete new work"   KEPT stale-oid      "$TMP/run.ou
 check "update-branch head is rescued by commits" GONE updated-branch "$TMP/run.out"
 check "INTERMEDIATE commit of a merged PR is KEPT" KEPT intermediate   "$TMP/run.out"
 check "gh API refusal KEEPS rather than answers no" KEPT gh-down       "$TMP/run.out"
+check "NULL mergeCommit must NOT authorise a delete" KEPT null-merge  "$TMP/run.out"
+check "two merged PRs for one head: still KEPT"      KEPT two-prs     "$TMP/run.out"
+check "malformed row (merge==head==tip) is KEPT"     KEPT crafted     "$TMP/run.out"
+if grep -q "refs/pull/9/head" "$TMP/run.out"; then
+  echo "ok   remedy names the PR that CONTAINS the tip   #9"
+  pass=$((pass + 1))
+else
+  echo "FAIL remedy names the PR that CONTAINS the tip   wrong or missing PR number"
+  fail=$((fail + 1))
+fi
 if grep -q "at least one GitHub lookup FAILED" "$TMP/run.out"; then
   echo "ok   a gh refusal is REPORTED, not silent            warned"
   pass=$((pass + 1))
@@ -333,7 +397,8 @@ else
   echo "FAIL a gh refusal is REPORTED, not silent            no warning line"
   fail=$((fail + 1))
 fi
-if grep -q "this local tip is an EARLIER commit" "$TMP/run.out" \n   && grep -q "git fetch origin refs/pull/" "$TMP/run.out"; then
+if grep -q "this local tip is an EARLIER commit" "$TMP/run.out" \
+   && grep -q "git fetch origin refs/pull/" "$TMP/run.out"; then
   echo "ok   intermediate keep names its REAL reason         accurate"
   pass=$((pass + 1))
 else

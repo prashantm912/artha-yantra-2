@@ -377,6 +377,44 @@ services:
       # way). Added so the owner's ticker flip is a one-line .env change. Default kite (no behaviour change).
       ARTHA_MD_SOURCE_TICKER: ${ARTHA_MD_SOURCE_TICKER:-kite}
       ARTHA_MD_SOURCE_FIIDII: ${ARTHA_MD_SOURCE_FIIDII:-nse}
+      # ---- Evening chain, COMPRESSED to finish before 19:00 IST (owner decision 2026-08-11) ----
+      # The owner closes the machine at 19:00 daily and starts it after 08:00, so nothing may be
+      # scheduled outside that window. Every job below previously ran 19:00-20:10; the times here are
+      # the DEFAULT (not an .env override) so the repo, not a gitignored file, is the source of truth.
+      #
+      # Ordering is the original dependency order, compressed: NSE feeds -> bhavcopy -> close-recon ->
+      # canary -> data-quality -> screens -> breadth (must follow the screens) -> market-context ->
+      # buyable alerts. Measured 2026-08-11: once bhavcopy lands the dependent chain completes in
+      # ~2 minutes, so the 25-minute gap from bhavcopy to the screens is generous headroom.
+      #
+      # WARNING: NSE publish time VARIES -- fetchable at 17:59 on 2026-08-11 but only 18:47 on 08-10.
+      # On a late day the screens SKIP and the 08:35 catch-up takes the session next morning (owner
+      # decision: "skip, catch up at 08:35 next morning"). That is the designed outcome, not a miss.
+      # ⚠️ There is NO overnight schedule: the 00:55/03:24 BHAVCOPY rows seen on 2026-08-11 were
+      # BhavcopyStartupCatchup firing on ApplicationReadyEvent after a DEPLOY, not a cron. Verified
+      # over 8 days -- 19:30 is the only time that appears daily. Do not deploy overnight expecting
+      # nothing to run; a restart re-runs the catch-up.
+
+      # was 19:00  NSE FII / participant / DII feeds
+      ARTHA_NSE_EOD_CRON: "${ARTHA_NSE_EOD_CRON:-0 0 18 * * MON-FRI}"
+      # was 19:30  the bhavcopy fetch everything else waits on
+      ARTHA_BHAVCOPY_EOD_CRON: "${ARTHA_BHAVCOPY_EOD_CRON:-0 5 18 * * MON-FRI}"
+      # was 20:10  close reconciliation
+      ARTHA_BHAVCOPY_CLOSE_CRON: "${ARTHA_BHAVCOPY_CLOSE_CRON:-0 10 18 * * MON-FRI}"
+      # was 19:30  upstox contract canary
+      ARTHA_UPSTOX_CANARY_CRON: "${ARTHA_UPSTOX_CANARY_CRON:-0 15 18 * * MON-FRI}"
+      # was 19:50  data-quality sweep
+      ARTHA_DATA_QUALITY_EOD_CRON: "${ARTHA_DATA_QUALITY_EOD_CRON:-0 20 18 * * MON-FRI}"
+      # was 19:50  minervini screen
+      ARTHA_MINERVINI_CRON: "${ARTHA_MINERVINI_CRON:-0 25 18 * * MON-FRI}"
+      # was 19:55  manas screen
+      ARTHA_MANAS_ARORA_CRON: "${ARTHA_MANAS_ARORA_CRON:-0 30 18 * * MON-FRI}"
+      # was 19:55  breadth fold -- MUST follow the screens
+      ARTHA_BREADTH_MATERIALIZE_CRON: "${ARTHA_BREADTH_MATERIALIZE_CRON:-0 35 18 * * MON-FRI}"
+      # was 19:45  market context -- ledger row H11
+      ARTHA_CONTEXT_EOD_CRON: "${ARTHA_CONTEXT_EOD_CRON:-0 40 18 * * MON-FRI}"
+      # was 19:58  buyable alerts
+      ARTHA_MINERVINI_BUYABLE_ALERTS_CRON: "${ARTHA_MINERVINI_BUYABLE_ALERTS_CRON:-0 45 18 * * MON-FRI}"
       ARTHA_MD_SOURCE_OPTIONANALYTICS: ${ARTHA_MD_SOURCE_OPTIONANALYTICS:-native}
       # Upstox Market-Information analytics side-channel (ADR-0002) — default-OFF.
       ARTHA_UPSTOX_ANALYTICS_ENABLED: ${ARTHA_UPSTOX_ANALYTICS_ENABLED:-false}
@@ -524,6 +562,19 @@ services:
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_MODE:-DISABLED}
       ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS: ${ARTHA_SIGNALS_STRATEGY_COVERAGE_WATCHDOG_GRACE_MS:-180000}
       # EOD swing missed-batch detector: ship dormant; owner arms after ops ntfy is configured.
+      # ---- Evening chain, COMPRESSED to finish before 19:00 IST (owner decision 2026-08-11) ----
+      # See the matching block on market-data-service for the rationale. These four run AFTER the
+      # market-data chain because they read its output (the swing heartbeat checks the batch ran; the
+      # insights jobs read the screens and the settle). The 16:00 settle is unchanged.
+
+      # was 20:15  swing batch heartbeat
+      ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 50 18 * * MON-FRI}"
+      # was 21:00  paper graduation promotion
+      ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 52 18 * * MON-FRI}"
+      # was 21:10  strategy-evidence insight
+      ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON: "${ARTHA_INSIGHTS_STRATEGY_EVIDENCE_CRON:-0 54 18 * * MON-FRI}"
+      # was 21:15  sell-decision insight
+      ARTHA_INSIGHTS_SELL_DECISION_CRON: "${ARTHA_INSIGHTS_SELL_DECISION_CRON:-0 56 18 * * MON-FRI}"
       ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED: ${ARTHA_SIGNALS_SWING_MISSED_BATCH_DETECTOR_ENABLED:-false}
       # (The ARTHA_SIGNALS_STARVATION_WATCHDOG_* passthroughs were removed 2026-07-26 with the
       # retirement of SignalStarvationCanary — see the note in strategy-signal's application.yml.)
@@ -619,7 +670,6 @@ services:
       # advisory risk sizing (advised_lots = floor(pct% × equity ÷ stop-distance); advisory only)
       ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT: ${ARTHA_PAPER_RISK_PER_TRADE_RISK_PCT:-1.0}
       # batch/evaluator crons (Asia/Kolkata) — quoted (the value has spaces)
-      ARTHA_GRADUATION_PROMOTION_CRON: "${ARTHA_GRADUATION_PROMOTION_CRON:-0 0 21 * * MON-FRI}"
       ARTHA_MINERVINI_SWING_CRON: "${ARTHA_MINERVINI_SWING_CRON:-0 0 16 * * MON-FRI}"
       ARTHA_MANAS_ARORA_SWING_CRON: "${ARTHA_MANAS_ARORA_SWING_CRON:-0 2 16 * * MON-FRI}"
       ARTHA_SWING_CANARY_CRON: "${ARTHA_SWING_CANARY_CRON:-0 30 8 * * MON-FRI}"
@@ -643,7 +693,6 @@ services:
       # covered years, where a session cannot be judged expected-or-not -- refresh libs/market-calendar
       # (CD-2) before the horizon canary reddens or expect nightly alarms from that date on.
       ARTHA_HEARTBEAT_URL: "${ARTHA_HEARTBEAT_URL:-}"
-      ARTHA_HEARTBEAT_SWING_CRON: "${ARTHA_HEARTBEAT_SWING_CRON:-0 15 20 * * MON-FRI}"
       # Session-cadence dead-man's-switch for the LIVE trading session (the swing ping above proves only
       # the 20:15 batch ran — a stack dead 09:15-15:30 but recovered by 20:15 pings it happily). Pings
       # every ~10 min while candles are flowing; the withheld ping is the alarm. Blank = dormant; paste a

@@ -504,6 +504,14 @@ Run in order; each answers one question. Canned SQL in §6.
     or ~100% over a COMPLETE session (§3.21) and §3.22's DISTINCT-count comes back >1:** pull the operand's
     session min/max and place the dot's own threshold on it, then repeat across sessions — an operand that
     sits wholly on one side of the threshold every session is a step function, not a signal.
+    ⚠️ **AMENDED 2026-08-11 — the dot is SIDE-AWARE, and a mid-range support rate can be two saturated
+    sides superimposed.** `breadth` read 88.0% on 08-11, which under this section's "never in between"
+    shape would look like a revival — split by side it is **CE 0/80 (advances 11–17 vs `>32`) and PE
+    584/584 (declines 33–39 vs `>32`)**: the same one rule string, a different operand per side, each
+    side fully saturated. On a directional day the dot is a free +1.0 for the with-trend side and dead
+    weight for the counter-trend side — a per-SIDE session bias, sharper than the per-session bias above.
+    Split any step-function suspect by side before reading its aggregate rate; note the G16
+    `neverCrossing` probe judges the session-wide dedup and reads neither-dead-nor-free on such a split.
     ```sql
     -- the dot's rule is in its own reason string; read it, then bracket the operand
     SELECT (r.generated_at AT TIME ZONE 'Asia/Kolkata')::date d,

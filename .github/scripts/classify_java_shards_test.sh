@@ -125,6 +125,21 @@ expect "the shared json-schema keyword artifact reaches the ratchet" \
   "contracts/json-schema-2020-12-keywords.json" \
   "market_data=false,backtest=false,strategy_gateway=true"
 
+# --- deploy/docker-compose.yml is a TEST INPUT, not just deploy config ---
+# The edit these guards exist to catch — a cron changed, or a passthrough moved to the wrong
+# service — touches compose and NOTHING else. Before this rule that classified to no shard at all,
+# so CronPassthroughParityTest and SwingCoverageGateDefaultTest never ran and the PR went green.
+# backtest stays false deliberately: nothing in that shard reads the file.
+expect "a compose-only edit still runs the two shards that assert against it" \
+  "deploy/docker-compose.yml" \
+  "market_data=true,backtest=false,strategy_gateway=true,java=true"
+
+# Sibling files under deploy/ are NOT test inputs and must not fan out — otherwise every unrelated
+# deploy tweak pays two full shards and the rule above stops meaning anything.
+expect "another deploy/ file does not reach any shard" \
+  "deploy/README.md" \
+  "market_data=false,backtest=false,strategy_gateway=false"
+
 # --- a service no shard owns: named, which ci-java turns into a HARD FAILURE ---
 expect "unowned service fans out and is named" \
   "services/brand-new-service/src/main/java/Foo.java" \

@@ -1,5 +1,6 @@
 package in.arthayantra.marketdata.canary;
 
+import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.alerts.NtfyClient;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -104,7 +105,18 @@ public class BhavcopyCloseCanary {
     this.sampleLimit = sampleLimit;
   }
 
-  /** Daily sweep (20:10 IST, after the ~19:30 bhavcopy lands). Live-only. */
+  /**
+   * Daily sweep, after the evening's bhavcopy lands. Live-only.
+   *
+   * <p>⚠️ Sweeps the LATEST bhavcopy date, which is not necessarily today's. NSE's publish time
+   * varies — measured 17:52, 17:59, 18:47 and 19:31 across four days — so on a late night the file
+   * has not landed when this fires, and without the guard below the canary silently re-evaluates
+   * YESTERDAY's session and alerts on it as if it were tonight's: an operator message naming the
+   * wrong day, repeated every late night. Skip instead — a missed comparison is recoverable (the
+   * next boot's BhavcopyStartupCatchup replays the chain), a confidently wrong one trains the owner
+   * to ignore the alert. The margin is thin even at the current 20:10 against a 19:30 bhavcopy, and
+   * it shrinks to nothing under the pending schedule move.
+   */
   @Scheduled(cron = "${artha.bhavcopy-close.cron:0 10 20 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sweep() {
     if (!live || !enabled) {
@@ -112,6 +124,14 @@ public class BhavcopyCloseCanary {
     }
     LocalDate latest = latestTradeDate();
     if (latest == null) {
+      return;
+    }
+    LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
+    if (latest.isBefore(today)) {
+      log.info(
+          "bhavcopy-close canary skipped — the newest bhavcopy is {} but today is {}; tonight's file"
+              + " has not landed yet, and comparing an older session would alert on the wrong day",
+          latest, today);
       return;
     }
     BhavcopyCloseReport report;

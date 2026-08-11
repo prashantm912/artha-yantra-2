@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
+import org.springframework.scheduling.support.CronExpression;
 
 /**
  * Pins the owner's operating window: <b>every market-data evening job must fire before 19:00 IST</b>
@@ -131,23 +132,45 @@ class EveningScheduleWindowTest {
     if (f.length != 6) {
       fail(envName + " = '" + cron + "' is not a 6-field second-precision cron");
     }
+    // ⚠️ Validate with Spring's own parser first (cross-vendor review Major). This used to read
+    // fields 1 and 2 and ignore everything else, so `* 0 18 * * MON-FRI` — which fires every SECOND
+    // of 18:00 — and a minute of `60`, which Spring rejects outright at boot, both sailed through as
+    // "18:00, inside the window". A schedule this file vouches for must at least BE a schedule.
+    if (!CronExpression.isValidExpression(cron)) {
+      fail(envName + " = '" + cron + "' is not a valid Spring cron expression");
+    }
+    // Seconds are not a cadence knob here: every one of these jobs fires once, on the minute. A list
+    // or range in seconds would multiply the firings the window and collision checks reason about.
+    if (!"0".equals(f[0])) {
+      fail(
+          envName
+              + " = '"
+              + cron
+              + "' has a seconds field of '"
+              + f[0]
+              + "'. These jobs fire once, on the minute — anything else changes what a 'firing'"
+              + " means for the window and collision checks");
+    }
     List<String> out = new ArrayList<>();
-    for (int h : expand(envName, cron, "hour", f[2])) {
-      for (int m : expand(envName, cron, "minute", f[1])) {
+    for (int h : expand(envName, cron, "hour", f[2], 23)) {
+      for (int m : expand(envName, cron, "minute", f[1], 59)) {
         out.add(String.format("%02d:%02d", h, m));
       }
     }
     return out;
   }
 
-  private static List<Integer> expand(String envName, String cron, String field, String spec) {
+  private static List<Integer> expand(
+      String envName, String cron, String field, String spec, int max) {
     List<Integer> out = new ArrayList<>();
     for (String part : spec.split(",")) {
       Matcher range = Pattern.compile("^(\\d{1,2})-(\\d{1,2})$").matcher(part);
       if (part.matches("\\d{1,2}")) {
-        out.add(Integer.parseInt(part));
+        out.add(inRange(envName, cron, field, Integer.parseInt(part), max));
       } else if (range.matches()) {
-        for (int v = Integer.parseInt(range.group(1)); v <= Integer.parseInt(range.group(2)); v++) {
+        int from = inRange(envName, cron, field, Integer.parseInt(range.group(1)), max);
+        int to = inRange(envName, cron, field, Integer.parseInt(range.group(2)), max);
+        for (int v = from; v <= to; v++) {
           out.add(v);
         }
       } else {
@@ -164,6 +187,13 @@ class EveningScheduleWindowTest {
       }
     }
     return out;
+  }
+
+  private static int inRange(String envName, String cron, String field, int value, int max) {
+    if (value > max) {
+      fail(envName + " = '" + cron + "' has " + field + " " + value + ", above the maximum " + max);
+    }
+    return value;
   }
 
   @Test

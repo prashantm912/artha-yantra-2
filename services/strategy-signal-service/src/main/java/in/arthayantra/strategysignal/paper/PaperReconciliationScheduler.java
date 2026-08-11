@@ -9,8 +9,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Fires the nightly paper-ledger reconciliation (audit §8, V5 + V16) once per trading evening at 21:15
- * IST — AFTER the graduation evaluator (21:00, its neighbour) and the swing batches (20:00/20:05), so
+ * Fires the nightly paper-ledger reconciliation (audit §8, V5 + V16) once per trading evening —
+ * AFTER the graduation evaluator (its neighbour) and the swing batches, so
  * the evening's positions/orders/signals are all settled before the pass runs. Weekdays only (no paper
  * trading over the weekend). Cron is property-overridable like every sibling scheduler; a missed cron
  * NEVER fires later (Spring {@code @Scheduled} has no catch-up) — the next evening's pass simply widens
@@ -33,7 +33,13 @@ public class PaperReconciliationScheduler {
     this.events = events;
   }
 
-  /** Post-close nightly reconciliation (21:15 IST, weekdays). */
+  /**
+   * Post-close nightly reconciliation, weekdays. ⚠️ No time in this javadoc or in the FAILURE alert
+   * below: the cron is deployment-configured and moved from 21:15 to 18:58 IST on 2026-08-11 (the
+   * owner shuts the machine down at 19:00, so 21:15 never ran). An operator message that names a
+   * hard-coded hour goes quietly wrong the moment the schedule moves, and it is read at exactly the
+   * moment precision matters. The ordering constraint is what is real, and it is stated above.
+   */
   @Scheduled(cron = "${artha.paper.reconciliation.cron:0 15 21 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
     try {
@@ -56,7 +62,7 @@ public class PaperReconciliationScheduler {
             new SwingBatchAlert(
                 "reconciliation",
                 "Paper reconciliation FAILED",
-                "The 21:15 IST paper V5/V16 reconciliation threw: " + e.getMessage()));
+                "The nightly paper V5/V16 reconciliation threw: " + e.getMessage()));
       } catch (RuntimeException publishFailure) {
         log.warn("paper reconciliation alert publish failed: {}", publishFailure.getMessage());
       }

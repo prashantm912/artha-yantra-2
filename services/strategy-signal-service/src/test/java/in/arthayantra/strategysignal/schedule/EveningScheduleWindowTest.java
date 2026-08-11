@@ -18,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
+import org.springframework.scheduling.support.CronExpression;
 
 /**
  * The strategy-signal half of the owner's operating window: these four jobs read market-data's
@@ -117,23 +118,45 @@ class EveningScheduleWindowTest {
     if (f.length != 6) {
       fail(envName + " = '" + cron + "' is not a 6-field second-precision cron");
     }
+    // ⚠️ Validate with Spring's own parser first (cross-vendor review Major). This used to read
+    // fields 1 and 2 and ignore everything else, so `* 0 18 * * MON-FRI` — which fires every SECOND
+    // of 18:00 — and a minute of `60`, which Spring rejects outright at boot, both sailed through as
+    // "18:00, inside the window". A schedule this file vouches for must at least BE a schedule.
+    if (!CronExpression.isValidExpression(cron)) {
+      fail(envName + " = '" + cron + "' is not a valid Spring cron expression");
+    }
+    // Seconds are not a cadence knob here: every one of these jobs fires once, on the minute. A list
+    // or range in seconds would multiply the firings the window and collision checks reason about.
+    if (!"0".equals(f[0])) {
+      fail(
+          envName
+              + " = '"
+              + cron
+              + "' has a seconds field of '"
+              + f[0]
+              + "'. These jobs fire once, on the minute — anything else changes what a 'firing'"
+              + " means for the window and collision checks");
+    }
     List<String> out = new ArrayList<>();
-    for (int h : expand(envName, cron, "hour", f[2])) {
-      for (int m : expand(envName, cron, "minute", f[1])) {
+    for (int h : expand(envName, cron, "hour", f[2], 23)) {
+      for (int m : expand(envName, cron, "minute", f[1], 59)) {
         out.add(String.format("%02d:%02d", h, m));
       }
     }
     return out;
   }
 
-  private static List<Integer> expand(String envName, String cron, String field, String spec) {
+  private static List<Integer> expand(
+      String envName, String cron, String field, String spec, int max) {
     List<Integer> out = new ArrayList<>();
     for (String part : spec.split(",")) {
       Matcher range = Pattern.compile("^(\\d{1,2})-(\\d{1,2})$").matcher(part);
       if (part.matches("\\d{1,2}")) {
-        out.add(Integer.parseInt(part));
+        out.add(inRange(envName, cron, field, Integer.parseInt(part), max));
       } else if (range.matches()) {
-        for (int v = Integer.parseInt(range.group(1)); v <= Integer.parseInt(range.group(2)); v++) {
+        int from = inRange(envName, cron, field, Integer.parseInt(range.group(1)), max);
+        int to = inRange(envName, cron, field, Integer.parseInt(range.group(2)), max);
+        for (int v = from; v <= to; v++) {
           out.add(v);
         }
       } else {
@@ -152,33 +175,75 @@ class EveningScheduleWindowTest {
     return out;
   }
 
+  private static int inRange(String envName, String cron, String field, int value, int max) {
+    if (value > max) {
+      fail(envName + " = '" + cron + "' has " + field + " " + value + ", above the maximum " + max);
+    }
+    return value;
+  }
+
   @Test
   @DisplayName("the morning catch-up is still firing if the machine starts as late as 09:00")
   void theMorningCatchUpKeepsFiringUntilTheMarketOpens() throws IOException {
     List<String> firings = firings(CATCHUP_ENV, composeDefault(composeLines(), CATCHUP_ENV));
 
-    // A session the evening chain missed is recovered ONLY here. A single 08:35 shot loses it
-    // outright on any morning the machine is not up yet — which the owner says happens.
+    // ⚠️ ONE assertion, over the INTERSECTION. Cross-vendor review Major: written as three separate
+    // anySatisfy checks — "fires at/after 09:00", "fires before 09:15", "covers an on-time start" —
+    // the schedule `0 59 8-9` passes all three while having NO usable late pass at all: 08:59
+    // satisfies "before 09:15" and 09:59 satisfies "at/after 09:00", and its only post-09:00 firing
+    // is refused by the deadline. Separate existential checks over the same set do not compose into
+    // the conjunction they look like.
+    //
+    // What actually has to be true: a pass in [09:00, 09:15) — late enough to catch a 09:00 start,
+    // early enough that SwingBatchCatchUp's own market-open deadline (SwingBatchCatchUp:610) still
+    // lets it do work. A session the evening chain missed is recovered ONLY here.
     assertThat(firings)
         .as(
-            "%s must still fire at or after 09:00, or a late start loses the whole session with no"
-                + " second chance (owner: the machine is sometimes not up until 09:00)",
+            "%s has no firing inside [09:00, 09:15). Later passes are refused by the market-open"
+                + " deadline and earlier ones happen before the machine is up, so a morning the"
+                + " owner starts at 09:00 loses the whole session with no second chance",
             CATCHUP_ENV)
-        .anySatisfy(at -> assertThat(at).isGreaterThanOrEqualTo("09:00"));
+        .anySatisfy(at -> assertThat(at).isBetween("09:00", "09:14"));
 
-    // ...and it must not be a schedule that only fires late either — the normal path is early.
+    // ...and it must still cover the normal on-time start, which is the common case.
     assertThat(firings)
-        .as("%s must also cover a normal on-time start", CATCHUP_ENV)
+        .as("%s must also cover a normal start, before 09:00", CATCHUP_ENV)
         .anySatisfy(at -> assertThat(at).isBetween("08:00", "08:59"));
+  }
 
-    // Entries after the 09:15 market open are refused by SwingBatchCatchUp's own deadline guard
-    // (SwingBatchCatchUp:610), so later passes are no-ops rather than late entries — but a schedule
-    // that fires ONLY past the deadline would be all no-ops and read as armed. Pin at least one
-    // useful pass inside the deadline.
-    assertThat(firings)
-        .as("%s fires only past the 09:15 market-open deadline — every pass would be refused",
-            CATCHUP_ENV)
-        .anySatisfy(at -> assertThat(at).isLessThan("09:15"));
+  @Test
+  @DisplayName("the morning catch-up is wired like every other job — name, source, IST, service")
+  void theMorningCatchUpIsWiredLikeTheRest() throws IOException {
+    // Cross-vendor review Major: CATCHUP_ENV was pinned for its FIRING TIMES and nothing else, so
+    // the property could be renamed, the passthrough could move to another service, or the zone
+    // could be dropped, and only the evening jobs would notice. Same four checks, same reasons.
+    Job catchUp =
+        new Job("artha.swing.catchup-cron", CATCHUP_ENV, SRC + "swing/SwingBatchCatchUp.java");
+
+    StandardEnvironment spring = new StandardEnvironment();
+    spring
+        .getPropertySources()
+        .replace(
+            StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+            new SystemEnvironmentPropertySource(
+                StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                Map.of(catchUp.envName(), "RESOLVED")));
+    assertThat(spring.resolveRequiredPlaceholders("${" + catchUp.property() + ":FELL_BACK}"))
+        .as("%s does not resolve from %s (#653)", catchUp.property(), catchUp.envName())
+        .isEqualTo("RESOLVED");
+
+    String src = Files.readString(repoRoot().resolve(catchUp.sourceFile()), StandardCharsets.UTF_8);
+    int at = src.indexOf("cron = \"${" + catchUp.property() + ":");
+    assertThat(at)
+        .as("%s no longer reads ${%s}", catchUp.sourceFile(), catchUp.property())
+        .isGreaterThan(0);
+    assertThat(src.substring(at, Math.min(src.length(), at + 220)))
+        .as("the catch-up must schedule in IST, or 09:00 means nothing")
+        .contains("zone = \"Asia/Kolkata\"");
+
+    assertThat(serviceBlock(composeLines(), "strategy-signal-service"))
+        .as("%s is missing from the strategy-signal-service environment block", catchUp.envName())
+        .anySatisfy(line -> assertThat(line.trim()).startsWith(catchUp.envName() + ": "));
   }
 
   @Test

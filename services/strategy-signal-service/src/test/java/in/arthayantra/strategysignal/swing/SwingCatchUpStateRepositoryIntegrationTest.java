@@ -143,6 +143,30 @@ class SwingCatchUpStateRepositoryIntegrationTest extends StrategySignalIntegrati
    * claimed_at}'s IST date to today's. The sibling test above records what happens when a guard that
    * lives in SQL is proved by a unit test instead.
    */
+  /**
+   * ⚠️ THE PRODUCTION PATH, and the one the first cut of this test missed. Every real session is
+   * SEEDED before it is claimed, and a seeded row has {@code attempts = 0} with {@code claimed_at}
+   * unset — so the day comparison sees NULL, which is neither less-than nor equal, and without an
+   * explicit NULL arm the first genuine claim returns attempt ZERO. A five-day budget would then
+   * run for six, silently.
+   *
+   * <p>The sibling test below claims a row that does not exist yet, which takes the INSERT arm of
+   * the upsert. That is the EXCEPTIONAL path. Cross-vendor review caught the gap; the shape is the
+   * catalogue's "a test that supplies its own input" — it built the one starting state the bug
+   * could not occur in.
+   */
+  @Test
+  void aSeededRowStartsAtAttemptOneNotZero() {
+    String batch = "cu-it-seeded-" + System.nanoTime();
+    state.seedMissing(batch, java.util.List.of(SESSION));
+
+    assertThat(state.claim(batch, SESSION, 30).orElseThrow().attempts())
+        .as(
+            "a seeded row has claimed_at NULL, so the first real claim must still count as day ONE"
+                + " — returning 0 here stretches every budget by a day")
+        .isEqualTo(1);
+  }
+
   @Test
   void attemptsCountIstDaysNotClaims() {
     String batch = "cu-it-budget-" + System.nanoTime();

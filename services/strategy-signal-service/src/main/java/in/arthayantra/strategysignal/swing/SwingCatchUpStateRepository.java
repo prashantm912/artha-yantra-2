@@ -56,6 +56,14 @@ public class SwingCatchUpStateRepository {
    * meaning without a migration: a second claim on the same IST day is free, and behaviour for a
    * once-a-day caller is byte-identical to what it always was.
    *
+   * <p>⚠️ {@code claimed_at IS NULL} counts as a new day, and that clause is the whole fix working
+   * on real data. Production ALWAYS calls {@link #seedMissing} first, and a seeded row has
+   * {@code attempts = 0} with {@code claimed_at} unset — so without it the comparison evaluates
+   * {@code NULL < today}, which is NULL, not true. The first genuine claim would then return
+   * attempt ZERO, and a five-day budget would quietly run for six. Cross-vendor review found this;
+   * the original test claimed a row that did not exist yet, exercising the INSERT path, which is
+   * the EXCEPTIONAL one — every real session goes through the conflict path instead.
+   *
    * <p>Rendering uses {@code AT TIME ZONE 'Asia/Kolkata'}, never {@code '+05:30'} — the POSIX sign
    * convention makes the offset form INVERT, so it would compare a time 11 hours adrift.
    */
@@ -68,9 +76,10 @@ public class SwingCatchUpStateRepository {
             ON CONFLICT (batch, session_date) DO UPDATE
               SET status = 'RUNNING',
                   attempts = swing_catchup_runs.attempts
-                             + CASE WHEN (swing_catchup_runs.claimed_at
-                                            AT TIME ZONE 'Asia/Kolkata')::date
-                                          < (now() AT TIME ZONE 'Asia/Kolkata')::date
+                             + CASE WHEN swing_catchup_runs.claimed_at IS NULL
+                                       OR (swing_catchup_runs.claimed_at
+                                             AT TIME ZONE 'Asia/Kolkata')::date
+                                           < (now() AT TIME ZONE 'Asia/Kolkata')::date
                                     THEN 1 ELSE 0 END,
                   claimed_at = now(),
                   updated_at = now()

@@ -492,7 +492,7 @@ public class SwingBatchCatchUp {
                   : run.exitSkipped()
                       + " held stop(s) were NOT evaluated — see the STOP NOT EVALUATED TODAY errors"
                       + " in the service log."));
-    } else if (!entriesReady) {
+    } else if (!entriesReady && run.exitSkipped() == 0 && outcome.markerRecorded()) {
       // ⚠️ The SAME argument as the armingUnknown branch directly above, for the OTHER reason
       // entries get withheld: the funnel served is not this session's screen, so entering off it
       // would take the wrong day's names. Exits ran; the entries are still OWED.
@@ -535,7 +535,11 @@ public class SwingBatchCatchUp {
       alert(
           doctrine, "catch-up marker WRITE FAILED for " + session,
           "Caught up " + session + " (" + summary + ") but the swing_batch_runs marker did not persist"
-              + " — the session is left retryable so the next sweep completes it. Check the DB.");
+              + " — the session is left retryable so the next sweep completes it. Check the DB."
+              + (entriesReady
+                  ? ""
+                  : " Its ENTRIES are also still owed: the funnel was not as-of that session, so a"
+                      + " later sweep needs its screen, not just the marker."));
     } else {
       // A held anchor's daily bar is missing — the marker was NOT recorded; retry next session.
       state.markPending(batch, session);
@@ -545,7 +549,11 @@ public class SwingBatchCatchUp {
       alert(
           doctrine, "catch-up INCOMPLETE for " + session,
           "Caught up what it could for " + session + " (" + summary + ") but " + run.exitSkipped()
-              + " held stop(s) had no daily bar — leaving the session retryable for the next sweep.");
+              + " held stop(s) had no daily bar — leaving the session retryable for the next sweep."
+              + (entriesReady
+                  ? ""
+                  : " Its ENTRIES are also still owed: the funnel was not as-of that session, so"
+                      + " recovery needs its screen as well as the missing bar."));
     }
   }
 

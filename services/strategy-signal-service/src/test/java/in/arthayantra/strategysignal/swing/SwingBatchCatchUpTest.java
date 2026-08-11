@@ -368,6 +368,53 @@ class SwingBatchCatchUpTest {
         .anyMatch(a -> a.title().contains("EXITS ONLY") && a.message().contains("still owed"));
   }
 
+  /**
+   * ⚠️ The COMBINED state, and the gap that let a categorical falsehood through. Cross-vendor review
+   * Critical: with a mismatched screen AND a held stop that had no bar, the entries-owed branch
+   * intercepted the INCOMPLETE branch and told the owner "Every held stop WAS evaluated off that
+   * session's bar" — flatly untrue, and exactly the sentence an operator acts on.
+   *
+   * <p>The suite stayed GREEN through that defect because no test drove both conditions at once.
+   * Each was covered alone.
+   */
+  @Test
+  void aMismatchedScreenWithASkippedExitReportsTheSkipNotACleanExitsPass() {
+    SwingDoctrine manas = doctrine(true, THURSDAY); // funnel is NOT FRIDAY's screen
+    armedFamilyOnlyFridayMissed();
+    when(recorder.runAndRecord(
+            eq(manas), eq(FRIDAY), eq(false), eq(SwingBatchRecorder.MarkerPolicy.ON_COMPLETE)))
+        .thenReturn(run(0, 0, 1)); // a held stop had no daily bar
+
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    verify(state, never()).markDone("manas-arora", FRIDAY);
+    assertThat(alerts())
+        .as("the unevaluated stop is the more urgent fact and must not be masked")
+        .anyMatch(a -> a.title().contains("INCOMPLETE"));
+    assertThat(alerts())
+        .as("...and the owner must still learn the entries are owed, or the screen never gets fixed")
+        .anyMatch(a -> a.message().contains("ENTRIES are also still owed"));
+    assertThat(alerts())
+        .as("no alert may claim every stop was evaluated when one was not")
+        .noneMatch(a -> a.message().contains("Every held stop WAS evaluated"));
+  }
+
+  /** Same shape for the other precedence case: entries owed AND the marker write failed. */
+  @Test
+  void aMismatchedScreenWithAFailedMarkerReportsTheMarkerFailure() {
+    SwingDoctrine manas = doctrine(true, THURSDAY);
+    armedFamilyOnlyFridayMissed();
+    when(recorder.runAndRecord(
+            eq(manas), eq(FRIDAY), eq(false), eq(SwingBatchRecorder.MarkerPolicy.ON_COMPLETE)))
+        .thenReturn(run(0, 1, 0, false)); // exits fine, marker did not persist
+
+    catchUp(MONDAY_0835, true, manas).catchUp();
+
+    verify(state, never()).markDone("manas-arora", FRIDAY);
+    assertThat(alerts()).anyMatch(a -> a.title().contains("marker WRITE FAILED"));
+    assertThat(alerts()).anyMatch(a -> a.message().contains("ENTRIES are also still owed"));
+  }
+
   @Test
   void aPartialRunIsLeftRetryableNotRecordedDone() {
     // Critical 1: a held anchor's daily bar was missing (exitSkipped>0). The run must NOT be marked

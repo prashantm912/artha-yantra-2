@@ -334,10 +334,23 @@ class SwingBatchCatchUpTest {
     assertThat(alerts()).anyMatch(a -> a.message().contains("1 exits"));
   }
 
+  /**
+   * ⚠️ This test PINNED THE DEFECT. It previously asserted {@code markDone} here and checked the
+   * alert said "Entries were SKIPPED" — i.e. it froze, as correct, a session going TERMINAL while
+   * its entries were never taken. {@code claim} refuses a terminal row, so a screen landing later
+   * could not recover them: silent, permanent forfeiture, distinguishable from a clean run only by
+   * reading the alert body.
+   *
+   * <p>The exits half was always right and is unchanged — 07-17's screen never landed, so the funnel
+   * serves THURSDAY's names and entering off it would take the wrong day's, while the held STOPS
+   * must still be evaluated off Friday's bar. What was wrong was calling that state DONE.
+   *
+   * <p>The correct rule already existed one branch above for {@code armingUnknown}, commented
+   * "markDone here would have forfeited the very pass this run deferred". It was simply never
+   * applied to the other reason entries get withheld.
+   */
   @Test
-  void catchesUpExitsButSkipsEntriesWhenTheFunnelIsNotTheSessionsScreen() {
-    // 07-17's screen never landed → the funnel serves THURSDAY's names. Entering off it is wrong, but
-    // the held STOPS must still be evaluated off Friday's bar — so entries are suppressed, exits run.
+  void catchesUpExitsButLeavesTheSessionOwingItsEntriesWhenTheFunnelIsNotItsScreen() {
     SwingDoctrine manas = doctrine(true, THURSDAY);
     armedFamilyOnlyFridayMissed();
     when(recorder.runAndRecord(
@@ -348,8 +361,11 @@ class SwingBatchCatchUpTest {
 
     verify(recorder)
         .runAndRecord(manas, FRIDAY, false, SwingBatchRecorder.MarkerPolicy.ON_COMPLETE);
-    verify(state).markDone("manas-arora", FRIDAY);
-    assertThat(alerts()).anyMatch(a -> a.message().contains("Entries were SKIPPED"));
+    verify(state, never()).markDone("manas-arora", FRIDAY);
+    verify(state).markPending("manas-arora", FRIDAY, "SCREEN_NOT_AS_OF_SESSION");
+    assertThat(alerts())
+        .as("the owner must be told the entries are still owed, not that the batch ran")
+        .anyMatch(a -> a.title().contains("EXITS ONLY") && a.message().contains("still owed"));
   }
 
   @Test
@@ -564,7 +580,11 @@ class SwingBatchCatchUpTest {
     LocalDate oldest = LocalDate.of(2026, 7, 9);
     Clock tuesday0835 =
         Clock.fixed(Instant.parse("2026-07-21T03:05:00Z"), ZoneOffset.UTC);
-    SwingDoctrine manas = doctrine(true, null);
+    // ⚠️ The screen date must MATCH the session. This used to be `null` as a don't-care, which is
+    // no longer one: a funnel that is not as-of the session means entries are still owed, so the
+    // session correctly never reaches a terminal state and this test's whole subject — that the
+    // oldest row eventually DOES — becomes untestable. The change is to the fixture, not the claim.
+    SwingDoctrine manas = doctrine(true, oldest);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(oldest.minusDays(1)));
     when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
     when(runs.hasRunWithEntries("manas-arora", oldest)).thenReturn(false);
@@ -692,7 +712,10 @@ class SwingBatchCatchUpTest {
   void stopsBeforeClaimingRemainingSessionsWhenTheMarketOpens() {
     MutableClock clock = new MutableClock(MONDAY_0835.instant());
     LocalDate wednesday = LocalDate.of(2026, 7, 15);
-    SwingDoctrine manas = doctrine(true, null);
+    // Screen as-of THURSDAY — the session that actually runs here and is asserted DONE below. `null`
+    // was a don't-care until a non-matching funnel started meaning "entries still owed"; this test
+    // is about the deadline stopping further CLAIMS, not about withheld entries.
+    SwingDoctrine manas = doctrine(true, THURSDAY);
     when(runs.lastRunDate("manas-arora")).thenReturn(Optional.of(wednesday));
     when(runs.hasRunWithEntries(eq("manas-arora"), any())).thenReturn(true);
     when(runs.hasRunWithEntries("manas-arora", THURSDAY)).thenReturn(false);

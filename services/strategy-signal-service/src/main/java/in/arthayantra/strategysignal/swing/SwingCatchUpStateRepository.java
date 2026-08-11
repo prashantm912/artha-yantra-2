@@ -42,6 +42,22 @@ public class SwingCatchUpStateRepository {
    * partial), or it was a RUNNING claim staler than {@code staleLeaseMinutes} (a crashed attempt).
    * Empty when another caller holds a fresh RUNNING claim, or the session is terminal (DONE /
    * ABANDONED). The whole decision is one statement, so it is safe under concurrent callers.
+   *
+   * <p>⚠️ {@code attempts} counts <b>IST DAYS attempted</b>, not claims. It always meant days — the
+   * budget exists to stop retrying a session whose daily bar never arrives, its exhaustion alert
+   * says "a held position's daily bar is still missing", and the sweep window is expressed in
+   * {@code max-attempts + 2} trading DAYS. With one catch-up run per morning, "claims" was an exact
+   * proxy for "days" and the distinction never surfaced.
+   *
+   * <p>It surfaces the moment the catch-up runs more than once a morning. At the default budget of
+   * 5, six passes in one morning exhaust it and mark the session {@code ABANDONED} — whose alert
+   * reads "its stop for that session is UNRECOVERABLE" — before the morning is even over, purely
+   * because someone widened a cron. The {@code claimed_at} comparison below restores the original
+   * meaning without a migration: a second claim on the same IST day is free, and behaviour for a
+   * once-a-day caller is byte-identical to what it always was.
+   *
+   * <p>Rendering uses {@code AT TIME ZONE 'Asia/Kolkata'}, never {@code '+05:30'} — the POSIX sign
+   * convention makes the offset form INVERT, so it would compare a time 11 hours adrift.
    */
   public Optional<Claim> claim(String batch, LocalDate session, int staleLeaseMinutes) {
     return jdbc
@@ -51,7 +67,11 @@ public class SwingCatchUpStateRepository {
             VALUES (?, ?, 'RUNNING', 1, now(), now())
             ON CONFLICT (batch, session_date) DO UPDATE
               SET status = 'RUNNING',
-                  attempts = swing_catchup_runs.attempts + 1,
+                  attempts = swing_catchup_runs.attempts
+                             + CASE WHEN (swing_catchup_runs.claimed_at
+                                            AT TIME ZONE 'Asia/Kolkata')::date
+                                          < (now() AT TIME ZONE 'Asia/Kolkata')::date
+                                    THEN 1 ELSE 0 END,
                   claimed_at = now(),
                   updated_at = now()
               WHERE swing_catchup_runs.status = 'PENDING'

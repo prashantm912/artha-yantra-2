@@ -58,9 +58,14 @@ import org.springframework.stereotype.Component;
  *   <li>EXITS run unconditionally off the session bar (the money-critical part — a held stop needs no
  *       funnel). ENTRIES run only when the funnel is actually the session's screen (it silently serves
  *       the latest persisted screen, so entering off it would take the WRONG day's names).
- *   <li>Complete (every held stop evaluated) → record the {@code swing_batch_runs} marker (silences the
- *       canary) + mark the claim DONE. Partial (a held bar missing) → leave it retryable and try again
- *       next session. Exhausted its attempt budget → ABANDON + alert (bounded, never chases forever).
+ *   <li>Complete (every held stop evaluated AND the entries taken) → record the {@code
+ *       swing_batch_runs} marker (silences the canary) + mark the claim DONE. Partial (a held bar
+ *       missing), or entries withheld because the funnel is not this session's screen → leave it
+ *       retryable and try again next session. Exhausted its attempt budget → ABANDON + alert
+ *       (bounded, never chases forever).
+ *   <li>⚠️ DONE means "nothing left to do", and {@code claim} never re-claims a terminal row — so a
+ *       session may not be marked DONE while it still owes ENTRIES, however completely its exits
+ *       ran. Withheld entries are recoverable only for as long as the row stays retryable.
  * </ul>
  *
  * <p>Default-OFF ({@code artha.swing.catchup-enabled} / {@code ARTHA_SWING_CATCHUP_ENABLED}) — it fires
@@ -487,14 +492,39 @@ public class SwingBatchCatchUp {
                   : run.exitSkipped()
                       + " held stop(s) were NOT evaluated — see the STOP NOT EVALUATED TODAY errors"
                       + " in the service log."));
+    } else if (!entriesReady) {
+      // ⚠️ The SAME argument as the armingUnknown branch directly above, for the OTHER reason
+      // entries get withheld: the funnel served is not this session's screen, so entering off it
+      // would take the wrong day's names. Exits ran; the entries are still OWED.
+      //
+      // This branch used to fall through to markDone, and the alert text on that line said "Entries
+      // were SKIPPED" while the row went TERMINAL — and `claim` never re-claims a terminal row, so a
+      // screen landing later could not recover them. Silent, permanent forfeiture of a session's
+      // entries, distinguishable from a clean run only by reading the alert body.
+      //
+      // Failure direction is deliberately inverted: a session whose screen NEVER lands now consumes
+      // its attempt budget until ABANDONED, which alerts the owner. A loud unrecoverable beats a
+      // silent one.
+      state.markPending(batch, session, "SCREEN_NOT_AS_OF_SESSION");
+      log.warn(
+          "swing catch-up: {} ran {}'s exits but the funnel is not as-of that session — left"
+              + " retryable, entries still owed",
+          batch,
+          session);
+      alert(
+          doctrine,
+          "catch-up EXITS ONLY for " + session,
+          "The " + session + " screen never landed, so the funnel serves another session's names and"
+              + " entries were withheld. Its entries are still owed, so the session stays retryable"
+              + " rather than being marked done without them. " + summary
+              + ". Every held stop WAS evaluated off that session's bar.");
     } else if (run.exitSkipped() == 0 && outcome.markerRecorded()) {
       state.markDone(batch, session);
       log.warn("swing catch-up: {} caught up {} — {}", batch, session, summary);
       alert(
           doctrine, "catch-up ran for " + session,
           "The " + session + " batch never ran; caught up off that session's daily bar: " + summary
-              + "." + (entriesReady ? "" : " Entries were SKIPPED (the funnel is not as-of " + session
-                  + " — its screen never landed); the held stops WERE evaluated."));
+              + ".");
     } else if (run.exitSkipped() == 0) {
       // Exits fully evaluated but the marker write FAILED — repairable, not terminal.
       state.markPending(batch, session);

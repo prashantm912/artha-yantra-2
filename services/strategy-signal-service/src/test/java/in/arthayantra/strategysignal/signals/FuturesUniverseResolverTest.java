@@ -101,6 +101,51 @@ class FuturesUniverseResolverTest {
   }
 
   @Test
+  void emptyContractsArrayOnAnIndexRootIsUnresolvedNotEmpty() {
+    // H8 / chip task_f624fca7 — #877's one remaining fused branch. #877 un-fused !isArray() from
+    // isEmpty() and gave them DIFFERENT meanings: non-array ⇒ unresolved, empty ⇒ legitimately
+    // empty. This test is the case the suite never had: FuturesUniverseResolverTest covered 503,
+    // index 404, screener 404 and non-array, but nothing ever drove {"contracts":[]}, so the
+    // branch's behaviour was pure assumption on BOTH sides of the wire.
+    //
+    // On the INDEX path it must be UNRESOLVED for the same reason a 404 is. Empty reads as
+    // RESOLVED_EMPTY, which SignalEngine does not count in `unresolved`, which
+    // StrategyCoverageSnapshot.Classification#abnormal() returns false for, and which the ARMED T9
+    // watchdog therefore never pages on — the entire live book dark with every counter green.
+    stub("/api/v1/market/futures/term-structure", 200, "{\"contracts\":[]}");
+
+    assertThat(resolver().resolve("NSE", "NIFTY 50", "front_month", 2))
+        .isEqualTo(Optional.empty());
+  }
+
+  @Test
+  void emptyContractsArrayOnTheScreenerPathStaysALegitimateSkip() {
+    // The asymmetry's other half, and the reason the fix is a flag check rather than a blanket
+    // reclassification: on the screener a picked STOCK mover that is cash-only is a legitimate
+    // stand-aside, exactly as it is for a 404. Without this control the previous test would pass
+    // just as well against a rule that faults EVERYWHERE — which would brick the whole screen on
+    // one cash-only pick.
+    stub(
+        "/api/v1/market/futures/movers-screen",
+        200,
+        "{\"longCandidates\":[{\"symbol\":\"CASHONLY\"},{\"symbol\":\"HDFCBANK\"}]}");
+    stubTermStructure("CASHONLY", 200, "{\"contracts\":[]}");
+    stubTermStructure(
+        "HDFCBANK",
+        200,
+        "{\"contracts\":[{\"exchange\":\"NFO\",\"tradingsymbol\":\"HDFCBANK26AUGFUT\","
+            + "\"expiry\":\"2026-08-27\"}]}");
+
+    assertThat(resolver().resolveScreener("long", 5, "captured"))
+        .hasValueSatisfying(
+            refs ->
+                assertThat(refs)
+                    .singleElement()
+                    .extracting(StrategyDefinition.InstrumentRef::tradingsymbol)
+                    .isEqualTo("HDFCBANK26AUGFUT"));
+  }
+
+  @Test
   void nonArrayContractsBodyReturnsAnUnresolvedUniverse() {
     stub(
         "/api/v1/market/futures/term-structure",

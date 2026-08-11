@@ -4515,6 +4515,34 @@
         }
       }
     },
+    "/api/v1/market/health/evening-chain" : {
+      "get" : {
+        "tags" : [ "ingest-health-controller" ],
+        "operationId" : "eveningChain",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ChainReport"
+                }
+              }
+            }
+          },
+          "default" : {
+            "description" : "Error envelope (COMMON 8.3)",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/health/data" : {
       "get" : {
         "tags" : [ "data-health-controller" ],
@@ -11533,6 +11561,64 @@
           }
         },
         "required" : [ "days", "detail", "lastRun", "missingDays", "policy", "source", "status" ]
+      },
+      "ChainReport" : {
+        "type" : "object",
+        "properties" : {
+          "generatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "day" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "tradingDay" : {
+            "type" : "boolean"
+          },
+          "total" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "done" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "complete" : {
+            "type" : "boolean"
+          },
+          "sources" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SourceProgress"
+            }
+          }
+        },
+        "required" : [ "complete", "day", "done", "generatedAt", "sources", "total", "tradingDay" ]
+      },
+      "SourceProgress" : {
+        "type" : "object",
+        "properties" : {
+          "source" : {
+            "type" : "string"
+          },
+          "state" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "STUCK", "DONE" ]
+          },
+          "status" : {
+            "type" : [ "string", "null" ]
+          },
+          "startedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          },
+          "finishedAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "finishedAt", "source", "startedAt", "state", "status" ]
       },
       "CanaryReport" : {
         "type" : "object",

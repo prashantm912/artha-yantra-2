@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { BoardReport } from '../../api/ingestHealth.ts';
+import type { BoardReport, ChainReport } from '../../api/ingestHealth.ts';
 
 const board: BoardReport = {
   generatedAt: '2026-09-16T03:15:00Z',
@@ -72,10 +72,62 @@ const board: BoardReport = {
   ],
 };
 
+const completeChain: ChainReport = {
+  generatedAt: '2026-09-15T14:05:00Z',
+  day: '2026-09-15',
+  tradingDay: true,
+  total: 9,
+  done: 9,
+  complete: true,
+  sources: [
+    {
+      source: 'NSE_FII_DII',
+      state: 'DONE',
+      status: 'SUCCESS',
+      startedAt: '2026-09-15T13:30:00Z',
+      finishedAt: '2026-09-15T13:31:00Z',
+    },
+  ],
+};
+
+const pendingChain: ChainReport = {
+  generatedAt: '2026-09-15T14:10:00Z',
+  day: '2026-09-15',
+  tradingDay: true,
+  total: 9,
+  done: 7,
+  complete: false,
+  sources: [
+    {
+      source: 'EQUITY_BREADTH',
+      state: 'PENDING',
+      status: null,
+      startedAt: null,
+      finishedAt: null,
+    },
+    {
+      source: 'MANAS_SCREEN',
+      state: 'STUCK',
+      status: 'RUNNING',
+      startedAt: '2026-09-15T12:30:00Z',
+      finishedAt: null,
+    },
+  ],
+};
+
+let chain: ChainReport = completeChain;
+
 vi.mock('../../api/ingestHealth.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/ingestHealth.ts')>()),
   useIngestHealth: () => ({
     data: board,
+    isPending: false,
+    isError: false,
+    isSuccess: true,
+    refetch: () => {},
+  }),
+  useEveningChainStatus: () => ({
+    data: chain,
     isPending: false,
     isError: false,
     isSuccess: true,
@@ -97,6 +149,7 @@ function renderPage() {
 describe('IngestHealthPage', () => {
   // Budget 2026-08-03 (#1061 suite-growth rule): measured 4052ms in a full-suite run.
   it('renders the per-source health table with verdicts, missing-days and last-run', () => {
+    chain = completeChain;
     renderPage();
 
     // Title + summary strip.
@@ -122,5 +175,21 @@ describe('IngestHealthPage', () => {
     expect(screen.getAllByText(/stale/).length).toBeGreaterThan(0);
     // The data-starved screener detail is shown.
     expect(screen.getAllByText(/data-starved/).length).toBeGreaterThan(0);
+  }, 15_000);
+
+  it("shows the evening chain complete and safe-to-shut-down when every source is done", () => {
+    chain = completeChain;
+    renderPage();
+
+    expect(screen.getByText(/Evening chain complete 9\/9/)).toBeInTheDocument();
+    expect(screen.getByText(/safe to shut down/)).toBeInTheDocument();
+  }, 15_000);
+
+  it('names still-pending and stuck sources when the chain is not yet complete', () => {
+    chain = pendingChain;
+    renderPage();
+
+    expect(screen.getByText(/still pending: EQUITY_BREADTH/)).toBeInTheDocument();
+    expect(screen.getAllByText('STUCK').length).toBeGreaterThan(0);
   }, 15_000);
 });

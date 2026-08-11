@@ -171,29 +171,129 @@ branch_work_is_in_main() {
 #
 # Every uncertainty KEEPS: no gh, no merged PR, no identity match, a merge commit we do not have
 # locally (GC'd or never fetched), or a non-empty scoped diff.
+#
+# GH_REASON records WHY a keep happened, because "kept" alone is what got this script re-reported as
+# broken (2026-08-11, owner): a run that kept a demonstrably squash-merged branch printed
+# "its changes are NOT in main -- not merged", which is a claim the script had not established and
+# in two of the four reported cases was simply false. Keeping is right; MISDESCRIBING the keep is
+# what wastes an investigation. Values:
+#   merged              -- identity and proof both hold; the branch is deletable
+#   gh-unavailable      -- gh missing, or the API refused to answer (see the rate-limit note below)
+#   no-merged-pr        -- gh answered, and there is no merged PR for this head
+#   tip-not-in-pr       -- a merged PR exists but this tip is none of its commits (reused branch name)
+#   tip-behind-merged-pr-- this tip IS one of its commits but an EARLIER one; its tree never landed
+# GH_PR carries the PR number for that case, so the remedy can name a ref that actually exists.
+#   merge-commit-absent -- we do not hold the squash commit locally, so the proof cannot be run
+GH_REASON=""
+GH_PR=""
+
 gh_says_merged() {
-  local branch="$1" tip row merged_at head_oid oids
+  local branch="$1" tip line tmp rc saw_pr=0 saw_identity=0 saw_merge=0
+  local num merge head rest oid matched matched_pr=""
+  GH_REASON="gh-unavailable"
+  GH_PR=""
   command -v gh >/dev/null 2>&1 || return 1
   tip="$(git rev-parse "$branch" 2>/dev/null)" || return 1
 
-  # One row per merged PR for this head: "<mergeCommitOid> <headRefOid> <commitOid>...".
-  while IFS= read -r row; do
-    [ -n "$row" ] || continue
-    merged_at="${row%% *}"
-    oids="${row#* }"
-    head_oid="${oids%% *}"
-    [ -n "$head_oid" ] || continue
+  # Run gh into a FILE and check its exit code. Piping into a process substitution discards the
+  # status, so an API failure becomes indistinguishable from "no merged PR" -- and it degrades in
+  # exactly the direction that looks like a correct answer. Measured 2026-08-11: gh pr list is a
+  # GRAPHQL call and that budget is SEPARATE from REST core, so core read 4993/5000 -- "the rate
+  # limit is fine" by the obvious check -- while every call failed. A real prune run stopped
+  # part-way with no indication.
+  tmp="$(mktemp)" || return 1
+  gh pr list --head "$branch" --state merged \
+     --json number,mergeCommit,headRefOid,commits \
+     --jq '.[] | [(.number|tostring), (.mergeCommit.oid // "-"), .headRefOid] + [.commits[].oid] | @tsv' \
+     >"$tmp" 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$tmp"
+    GH_UNAVAILABLE=1
+    return 1
+  fi
 
-    # IDENTITY
-    printf '%s\n' $oids | grep -Fxq "$tip" || continue
-    # PROOF -- we must actually hold the squash commit, and the tip's own paths must match it.
-    [ -n "$merged_at" ] || continue
-    git cat-file -e "${merged_at}^{commit}" 2>/dev/null || continue
-    branch_work_is_in_main "$branch" "$merged_at" && return 0
-  done < <(gh pr list --head "$branch" --state merged \
-             --json mergeCommit,headRefOid,commits \
-             --jq '.[] | [(.mergeCommit.oid // "")] + [.headRefOid] + [.commits[].oid] | @tsv' \
-             2>/dev/null | tr '\t' ' ')
+  # WARNING: parse the TSV as TSV, and make sure NO column can ever be EMPTY. Two separate ways an
+  # empty column has bitten this parser:
+  #
+  #   1. An earlier cut collapsed tabs to spaces and split on spaces, so an empty mergeCommit
+  #      column shifted every later field left by one. Cross-vendor review raised a Critical for a
+  #      row where the shift makes merge == the branch tip, which would make the proof below
+  #      compare the branch against ITSELF -- empty diff, DELETE. ⚠️ Scope, measured rather than
+  #      assumed: no real gh output was found that produces it (a squash mergeCommit is never the
+  #      head), and the plausible variant -- a NULL mergeCommit -- was already caught by the
+  #      empty-string check. The ancestor guard below closes it regardless; treat it as a guard
+  #      against malformed input, not as a fix for a demonstrated live hole.
+  #
+  #   2. IFS=$'	' does NOT rescue that, because bash treats tab as IFS WHITESPACE: a run of tabs
+  #      collapses and the empty column vanishes anyway (review round 2). The real null-mergeCommit
+  #      case therefore read back as merge=<head>, head="" and the branch was kept for the WRONG
+  #      REASON -- tip-not-in-pr rather than merge-commit-absent. It failed safe and still
+  #      misdescribed itself, which is the defect class this whole change is about.
+  #
+  # Hence the jq above emits "-" for a null mergeCommit: a NON-WHITESPACE sentinel is the only
+  # thing that survives the split. Fields are read tab-delimited and validated before use.
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    saw_pr=1
+    IFS=$'	' read -r num merge head rest <<<"$line"
+    # a PR number is digits; an OID is 40 hex. Anything else is a shape we do not understand, and
+    # the only safe response to that is to make no claim.
+    case "$num" in ""|*[!0-9]*) continue ;; esac
+    case "$head" in ""|*[!0-9a-f]*) continue ;; esac
+    [ "${#head}" -eq 40 ] || continue
+
+    # IDENTITY -- the tip must be the head, or one of the PR commits.
+    if [ "$tip" != "$head" ]; then
+      matched=0
+      IFS=$'	' read -r -a __commits <<<"${rest:-}"
+      for oid in "${__commits[@]}"; do
+        [ "$oid" = "$tip" ] && { matched=1; break; }
+      done
+      [ "$matched" -eq 1 ] || continue
+    fi
+    saw_identity=1
+    # Bind the remedy PR only on an IDENTITY match. Assigning per ROW named whichever merged PR
+    # came last, so with a reused branch name or a same-named fork PR the printed
+    # "git branch -f ... FETCH_HEAD" would have force-moved the branch onto a DIFFERENT PR.
+    matched_pr="$num"
+
+    # PROOF -- we must hold the squash commit, and the tip paths must match it.
+    # "-" is the null-mergeCommit sentinel; anything non-hex or wrong-length is a shape we do not
+    # understand. Both fall through with saw_merge=0, which renders as merge-commit-absent.
+    case "$merge" in "-"|""|*[!0-9a-f]*) continue ;; esac
+    [ "${#merge}" -eq 40 ] || continue
+    git cat-file -e "${merge}^{commit}" 2>/dev/null || continue
+    # A squash-merge commit is BY DEFINITION a commit on main. Requiring that is what actually closes
+    # the malformed-row hole: field validation cannot help when every field is a well-formed OID.
+    # Concretely, a row whose mergeCommit equals the branch TIP passes every syntactic check and then
+    # makes branch_work_is_in_main compare the branch against ITSELF -- an empty diff, and a DELETE.
+    # An unmerged tip is not an ancestor of origin/main, so this rejects it; a real squash commit is,
+    # so nothing legitimate is lost. (Cross-vendor review Critical, 2026-08-11. The reviewer's exact
+    # row shape is not something real gh emits -- a squash mergeCommit is never the head -- so this
+    # is a GUARD against malformed input rather than a fix for a demonstrated live hole; the
+    # plausible variant, a NULL mergeCommit, was already caught by the empty-string check.)
+    git merge-base --is-ancestor "$merge" origin/main 2>/dev/null || continue
+    saw_merge=1
+    if branch_work_is_in_main "$branch" "$merge"; then
+      rm -f "$tmp"
+      GH_REASON="merged"
+      GH_PR="$num"
+      return 0
+    fi
+  done <"$tmp"
+  rm -f "$tmp"
+
+  GH_PR="$matched_pr"
+  if [ "$saw_pr" -eq 0 ]; then
+    GH_REASON="no-merged-pr"
+  elif [ "$saw_identity" -eq 0 ]; then
+    GH_REASON="tip-not-in-pr"
+  elif [ "$saw_merge" -eq 0 ]; then
+    GH_REASON="merge-commit-absent"
+  else
+    GH_REASON="tip-behind-merged-pr"
+  fi
   return 1
 }
 
@@ -208,7 +308,39 @@ while read -r branch; do
       echo "branch    -> $branch  (main moved on its paths; GitHub confirms the PR merged)"
     else
       ahead="$(git rev-list --count "origin/main..$branch" 2>/dev/null || echo '?')"
-      kept+=("$branch ($ahead commit(s) ahead; its changes are NOT in main — not merged)")
+      case "$GH_REASON" in
+        gh-unavailable)
+          why="GitHub could not be asked (gh missing, or the API refused) — status UNKNOWN, kept" ;;
+        tip-behind-merged-pr)
+          # WARNING: do NOT say "fetch the merged head" -- delete_branch_on_merge removed the
+          # remote branch, so no branch ref exists to fetch and that advice is unactionable.
+          # The PR head ref survives and IS fetchable. Verified 2026-08-11 on #1333: the fetch
+          # returns a54a4b4b and the branch prunes on the next run.
+          # WARNING: do NOT say "fetch the merged head" -- delete_branch_on_merge removed the
+          # remote branch, so no branch ref exists to fetch and that advice is unactionable. The
+          # PR head ref survives and IS fetchable. Verified 2026-08-11 on #1333: the fetch returns
+          # a54a4b4b and the branch prunes on the next run. Works for fork PRs and reopened ones.
+          #
+          # printf %q on the branch is NOT tidiness: git accepts names like fix/$(id), and this
+          # line is printed for a human to PASTE INTO A SHELL. Unquoted, that name would execute
+          # (cross-vendor review, Major). %q renders it inert.
+          why="its PR${GH_PR:+ #$GH_PR} MERGED, but this local tip is an EARLIER commit whose"
+          why="$why tree never landed. Clear it with:  git fetch origin"
+          why="$why refs/pull/${GH_PR:-N}/head && git branch -f $(printf %q "$branch") FETCH_HEAD"
+          # git branch -f REFUSES a branch checked out in any worktree, and the script skips the
+          # root worktree rather than reporting it, so the paste can fail with no hint why.
+          if git worktree list --porcelain 2>/dev/null | grep -Fxq "branch refs/heads/$branch"; then
+            why="$why  (checked out in a worktree — switch or detach it there first)"
+          fi
+          ;;
+        tip-not-in-pr)
+          why="a merged PR exists for this branch NAME, but this tip is none of its commits" ;;
+        merge-commit-absent)
+          why="its PR merged, but we do not hold the squash commit locally — cannot verify, kept" ;;
+        *)
+          why="no merged PR, and its changes are not in main — not merged" ;;
+      esac
+      kept+=("$branch ($ahead commit(s) ahead; $why)")
       continue
     fi
   fi
@@ -218,6 +350,14 @@ done < <(git for-each-ref --format='%(refname:short) %(upstream:track)' refs/hea
            | awk '$2 == "[gone]" {print $1}')
 
 echo
+if [ -n "${GH_UNAVAILABLE:-}" ]; then
+  # Not decoration. Without this line a rate-limited run reads as "nothing left to prune", which is
+  # the exact false conclusion that had this script re-reported as broken.
+  echo "WARNING: at least one GitHub lookup FAILED (rate limit or auth), so any branch whose"
+  echo "         content test was inconclusive was kept WITHOUT being checked. Re-run after"
+  echo "         'gh api rate_limit --jq .resources.graphql' shows headroom."
+  echo
+fi
 if [ -n "$DRY" ]; then
   echo "dry run — nothing removed"
 else

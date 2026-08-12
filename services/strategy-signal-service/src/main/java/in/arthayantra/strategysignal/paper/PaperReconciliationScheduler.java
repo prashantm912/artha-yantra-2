@@ -42,7 +42,22 @@ public class PaperReconciliationScheduler {
     this.events = events;
   }
 
-  /** Pre-open daily reconciliation (08:50 IST, weekdays), serialized after the 08:35 catch-up. */
+  /**
+   * Pre-open daily reconciliation (08:50 IST, weekdays), STARTING fifteen minutes after the 08:35
+   * entry pass — which is not the same as running after it finishes, and the difference is not
+   * pedantic. An earlier revision put this on the catch-up's own single-thread lane so it genuinely
+   * queued behind; that was withdrawn because it made a hung catch-up silently block two money jobs
+   * with nothing detecting it. Separate lanes trade the ordering guarantee for a much smaller blast
+   * radius. See {@code preOpenTaskScheduler} for the full weighing.
+   *
+   * <p>⚠️ So a long catch-up CAN overlap this, and 81 s (both families, 2026-08-12) does not bound
+   * the case that matters: recovery scans {@code maxAttempts + 2} sessions per family, so after a
+   * multi-day outage the pass runs far longer and this reconciler can read a book mid-change and
+   * persist a torn result. It is a read-only reporter, so the harm is a possibly-false discrepancy
+   * rather than a wrong money effect — but it IS reachable, not theoretical. Bounded completion
+   * coordination (wait, with a loud failure at the pre-open deadline rather than an indefinite wait)
+   * is the real fix and is deliberately not built here.
+   */
   @Scheduled(
       cron = "${artha.paper.reconciliation.cron:0 50 8 * * MON-FRI}",
       zone = "Asia/Kolkata",

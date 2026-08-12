@@ -182,20 +182,27 @@ class OperatingWindowTest {
   void theReconcilersRunAfterTheJobsWhoseOutputTheyRead() throws IOException {
     // PaperReconciliationScheduler's contract is "AFTER the graduation evaluator and the swing
     // batches". Since the 16:00/08:35 split those straddle midnight, so the ordering that matters is
-    // the one WITHIN the morning: the 08:35 entry pass must precede them, or they reconcile a book
-    // that is about to change.
+    // the one WITHIN the morning: the 08:35 entry pass must START before them.
+    //
+    // ⚠️ READ WHAT THIS PROVES, AND WHAT IT DOES NOT. It compares CRON MINUTES. A cron minute is a
+    // start time, not a dependency, so this shows the intended ORDER of triggers and nothing about
+    // completion — a catch-up still running at 08:50 is not excluded by anything here. Cross-vendor
+    // review flagged an earlier version of this comment for claiming the jobs "finish" before the
+    // open, which no assertion in this file can establish.
     int entries = onlyFiring("artha.swing.catchup-cron", SS + "swing/SwingBatchCatchUp.java");
     int reconcile = onlyFiring("artha.paper.reconciliation.cron", SS + "paper/PaperReconciliationScheduler.java");
     int pastExpiry = onlyFiring("artha.paper.past-expiry-recon.cron", SS + "paper/PaperScheduler.java");
 
     assertThat(reconcile)
-        .as("reconciliation must run AFTER the 08:35 entry pass, or it misses that day's entries")
+        .as("reconciliation must be TRIGGERED after the 08:35 entry pass, or it cannot even see that"
+            + " day's entries")
         .isGreaterThan(entries);
     assertThat(pastExpiry)
         .as("past-expiry recovery's own javadoc puts it just after the reconciler")
         .isGreaterThan(reconcile);
     assertThat(pastExpiry)
-        .as("...and both must finish before the 09:15 market open")
+        .as("...and both must be triggered before the 09:15 open — whether they FINISH before it is"
+            + " not something a cron minute can promise, and nothing here asserts that")
         .isLessThan(9 * 60 + 15);
   }
 

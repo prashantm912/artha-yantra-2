@@ -31,7 +31,7 @@ public class GraduationPromotionScheduler {
   }
 
   /** Post-close daily evaluation (21:00 IST, weekdays). */
-  @Scheduled(cron = "${artha.graduation.promotion-cron:0 0 21 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.graduation.promotion-cron:0 55 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void run() {
     try {
       GraduationPromotionService.PromotionResult r = promotion.evaluate();

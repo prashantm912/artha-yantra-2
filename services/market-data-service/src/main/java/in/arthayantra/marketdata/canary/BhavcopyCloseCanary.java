@@ -125,7 +125,7 @@ public class BhavcopyCloseCanary {
    * the loss is a whole session's close comparison rather than a delay. Wiring that listener is the
    * real fix and is deliberately not in this change.
    */
-  @Scheduled(cron = "${artha.bhavcopy-close.cron:0 10 20 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.bhavcopy-close.cron:0 52 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void sweep() {
     if (!live || !enabled) {
       return;

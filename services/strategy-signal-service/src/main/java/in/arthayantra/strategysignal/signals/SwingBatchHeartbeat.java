@@ -134,7 +134,7 @@ public class SwingBatchHeartbeat {
   }
 
   /** Post-batch daily ping (20:15 IST weekdays) — after the 20:00 + 20:05 swing batches. */
-  @Scheduled(cron = "${artha.heartbeat.swing-cron:0 15 20 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.heartbeat.swing-cron:0 54 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void beat() {
     if (url == null || url.isBlank()) {
       return; // belt-and-braces; the conditional already gates loading

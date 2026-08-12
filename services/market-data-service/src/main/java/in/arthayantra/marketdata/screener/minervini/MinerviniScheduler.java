@@ -67,7 +67,7 @@ public class MinerviniScheduler {
   }
 
   /** Fallback cron (bhavcopy backfill failed → no event). 19:50, before the 20:00 swing batch. */
-  @Scheduled(cron = "${artha.minervini.cron:0 50 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.minervini.cron:0 47 18 * * MON-FRI}", zone = "Asia/Kolkata")
   void scheduled() {
     runQuietly("scheduled");
   }

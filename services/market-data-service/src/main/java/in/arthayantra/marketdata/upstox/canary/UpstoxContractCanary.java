@@ -166,7 +166,7 @@ public class UpstoxContractCanary {
   }
 
   /** Trading-day-gated, once per day via the Redis marker (default 19:30 IST, after EOD settles). */
-  @Scheduled(cron = "${artha.upstox.canary-cron:0 30 19 * * MON-FRI}", zone = "Asia/Kolkata")
+  @Scheduled(cron = "${artha.upstox.canary-cron:0 20 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void maybeRunDaily() {
     LocalDate today = LocalDate.now(clock.withZone(Ist.ZONE));
     if (!isTradingDaySafe(today)) {

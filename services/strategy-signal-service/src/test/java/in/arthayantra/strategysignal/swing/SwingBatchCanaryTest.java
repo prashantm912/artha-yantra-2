@@ -70,6 +70,7 @@ class SwingBatchCanaryTest {
     // move that same hang also holds the 08:50 reconciler and 08:52 past-expiry recovery on the
     // shared single-thread lane. This is the only thing that pages for it.
     when(runs.hasRunWithEntries(any(), eq(FRIDAY))).thenReturn(false);
+    when(runs.hasRun(any(), eq(FRIDAY))).thenReturn(true); // the 16:00 exit pass already stamped it
 
     canary(true).entryPassWatchdog();
 

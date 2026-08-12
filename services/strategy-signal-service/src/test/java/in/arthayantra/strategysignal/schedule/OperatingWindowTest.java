@@ -73,9 +73,13 @@ class OperatingWindowTest {
     // against the shutdown boundary. They must follow the 08:35 entry pass; see the ordering test.
     JOBS.put("artha.paper.reconciliation.cron", SS + "paper/PaperReconciliationScheduler.java");
     JOBS.put("artha.paper.past-expiry-recon.cron", SS + "paper/PaperScheduler.java");
+    // The detector those two now depend on: the shared pre-open lane means a hung 08:35 entry pass
+    // holds them both, and the 08:30 canary is structurally blind to it (hasRun, not
+    // hasRunWithEntries). Catalogued like any other cron so it cannot itself drift out of the window.
+    JOBS.put("artha.swing.entry-watchdog-cron", SS + "swing/SwingBatchCanary.java");
   }
 
-  private static final int EXPECTED_JOB_COUNT = 16;
+  private static final int EXPECTED_JOB_COUNT = 17;
 
   @Test
   @DisplayName("the catalogue is not silently shrunk")

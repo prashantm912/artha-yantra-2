@@ -64,6 +64,41 @@ class SwingBatchCanaryTest {
   }
 
   @Test
+  void theEntryWatchdogPagesWhenTheEntryPassNeverCompleted() {
+    // The gap it exists for: the 08:30 sweep above checks hasRun, which the 16:00 exit pass already
+    // satisfied, so a hung 08:35 ENTRY pass is invisible to it — and since the 2026-08-12 schedule
+    // move that same hang also holds the 08:50 reconciler and 08:52 past-expiry recovery on the
+    // shared single-thread lane. This is the only thing that pages for it.
+    when(runs.hasRunWithEntries(any(), eq(FRIDAY))).thenReturn(false);
+
+    canary(true).entryPassWatchdog();
+
+    verify(events, times(2)).publishEvent(any(SwingBatchAlert.class));
+  }
+
+  @Test
+  void theEntryWatchdogIsSilentOnceTheEntryPassHasCompleted() {
+    // ⚠️ Without this the watchdog could page unconditionally and the test above would still pass —
+    // a detector that always fires is as useless as one that never does, and noisier.
+    when(runs.hasRunWithEntries(any(), eq(FRIDAY))).thenReturn(true);
+
+    canary(true).entryPassWatchdog();
+
+    verify(events, never()).publishEvent(any(SwingBatchAlert.class));
+  }
+
+  @Test
+  void theEntryWatchdogIsInertWhileTheCatchUpIsDisarmed() {
+    // With the flag off there is no 08:35 entry pass to complete, so an unconditional page would be
+    // a nightly false alarm on a stack that is behaving exactly as configured.
+    when(runs.hasRunWithEntries(any(), eq(FRIDAY))).thenReturn(false);
+
+    canary(false).entryPassWatchdog();
+
+    verify(events, never()).publishEvent(any(SwingBatchAlert.class));
+  }
+
+  @Test
   void anArmedSessionWithNoSuccessfulRunIsReported() {
     when(intents.claimableMissedSessionsBefore(eq("minervini"), eq(MONDAY), anyInt(), anyInt(), anyInt()))
         .thenReturn(List.of(FRIDAY));

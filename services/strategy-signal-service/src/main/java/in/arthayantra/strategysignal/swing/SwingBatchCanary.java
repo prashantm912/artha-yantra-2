@@ -7,6 +7,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -122,6 +123,72 @@ public class SwingBatchCanary {
     LocalDate today = LocalDate.now(clock.withZone(IST));
     checkBatch("minervini", today);
     checkBatch("manas-arora", today);
+  }
+
+  /**
+   * Pre-open watchdog (09:05 IST, weekdays) — did the 08:35 ENTRY pass actually finish?
+   *
+   * <p>⚠️ <b>The 08:30 check above cannot answer this, and that is the whole reason this exists.</b>
+   * It fires five minutes BEFORE the catch-up starts, and its predicate is {@code hasRun} — a marker
+   * the 16:00 exit pass has already written. The entry pass deliberately requires the stricter
+   * {@code hasRunWithEntries}. So a 08:35 entry pass that hangs satisfies the 08:30 detector, pages
+   * nobody, and — since 2026-08-12 — silently holds the pre-open paper reconciler and past-expiry
+   * recovery behind it on the shared size-one lane. Cross-vendor review called that combination a
+   * merge blocker, correctly: the schedule change created the coupling, so the schedule change owes
+   * the detector.
+   *
+   * <p>Deliberately OUTSIDE the lane it watches. It runs on {@code swingDetectorTaskScheduler},
+   * which the catch-up cannot occupy, so a hang that blocks everything else still gets paged. A
+   * detector sharing the thread it monitors is not a detector.
+   *
+   * <p>09:05 is ten minutes before the open and thirty after the pass starts — long enough that a
+   * normal run (measured 37-44 s per family on 2026-08-12) has finished many times over, early
+   * enough that the owner can act before the session begins.
+   *
+   * <p>Gated on the catch-up being armed, because the entry pass only exists when it is: with the
+   * flag off no entry pass is expected and an unconditional page would be a nightly false alarm.
+   */
+  @Scheduled(
+      cron = "${artha.swing.entry-watchdog-cron:0 5 9 * * MON-FRI}",
+      zone = "Asia/Kolkata",
+      scheduler = "swingDetectorTaskScheduler")
+  public void entryPassWatchdog() {
+    if (!catchupEnabled) {
+      return;
+    }
+    LocalDate today = LocalDate.now(clock.withZone(IST));
+    if (!calendar.isTradingDay(today)) {
+      return;
+    }
+    LocalDate session;
+    try {
+      session = calendar.previousTradingDay(today);
+    } catch (RuntimeException e) {
+      // The bundled-calendar cliff, guarded exactly as the sweeps above guard it.
+      log.warn("swing entry watchdog: NSE calendar does not cover {} — skipping", today);
+      return;
+    }
+    for (String batch : List.of("minervini", "manas-arora")) {
+      try {
+        if (runs.hasRunWithEntries(batch, session)) {
+          continue;
+        }
+        String title = batch + " ENTRY pass did not complete before the open";
+        String message =
+            "The 08:35 " + batch + " entry pass has recorded no entries-enabled run for session "
+                + session + " and it is now past 09:05 IST. The 08:30 canary CANNOT see this — it"
+                + " checks hasRun, which the 16:00 exit pass already satisfied. Two consequences:"
+                + " no swing entries for this session, and the pre-open paper reconciler (08:50)"
+                + " plus past-expiry recovery (08:52) share the catch-up's single-thread lane, so"
+                + " if the pass is hung rather than merely refused they are queued behind it and"
+                + " have not run either. Check swing_catchup_runs for this session's row and reason,"
+                + " then the strategy-signal container logs for a stuck sweep.";
+        log.error("swing entry watchdog: {} — {}", title, message);
+        events.publishEvent(new SwingBatchAlert(batch, title, message));
+      } catch (RuntimeException e) {
+        log.warn("swing entry watchdog for {} failed: {}", batch, e.getMessage());
+      }
+    }
   }
 
   /**

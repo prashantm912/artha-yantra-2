@@ -51,7 +51,7 @@ class CronPassthroughParityTest {
    * the whole file execute zero assertions and pass — the guard-that-checks-nothing shape. Lowering
    * this number is a deliberate act that must be justified in the PR that does it.
    */
-  private static final int EXPECTED_JOB_COUNT = 6;
+  private static final int EXPECTED_JOB_COUNT = 7;
 
   private static final List<Job> JOBS =
       List.of(
@@ -84,7 +84,13 @@ class CronPassthroughParityTest {
           new Job(
               "artha.insights.sell-decision-cron",
               "ARTHA_INSIGHTS_SELL_DECISION_CRON",
-              SRC + "insights/InsightSweeper.java"));
+              SRC + "insights/InsightSweeper.java"),
+          // The pre-open entry watchdog (2026-08-12). A new cron with a passthrough that no parity
+          // catalogue covered would be exactly the drift this file exists to stop.
+          new Job(
+              "artha.swing.entry-watchdog-cron",
+              "ARTHA_SWING_ENTRY_WATCHDOG_CRON",
+              SRC + "swing/SwingBatchCanary.java"));
 
   @Test
   @DisplayName("the catalogue still covers every job it claims to")

@@ -87,7 +87,9 @@ class OiBackfillIntegrationTest extends MarketDataIntegrationTestBase {
 
   /**
    * ⚠️ THE ISOLATION PROOF. Seeds a BACKFILL row for a DIFFERENT underlying and expiry, carrying a
-   * non-null {@code iv} — precisely the row shape that reddened CI run 31515420664 with
+   * non-null {@code iv} and a DIFFERENT {@code price_source} — mirroring the real contaminant in
+   * {@code OptionsChainIntegrationTest}, and precisely the row shape that reddened CI run
+   * 31515420664 with
    * "expected: 0L but was: 1L" — then asserts the scoped queries do not see it while an unscoped
    * one does.
    *
@@ -100,7 +102,7 @@ class OiBackfillIntegrationTest extends MarketDataIntegrationTestBase {
         "INSERT INTO options_chain_snapshots"
             + " (ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, oi, spot_price,"
             + " iv, source, price_source)"
-            + " VALUES (?,?,?,?::numeric,?,?,?::numeric,?,?::numeric,?::numeric,'BACKFILL','BACKFILL')"
+            + " VALUES (?,?,?,?::numeric,?,?,?::numeric,?,?::numeric,?::numeric,'BACKFILL','MID')"
             + " ON CONFLICT DO NOTHING",
         java.sql.Timestamp.from(
             SESSION.atTime(10, 0).atZone(Ist.ZONE).toInstant()),
@@ -222,13 +224,21 @@ class OiBackfillIntegrationTest extends MarketDataIntegrationTestBase {
    *
    * <p>⚠️ Every assertion here goes through this, and that is the point. They used to count over the
    * whole table filtered only by {@code source = 'BACKFILL'}, which made them assertions about every
-   * other test's data as well. Five classes in this service write BACKFILL rows —
-   * {@code CorporateActionResumeTest}, {@code CandleDerivedChainReaderIntegrationTest},
-   * {@code OptionsSnapshotReaderIntegrationTest}, {@code OptionsChainIntegrationTest} and this one —
-   * onto the singleton Testcontainers DB, which has NO per-method cleanup and keeps state across
-   * methods and across surefire reruns. Execution order then decided whether
-   * {@code assertThat(greeked).isZero()} passed. It failed exactly that way on CI run 31515420664
+   * other test's data as well, on a singleton Testcontainers DB with NO per-method cleanup that keeps
+   * state across methods and across surefire reruns. Execution order then decided whether
+   * {@code assertThat(greeked).isZero()} passed. It failed that way on CI run 31515420664
    * ("expected: 0L but was: 1L") while passing locally every time.
+   *
+   * <p>The contaminating row is NAMED, not hypothesised:
+   * {@code OptionsChainIntegrationTest.theDegradeIgnoresBackfillUpstoxAndQuarantinedRows} inserts a
+   * {@code source='BACKFILL'} leg carrying {@code iv=0.181500} and {@code delta=0.512300}, which is
+   * precisely what makes {@code greeked} 1 instead of 0. It shares this fixture's SESSION
+   * (2026-06-15) and its EXPIRY (2026-06-16) — only {@code underlying} separates them, so the
+   * underlying predicate below is the one doing the work and the other two are defence in depth.
+   *
+   * <p>An earlier version of this comment claimed five classes write such rows. That came from
+   * grepping for the string "BACKFILL", not from reading what each writes: two of them touch only
+   * candles or mock data, and one never inserts a snapshot at all. Cross-vendor review corrected it.
    *
    * <p>A table-wide DELETE in {@code @BeforeEach} would be the wrong fix: the DB is shared with
    * other classes, so deleting their rows turns a read-flake into a write-flake, which is worse and

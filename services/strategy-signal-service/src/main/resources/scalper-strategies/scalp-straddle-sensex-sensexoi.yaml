@@ -89,7 +89,7 @@ exit_rules:
   # surfaces combinedVwap + slBufferPoints + slLevel on /options/straddle-chart, the operator squares off on the break.
 
 risk:
-  position_sizing: { method: premium_budget, params: { budget_inr: 20000, max_lots: 5 } }
+  position_sizing: { method: premium_budget, params: { budget_inr: 25000, max_lots: 5 } }
   max_positions: 1
   max_positions_per_underlying: 1
   max_daily_loss_pct: 2.0

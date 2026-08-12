@@ -678,7 +678,9 @@ services:
       ARTHA_SWING_CATCHUP_MAX_ATTEMPTS: ${ARTHA_SWING_CATCHUP_MAX_ATTEMPTS:-5}
       # External dead-man's-switch for the swing batches (catches a whole-stack/host OUTAGE, which the
       # in-stack P0-4 canary can't). Blank = dormant; paste a healthchecks.io/UptimeRobot heartbeat URL
-      # to arm, and set the external check to expect a ping on 15 20 * * 1-5 (TZ Asia/Kolkata).
+      # to arm, and set the external check to expect a ping on 54 18 * * 1-5 (TZ Asia/Kolkata).
+      # ⚠️ That external check lives OUTSIDE this repo: moving the cron here does NOT move it, so
+      # reconfigure the monitor at the same deploy or it pages nightly for a ping now 81 min early.
       # The ping is EARNED, not unconditional: it is WITHHELD when an ARMED swing family recorded no
       # swing_batch_runs marker for the IST session, so a stack that is up but whose batch silently
       # failed now alarms at 20:15 instead of at the 08:30 canary. An NSE holiday and a disarmed

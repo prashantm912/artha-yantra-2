@@ -8,7 +8,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 /**
  * Scheduler isolation for the pure liveness DETECTORS (audit BEJ-01). Boot gives {@code @Scheduled}
  * a single default {@code ThreadPoolTaskScheduler} (pool size 1) shared by all ~31 scheduled methods
- * here, so a blocked sibling job (notably the synchronous 20:00/20:05 swing batch) silently freezes
+ * here, so a blocked sibling job (notably the synchronous swing batch) silently freezes
  * every watchdog/canary sweep on the same thread — detection is starvable exactly when the engine is
  * most broken, even though the RECOVERY paths (SignalEngine {@code recoveryExecutor}, off-pool
  * daemons) are decoupled. This gives the detectors their own dedicated single-thread scheduler so
@@ -122,10 +122,21 @@ public class MonitorSchedulingConfig {
    * the other reason: it does sequential per-position REST reads with 30-second timeouts, and on the
    * default pool an overrun past 09:15 would stall the bracket sweep at exactly the wrong moment.
    *
-   * <p><b>The cost, stated:</b> a catch-up that hangs now also blocks both. That is the deliberate
-   * trade — a reconciliation that reads torn mid-catch-up state reports false discrepancies on a money
-   * ledger, while a hung catch-up is already a paged condition via the missed-batch detector, which
-   * sits on {@code swingDetectorTaskScheduler} and keeps firing.
+   * <p><b>The cost, stated, and it is worse than the first version of this comment claimed.</b> A
+   * catch-up that hangs now blocks both queued jobs. That paragraph originally justified the trade by
+   * saying a hung catch-up "is already a paged condition via the missed-batch detector" — <b>which is
+   * false, and cross-vendor review caught it.</b> {@code SwingBatchCanary} fires at <b>08:30</b>, five
+   * minutes BEFORE the catch-up starts, and its predicate is {@code runs.hasRun(batch, session)} —
+   * a marker the <b>16:00 exit pass has already written</b>. The entry pass deliberately requires the
+   * stricter {@code hasRunWithEntries}. So a hung entry pass satisfies the detector, pages nobody, and
+   * silently holds reconciliation and past-expiry recovery behind it.
+   *
+   * <p>The isolation this pool buys is still real and still worth it: the bracket sweep on the default
+   * pool keeps running, so stop-losses are unaffected, and ordering after the catch-up is exactly what
+   * the reconciler's contract needs. What is NOT true is that anything currently detects the hang. A
+   * post-08:35 watchdog keyed to entry completion, plus independent missed-run alerts for both paper
+   * jobs, is the missing piece — deliberately not built here, and recorded in the ledger rather than
+   * papered over with a sentence that reads like coverage.
    *
    * <p><b>Why not {@code monitorTaskScheduler}.</b> That pool is fenced for pure liveness DETECTORS.
    * The catch-up has money effects and blocking I/O; putting it there could starve

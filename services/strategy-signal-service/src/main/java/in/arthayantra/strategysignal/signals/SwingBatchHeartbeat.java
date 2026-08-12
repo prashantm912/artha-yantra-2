@@ -26,12 +26,12 @@ import org.springframework.stereotype.Component;
  * together with the batch and no alert fires — the root cause of the 2026-07-09 silently-missed 20:05
  * batch (Docker was down; nothing on-box could report it). This heartbeat pings an EXTERNAL monitor
  * (healthchecks.io / UptimeRobot heartbeat / any dead-man's-switch URL) once per trading evening,
- * AFTER both swing batches (Minervini 20:00, Manas 20:05). If the stack is down at 20:15 IST the ping
+ * AFTER the evening chain. If the stack is down at 18:54 IST the ping
  * never arrives and the external monitor alerts the owner on the missed schedule — off-box, so it
  * survives exactly the outage the in-stack canaries can't see.
  *
  * <p><b>The ping is EARNED, not unconditional.</b> Until this gate existed the beat fired whatever the
- * batches had done, so it proved only that a JVM was alive at 20:15 — a stack that was UP but whose
+ * batches had done, so it proved only that a JVM was alive at ping time — a stack that was UP but whose
  * batch silently failed pinged green, and the miss surfaced ~12 h later at the 08:30
  * {@code SwingBatchCanary}. That shape is REAL, not hypothetical: when a family's funnel read fails over
  * HTTP the recorder's {@code snapshotAvailable} is false, so no {@code swing_batch_runs} marker is
@@ -135,7 +135,7 @@ public class SwingBatchHeartbeat {
     this.manasArmed = manasArmed;
   }
 
-  /** Post-batch daily ping (20:15 IST weekdays) — after the 20:00 + 20:05 swing batches. */
+  /** Post-chain daily ping (18:54 IST weekdays) — inside the 19:00 machine-off boundary. */
   @Scheduled(cron = "${artha.heartbeat.swing-cron:0 54 18 * * MON-FRI}", zone = "Asia/Kolkata")
   public void beat() {
     if (url == null || url.isBlank()) {
@@ -217,7 +217,7 @@ public class SwingBatchHeartbeat {
       return true;
     } catch (RuntimeException e) {
       // Fail CLOSED. The marker lives in the database the batch writes to, so a read that fails at
-      // 20:15 far more likely means the 20:00 batch could not write than that a blip straddles only
+      // ping time far more likely means the batch could not write than that a blip straddles only
       // this beat. On an alerting path an unprovable state must be loud.
       //
       // The message IS kept here, unlike the ping path above: this exception comes from JDBC and can

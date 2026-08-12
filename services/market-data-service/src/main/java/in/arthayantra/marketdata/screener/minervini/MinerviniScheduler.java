@@ -139,7 +139,7 @@ public class MinerviniScheduler {
           written, r.screenDate(), passing, geo, trigger);
       probePlaneDivergence(r.screenDate(), trigger, false);
     } catch (Exception e) {
-      // Audit P0-4/H10: a failed screen leaves the 20:00 swing batch on yesterday's funnel — the
+      // Audit P0-4/H10: a failed screen leaves the NEXT swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
       ledger.fail(runId, e.getMessage());
       log.warn("minervini screen failed ({}) — non-fatal", trigger, e);

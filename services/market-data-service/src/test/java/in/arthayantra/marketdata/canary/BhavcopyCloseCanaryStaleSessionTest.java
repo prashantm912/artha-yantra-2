@@ -1,6 +1,7 @@
 package in.arthayantra.marketdata.canary;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -98,10 +99,33 @@ class BhavcopyCloseCanaryStaleSessionTest {
   }
 
   @Test
-  @DisplayName("an empty completion is skipped by the same guard, not swept twice")
-  void aCompletionThatLandedNothingIsStillSkipped() {
-    // Completion is published even when both exchanges returned nothing, so the event does NOT
-    // prove the file arrived. The listener must inherit the stale-date guard rather than trust it.
+  @DisplayName("event THEN cron does not compare the same session twice — the common production order")
+  void theListenerThenTheCronDoNotBothAlert() {
+    // ⚠️ The first version of this suite only tested cron-then-event, and `lastSwept` was only read
+    // by the listener — so it suppressed the order that is RARE and did nothing about the order that
+    // is common. NSE published before 18:52 on three of four measured days, meaning the event
+    // normally lands FIRST and the cron then re-compares the same session. Cross-vendor review
+    // called the original proof vacuous for exactly this reason.
+    NtfyClient ntfy = mock(NtfyClient.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.query(anyString(), ArgumentMatchers.<ResultSetExtractor<LocalDate>>any()))
+        .thenReturn(TODAY);
+
+    BhavcopyCloseCanary canary = canary(jdbc, ntfy);
+    canary.onBhavcopyCompleted();
+    canary.sweep();
+
+    verify(jdbc, times(1))
+        .query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), any(), any());
+  }
+
+  @Test
+  @DisplayName("next-morning replay compares the LATE session the cron skipped, not nothing")
+  void theListenerRecoversYesterdaysLatePublish() {
+    // The 19:31 night: the file lands after the machine is off, so nothing compares it. Next morning
+    // BhavcopyStartupCatchup replays the backfill, completion fires, and `latest` is YESTERDAY. The
+    // cron's stale-date guard would skip that forever — the session is never today again. The
+    // listener must NOT inherit that guard, because it only runs when a fetch actually completed.
     NtfyClient ntfy = mock(NtfyClient.class);
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     when(jdbc.query(anyString(), ArgumentMatchers.<ResultSetExtractor<LocalDate>>any()))
@@ -109,8 +133,48 @@ class BhavcopyCloseCanaryStaleSessionTest {
 
     canary(jdbc, ntfy).onBhavcopyCompleted();
 
-    verify(ntfy, never()).send(anyString(), anyString(), anyString());
-    verify(jdbc, never()).query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), any(), any());
+    verify(jdbc)
+        .query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), any(), any());
+  }
+
+  @Test
+  @DisplayName("a listener failure never escapes into the completion multicast")
+  void theListenerCannotBreakTheChainItObserves() {
+    // Spring multicasts BhavcopyBackfillCompleted SYNCHRONOUSLY and the publisher catches only
+    // around the whole multicast, so an exception escaping this observer can stop Minervini and
+    // Manas from ever receiving completion. A canary must not be able to break the chain it watches.
+    NtfyClient ntfy = mock(NtfyClient.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.query(anyString(), ArgumentMatchers.<ResultSetExtractor<LocalDate>>any()))
+        .thenThrow(new IllegalStateException("connection pool exhausted"));
+
+    assertThatCode(() -> canary(jdbc, ntfy).onBhavcopyCompleted())
+        .as("the observer must swallow its own failure — the screens depend on this event")
+        .doesNotThrowAnyException();
+  }
+
+  @Test
+  @DisplayName("a completion that landed nothing re-compares nothing — the claim, not the date, dedupes")
+  void aCompletionThatLandedNothingDoesNotReCompare() {
+    // ⚠️ This test used to assert the OPPOSITE — that the listener inherits the cron's stale-date
+    // guard — and that assertion is precisely what left the Critical open: it froze "skip anything
+    // before today" as correct on the one path that can legitimately compare an earlier session.
+    //
+    // Completion is published even when both exchanges returned nothing, so the event still does not
+    // prove a file arrived. What handles that is the CLAIM, not the date: an empty completion leaves
+    // `latest` where it was, and a session already compared is not compared again. Here the same
+    // session arrives twice; only the first is evaluated.
+    NtfyClient ntfy = mock(NtfyClient.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.query(anyString(), ArgumentMatchers.<ResultSetExtractor<LocalDate>>any()))
+        .thenReturn(TODAY);
+
+    BhavcopyCloseCanary canary = canary(jdbc, ntfy);
+    canary.onBhavcopyCompleted();
+    canary.onBhavcopyCompleted();
+
+    verify(jdbc, times(1))
+        .query(anyString(), any(org.springframework.jdbc.core.RowMapper.class), any(), any());
   }
 
   @Test

@@ -70,30 +70,60 @@ class OiBackfillIntegrationTest extends MarketDataIntegrationTestBase {
     OiBackfillService.BackfillResult first = service.runBackfill(UNDERLYING, expiry, SESSION, "it-1");
     assertThat(first.optionRows()).as("each chain leg samples to 5-min buckets").isGreaterThan(0);
 
-    long backfilled =
-        count("SELECT count(*) FROM options_chain_snapshots WHERE source = 'BACKFILL'");
+    long backfilled = ours("source = 'BACKFILL'");
     assertThat(backfilled).isGreaterThan(0);
 
     // oi_change is null on a leg's first bucket and a Long thereafter (sampled OI diff).
-    long withChange =
-        count(
-            "SELECT count(*) FROM options_chain_snapshots "
-                + "WHERE source = 'BACKFILL' AND oi_change IS NOT NULL");
-    assertThat(withChange).isGreaterThan(0);
+    assertThat(ours("source = 'BACKFILL' AND oi_change IS NOT NULL")).isGreaterThan(0);
 
     // greeks left null; provenance also stamped on the row fields.
-    long greeked =
-        count(
-            "SELECT count(*) FROM options_chain_snapshots "
-                + "WHERE source = 'BACKFILL' AND (iv IS NOT NULL OR delta IS NOT NULL)");
-    assertThat(greeked).isZero();
-    assertThat(count("SELECT count(*) FROM options_chain_snapshots WHERE price_source = 'BACKFILL'"))
-        .isEqualTo(backfilled);
+    assertThat(ours("source = 'BACKFILL' AND (iv IS NOT NULL OR delta IS NOT NULL)")).isZero();
+    assertThat(ours("price_source = 'BACKFILL'")).isEqualTo(backfilled);
 
     // a re-run is a no-op (ON CONFLICT DO NOTHING on the snapshot PK).
     service.runBackfill(UNDERLYING, expiry, SESSION, "it-2");
-    assertThat(count("SELECT count(*) FROM options_chain_snapshots WHERE source = 'BACKFILL'"))
-        .isEqualTo(backfilled);
+    assertThat(ours("source = 'BACKFILL'")).isEqualTo(backfilled);
+  }
+
+  /**
+   * ⚠️ THE ISOLATION PROOF. Seeds a BACKFILL row for a DIFFERENT underlying and expiry, carrying a
+   * non-null {@code iv} — precisely the row shape that reddened CI run 31515420664 with
+   * "expected: 0L but was: 1L" — then asserts the scoped queries do not see it while an unscoped
+   * one does.
+   *
+   * <p>Without the second half this test would pass for the wrong reason: a scoped query returning
+   * zero proves nothing unless the foreign row is demonstrably THERE to be miscounted.
+   */
+  @Test
+  void assertionsIgnoreAnotherTestsBackfillRows() {
+    jdbc.update(
+        "INSERT INTO options_chain_snapshots"
+            + " (ts, underlying, expiry, strike, option_type, tradingsymbol, ltp, oi, spot_price,"
+            + " iv, source, price_source)"
+            + " VALUES (?,?,?,?::numeric,?,?,?::numeric,?,?::numeric,?::numeric,'BACKFILL','BACKFILL')"
+            + " ON CONFLICT DO NOTHING",
+        java.sql.Timestamp.from(
+            SESSION.atTime(10, 0).atZone(Ist.ZONE).toInstant()),
+        "SOMEONE ELSES INDEX",
+        java.sql.Date.valueOf(expiry.plusDays(7)),
+        "12345",
+        "CE",
+        "FOREIGNCE12345",
+        "1.5",
+        42L,
+        "100",
+        "0.25");
+
+    assertThat(count("SELECT count(*) FROM options_chain_snapshots"
+            + " WHERE source = 'BACKFILL' AND iv IS NOT NULL"))
+        .as("the foreign row must really be in the table, or this proves nothing")
+        .isGreaterThan(0);
+    assertThat(ours("source = 'BACKFILL' AND (iv IS NOT NULL OR delta IS NOT NULL)"))
+        .as("...and the scoped query must not see it — this is the assertion that reddened on CI")
+        .isZero();
+    assertThat(ours("source = 'BACKFILL'"))
+        .as("a foreign row must not inflate our own row count either")
+        .isEqualTo(ours("price_source = 'BACKFILL'"));
   }
 
   @Test
@@ -185,6 +215,37 @@ class OiBackfillIntegrationTest extends MarketDataIntegrationTestBase {
   private long count(String sql) {
     Long n = jdbc.queryForObject(sql, Long.class);
     return n == null ? 0 : n;
+  }
+
+  /**
+   * Rows in {@code options_chain_snapshots} that THIS test created, matching {@code predicate}.
+   *
+   * <p>⚠️ Every assertion here goes through this, and that is the point. They used to count over the
+   * whole table filtered only by {@code source = 'BACKFILL'}, which made them assertions about every
+   * other test's data as well. Five classes in this service write BACKFILL rows —
+   * {@code CorporateActionResumeTest}, {@code CandleDerivedChainReaderIntegrationTest},
+   * {@code OptionsSnapshotReaderIntegrationTest}, {@code OptionsChainIntegrationTest} and this one —
+   * onto the singleton Testcontainers DB, which has NO per-method cleanup and keeps state across
+   * methods and across surefire reruns. Execution order then decided whether
+   * {@code assertThat(greeked).isZero()} passed. It failed exactly that way on CI run 31515420664
+   * ("expected: 0L but was: 1L") while passing locally every time.
+   *
+   * <p>A table-wide DELETE in {@code @BeforeEach} would be the wrong fix: the DB is shared with
+   * other classes, so deleting their rows turns a read-flake into a write-flake, which is worse and
+   * harder to attribute.
+   *
+   * <p>The session bound is written as explicit {@code +05:30} literals. {@code ts} is a
+   * {@code timestamptz} and the container's {@code now()}/{@code ::date} are UTC, so a bare
+   * {@code ::date} comparison is off by one across IST midnight.
+   */
+  private long ours(String predicate) {
+    return count(
+        "SELECT count(*) FROM options_chain_snapshots"
+            + " WHERE underlying = '" + UNDERLYING + "'"
+            + " AND expiry = DATE '" + expiry + "'"
+            + " AND ts >= TIMESTAMPTZ '" + SESSION + "T00:00:00+05:30'"
+            + " AND ts <  TIMESTAMPTZ '" + SESSION.plusDays(1) + "T00:00:00+05:30'"
+            + " AND " + predicate);
   }
 
   /** Canned 1m OHLC+OI for any key: a 12-minute rising ramp from the session start (≥3 buckets). */

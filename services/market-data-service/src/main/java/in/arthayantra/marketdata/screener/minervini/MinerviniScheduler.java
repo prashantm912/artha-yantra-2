@@ -1,6 +1,6 @@
 package in.arthayantra.marketdata.screener.minervini;
 
-import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
+import in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import java.time.LocalDate;
 import org.slf4j.Logger;

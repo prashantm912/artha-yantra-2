@@ -65,7 +65,7 @@ class ManasSchedulerTest {
             ctx -> {
               ctx.getSourceApplicationContext()
                   .publishEvent(
-                      new in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted("job"));
+                      new in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted("job"));
               verify(repo).replaceAll(eq(day), any());
             });
   }

@@ -1,6 +1,6 @@
 package in.arthayantra.marketdata.screener.manas;
 
-import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
+import in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

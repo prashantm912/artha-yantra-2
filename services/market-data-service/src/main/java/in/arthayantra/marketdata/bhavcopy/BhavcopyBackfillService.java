@@ -13,6 +13,7 @@ import in.arthayantra.marketdata.candles.Candle;
 import in.arthayantra.marketdata.candles.CandleRepository;
 import in.arthayantra.marketdata.candles.EodCorporateActionRepository;
 import in.arthayantra.marketdata.dividends.DividendRepository;
+import in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted;
 import in.arthayantra.marketdata.ingest.IngestRunLedger;
 import in.arthayantra.marketdata.lineage.SymbolRenameEventRepository;
 import in.arthayantra.marketdata.nse.BhavcopyFetcher;

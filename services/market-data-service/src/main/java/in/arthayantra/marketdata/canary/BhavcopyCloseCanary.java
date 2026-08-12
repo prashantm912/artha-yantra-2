@@ -2,7 +2,7 @@ package in.arthayantra.marketdata.canary;
 
 import in.arthayantra.common.web.time.Ist;
 import in.arthayantra.marketdata.alerts.NtfyClient;
-import in.arthayantra.marketdata.bhavcopy.BhavcopyBackfillCompleted;
+import in.arthayantra.marketdata.ingest.BhavcopyBackfillCompleted;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;

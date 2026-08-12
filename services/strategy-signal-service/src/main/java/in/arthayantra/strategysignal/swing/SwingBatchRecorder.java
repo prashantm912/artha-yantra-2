@@ -262,7 +262,17 @@ public class SwingBatchRecorder {
                 doctrine.batchName(),
                 doctrine.alertLabel() + ": " + result.exitSkipped() + " exit(s) NOT evaluated",
                 summary + " — see the STOP NOT EVALUATED TODAY errors in the service log.")
-            : new SwingBatchAlert(doctrine.batchName(), doctrine.alertLabel() + " batch done", summary));
+            // ⚠️ "batch done" only when the batch actually did BOTH passes. An entries-disabled run
+            // completed its EXITS and nothing more — the 16:00 settle, or a catch-up whose funnel is
+            // not the session's screen. Announcing that as done contradicted the coordinator, which
+            // moments later publishes EXITS ONLY and leaves the session retryable precisely because
+            // it is not done. Two alerts, opposite claims, same run; the operator believes the first.
+            // Cross-vendor review Major, invisible to the coordinator's unit tests because they mock
+            // this recorder.
+            : new SwingBatchAlert(
+                doctrine.batchName(),
+                doctrine.alertLabel() + (entriesEnabled ? " batch done" : " exits pass complete"),
+                summary));
     return new RunOutcome(result, markerRecorded);
   }
 

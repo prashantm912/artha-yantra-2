@@ -120,6 +120,21 @@ class OperatingWindowTest {
         .as("the source walk found almost nothing — it is checking an empty set, not the schedule")
         .hasSizeGreaterThan(50);
 
+    // Every discovered cron must be IST-zoned BEFORE its hour means anything. An unzoned job runs in
+    // the container's UTC, so `0 0 18` fires at 23:30 IST — inside the window on the page, never run
+    // in reality, and invisible to any hour check that assumes IST.
+    List<String> unzoned =
+        all.stream()
+            .filter(job -> !"Asia/Kolkata".equals(job.zone()))
+            .map(job -> job.simpleClassName() + "#" + job.cron() + " (zone=" + job.zone() + ")")
+            .toList();
+    assertThat(unzoned)
+        .as(
+            "a cron without zone=\"Asia/Kolkata\" is scheduled in the JVM zone — UTC in our"
+                + " containers — so its hour is not the hour it reads as, and every hour-based"
+                + " assertion in this file silently means something else")
+        .isEmpty();
+
     List<String> unreachable = new ArrayList<>();
     for (DiscoveredJob job : all) {
       if (!canEverFireInsideTheWindow(job.cron())) {
@@ -317,12 +332,21 @@ class OperatingWindowTest {
     return out;
   }
 
-  /** One {@code @Scheduled} site found by walking the source. */
-  private record DiscoveredJob(String simpleClassName, String cron) {}
+  /**
+   * One {@code @Scheduled} site found by walking the source.
+   *
+   * <p>{@code zone} is carried, not discarded, and that is load-bearing: without {@code zone} Spring
+   * schedules in the JVM's zone, which is UTC in our containers, so a job written {@code 0 0 18}
+   * fires at <b>23:30 IST</b>. Reading the hour as if it were IST would let exactly that job pass
+   * this guard while never running. Cross-vendor review found it in the first version of this walk,
+   * which kept only the class name and the cron.
+   */
+  private record DiscoveredJob(String simpleClassName, String cron, String zone) {}
 
   private static final Pattern SCHEDULED = Pattern.compile("@Scheduled\\s*\\(([^)]*)\\)", Pattern.DOTALL);
   private static final Pattern CRON_ARG = Pattern.compile("cron\\s*=\\s*\"([^\"]*)\"");
   private static final Pattern PLACEHOLDER = Pattern.compile("^\\$\\{([^:}]+)(?::(.*))?\\}$");
+  private static final Pattern ZONE_ARG = Pattern.compile("zone\\s*=\\s*\"([^\"]*)\"");
 
   /**
    * Every {@code @Scheduled} carrying a cron, across BOTH services. {@code fixedRate}/{@code
@@ -345,7 +369,10 @@ class OperatingWindowTest {
         while (site.find()) {
           Matcher cron = CRON_ARG.matcher(site.group(1));
           if (cron.find()) {
-            out.add(new DiscoveredJob(simple, resolve(simple, cron.group(1))));
+            Matcher zone = ZONE_ARG.matcher(site.group(1));
+            out.add(
+                new DiscoveredJob(
+                    simple, resolve(simple, cron.group(1)), zone.find() ? zone.group(1) : null));
           }
         }
       }

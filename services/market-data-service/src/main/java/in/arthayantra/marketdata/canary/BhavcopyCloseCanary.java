@@ -8,7 +8,8 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.LocalDate;
+import java.time.LocalDate;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,11 +86,17 @@ public class BhavcopyCloseCanary {
   private final int sampleLimit;
 
   /**
-   * The last trade date actually compared, so the cron and the completion listener below cannot both
-   * evaluate the same session and push the same alert twice. Written only from this canary's own two
-   * entry points; both run on scheduler/event threads, hence volatile rather than a lock.
+   * The last trade date CLAIMED for comparison, so a session is compared exactly once however the two
+   * entry points interleave.
+   *
+   * <p>⚠️ An {@code AtomicReference} with a compare-and-set claim, not a {@code volatile} write after
+   * the fact. The first version wrote it at the END of {@code sweep()} and checked it only in the
+   * listener, which suppressed cron-then-event and nothing else — and cross-vendor review pointed out
+   * that production's COMMON order is the opposite: the file usually lands before 18:52, so the event
+   * runs first and the cron then compares the same session again. Two entry points needing
+   * exactly-once means a claim in the shared path, which is what {@link #compareOnce} is.
    */
-  private volatile LocalDate lastSwept;
+  private final AtomicReference<LocalDate> lastSwept = new AtomicReference<>();
 
   public BhavcopyCloseCanary(
       JdbcTemplate jdbc,
@@ -152,15 +159,7 @@ public class BhavcopyCloseCanary {
           latest, today);
       return;
     }
-    BhavcopyCloseReport report;
-    try {
-      report = evaluate(latest);
-    } catch (RuntimeException e) {
-      log.warn("bhavcopy-close canary failed: {}", e.getMessage());
-      return;
-    }
-    publish(report);
-    lastSwept = latest;
+    compareOnce(latest);
   }
 
   /**
@@ -182,11 +181,55 @@ public class BhavcopyCloseCanary {
    */
   @EventListener(BhavcopyBackfillCompleted.class)
   void onBhavcopyCompleted() {
-    LocalDate latest = latestTradeDate();
-    if (latest != null && latest.equals(lastSwept)) {
+    if (!live || !enabled) {
       return;
     }
-    sweep();
+    // ⚠️ Guard FIRST, then wrap everything, and never rethrow. Spring multicasts this event
+    // SYNCHRONOUSLY and BhavcopyBackfillService catches only around the whole multicast, so an
+    // exception escaping this observer can stop Minervini and Manas from ever receiving completion.
+    // A canary must not be able to break the chain it observes.
+    try {
+      LocalDate latest = latestTradeDate();
+      if (latest == null) {
+        return;
+      }
+      // NO today-guard here, and that is the point of this path rather than an oversight. The cron
+      // is blind — it fires at a fixed minute and cannot know whether anything landed, so for IT a
+      // pre-today `latest` means "tonight's file has not arrived" and comparing it would be a
+      // wrong-day verdict. This path only runs BECAUSE a fetch just completed, so a `latest` of
+      // yesterday means the late-published session has now genuinely arrived and is the one to
+      // compare. That is what recovers the 19:31 night: the machine is off before the file lands,
+      // the next morning's BhavcopyStartupCatchup replays it, completion fires, and this compares
+      // the session the cron would have skipped forever. The alert names `report.tradeDate()`, so
+      // reporting a prior session is explicit rather than mislabelled as tonight's.
+      compareOnce(latest);
+    } catch (RuntimeException e) {
+      log.warn("bhavcopy-close canary listener failed (non-fatal to the chain): {}", e.getMessage());
+    }
+  }
+
+  /**
+   * Compare {@code session} at most once across both entry points, then publish.
+   *
+   * <p>The CAS is the exactly-once guarantee: whichever of the cron and the listener claims the
+   * session runs the comparison, and the other returns having done nothing. A failed evaluation
+   * releases the claim so the next trigger can retry rather than the session being silently consumed
+   * by an attempt that produced no verdict.
+   */
+  private void compareOnce(LocalDate session) {
+    LocalDate previous = lastSwept.get();
+    if (session.equals(previous) || !lastSwept.compareAndSet(previous, session)) {
+      return;
+    }
+    BhavcopyCloseReport report;
+    try {
+      report = evaluate(session);
+    } catch (RuntimeException e) {
+      lastSwept.compareAndSet(session, previous);
+      log.warn("bhavcopy-close canary failed for {}: {}", session, e.getMessage());
+      return;
+    }
+    publish(report);
   }
 
   /** The newest EQ bhavcopy trade date, or {@code null} when the table is empty. */

@@ -143,8 +143,18 @@ public class MinerviniScheduler {
       // down" push could fire mid-probe. Safe to move: probePlaneDivergence is fail-soft and never
       // throws (its own try/catch), so this reordering changes WHEN succeed() is called, never
       // WHETHER — a probe failure still leaves a clean SUCCESS row, exactly as before.
-      probePlaneDivergence(r.screenDate(), trigger, false);
-      ledger.succeed(runId, written);
+      // ⚠️ finally, not a bare sequence (Architect audit). probePlaneDivergence swallows every
+      // EXCEPTION, but not an ERROR — an OOM inside the probe would skip succeed() and strand
+      // this ingest_runs row RUNNING forever. There is no reaper (ledger H12, whose second half
+      // is still open), and a stranded row reads as in-flight to every coverage check that asks
+      // "is the latest run terminal" — including the new EveningChainCanary, which would then
+      // never say the chain is complete. Before this reordering succeed() ran first, so the row
+      // closed whatever the probe did; finally preserves that guarantee.
+      try {
+        probePlaneDivergence(r.screenDate(), trigger, false);
+      } finally {
+        ledger.succeed(runId, written);
+      }
     } catch (Exception e) {
       // Audit P0-4/H10: a failed screen leaves the 20:00 swing batch on yesterday's funnel — the
       // owner must hear about it, not find it in a log next week. NtfyClient never throws.
